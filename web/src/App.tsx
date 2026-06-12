@@ -98,7 +98,13 @@ const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode
 
 const AppContent = () => {
   const { theme, accent } = useThemeStore(useShallow(s => ({ theme: s.theme, accent: s.accent })));
-  const { bootstrap, logout, user, isBootstrapping } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user, isBootstrapping: s.isBootstrapping })));
+  const { bootstrap, logout, user, isBootstrapping, hasRestoredKeys } = useAuthStore(useShallow(s => ({ 
+    bootstrap: s.bootstrap, 
+    logout: s.logout, 
+    user: s.user, 
+    isBootstrapping: s.isBootstrapping,
+    hasRestoredKeys: s.hasRestoredKeys
+  })));
   const openCommandPalette = useCommandPaletteStore(s => s.open);
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands,
@@ -218,7 +224,7 @@ const AppContent = () => {
     if (isDeviceFlow(location.pathname)) {
       return;
     }
-    if (user) {
+    if (user && useAuthStore.getState().hasRestoredKeys) {
       const token = useAuthStore.getState().accessToken;
       if (token) {
         connectSocket();
@@ -230,7 +236,8 @@ const AppContent = () => {
       }
     } else {
       // Don't disconnect if on Burner Chat drop route (guest needs it)
-      if (location.pathname !== '/drop') {
+      // or if on a device flow route that requires the socket for migration
+      if (location.pathname !== '/drop' && !isDeviceFlow(location.pathname)) {
          disconnectSocket();
       }
     }
@@ -265,7 +272,7 @@ const AppContent = () => {
         // if they try to read messages or if we trigger the auth check here.
 
         if (!socket?.connected) {
-          if (user) {
+          if (user && useAuthStore.getState().hasRestoredKeys) {
             connectSocket();
           }
         } else {
@@ -365,13 +372,13 @@ const AppContent = () => {
               {/* Public/Auth Routes */}
               <Route path="/" element={
                 isBootstrapping ? <LoadingScreen /> : 
-                user ? <Navigate to="/chat" replace /> :
+                (user && hasRestoredKeys) ? <Navigate to="/chat" replace /> :
                 <Navigate to="/login" replace />
                 }
               />
               <Route path="/login" element={
                 isBootstrapping ? <LoadingScreen /> : 
-                user ? <Navigate to="/chat" replace /> :
+                (user && hasRestoredKeys) ? <Navigate to="/chat" replace /> :
                 <PageWrapper><Login /></PageWrapper>
                 }
               />

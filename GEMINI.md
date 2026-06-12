@@ -20,6 +20,7 @@ NYX is a Zero-Knowledge Post-Quantum Hardened Messenger designed for pure anonym
   - **Post-Quantum Security**: ML-KEM-768 (X-Wing) for key exchange.
   - **Local-First**: Chat history is stored only on the device via IndexedDB (`dexie`).
   - **Blind Relay**: The server only routes encrypted blobs without access to keys.
+  - **Single-Active-Device**: For maximum security, only one device can be active per account at a time. Multiple device records are maintained solely for hardware verification and new device detection.
 
 ## 🛠️ Building and Running
 

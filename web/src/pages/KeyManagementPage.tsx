@@ -59,18 +59,48 @@ export default function KeyManagementPage() {
           if (!password) return;
           setIsProcessing(true);
           try {
+            // 1. Notify active conversations about identity change using the OLD keys and sessions first.
+            try {
+              const { useConversationStore } = await import('@store/conversation');
+              const { useMessageStore } = await import('@store/message');
+              const conversations = useConversationStore.getState().conversations;
+              
+              const promises = conversations.map(conv => 
+                useMessageStore.getState().sendMessage(conv.id, { 
+                  type: 'SYSTEM', 
+                  content: JSON.stringify({ type: 'PROTOCOL_RESET', reason: 'IDENTITY_ROTATION' }) 
+                }, undefined, true)
+              );
+              await Promise.allSettled(promises);
+            } catch (e) {
+              console.error("Failed to broadcast security update", e);
+            }
+
+            // 2. Generate New Keys
             const {
               encryptedPrivateKeys,
               encryptionPublicKeyB64,
               signingPublicKeyB64,
             } = await generateNewKeys(password);
             
+            // 3. Save the new keys locally
             await saveEncryptedKeys(encryptedPrivateKeys);
             
-            await setupAndUploadPreKeyBundle();
+            // 4. Wipe only sessions tied to the old identity (initiator/sender state). 
+            // We PRESERVE groupReceiverStates so we can still read group metadata and incoming messages!
+            try {
+              const { db } = await import('@lib/db');
+              await Promise.all([
+                  db.ratchetSessions.clear(),
+                  db.groupSenderStates.clear(),
+                  db.sessionKeys.clear()
+              ]);
+            } catch (e) {
+              console.error("Failed to clear old sessions", e);
+            }
 
+            // 5. Success and Reload to load new keys into RAM
             toast.success(t('settings:messages.keys_rotated'));
-            // Force a reload to re-bootstrap the app with the new keys
             setTimeout(() => {
               window.location.reload();
             }, 1000);

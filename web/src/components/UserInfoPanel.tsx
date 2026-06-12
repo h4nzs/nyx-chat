@@ -138,7 +138,7 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
             <div className="flex items-center justify-between p-3 rounded-lg bg-bg-surface shadow-neumorphic-pressed">
               <div className="flex flex-col gap-0.5">
                 <span className="font-semibold text-text-primary">X-Wing Post-Quantum</span>
-                <span className="text-[10px] text-text-secondary opacity-60">Multi-Device Forward Secrecy Enabled</span>
+                <span className="text-[10px] text-text-secondary opacity-60">Hardened Forward Secrecy Enabled</span>
               </div>
               <div className="p-1.5 rounded-full bg-green-500/20 text-green-500">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>

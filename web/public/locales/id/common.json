@@ -129,7 +129,10 @@
     "send_title": "Transfer Brankas",
     "send_desc": "Kirim data ke perangkat baru Anda",
     "preparing": "MENYIAPKAN BRANKAS...",
-    "status_tunneling": "MENGIRIM..."
+    "status_tunneling": "MENGIRIM...",
+    "identity_regen_notice": "Setelah transfer selesai, perangkat ini akan menghasilkan identitas unik baru untuk menjamin keamanan maksimal.",
+    "syncing_hardware": "Menyelaraskan Hardware...",
+    "important_note": "Penting"
   },
   "not_found": {
     "title": "Halaman Tidak Ditemukan",
@@ -176,8 +179,6 @@
     "description": "Arsitektur Nyx Core sedang mengalami peningkatan keamanan dan stabilitas. Kami akan segera kembali dalam beberapa saat.",
     "retryButton": "Cek Status Sekarang"
   },
-  "device_revoked_successfully": "Perangkat berhasil dicabut",
-  "history_sync_payload_broadcasted_success": "Payload sinkronisasi riwayat berhasil disiarkan.",
   "notifications_enabled": "Notifikasi diaktifkan!",
   "notifications_disabled": "Notifikasi dinonaktifkan",
   "profile_updated": "Profil diperbarui!",
@@ -185,8 +186,6 @@
   "blocking_user": "Memblokir pengguna...",
   "unblocking_user": "Membuka blokir pengguna...",
   "secure_session_state_reset_next_message_": "Status sesi aman direset. Pesan berikutnya akan menegosiasikan kunci baru.",
-  "preparing_history_sync_for_your_linked_d": "Menyiapkan sinkronisasi riwayat untuk perangkat tertaut Anda...",
-  "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat Anda yang lain...",
   "posting_story": "Memposting cerita...",
   "added_to_group": "Anda telah ditambahkan ke \"{{groupName}}\"",
   "user_unbanned": "Pengguna @{{username}} telah di-unban!",

@@ -671,8 +671,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             privateKey: signingPrivateKey
         };
 
-        const { sessionKey, initiatorCiphertexts } = await establishSessionFromPreKeyBundle(mySigningKey, bundle);
-        
+        const { sessionKey, initiatorCiphertexts, identityChanged } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peerId);
+
+        // [SECURITY WARNING] Insert system message if identity changed
+        if (identityChanged) {
+            const { useMessageStore } = await import('@store/message');
+            const { t } = await import('i18next');
+            const peer = conv.participants.find(p => p.id === peerId);
+            const peerName = peer?.name || peer?.user?.name || t('common:defaults.unknown_user');
+            const warningText = t('common:security_key_changed', { name: peerName });
+            useMessageStore.getState().addSystemMessage(conversationId, warningText);
+        }
+
         // Start Binary Handshake over WebTransport
         return new Promise<void>((resolve, reject) => {
             const handler = (success: boolean, error?: string) => {

@@ -30,7 +30,6 @@ import { useSettingsStore } from '@store/settings';
 import { setupBiometricUnlock } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
-import { LinkedDevicesPanel } from '@components/LinkedDevicesPanel';
 import ImageCropperModal from '../components/ImageCropperModal';
 import SubscriptionModal from '../components/SubscriptionModal';
 
@@ -418,18 +417,32 @@ export default function SettingsPage() {
                  if (!password) return;
                  try {
                      await importDatabaseFromJson(json, password);
+
+                     // ✅ OPSI A: FORCE NEW IDENTITY FOR THIS HARDWARE
+                     // After importing a vault (which may come from another device),
+                     // we reset the local device ID and identity keys.
+                     localStorage.removeItem('deviceId');
+                     const { db } = await import('@lib/db');
+                     await db.identityKeys.clear();
+
                      toast.success(t('settings:messages.import_success'));
-                     setTimeout(() => window.location.reload(), 1000);
+                     setTimeout(() => window.location.reload(), 1500);
                  } catch (error) {
                      console.error("Import failed:", sanitizeErrorLog(error));
                      toast.error(t('settings:messages.import_failed'));
                  }
-             });
-         } else {
-             await importDatabaseFromJson(json);
-             toast.success(t('settings:messages.import_success'));
-             setTimeout(() => window.location.reload(), 1000);
-         }
+                 });
+                 } else {
+                 await importDatabaseFromJson(json);
+
+                 // ✅ OPSI A: FORCE NEW IDENTITY
+                 localStorage.removeItem('deviceId');
+                 const { db } = await import('@lib/db');
+                 await db.identityKeys.clear();
+
+                 toast.success(t('settings:messages.import_success'));
+                 setTimeout(() => window.location.reload(), 1500);
+                 }
       } catch (error) {
          console.error("Import parsing failed:", sanitizeErrorLog(error));
          toast.error(t('settings:messages.import_failed'));
@@ -923,13 +936,6 @@ export default function SettingsPage() {
               </div>
             </div>
           </ControlModule>
-        </div>
-
-        {/* ========================================== */}
-        {/* ✅ FASE 6: MULTI-DEVICE MANAGEMENT SLOT */}
-        {/* ========================================== */}
-        <div className="col-span-1 md:col-span-12 lg:col-span-8">
-           <LinkedDevicesPanel />
         </div>
 
         {/* 7. SMART ASSISTANCE */}

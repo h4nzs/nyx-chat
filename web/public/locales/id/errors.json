@@ -1,8 +1,4 @@
 {
-  "failed_to_load_linked_devices": "Gagal memuat perangkat tertaut",
-  "failed_to_revoke_device": "Gagal mencabut perangkat",
-  "please_start_a_chat_with_yourself_saved_": "Silakan mulai obrolan dengan diri Anda sendiri ('Pesan Tersimpan') terlebih dahulu untuk menggunakannya sebagai saluran sinkronisasi.",
-  "failed_to_broadcast_history_sync": "Gagal menyiarkan sinkronisasi riwayat.",
   "push_notifications_not_supported": "Notifikasi push tidak didukung",
   "notification_permission_denied": "Izin notifikasi ditolak",
   "failed_to_disable_notifications": "Gagal menonaktifkan notifikasi",

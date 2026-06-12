@@ -1,7 +1,5 @@
 // web/src/lib/keyStorage.ts
 import { db } from './db';
-// FIX 1: Perbaikan case-sensitivity nama file agar aman di build Linux/Vercel
-import { clearAllKeys as clearSessionKeys } from './keychainDb';
 import { sha256, argon2id } from 'hash-wasm';
 import { getSodium } from './sodiumInitializer';
 
@@ -242,36 +240,6 @@ export const clearKeys = async () => {
     sessionStorage.removeItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);
   } catch (error) {
     console.error('Failed to clear keys:', error);
-  }
-};
-
-/**
- * NUCLEAR WIPE (Emergency Eject)
- * Menghapus SEMUA jejak data dari browser ini.
- * - Menghapus Session Keys & History (IndexedDB)
- * - Menghapus Master Keys (IDB-Keyval)
- * - Menghapus LocalStorage & SessionStorage
- */
-export const nuclearWipe = async () => {
-  try {
-    console.warn("INITIATING NUCLEAR WIPE...");
-    
-    // 1. Hapus Kunci Master
-    await clearKeys();
-    
-    // 2. Hapus History & Session Keys (The Vault)
-    await clearSessionKeys();
-    
-    // 3. Hapus Bio Vault (WebAuthn PRF Storage)
-    localStorage.removeItem('nyx_bio_vault');
-    
-    // 4. Hapus sisa LocalStorage (User Profile, Settings, dll)
-    localStorage.clear();
-    sessionStorage.clear();
-    
-    console.warn("NUCLEAR WIPE COMPLETE.");
-  } catch (error) {
-    console.error('Nuclear wipe failed partially:', error);
   }
 };
 

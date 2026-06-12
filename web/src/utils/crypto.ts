@@ -239,14 +239,14 @@ export const fetchPublicKeys = async (userIds: string[]): Promise<Record<string,
   }
 };
 
-export const fetchPreKeyBundle = async (userId: string): Promise<PreKeyBundle[]> => {
+export const fetchPreKeyBundle = async (userId: string): Promise<PreKeyBundle> => {
   try {
-      const bundles = await authFetch<PreKeyBundle[]>(`/api/keys/prekey-bundle/${userId}`);
+      const bundle = await authFetch<PreKeyBundle>(`/api/keys/prekey-bundle/${userId}`);
       
-      if (!bundles || !Array.isArray(bundles) || bundles.length === 0) {
+      if (!bundle || !bundle.identityKey) {
            throw new Error(`No pre-key bundles found for user ${userId}`);
       }
-      return bundles;
+      return bundle;
   } catch (error) {
       console.error(`Failed to fetch pre-key bundles for ${userId}:`, error);
       throw error;
@@ -639,6 +639,35 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   continue;
               }
 
+              // [SECURITY WARNING] Check Identity Change
+              const { getPeerIdentityKey, savePeerIdentityKey } = await import('@lib/keychainDb');
+              const existingKey = await getPeerIdentityKey(uId);
+              if (existingKey && existingKey !== bundle.identityKey) {
+                  const { useMessageStore } = await import('@store/message');
+                  const { t } = await import('i18next');
+                  const { default: toast } = await import('react-hot-toast');
+                  const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
+
+                  const peer = participants.find(p => (p.userId || p.user?.id || p.id) === uId);
+                  const peerName = (peer as any)?.name || peer?.user?.name || t('common:defaults.unknown_user');
+                  const warningText = t('common:security_key_changed', { name: peerName });
+                  
+                  // 1. Persistent chat message
+                  useMessageStore.getState().addSystemMessage(conversationId, warningText);
+
+                  // 2. Immediate Toast
+                  toast.error(warningText, { icon: '🛡️', duration: 6000 });
+
+                  // 3. Dynamic Island Alert
+                  useDynamicIslandStore.getState().addActivity({
+                      type: 'notification',
+                      sender: { name: 'NYX_SHIELD' },
+                      message: warningText,
+                      link: `/chat/${conversationId}`
+                  }, 6000);
+              }
+              await savePeerIdentityKey(uId, bundle.identityKey);
+
               const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
               const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
               
@@ -883,6 +912,99 @@ async function doEncryptMessage(
   messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
   const sodium = await getSodiumLib();
+  
+  if (!isGroup) {
+      let state = await retrieveRatchetStateSecurely(conversationId);
+      let x3dhData = null;
+      const myId = useAuthStore.getState().user?.id;
+
+      if (!state) {
+          const { useConversationStore } = await import('@store/conversation');
+          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+          if (!conversation) throw new Error("Conversation not found");
+
+          const peer = conversation.participants.find(p => p.id !== myId);
+          if (!peer) throw new Error("Peer not found");
+
+          const bundle = await fetchPreKeyBundle(peer.id);
+          
+          const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+          if (!signingPrivateKey) throw new Error("My signing key missing");
+          const mySigningKey = {
+              publicKey: signingPrivateKey.slice(32),
+              privateKey: signingPrivateKey
+          };
+
+          const { sessionKey, initiatorCiphertexts, otpkId, identityChanged } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peer.id);
+
+          // [SECURITY WARNING] Insert system message if identity changed
+          if (identityChanged) {
+              const { useMessageStore } = await import('@store/message');
+              const { t } = await import('i18next');
+              const { default: toast } = await import('react-hot-toast');
+              const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
+
+              const peerName = (peer as any).name || peer.user?.name || t('common:defaults.unknown_user');
+              const warningText = t('common:security_key_changed', { name: peerName });
+              
+              // 1. Persistent chat message
+              useMessageStore.getState().addSystemMessage(conversationId, warningText);
+              
+              // 2. Immediate Toast
+              toast.error(warningText, { icon: '🛡️', duration: 6000 });
+
+              // 3. Dynamic Island Alert
+              useDynamicIslandStore.getState().addActivity({
+                  type: 'notification',
+                  sender: { name: 'NYX_SHIELD' },
+                  message: warningText,
+                  link: `/chat/${conversationId}`
+              }, 6000);
+          }
+
+          const { worker_dr_init_alice } = await getWorkerProxy();
+          
+          if (!bundle.signedPreKey.pqKey) {
+             throw new Error("Peer does not have PQ keys");
+          }
+
+          const theirPqSignedPreKeyPublic = sodium.from_base64(bundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+          
+          state = await worker_dr_init_alice({
+              sk: sessionKey,
+              theirPqSignedPreKeyPublic
+          });
+
+          x3dhData = {
+              initiatorSigningKey: sodium.to_base64(mySigningKey.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+              initiatorCiphertexts: sodium.to_base64(initiatorCiphertexts, sodium.base64_variants.URLSAFE_NO_PADDING),
+              otpkId
+          };
+      }
+
+      const { worker_dr_ratchet_encrypt } = await getWorkerProxy();
+      const result = await worker_dr_ratchet_encrypt({
+          serializedState: state,
+          plaintext: text
+      });
+
+      if (messageId && result.mk) {
+          const mkBytes = new Uint8Array(result.mk);
+          await storeMessageKeySecurely(messageId, mkBytes);
+      }
+
+      await storeRatchetStateSecurely(conversationId, result.state);
+
+      const payload = JSON.stringify({
+          dr: result.header,
+          ciphertext: sodium.to_base64(new Uint8Array(result.ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING),
+          senderId: myId,
+          ...(x3dhData ? { x3dh: x3dhData } : {})
+      });
+
+      return { ciphertext: payload, mk: new Uint8Array(result.mk), drHeader: result.header };
+  }
+
   const { groupRatchetEncrypt } = await getWorkerProxy();
 
   // SENDER KEY PROTOCOL (UNIVERSAL FAN-OUT)
@@ -892,7 +1014,7 @@ async function doEncryptMessage(
   if (senderState) {
       const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
 
-      const MAX_MESSAGES = isGroup ? 20 : 3;
+      const MAX_MESSAGES = 25;
       const MAX_AGE_MS = isGroup ? (60 * 60 * 1000) : (2 * 60 * 1000);
       
       const now = Date.now();
@@ -949,13 +1071,16 @@ async function doEncryptMessage(
   const { publicKey } = await getMyEncryptionKeyPair();
   const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
+  const keyId = senderState.CK.substring(0, 8);
+
   // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
   const payload = JSON.stringify({
       header: result.header,
       ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
       signature: result.signature,
       senderId: myId,
-      senderDeviceKey: myPublicKeyB64
+      senderDeviceKey: myPublicKeyB64,
+      keyId: keyId
   });
   
   // ✅ FIX: Atomic Persistence - Update state only after everything else succeeds
@@ -1058,7 +1183,7 @@ async function doDecryptMessage(
         // --- Resolve Sender Signing Key ---
         // ✅ FIX: Jika pengirim melampirkan senderDeviceKey, kita bisa mencari signingKey perangkat tersebut secara langsung
         // --- Resolve Sender Signing Key ---
-        // ✅ FIX: Perbaikan Key Resolution untuk Multi-Device (Self-Sync)
+        // ✅ FIX: Perbaikan Key Resolution untuk Sinkronisasi Perangkat (Device Migration)
         if (senderDeviceKey) {
              try {
                  // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
@@ -1096,7 +1221,8 @@ async function doDecryptMessage(
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
         const { getGroupSkippedKey, deleteGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
-        const skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
+        const keyId = payloadObj.keyId;
+        const skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, keyId);
         
         if (skippedMkB64) {
             const { groupDecryptSkipped } = await getWorkerProxy();
@@ -1129,8 +1255,9 @@ async function doDecryptMessage(
             senderSigningKey
         );
         
+        const keyIdForSkip = receiverState.CK ? receiverState.CK.substring(0, 8) : undefined;
         for (const sk of result.skippedKeys) {
-            await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk);
+            await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk, keyIdForSkip);
         }
 
         await saveGroupReceiverState({
@@ -1270,14 +1397,29 @@ async function doDecryptMessage(
 
 export async function establishSessionFromPreKeyBundle(
   mySigningKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
-  preKeyBundle: PreKeyBundle
-): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array, otpkId?: number }> {
+  preKeyBundle: PreKeyBundle,
+  peerUserId: string
+): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array, otpkId?: number, identityChanged: boolean }> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
   if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
       throw new Error("Post-Quantum Handshake Mandatory");
   }
+
+  // 1. Check Identity Change (Security Warning)
+  const { getPeerIdentityKey, savePeerIdentityKey } = await import('@lib/keychainDb');
+  const existingKey = await getPeerIdentityKey(peerUserId);
+  const newIdentityKeyB64 = preKeyBundle.identityKey;
+
+  let identityChanged = false;
+  if (existingKey && existingKey !== newIdentityKeyB64) {
+      identityChanged = true;
+      console.warn(`[Security] Identity key changed for user ${peerUserId}. Previous: ${existingKey.substring(0, 10)}... New: ${newIdentityKeyB64.substring(0, 10)}...`);
+  }
+
+  // Store/Update the known identity key
+  await savePeerIdentityKey(peerUserId, newIdentityKeyB64);
   
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1314,7 +1456,8 @@ export async function establishSessionFromPreKeyBundle(
   return {
     sessionKey: result.sessionKey,
     initiatorCiphertexts: result.initiatorCiphertexts,
-    otpkId: preKeyBundle.oneTimePreKey?.keyId
+    otpkId: preKeyBundle.oneTimePreKey?.keyId,
+    identityChanged
   };
 }
 
@@ -1341,32 +1484,21 @@ export async function deriveSessionKeyAsRecipient(
 
   if (otpkId !== undefined) {
     const masterSeed = await getMasterSeedOrThrow();
-    const encryptedOtpk = await getOneTimePreKey(otpkId);
-    if (encryptedOtpk) {
-      try {
-        const otpkPrivateKey = await worker_decrypt_session_key(encryptedOtpk, masterSeed);
-        myOneTimePreKey = { privateKey: otpkPrivateKey };
-      } catch (e) {
-        console.error("Failed to decrypt stored OTPK:", e);
-      }
-    } 
-    if (!myOneTimePreKey) {
-        try {
-            const { worker_x3dh_recipient_regenerate } = await getWorkerProxy();
-            const sessionKey = await worker_x3dh_recipient_regenerate({
-                keyId: otpkId,
-                masterSeed,
-                myIdentityKey: myIdentityKeyPair,
-                mySignedPreKey: mySignedPreKeyPair,
-                myPqIdentityKey: myPqIdentityKeyPair,
-                myPqSignedPreKey: myPqSignedPreKeyPair,
-                theirSigningKey,
-                initiatorCiphertexts
-            });
-            return sessionKey;
-        } catch (e) {
-            console.error('[X3DH] Failed to regenerate OTPK:', otpkId, e);
-        }
+    try {
+        const { worker_x3dh_recipient_regenerate } = await getWorkerProxy();
+        const sessionKey = await worker_x3dh_recipient_regenerate({
+            keyId: otpkId,
+            masterSeed,
+            myIdentityKey: myIdentityKeyPair,
+            mySignedPreKey: mySignedPreKeyPair,
+            myPqIdentityKey: myPqIdentityKeyPair,
+            myPqSignedPreKey: myPqSignedPreKeyPair,
+            theirSigningKey,
+            initiatorCiphertexts
+        });
+        return sessionKey;
+    } catch (e) {
+        console.error('[X3DH] Failed to regenerate OTPK:', otpkId, e);
     }
   }
 
@@ -1533,16 +1665,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     } catch (e) {
         // [BUGFIX: SENDER KEY OFFLINE SYNC] Propagate failure if needed, or emit request for new key
         console.error('[Crypto] Group key distribution failed:', e);
-        if (e instanceof Error && e.message === 'DECRYPTION_FAILED') {
-            // [BUGFIX: PERSISTENT OFFLINE KEY REQUEST]
-            // Kirim pesan tak kasat mata (terenkripsi) ke pengirim asli
-            import('@store/message').then(({ useMessageStore }) => {
-                const reqPayload = JSON.stringify({ type: 'SYSTEM_KEY_REQUEST', targetUserId: senderId });
-                console.log(`[Offline Sync] Sending persistent key request to ${senderId}`);
-                useMessageStore.getState().sendMessage(conversationId, { content: reqPayload, type: 'SYSTEM' }, undefined, true);
-            });
-        }
-        throw e; // Rethrow agar caller (misal offline sync loop) tahu bahwa ini gagal
+        throw new Error("DECRYPTION_FAILED");
     }
 
   } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;

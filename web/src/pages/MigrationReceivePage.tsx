@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useAuthStore } from '@store/auth';
 // Obati isu impor Vite (CommonJS ke ESM)
 import QRCodeRaw from 'react-qr-code';
 const QRCode = (
@@ -8,7 +9,7 @@ const QRCode = (
   QRCodeRaw
 ) as typeof QRCodeRaw;
 
-import { FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
+import { FiDownloadCloud, FiCheckCircle, FiAlertTriangle } from 'react-icons/fi';
 import { transportClient, connectSocket } from '@lib/transportClient';
 import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
@@ -18,9 +19,10 @@ import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
 export default function MigrationReceivePage() {
-  const { t } = useTranslation(['common']);
+  const { t } = useTranslation(['common', 'auth']);
   const tRef = useRef(t);
   tRef.current = t;
+  const { user, accessToken } = useAuthStore();
   const [qrData, setQrData] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const [status, setStatus] = useState<'waiting' | 'receiving' | 'decrypting' | 'success'>('waiting');
@@ -31,7 +33,15 @@ export default function MigrationReceivePage() {
   const metaRef = useRef<{ roomId: string, totalChunks: number, sealedKey: string } | null>(null);
   const migrationStartedRef = useRef(false);
 
+  // SECURE GUARD: Only authenticated users can receive migration data
   useEffect(() => {
+    if (!accessToken || !user) {
+        navigate('/login');
+    }
+  }, [accessToken, user, navigate]);
+
+  useEffect(() => {
+    if (!accessToken) return;
     let isMounted = true;
     
     const init = async () => {
@@ -44,7 +54,6 @@ export default function MigrationReceivePage() {
       const roomId = `mig_${uuidv4()}`;
       const pubKeyB64 = sodium.to_base64(keypair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       
-      const socket = transportClient;
       if (!transportClient.connected) connectSocket();
       
       transportClient.sendEvent('migration:join', roomId);
@@ -77,11 +86,10 @@ export default function MigrationReceivePage() {
     
     return () => {
       isMounted = false;
-      const socket = transportClient;
       transportClient.off('migration:start');
       transportClient.off('migration:chunk');
     };
-  }, []);
+  }, [accessToken]);
 
   const processMigration = async (sodium: typeof import('libsodium-wrappers')) => {
     try {
@@ -111,17 +119,25 @@ export default function MigrationReceivePage() {
       // 5. Import to IDB
       await importDatabaseFromJson(jsonString);
       
-      const socket = transportClient;
+      // ✅ OPSI A: FORCE NEW IDENTITY FOR NEW DEVICE
+      // After importing the vault (which contains the old deviceId and keys),
+      // we MUST clear them so that on the next reload, the app detects
+      // it has no local identity keys and performs a NEW DEVICE BOOTSTRAP.
+      localStorage.removeItem('deviceId');
+      const { db } = await import('@lib/db');
+      await db.identityKeys.clear();
+      
       transportClient.sendEvent('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 
       setStatus('success');
       toast.success(tRef.current('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
-      setTimeout(() => window.location.href = '/', 2000); // Hard reload to clear RAM
+      
+      // Hard reload to apply the imported state and trigger key regeneration
+      setTimeout(() => window.location.href = '/', 2500); 
     } catch (e) {
       console.error(e);
       toast.error(tRef.current('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
       
-      const socket = transportClient;
       if (metaRef.current?.roomId) {
          transportClient.sendEvent('migration:ack', { roomId: metaRef.current.roomId, success: false });
       }
@@ -131,6 +147,8 @@ export default function MigrationReceivePage() {
     }
   };
 
+  if (!accessToken) return null;
+
   return (
     <div className="min-h-screen bg-bg-main text-text-primary flex flex-col items-center justify-center p-4">
       <div className="text-center mb-8">
@@ -138,10 +156,11 @@ export default function MigrationReceivePage() {
         <p className="text-xs text-text-secondary mt-2">{t('common:migration.receive_desc', 'Pindai QR ini dari perangkat lama Anda')}</p>
       </div>
 
-      <div className="bg-white p-4 rounded-2xl shadow-neumorphic-convex border-4 border-bg-main mb-8 relative">
+      <div className="bg-white p-4 rounded-2xl shadow-neumorphic-convex border-4 border-bg-main mb-8 relative text-center">
         {status === 'success' ? (
-          <div className="w-[250px] h-[250px] flex items-center justify-center text-green-500">
-            <FiCheckCircle size={80} className="animate-bounce-in" />
+          <div className="w-[250px] h-[250px] flex flex-col items-center justify-center text-green-500 p-4">
+            <FiCheckCircle size={60} className="animate-bounce-in mb-4" />
+            <p className="text-xs font-bold uppercase text-bg-main">{t('common:migration.syncing_hardware', 'Menyelaraskan Hardware...')}</p>
           </div>
         ) : qrData ? (
           <QRCode value={qrData} size={250} level="M" />
@@ -157,7 +176,17 @@ export default function MigrationReceivePage() {
         )}
       </div>
 
-      <Link to="/login" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest">
+      <div className="max-w-xs text-center mb-8">
+          <div className="flex items-center justify-center gap-2 text-amber-500 mb-2">
+              <FiAlertTriangle size={16} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">{t('common:migration.important_note', 'Penting')}</span>
+          </div>
+          <p className="text-[10px] text-text-secondary leading-relaxed uppercase opacity-60">
+              {t('common:migration.identity_regen_notice', 'Setelah transfer selesai, perangkat ini akan menghasilkan identitas unik baru untuk menjamin keamanan maksimal.')}
+          </p>
+      </div>
+
+      <Link to="/settings" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest">
         {t('common:actions.cancel_bracket', '[ BATAL ]')}
       </Link>
     </div>

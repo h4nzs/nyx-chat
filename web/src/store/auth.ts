@@ -10,10 +10,11 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, nuclearWipe } from "@lib/keyStorage";
-import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
-import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
+import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
+import type { RetrievedKeys } from "@lib/crypto-worker-proxy";
+import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto";
 import type { UserId, User, SubscriptionTier } from '@nyx/shared';
+import { executeLocalWipe } from "@lib/nukeProtocol";
 import i18n from '../i18n';
 
 // ✅ Helper pendeteksi nama perangkat
@@ -351,7 +352,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           localStorage.setItem("user", JSON.stringify(me));
 
           await get().tryAutoUnlock();
-          connectSocket();
           get().loadBlockedUsers();
         } else {
           throw new Error("No valid session.");
@@ -403,20 +403,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             } else {
                 throw new Error("Invalid password for local keys. Please recover your account.");
             }
-        } else if (!alreadyHasKeys && !restoredNotSynced && !existingDeviceId) {
-            // Fresh login on a brand new linked device -> Database lokal kosong, regenerasi kunci baru
-            const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
-            const { 
-              encryptionPublicKeyB64, 
-              pqEncryptionPublicKeyB64, 
-              signingPublicKeyB64, 
-              encryptedPrivateKeys 
-            } = await generateNewKeys(password);
-            
-            newPublicKey = encryptionPublicKeyB64;
-            newPqPublicKey = pqEncryptionPublicKeyB64;
-            newSigningKey = signingPublicKeyB64;
-            newEncryptedPrivateKey = encryptedPrivateKeys;
         } else if (restoredNotSynced) {
             // Restored from phrase, but not synced to server yet
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
@@ -456,19 +442,39 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           }),
         });
 
-        // FIX 1: SIMPAN encryptedPrivateKey DARI SERVER DULU sebelum mencoba membukanya
-        if (res.encryptedPrivateKey) {
+        // ✅ SET SESSION IMMEDIATELY (Allows navigation to migration pages)
+        set({ 
+          accessToken: res.accessToken, 
+          user: res.user, 
+          hasRestoredKeys: false, // Baseline as false, will be checked below
+          blockedUserIds: [] 
+        });
+        localStorage.setItem("user", JSON.stringify(res.user));
+
+        // [FIX] SINGLE-ACTIVE-DEVICE: Do not blindly adopt keys from the server if this is a brand new device.
+        // This forces the user to go through the Identity Recovery flow to generate unique hardware keys.
+        const isNewDevice = !alreadyHasKeys && !restoredNotSynced && !existingDeviceId;
+
+        if (res.encryptedPrivateKey && !isNewDevice) {
           await saveEncryptedKeys(res.encryptedPrivateKey);
           await saveDeviceAutoUnlockKey(password);
           await setDeviceAutoUnlockReady(true);
         }
         
-        if (res.deviceId) {
+        if (res.deviceId && !isNewDevice) {
            localStorage.setItem('deviceId', res.deviceId);
         }
 
         const hasKeysNow = await hasStoredKeys();
+        set({ hasRestoredKeys: hasKeysNow }); // Sync state with actual disk state
         
+        // CHECK: If we still don't have local keys, this is a "Blind Login" on a new device.
+        if (!hasKeysNow) {
+            get().loadBlockedUsers();
+            connectSocket();
+            throw new Error("IDENTITY_RECOVERY_REQUIRED");
+        }
+
         // FIX 2: Buka kunci MENGGUNAKAN data yang baru saja disave
         if (hasKeysNow) {
           try {
@@ -509,6 +515,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         connectSocket();
       } catch (error: unknown) {
         console.error("Login error:", error);
+        // [FIX] Don't wipe the session if we are just missing local keys.
+        // The user is authenticated but needs to recover their identity.
+        if (error instanceof Error && error.message === "IDENTITY_RECOVERY_REQUIRED") {
+            throw error;
+        }
         set({ user: null, accessToken: null });
         throw error;
       } finally {
@@ -555,12 +566,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
-        
+
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
-        connectSocket();
 
         return { phrase, userId: res.user.id };
-      } finally {
+        } finally {
         set({ isInitializingCrypto: false });
       }
     },
@@ -610,14 +620,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } finally {
         clearAuthCookies();
         privateKeysCache = null;
-        await nuclearWipe(); 
-        
+
+        // Nuclear local wipe and redirect
+        await executeLocalWipe('/login');
+
         set({ user: null, accessToken: null });
         disconnectSocket();
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();
-        
-        window.location.href = '/login';
       }
     },
 

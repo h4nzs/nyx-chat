@@ -163,7 +163,9 @@ router.get(
 
       const devices = await prisma.device.findMany({
         where: { userId: String(userId) },
-        include: { preKeyBundle: true }
+        include: { preKeyBundle: true },
+        orderBy: { lastActiveAt: 'desc' },
+        take: 1
       })
 
       if (devices.length === 0) {
@@ -219,7 +221,7 @@ router.get(
       const validBundles = responseBundles.filter(b => b !== null);
       if (validBundles.length === 0) throw new ApiError(404, 'No valid key bundles found for this user.');
 
-      res.json(validBundles)
+      res.json(validBundles[0])
     } catch (e: unknown) {
       next(e)
     }

@@ -129,9 +129,9 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
 /**
  * Stores a group skipped message key atomically.
  */
-export async function storeGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number, mk: string): Promise<void> {
+export async function storeGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number, mk: string, keyId?: string): Promise<void> {
     return enqueueWrite(async () => {
-        const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+        const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
         await db.groupSkippedKeys.put({ key, mk });
     });
 }
@@ -139,12 +139,19 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
 /**
  * Retrieves a group skipped message key without deleting it.
  */
-export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number): Promise<string | null> {
+export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number, keyId?: string): Promise<string | null> {
     return enqueueWrite(async () => {
         if (senderDeviceKey && senderDeviceKey !== 'undefined') {
-            const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+            const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
             const record = await db.groupSkippedKeys.get(key);
             if (record) return record.mk;
+            
+            if (keyId) {
+                // Fallback to legacy format without keyId
+                const fallbackKey = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+                const fallbackRecord = await db.groupSkippedKeys.get(fallbackKey);
+                if (fallbackRecord) return fallbackRecord.mk;
+            }
         }
         
         // Fallback for older messages that didn't include senderDeviceKey
@@ -398,6 +405,17 @@ export async function getProfileKey(userId: string): Promise<string | undefined>
   return record?.key;
 }
 
+export async function savePeerIdentityKey(userId: string, keyB64: string): Promise<void> {
+  return enqueueWrite(async () => {
+      await db.identityKeys.put({ userId: `ID_PUB_${userId}` as UserId, key: keyB64 });
+  });
+}
+
+export async function getPeerIdentityKey(userId: string): Promise<string | undefined> {
+  const record = await db.identityKeys.get(`ID_PUB_${userId}`);
+  return record?.key;
+}
+
 export async function clearAllKeys(): Promise<void> {
   return enqueueWrite(async () => {
       await Promise.all([
@@ -436,7 +454,16 @@ export async function exportDatabaseToJson(): Promise<string> {
     'offlineQueue',
     'identityKeys', 
     'groupReceiverStates', 
-    'groupSkippedKeys'
+    'groupSkippedKeys',
+    'sessionKeys',
+    'groupKeys',
+    'preKeys',
+    'ratchetSessions',
+    'groupSenderStates',
+    'skippedKeys',
+    'pendingHeaders',
+    'pqDrSessionsV2',
+    'kvStore'
   ];
 
   for (const tableName of tables) {
@@ -454,6 +481,10 @@ export async function exportDatabaseToJson(): Promise<string> {
     }
     if (value instanceof ArrayBuffer) {
       return { __type: 'Uint8Array', data: sodium.to_base64(new Uint8Array(value), sodium.base64_variants.URLSAFE_NO_PADDING) };
+    }
+    // Handle objects that might contain buffers (like states)
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // Recursive serialization for state objects is handled by JSON.stringify
     }
     return value;
   });
@@ -506,7 +537,16 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
         'offlineQueue',
         'identityKeys', 
         'groupReceiverStates', 
-        'groupSkippedKeys'
+        'groupSkippedKeys',
+        'sessionKeys',
+        'groupKeys',
+        'preKeys',
+        'ratchetSessions',
+        'groupSenderStates',
+        'skippedKeys',
+        'pendingHeaders',
+        'pqDrSessionsV2',
+        'kvStore'
       ];
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {

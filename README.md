@@ -117,12 +117,13 @@ pnpm dev # (Assuming you set up a root script, or run individually in /web and /
 
 ---
 
-## 💾 The "Shadow Vault" & Multi-Device Sync
+## 💾 The "Shadow Vault" & Device Migration
 
-Because we don't sync history to the cloud, YOU own your data:
+Because we don't sync history to the cloud, YOU own your data. To ensure maximum security, **NYX supports only one active device per account at a time**.
 
 1.  **Vault Export:** Export an encrypted `.nyxvault` file containing your keys and metadata.
-2.  **Post-Quantum History Sync:** Moving to a new phone or linking a web client? NYX encrypts your IndexedDB history with a symmetric key and distributes the key via the PQ-Sender Key protocol to your other devices. The server acts only as a blind relay for the encrypted blob.
+2.  **Single-Device Policy:** While an account can have multiple device records (allowing the system to detect if you are using a known or new device), only one device can be logged in and active.
+3.  **Secure Migration:** When moving to a new device, NYX uses your vault and Post-Quantum protocols to securely migrate your identity. The server acts only as a blind relay during this process.
 
 ---
 

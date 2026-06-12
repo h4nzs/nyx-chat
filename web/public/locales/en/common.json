@@ -129,7 +129,10 @@
     "send_title": "Transfer Vault",
     "send_desc": "Send data to your new device",
     "preparing": "PREPARING VAULT...",
-    "status_tunneling": "TUNNELING..."
+    "status_tunneling": "TUNNELING...",
+    "identity_regen_notice": "After the transfer is complete, this device will generate a new unique identity to ensure maximum security.",
+    "syncing_hardware": "Syncing Hardware...",
+    "important_note": "Important"
   },
   "not_found": {
     "title": "Page Not Found",
@@ -176,8 +179,6 @@
     "description": "Nyx Core architecture is currently undergoing security and stability upgrades. We will be right back shortly.",
     "retryButton": "Check Status Now"
   },
-  "device_revoked_successfully": "Device revoked successfully",
-  "history_sync_payload_broadcasted_success": "History sync payload broadcasted successfully.",
   "notifications_enabled": "Notifications enabled!",
   "notifications_disabled": "Notifications disabled",
   "profile_updated": "Profile updated!",
@@ -185,8 +186,6 @@
   "blocking_user": "Blocking user...",
   "unblocking_user": "Unblocking user...",
   "secure_session_state_reset_next_message_": "Secure session state reset. Next message will negotiate new keys.",
-  "preparing_history_sync_for_your_linked_d": "Preparing history sync for your linked devices...",
-  "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device...",
   "posting_story": "Posting story...",
   "added_to_group": "You've been added to \"{{groupName}}\"",
   "user_unbanned": "User @{{username}} unbanned!",

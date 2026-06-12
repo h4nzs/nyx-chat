@@ -287,6 +287,35 @@ export async function decryptMessageObject(
                const { initiatorSigningKey, initiatorCiphertexts, otpkId } = payload.x3dh;
                const ciphertext = payload.ciphertext;
 
+               // [SECURITY] Fetch peer's PreKeyBundle to verify identity and update keychain
+               try {
+                   const { fetchPreKeyBundle } = await import('@utils/crypto');
+                   const bundle = await fetchPreKeyBundle(rawMsg.senderId);
+                   const { getPeerIdentityKey, savePeerIdentityKey } = await import('@lib/keychainDb');
+                   const existingKey = await getPeerIdentityKey(rawMsg.senderId);
+                   if (existingKey && existingKey !== bundle.identityKey) {
+                       const { t } = await import('i18next');
+                       const { default: toast } = await import('react-hot-toast');
+                       const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
+                       
+                       const peerName = rawMsg.sender?.name || t('common:defaults.unknown_user');
+                       const warningText = t('common:security_key_changed', { name: peerName });
+                       
+                       useMessageStore.getState().addSystemMessage(rawMsg.conversationId, warningText);
+                       toast.error(warningText, { icon: '🛡️', duration: 6000 });
+                       
+                       useDynamicIslandStore.getState().addActivity({
+                           type: 'notification',
+                           sender: { name: 'NYX_SHIELD' },
+                           message: warningText,
+                           link: `/chat/${rawMsg.conversationId}`
+                       }, 6000);
+                   }
+                   await savePeerIdentityKey(rawMsg.senderId, bundle.identityKey);
+               } catch (e) {
+                   console.error("[X3DH] Failed to verify peer identity", e);
+               }
+
                const myIdentityKeyPair = await getMyEncryptionKeyPair();
                const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -303,23 +332,7 @@ export async function decryptMessageObject(
                    initiatorCiphertexts,
                    otpkId
                );
-               let theirRatchetPublicKey: Uint8Array | undefined;
                
-               try {
-                   const innerPayload = JSON.parse(ciphertext) as { dr?: { kemPk?: string } };
-                   if (innerPayload.dr) {
-                        const kemPk = innerPayload.dr.kemPk;
-                        if (kemPk) {
-                            const sodium = await getSodium();
-                            theirRatchetPublicKey = sodium.from_base64(kemPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-                        }
-                   }
-               } catch (_e) {}
-
-               if (!theirRatchetPublicKey) {
-                   throw new Error("Cannot initialize Bob: Missing sender's ratchet key in first message.");
-               }
-
                const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
                const newState = await worker_dr_init_bob({
                    sk: sessionKey,
@@ -327,7 +340,7 @@ export async function decryptMessageObject(
                });
 
                await storeRatchetStateSecurely(rawMsg.conversationId, newState);
-               contentToDecrypt = ciphertext; 
+               contentToDecrypt = JSON.stringify(payload); // Ensure the whole payload is passed to decryptMessage
            }
        } catch (e) {
            console.error("[X3DH] Failed to parse/derive from header:", e);
@@ -524,9 +537,6 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
       return payload;
     }
     if (payload.type === 'STORY_KEY') {
-      return payload;
-    }
-    if (payload.type === 'HISTORY_SYNC' && payload.url && payload.key) {
       return payload;
     }
     // Tambahan untuk E2EE Unsend & Cabut Reaksi
@@ -767,7 +777,7 @@ type Actions = {
   updateMessageStatus: (conversationId: string, messageId: string, userId: string, status: string) => void;
   clearMessagesForConversation: (conversationId: string) => void;
   retrySendMessage: (message: Message) => void;
-  addSystemMessage: (conversationId: string, content: string) => void;
+  addSystemMessage: (conversationId: string, content: string) => Promise<void>;
   reDecryptPendingMessages: (conversationId: string) => Promise<void>;
   failPendingMessages: (conversationId: string, reason: string) => void;
   processOfflineQueue: () => Promise<void>;
@@ -777,7 +787,6 @@ type Actions = {
   toggleMessageSelection: (id: string) => void;
   clearMessageSelection: () => void;
   repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
-  broadcastHistorySync: (selfConversationId: string) => Promise<void>;
 };
 
 let tempIdCounter = 0;
@@ -920,20 +929,58 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   const { useConversationStore } = await import('@store/conversation');
                   useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
                   
-                  // Also clear local receiver state for this sender to ensure fresh keys are requested if needed
+                  // Clear local receiver state for this sender to ensure fresh keys are requested
                   const senderId = decrypted.senderId || data.senderId;
                   if (senderId) {
-                      const { getGroupReceiverState, saveGroupReceiverState } = await import('@lib/keychainDb');
-                      // Force local deletion of receiver state (effectively deleting current chain)
                       try {
-                          const rxState = await getGroupReceiverState(conversationId, senderId);
-                          if (rxState) {
-                              // Setting N to a very high number forces DoS protection to throw or state reset
-                              // Or better yet, we can emit a group key distribution immediately.
-                              const { emitGroupKeyRequest } = await import('@lib/transportClient');
-                              emitGroupKeyRequest(conversationId);
+                          const { db } = await import('@lib/db');
+                          // Delete the specific group receiver states and 1-on-1 ratchet sessions
+                          await db.groupReceiverStates.where('[conversationId+senderId]').equals([conversationId, senderId]).delete();
+                          await db.ratchetSessions.delete(conversationId);
+                          
+                          // Immediately fetch new PreKeyBundle to trigger security warnings
+                          const { getSodiumLib, fetchPreKeyBundle, establishSessionFromPreKeyBundle } = await import('@utils/crypto');
+                          const bundle = await fetchPreKeyBundle(senderId);
+                          const { useAuthStore } = await import('@store/auth');
+                          const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+                          if (!signingPrivateKey) throw new Error("Missing signing key");
+                          const mySigningKey = {
+                              publicKey: signingPrivateKey.slice(32),
+                              privateKey: signingPrivateKey
+                          };
+                          
+                          // Establish a new session proactively so we have their new identity key cached
+                          const { identityChanged } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, senderId);
+                          
+                          if (identityChanged) {
+                              const { t } = await import('i18next');
+                              const { default: toast } = await import('react-hot-toast');
+                              const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
+                              const { useMessageStore } = await import('@store/message');
+                              
+                              const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                              const peer = conv?.participants.find(p => (p.userId || p.user?.id || p.id) === senderId);
+                              const peerName = (peer as any)?.name || peer?.user?.name || t('common:defaults.unknown_user');
+                              const warningText = t('common:security_key_changed', { name: peerName });
+                              
+                              useMessageStore.getState().addSystemMessage(conversationId, warningText);
+                              toast.error(warningText, { icon: '🛡️', duration: 6000 });
+                              
+                              useDynamicIslandStore.getState().addActivity({
+                                  type: 'notification',
+                                  sender: { name: 'NYX_SHIELD' },
+                                  message: warningText,
+                                  link: `/chat/${conversationId}`
+                              }, 6000);
                           }
-                      } catch (e) {}
+                          
+                          // Proactively ask for their new group key if it's a group
+                          const { emitGroupKeyRequest } = await import('@lib/transportClient');
+                          emitGroupKeyRequest(conversationId);
+                          
+                      } catch (e) {
+                          console.error("Failed to perform real-time security check:", e);
+                      }
                   }
                   return true;
               }
@@ -993,6 +1040,13 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       if (success) {
                           console.log(`[Group Ratchet] Berhasil mengekstrak & menyimpan real-time group key untuk ${conversationId}`);
                           useMessageStore.getState().reDecryptPendingMessages(data.conversationId || conversationId);
+                      } else {
+                          const requestorId = decrypted.senderId || data.senderId;
+                          if (requestorId) {
+                              const reqPayload = JSON.stringify({ type: 'SYSTEM_KEY_REQUEST', targetUserId: requestorId });
+                              console.log(`[Offline Sync] Sending persistent key request to ${requestorId} due to failed processing`);
+                              useMessageStore.getState().sendMessage(conversationId, { content: reqPayload, type: 'SYSTEM' }, undefined, true);
+                          }
                       }
                   } catch (e) {
                       console.error(`[Group Ratchet] Gagal memproses real-time group key`, e);
@@ -1035,66 +1089,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     } catch (error) {
       console.error("Failed to repair session:", error);
       if (!isAuto) toast.error(i18n.t('errors:failed_to_repair_session', 'Failed to repair session.'));
-    }
-  },
-
-  broadcastHistorySync: async (selfConversationId) => {
-    const { user } = useAuthStore.getState();
-    if (!user) return;
-
-    const toastId = toast.loading(i18n.t('common:preparing_history_sync_for_your_linked_d', 'Preparing history sync for your linked devices...'));
-    try {
-        const { exportDatabaseToJson } = await import('@lib/keychainDb');
-        const jsonStr = await exportDatabaseToJson();
-        const blob = new Blob([jsonStr], { type: 'application/json' });        
-        // Enkripsi JSON dengan kunci simetris rahasia
-        const { encryptFileViaWorker } = await import('@utils/crypto');
-        const { encryptedBlob, key } = await encryptFileViaWorker(blob);
-        
-        const { api } = await import('@lib/api');
-        const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
-            method: 'POST',
-            body: JSON.stringify({
-                fileName: `sync_${Date.now()}.enc`, 
-                fileType: 'application/octet-stream', 
-                folder: 'sync',
-                fileSize: encryptedBlob.size 
-            })
-        });
-
-        // Unggah ke Cloudflare R2
-        await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('PUT', presignedRes.uploadUrl, true);
-            xhr.setRequestHeader('Content-Type', 'application/octet-stream'); 
-            xhr.onload = () => { if (xhr.status === 200) resolve(); else reject(new Error('Upload failed')); };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send(encryptedBlob);
-        });
-
-        const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-        const syncId = sodium.to_hex(sodium.randombytes_buf(16));
-        type WindowWithSync = Window & typeof globalThis & Record<string, string>;
-        (window as WindowWithSync)._nyx_last_sync_id = syncId;
-
-        const payload = {
-            type: 'HISTORY_SYNC',
-            url: presignedRes.publicUrl,
-            key: key,
-            syncId: syncId
-        };
-        
-        // Kirim E2EE payload ini ke "Self-Chat" (Pesan Tersimpan)
-        // Fan-Out Sender Key akan secara otomatis mendistribusikannya ke SEMUA perangkat Anda!
-        await get().sendMessage(selfConversationId, {
-            content: JSON.stringify(payload),
-            isSilent: true
-        });
-        
-        toast.success(i18n.t('common:history_sync_success', 'History securely synced to your linked devices!'), { id: toastId });
-    } catch (e) {
-        console.error(e);
-        toast.error(i18n.t('common:history_sync_failure', 'Failed to sync history.'), { id: toastId });
     }
   },
 
@@ -2475,7 +2469,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               pendingDecryptions: [...state.pendingDecryptions, decrypted]
           }));
           
-          // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
+          // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Per-Device)
           // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
           const now = Date.now();
           const repairKey = `last_repair_${conversationId}` as const;
@@ -2559,57 +2553,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               cleanUpOptimisticBubble(); // ✅ Bersihkan
               console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
-          }
-
-          if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
-              const currentUser = useAuthStore.getState().user;
-              const { useConversationStore } = await import('@store/conversation');
-              const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-              const isSelfChat = conversation?.participants.length === 1 && conversation.participants[0].id === currentUser?.id;
-
-              if (!currentUser || decrypted.senderId !== currentUser.id || !isSelfChat) {
-                  return decrypted;
-              }
-
-              type WindowWithSync = Window & typeof globalThis & Record<string, string>;
-              const mySyncId = (window as WindowWithSync)._nyx_last_sync_id;
-              if ('syncId' in silentPayload && silentPayload.syncId === mySyncId) {                  console.log('[History Sync] Ignored own sync payload on current device');
-                  return decrypted;
-              }
-
-              cleanUpOptimisticBubble();
-              console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
-
-              // Proses secara asinkron agar tidak membuat UI "freeze"
-              setTimeout(async () => {
-                  const toastId = toast.loading(i18n.t('common:receiving_history_sync_from_your_other_d', 'Receiving history sync from your other device...'));
-                  try {
-                      const { decryptFile } = await import('@utils/crypto');
-                      const res = await fetch(silentPayload.url!);
-                      const blob = await res.blob();
-                      
-                      const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
-                      const jsonText = await decryptedBlob.text();
-                      
-                      // ✅ FIX: Gunakan importer Vault utama
-                      const { importDatabaseFromJson } = await import('@lib/keychainDb');
-                      await importDatabaseFromJson(jsonText);
-                      
-                      toast.success('History synchronized successfully! Reloading...', { id: toastId });
-                      
-                      // ✅ FIX: Cara paling bersih untuk merefresh Zustand Store dan UI
-                      // setelah injeksi database massal adalah dengan hard reload.
-                      setTimeout(() => {
-                          window.location.reload();
-                      }, 1500);
-
-                  } catch (e) {
-                      console.error('[History Sync] Failed to process history payload:', e);
-                      toast.error('Failed to sync history payload.', { id: toastId });
-                  }
-              }, 1000);
-              
-              return null; 
           }
 
           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
@@ -3070,11 +3013,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             });
             },
 
-            addSystemMessage: (conversationId, content) => {
-            const systemMessage: Message = {
-            id: asMessageId(`system_${Date.now()}`), type: 'SYSTEM', conversationId: asConversationId(conversationId), content, createdAt: new Date().toISOString(), senderId: asUserId('system') };
-            set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), systemMessage] } }));
-            },
+    addSystemMessage: async (conversationId, content) => {
+        const systemMessage: Message = {
+            id: asMessageId(`system_${Date.now()}_${Math.random().toString(36).substring(7)}`),
+            type: 'SYSTEM',
+            conversationId: asConversationId(conversationId),
+            content,
+            createdAt: new Date().toISOString(),
+            senderId: asUserId('system'),
+            reactions: []
+        };
+
+        // Persistent save
+        const { shadowVault } = await import('@lib/shadowVaultDb');
+        await shadowVault.upsertMessages([systemMessage]);
+
+        set(state => ({
+            messages: {
+                ...state.messages,
+                [conversationId]: [...(state.messages[conversationId] || []), systemMessage]
+            }
+        }));
+    },
             
   reDecryptPendingMessages: async (conversationId: string) => {
     // Process without delay as we are called strictly after key is stored

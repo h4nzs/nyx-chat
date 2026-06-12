@@ -14,7 +14,7 @@ router.get('/:conversationId', async (req, res, next) => {
     const { conversationId } = req.params
     const { deviceId } = req.query
 
-    // Kunci sesi sekarang spesifik per-perangkat (Multi-Device E2EE)
+    // Kunci sesi sekarang spesifik per-perangkat (Per-Device E2EE)
     if (!deviceId || typeof deviceId !== 'string') {
       throw new ApiError(400, 'deviceId query parameter is required.')
     }

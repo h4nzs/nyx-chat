@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from "../store/auth";
@@ -9,26 +9,40 @@ import { IoFingerPrint } from "react-icons/io5";
 import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
 import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
-import { connectSocket } from '@lib/transportClient';
 import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
 import { unlockWithBiometric } from "@lib/biometricUnlock";
 import { executeLocalWipe } from "@lib/nukeProtocol";
+import { importDatabaseFromJson } from '@lib/keychainDb';
+import { sanitizeErrorLog } from '../utils/sanitize';
 import toast from "react-hot-toast";
-import { FiLock, FiKey, FiShield } from "react-icons/fi";
+import { FiLock, FiKey, FiShield, FiSmartphone, FiUpload, FiCpu } from "react-icons/fi";
 import SEO from '../components/SEO';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+import ModalBase from '../components/ui/ModalBase';
 
 import i18n from '../i18n';
 export default function Login() {
-  const { t } = useTranslation(['auth', 'common']);
+  const { t } = useTranslation(['auth', 'common', 'settings']);
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
+  const [showRecoveryOptions, setShowRecoveryOptions] = useState(false);
+  const vaultInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { login } = useAuthStore(useShallow(s => ({
+  const { login, user, accessToken, hasRestoredKeys } = useAuthStore(useShallow(s => ({
     login: s.login,
+    user: s.user,
+    accessToken: s.accessToken,
+    hasRestoredKeys: s.hasRestoredKeys
   })));
+
+  useEffect(() => {
+    // If we are logged in but missing keys, auto-show recovery modal
+    if (accessToken && user && !hasRestoredKeys) {
+        setShowRecoveryOptions(true);
+    }
+  }, [accessToken, user, hasRestoredKeys]);
 
   useEffect(() => {
     // Cek ketersediaan hardware biometric
@@ -36,6 +50,50 @@ export default function Login() {
       setIsBiometricsAvailable(available);
     });
   }, []);
+
+  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const json = event.target?.result as string;
+      try {
+          const parsed = JSON.parse(json);
+          const performImport = async (password?: string) => {
+              try {
+                  await importDatabaseFromJson(json, password);
+                  
+                  // ✅ OPSI A: FORCE NEW IDENTITY
+                  localStorage.removeItem('deviceId');
+                  const { db } = await import('@lib/db');
+                  await db.identityKeys.clear();
+
+                  toast.success(t('settings:messages.import_success'));
+                  setShowRecoveryOptions(false);
+                  setTimeout(() => window.location.reload(), 1500);
+              } catch (error) {
+                  console.error("Import failed:", sanitizeErrorLog(error));
+                  toast.error(t('settings:messages.import_failed'));
+              }
+          };
+
+          if (parsed.encrypted) {
+              useModalStore.getState().showPasswordPrompt(async (password) => {
+                  if (!password) return;
+                  await performImport(password);
+              });
+          } else {
+              await performImport();
+          }
+      } catch (error) {
+          console.error("Import parsing failed:", sanitizeErrorLog(error));
+          toast.error(t('settings:messages.import_failed'));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const handleLogin = async (data: { a: string; b?: string }) => {
     if (!data.a || !data.b) {
@@ -67,9 +125,14 @@ export default function Login() {
 
       await login(usernameHash, data.b, restoredNotSynced);
 
-      navigate("/chat");
+      // ✅ REMOVED: navigate("/chat")
+      // Redirection is now managed by App.tsx routing based on hasRestoredKeys state.
 
     } catch (err: unknown) {
+      if (err instanceof Error && err.message === "IDENTITY_RECOVERY_REQUIRED") {
+         setShowRecoveryOptions(true);
+         return;
+      }
       setError((err instanceof Error ? err.message : 'Unknown error') || t('auth:messages.login_failed'));
     }
   };
@@ -168,25 +231,23 @@ export default function Login() {
                             await setDeviceAutoUnlockReady(true);
                             useAuthStore.getState().setDecryptedKeys(result.keys);
                             await useAuthStore.getState().loadBlockedUsers();
-                            connectSocket();
                             navigate("/chat");
-                        } else {
+                            } else {
                             toast.error(t('auth:messages.decrypt_failed'));
-                        }
-                    } catch (e) {
-                        toast.error(i18n.t('errors:something_went_wrong_when_decrypting', 'Something went wrong when decrypting.'));
-                    }
-                });
-                return;
-             }
-        }
-        
-        await useAuthStore.getState().loadBlockedUsers();
-        connectSocket();
+                            }
+                            } catch (e) {
+                            toast.error(i18n.t('errors:something_went_wrong_when_decrypting', 'Something went wrong when decrypting.'));
+                            }
+                            });
+                            return;
+                            }
+                            }
 
-        navigate("/chat");
-      }
-    } catch (err: unknown) {
+                            await useAuthStore.getState().loadBlockedUsers();
+
+                            navigate("/chat");
+                            }
+                            } catch (err: unknown) {
       console.error("Biometric login error:", err);
 
       // Tangani berbagai jenis error WebAuthn
@@ -238,7 +299,6 @@ export default function Login() {
                     await setDeviceAutoUnlockReady(true);
                     useAuthStore.getState().setDecryptedKeys(result.keys);
                     await useAuthStore.getState().loadBlockedUsers();
-                    connectSocket();
                     navigate("/chat");
                 } else {
                     toast.error(t('auth:messages.decrypt_failed'));
@@ -255,6 +315,89 @@ export default function Login() {
     <div className="min-h-screen flex flex-col md:flex-row bg-bg-main relative">
       <LanguageSwitcher />
       <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
+      
+      {/* Hidden file input for vault import */}
+      <input
+        type="file"
+        ref={vaultInputRef}
+        onChange={handleImportVault}
+        accept=".nyxvault,.json"
+        className="hidden"
+      />
+
+      {/* Identity Recovery Modal */}
+      <ModalBase
+        isOpen={showRecoveryOptions}
+        onClose={() => setShowRecoveryOptions(false)}
+        title={t('auth:messages.new_device_title')}
+      >
+        <div className="p-6">
+          <p className="text-text-secondary text-sm mb-8 leading-relaxed">
+            {t('auth:messages.new_device_message')}
+          </p>
+
+          <div className="space-y-4">
+             {/* Option 1: Phrase */}
+             <button
+                onClick={() => navigate("/restore", { state: { mode: 'verify' } })}
+                className="w-full flex items-center justify-between p-4 rounded-xl bg-bg-main border border-white/5 shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent transition-all group"
+             >
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
+                        <FiKey size={20} />
+                    </div>
+                    <div className="text-left">
+                        <p className="font-bold text-sm">{t('auth:buttons.restore_phrase')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">Identity only • No History</p>
+                    </div>
+                </div>
+                <FiLock size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
+             </button>
+
+             {/* Option 2: QR Transfer */}
+             <button
+                onClick={() => navigate("/migrate-receive")}
+                className="w-full flex items-center justify-between p-4 rounded-xl bg-bg-main border border-white/5 shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent transition-all group"
+             >
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
+                        <FiSmartphone size={20} />
+                    </div>
+                    <div className="text-left">
+                        <p className="font-bold text-sm">{t('auth:buttons.transfer_qr', 'Scan QR Transfer')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">Device to Device • Full History</p>
+                    </div>
+                </div>
+                <FiCpu size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
+             </button>
+
+             {/* Option 3: Manual Import */}
+             <button
+                onClick={() => vaultInputRef.current?.click()}
+                className="w-full flex items-center justify-between p-4 rounded-xl bg-bg-main border border-white/5 shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent transition-all group"
+             >
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
+                        <FiUpload size={20} />
+                    </div>
+                    <div className="text-left">
+                        <p className="font-bold text-sm">{t('auth:buttons.restore_vault')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">From .nyxvault file • Full History</p>
+                    </div>
+                </div>
+                <FiShield size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
+             </button>
+          </div>
+
+          <button
+            onClick={() => setShowRecoveryOptions(false)}
+            className="w-full mt-8 py-3 text-xs font-mono text-text-secondary hover:text-red-500 uppercase tracking-widest transition-colors"
+          >
+            {t('common:actions.cancel_bracket')}
+          </button>
+        </div>
+      </ModalBase>
+
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-bg-surface p-8 flex flex-col justify-center shadow-2xl z-10">
         <div className="max-w-md w-full mx-auto">
@@ -294,9 +437,8 @@ export default function Login() {
             <p className="text-text-secondary text-sm mb-4">
               {t('auth:links.no_account')} <Link to="/register" className="font-bold text-accent hover:underline">{t('auth:links.sign_up')}</Link>
             </p>
-            <div className="flex flex-col sm:flex-row justify-center gap-4">
+            <div className="flex justify-center">
               <Link to="/restore" className="text-sm text-accent hover:underline">{t('auth:links.restore')}</Link>
-              <Link to="/migrate-receive" className="text-sm text-accent hover:underline">{t('auth:links.transfer')}</Link>
             </div>
             <div className="mt-4 pt-4 border-t border-white/10 dark:border-white/5">
               <a href="https://nyx-app.my.id/privacy" target="_blank" rel="noopener noreferrer" className="text-xs text-text-secondary hover:text-accent transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</a>
@@ -359,3 +501,4 @@ export default function Login() {
     </div>
   );
 }
+

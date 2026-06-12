@@ -308,7 +308,14 @@ router.delete('/me', zodValidate({
     // 1. Delete R2 files if any
     if (fileKeys && fileKeys.length > 0) {
       const { deleteR2Files } = await import('../utils/r2.js')
-      const userFileKeys = fileKeys.filter((k: string) => k.startsWith(`${userId}-`))
+      // Correctly filter keys that belong to this user. 
+      // Key format: folder/userId-nanoid.ext
+      const userFileKeys = fileKeys.filter((k: string) => {
+        const parts = k.split('/');
+        const fileName = parts.length > 1 ? parts[1] : parts[0];
+        return fileName.startsWith(`${userId}-`);
+      });
+
       if (userFileKeys.length > 0) {
         await deleteR2Files(userFileKeys).catch(err => console.error('[R2] Cleanup failed:', err))
       }

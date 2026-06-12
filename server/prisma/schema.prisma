@@ -29,7 +29,7 @@ model User {
   autoDestructDays Int?
   currentChallenge String?
 
-  // --- RELASI MULTI-DEVICE ---
+  // --- RELASI PERANGKAT (DEVICE RECORDS) ---
   devices Device[]
 
   // --- RELASI PENGGUNA ---

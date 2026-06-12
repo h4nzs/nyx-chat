@@ -1,8 +1,4 @@
 {
-  "failed_to_load_linked_devices": "Failed to load linked devices",
-  "failed_to_revoke_device": "Failed to revoke device",
-  "please_start_a_chat_with_yourself_saved_": "Please start a chat with yourself ('Saved Messages') first to use as a sync channel.",
-  "failed_to_broadcast_history_sync": "Failed to broadcast history sync.",
   "push_notifications_not_supported": "Push notifications not supported",
   "notification_permission_denied": "Notification permission denied",
   "failed_to_enable_notifications": "Failed to enable notifications: {{error}}",
