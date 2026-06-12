@@ -173,18 +173,15 @@ export default function Login() {
             await saveDeviceAutoUnlockKey(sessionPassword);
             await setDeviceAutoUnlockReady(true);
             
-            // Beritahu store bahwa kunci sudah siap
-            useAuthStore.getState().setHasRestoredKeys(true);
-            
             toast.success(t('auth:status.vault_unlocked'));
         } else if (result.encryptedPrivateKey) {
             // Fallback: Jika PRF tidak jalan/tidak disetup, pakai bundle dari server (tapi masih terkunci password)
             const { saveEncryptedKeys } = await import("@lib/keyStorage");
             await saveEncryptedKeys(result.encryptedPrivateKey);
-            useAuthStore.getState().setHasRestoredKeys(true);
         }
 
         // Try auto-unlock (akan sukses jika PRF jalan tadi)
+        // Ini secara internal akan memanggil setHasRestoredKeys(true) jika berhasil
         const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
         
         if (!autoUnlockSuccess) {
@@ -240,12 +237,13 @@ export default function Login() {
                             }
                             });
                             return;
-                            }
-                            }
+             }
+        }
 
-                            await useAuthStore.getState().loadBlockedUsers();
+        await useAuthStore.getState().loadBlockedUsers();
 
-                            navigate("/chat");
+        // Note: App.tsx router will automatically redirect to /chat since user and hasRestoredKeys are now set
+        navigate("/chat");
                             }
                             } catch (err: unknown) {
       console.error("Biometric login error:", err);

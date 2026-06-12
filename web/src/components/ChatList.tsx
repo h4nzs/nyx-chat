@@ -591,9 +591,10 @@ export default function ChatList() {
       {showScanModal && (
         <ScanQRModal 
           onClose={() => setShowScanModal(false)} 
-          onScanSuccess={(hash) => {
+          onScanSuccess={(searchQueryString) => {
             setShowScanModal(false);
-            navigate(`/connect?u=${hash}`);
+            // searchQueryString already includes the leading '?' (e.g. "?u=...&i=...&p=...")
+            navigate(`/connect${searchQueryString}`);
           }} 
         />
       )}

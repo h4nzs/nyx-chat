@@ -466,8 +466,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
 
         const hasKeysNow = await hasStoredKeys();
-        set({ hasRestoredKeys: hasKeysNow }); // Sync state with actual disk state
-        
+
         // CHECK: If we still don't have local keys, this is a "Blind Login" on a new device.
         if (!hasKeysNow) {
             get().loadBlockedUsers();
@@ -498,6 +497,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           }
         }
 
+        // NOW set hasRestoredKeys, so App.tsx connects socket only after crypto is ready
         set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeysNow, blockedUserIds: [] });
         localStorage.setItem("user", JSON.stringify(res.user));
 

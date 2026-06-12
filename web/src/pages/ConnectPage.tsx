@@ -11,6 +11,8 @@ export default function ConnectPage() {
   const { t } = useTranslation(['common']);
   const [searchParams] = useSearchParams();
   const u = searchParams.get('u');
+  const i = searchParams.get('i'); // Optional: Direct ID
+  const p = searchParams.get('p'); // Optional: Encrypted Profile
   const navigate = useNavigate();
   const searchUsers = useConversationStore(s => s.searchUsers);
   const startConversation = useConversationStore(s => s.startConversation);
@@ -23,36 +25,54 @@ export default function ConnectPage() {
     let active = true;
     
     const processConnection = async () => {
+      // 1. Basic Validation
       if (!u || u.length < 10) {
         toast.error(t('connect.invalid_link'));
         navigate('/chat');
         return;
       }
-      
+
       try {
-        const results = await searchUsers(u);
-        if (!active) return;
-        
-        if (results.length === 0) {
-          toast.error(t('connect.user_not_found'));
-          navigate('/chat');
-          return;
+        let targetId = i;
+        let encryptedProfile = p;
+        let targetName = t('defaults.encrypted_user');
+
+        // 2. Optimization: If we already have ID and Profile from URL, use them
+        if (targetId && encryptedProfile) {
+            const { useProfileStore } = await import('@store/profile');
+            const decryptedProfile = await useProfileStore.getState().decryptAndCache(targetId, encryptedProfile);
+            if (decryptedProfile?.name && decryptedProfile.name !== "Unknown") {
+                targetName = decryptedProfile.name;
+            }
+        } else {
+            // Fallback: Fetch from server
+            const results = await searchUsers(u);
+            if (!active) return;
+            
+            if (results.length === 0) {
+              toast.error(t('connect.user_not_found'));
+              navigate('/chat');
+              return;
+            }
+            
+            const targetUser = results[0];
+            targetId = targetUser.id;
+            encryptedProfile = targetUser.encryptedProfile || null;
+
+            // Decrypt the profile to show the name
+            const { useProfileStore } = await import('@store/profile');
+            const decryptedProfile = await useProfileStore.getState().decryptAndCache(targetId, encryptedProfile);
+            
+            if (decryptedProfile?.name && decryptedProfile.name !== "Unknown") {
+                targetName = decryptedProfile.name;
+            }
         }
-        
-        const targetUser = results[0];
-        if (targetUser.id === me?.id) {
+
+        if (targetId === me?.id) {
           toast.success(t('connect.own_profile'));
           navigate('/chat');
           return;
         }
-        
-        // Decrypt the profile to show the name
-        const { useProfileStore } = await import('@store/profile');
-        const decryptedProfile = await useProfileStore.getState().decryptAndCache(targetUser.id, targetUser.encryptedProfile || null);
-        
-        const targetName = decryptedProfile?.name && decryptedProfile.name !== "Unknown" && decryptedProfile.name !== "Encrypted User" 
-            ? decryptedProfile.name 
-            : t('defaults.encrypted_user');
         
         setLoading(false);
         showConfirm(
@@ -61,7 +81,16 @@ export default function ConnectPage() {
           async () => {
              try {
                 toast.loading(t('connect.connecting_to', { name: targetName }), { id: 'connect' });
-                const convId = await startConversation(targetUser.id);
+                const convId = await startConversation(targetId!);
+                
+                // EAGER HANDSHAKE: Establish secure session immediately
+                try {
+                  const { useConversationStore } = await import('@store/conversation');
+                  await useConversationStore.getState().performHandshake(convId);
+                } catch (handshakeErr) {
+                  console.warn("Eager handshake failed, will retry on first message:", handshakeErr);
+                }
+
                 toast.success(t('connect.connected'), { id: 'connect' });
                 navigate(`/chat/${convId}`);
              } catch (e: unknown) {
@@ -70,13 +99,13 @@ export default function ConnectPage() {
              }
           },
           () => {
-            // onCancel: return to chat list
             navigate('/chat');
           }
         );
         
       } catch (e) {
         if (!active) return;
+        console.error("Connect error:", e);
         toast.error(t('connect.error_processing'));
         navigate('/chat');
       }
@@ -85,7 +114,7 @@ export default function ConnectPage() {
     processConnection();
     
     return () => { active = false; };
-  }, [u, navigate, searchUsers, startConversation, showConfirm, me, t]);
+  }, [u, i, p, navigate, searchUsers, startConversation, showConfirm, me, t]);
   
   return (
     <div className="min-h-screen bg-bg-main flex items-center justify-center p-4">

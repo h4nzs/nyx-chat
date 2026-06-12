@@ -938,45 +938,64 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                           await db.groupReceiverStates.where('[conversationId+senderId]').equals([conversationId, senderId]).delete();
                           await db.ratchetSessions.delete(conversationId);
                           
-                          // Immediately fetch new PreKeyBundle to trigger security warnings
                           const { getSodiumLib, fetchPreKeyBundle, establishSessionFromPreKeyBundle } = await import('@utils/crypto');
-                          const bundle = await fetchPreKeyBundle(senderId);
+                          const { getPeerIdentityKey } = await import('@lib/keychainDb');
                           const { useAuthStore } = await import('@store/auth');
-                          const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
-                          if (!signingPrivateKey) throw new Error("Missing signing key");
-                          const mySigningKey = {
-                              publicKey: signingPrivateKey.slice(32),
-                              privateKey: signingPrivateKey
+                          const { t } = await import('i18next');
+                          const { default: toast } = await import('react-hot-toast');
+                          const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
+                          const { useMessageStore } = await import('@store/message');
+                          
+                          const existingKey = await getPeerIdentityKey(senderId);
+                          let retries = 6; // Max 6 attempts (9 seconds total)
+                          
+                          const pollForNewBundle = async () => {
+                              try {
+                                  const bundle = await fetchPreKeyBundle(senderId);
+                                  
+                                  if (existingKey && bundle.identityKey !== existingKey) {
+                                      // The sender has finished uploading their new keys!
+                                      const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+                                      if (!signingPrivateKey) throw new Error("Missing signing key");
+                                      const mySigningKey = {
+                                          publicKey: signingPrivateKey.slice(32),
+                                          privateKey: signingPrivateKey
+                                      };
+                                      
+                                      // Establish a new session proactively so we have their new identity key cached
+                                      await establishSessionFromPreKeyBundle(mySigningKey, bundle, senderId);
+                                      
+                                      const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                                      const peer = conv?.participants.find(p => (p.userId || p.user?.id || p.id) === senderId);
+                                      const peerName = (peer as any)?.name || peer?.user?.name || t('common:defaults.unknown_user');
+                                      const warningText = t('common:security_key_changed', { name: peerName });
+                                      
+                                      useMessageStore.getState().addSystemMessage(conversationId, warningText);
+                                      toast.error(warningText, { icon: '🛡️', duration: 6000 });
+                                      
+                                      useDynamicIslandStore.getState().addActivity({
+                                          type: 'notification',
+                                          sender: { name: 'NYX_SHIELD' },
+                                          message: warningText,
+                                          link: `/chat/${conversationId}`
+                                      }, 6000);
+                                      
+                                      // Proactively ask for their new group key if it's a group
+                                      const { emitGroupKeyRequest } = await import('@lib/transportClient');
+                                      emitGroupKeyRequest(conversationId);
+                                  } else if (retries > 0) {
+                                      retries--;
+                                      setTimeout(pollForNewBundle, 1500); // Check again
+                                  } else {
+                                      console.warn("[Protocol Reset] Polling timed out waiting for the new PreKeyBundle.");
+                                  }
+                              } catch (err) {
+                                  console.error("[Protocol Reset] Polling error:", err);
+                              }
                           };
                           
-                          // Establish a new session proactively so we have their new identity key cached
-                          const { identityChanged } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, senderId);
-                          
-                          if (identityChanged) {
-                              const { t } = await import('i18next');
-                              const { default: toast } = await import('react-hot-toast');
-                              const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
-                              const { useMessageStore } = await import('@store/message');
-                              
-                              const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                              const peer = conv?.participants.find(p => (p.userId || p.user?.id || p.id) === senderId);
-                              const peerName = (peer as any)?.name || peer?.user?.name || t('common:defaults.unknown_user');
-                              const warningText = t('common:security_key_changed', { name: peerName });
-                              
-                              useMessageStore.getState().addSystemMessage(conversationId, warningText);
-                              toast.error(warningText, { icon: '🛡️', duration: 6000 });
-                              
-                              useDynamicIslandStore.getState().addActivity({
-                                  type: 'notification',
-                                  sender: { name: 'NYX_SHIELD' },
-                                  message: warningText,
-                                  link: `/chat/${conversationId}`
-                              }, 6000);
-                          }
-                          
-                          // Proactively ask for their new group key if it's a group
-                          const { emitGroupKeyRequest } = await import('@lib/transportClient');
-                          emitGroupKeyRequest(conversationId);
+                          // Wait 1 second before first poll to give sender time to upload
+                          setTimeout(pollForNewBundle, 1000);
                           
                       } catch (e) {
                           console.error("Failed to perform real-time security check:", e);

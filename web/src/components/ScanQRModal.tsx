@@ -22,14 +22,15 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
           try {
-            // Looking for .../connect?u=HASH
+            // Looking for .../connect?u=HASH&...
             const url = new URL(decodedText);
             const u = url.searchParams.get('u');
             if (u && u.length > 10) {
               if (scannerRef.current) {
                 await scannerRef.current.stop();
               }
-              onScanSuccess(u);
+              // Pass the full search query string (e.g., ?u=...&i=...&p=...)
+              onScanSuccess(url.search);
             } else {
               // Not a valid connect link but keep scanning
             }

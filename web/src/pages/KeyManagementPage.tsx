@@ -72,6 +72,9 @@ export default function KeyManagementPage() {
                 }, undefined, true)
               );
               await Promise.allSettled(promises);
+              
+              // Wait a brief moment to ensure all messages are flushed through the WebTransport socket
+              await new Promise(resolve => setTimeout(resolve, 500));
             } catch (e) {
               console.error("Failed to broadcast security update", e);
             }
@@ -85,8 +88,18 @@ export default function KeyManagementPage() {
             
             // 3. Save the new keys locally
             await saveEncryptedKeys(encryptedPrivateKeys);
+
+            // 4. Load New Keys into RAM so the bundle uploader uses them
+            const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+            const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
+            if (result.success) {
+                 // @ts-ignore
+                 useAuthStore.getState().setDecryptedKeys(result.keys);
+                 // Upload the newly minted keys to the server IMMEDIATELY to prevent race conditions
+                 await setupAndUploadPreKeyBundle();
+            }
             
-            // 4. Wipe only sessions tied to the old identity (initiator/sender state). 
+            // 5. Wipe only sessions tied to the old identity (initiator/sender state). 
             // We PRESERVE groupReceiverStates so we can still read group metadata and incoming messages!
             try {
               const { db } = await import('@lib/db');
@@ -99,7 +112,7 @@ export default function KeyManagementPage() {
               console.error("Failed to clear old sessions", e);
             }
 
-            // 5. Success and Reload to load new keys into RAM
+            // 6. Success and Reload to load new keys cleanly
             toast.success(t('settings:messages.keys_rotated'));
             setTimeout(() => {
               window.location.reload();

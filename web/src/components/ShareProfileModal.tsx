@@ -28,7 +28,13 @@ export default function ShareProfileModal({ onClose }: Props) {
     return null; // Should not happen if data is loaded
   }
 
-  const shareUrl = `${window.location.origin}/connect?u=${user.usernameHash}`;
+  // ENHANCED URL: Include ID and Encrypted Profile for immediate connection & OOB profile exchange
+  const params = new URLSearchParams();
+  params.set('u', user.usernameHash);
+  params.set('i', user.id);
+  if (user.encryptedProfile) params.set('p', user.encryptedProfile);
+  
+  const shareUrl = `${window.location.origin}/connect?${params.toString()}`;
 
   const handleCopy = async () => {
     try {

@@ -27,7 +27,7 @@ import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
 import { useSettingsStore } from '@store/settings';
-import { setupBiometricUnlock } from '@lib/biometricUnlock';
+import { setupBiometricUnlock, browserSupportsWebAuthn } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
 import ImageCropperModal from '../components/ImageCropperModal';
@@ -780,27 +780,29 @@ export default function SettingsPage() {
                   setReadReceipts(!readReceipts);
                 }} 
               />
-              <button
-                onClick={handleRegisterPasskey}
-                className={`
-                  mt-4 w-full p-4 rounded-xl flex items-center justify-between
-                  bg-bg-main text-text-primary
-                  shadow-neu-flat-light dark:shadow-neu-flat-dark
-                  active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                  hover:text-accent transition-colors
-                `}
-              >
-                <div className="flex items-center gap-3">
-                  <IoFingerPrint size={20} />
-                  <div className="text-left">
-                    <div className="font-bold text-sm">
-                        {hasBioVault ? t('settings:privacy.biometric_active') : (user.isVerified ? t('settings:privacy.biometric_enable') : t('settings:privacy.biometric_enable'))}
+              {browserSupportsWebAuthn() && (
+                <button
+                  onClick={handleRegisterPasskey}
+                  className={`
+                    mt-4 w-full p-4 rounded-xl flex items-center justify-between
+                    bg-bg-main text-text-primary
+                    shadow-neu-flat-light dark:shadow-neu-flat-dark
+                    active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                    hover:text-accent transition-colors
+                  `}
+                >
+                  <div className="flex items-center gap-3">
+                    <IoFingerPrint size={20} />
+                    <div className="text-left">
+                      <div className="font-bold text-sm">
+                          {hasBioVault ? t('settings:privacy.biometric_active') : (user.isVerified ? t('settings:privacy.biometric_enable') : t('settings:privacy.biometric_enable'))}
+                      </div>
+                      <div className="text-[10px] text-text-secondary">{t('auth:buttons.verify_identity')}</div>
                     </div>
-                    <div className="text-[10px] text-text-secondary">{t('auth:buttons.verify_identity')}</div>
                   </div>
-                </div>
-                <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
-              </button>
+                  <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
+                </button>
+              )}
 
             {/* PANIC PASSWORD */}
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">

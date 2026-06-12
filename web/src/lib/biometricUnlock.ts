@@ -21,6 +21,17 @@ interface PRFClientExtensionResults {
   };
 }
 
+/**
+ * Cek apakah browser mendukung WebAuthn
+ */
+export function browserSupportsWebAuthn(): boolean {
+  return !!(
+    window.PublicKeyCredential &&
+    typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function' &&
+    typeof window.PublicKeyCredential.isConditionalMediationAvailable === 'function'
+  );
+}
+
 async function getPrfSalt(): Promise<Uint8Array> {
   const sodium = await getSodium();
   const encoder = new TextEncoder();

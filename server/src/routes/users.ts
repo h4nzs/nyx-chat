@@ -386,7 +386,11 @@ router.get('/search', async (req, res, next) => {
     
     // RESTORE: Sandbox Search Restriction
     const requester = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isVerified: true } });
-    if (!requester?.isVerified) {
+    
+    // Check if query is an exact Hash ID (43 chars base64url)
+    const isExactHash = typeof q === 'string' && q.length === 43 && /^[A-Za-z0-9_-]+$/.test(q);
+
+    if (!requester?.isVerified && !isExactHash) {
         throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users can only find contacts by providing the exact Hash ID.');
     }
 
