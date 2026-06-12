@@ -124,8 +124,6 @@ export default function MigrationReceivePage() {
       // we MUST clear them so that on the next reload, the app detects
       // it has no local identity keys and performs a NEW DEVICE BOOTSTRAP.
       localStorage.removeItem('deviceId');
-      const { db } = await import('@lib/db');
-      await db.identityKeys.clear();
       
       transportClient.sendEvent('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 

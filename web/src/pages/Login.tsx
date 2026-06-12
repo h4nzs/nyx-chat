@@ -66,8 +66,6 @@ export default function Login() {
                   
                   // ✅ OPSI A: FORCE NEW IDENTITY
                   localStorage.removeItem('deviceId');
-                  const { db } = await import('@lib/db');
-                  await db.identityKeys.clear();
 
                   toast.success(t('settings:messages.import_success'));
                   setShowRecoveryOptions(false);
