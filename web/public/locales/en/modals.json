@@ -110,7 +110,10 @@
     "verified": "Verified",
     "no_desc": "This user prefers to keep an air of mystery.",
     "view_profile": "View Full Profile",
-    "verify_security": "Verify Security"
+    "verify_security": "Verify Security",
+    "pq_status": "X-Wing Post-Quantum",
+    "pq_desc": "Hardened Forward Secrecy Enabled",
+    "id_label": "ID"
   },
   "participants": {
     "make_admin": "Make Admin",
@@ -136,7 +139,13 @@
     "desc": "Verify end-to-end encryption integrity with",
     "hash_label": "Fingerprint Hash",
     "confirmed": "Verification Confirmed",
-    "confirm_btn": "Confirm Safety Number"
+    "confirm_btn": "Confirm Safety Number",
+    "reduced_protection": {
+      "title": "Reduced Protection",
+      "older": "This contact is using an older version. Post-Quantum and Identity Signing protections are disabled for this session.",
+      "no_pq": "This contact's device doesn't support Post-Quantum encryption yet. Falling back to classical X25519.",
+      "no_signing": "This contact is missing Identity Signing. The safety number uses only encryption keys."
+    }
   },
   "tour": {
     "title": "Quick Tour",
@@ -216,9 +225,9 @@
     "blob_failed": "Failed to generate image blob.",
     "crop": "Crop",
     "remove": "Remove",
-    "undo": "Urungkan",
-    "redo": "Ulangi",
-    "pick_color": "Pilih warna",
+    "undo": "Undo",
+    "redo": "Redo",
+    "pick_color": "Pick color",
     "zoom": "ZOOM",
     "rotate": "Rotate"
   },

@@ -16,6 +16,7 @@
     "previous": "Previous",
     "finish": "Finish",
     "sending": "Sending...",
+    "processing": "Processing...",
     "executing": "Executing...",
     "copy_link": "Copy Link",
     "copied": "Link copied to clipboard",
@@ -25,6 +26,7 @@
     "unlock": "UNLOCK",
     "done": "Done",
     "saving": "Saving...",
+    "close": "Close",
     "creating": "Creating...",
     "menu": "Menu",
     "back": "Back",
@@ -80,7 +82,12 @@
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
     "establishing_uplink": "ESTABLISHING_UPLINK...",
     "power_surge": "Power Surge Required",
-    "secure_context_locked": "Secure Context Locked"
+    "secure_context_locked": "Secure Context Locked",
+    "decrypting": "Decrypting...",
+    "authenticating": "Authenticating..."
+  },
+  "words": {
+    "or": "OR"
   },
   "cmd_palette": {
     "title": "System Command Line",

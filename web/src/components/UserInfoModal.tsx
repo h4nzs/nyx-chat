@@ -169,7 +169,7 @@ export default function UserInfoModal() {
               {/* ID Badge: Extruded pill */}
               <div className="flex flex-col items-start gap-2 mt-2">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
-                   <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
+                   <span className="text-xs font-mono text-text-secondary uppercase">{t('modals:user_info.id_label')}</span>
                    <span className="text-sm font-mono text-accent">#{user.id.substring(0, 8)}</span>
                 </div>
                 {user.isVerified && (
@@ -189,15 +189,15 @@ export default function UserInfoModal() {
                shadow-neu-pressed dark:shadow-neu-pressed-dark
                border border-white/5
              ">
-               {profile.description || <span className="opacity-40 italic">{t('modals:user_info_modal.no_data', 'No data available.')}</span>}
+               {profile.description || <span className="opacity-40 italic">{t('modals:user_info_modal.no_data')}</span>}
              </div>
           </div>
           
           <div className="w-full">
             <div className="flex items-center justify-between p-4 rounded-xl bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark border border-white/5">
               <div className="flex flex-col gap-0.5">
-                <span className="font-bold text-sm uppercase tracking-wider text-text-primary">X-Wing Post-Quantum</span>
-                <span className="text-[10px] text-text-secondary opacity-60">Hardened Forward Secrecy Enabled</span>
+                <span className="font-bold text-sm uppercase tracking-wider text-text-primary">{t('modals:user_info.pq_status')}</span>
+                <span className="text-[10px] text-text-secondary opacity-60">{t('modals:user_info.pq_desc')}</span>
               </div>
               <div className="p-2 rounded-full bg-green-500/20 text-green-500">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
@@ -237,7 +237,7 @@ export default function UserInfoModal() {
                       hover:text-accent transition-all
                     "
                   >
-                    {t('modals:user_info_modal.view_personnel', 'View Personnel File')}
+                    {t('modals:user_info_modal.view_personnel')}
                   </button>
                   <button
                     onClick={handleVerifySecurity}
@@ -249,7 +249,7 @@ export default function UserInfoModal() {
                       hover:text-green-500 transition-all
                     "
                   >
-                    {t('modals:user_info_modal.verify_handshake', 'Verify Encryption Handshake')}
+                    {t('modals:user_info_modal.verify_handshake')}
                   </button>
                   {user && user.id !== useAuthStore.getState().user?.id && (
                     <>
@@ -266,7 +266,7 @@ export default function UserInfoModal() {
                             hover:bg-red-500 hover:text-white transition-all
                           "
                         >
-                          {t('modals:user_info_modal.unblock_signal', 'Unblock Signal')}
+                          {t('modals:user_info_modal.unblock_signal')}
                         </button>
                       ) : (
                         <button
@@ -281,7 +281,7 @@ export default function UserInfoModal() {
                             hover:text-red-500 transition-all
                           "
                         >
-                          {t('modals:user_info_modal.block_signal', 'Block Signal')}
+                          {t('modals:user_info_modal.block_signal')}
                         </button>
                       )}
                       
@@ -295,7 +295,7 @@ export default function UserInfoModal() {
                           hover:text-yellow-500 transition-all
                         "
                       >
-                        {t('modals:user_info_modal.report_signal', 'Report Signal')}
+                        {t('modals:user_info_modal.report_signal')}
                       </button>
                     </>
                   )}

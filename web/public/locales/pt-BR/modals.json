@@ -110,7 +110,10 @@
     "verified": "Verificado",
     "no_desc": "Este usuário prefere ser misterioso.",
     "view_profile": "Ver Perfil Completo",
-    "verify_security": "Verificar Segurança"
+    "verify_security": "Verificar Segurança",
+    "pq_status": "X-Wing Post-Quantum",
+    "pq_desc": "Sigilo Direto Reforçado Ativado",
+    "id_label": "ID"
   },
   "participants": {
     "make_admin": "Tornar Administrador",
@@ -136,7 +139,13 @@
     "desc": "Verifique a integridade da criptografia de ponta a ponta com",
     "hash_label": "Hash da Impressão Digital",
     "confirmed": "Verificação Confirmada",
-    "confirm_btn": "Confirmar Número de Segurança"
+    "confirm_btn": "Confirmar Número de Segurança",
+    "reduced_protection": {
+      "title": "Proteção Reduzida",
+      "older": "Este contato está usando uma versão antiga. As proteções Post-Quantum e Assinatura de Identidade estão desativadas para esta sessão.",
+      "no_pq": "O dispositivo deste contato ainda não suporta criptografia Post-Quantum. Voltando para o X25519 clássico.",
+      "no_signing": "Este contato não possui Assinatura de Identidade. O número de segurança usa apenas chaves de criptografia."
+    }
   },
   "tour": {
     "title": "Tour Rápido",

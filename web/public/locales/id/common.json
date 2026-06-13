@@ -16,15 +16,17 @@
     "previous": "Sebelumnya",
     "finish": "Selesai",
     "sending": "Mengirim...",
+    "processing": "Memproses...",
     "executing": "Mengeksekusi...",
     "copy_link": "Salin Tautan",
     "copied": "Tautan disalin ke papan klip",
     "copy_failed": "Gagal menyalin tautan",
     "copied_label": "Disalin",
     "abort": "BATALKAN",
-    "unlock": "BUKA KUNCI",
+    "unlock": "BUKA",
     "done": "Selesai",
     "saving": "Menyimpan...",
+    "close": "Tutup",
     "creating": "Membuat...",
     "create_group": "Buat Grup",
     "menu": "Menu",
@@ -77,10 +79,15 @@
     "unknown_user": "Pengguna Tidak Dikenal"
   },
   "status": {
-    "connection_lost": "KONEKSI_HILANG // SISTEM_OFFLINE",
-    "establishing_uplink": "MEMBANGUN_UPLINK...",
+    "connection_lost": "KONEKSI_TERPUTUS // SISTEM_OFFLINE",
+    "establishing_uplink": "MEMBANGUN_KONEKSI...",
     "power_surge": "Lonjakan Daya Diperlukan",
-    "secure_context_locked": "Konteks Aman Terkunci"
+    "secure_context_locked": "Konteks Aman Terkunci",
+    "decrypting": "Mendekripsi...",
+    "authenticating": "Mengautentikasi..."
+  },
+  "words": {
+    "or": "ATAU"
   },
   "cmd_palette": {
     "title": "Baris Perintah Sistem",

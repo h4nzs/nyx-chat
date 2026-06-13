@@ -231,7 +231,7 @@ export default function Login() {
                             toast.error(t('auth:messages.decrypt_failed'));
                             }
                             } catch (e) {
-                            toast.error(i18n.t('errors:something_went_wrong_when_decrypting', 'Something went wrong when decrypting.'));
+                                toast.error(t('auth:errors.decrypt_failed_unknown'));
                             }
                             });
                             return;
@@ -272,7 +272,7 @@ export default function Login() {
 
             const isPanic = await checkPanicPassword(password);
             if (isPanic) {
-              const toastId = toast.loading(t('auth:status.decrypting'));
+              const toastId = toast.loading(t('common:status.decrypting'));
               setTimeout(async () => {
                 try {
                   await executeLocalWipe();
@@ -300,7 +300,7 @@ export default function Login() {
                     toast.error(t('auth:messages.decrypt_failed'));
                 }
             } catch (e) {
-                toast.error(i18n.t('auth:messages.decrypt_failed', 'An error occurred during decryption.'));
+                toast.error(t('auth:messages.decrypt_failed'));
             }
          });
       }
@@ -344,7 +344,7 @@ export default function Login() {
                     </div>
                     <div className="text-left">
                         <p className="font-bold text-sm">{t('auth:buttons.restore_phrase')}</p>
-                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">Identity only • No History</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.identity_only')}</p>
                     </div>
                 </div>
                 <FiLock size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
@@ -360,8 +360,8 @@ export default function Login() {
                         <FiSmartphone size={20} />
                     </div>
                     <div className="text-left">
-                        <p className="font-bold text-sm">{t('auth:buttons.transfer_qr', 'Scan QR Transfer')}</p>
-                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">Device to Device • Full History</p>
+                        <p className="font-bold text-sm">{t('auth:buttons.transfer_qr')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.device_to_device')}</p>
                     </div>
                 </div>
                 <FiCpu size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
@@ -378,7 +378,7 @@ export default function Login() {
                     </div>
                     <div className="text-left">
                         <p className="font-bold text-sm">{t('auth:buttons.restore_vault')}</p>
-                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">From .nyxvault file • Full History</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.from_vault_file')}</p>
                     </div>
                 </div>
                 <FiShield size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />

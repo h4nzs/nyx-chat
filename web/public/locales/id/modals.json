@@ -110,7 +110,10 @@
     "verified": "Terverifikasi",
     "no_desc": "Pengguna ini lebih suka menjadi misterius.",
     "view_profile": "Lihat Profil Lengkap",
-    "verify_security": "Verifikasi Keamanan"
+    "verify_security": "Verifikasi Keamanan",
+    "pq_status": "X-Wing Post-Quantum",
+    "pq_desc": "Kerahasiaan Maju Diperkuat Aktif",
+    "id_label": "ID"
   },
   "participants": {
     "make_admin": "Jadikan Admin",
@@ -136,7 +139,13 @@
     "desc": "Verifikasi integritas enkripsi ujung-ke-ujung dengan",
     "hash_label": "Hash Sidik Jari",
     "confirmed": "Verifikasi Dikonfirmasi",
-    "confirm_btn": "Konfirmasi Nomor Keamanan"
+    "confirm_btn": "Konfirmasi Nomor Keamanan",
+    "reduced_protection": {
+      "title": "Perlindungan Berkurang",
+      "older": "Kontak ini menggunakan versi lama. Perlindungan Post-Quantum dan Identity Signing dinonaktifkan untuk sesi ini.",
+      "no_pq": "Perangkat kontak ini belum mendukung enkripsi Post-Quantum. Beralih kembali ke X25519 klasik.",
+      "no_signing": "Kontak ini kehilangan Identity Signing. Nomor keamanan hanya menggunakan kunci enkripsi."
+    }
   },
   "tour": {
     "title": "Tur Cepat",

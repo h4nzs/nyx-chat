@@ -16,6 +16,7 @@
     "previous": "Anterior",
     "finish": "Terminar",
     "sending": "Enviando...",
+    "processing": "Procesando...",
     "executing": "Ejecutando...",
     "copy_link": "Copiar enlace",
     "copied": "Enlace copiado al portapapeles",
@@ -25,6 +26,7 @@
     "unlock": "DESBLOQUEAR",
     "done": "Listo",
     "saving": "Guardando...",
+    "close": "Cerrar",
     "creating": "Creando...",
     "create_group": "Crear grupo",
     "menu": "Menú",
@@ -85,7 +87,12 @@
     "connection_lost": "CONEXIÓN_PERDIDA // SISTEMA_OFFLINE",
     "establishing_uplink": "ESTABLECIENDO_ENLACE...",
     "power_surge": "Se necesita un pico de energía",
-    "secure_context_locked": "Contexto seguro bloqueado"
+    "secure_context_locked": "Contexto seguro bloqueado",
+    "decrypting": "Descifrando...",
+    "authenticating": "Autenticando..."
+  },
+  "words": {
+    "or": "O"
   },
   "cmd_palette": {
     "title": "Línea de comandos",

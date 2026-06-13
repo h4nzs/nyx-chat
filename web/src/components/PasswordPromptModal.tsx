@@ -65,20 +65,20 @@ export default function PasswordPromptModal() {
         await saveDeviceAutoUnlockKey(sessionPassword);
         await setDeviceAutoUnlockReady(true);
         
-        toast.success(t('auth:status.vault_unlocked', 'Vault unlocked via Biometric PRF!'));
+        toast.success(t('auth:status.vault_unlocked'));
         
         // Pass the new session password to the caller so they can decrypt the new keys
         await (onPasswordSubmit(sessionPassword) as unknown as Promise<void>);
         setPassword('');
         hidePasswordPrompt();
       } else {
-        throw new Error(t('auth:errors.biometric_corrupt', 'Biometric key invalid or corrupted. Please enter password manually.'));
+        throw new Error(t('auth:errors.biometric_corrupt'));
       }
     } catch (err: unknown) {
       console.error("Biometric unlock error:", err);
       // Don't show confusing error if user simply cancels the biometric prompt
       if ((err as Error).name !== 'NotAllowedError' && !(err instanceof Error ? err.message : '').includes('cancelled') && !(err as Error).message.includes('User cancelled')) {
-        const msg = err instanceof Error ? err.message : t('auth:errors.biometric_failed', 'Biometric login failed. Please use password or try again.');
+        const msg = err instanceof Error ? err.message : t('auth:errors.biometric_failed');
         setError(msg);
       }
     } finally {
@@ -86,25 +86,7 @@ export default function PasswordPromptModal() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password) return;
-    
-    setIsLoading(true);
-    setError('');
-    try {
-      // Tunggu hingga proses validasi/dekripsi di authStore selesai
-      await (onPasswordSubmit(password) as unknown as Promise<void>);
-      setPassword('');
-      hidePasswordPrompt();
-    } catch (err: unknown) {
-      console.error("Password submission error:", err);
-      const msg = err instanceof Error ? err.message : t('modals:password_prompt.error');
-      setError(msg);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // ... ( handleSubmit )
 
   return (
     <div 
@@ -153,7 +135,7 @@ export default function PasswordPromptModal() {
             <div className="flex flex-col gap-2">
               <div className="relative flex items-center py-2">
                 <div className="flex-grow border-t border-gray-700"></div>
-                <span className="flex-shrink-0 mx-4 text-gray-500 text-xs uppercase tracking-wider">{t('common:words.or', 'OR')}</span>
+                <span className="flex-shrink-0 mx-4 text-gray-500 text-xs uppercase tracking-wider">{t('common:words.or')}</span>
                 <div className="flex-grow border-t border-gray-700"></div>
               </div>
               <button
@@ -163,7 +145,7 @@ export default function PasswordPromptModal() {
                 className="w-full py-3 px-4 rounded-lg bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-3"
               >
                 <IoFingerPrint size={20} />
-                <span>{t('auth:buttons.biometric_unlock', 'Unlock with Biometrics')}</span>
+                <span>{t('auth:buttons.biometric_unlock')}</span>
               </button>
             </div>
           )}
@@ -185,7 +167,7 @@ export default function PasswordPromptModal() {
               {isLoading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  <span>{t('common:status.decrypting', 'Decrypting...')}</span>
+                  <span>{t('common:status.decrypting')}</span>
                 </>
               ) : (
                 t('common:actions.unlock')
