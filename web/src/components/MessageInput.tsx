@@ -223,35 +223,48 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   }, []);
 
   const [filePreviews, setFilePreviews] = useState<Map<string, string>>(new Map());
-  const previewsRef = useRef<Map<string, string>>(new Map());
+  const previewsRef = useRef<Map<string, { url: string, file: File }>>(new Map());
 
   useEffect(() => {
     const currentMap = previewsRef.current;
     let changed = false;
     const activeIds = new Set(stagedFiles.map(sf => sf.id));
 
-    for (const [id, url] of currentMap.entries()) {
+    // 1. Cleanup revoked/removed files
+    for (const [id, data] of currentMap.entries()) {
         if (!activeIds.has(id)) {
-            URL.revokeObjectURL(url);
+            URL.revokeObjectURL(data.url);
             currentMap.delete(id);
             changed = true;
         }
     }
 
+    // 2. Add or UPDATE files
     stagedFiles.forEach(sf => {
-        if (sf.file.type.startsWith('image/') && !currentMap.has(sf.id)) {
-            const url = URL.createObjectURL(sf.file);
-            currentMap.set(sf.id, url);
-            changed = true;
+        if (sf.file.type.startsWith('image/')) {
+            const existing = currentMap.get(sf.id);
+            
+            // IF file object reference changed, we need a new URL
+            if (!existing || existing.file !== sf.file) {
+                if (existing) URL.revokeObjectURL(existing.url);
+                
+                const url = URL.createObjectURL(sf.file);
+                currentMap.set(sf.id, { url, file: sf.file });
+                changed = true;
+            }
         }
     });
 
-    if (changed) setFilePreviews(new Map(currentMap));
+    if (changed) {
+        const justUrls = new Map<string, string>();
+        currentMap.forEach((v, k) => justUrls.set(k, v.url));
+        setFilePreviews(justUrls);
+    }
   }, [stagedFiles]);
 
   useEffect(() => {
       return () => {
-          previewsRef.current.forEach(url => URL.revokeObjectURL(url));
+          previewsRef.current.forEach(data => URL.revokeObjectURL(data.url));
           previewsRef.current.clear();
       };
   }, []);
