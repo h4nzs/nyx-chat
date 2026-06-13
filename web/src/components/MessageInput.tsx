@@ -18,6 +18,7 @@ import { triggerSendFeedback } from '@utils/feedback';
 import { useUserProfile } from '@hooks/useUserProfile';
 import AttachmentCropperModal from './AttachmentCropperModal';
 import ImageEditorModal from './ImageEditorModal';
+import Portal from './ui/Portal';
 import { FiEdit3 } from 'react-icons/fi';
 import { useTranslation } from 'react-i18next';
 
@@ -610,10 +611,14 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       )}
 
       {cropTarget && (
-        <AttachmentCropperModal file={cropTarget.file} url={cropTarget.url} onClose={() => setCropTarget(null)} onSave={(newFile) => { updateStagedFile(cropTarget.id, newFile); setCropTarget(null); }} />
+        <Portal>
+            <AttachmentCropperModal file={cropTarget.file} url={cropTarget.url} onClose={() => setCropTarget(null)} onSave={(newFile) => { updateStagedFile(cropTarget.id, newFile); setCropTarget(null); }} />
+        </Portal>
       )}
       {paintTarget && (
-        <ImageEditorModal file={paintTarget.file} onSave={(newFile) => { updateStagedFile(paintTarget.id, newFile); setPaintTarget(null); }} onCancel={() => setPaintTarget(null)} />
+        <Portal>
+            <ImageEditorModal file={paintTarget.file} onSave={(newFile) => { updateStagedFile(paintTarget.id, newFile); setPaintTarget(null); }} onCancel={() => setPaintTarget(null)} />
+        </Portal>
       )}
     </div>
   );

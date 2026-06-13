@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Cropper, CropperRef } from 'react-advanced-cropper';
 import 'react-advanced-cropper/dist/style.css';
 import 'react-advanced-cropper/dist/themes/compact.css';
-import { FiCheck, FiX, FiRotateCw } from 'react-icons/fi';
+import { FiX, FiRotateCw } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
@@ -45,8 +45,9 @@ export default function AttachmentCropperModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-md p-2 md:p-4">
-      <div className="relative w-full max-w-4xl h-[85vh] flex flex-col bg-bg-main rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-xl md:p-4 overscroll-none">
+      <div className="relative w-full h-full md:max-w-5xl md:h-[90vh] flex flex-col bg-bg-main md:rounded-3xl overflow-hidden shadow-[0_30px_100px_rgba(0,0,0,0.8)] border border-white/10">
+        {/* Dynamic Image Area */}
         <div className="flex-1 w-full bg-black relative flex items-center justify-center overflow-hidden">
           <Cropper
             ref={cropperRef}
@@ -61,31 +62,41 @@ export default function AttachmentCropperModal({
           />
         </div>
         
-        <div className="p-4 bg-bg-surface flex items-center justify-between gap-4 border-t border-white/5">
-          <button 
-            onClick={onClose} 
-            disabled={isProcessing} 
-            aria-label={t('common:actions.close', 'Close')} 
-            title={t('common:actions.close', 'Close')} 
-            className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/20 transition-colors"
-          >
-            <FiX size={20} />
-          </button>
-          <button 
-            onClick={handleRotate} 
-            disabled={isProcessing} 
-            className="flex items-center justify-center gap-2 p-3 bg-white/5 text-text-primary rounded-xl hover:bg-white/10 transition-colors flex-1 font-bold text-sm"
-          >
-            <FiRotateCw size={18} /> {t('modals:editor.rotate', 'Rotate')}
-          </button>
+        {/* Responsive Control Bar */}
+        <div className="p-6 bg-bg-surface flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/5 pb-safe">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <button 
+                onClick={onClose} 
+                disabled={isProcessing} 
+                aria-label={t('common:actions.close', 'Close')} 
+                title={t('common:actions.close', 'Close')} 
+                className="p-3.5 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500/20 transition-all active:scale-90"
+            >
+                <FiX size={22} />
+            </button>
+            <button 
+                onClick={handleRotate} 
+                disabled={isProcessing} 
+                className="flex items-center justify-center gap-2 p-3.5 bg-white/5 text-text-primary rounded-2xl hover:bg-white/10 transition-all flex-1 sm:px-6 font-black uppercase tracking-widest text-xs border border-white/5"
+            >
+                <FiRotateCw size={18} /> {t('modals:editor.rotate', 'Rotate')}
+            </button>
+          </div>
+
           <button 
             onClick={handleSave} 
             disabled={isProcessing} 
             aria-label={t('common:actions.save', 'Save')} 
             title={t('common:actions.save', 'Save')} 
-            className="p-3 bg-accent text-white rounded-xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(var(--accent),0.4)]"
+            className="
+                w-full sm:w-auto px-10 py-3.5 bg-accent text-white rounded-2xl 
+                hover:scale-105 active:scale-95 transition-all 
+                shadow-[0_15px_35px_rgba(var(--accent),0.5)]
+                font-black uppercase tracking-tighter text-sm
+                disabled:opacity-50 disabled:grayscale
+            "
           >
-            <FiCheck size={20} />
+            {isProcessing ? t('common:actions.processing') : t('common:actions.done')}
           </button>
         </div>
       </div>
