@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 [2.6.5] - 2026-06-13
+
+This update introduces the cutting-edge Binary WebTransport Handshake (NYX-BWH-V1), significantly optimizing Post-Quantum Cryptography performance. We have also hardened our security model by strictly enforcing Single-Active-Device policies and introducing Biometric Vault unlocks for seamless session recovery.
+
+### 🚀 Protocol & Cryptography (NYX-BWH-V1)
+* **Binary WebTransport Handshake:** Transitioned the PQX3DH handshake from JSON/Base64 to a packed raw binary format (`Uint8Array`). This reduces payload overhead by ~40% and drastically improves Time To First Chat (TTFC).
+* **Zero-Copy Memory Transfers:** Web Workers (`crypto.worker` and `transport.worker`) now communicate using Transferable Objects (`ArrayBuffer`), allowing heavy X-Wing decapsulation to run without blocking the main UI thread.
+* **Bi-directional Stream Pipeline:** The Rust Sidecar now handles dedicated, continuous bidirectional streams specifically for binary handshakes (OpCode `0x0A`), featuring immediate ACK frames to handle aggressive UDP backpressure.
+
+### 🔒 Security & Identity Hardening
+* **Single-Active-Device Enforcement:** To eliminate cryptographic "Split-Brain" scenarios, accounts are now strictly limited to one active device per account. Logging into a new device automatically revokes all previous refresh tokens and sessions.
+* **Better biometric Vault Unlock:** Integrated WebAuthn PRF. Users can now securely unlock their local vault and decrypt session keys using device biometrics (FaceID/TouchID) instead of manually typing their password.
+* **Sandbox Search Bypass:** Unverified accounts in Sandbox Mode can now bypass search restrictions by providing the exact 43-character Base64URL Hash ID of a contact.
+* **Out-of-Band (OOB) Profile Exchange:** Profile sharing URLs now bundle the `id` and `encryptedProfile` payload (`?u=...&i=...&p=...`), allowing immediate peer connection without requiring an initial round-trip to the server.
+
+### 📁 Media & UI/UX Improvements
+* **Optimistic Local Previews:** Media rendering components (`LazyImage`, `FileAttachment`, `VoiceMessagePlayer`) now intelligently bypass the decryption pipeline for local, unencrypted blob URLs, instantly rendering sent attachments.
+* **Image Editor Refinements:** Rewrote the canvas composition engine. SVG strokes are now accurately drawn onto a high-res background bitmap before exporting, preserving original image dimensions and aspect ratios.
+* **Interface Cleanup:** Added iOS safe-area utilities (`pt-safe`, `pb-safe`) for edge-to-edge screens. Wrapped `ImageEditorModal` and `AttachmentCropperModal` in React `<Portal>` to fix stacking context issues. Removed legacy multi-device UI components.
+* **Post-Quantum Badges:** Replaced manual Paranoid Mode toggles with automated "X-Wing Post-Quantum" status badges in the User Info panel.
+
+### 🐛 Bug Fixes & Stability
+* **Redis PubSub Self-Relay:** Fixed an issue where the sender's own active sessions weren't receiving chat message broadcasts over the Redis bridge (push notifications are still correctly suppressed for self).
+* **Cloud Storage Cleanup:** Fixed an R2 bucket cleanup bug that caused user avatar and media artifacts to be orphaned upon account deletion.
+* **Database Migration:** Upgraded the local `NyxDatabase` (IndexedDB) to version 4, gracefully migrating legacy `pqDrSessions` into `pqDrSessionsV2` using robust composite keys.
+* **Group Ratchet State:** Added the `requiresImmediateRotation` flag to `GroupSenderState` and improved fallback logic for fetching older skipped message keys missing the `senderDeviceKey`.
+* **Memory Leak Prevention:** Improved `MessageInput`'s file preview manager to strictly track and execute `URL.revokeObjectURL()` on deleted or modified attachments, preventing RAM bloat.
+
 ## 🔒 [2.6.4] - 2026-06-06
 
 This major update introduces a high-performance networking architecture using WebTransport (HTTP/3), a secure hybrid storage system for attachments, and significant hardening of the anonymous Burner Chat experience.
