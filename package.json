@@ -50,6 +50,7 @@
     "axios": ">=1.15.0",
     "follow-redirects": ">=1.16.0",
     "brace-expansion": "^2.0.3",
+    "esbuild": ">=0.28.1",
     "@types/react": ">=19.2.15",
     "@types/react-dom": ">=19.2.3"
   },
