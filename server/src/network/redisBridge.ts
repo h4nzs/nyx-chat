@@ -253,8 +253,8 @@ async function handleWebRtcRelay(fromUserId: string, payload: { to: string, type
   await sendJsonToUser(payload.to, opCode, relayPayload, opCode === TransportOpCode.WEBRTC_ICE);
 }
 
-async function handlePresence(userId: string, payload: { event: 'active' | 'away' | 'typing:start' | 'typing:stop', conversationId?: string }) {
-  if (payload.event === 'active') {
+async function handlePresence(userId: string, payload: { event: string, conversationId?: string }) {
+  if (payload.event === 'active' || payload.event === 'user:active') {
     const added = await pubClient.sAdd('online_users', userId);
     const onlineUsers = await pubClient.sMembers('online_users');
     
@@ -264,7 +264,7 @@ async function handlePresence(userId: string, payload: { event: 'active' | 'away
     if (added === 1) {
       await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'join', userId });
     }
-  } else if (payload.event === 'away') {
+  } else if (payload.event === 'away' || payload.event === 'user:away') {
     const removed = await pubClient.sRem('online_users', userId);
     if (removed === 1) {
       const onlineUsers = await pubClient.sMembers('online_users');
@@ -272,17 +272,34 @@ async function handlePresence(userId: string, payload: { event: 'active' | 'away
     }
   }
 
-  if (payload.conversationId && (payload.event === 'typing:start' || payload.event === 'typing:stop')) {
-     const conversation = await prisma.conversation.findUnique({
-       where: { id: payload.conversationId },
-       include: { participants: { select: { userId: true } } }
-     });
+  if (payload.conversationId && (payload.event === 'typing:start' || payload.event === 'typing:stop' || payload.event === 'typing')) {
+     const conversationId = payload.conversationId;
+     const cacheKey = `cache:participants:${conversationId}`;
+     
+     let participantIds: string[] = [];
+     const cached = await redisClient.get(cacheKey);
+     
+     if (cached) {
+       participantIds = JSON.parse(cached);
+     } else {
+       const conversation = await prisma.conversation.findUnique({
+         where: { id: conversationId },
+         include: { participants: { select: { userId: true } } }
+       });
+       
+       if (conversation) {
+         participantIds = conversation.participants.map(p => p.userId);
+         await redisClient.set(cacheKey, JSON.stringify(participantIds), { EX: 600 }); // Cache 10 mins
+       }
+     }
 
-     if (conversation) {
-       const typingData = { type: 'typing', userId, conversationId: payload.conversationId, isTyping: payload.event === 'typing:start' };
-       for (const p of conversation.participants) {
-         if (p.userId !== userId) {
-           await sendJsonToUser(p.userId, TransportOpCode.PRESENCE, typingData);
+     if (participantIds.length > 0) {
+       const isTyping = payload.event === 'typing:start' || payload.event === 'typing';
+       const typingData = { type: 'typing', userId, conversationId, isTyping };
+       
+       for (const pId of participantIds) {
+         if (pId !== userId) {
+           await sendJsonToUser(pId, TransportOpCode.PRESENCE, typingData);
          }
        }
      }

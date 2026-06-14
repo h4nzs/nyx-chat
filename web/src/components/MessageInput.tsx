@@ -1,3 +1,4 @@
+import { transportClient } from '@lib/transportClient';
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiSmile, FiMic, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX, FiCrop } from 'react-icons/fi';
@@ -30,12 +31,23 @@ interface MessageInputProps {
   conversation: { id: string, isGroup: boolean, participants?: { id: string }[] };
 }
 
-// --- Helper: Debounce ---
+// --- Helpers ---
 function debounce<Args extends unknown[]>(func: (...args: Args) => void, waitFor: number) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   return (...args: Args) => {
     if (timeout !== null) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), waitFor);
+  };
+}
+
+function throttle<Args extends unknown[]>(func: (...args: Args) => void, limit: number) {
+  let inThrottle = false;
+  return (...args: Args) => {
+    if (!inThrottle) {
+      func(...args);
+      inThrottle = true;
+      setTimeout(() => { inThrottle = false; }, limit);
+    }
   };
 }
 
@@ -201,9 +213,9 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   }
 }, [editingMessage, setHasTextUI]);
 
-  // ✅ SUPER OPTIMIZATION: Debounce untuk emit Socket (Mencegah jaringan tersedak)
-  const debouncedTypingSignal = useCallback(
-    debounce(() => { if (isConnected) onTyping(); }, 1500),
+  // ✅ SUPER OPTIMIZATION: Throttle untuk emit Socket (Mencegah jaringan tersedak & responsif instan)
+  const throttledTypingSignal = useCallback(
+    throttle(() => { if (isConnected) onTyping(); }, 2000),
     [isConnected, onTyping]
   );
 
@@ -283,7 +295,12 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     }
 
     if (isConnected) {
-      debouncedTypingSignal();
+      if (newText.length > 0) {
+        throttledTypingSignal();
+      } else {
+        // Jika teks dihapus sampai kosong, hentikan indikator mengetik segera
+        transportClient.sendEvent("typing:stop", { conversationId: conversation.id });
+      }
       debouncedFetchPreview(newText);
     }
   };

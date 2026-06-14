@@ -401,12 +401,11 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleTyping = useCallback(() => {
-    const socket = transportClient;
     transportClient.sendEvent("typing:start", { conversationId: id });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       transportClient.sendEvent("typing:stop", { conversationId: id });
-    }, 1500);
+    }, 3500); // 3.5s untuk memberi ruang bagi throttle 2s
   }, [id]);
 
   const handleSendMessage = (data: { content: string }) => {
