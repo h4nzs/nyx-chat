@@ -60,7 +60,7 @@ initSocketListeners();
 // --- Components ---
 
 const LoadingScreen = () => (
-  <div className="w-full h-screen flex items-center justify-center bg-bg-main">
+  <div className="w-full h-dvh flex items-center justify-center bg-bg-main">
     <Spinner size="lg" />
   </div>
 );
@@ -367,7 +367,7 @@ const AppContent = () => {
           <SystemBanner />
 
           {/* Area Konten Aplikasi Utama */}
-          <div className="flex-1 w-full h-full overflow-hidden relative">
+          <div className="flex-1 w-full overflow-hidden relative">
             <Routes>
               {/* Public/Auth Routes */}
               <Route path="/" element={

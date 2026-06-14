@@ -131,7 +131,7 @@ export default function RestorePage() {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-bg-main text-text-primary p-4 font-mono">
+    <div className="min-h-dvh w-full flex flex-col items-center justify-center bg-bg-main text-text-primary p-4 font-mono">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex p-4 rounded-full bg-bg-surface shadow-neumorphic-convex mb-4 text-accent">

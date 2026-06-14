@@ -179,7 +179,7 @@ export default function Register() {
   // STEP 2: BIOMETRIC VERIFICATION
   if (step === 'biometric') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-bg-main p-4 relative">
+      <div className="min-h-dvh flex items-center justify-center bg-bg-main p-4 relative">
         <LanguageSwitcher />
         <div className="max-w-md w-full bg-bg-surface rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark text-center">
           <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-6 text-accent shadow-neu-pressed dark:shadow-neu-pressed-dark">
@@ -232,7 +232,7 @@ export default function Register() {
 
   // STEP 1: REGISTER FORM
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-bg-main relative">
+    <div className="min-h-dvh flex flex-col md:flex-row bg-bg-main relative">
       <LanguageSwitcher />
       <SEO title="Register" description="Create a new anonymous, end-to-end encrypted account on NYX. No tracking, no ads." canonicalUrl="/register" />
       {/* Left Panel - Concrete Security Panel */}

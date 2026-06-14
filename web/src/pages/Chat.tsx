@@ -85,7 +85,7 @@ export default function Chat() {
   const isDesktopLayout = window.innerWidth >= 1024 || (window.innerWidth >= 768 && isLandscape);
 
   return (
-    <div className="h-screen w-screen flex bg-bg-main text-text-primary font-sans overflow-hidden">
+    <div className="h-full w-full flex bg-bg-main text-text-primary font-sans overflow-hidden">
       <ConnectionStatusBanner />
       
       {/* Mobile Sidebar Overlay */}

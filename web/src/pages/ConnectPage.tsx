@@ -117,7 +117,7 @@ export default function ConnectPage() {
   }, [u, i, p, navigate, searchUsers, startConversation, showConfirm, me, t]);
   
   return (
-    <div className="min-h-screen bg-bg-main flex items-center justify-center p-4">
+    <div className="min-h-dvh bg-bg-main flex items-center justify-center p-4">
       {loading && (
         <div className="text-center">
             <Spinner />

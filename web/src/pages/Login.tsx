@@ -308,7 +308,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-bg-main relative">
+    <div className="min-h-dvh flex flex-col md:flex-row bg-bg-main relative">
       <LanguageSwitcher />
       <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       

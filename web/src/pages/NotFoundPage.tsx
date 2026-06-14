@@ -8,7 +8,7 @@ export default function NotFoundPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-bg-main p-6 text-center">
+    <div className="min-h-dvh w-full flex flex-col items-center justify-center bg-bg-main p-6 text-center">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}

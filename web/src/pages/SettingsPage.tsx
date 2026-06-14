@@ -482,7 +482,7 @@ export default function SettingsPage() {
     );
   };
 
-  if (!user) return <div className="h-screen w-full flex items-center justify-center bg-bg-main"><Spinner /></div>;
+  if (!user) return <div className="h-dvh w-full flex items-center justify-center bg-bg-main"><Spinner /></div>;
 
   return (
     <div className="w-full bg-bg-main text-text-primary p-4 md:p-8 font-sans selection:bg-accent selection:text-white pb-32">

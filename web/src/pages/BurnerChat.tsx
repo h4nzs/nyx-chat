@@ -271,7 +271,7 @@ export default function BurnerChat() {
         <div ref={messagesEndRef} />
       </main>
 
-      <footer className="p-4 bg-bg-surface/50 border-t border-border">
+      <footer className="p-2 pb-safe md:p-4 bg-bg-surface/50 border-t border-border">
         {isUploading && (
            <div className="text-xs text-accent mb-2 px-2 animate-pulse">Uploading encrypted attachment...</div>
         )}

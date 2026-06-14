@@ -476,7 +476,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   // --- Render ---
 
   return (
-    <div className="bg-bg-main border-t border-white/10 z-20 relative">
+    <div className="bg-bg-main border-t border-white/10 z-20 relative pb-safe pb-3 md:pb-0">
       <div className="absolute bottom-full left-0 w-full">
         <SmartReply lastMessage={lastDecryptedText} isFromMe={!isLastMessageFromOther} onSelectReply={handleSmartReplySelect} />
         <div className="px-4">
@@ -566,7 +566,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
           <button onClick={handleStopRecording} className="p-3 rounded-full bg-accent text-white shadow-[0_0_15px_rgba(var(--accent),0.5)] hover:scale-110 active:scale-95 transition-all flex-shrink-0" title={t('input.send_voice')}><FiSend size={20} /></button>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="relative flex items-center gap-2 p-2 rounded-2xl bg-bg-main w-full m-4 shadow-neu-pressed dark:shadow-neu-pressed-dark max-w-[calc(100%-2rem)]">
+        <form onSubmit={handleSubmit} className="relative flex items-center gap-2 p-2 rounded-2xl bg-bg-main w-full m-2 md:m-4 shadow-neu-pressed dark:shadow-neu-pressed-dark max-w-[calc(100%-1rem)] md:max-w-[calc(100%-2rem)]">
           <div className="hidden md:flex items-center gap-1">
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-accent active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiPaperclip size={18} /></button>
             <button type="button" onClick={() => setShowTimerMenu(!showTimerMenu)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500")}><FiClock size={18} /></button>
