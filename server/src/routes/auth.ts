@@ -267,17 +267,7 @@ router.post('/login', authLimiter, zodValidate({
       }
       activeDeviceId = device.id;
       activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
-      
-      // ✅ FIX: SINGLE-ACTIVE-DEVICE ENFORCEMENT
-      // If we are authenticating with new keys (New Device Bootstrap), we MUST revoke all other sessions.
-      await prisma.refreshToken.deleteMany({
-          where: {
-              device: { userId: user.id },
-              deviceId: { not: activeDeviceId }
-          }
-      });
-      // Optionally notify the old devices that they have been kicked (handled by Redis TTL/WebTransport Kick elsewhere)
-      
+
     } else {
       const explicitDeviceId = req.body.deviceId;
       if (explicitDeviceId) {

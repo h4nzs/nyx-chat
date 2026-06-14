@@ -114,8 +114,7 @@ export async function drInitAlice(sk: CryptoBuffer, theirPqSignedPreKeyPublic: C
       CKr: null,
       Ns: 0,
       Nr: 0,
-      PN: 0,
-      skippedKeys: {}
+      PN: 0
     };
 
     const serialized = await serializeState(state);
@@ -523,14 +522,6 @@ export async function groupDecryptSkipped(
     const ctext = ciphertextBytes.slice(24);
     const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
         null, ctext, null, nonce, mkBytes
-    );
-
-    return { plaintext };
-  } finally {
-    sodium.memzero(mkBytes);
-  }
-}
-xt, null, nonce, mkBytes
     );
 
     return { plaintext };

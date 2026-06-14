@@ -78,8 +78,6 @@ export interface SystemMessagePayload {
 
 export type GroupKeyDistributionPayload = SystemMessagePayload & { type: 'GROUP_KEY_DISTRIBUTION' };
 export type SystemKeyRequestPayload = SystemMessagePayload & { type: 'SYSTEM_KEY_REQUEST' };
-export type ProtocolUpgradeReqPayload = SystemMessagePayload & { type: 'PROTOCOL_UPGRADE_REQ' };
-export type ProtocolUpgradeAckPayload = SystemMessagePayload & { type: 'PROTOCOL_UPGRADE_ACK' };
 
 export type Message = z.infer<typeof IncomingMessageSchema> & {
   tempId?: number;
