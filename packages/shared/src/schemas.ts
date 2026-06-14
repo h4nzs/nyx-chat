@@ -204,3 +204,51 @@ export const ShadowVaultMessageSchema = z.object({
   fileMeta: z.string().optional(),
   expiresAt: z.string().nullable().optional(),
 }).passthrough();
+
+// --- Transport Payload Schemas ---
+export const DistributeKeysPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  keys: z.array(z.object({
+    userId: z.string(),
+    targetDeviceId: z.string().optional(),
+    targetDeviceKey: z.string().optional(),
+    key: z.string(),
+    senderDeviceKey: z.string().optional()
+  }))
+});
+
+export const KeyRequestPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  sessionId: z.string().min(1),
+  targetId: z.string().optional(),
+  requesterId: z.string().optional(),
+  requesterPublicKey: z.string().optional(),
+  requesterPqPublicKey: z.string().optional(),
+  requesterDeviceId: z.string().optional(),
+});
+
+export const GroupKeyRequestPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  targetSenderId: z.string().optional(),
+  targetDeviceKey: z.string().optional(),
+  requesterId: z.string().optional(),
+  requesterDeviceId: z.string().optional(),
+  requesterPublicKey: z.string().optional(),
+});
+
+export const KeyFulfillmentPayloadSchema = z.object({
+  requesterId: z.string().min(1),
+  conversationId: z.string().min(1),
+  sessionId: z.string().optional(),
+  encryptedKey: z.string().min(1),
+  targetDeviceId: z.string().optional(),
+  senderDeviceKey: z.string().optional(),
+});
+
+export const PushSubscribePayloadSchema = z.object({
+  endpoint: z.string().min(1),
+  keys: z.object({
+    p256dh: z.string(),
+    auth: z.string()
+  })
+});

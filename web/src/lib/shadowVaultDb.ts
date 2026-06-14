@@ -158,7 +158,7 @@ class NyxShadowVaultProxy {
     // Exclude internal system control payloads like GROUP_KEY which should only live in the keychain.
     const validMessages = messages.filter(m => {
       // 1. Check for system control types (strictly exclude from UI vault)
-      if ((m as any).type === 'GROUP_KEY' || (m as any).type === 'KEY_SYNC') return false;
+      if ((m as Record<string, unknown>).type === 'GROUP_KEY' || (m as Record<string, unknown>).type === 'KEY_SYNC') return false;
 
       // 2. Check for valid chat content or state
       const hasContent = m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[') && !m.content.startsWith('{');

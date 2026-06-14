@@ -59,12 +59,13 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
     readIncomingBidirectionalStreams(transport.incomingBidirectionalStreams).catch(console.error);
     readIncomingDatagrams(transport.datagrams.readable).catch(console.error);
     
-  } catch (error: any) {
-    postMessage({ type: 'ERROR', error: error?.message || 'Connection failed' } satisfies TransportWorkerToMain);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Connection failed';
+    postMessage({ type: 'ERROR', error: msg } satisfies TransportWorkerToMain);
   }
 }
 
-async function readIncomingStreams(readable: ReadableStream<any>) {
+async function readIncomingStreams(readable: ReadableStream<ReadableStream<Uint8Array>>) {
   const reader = readable.getReader();
   try {
     while (true) {
@@ -119,7 +120,7 @@ async function handleBidirectionalStream(stream: WebTransportBidirectionalStream
   }
 }
 
-async function readSingleStream(stream: any) {
+async function readSingleStream(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
@@ -276,12 +277,13 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
           
           postMessage({ type: 'HANDSHAKE_COMPLETED', success: true } satisfies TransportWorkerToMain);
           
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : 'Handshake failed';
           console.error("Handshake failed:", e);
           postMessage({ 
             type: 'HANDSHAKE_COMPLETED', 
             success: false, 
-            error: e?.message || 'Handshake failed' 
+            error: msg 
           } satisfies TransportWorkerToMain);
         } finally {
             // Reader cleanup is handled by GC or explicit release if needed

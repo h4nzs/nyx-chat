@@ -415,7 +415,7 @@ export async function decryptMessageObject(
                 fileSize: metadata.size,
                 fileType: metadata.mimeType,
                 content: null,
-                isBlindAttachment: metadata.type === 'file' ? (metadata as any).isBlindAttachment ?? finalMessage.isBlindAttachment : finalMessage.isBlindAttachment
+                isBlindAttachment: metadata.type === 'file' ? (metadata as { isBlindAttachment?: boolean }).isBlindAttachment ?? finalMessage.isBlindAttachment : finalMessage.isBlindAttachment
             };
           }
         } catch (_e) { }
@@ -1533,10 +1533,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                                let recipientPubBytes: Uint8Array;
                                
                                if (typeof targetPublicKey !== 'string') {
-                                   if ((targetPublicKey as any).type === 'Buffer' && Array.isArray((targetPublicKey as any).data)) {
-                                       recipientPubBytes = new Uint8Array((targetPublicKey as any).data);
+                                   if (typeof targetPublicKey === 'object' && targetPublicKey !== null && 'type' in targetPublicKey && (targetPublicKey as Record<string, unknown>).type === 'Buffer' && Array.isArray((targetPublicKey as Record<string, unknown>).data)) {
+                                       recipientPubBytes = new Uint8Array((targetPublicKey as Record<string, unknown>).data as number[]);
                                    } else if (targetPublicKey instanceof Uint8Array || ArrayBuffer.isView(targetPublicKey)) {
-                                       recipientPubBytes = new Uint8Array(targetPublicKey as any);
+                                       recipientPubBytes = new Uint8Array(targetPublicKey.buffer, targetPublicKey.byteOffset, targetPublicKey.byteLength);
                                    } else {
                                        throw new Error("Invalid public key type: " + typeof targetPublicKey);
                                    }
@@ -1782,7 +1782,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
         }, 5000);
 
-        transportClient.sendEvent("message:send", sendPayload, async (err: any, res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+        transportClient.sendEvent("message:send", sendPayload, async (err: unknown, res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           clearTimeout(timeoutId);
           if (!err && res && res.ok && res.msg) {
             await removeFromQueue(tempId);

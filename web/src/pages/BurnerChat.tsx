@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { transportClient, connectSocket } from '../lib/transportClient';
 import { FiPaperclip, FiMic, FiSend } from 'react-icons/fi';
 import MessageBubble from '../components/MessageBubble';
-import type { Message } from '@nyx/shared';
+import type { Message, User } from '@nyx/shared';
 import { api } from '../lib/api';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
@@ -48,7 +48,7 @@ export default function BurnerChat() {
       // Jika Guest (tidak ada user login), minta token sementara
       if (!currentUser && !socket.connected) {
          try {
-            const res = await api<{ accessToken: string; user: any; deviceId: string }>('/api/auth/burner', {
+            const res = await api<{ accessToken: string; user: User; deviceId: string }>('/api/auth/burner', {
               method: 'POST'
             });
             

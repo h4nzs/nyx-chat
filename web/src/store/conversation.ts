@@ -731,14 +731,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             transportClient.startHandshake(initiatorCiphertexts);
         });
 
-    } catch (e: any) {
+    } catch (e: unknown) {
         console.error("Handshake failed action:", e);
         set(state => ({
             conversations: state.conversations.map(c => 
                 c.id === conversationId ? { ...c, handshakeStatus: 'failed' } : c
             )
         }));
-        toast.error(`Handshake failed: ${e.message}`);
+        toast.error(`Handshake failed: ${e instanceof Error ? e.message : String(e)}`);
         throw e;
     }
   },

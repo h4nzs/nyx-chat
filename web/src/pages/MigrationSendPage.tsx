@@ -124,7 +124,8 @@ export default function MigrationSendPage() {
       // Wait for ACK
       const ackResult = await new Promise((resolve) => {
         const timeout = setTimeout(() => resolve(false), 30000); // 30s timeout
-        transportClient.once('migration:ack', (data: { roomId: string, success: boolean }) => {
+        transportClient.once('migration:ack', (payload) => {
+           const data = payload as { roomId: string, success: boolean };
            if (data.roomId === roomId) {
                clearTimeout(timeout);
                resolve(data.success);

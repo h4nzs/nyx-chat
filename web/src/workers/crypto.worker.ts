@@ -312,10 +312,10 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       
       kek = await _deriveKey(password, salt);
       
-      let privateKeysRaw: any;
+      let privateKeysRaw: unknown;
       try {
         privateKeysRaw = await _decryptData(kek, encryptedString);
-      } catch (decryptErr: any) {
+      } catch (decryptErr: unknown) {
         const errMsg = _sanitizeError(decryptErr);
         if (errMsg.includes('decrypted')) {
             // This is the classic "incorrect password" signal from libsodium
@@ -875,7 +875,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirIdentityKeyBytes = sodium.crypto_sign_ed25519_pk_to_curve25519(theirSigningKeyBytes);
 
         // Parse Binary Handshake
-        const { ephemeralPublicKey, ctId, ctSpk, ctOtpk } = deserializeHandshake(new Uint8Array(initiatorCiphertexts as any));
+        const { ephemeralPublicKey, ctId, ctSpk, ctOtpk } = deserializeHandshake(new Uint8Array(initiatorCiphertexts as unknown as ArrayBufferLike));
 
         let sharedSecret: Uint8Array | null = null;
 
@@ -1495,7 +1495,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirIdentityKeyBytes = sodium.crypto_sign_ed25519_pk_to_curve25519(theirSigningKeyBytes);
 
         // Parse Binary Handshake
-        const { ephemeralPublicKey, ctId, ctSpk, ctOtpk } = deserializeHandshake(new Uint8Array(initiatorCiphertexts as any));
+        const { ephemeralPublicKey, ctId, ctSpk, ctOtpk } = deserializeHandshake(new Uint8Array(initiatorCiphertexts as unknown as ArrayBufferLike));
 
         let sharedSecret: Uint8Array | null = null;
 

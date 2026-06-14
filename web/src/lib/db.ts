@@ -133,7 +133,7 @@ export class NyxDatabase extends Dexie {
   messageKeys!: Table<MessageKey, string>;
   pendingHeaders!: Table<PendingHeader, string>;
   groupSkippedKeys!: Table<{ key: string; mk: string }, string>;
-  pqDrSessions!: Table<any, string>; // Legacy
+  pqDrSessions!: Table<Record<string, unknown>, string>; // Legacy
   pqDrSessionsV2!: Table<PqDrSessionRecord, string>;
 
   constructor() {

@@ -104,7 +104,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       const stateFromWorker = initResult.state;
       const guestPk = initResult.guestClassicalPk;
       // Extract ct for propagation (ignoring strict TS errors here as instructed)
-      const ct = (initResult as any).ct || (initResult as any).savedCt || "";
+      const ct = (initResult as Record<string, unknown>).ct || (initResult as Record<string, unknown>).savedCt || "";
 
       set(state => ({
         hostUserId,
@@ -191,10 +191,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
               targetDeviceId: hostDeviceId, 
               hostUserId, 
               ciphertext: JSON.stringify(payload) 
-            }, (err: any, res: any) => {
+            }, (err: unknown, res: { ok: boolean; error?: string } | undefined) => {
               clearTimeout(timer);
               if (err) {
-                resolve({ ok: false, error: err.message || String(err) });
+                resolve({ ok: false, error: err instanceof Error ? err.message : String(err) });
               } else {
                 resolve(res || { ok: true });
               }
@@ -284,7 +284,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
             const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
 
             const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-            const ctStr = (header as any).ct;
+            const ctStr = (header as Record<string, unknown>).ct as string;
             if (!ctStr) {
                 throw new Error('KEM Ciphertext missing');
             }

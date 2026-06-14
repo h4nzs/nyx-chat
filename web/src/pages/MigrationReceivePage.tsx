@@ -29,7 +29,7 @@ export default function MigrationReceivePage() {
   const navigate = useNavigate();
   
   const keysRef = useRef<{ publicKey: Uint8Array, privateKey: Uint8Array } | null>(null);
-  const chunksRef = useRef<ArrayBuffer[]>([]);
+  const chunksRef = useRef<string[]>([]);
   const metaRef = useRef<{ roomId: string, totalChunks: number, sealedKey: string } | null>(null);
   const migrationStartedRef = useRef(false);
 
@@ -60,7 +60,8 @@ export default function MigrationReceivePage() {
       setQrData(JSON.stringify({ roomId, pubKey: pubKeyB64 }));
 
       // Listeners
-      transportClient.on('migration:start', (data) => {
+      transportClient.on('migration:start', (payload) => {
+        const data = payload as { roomId: string; totalChunks: number; sealedKey: string; };
         metaRef.current = data;
         chunksRef.current = new Array(data.totalChunks);
         migrationStartedRef.current = false;
@@ -68,7 +69,8 @@ export default function MigrationReceivePage() {
         toast.loading(tRef.current('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
       });
 
-      transportClient.on('migration:chunk', async (data) => {
+      transportClient.on('migration:chunk', async (payload) => {
+        const data = payload as { chunkIndex: number; chunk: string; };
         chunksRef.current[data.chunkIndex] = data.chunk;
         const receivedCount = chunksRef.current.filter(Boolean).length;
         const total = metaRef.current?.totalChunks || 1;
@@ -100,11 +102,12 @@ export default function MigrationReceivePage() {
       const aesKey = sodium.crypto_box_seal_open(sealedKeyBytes, keysRef.current!.publicKey, keysRef.current!.privateKey);
       
       // 2. Reassemble chunks
-      const totalLength = chunksRef.current.reduce((acc, val) => acc + val.byteLength, 0);
+      const chunksDecoded = chunksRef.current.map(c => sodium.from_base64(c, sodium.base64_variants.URLSAFE_NO_PADDING));
+      const totalLength = chunksDecoded.reduce((acc, val) => acc + val.byteLength, 0);
       const combinedCiphertext = new Uint8Array(totalLength);
       let offset = 0;
-      for (const chunk of chunksRef.current) {
-        combinedCiphertext.set(new Uint8Array(chunk), offset);
+      for (const chunk of chunksDecoded) {
+        combinedCiphertext.set(chunk, offset);
         offset += chunk.byteLength;
       }
 

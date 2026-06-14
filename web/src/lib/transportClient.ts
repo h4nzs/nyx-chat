@@ -9,14 +9,16 @@ type TransportEvents = {
   'message:new': [payload: BinaryPayload];
   'webrtc:signal': [payload: BinaryPayload];
   'presence:update': [payload: BinaryPayload];
+  'handshake:completed': [success: boolean, error?: string];
   // Allow arbitrary events for backward compatibility
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [event: string]: any[];
 };
 
 export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private worker: Worker;
   public connected: boolean = false;
-  private pendingAcks = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void, timeoutId: any }>();
+  private pendingAcks = new Map<string, { resolve: (val: unknown) => void, reject: (err: unknown) => void, timeoutId: ReturnType<typeof setTimeout> }>();
 
   private offlineQueue: MainToTransportWorker[] = [];
 
@@ -165,27 +167,27 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     }
   }
 
-  public sendJsonStream(opCode: TransportOpCode, payload: any): void {
+  public sendJsonStream(opCode: TransportOpCode, payload: unknown): void {
     const buffer = new TextEncoder().encode(JSON.stringify(payload));
     this.sendStream(opCode, buffer);
   }
 
-  public sendJsonDatagram(opCode: TransportOpCode, payload: any): void {
+  public sendJsonDatagram(opCode: TransportOpCode, payload: unknown): void {
     const buffer = new TextEncoder().encode(JSON.stringify(payload));
     this.sendDatagram(opCode, buffer);
   }
   
-  private routeAndSend(event: string, data: any, msgId?: string): void {
+  private routeAndSend(event: string, data: unknown, msgId?: string): void {
     if (event === 'message:send') {
-        this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...data, msgId });
-    } else if (event.startsWith('user:') || event.startsWith('typing:')) {
-        this.sendJsonStream(TransportOpCode.PRESENCE, { event, ...data });
+        this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...(data as Record<string, unknown> || {}), msgId });
+        } else if (event.startsWith('user:') || event.startsWith('typing:')) {
+        this.sendJsonStream(TransportOpCode.PRESENCE, { event, ...(data as Record<string, unknown> || {}) });
     } else {
         this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
     }
   }
 
-  public sendEvent(event: string, data?: any, callback?: Function): void {
+  public sendEvent(event: string, data?: unknown, callback?: Function): void {
     const msgId = Math.random().toString(36).substring(7);
     
     if (callback) {
@@ -204,7 +206,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
   public timeout(ms: number) {
     return {
-      emit: (event: string, data: any, callback: Function) => {
+      emit: (event: string, data: unknown, callback: Function) => {
         const msgId = Math.random().toString(36).substring(7);
         this.pendingAcks.set(msgId, {
           resolve: (val) => callback(null, val),
@@ -252,7 +254,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
 export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string }[]): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!transportClient.connected) return reject(new Error('Socket not connected'));
-    transportClient.sendEvent('messages:distribute_keys', { conversationId, keys }, (err: any, res?: { ok: boolean }) => {
+    transportClient.sendEvent('messages:distribute_keys', { conversationId, keys }, (err: unknown, res?: { ok: boolean }) => {
       if (err || !res?.ok) return reject(new Error('Failed to distribute keys'));
       resolve();
     });

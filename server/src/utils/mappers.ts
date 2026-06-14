@@ -74,8 +74,22 @@ export const userSelectWithKeys = {
   }
 };
 
-export function hoistKeys(user: UserWithDevices): any {
-  if (!user.devices || user.devices.length === 0) return user;
+export interface HoistedDevice {
+  id: string;
+  publicKey: string;
+  pqPublicKey: string | null;
+  signingKey: string;
+}
+
+export interface HoistedUser extends Omit<UserWithDevices, 'devices'> {
+  devices?: HoistedDevice[] | null;
+  publicKey?: string | null;
+  pqPublicKey?: string | null;
+  signingKey?: string | null;
+}
+
+export function hoistKeys(user: UserWithDevices): HoistedUser {
+  if (!user.devices || user.devices.length === 0) return user as HoistedUser;
   
   const mappedDevices = user.devices.map(d => ({
     ...d,
@@ -93,7 +107,10 @@ export function hoistKeys(user: UserWithDevices): any {
   };
 }
 
-export function hoistConvoKeys(convo: RawConversationData): any {
+export type HoistedParticipant = Omit<PrismaParticipantInput, 'user'> & { user?: HoistedUser | null };
+export type HoistedConversation = Omit<RawConversationData, 'participants'> & { participants?: HoistedParticipant[] };
+
+export function hoistConvoKeys(convo: RawConversationData): HoistedConversation {
   return {
     ...convo,
     participants: convo.participants?.map(p => ({

@@ -51,14 +51,14 @@ export async function sendToDevice(targetUserId: string, targetDeviceId: string,
 /**
  * Emits a named event to a specific user (legacy compatibility).
  */
-export async function emitEventToUser(userId: string, event: string, data: any, deviceId?: string) {
+export async function emitEventToUser(userId: string, event: string, data: unknown, deviceId?: string) {
   await sendJsonToUser(userId, TransportOpCode.KEY_SYNC, { event, data }, false, deviceId);
 }
 
 /**
  * Emits a named event to all participants of a conversation.
  */
-export async function emitEventToConversation(conversationId: string, event: string, data: any, excludeUserId?: string) {
+export async function emitEventToConversation(conversationId: string, event: string, data: unknown, excludeUserId?: string) {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { participants: { select: { userId: true } } }
@@ -75,7 +75,7 @@ export async function emitEventToConversation(conversationId: string, event: str
 /**
  * Emits a named event to multiple users.
  */
-export async function emitEventToUsers(userIds: string[], event: string, data: any) {
+export async function emitEventToUsers(userIds: string[], event: string, data: unknown) {
   for (const userId of userIds) {
     await emitEventToUser(userId, event, data);
   }
@@ -84,7 +84,7 @@ export async function emitEventToUsers(userIds: string[], event: string, data: a
 /**
  * Utility to send JSON payload (encoded to Base64) to a user.
  */
-export async function sendJsonToUser(targetUserId: string, opCode: TransportOpCode, data: any, isDatagram = false, deviceId?: string) {
+export async function sendJsonToUser(targetUserId: string, opCode: TransportOpCode, data: unknown, isDatagram = false, deviceId?: string) {
   const base64 = Buffer.from(JSON.stringify(data)).toString('base64');
   await sendToUser(targetUserId, opCode, base64, isDatagram, deviceId);
 }
@@ -304,7 +304,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
    try {
      switch (event) {
        case 'session:request_key': {
-         const { conversationId, sessionId, targetId } = data as any;
+         const { conversationId, sessionId, targetId } = data as KeyRequestPayload;
          if (!conversationId) return;
          if (!await checkRateLimit(userId, 'session_request_key', 20, 60)) return;
 
@@ -370,7 +370,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'session:request_missing': {
-         const { conversationId, targetId } = data as any;
+         const { conversationId, targetId } = data as { conversationId: string, targetId?: string };
          if (conversationId && targetId) {
            await emitEventToUser(targetId, 'session:key_requested', {
               conversationId,
@@ -461,7 +461,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'group:fulfilled_key': {
-         const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = data as any;
+         const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = data as KeyFulfillmentPayload;
          if (!requesterId || !conversationId || !encryptedKey) return;
          if (!await checkRateLimit(userId, 'group_fulfilled_key', 60, 60)) return;
 
@@ -483,7 +483,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'message:unsend': {
-         const { messageId, conversationId } = data as any;
+         const { messageId, conversationId } = data as { messageId: string, conversationId: string };
          if (!messageId || !conversationId) return;
          const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
          if (!msg || msg.conversationId !== conversationId || msg.senderId !== userId) return;
@@ -616,7 +616,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'message:deleted': {
-         const { conversationId, id: messageId } = data as any;
+         const { conversationId, id: messageId } = data as { conversationId: string, id: string };
          if (!conversationId || !messageId) return;
 
          const message = await prisma.message.findUnique({ where: { id: messageId } });
@@ -690,9 +690,9 @@ async function handleMessageStatusUpdate(userId: string, conversationId: string,
             }
         }
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     // Tangani P2003 (FK Violation) jika pesan dihapus tepat saat kueri berjalan
-    if (e.code === 'P2003') return;
+    if ((e as Record<string, unknown>).code === 'P2003') return;
     console.error(`[RedisBridge] Failed to update message status:`, e);
   }
 }
