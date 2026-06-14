@@ -8,10 +8,12 @@ import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
 import { Turnstile } from '@marsidev/react-turnstile';
 import toast from "react-hot-toast";
 import { api } from "@lib/api";
-import { FiShield, FiSkipForward } from "react-icons/fi";
+import { FiShield, FiSkipForward, FiCpu, FiZap } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
 import SEO from '../components/SEO';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+import { Spinner } from "@components/Spinner";
+import { getFullDeviceIdentity } from "../utils/fingerprint";
 
 // 🚨 PERHATIAN: 
 // Import '@lib/crypto-worker-proxy', '@lib/keychainDb', dan '@simplewebauthn/browser' 
@@ -25,6 +27,7 @@ export default function Register() {
   const [turnstileToken, setTurnstileToken] = useState<string>('');
   const [isBiometricsSupported, setIsBiometricsSupported] = useState(false);
   const [isVerifyingBio, setIsVerifyingBio] = useState(false);
+  const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
 
   const navigate = useNavigate();
   const { registerAndGeneratePhrase, user } = useAuthStore(useShallow(s => ({ 
@@ -55,6 +58,50 @@ export default function Register() {
     (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
       ? '1x00000000000000000000AA' 
       : '');
+
+  async function handleProofOfWork() {
+    setMiningStatus('mining');
+    const toastId = toast.loading(t('auth:messages.mining_connecting', 'Establishing trust sequence...'));
+    
+    try {
+      // 0. Get Identity
+      const { fingerprint, installationId } = await getFullDeviceIdentity();
+
+      // 1. Get Challenge with Fingerprint Headers
+      const { salt, difficulty } = await api<{ salt: string, difficulty: number }>('/api/auth/pow/challenge', {
+        headers: {
+            'X-Nyx-Fingerprint': fingerprint,
+            'X-Nyx-Installation-Id': installationId
+        }
+      });
+      
+      toast.loading(t('auth:messages.mining_processing', 'Mining proof of trust...'), { id: toastId });
+      
+      const { minePoW } = await import("@lib/crypto-worker-proxy");
+      const { nonce } = await minePoW(salt, difficulty);
+      
+      setMiningStatus('verifying');
+      toast.loading(t('auth:messages.mining_verifying', 'Verifying proof...'), { id: toastId });
+      
+      const result = await api<{ success: boolean }>('/api/auth/pow/verify', {
+        method: 'POST',
+        body: JSON.stringify({ nonce })
+      });
+      
+      if (result.success) {
+        toast.success(t('auth:messages.mining_success', 'Trust verified!'), { id: toastId });
+        setStep('recovery');
+      } else {
+        throw new Error(t('auth:errors.verification_failed', 'Verification failed'));
+      }
+    } catch (error: unknown) {
+      console.error(error);
+      const errorMsg = error instanceof Error ? error.message : t('common:errors.unknown');
+      toast.error(t('auth:messages.mining_failed', { error: errorMsg, defaultValue: 'Verification failed' }), { id: toastId });
+    } finally {
+      setMiningStatus('idle');
+    }
+  }
 
   async function handleRegister(data: { name?: string, d?: string, b?: string }) {
     if (!TURNSTILE_SITE_KEY) {
@@ -176,14 +223,14 @@ export default function Register() {
     }} />
   }
 
-  // STEP 2: BIOMETRIC VERIFICATION
+  // STEP 2: TRUST VERIFICATION
   if (step === 'biometric') {
     return (
       <div className="min-h-dvh flex items-center justify-center bg-bg-main p-4 relative">
         <LanguageSwitcher />
         <div className="max-w-md w-full bg-bg-surface rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark text-center">
           <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-6 text-accent shadow-neu-pressed dark:shadow-neu-pressed-dark">
-            <IoFingerPrint size={32} />
+            <FiShield size={32} />
           </div>
           
           <h2 className="text-2xl font-black text-text-primary mb-2 tracking-tight">{t('auth:titles.trust_verification')}</h2>
@@ -191,40 +238,51 @@ export default function Register() {
             {t('auth:subtitles.verify_desc')}
           </p>
 
-          {isBiometricsSupported ? (
-            <div className="space-y-4">
+          <div className="space-y-4">
+            {/* Option 1: Biometric (Conditional) */}
+            {isBiometricsSupported && (
               <button
                 onClick={handleBiometricRegister}
-                disabled={isVerifyingBio}
-                className="w-full py-4 rounded-xl bg-accent text-white font-bold uppercase tracking-wider shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all flex items-center justify-center gap-2 hover:brightness-110"
+                disabled={isVerifyingBio || miningStatus !== 'idle'}
+                className="w-full p-4 rounded-xl bg-bg-main border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group disabled:opacity-50"
               >
-                {isVerifyingBio ? <span className="animate-pulse">{t('common:actions.loading')}</span> : (
-                  <>
-                    <FiShield /> {t('auth:buttons.verify_identity')}
-                  </>
-                )}
+                <div className="p-3 bg-accent/10 text-accent rounded-full group-hover:bg-accent group-hover:text-white transition-colors">
+                  {isVerifyingBio ? <Spinner size="sm" /> : <FiZap size={24} />}
+                </div>
+                <div>
+                  <h3 className="font-bold text-text-primary text-sm">{t('auth:buttons.biometric_verify', 'Instant Biometric')}</h3>
+                  <p className="text-[10px] text-text-secondary mt-1">{t('auth:subtitles.biometric_short', 'Verify using your device fingerprint or face.')}</p>
+                </div>
               </button>
-              
-              <button
-                onClick={handleSkipBiometric}
-                className="w-full py-4 rounded-xl bg-bg-main text-text-secondary hover:text-accent font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark"
-              >
-                <FiSkipForward /> {t('auth:buttons.skip_now')}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-600 dark:text-yellow-500 text-xs">
-                {t('auth:messages.device_not_supported')}
+            )}
+
+            {/* Option 2: Proof of Work */}
+            <button
+              onClick={handleProofOfWork}
+              disabled={miningStatus !== 'idle' || isVerifyingBio}
+              className="w-full p-4 rounded-xl bg-bg-main border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group disabled:opacity-50"
+            >
+              <div className="p-3 bg-blue-500/10 text-blue-500 rounded-full group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                {miningStatus === 'idle' ? <FiCpu size={24} /> : <Spinner size="sm" />}
               </div>
-              <button
-                onClick={handleSkipBiometric}
-                className="w-full py-4 rounded-xl bg-bg-main text-text-primary hover:text-accent font-bold uppercase tracking-wider transition-all shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark"
-              >
-                {t('auth:buttons.continue_app')}
-              </button>
-            </div>
-          )}
+              <div>
+                <h3 className="font-bold text-text-primary text-sm">{t('auth:buttons.pow_verify', 'Proof of Trust')}</h3>
+                <p className="text-[10px] text-text-secondary mt-1">
+                  {miningStatus === 'idle' ? t('auth:subtitles.pow_desc', 'Verify by solving a cryptographic challenge.') :
+                   miningStatus === 'mining' ? t('auth:status.mining', 'Mining...') : t('auth:status.verifying', 'Verifying...')}
+                </p>
+              </div>
+            </button>
+            
+            {/* Skip Button */}
+            <button
+              onClick={handleSkipBiometric}
+              disabled={miningStatus !== 'idle' || isVerifyingBio}
+              className="w-full py-4 rounded-xl bg-bg-main text-text-secondary hover:text-accent font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark disabled:opacity-50 mt-4"
+            >
+              <FiSkipForward /> {t('auth:buttons.skip_now')}
+            </button>
+          </div>
         </div>
       </div>
     );

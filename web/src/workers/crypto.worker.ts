@@ -1257,38 +1257,52 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'minePoW': {
         const { salt, difficulty } = payload;
-        const targetPrefix = '0'.repeat(difficulty);
+
+        // ADJUSTED DIFFICULTY: Argon2 is VERY heavy.
+        // We use difficulty as a target: finding a hash that starts with specific bit pattern.
+        // For Argon2, we'll look for leading ZERO NIBBLES (hex chars) but fewer than Blake2b.
+        const targetPrefix = '0'.repeat(Math.max(1, Math.floor(difficulty / 2))); 
+
         let nonce = 0;
         let hash = '';
         let found = false;
-        
+
         const saltBytes = new TextEncoder().encode(salt);
-        
-        const toHex = (buffer: Uint8Array) => {
-            return Array.from(buffer)
-                .map(b => b.toString(16).padStart(2, '0'))
-                .join('');
-        };
 
         while (!found) {
             const nonceStr = nonce.toString();
             const nonceBytes = new TextEncoder().encode(nonceStr);
-            
-            const input = new Uint8Array(saltBytes.length + nonceBytes.length);
-            input.set(saltBytes);
-            input.set(nonceBytes, saltBytes.length);
-            
-            const hashBuffer = sodium.crypto_generichash(64, input);
-            hash = toHex(hashBuffer);
-            
+
+            // Combine salt + nonce for Argon2
+            const combinedSalt = new Uint8Array(saltBytes.length + nonceBytes.length);
+            combinedSalt.set(saltBytes);
+            combinedSalt.set(nonceBytes, saltBytes.length);
+
+            // Using argon2id from hash-wasm (already imported in this file)
+            // Config: Light memory (16MB) to keep it fair but hard for mass spam
+            const hashBuffer = await argon2id({
+                password: "nyx_pow_sequence",
+                salt: combinedSalt,
+                parallelism: 1,
+                iterations: 1,
+                memorySize: 16384, // 16 MB
+                hashLength: 32,
+                outputType: 'binary'
+            });
+
+            hash = Array.from(hashBuffer)
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+
             if (hash.startsWith(targetPrefix)) {
                 found = true;
             } else {
                 nonce++;
-                if (nonce % 500 === 0) await new Promise(r => setTimeout(r, 0));
+                // Release UI thread occasionally
+                if (nonce % 5 === 0) await new Promise(r => setTimeout(r, 0));
             }
         }
-        
+
         result = { nonce, hash };
         break;
       }

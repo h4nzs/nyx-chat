@@ -13,6 +13,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { authLimiter } from '../middleware/rateLimiter.js'
 import { getSodium } from '../lib/sodium.js'
 import { nanoid } from 'nanoid'
+import argon2 from 'argon2'
 import crypto from 'crypto'
 import {
   generateRegistrationOptions,
@@ -482,14 +483,22 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     const salt = sodium.to_hex(sodium.randombytes_buf(16));
     const ip = req.ip || req.socket.remoteAddress;
     const userId = req.user?.id;
-    
-    if (!ip && !userId) {
+    const fingerprint = req.headers['x-nyx-fingerprint'];
+    const instId = req.headers['x-nyx-installation-id'];
+
+    if (!ip && !userId && !fingerprint && !instId) {
       throw new ApiError(400, 'Cannot determine client identifier for PoW challenge.');
     }
 
-    const identifier = ip || userId;
-    const stableHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(String(identifier)), null)).slice(0, 16);
-    const rateKey = ip ? `pow:ip_count:${stableHash}` : `pow:user_count:${stableHash}`;
+    // MULTI-LAYER IDENTIFICATION: 
+    // We prioritize Installation ID (IDB), then Fingerprint, then IP
+    const primaryId = instId || fingerprint || ip || userId;
+    const stableHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(String(primaryId)), null)).slice(0, 16);
+
+    // Choose prefix based on most reliable available identifier
+    const prefix = instId ? 'pow:inst' : (fingerprint ? 'pow:fp' : (ip ? 'pow:ip' : 'pow:user'));
+    const rateKey = `${prefix}:${stableHash}`;
+
     let count = await redisClient.incr(rateKey);
     if (count === 1) {
         await redisClient.expire(rateKey, 86400);
@@ -497,7 +506,12 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
         count = 0;
     }
 
-    const difficulty = Math.min(4 + Math.floor(count / 2), 6);
+    // AGGRESSIVE SCALING: 
+    // Start at 4. 
+    // Max 8 (extremely hard, takes minutes to solve).
+    // Increment every 1 attempt (more aggressive than before).
+    const difficulty = Math.min(4 + Math.floor(count / 1), 8);
+
     await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
 
     res.json({ salt, difficulty });
@@ -506,32 +520,49 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
   }
 });
 
-router.post('/pow/verify', 
-  requireAuth, 
+router.post('/pow/verify',
+  requireAuth,
   zodValidate({
     body: z.object({ nonce: z.number() })
-  }), 
+  }),
   async (req, res, next) => {
     try {
       const { nonce } = req.body;
       const userId = req.user!.id;
-      
+
       const challengeData = await redisClient.get(`pow:challenge:${userId}`);
       if (!challengeData) {
         throw new ApiError(400, 'Challenge expired or invalid. Please request a new one.');
       }
-      
+
       const { salt, difficulty } = JSON.parse(challengeData as string) as { salt: string, difficulty: number };
-      const sodium = await getSodium();
-      const input = Buffer.concat([
-        Buffer.from(salt),
-        Buffer.from(nonce.toString())
-      ]);
 
-      const hashBuffer = sodium.crypto_generichash(64, input, null);
-      const hash = Buffer.from(hashBuffer).toString('hex');
+      // ADJUSTED DIFFICULTY MATCHING FRONTEND:
+      const targetPrefix = '0'.repeat(Math.max(1, Math.floor(difficulty / 2)));
 
-      if (hash.startsWith('0'.repeat(difficulty))) {          await redisClient.del(`pow:challenge:${userId}`);
+      const nonceStr = nonce.toString();
+      const saltBytes = Buffer.from(salt);
+      const nonceBytes = Buffer.from(nonceStr);
+
+      // Combine salt + nonce
+      const combinedSalt = Buffer.concat([saltBytes, nonceBytes]);
+
+      // Verify with Argon2 (Node.js version)
+      // Note: We use the same parameters as hash-wasm in frontend (16MB, 1 iter)
+      const hashBuffer = await argon2.hash("nyx_pow_sequence", {
+        salt: combinedSalt,
+        type: argon2.argon2id,
+        memoryCost: 16384, // 16 MB
+        timeCost: 1,      // 1 iteration
+        parallelism: 1,
+        hashLength: 32,
+        raw: true
+      });
+
+      const hash = hashBuffer.toString('hex');
+
+      if (hash.startsWith(targetPrefix)) {
+          await redisClient.del(`pow:challenge:${userId}`);
           await prisma.user.update({
               where: { id: userId },
               data: { isVerified: true }
