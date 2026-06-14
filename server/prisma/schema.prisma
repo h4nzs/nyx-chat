@@ -77,6 +77,7 @@ model Device {
   id     String  @id @default(cuid())
   userId String
   name   String? // e.g., "Chrome on MacOS", "iPhone 15"
+  fingerprint String? // Browser/Hardware fingerprint for security verification
 
   // Identitas Kriptografi (Pindahan dari tabel User)
   publicKey           Bytes // Encryption/Identity Key

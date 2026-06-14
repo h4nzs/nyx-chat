@@ -180,6 +180,11 @@ const navItems = [
                     <td class="p-4 font-mono text-accent">shadow_vault</td>
                     <td class="p-4">{t('privacy:cookies.idb_vault_desc')}</td>
                   </tr>
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="p-4"><span class="px-2 py-1 rounded bg-orange-500/10 text-orange-400 text-xs">Persistent Storage</span></td>
+                    <td class="p-4 font-mono text-accent">deviceId / installationId</td>
+                    <td class="p-4">{t('privacy:cookies.id_desc')}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -227,6 +232,10 @@ const navItems = [
               <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
                 <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.migration_title')}</h3>
                 <p class="text-xs text-text-secondary">{t('privacy:security.migration_desc')}</p>
+              </div>
+              <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.hardware_binding_title')}</h3>
+                <p class="text-xs text-text-secondary">{t('privacy:security.hardware_binding_desc')}</p>
               </div>
             </div>
           </div>

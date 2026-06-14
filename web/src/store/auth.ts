@@ -12,6 +12,7 @@ import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy";
+import { getBrowserFingerprint } from "@utils/fingerprint";
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto";
 import type { UserId, User, SubscriptionTier } from '@nyx/shared';
 import { executeLocalWipe } from "@lib/nukeProtocol";
@@ -428,8 +429,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
 
         // Call API
+        const fingerprint = await getBrowserFingerprint();
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string; deviceId?: string }>("/api/auth/login", {
           method: "POST",
+          headers: { 'X-Nyx-Fingerprint': fingerprint },
           body: JSON.stringify({ 
               usernameHash, 
               password,
@@ -451,18 +454,18 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         });
         localStorage.setItem("user", JSON.stringify(res.user));
 
-        // [FIX] SINGLE-ACTIVE-DEVICE: Do not blindly adopt keys from the server if this is a brand new device.
-        // This forces the user to go through the Identity Recovery flow to generate unique hardware keys.
-        const isNewDevice = !alreadyHasKeys && !restoredNotSynced && !existingDeviceId;
+        // [FIX] Identity Persistence
+        // 1. Always save deviceId if server provides it (recovery fallback)
+        if (res.deviceId) {
+           localStorage.setItem('deviceId', res.deviceId);
+        }
 
-        if (res.encryptedPrivateKey && !isNewDevice) {
+        // 2. Only adopt server keys if we don't have local keys
+        // This prevents overwriting existing IDB data on same device
+        if (res.encryptedPrivateKey && !alreadyHasKeys) {
           await saveEncryptedKeys(res.encryptedPrivateKey);
           await saveDeviceAutoUnlockKey(password);
           await setDeviceAutoUnlockReady(true);
-        }
-        
-        if (res.deviceId && !isNewDevice) {
-           localStorage.setItem('deviceId', res.deviceId);
         }
 
         const hasKeysNow = await hasStoredKeys();
@@ -539,8 +542,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           phrase
         } = await registerAndGenerateKeys(password);
 
-        const res = await api<{ accessToken: string; user: User }>("/api/auth/register", {
+        const fingerprint = await getBrowserFingerprint();
+        const res = await api<{ accessToken: string; user: User; deviceId?: string }>("/api/auth/register", {
           method: "POST",
+          headers: { 'X-Nyx-Fingerprint': fingerprint },
           body: JSON.stringify({
             usernameHash,
             password,
@@ -553,6 +558,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             turnstileToken
           }),
         });
+
+        if (res.deviceId) {
+           localStorage.setItem('deviceId', res.deviceId);
+        }
 
         await saveEncryptedKeys(encryptedPrivateKeys);
         await saveDeviceAutoUnlockKey(password);

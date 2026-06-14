@@ -227,19 +227,16 @@ export const getDeviceAutoUnlockReady = async (): Promise<boolean> => {
 
 /**
  * Menghapus Keys (Logout Biasa)
- * Hanya menghapus kunci dekripsi lokal, tapi mempertahankan database history (keychain-db)
- * agar user tidak kehilangan chat saat login kembali.
+ * Hanya menghapus data sensitif di memori dan sesi (auto-unlock), 
+ * tapi mempertahankan kunci terenkripsi di IDB (Local-First)
+ * agar user tidak perlu melakukan recovery saat login kembali.
  */
 export const clearKeys = async () => {
   try {
-    // Overwrite with empty data before deletion for security
-    await set(STORAGE_KEYS.ENCRYPTED_KEYS, null);
-    await del(STORAGE_KEYS.ENCRYPTED_KEYS);
-    
     sessionStorage.removeItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
     sessionStorage.removeItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);
   } catch (error) {
-    console.error('Failed to clear keys:', error);
+    console.error('Failed to clear session keys:', error);
   }
 };
 

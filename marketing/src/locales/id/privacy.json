@@ -24,7 +24,8 @@
     "logging_desc": "Untuk menjaga integritas jaringan dan mencegah serangan DDoS/Botnet, kami memproses secara sementara:",
     "logging_1": "Alamat IP (dihash secara ireversibel saat koneksi).",
     "logging_2": "Timestamp koneksi WebSocket (dihapus otomatis dari Redis).",
-    "logging_3": "Antrean pesan offline terenkripsi (dihapus otomatis setelah berhasil dikirim ke penerima)."
+    "logging_3": "Antrean pesan offline terenkripsi (dihapus otomatis setelah berhasil dikirim ke penerima).",
+    "logging_4": "Sidik Jari Perangkat Keras (dihash secara ireversibel untuk mengidentifikasi dan mengikat perangkat Anda ke identitas Anda secara unik, mencegah serangan kloning akun)."
   },
   "terms": {
     "title": "Ketentuan Layanan",
@@ -51,7 +52,8 @@
     "table_purpose": "Tujuan",
     "cookie_desc": "Autentikasi aman & persistensi sesi.",
     "idb_keys_desc": "Penyimpanan lokal Kunci Privat terenkripsi Anda.",
-    "idb_vault_desc": "Penyimpanan lokal riwayat obrolan E2EE Anda."
+    "idb_vault_desc": "Penyimpanan lokal riwayat obrolan E2EE Anda.",
+    "id_desc": "Identifikasi perangkat persisten untuk menegakkan aturan 'Satu User, Satu Perangkat Aktif' dan mencegah bypass kloning hardware."
   },
   "ai": {
     "title": "AI & Telemetri",
@@ -72,7 +74,9 @@
     "memory_title": "Memori Volatil",
     "memory_desc": "Kunci kriptografi dihapus dari RAM (`sodium.memzero`) segera setelah siklus dekripsi.",
     "migration_title": "Migrasi Peer-to-Peer",
-    "migration_desc": "Migrasi perangkat menggunakan terowongan WebSocket terenkripsi. Server meneruskan chunk secara buta tanpa akses kunci."
+    "migration_desc": "Migrasi perangkat menggunakan terowongan WebSocket terenkripsi. Server meneruskan chunk secara buta tanpa akses kunci.",
+    "hardware_binding_title": "Hardware Binding",
+    "hardware_binding_desc": "Setiap ID perangkat diikat secara kriptografis ke sidik jari hardware Anda. Jika data browser Anda dikloning ke mesin lain, server akan mendeteksi ketidakcocokan hardware dan memblokir akses."
   },
   "seo": {
     "title": "Hukum & Privasi | NYX",

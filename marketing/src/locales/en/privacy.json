@@ -24,7 +24,8 @@
     "logging_desc": "To maintain network integrity and prevent DDoS/Botnet attacks, we temporarily process:",
     "logging_1": "IP addresses (irreversibly hashed upon connection).",
     "logging_2": "WebSocket connection timestamps (swept automatically from Redis).",
-    "logging_3": "Encrypted offline message queues (automatically purged upon successful delivery to the recipient)."
+    "logging_3": "Encrypted offline message queues (automatically purged upon successful delivery to the recipient).",
+    "logging_4": "Hardware Fingerprints (irreversibly hashed to uniquely identify and bind your device to your identity, preventing account cloning attacks)."
   },
   "terms": {
     "title": "Terms of Service",
@@ -51,7 +52,8 @@
     "table_purpose": "Purpose",
     "cookie_desc": "Secure authentication & session persistence.",
     "idb_keys_desc": "Local storage of your encrypted Private Keys.",
-    "idb_vault_desc": "Local storage of your E2EE chat history."
+    "idb_vault_desc": "Local storage of your E2EE chat history.",
+    "id_desc": "Persistent device identification to enforce 'One User, One Active Device' and prevent hardware-cloning bypasses."
   },
   "ai": {
     "title": "AI & Telemetry",
@@ -72,7 +74,9 @@
     "memory_title": "Volatile Memory",
     "memory_desc": "Cryptographic keys are wiped from RAM (`sodium.memzero`) immediately after decryption cycles.",
     "migration_title": "Peer-to-Peer Migration",
-    "migration_desc": "Device migration uses an encrypted WebSocket tunnel. The server relays chunks blindly without key access."
+    "migration_desc": "Device migration uses an encrypted WebSocket tunnel. The server relays chunks blindly without key access.",
+    "hardware_binding_title": "Hardware Binding",
+    "hardware_binding_desc": "Every device ID is cryptographically bound to your hardware fingerprint. If your browser data is cloned to a different machine, the server will detect the hardware mismatch and block access."
   },
   "seo": {
     "title": "Legal & Privacy | NYX",

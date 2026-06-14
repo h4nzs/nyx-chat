@@ -24,8 +24,9 @@
     "logging_desc": "Para mantener la integridad de la red y prevenir ataques DDoS/Botnet, procesamos temporalmente:",
     "logging_1": "Direcciones IP (hash irreversible al conectarse).",
     "logging_2": "Marcas de tiempo de conexión WebSocket (eliminadas automáticamente de Redis).",
-    "logging_3": "Colas de mensajes fuera de línea cifrados (purgadas automáticamente después de la entrega exitosa al destinatario)."
-  },
+    "logging_3": "Colas de mensajes fuera de línea cifrados (purgadas automáticamente después de la entrega exitosa al destinatario).",
+    "logging_4": "Huellas Digitales de Hardware (hash irreversible para identificar y vincular de forma única su dispositivo a su identidad, evitando ataques de clonación de cuentas)."
+    },
   "terms": {
     "title": "Términos de Servicio",
     "liability_title": "Aviso Crítico de Exención de Responsabilidad",
@@ -51,7 +52,8 @@
     "table_purpose": "Propósito",
     "cookie_desc": "Autenticación segura y persistencia de sesión.",
     "idb_keys_desc": "Almacenamiento local de sus llaves privadas cifradas.",
-    "idb_vault_desc": "Almacenamiento local de su historial de chat E2EE."
+    "idb_vault_desc": "Almacenamiento local de su historial de chat E2EE.",
+    "id_desc": "Identificación persistente del dispositivo para imponer la regla de 'Un usuario, un dispositivo activo' y evitar el bypass de clonación de hardware."
   },
   "ai": {
     "title": "IA y Telemetría",
@@ -72,7 +74,9 @@
     "memory_title": "Memoria Volátil",
     "memory_desc": "Las llaves criptográficas se borran de la RAM (`sodium.memzero`) inmediatamente después de los ciclos de descifrado.",
     "migration_title": "Migración de Punto a Punto",
-    "migration_desc": "La migración de dispositivos utiliza un túnel WebSocket cifrado. El servidor retransmite fragmentos a ciegas sin acceso a las llaves."
+    "migration_desc": "La migración de dispositivos utiliza un túnel WebSocket cifrado. El servidor retransmite fragmentos a ciegas sin acceso a las llaves.",
+    "hardware_binding_title": "Vinculación de Hardware",
+    "hardware_binding_desc": "Cada ID de dispositivo está vinculado criptográficamente a su huella digital de hardware. Si los datos de su navegador se clonan en una máquina diferente, el servidor detectará el desajuste de hardware dan bloqueará el acceso."
   },
   "seo": {
     "title": "Legal y Privacidad | NYX",

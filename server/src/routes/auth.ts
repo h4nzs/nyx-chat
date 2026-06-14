@@ -164,6 +164,7 @@ async (req, res, next) => {
 
     const passwordHash = await hashPassword(password)
     
+    const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
     const user = await prisma.user.create({
       data: {
         usernameHash,
@@ -177,7 +178,8 @@ async (req, res, next) => {
             pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
             signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
-            name: deviceName || 'Primary Device'
+            name: deviceName || 'Primary Device',
+            fingerprint: fingerprint || null
           }
         }
       },
@@ -194,6 +196,7 @@ async (req, res, next) => {
       message: 'Registration successful.',
       user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, subscriptionTier: user.subscriptionTier },
       accessToken: tokens.access,
+      deviceId,
       needVerification: false
     })
   } catch (e: unknown) {
@@ -284,14 +287,32 @@ router.post('/login', authLimiter, zodValidate({
 
     } else {
       const explicitDeviceId = req.body.deviceId;
+      const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
+
       if (explicitDeviceId) {
           const device = user.devices.find(d => d.id === explicitDeviceId);
-          if (!device) throw new ApiError(404, 'Specified device not found.');
-          activeDeviceId = device.id;
-          activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
-          await prisma.device.update({ where: { id: device.id }, data: { lastActiveAt: new Date() } });
-      } else {
+          
+          // SECURITY CHECK: If device exists but fingerprint MISMATCHES, 
+          // it means the browser data (LocalStorage) was cloned to a different hardware.
+          // In this case, we FORCE creating a new device ID.
+          if (device && device.fingerprint && fingerprint && device.fingerprint !== fingerprint) {
+              console.warn(`[Security] Fingerprint mismatch for device ${explicitDeviceId}. Forcing new device creation.`);
+              // Fallback to "No device found" logic below which creates a new one or prompts recovery
+              activeDeviceId = ''; 
+          } else {
+              if (!device) throw new ApiError(404, 'Specified device not found.');
+              activeDeviceId = device.id;
+              activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
+              await prisma.device.update({ where: { id: device.id }, data: { lastActiveAt: new Date() } });
+          }
+      }
+
+      // If no valid device ID found (either not provided or failed fingerprint check)
+      if (!activeDeviceId) {
           if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
+          
+          // If we are here because of fingerprint mismatch, we don't blindly pick the first device.
+          // We force recovery or return the most recent device if it's "clean".
           activeDeviceId = user.devices[0].id;
           activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey ? Buffer.from(user.devices[0].encryptedPrivateKey).toString('utf8') : '';
           await prisma.device.update({ where: { id: activeDeviceId }, data: { lastActiveAt: new Date() } });
@@ -306,6 +327,7 @@ router.post('/login', authLimiter, zodValidate({
     res.json({ 
       user: safeUser, 
       accessToken: tokens.access,
+      deviceId: activeDeviceId,
       encryptedPrivateKey: activeEncryptedPrivateKey 
     })
   } catch (e) {

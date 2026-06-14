@@ -89,14 +89,19 @@ app.use(helmet({
         "https://cdn.jsdelivr.net",
         "https://*.cloudflarestorage.com",
         "https://nyx-app.my.id",
-        "https://*.nyx-app.my.id"
+	"https://api.nyx-app.my.id",
+	"https://storage.nyx-app.my.id",
+        "https://app.nyx-app.my.id"
       ],
       mediaSrc: [
         "'self'",
         "data:",
         "blob:",
         "https://*.cloudflarestorage.com",
-        "https://*.nyx-app.my.id"
+        "https://nyx-app.my.id",
+        "https://api.nyx-app.my.id",
+        "https://storage.nyx-app.my.id",
+        "https://app.nyx-app.my.id"
       ],
       workerSrc: [
         "'self'",
@@ -108,8 +113,8 @@ app.use(helmet({
         "https://api.nyx-app.my.id",
         "wss://api.nyx-app.my.id",
         "https://nyx-app.my.id",
-        "wss://nyx-app.my.id",
-        "https://*.nyx-app.my.id",
+	"https://app.nyx-app.my.id",
+	"https://rt.nyx-app.my.id",
         "https://*.cloudflareinsights.com",
         "https://cloudflareinsights.com",
         "https://*.cloudflarestorage.com"
@@ -157,10 +162,16 @@ const isAllowedOrigin = (origin: string): boolean => {
     // IZINKAN HTTP & HTTPS UNTUK CLOUDFLARE TUNNEL
     "https://nyx-app.my.id",
     "https://www.nyx-app.my.id",
-    "https://*.nyx-app.my.id",
+    "https://api.nyx-app.my.id",
+    "https://app.nyx-app.my.id",
+    "https://rt.nyx-app.my.id",
+    "https://storage.nyx-app.my.id",
     "http://nyx-app.my.id",
     "http://www.nyx-app.my.id",
-    "http://*.nyx-app.my.id",
+    "http://app.nyx-app.my.id",
+    "http://api.nyx-app.my.id",
+    "http://rt.nyx-app.my.id",
+    "http://storage.nyx-app.my.id",
   ];
 
   return allowedOrigins.some(allowedOrigin => {
@@ -186,7 +197,14 @@ const corsMiddleware = cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "CSRF-Token", "x-csrf-token"], // Tambahkan x-csrf-token
+  allowedHeaders: [
+    "Content-Type", 
+    "Authorization", 
+    "CSRF-Token", 
+    "x-csrf-token",
+    "x-nyx-fingerprint",
+    "x-nyx-installation-id"
+  ],
 });
 
 app.use(corsMiddleware);
