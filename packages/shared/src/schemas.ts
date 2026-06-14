@@ -80,6 +80,17 @@ export const ConversationUiSchema = ConversationSchema.extend({
   }).optional()
 }).passthrough();
 
+export const MessageSendPayloadSchema = z.object({
+  conversationId: z.string().min(1),
+  content: z.string().min(1),
+  sessionId: z.string().optional(),
+  tempId: z.number().int().optional(),
+  expiresAt: z.string().datetime().optional(),
+  pushPayloads: z.record(z.string(), z.string()).optional(),
+  repliedToId: z.string().optional(),
+  isViewOnce: z.boolean().optional(),
+});
+
 export const IncomingMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,

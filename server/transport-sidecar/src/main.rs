@@ -120,102 +120,123 @@ async fn main() -> Result<()> {
     // Redis
     let redis_client = redis::Client::open(redis_url)?;
     let pub_conn = redis_client.get_multiplexed_tokio_connection().await?;
-    let mut pubsub = redis_client.get_async_pubsub().await?;
-
-    // Downstream subscriber
-    let sessions_clone = sessions.clone();
+    let redis_url_clone = redis_url.clone();
     tokio::spawn(async move {
-        if let Err(e) = pubsub.subscribe("nyx:downstream").await {
-            error!("Failed to subscribe to nyx:downstream: {:?}", e);
-            return;
-        }
-
-        let mut stream = pubsub.on_message();
-        while let Some(msg) = stream.next().await {
-            let payload: String = match msg.get_payload() {
-                Ok(p) => p,
-                Err(_) => continue,
+        loop {
+            let mut pubsub = match redis::Client::open(redis_url_clone.clone()) {
+                Ok(client) => match client.get_async_pubsub().await {
+                    Ok(ps) => ps,
+                    Err(e) => {
+                        error!("Failed to get async pubsub: {:?}. Retrying in 3s...", e);
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    error!("Failed to open redis client: {:?}. Retrying in 3s...", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    continue;
+                }
             };
 
-            let down_msg: DownstreamMessage = match serde_json::from_str(&payload) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
+            if let Err(e) = pubsub.subscribe("nyx:downstream").await {
+                error!("Failed to subscribe to nyx:downstream: {:?}. Retrying in 3s...", e);
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                continue;
+            }
 
-            let payload_bytes = match data_encoding::BASE64URL_NOPAD.decode(down_msg.payload.as_bytes()) {
-                Ok(b) => b,
-                Err(_) => match data_encoding::BASE64.decode(down_msg.payload.as_bytes()) {
-                    Ok(b) => b,
+            info!("Successfully subscribed to nyx:downstream");
+            let mut stream = pubsub.on_message();
+            
+            while let Some(msg) = stream.next().await {
+                let payload: String = match msg.get_payload() {
+                    Ok(p) => p,
                     Err(_) => continue,
-                }
-            };
+                };
 
-            if let Some(target_device) = down_msg.device_id {
-                let prefix = format!("{}:{}:", down_msg.user_id, target_device);
-                for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
-                    let conn = item.value().clone();
-                    let op_code = down_msg.op_code;
-                    let payload_clone = payload_bytes.clone();
+                let down_msg: DownstreamMessage = match serde_json::from_str(&payload) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
 
-                    if op_code == 0x07 { // KICK
-                        conn.close(1000u32.into(), b"Kicked by server");
-                        continue;
+                let payload_bytes = match data_encoding::BASE64URL_NOPAD.decode(down_msg.payload.as_bytes()) {
+                    Ok(b) => b,
+                    Err(_) => match data_encoding::BASE64.decode(down_msg.payload.as_bytes()) {
+                        Ok(b) => b,
+                        Err(_) => continue,
                     }
+                };
 
-                    tokio::spawn(async move {
-                        let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
-                        frame.put_u8(op_code);
-                        frame.put_u32(payload_clone.len() as u32);
-                        frame.put_slice(&payload_clone);
+                if let Some(target_device) = down_msg.device_id {
+                    let prefix = format!("{}:{}:", down_msg.user_id, target_device);
+                    for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
+                        let conn = item.value().clone();
+                        let op_code = down_msg.op_code;
+                        let payload_clone = payload_bytes.clone();
 
-                        if down_msg.is_datagram {
-                            let _ = conn.send_datagram(frame.freeze());
-                        } else {
-                            if let Ok(opening) = conn.open_uni().await {
-                                let _ = tokio::spawn(async move {
-                                    if let Ok(mut stream) = opening.await {
-                                        let _ = stream.write_all(&frame).await;
-                                        let _ = stream.finish().await;
-                                    }
-                                });
-                            }
+                        if op_code == 0x07 { // KICK
+                            conn.close(1000u32.into(), b"Kicked by server");
+                            continue;
                         }
-                    });
-                }
-            } else {
-                // Broadcast to all devices of this user
-                let prefix = format!("{}:", down_msg.user_id);
-                for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
-                    let conn = item.value().clone();
-                    let op_code = down_msg.op_code;
-                    let payload_clone = payload_bytes.clone();
-                    
-                    if op_code == 0x07 { // KICK
-                        conn.close(1000u32.into(), b"Kicked by server");
-                        continue;
+
+                        tokio::spawn(async move {
+                            let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
+                            frame.put_u8(op_code);
+                            frame.put_u32(payload_clone.len() as u32);
+                            frame.put_slice(&payload_clone);
+
+                            if down_msg.is_datagram {
+                                let _ = conn.send_datagram(frame.freeze());
+                            } else {
+                                if let Ok(opening) = conn.open_uni().await {
+                                    let _ = tokio::spawn(async move {
+                                        if let Ok(mut stream) = opening.await {
+                                            let _ = stream.write_all(&frame).await;
+                                            let _ = stream.finish().await;
+                                        }
+                                    });
+                                }
+                            }
+                        });
                     }
-
-                    tokio::spawn(async move {
-                        let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
-                        frame.put_u8(op_code);
-                        frame.put_u32(payload_clone.len() as u32);
-                        frame.put_slice(&payload_clone);
-
-                        if down_msg.is_datagram {
-                            let _ = conn.send_datagram(frame.freeze());
-                        } else {
-                            if let Ok(opening) = conn.open_uni().await {
-                                let _ = tokio::spawn(async move {
-                                    if let Ok(mut stream) = opening.await {
-                                        let _ = stream.write_all(&frame).await;
-                                        let _ = stream.finish().await;
-                                    }
-                                });
-                            }
+                } else {
+                    // Broadcast to all devices of this user
+                    let prefix = format!("{}:", down_msg.user_id);
+                    for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
+                        let conn = item.value().clone();
+                        let op_code = down_msg.op_code;
+                        let payload_clone = payload_bytes.clone();
+                        
+                        if op_code == 0x07 { // KICK
+                            conn.close(1000u32.into(), b"Kicked by server");
+                            continue;
                         }
-                    });
+
+                        tokio::spawn(async move {
+                            let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
+                            frame.put_u8(op_code);
+                            frame.put_u32(payload_clone.len() as u32);
+                            frame.put_slice(&payload_clone);
+
+                            if down_msg.is_datagram {
+                                let _ = conn.send_datagram(frame.freeze());
+                            } else {
+                                if let Ok(opening) = conn.open_uni().await {
+                                    let _ = tokio::spawn(async move {
+                                        if let Ok(mut stream) = opening.await {
+                                            let _ = stream.write_all(&frame).await;
+                                            let _ = stream.finish().await;
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
                 }
             }
+            
+            warn!("Redis downstream stream ended. Attempting to reconnect in 3s...");
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     });
 

@@ -4,7 +4,7 @@ import { redisClient } from '../lib/redis.js';
 import { getSodium } from '../lib/sodium.js';
 import { toRawServerMessage } from '../utils/mappers.js';
 import { sendPushNotification } from '../utils/sendPushNotification.js';
-import { TransportOpCode } from '@nyx/shared';
+import { TransportOpCode, MessageSendPayloadSchema } from '@nyx/shared';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -183,8 +183,17 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   }
   }
 
-async function handleChatMessage(userId: string, deviceId: string, payload: MessageSendPayload, msgId?: string) {
-  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = payload;
+async function handleChatMessage(userId: string, deviceId: string, payload: unknown, msgId?: string) {
+  let validatedPayload;
+  try {
+    validatedPayload = MessageSendPayloadSchema.parse(payload);
+  } catch (e) {
+    console.error("Invalid chat message payload:", e);
+    if (msgId) await sendAck(userId, deviceId, msgId, { ok: false, error: "Invalid payload format" });
+    return;
+  }
+
+  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = validatedPayload;
 
   try {
     const conversation = await prisma.conversation.findUnique({
@@ -197,14 +206,20 @@ async function handleChatMessage(userId: string, deviceId: string, payload: Mess
       return;
     }
 
-    const newMessageRaw = await prisma.message.create({
-      data: { 
-          conversationId, senderId: userId, content, sessionId: sessionId || null,
-          repliedToId: repliedToId || null, expiresAt: expiresAt ? new Date(expiresAt) : null, isViewOnce: isViewOnce === true
-      },
-      include: { sender: { select: { id: true, encryptedProfile: true } } }
-    });
-    
+    const [newMessageRaw] = await prisma.$transaction([
+      prisma.message.create({
+        data: {
+            conversationId, senderId: userId, content, sessionId: sessionId || null,
+            repliedToId: repliedToId || null, expiresAt: expiresAt ? new Date(expiresAt) : null, isViewOnce: isViewOnce === true
+        },
+        include: { sender: { select: { id: true, encryptedProfile: true } } }
+      }),
+      prisma.conversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: new Date() }
+      })
+    ]);
+
     const safeMessage = toRawServerMessage(newMessageRaw) as RawServerMessage;
     if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
 

@@ -21,6 +21,8 @@ interface ConnectionState {
 
 let isFetchingDevices = false;
 
+let reconnectInterval: ReturnType<typeof setInterval> | null = null;
+
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   status: 'connecting',
   myDevices: [],
@@ -30,6 +32,19 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     set({ status });
     if (status === 'connected') {
       get().fetchMyDevices(true); // Re-fetch on reconnect
+      if (reconnectInterval) {
+        clearInterval(reconnectInterval);
+        reconnectInterval = null;
+      }
+    } else if (status === 'disconnected') {
+      if (!reconnectInterval && document.visibilityState === 'visible') {
+        reconnectInterval = setInterval(async () => {
+          if (document.visibilityState === 'visible' && get().status === 'disconnected') {
+            const { connectSocket } = await import('@lib/transportClient');
+            connectSocket();
+          }
+        }, 5000);
+      }
     }
   },
 
