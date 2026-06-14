@@ -263,7 +263,10 @@ async fn main() -> Result<()> {
                         if let Ok(url) = base_url.join(full_path) {
                             for (key, value) in url.query_pairs() {
                                 if key == "ticket" {
-                                    let val = Validation::new(jsonwebtoken::Algorithm::HS256);
+                                    let mut val = Validation::new(jsonwebtoken::Algorithm::HS256);
+                                    val.validate_exp = true;
+                                    val.required_spec_claims.insert("exp".to_string());
+
                                     if let Ok(token_data) = decode::<Claims>(&*value, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
                                         ticket_user_id = token_data.claims.id.or(token_data.claims.sub);
                                         ticket_device_id = token_data.claims.device_id;
@@ -324,7 +327,10 @@ async fn handle_connection(
         }
         
         let token = String::from_utf8(token_bytes).unwrap_or_default();
-        let val = Validation::new(jsonwebtoken::Algorithm::HS256);
+        let mut val = Validation::new(jsonwebtoken::Algorithm::HS256);
+        val.validate_exp = true;
+        val.required_spec_claims.insert("exp".to_string());
+
         let token_data = match decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
             Ok(data) => data,
             Err(e) => {
