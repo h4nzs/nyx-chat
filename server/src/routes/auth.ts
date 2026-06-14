@@ -5,7 +5,7 @@ import { Router, Response, CookieOptions, Request } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { hashPassword, verifyPassword } from '../utils/password.js'
 import { ApiError } from '../utils/errors.js'
-import { newJti, refreshExpiryDate, signAccessToken, verifyJwt } from '../utils/jwt.js'
+import { newJti, refreshExpiryDate, signAccessToken, verifyJwt, signTransportTicket } from '../utils/jwt.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { env } from '../config.js'
@@ -39,6 +39,19 @@ function getGenericDeviceName(userAgent?: string | string[]): string {
 }
 
 const router: Router = Router()
+
+router.get('/transport-ticket', requireAuth, (req, res) => {
+  if (!req.user || !req.deviceId) {
+    throw new ApiError(401, 'Session incomplete for ticket issuance');
+  }
+  
+  const ticket = signTransportTicket({ 
+    id: req.user.id, 
+    deviceId: req.deviceId 
+  });
+  
+  res.json({ ticket });
+});
 
 const rpName = 'NYX'
 const getRpID = () => {

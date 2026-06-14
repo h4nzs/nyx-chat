@@ -5,6 +5,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthPayload;
+      deviceId?: string;
       jwtPayload?: JwtPayload;
       file?: {
         key?: string;

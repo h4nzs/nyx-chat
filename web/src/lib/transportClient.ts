@@ -89,11 +89,24 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     });
   }
 
-  public connect(url: string, token: string, certificateHash?: string): void {
+  public async connect(url: string, token: string, certificateHash?: string): Promise<void> {
     const rawUrl = url || import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
     
+    // 1. Get Temporary Transport Ticket for better browser compatibility (Brave/Safari fallback)
+    let finalUrlWithTicket = rawUrl;
+    try {
+      const { api } = await import('./api');
+      const { ticket } = await api<{ ticket: string }>('/api/auth/transport-ticket');
+      
+      const urlObj = new URL(rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`);
+      urlObj.searchParams.set('ticket', ticket);
+      finalUrlWithTicket = urlObj.toString();
+    } catch (e) {
+      console.warn("[Transport] Could not fetch connection ticket, falling back to pure Token Auth:", e);
+    }
+
     // Ensure URL has https:// scheme as required by WebTransport
-    let finalUrl = rawUrl;
+    let finalUrl = finalUrlWithTicket;
     if (!finalUrl.startsWith('https://') && !finalUrl.startsWith('http://')) {
        finalUrl = 'https://' + finalUrl;
     } else if (finalUrl.startsWith('http://')) {

@@ -18,6 +18,9 @@ export function requireAuth (req: Request, res: Response, next: NextFunction) {
   try {
     const payload = jwt.verify(token, env.jwtSecret) as AuthPayload
     req.user = payload
+    if ('deviceId' in payload) {
+      req.deviceId = payload.deviceId as string
+    }
     next()
   } catch (err) {
     console.error('Authentication error:', err)

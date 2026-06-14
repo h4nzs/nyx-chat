@@ -5,6 +5,10 @@ import { env } from '../config.js'
 const ACCESS_TTL = '15m'
 const REFRESH_TTL_SEC = 60 * 60 * 24 * 30 // 30d
 
+export function signTransportTicket (payload: object) {
+  return jwt.sign(payload, env.jwtSecret, { expiresIn: '15s' })
+}
+
 export function signAccessToken (payload: string | Buffer | object, opts: SignOptions = {}) {
   if (env.nodeEnv === 'production' && env.jwtSecret === 'dev-secret') {
     throw new Error('JWT_SECRET must be set in production environment')

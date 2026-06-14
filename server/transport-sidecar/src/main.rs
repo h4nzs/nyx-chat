@@ -254,9 +254,29 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             match incoming.await {
                 Ok(req) => {
+                    // 1. Extract Ticket from URL (Hybrid Auth for Brave/Safari)
+                    let full_path = req.path();
+                    let mut ticket_user_id = None;
+                    let mut ticket_device_id = None;
+
+                    if let Ok(base_url) = url::Url::parse("https://localhost") {
+                        if let Ok(url) = base_url.join(full_path) {
+                            for (key, value) in url.query_pairs() {
+                                if key == "ticket" {
+                                    let val = Validation::new(jsonwebtoken::Algorithm::HS256);
+                                    if let Ok(token_data) = decode::<Claims>(&*value, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
+                                        ticket_user_id = token_data.claims.id.or(token_data.claims.sub);
+                                        ticket_device_id = token_data.claims.device_id;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     match req.accept().await {
                         Ok(conn) => {
-                            if let Err(e) = handle_connection(conn, sessions, pub_conn, jwt_secret).await {
+                            if let Err(e) = handle_connection(conn, sessions, pub_conn, jwt_secret, ticket_user_id, ticket_device_id).await {
                                 warn!("Conn error: {:?}", e);
                             }
                         }
@@ -274,49 +294,58 @@ async fn handle_connection(
     sessions: SessionMap,
     mut pub_conn: redis::aio::MultiplexedConnection,
     jwt_secret: String,
+    ticket_user_id: Option<String>,
+    ticket_device_id: Option<String>,
 ) -> Result<()> {
-    // 1. First bidirectional stream is ALWAYS for Authentication
-    let (mut _auth_send, mut auth_recv) = conn.accept_bi().await.context("auth_accept_bi")?;
-    
-    let mut auth_header = [0u8; 5];
-    let mut read_bytes = 0;
-    while read_bytes < 5 {
-        let n = auth_recv.read(&mut auth_header[read_bytes..]).await.context("auth_header")?.unwrap_or(0);
-        if n == 0 { break; }
-        read_bytes += n;
-    }
-    
-    let auth_length = u32::from_be_bytes([auth_header[1], auth_header[2], auth_header[3], auth_header[4]]) as usize;
-    if auth_length > 4096 { return Err(anyhow::anyhow!("Token too large")); }
-
-    let mut token_bytes = vec![0u8; auth_length];
-    read_bytes = 0;
-    while read_bytes < auth_length {
-        let n = auth_recv.read(&mut token_bytes[read_bytes..]).await.context("auth_token")?.unwrap_or(0);
-        if n == 0 { break; }
-        read_bytes += n;
-    }
-    
-    let token = String::from_utf8(token_bytes).unwrap_or_default();
-    let val = Validation::new(jsonwebtoken::Algorithm::HS256);
-    let token_data = match decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
-        Ok(data) => data,
-        Err(e) => {
-            warn!("JWT Decode failed: {}", e);
-            return Err(anyhow::anyhow!("Unauthorized"));
+    let (user_id, device_id) = if let (Some(uid), Some(did)) = (ticket_user_id, ticket_device_id) {
+        info!("User {} authenticated via URL Ticket", uid);
+        (uid, did)
+    } else {
+        // Fallback: First bidirectional stream is for Authentication
+        let (mut _auth_send, mut auth_recv) = conn.accept_bi().await.context("auth_accept_bi")?;
+        
+        let mut auth_header = [0u8; 5];
+        let mut read_bytes = 0;
+        while read_bytes < 5 {
+            let n = auth_recv.read(&mut auth_header[read_bytes..]).await.context("auth_header")?.unwrap_or(0);
+            if n == 0 { break; }
+            read_bytes += n;
         }
-    };
-    
-    let user_id = match token_data.claims.id.or(token_data.claims.sub) {
-        Some(id) => id,
-        None => {
-            warn!("JWT missing id/sub claim");
-            return Err(anyhow::anyhow!("Unauthorized: Missing ID"));
-        }
-    };
-    let device_id = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
+        
+        let auth_length = u32::from_be_bytes([auth_header[1], auth_header[2], auth_header[3], auth_header[4]]) as usize;
+        if auth_length > 4096 { return Err(anyhow::anyhow!("Token too large")); }
 
-    info!("User {} (device {}) authenticated via WebTransport", user_id, device_id);
+        let mut token_bytes = vec![0u8; auth_length];
+        read_bytes = 0;
+        while read_bytes < auth_length {
+            let n = auth_recv.read(&mut token_bytes[read_bytes..]).await.context("auth_token")?.unwrap_or(0);
+            if n == 0 { break; }
+            read_bytes += n;
+        }
+        
+        let token = String::from_utf8(token_bytes).unwrap_or_default();
+        let val = Validation::new(jsonwebtoken::Algorithm::HS256);
+        let token_data = match decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!("JWT Decode failed: {}", e);
+                return Err(anyhow::anyhow!("Unauthorized"));
+            }
+        };
+        
+        let uid = match token_data.claims.id.or(token_data.claims.sub) {
+            Some(id) => id,
+            None => {
+                warn!("JWT missing id/sub claim");
+                return Err(anyhow::anyhow!("Unauthorized: Missing ID"));
+            }
+        };
+        let did = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
+        info!("User {} authenticated via BWH-V1 Stream", uid);
+        (uid, did)
+    };
+
+    info!("User {} (device {}) finalized authentication", user_id, device_id);
 
     // Enforce "One User, One Active Device"
     let user_prefix = format!("{}:", user_id);
