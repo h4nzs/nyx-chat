@@ -37,8 +37,8 @@
   },
   "sync_issues": {
     "title": "Why are my messages not syncing?",
-    "desc": "NYX is <strong>Local-First</strong>. Messages live on your device, not the cloud. To ensure maximum security, <strong>only one device can be active per account at a time</strong>.",
-    "future_text": "If you wish to switch devices, you must use your Recovery Phrase or Vault to migrate your identity. Once migrated, the new device becomes the active one, ensuring your cryptographic state remains isolated and secure."
+    "desc": "NYX is <strong>Local-First</strong>. Messages live on your device, not the cloud. While you can link multiple devices to your account, <strong>only one device can be active at a time</strong>. Logging in on a new device will sign out the previous one.",
+    "future_text": "We are working on a secure \"Sync Protocol\" for the future, but currently, history does not automatically sync between devices to ensure zero-knowledge privacy."
   },
   "lost_phrase": {
     "title": "What if I lose my Recovery Phrase?",

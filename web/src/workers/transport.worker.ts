@@ -23,10 +23,16 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
     transport = new WebTransport(url, options);
     
     // Prevent "Uncaught (in promise)" error when connection is rejected
-    transport.closed.then(() => {
-      postMessage({ type: 'DISCONNECTED', reason: 'connection closed' } satisfies TransportWorkerToMain);
-    }).catch(() => {
-      // Error is already handled via transport.ready catch block
+    transport.closed.then((info) => {
+      postMessage({ 
+        type: 'DISCONNECTED', 
+        reason: info?.reason || 'connection closed' 
+      } satisfies TransportWorkerToMain);
+    }).catch((err) => {
+      postMessage({ 
+        type: 'DISCONNECTED', 
+        reason: err?.message || 'connection error' 
+      } satisfies TransportWorkerToMain);
     });
 
     await transport.ready;

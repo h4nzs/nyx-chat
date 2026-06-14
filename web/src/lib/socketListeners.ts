@@ -28,6 +28,13 @@ export function initSocketListeners() {
   transportClient.on('disconnect', (reason) => {
     console.log('[Socket] Disconnected:', reason);
     useConnectionStore.getState().setStatus('disconnected');
+
+    if (reason === 'Logged in on another device') {
+      const { logout } = useAuthStore.getState();
+      logout().then(() => {
+        window.location.href = `/login?reason=kicked&msg=${encodeURIComponent(reason)}`;
+      });
+    }
   });
 
   // 1. MESSAGES

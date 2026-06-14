@@ -13,7 +13,7 @@ This update introduces the cutting-edge Binary WebTransport Handshake (NYX-BWH-V
 
 ### 🔒 Security & Identity Hardening
 * **Single-Active-Device Enforcement:** To eliminate cryptographic "Split-Brain" scenarios, accounts are now strictly limited to one active device per account. Logging into a new device automatically revokes all previous refresh tokens and sessions.
-* **Better biometric Vault Unlock:** Integrated WebAuthn PRF. Users can now securely unlock their local vault and decrypt session keys using device biometrics (FaceID/TouchID) instead of manually typing their password.
+* **Biometric Vault Unlock:** Integrated WebAuthn PRF. Users can now securely unlock their local vault and decrypt session keys using device biometrics (FaceID/TouchID) instead of manually typing their password.
 * **Sandbox Search Bypass:** Unverified accounts in Sandbox Mode can now bypass search restrictions by providing the exact 43-character Base64URL Hash ID of a contact.
 * **Out-of-Band (OOB) Profile Exchange:** Profile sharing URLs now bundle the `id` and `encryptedProfile` payload (`?u=...&i=...&p=...`), allowing immediate peer connection without requiring an initial round-trip to the server.
 

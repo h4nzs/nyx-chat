@@ -66,6 +66,13 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   // GUEST users (Burner Chat) are ephemeral and don't exist in the User/Device tables.
   // We skip DB persistence for their refresh tokens to avoid FK constraint violations.
   if (user.role !== 'GUEST') {
+    // Enforce "One User, One Active Device": Revoke all existing sessions for this user
+    await prisma.refreshToken.deleteMany({
+        where: {
+            device: { userId: user.id }
+        }
+    });
+
     await prisma.refreshToken.create({
       data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
     })

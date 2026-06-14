@@ -37,8 +37,8 @@
   },
   "sync_issues": {
     "title": "Mengapa pesan saya tidak sinkron?",
-    "desc": "NYX adalah <strong>Local-First</strong>. Pesan ada di perangkat Anda, bukan di cloud. Untuk menjamin keamanan maksimal, <strong>hanya satu perangkat yang dapat aktif untuk satu akun pada satu waktu</strong>.",
-    "future_text": "Jika Anda ingin berpindah perangkat, Anda harus menggunakan Frasa Pemulihan atau Vault untuk memigrasikan identitas Anda. Setelah migrasi, perangkat baru akan menjadi perangkat aktif, memastikan status kriptografi Anda tetap terisolasi dan aman."
+    "desc": "NYX adalah <strong>Local-First</strong>. Pesan ada di perangkat Anda, bukan di cloud. Meskipun Anda dapat menautkan banyak perangkat ke akun Anda, <strong>hanya satu perangkat yang dapat aktif dalam satu waktu</strong>. Masuk di perangkat baru akan otomatis mengeluarkan sesi di perangkat sebelumnya.",
+    "future_text": "Kami sedang mengerjakan \"Protokol Sinkronisasi\" yang aman untuk masa depan, tetapi saat ini, riwayat tidak sinkron secara otomatis antar perangkat untuk menjamin privasi zero-knowledge."
   },
   "lost_phrase": {
     "title": "Bagaimana jika saya kehilangan Frasa Pemulihan?",

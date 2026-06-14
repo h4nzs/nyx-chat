@@ -296,6 +296,26 @@ async fn handle_connection(
 
     info!("User {} (device {}) authenticated via WebTransport", user_id, device_id);
 
+    // Enforce "One User, One Active Device"
+    let user_prefix = format!("{}:", user_id);
+    let mut sessions_to_kick = Vec::new();
+    
+    // Find all active sessions for this user
+    for item in sessions.iter() {
+        if item.key().starts_with(&user_prefix) {
+            sessions_to_kick.push(item.key().clone());
+        }
+    }
+
+    // Kick existing sessions
+    for old_key in sessions_to_kick {
+        if let Some((_, old_conn)) = sessions.remove(&old_key) {
+            info!("Kicking existing session for user {}: {}", user_id, old_key);
+            // Close with reason (1000 is generic closure, could use a custom app code)
+            old_conn.close(1000u32.into(), b"Logged in on another device");
+        }
+    }
+
     let session_uuid = uuid::Uuid::new_v4().to_string();
     let session_key = format!("{}:{}:{}", user_id, device_id, session_uuid);
     
