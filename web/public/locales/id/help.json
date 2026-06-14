@@ -23,9 +23,9 @@
     "warning": "Catatan: Memulihkan dari frasa akan mereset kunci identitas Anda. Anda akan mendapatkan kembali akses ke ID akun Anda, tetapi <1>riwayat chat akan hilang</1> kecuali Anda memiliki Cadangan Brankas."
   },
   "sync_issues": {
-    "title": "Mengapa pesan saya tidak tersinkronisasi?",
-    "desc": "NYX bersifat <1>Local-First</1>. Pesan berada di perangkat Anda, bukan di cloud. Jika Anda menggunakan NYX di beberapa perangkat (misal: Ponsel + Laptop), mereka bertindak sebagai klien independen.",
-    "future_text": "Kami sedang mengerjakan \"Protokol Sinkronisasi\" aman untuk masa depan, tetapi saat ini, riwayat tidak tersinkronisasi otomatis antar perangkat demi menjamin privasi zero-knowledge."
+    "title": "Mengapa pesan saya tidak sinkron?",
+    "desc": "NYX adalah <strong>Local-First</strong>. Pesan ada di perangkat Anda, bukan di cloud. Untuk menjamin keamanan maksimal, <strong>hanya satu perangkat yang dapat aktif untuk satu akun pada satu waktu</strong>.",
+    "future_text": "Jika Anda ingin berpindah perangkat, Anda harus menggunakan Frasa Pemulihan atau Vault untuk memigrasikan identitas Anda. Setelah migrasi, perangkat baru akan menjadi perangkat aktif, memastikan status kriptografi Anda tetap terisolasi dan aman."
   },
   "lost_phrase": {
     "title": "Bagaimana jika saya kehilangan Frasa Pemulihan?",

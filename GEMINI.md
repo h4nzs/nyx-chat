@@ -17,7 +17,6 @@ NYX is a Zero-Knowledge Post-Quantum Hardened Messenger designed for pure anonym
   - The Node.js server and Rust sidecar communicate asynchronously via **Redis Pub/Sub** (`nyx:upstream` and `nyx:downstream`).
 - **Key Features**:
   - **Zero PII**: No phone numbers or emails required.
-  - **One Active Device**: Only one device can be active per user at any time. New logins will automatically kick previous sessions.
   - **Post-Quantum Security**: ML-KEM-768 (X-Wing) for key exchange.
   - **Local-First**: Chat history is stored only on the device via IndexedDB (`dexie`).
   - **Blind Relay**: The server only routes encrypted blobs without access to keys.

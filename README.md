@@ -117,7 +117,7 @@ pnpm dev # (Assuming you set up a root script, or run individually in /web and /
 
 ---
 
-## 💾 The "Shadow Vault" & Linked Devices
+## 💾 The "Shadow Vault" & Device Migration
 
 Because we don't sync history to the cloud, YOU own your data. To ensure maximum security, **NYX supports only one active device per account at a time**.
 

@@ -24,8 +24,8 @@
   },
   "sync_issues": {
     "title": "¿Por qué mis mensajes no se sincronizan?",
-    "desc": "NYX funciona bajo un modelo <1>Local-First (Enfocado en lo local)</1>. Los mensajes viven en tu dispositivo, no en la nube. Si usas NYX en varios dispositivos (ej: Teléfono + Laptop), actúan como clientes independientes.",
-    "future_text": "Estamos trabajando en un \"Protocolo de Sincronización\" seguro para el futuro, pero por ahora, el historial no se sincroniza automáticamente entre dispositivos para garantizar la privacidad zero-knowledge (de conocimiento cero)."
+    "desc": "NYX es <strong>Local-First</strong>. Los mensajes viven en tu dispositivo, no en la nube. Para garantizar la máxima seguridad, <strong>sólo un dispositivo puede estar activo por cuenta a la vez</strong>.",
+    "future_text": "Si deseas cambiar de dispositivo, debes usar tu Frase de Recuperación o Bóveda para migrar tu identidad. Una vez migrado, el nuevo dispositivo se convertirá en el activo, asegurando que tu estado criptográfico permanezca aislado y seguro."
   },
   "lost_phrase": {
     "title": "¿Qué pasa si pierdo mi Frase de Recuperación?",

@@ -967,7 +967,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                                       
                                       const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
                                       const peer = conv?.participants.find(p => (p.userId || p.user?.id || p.id) === senderId);
-                                      const peerName = (peer as any)?.name || peer?.user?.name || t('common:defaults.unknown_user');
+                                      const peerName = peer?.name || peer?.user?.name || t('common:defaults.unknown_user');
                                       const warningText = t('common:security_key_changed', { name: peerName });
                                       
                                       useMessageStore.getState().addSystemMessage(conversationId, warningText);

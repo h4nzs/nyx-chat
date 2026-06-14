@@ -649,7 +649,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
 
                   const peer = participants.find(p => (p.userId || p.user?.id || p.id) === uId);
-                  const peerName = (peer as any)?.name || peer?.user?.name || t('common:defaults.unknown_user');
+                  const peerName = peer?.name || peer?.user?.name || t('common:defaults.unknown_user');
                   const warningText = t('common:security_key_changed', { name: peerName });
                   
                   // 1. Persistent chat message
@@ -944,7 +944,7 @@ async function doEncryptMessage(
               const { default: toast } = await import('react-hot-toast');
               const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
 
-              const peerName = (peer as any).name || peer.user?.name || t('common:defaults.unknown_user');
+              const peerName = peer.name || peer.user?.name || t('common:defaults.unknown_user');
               const warningText = t('common:security_key_changed', { name: peerName });
               
               // 1. Persistent chat message

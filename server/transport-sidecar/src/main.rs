@@ -118,9 +118,10 @@ async fn main() -> Result<()> {
     let sessions: SessionMap = Arc::new(DashMap::new());
 
     // Redis
-    let redis_client = redis::Client::open(redis_url)?;
+    let redis_client = redis::Client::open(redis_url.clone())?;
     let pub_conn = redis_client.get_multiplexed_tokio_connection().await?;
     let redis_url_clone = redis_url.clone();
+    let sessions_clone = sessions.clone();
     tokio::spawn(async move {
         loop {
             let mut pubsub = match redis::Client::open(redis_url_clone.clone()) {

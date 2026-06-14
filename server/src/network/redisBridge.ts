@@ -493,7 +493,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'message:view_once_opened': {
-         const { messageId, conversationId } = data as any;
+         const { messageId, conversationId } = data as { messageId: string, conversationId: string };
          if (!messageId || !conversationId) return;
          const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
          if (!msg || msg.senderId === userId || msg.conversationId !== conversationId) return;
@@ -527,7 +527,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'burner:send': {
-         const { roomId, targetDeviceId, hostUserId, ciphertext } = data as any;
+         const { roomId, targetDeviceId, hostUserId, ciphertext } = data as { roomId: string, targetDeviceId?: string, hostUserId: string, ciphertext: string };
          if (await redisClient.exists(`burner:terminated:${roomId}`)) return;
          
          // Broadcast to all active sessions of the host if specific device ID fails or isn't strictly required
@@ -546,7 +546,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'burner:destroy': {
-         const { roomId } = data as any;
+         const { roomId } = data as { roomId: string };
          await redisClient.set(`burner:terminated:${roomId}`, "1", { EX: 86400 });
          const members = await pubClient.sMembers(`burner:room:${roomId}`);
          for (const memberId of members) {
@@ -562,7 +562,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'migration:start': {
-         const { roomId } = data as any;
+         const { roomId } = data as { roomId: string };
          await redisClient.set(`migration_owner:${roomId}`, userId, { EX: 3600 });
          const members = await pubClient.sMembers(`migration:room:${roomId}`);
          for (const memberId of members) {
@@ -571,7 +571,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'migration:chunk': {
-         const { roomId } = data as any;
+         const { roomId } = data as { roomId: string };
          const ownerId = await redisClient.get(`migration_owner:${roomId}`);
          if (ownerId !== userId) return;
          const members = await pubClient.sMembers(`migration:room:${roomId}`);
@@ -581,7 +581,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'migration:ack': {
-         const { roomId } = data as any;
+         const { roomId } = data as { roomId: string };
          const ownerId = await redisClient.get(`migration_owner:${roomId}`);
          if (ownerId) await sendJsonToUser(ownerId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
          break;
@@ -603,7 +603,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        case 'messages:mark_as_read':
        case 'messages:mark_read':
        case 'messages:mark_delivered': {
-         const { conversationId, messageIds } = data as any;
+         const { conversationId, messageIds } = data as { conversationId: string, messageIds: string[] };
          const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
          

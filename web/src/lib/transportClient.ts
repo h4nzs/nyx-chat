@@ -3,16 +3,66 @@ import { TransportOpCode } from '@nyx/shared';
 import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from '@nyx/shared';
 import { useAuthStore } from '../store/auth';
 
+import type { 
+  RawServerMessage, 
+  Message, 
+  Participant, 
+  User, 
+  Conversation,
+  ConversationId,
+  UserId
+} from '@nyx/shared';
+
 type TransportEvents = {
+  // Connection
   'connect': [];
   'disconnect': [reason: string];
+  
+  // Messages
   'message:new': [payload: BinaryPayload];
-  'webrtc:signal': [payload: BinaryPayload];
+  'message:updated': [data: Partial<RawServerMessage> & { id: string, conversationId: string }];
+  'message:deleted': [data: { conversationId: string; id: string }];
+  'message:status_updated': [data: { conversationId: string; messageId: string; userId: string; status: string }];
+  
+  // Conversations
+  'conversation:new': [conversation: Conversation];
+  'conversation:updated': [data: Partial<Conversation> & { id: string }];
+  'conversation:deleted': [data: { id: string }];
+  'conversation:participants_added': [data: { conversationId: string; participants: Participant[] }];
+  'conversation:participant_removed': [data: { conversationId: string; userId: string }];
+  'conversation:participant_updated': [data: { conversationId: string; userId: string; role: 'ADMIN' | 'MEMBER' | 'admin' | 'member' }];
+  
+  // Users
+  'user:updated': [user: Partial<User>];
+  
+  // Presence & RTC
   'presence:update': [payload: BinaryPayload];
+  'webrtc:signal': [payload: BinaryPayload];
+  
+  // Auth & Security
+  'force_logout': [data: { jti: string }];
+  'auth:banned': [data: { reason: string }];
+  
+  // Key Management
+  'session:request_key_fulfillment': [data: unknown];
+  'session:new_key': [data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string }];
+  'session:fulfill_request': [data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string }];
+  'group:fulfill_key_request': [data: { conversationId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string; requesterDeviceId?: string }];
+  'group:key_request_failed': [data: { conversationId: string; reason: string }];
+  'session:request_key_failed': [data: { sessionId: string; targetId: string; reason: string }];
   'handshake:completed': [success: boolean, error?: string];
+  
+  // Burner Chats
+  'burner:receive': [payload: { roomId?: string, ciphertext: string }];
+  'burner:terminated': [payload: { roomId: string }];
+
+  // Migration
+  'migration:start': [payload: { roomId: string; totalChunks: number; sealedKey: string; }];
+  'migration:chunk': [payload: { chunkIndex: number; chunk: string; }];
+  'migration:ack': [payload: { roomId: string, success: boolean }];
+
   // Allow arbitrary events for backward compatibility
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [event: string]: any[];
+  [event: string]: unknown[];
 };
 
 export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
