@@ -43,6 +43,17 @@ export default function PasswordPromptModal() {
     return null;
   }
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password) {
+      setError(t('auth:errors.password_required', 'Password required'));
+      return;
+    }
+    onPasswordSubmit(password);
+    setPassword('');
+    hidePasswordPrompt();
+  };
+
   const handleBiometricUnlock = async () => {
     setIsLoading(true);
     setError('');
@@ -86,7 +97,6 @@ export default function PasswordPromptModal() {
     }
   };
 
-  // ... ( handleSubmit )
 
   return (
     <div 
