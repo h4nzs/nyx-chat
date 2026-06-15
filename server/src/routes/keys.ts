@@ -12,7 +12,7 @@ import { ApiError } from '../utils/errors.js'
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // ✅ Menggunakan AuthJwtPayload dari paket shared
-import type { AuthJwtPayload } from '@nyx/shared'
+import type { AuthJwtPayload, IDeviceTemplate, IPreKeyBundle } from '@nyx/shared'
 
 const router: Router = Router()
 
@@ -172,7 +172,7 @@ router.get(
       const { userId } = req.params
 
       // 1. Try to get device template from Redis
-      let deviceTemplate: any = null;
+      let deviceTemplate: IDeviceTemplate | null = null;
       const cacheKey = `cache:keys:bundle:${userId}`;
 
       try {
@@ -242,7 +242,7 @@ router.get(
       }
 
       // 4. Combine and return
-      const bundle: any = {
+      const bundle: IPreKeyBundle = {
         deviceId: deviceTemplate.id,
         identityKey: deviceTemplate.identityKey,
         pqIdentityKey: deviceTemplate.pqIdentityKey,
@@ -427,11 +427,11 @@ router.post(
       }
 
       // 3. ATOMICALLY consume OTPKs for each device (Must ALWAYS come from DB)
-      const finalResults = new Map<string, any[]>();
+      const finalResults = new Map<string, IPreKeyBundle[]>();
       for (const [uid, templates] of responseMap.entries()) {
-          const userBundles: any[] = [];
+          const userBundles: IPreKeyBundle[] = [];
           
-          for (const template of templates as any[]) {
+          for (const template of templates as unknown as IDeviceTemplate[]) {
             let otpk = null;
             try {
               otpk = await prisma.$queryRaw`
@@ -447,7 +447,7 @@ router.post(
               `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
             } catch (e) {}
 
-            const bundle: any = {
+            const bundle: IPreKeyBundle = {
               deviceId: template.id,
               identityKey: template.identityKey,
               pqIdentityKey: template.pqIdentityKey,

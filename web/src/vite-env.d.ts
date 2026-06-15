@@ -18,4 +18,9 @@ interface Window {
   [key: `sys_key_req_reply_${string}`]: number | undefined;
   [key: `last_repair_history_${string}`]: number | undefined;
   [key: `last_repair_${string}`]: number | undefined;
+  _nyxBlobCache?: Map<string, string>;
+}
+
+interface Navigator {
+  deviceMemory?: number;
 }

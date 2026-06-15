@@ -7,7 +7,7 @@ import { useConversationStore } from '../store/conversation';
 import { useAuthStore } from '../store/auth';
 import { useConnectionStore } from '../store/connection';
 import { usePresenceStore } from '../store/presence';
-import type { RawServerMessage, Message, Participant, User, BinaryPayload, Conversation } from '@nyx/shared';
+import { RawServerMessageSchema, type RawServerMessage, type Message, type Participant, type User, type BinaryPayload, type Conversation } from '@nyx/shared';
 
 let isInitialized = false;
 
@@ -42,13 +42,14 @@ export function initSocketListeners() {
     let rawMsg: RawServerMessage;
     if (payload instanceof Uint8Array) {
       try {
-        rawMsg = JSON.parse(new TextDecoder().decode(payload));
+        const parsed = JSON.parse(new TextDecoder().decode(payload));
+        rawMsg = RawServerMessageSchema.parse(parsed);
       } catch (e) {
-        console.error("[Socket] Failed to decode message:new payload");
+        console.error("[Socket] Failed to decode message:new payload", e);
         return;
       }
     } else {
-      rawMsg = payload as RawServerMessage;
+      rawMsg = RawServerMessageSchema.parse(payload);
     }
 
     try {
@@ -107,18 +108,19 @@ export function initSocketListeners() {
   // 4. PRESENCE
   transportClient.on('presence:update', (payload: BinaryPayload) => {
     try {
-      const data = JSON.parse(new TextDecoder().decode(payload));
-      if (data.type === 'bulk') {
-        usePresenceStore.getState().setOnlineUsers(data.userIds);
-      } else if (data.type === 'join') {
+      const parsed = JSON.parse(new TextDecoder().decode(payload)) as unknown;
+      const data = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {};
+      if (data.type === 'bulk' && Array.isArray(data.userIds)) {
+        usePresenceStore.getState().setOnlineUsers(data.userIds as string[]);
+      } else if (data.type === 'join' && typeof data.userId === 'string') {
         usePresenceStore.getState().userJoined(data.userId);
-      } else if (data.type === 'leave') {
+      } else if (data.type === 'leave' && typeof data.userId === 'string') {
         usePresenceStore.getState().userLeft(data.userId);
-      } else if (data.type === 'typing') {
+      } else if (data.type === 'typing' && typeof data.userId === 'string') {
         usePresenceStore.getState().addOrUpdate({
           id: data.userId,
-          conversationId: data.conversationId,
-          isTyping: data.isTyping
+          conversationId: typeof data.conversationId === 'string' ? data.conversationId : '',
+          isTyping: Boolean(data.isTyping)
         });
       }
     } catch (e) {}

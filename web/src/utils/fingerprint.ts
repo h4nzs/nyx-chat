@@ -14,7 +14,7 @@ export async function getBrowserFingerprint(): Promise<string> {
     screen.colorDepth,
     screen.width + 'x' + screen.height,
     navigator.hardwareConcurrency || 'unknown',
-    (navigator as any).deviceMemory || 'unknown',
+    navigator.deviceMemory || 'unknown',
     navigator.maxTouchPoints || 0,
     // Kita gunakan resolusi layar yang tersedia (mengabaikan taskbar/dock) untuk stabilitas lebih tinggi
     screen.availWidth + 'x' + screen.availHeight,

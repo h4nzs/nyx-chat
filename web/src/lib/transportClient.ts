@@ -172,13 +172,15 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
         break;
       case TransportOpCode.KICK:
         try {
-           const json = JSON.parse(new TextDecoder().decode(payload));
+           const parsedJson = JSON.parse(new TextDecoder().decode(payload)) as unknown;
+           const json = typeof parsedJson === 'object' && parsedJson !== null ? parsedJson as Record<string, unknown> : {};
            // [+] AMBIL DARI OBJECT USER
            const userJson = localStorage.getItem('user');
-           const currentDeviceId = userJson ? JSON.parse(userJson).deviceId : localStorage.getItem('deviceId');
+           const parsedUser = userJson ? (JSON.parse(userJson) as unknown) : null;
+           const currentDeviceId = (typeof parsedUser === 'object' && parsedUser !== null && 'deviceId' in parsedUser) ? (parsedUser as Record<string, unknown>).deviceId : localStorage.getItem('deviceId');
            
            if (json.reason === 'Account deleted' || json.deviceId === currentDeviceId) {
-               this.emit('auth:banned', json);
+               this.emit('auth:banned', { reason: typeof json.reason === 'string' ? json.reason : 'Unknown reason' });
                this.disconnect();
            } else {
                console.log("Ignored kick for different device ID:", json.deviceId);
@@ -202,8 +204,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
   private handleAck(payload: BinaryPayload) {
      try {
-       const json = JSON.parse(new TextDecoder().decode(payload));
-       if (json && json.msgId && this.pendingAcks.has(json.msgId)) {
+       const parsedJson = JSON.parse(new TextDecoder().decode(payload)) as unknown;
+       const json = typeof parsedJson === 'object' && parsedJson !== null ? parsedJson as Record<string, unknown> : null;
+       if (json && json.msgId && typeof json.msgId === 'string' && this.pendingAcks.has(json.msgId)) {
           const p = this.pendingAcks.get(json.msgId)!;
           clearTimeout(p.timeoutId);
           p.resolve(json.data);

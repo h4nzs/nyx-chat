@@ -54,5 +54,5 @@ export function clearBlobCache(): void {
 
 // Attach to window for debugging in development only
 if (import.meta.env.DEV) {
-  (window as any)._nyxBlobCache = blobCache;
+  window._nyxBlobCache = blobCache;
 }

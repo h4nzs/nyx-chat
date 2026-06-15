@@ -193,3 +193,33 @@ export interface DoubleRatchetState {
   messageCount?: number;
   lastActivityTime?: number;
 }
+
+export interface ISignedPreKey {
+  key: string;
+  pqKey: string | null;
+  signature: string;
+  pqSignature: string | null;
+}
+
+export interface IOneTimePreKey {
+  keyId: number;
+  key: string;
+  pqKey: string | null;
+}
+
+export interface IDeviceTemplate {
+  id: string;
+  identityKey: string;
+  pqIdentityKey: string | null;
+  signingKey: string;
+  signedPreKey: ISignedPreKey | null;
+}
+
+export interface IPreKeyBundle {
+  deviceId: string;
+  identityKey: string;
+  pqIdentityKey: string | null;
+  signingKey: string;
+  signedPreKey: ISignedPreKey | null;
+  oneTimePreKey?: IOneTimePreKey;
+}

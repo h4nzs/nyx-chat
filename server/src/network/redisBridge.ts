@@ -152,7 +152,12 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         // Payload OpCode 0x00 sekarang adalah JSON string: { token: string, identity: { fingerprint, installationId } }
         let authData: { token: string, identity?: { fingerprint: string, installationId: string } };
         try {
-           authData = JSON.parse(payloadStr) as any;
+           const parsed = JSON.parse(payloadStr) as unknown;
+           if (typeof parsed === 'object' && parsed !== null && 'token' in parsed) {
+             authData = parsed as { token: string, identity?: { fingerprint: string, installationId: string } };
+           } else {
+             authData = { token: payloadStr };
+           }
         } catch (e) {
            // Fallback untuk klien lama yang hanya mengirim token sebagai string mentah
            authData = { token: payloadStr };
