@@ -30,6 +30,8 @@ jobs:
       # --- PHASE 1: INSTALL SEMUA (ROOT) ---
       - name: 📦 Install Dependencies (Root)
         run: pnpm install --no-frozen-lockfile
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
 
       # --- PHASE 2: BUILD SHARED PACKAGE ---
       - name: 🏗️ Build Shared Package
@@ -156,7 +158,7 @@ jobs:
                 cp $TARGET_DIR/ca.pem $TARGET_DIR/server/ca.pem || true
             fi
             cd $TARGET_DIR
-            CI=true pnpm install --no-frozen-lockfile
+            PUPPETEER_SKIP_DOWNLOAD="true" CI=true pnpm install --no-frozen-lockfile
 
             # Pastikan file rahasia diamankan (Diasumsikan Anda menaruh .env asli di /root/nyx-app/.env)
             if [ -f "$TARGET_DIR/.env" ]; then
