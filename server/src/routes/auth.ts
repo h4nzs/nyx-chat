@@ -80,12 +80,19 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   // GUEST users (Burner Chat) are ephemeral and don't exist in the User/Device tables.
   // We skip DB persistence for their refresh tokens to avoid FK constraint violations.
   if (user.role !== 'GUEST') {
-    // Enforce "One User, One Active Device": Revoke all existing sessions for this user
-    await prisma.refreshToken.deleteMany({
-        where: {
-            device: { userId: user.id }
-        }
-    });
+    // Check if user is in Migration Mode
+    const isMigrating = await redisClient.exists(`is_migrating:${user.id}`);
+
+    if (!isMigrating) {
+        // Enforce "One User, One Active Device": Revoke all existing sessions for this user
+        await prisma.refreshToken.deleteMany({
+            where: {
+                device: { userId: user.id }
+            }
+        });
+    } else {
+        console.log(`[Migration] Bypassing session revocation for user ${user.id} due to active migration flag.`);
+    }
 
     await prisma.refreshToken.create({
       data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }

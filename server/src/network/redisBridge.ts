@@ -160,8 +160,9 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
 
         // 🛡️ LAPIS 1: SINGLE ACTIVE DEVICE CHECK
         const activeDeviceId = await redisClient.get(`active_device:${userId}`);
+        const isMigrating = await redisClient.exists(`is_migrating:${userId}`);
         
-        if (activeDeviceId && activeDeviceId !== deviceId) {
+        if (activeDeviceId && activeDeviceId !== deviceId && !isMigrating) {
           console.warn(`[Security-L1] Revoked device ${deviceId} (User ${userId}) tried to connect. Kicking...`);
           const kickPayload = Buffer.from(JSON.stringify({ 
             reason: 'SESSION_REVOKED', 
@@ -627,6 +628,15 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        // --- MIGRATION EVENTS ---
+       case 'migration:prepare': {
+         await redisClient.set(`is_migrating:${userId}`, "1", { EX: 900 }); // 15 mins grace period
+         if (msgId) await sendAck(userId, deviceId, msgId, { ok: true });
+         break;
+       }
+       case 'migration:cancel': {
+         await redisClient.del(`is_migrating:${userId}`);
+         break;
+       }
        case 'migration:join': {
          if (data) await pubClient.sAdd(`migration:room:${data}`, userId);
          break;
@@ -653,6 +663,10 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        case 'migration:ack': {
          const { roomId } = data as { roomId: string };
          const ownerId = await redisClient.get(`migration_owner:${roomId}`);
+
+         // Clear migration grace period flag as it's finished
+         await redisClient.del(`is_migrating:${userId}`);
+
          if (ownerId) await sendJsonToUser(ownerId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
          break;
        }

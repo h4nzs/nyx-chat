@@ -41,6 +41,10 @@ export default function MigrationSendPage() {
         setStatus('scanning');
         
         connectSocket();
+
+        // [NEW] Signal Migration Mode to server to prevent L1/L2 kicks during transfer
+        // We call it immediately; transportClient will queue it if not yet connected
+        transportClient.sendEvent('migration:prepare', {});
       } catch (e) {
         toast.error(tRef.current('common:migration.read_vault_failed', 'Gagal membaca brankas data.'));
       }
@@ -48,6 +52,11 @@ export default function MigrationSendPage() {
     prefetch();
 
     return () => {
+      // [NEW] Disable Migration Mode on exit to restore full security
+      if (transportClient.connected) {
+         transportClient.sendEvent('migration:cancel', {});
+      }
+
       if (!transportClient?.connected) {
         connectSocket();
       }
