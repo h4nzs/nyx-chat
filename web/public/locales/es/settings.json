@@ -64,9 +64,9 @@
   "support": {
     "push_notif": "Notificaciones Push",
     "background_guide": "Guía de ejecución en segundo plano",
-    "background_desc": "Para recibir notificaciones cuando NYX esté cerrado, asegúrate de que tu dispositivo permite que la aplicación funcione en segundo plano.",
-    "android_guide_steps": "<0>🤖 Android:</0> Ajustes > Aplicaciones > NYX > Batería > <1>Sin restricciones</1>",
-    "ios_guide_steps": "<0>🍎 iOS:</0> Ajustes > NYX > <1>Actualizar en segundo plano</1>",
+    "background_desc": "Para recibir notificaciones cuando NYX esté cerrado, te recomendamos instalar la app (PWA). Si usas un navegador, asegúrate de que tiene permiso para funcionar en segundo plano.",
+    "android_guide_steps": "<0>🤖 Android:</0> Instala la app desde el menú del navegador. Luego Ajustes > Apps > NYX (o tu navegador) > Batería > <1>Sin restricciones</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Compartir > Añadir a la pantalla de inicio. <1>iOS requiere instalar PWA</1> para notificaciones en segundo plano.",
     "help_center": "Centro de ayuda",
     "report_bug": "Reportar un bug",
     "legal": "Legal y Privacidad"

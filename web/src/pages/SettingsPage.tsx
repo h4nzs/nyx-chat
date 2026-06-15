@@ -989,12 +989,12 @@ export default function SettingsPage() {
                       <div className="bg-black/20 p-3 rounded-xl border border-white/5 space-y-2 text-xs">
                         <p>
                           <Trans i18nKey="settings:support.android_guide_steps">
-                            <strong className="text-text-primary">🤖 Android:</strong> Settings {'>'} Apps {'>'} NYX (Chrome/any Browser you use if you are not installing nyx into home screen) {'>'} Battery {'>'} <span className="text-emerald-400">Unrestricted</span>
+                            <strong className="text-text-primary">🤖 Android:</strong> Install app via browser menu. Then Settings {'>'} Apps {'>'} NYX (or your browser) {'>'} Battery {'>'} <span className="text-emerald-400">Unrestricted</span>
                           </Trans>
                         </p>
                         <p>
                           <Trans i18nKey="settings:support.ios_guide_steps">
-                            <strong className="text-text-primary">🍎 iOS:</strong> Settings {'>'} NYX (or Safari/Chrome) {'>'} <span className="text-emerald-400">Enable Background App Refresh</span>
+                            <strong className="text-text-primary">🍎 iOS:</strong> Share {'>'} Add to Home Screen. <span className="text-emerald-400">iOS requires PWA installation</span> for background push.
                           </Trans>
                         </p>
                       </div>

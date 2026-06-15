@@ -64,9 +64,9 @@
   "support": {
     "push_notif": "Notifikasi Push",
     "background_guide": "Panduan Eksekusi Latar Belakang",
-    "background_desc": "Untuk menerima notifikasi saat NYX ditutup, pastikan perangkat Anda mengizinkan aplikasi ini berjalan di latar belakang.",
-    "android_guide_steps": "<0>🤖 Android:</0> Pengaturan > Aplikasi > NYX > Baterai > <1>Tidak Dibatasi</1>",
-    "ios_guide_steps": "<0>🍎 iOS:</0> Pengaturan > NYX > <1>Aktifkan Penyegaran App Latar Belakang</1>",
+    "background_desc": "Untuk menerima notifikasi saat NYX ditutup, kami sangat menyarankan menginstal aplikasi (PWA). Jika menggunakan browser, pastikan browser memiliki izin untuk berjalan di latar belakang.",
+    "android_guide_steps": "<0>🤖 Android:</0> Instal aplikasi via menu browser. Lalu Pengaturan > Aplikasi > NYX (atau browser Anda) > Baterai > <1>Tidak Dibatasi</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Bagikan > Tambah ke Layar Utama. <1>iOS mewajibkan instalasi PWA</1> untuk push latar belakang.",
     "help_center": "Pusat Bantuan",
     "report_bug": "Laporkan Bug",
     "legal": "Hukum & Privasi"

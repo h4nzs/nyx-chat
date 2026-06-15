@@ -64,9 +64,9 @@
   "support": {
     "push_notif": "Push Notifications",
     "background_guide": "Background Execution Guide",
-    "background_desc": "To receive notifications when NYX is closed, ensure your device allows this app to run in the background.",
-    "android_guide_steps": "<0>🤖 Android:</0> Settings > Apps > NYX > Battery > <1>Unrestricted</1>",
-    "ios_guide_steps": "<0>🍎 iOS:</0> Settings > NYX > <1>Enable Background App Refresh</1>",
+    "background_desc": "To receive notifications when NYX is closed, we highly recommend installing the app (PWA). If using a browser, ensure it has permission to run in the background.",
+    "android_guide_steps": "<0>🤖 Android:</0> Install app via browser menu. Then Settings > Apps > NYX (or your browser) > Battery > <1>Unrestricted</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Share > Add to Home Screen. <1>iOS requires PWA installation</1> for background push.",
     "help_center": "Help Center",
     "report_bug": "Report Bug",
     "legal": "Legal & Privacy"
