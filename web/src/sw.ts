@@ -15,17 +15,6 @@ cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
 // 4. API Caching Strategy - REMOVED FOR PRIVACY (No caching of sensitive data)
-// registerRoute(
-//   ({ url }) => url.pathname.startsWith('/api/conversations'),
-//   new StaleWhileRevalidate({
-//     cacheName: 'api-conversations-cache',
-//     plugins: [
-//       new CacheableResponsePlugin({
-//         statuses: [0, 200],
-//       }),
-//     ],
-//   })
-// );
 
 // --- 5. Push Notification Logic ---
 
@@ -68,15 +57,15 @@ self.addEventListener('push', (event: PushEvent) => {
            const autoUnlockKey = (await getKvValue('nyx_device_auto_unlock_key')) as string | undefined;
 
            if (encryptedKeys && autoUnlockKey) {
-           const sodiumModule = await import('libsodium-wrappers');
-           await sodiumModule.default.ready;
-           const sodium = sodiumModule.default;
+             const sodiumModule = await import('libsodium-wrappers');
+             await sodiumModule.default.ready;
+             const sodium = sodiumModule.default;
 
-           const { argon2id } = await import('hash-wasm');
+             const { argon2id } = await import('hash-wasm');
 
-           // 1. Parse the Vault Format: "saltB64.JSON_String"
-           const parts = encryptedKeys.split('.');
-           if (parts.length === 2) {
+             // 1. Parse the Vault Format: "saltB64.JSON_String"
+             const parts = encryptedKeys.split('.');
+             if (parts.length === 2) {
                const salt = sodium.from_base64(parts[0], sodium.base64_variants.URLSAFE_NO_PADDING);
                const encryptedString = parts[1];
 
@@ -85,8 +74,8 @@ self.addEventListener('push', (event: PushEvent) => {
                    password: autoUnlockKey,
                    salt,
                    parallelism: 1,
-                   iterations: 3,
-                   memorySize: 32768,
+                   iterations: 4, // Sinkron dengan ARGON_VAULT_CONFIG
+                   memorySize: 131072, // Sinkron dengan 128MB di crypto.worker.ts
                    hashLength: 32,
                    outputType: 'binary'
                });
@@ -95,8 +84,6 @@ self.addEventListener('push', (event: PushEvent) => {
                const parsedData = JSON.parse(encryptedString);
                const iv = new Uint8Array(parsedData.iv);
                const ciphertext = new Uint8Array(parsedData.data);
-
-               // Handle keys derived from argon2id that might be represented differently
                const keyBytes = new Uint8Array(kek as unknown as ArrayBuffer);
 
                const decryptedContent = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
@@ -109,31 +96,30 @@ self.addEventListener('push', (event: PushEvent) => {
 
                const decryptedString = new TextDecoder().decode(decryptedContent);
                const parsedOnce = JSON.parse(decryptedString);
-               // Handle the double-stringified payload from crypto.worker.ts
+               // Handle the double-stringified payload dari crypto.worker.ts
                const keys = typeof parsedOnce === 'string' ? JSON.parse(parsedOnce) : parsedOnce;
 
                // 4. Extract the Encryption Private Key & Compute Public Key
                const privateKey = sodium.from_base64(keys.encryption, sodium.base64_variants.URLSAFE_NO_PADDING);
+               const publicKey = sodium.crypto_scalarmult_base(privateKey);
 
-                  const publicKey = sodium.crypto_scalarmult_base(privateKey);
+               // 5. Open the Push Notification Sealed Box
+               const sealedPayloadBytes = sodium.from_base64(data.data.encryptedPushPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
+               const decryptedPushBytes = sodium.crypto_box_seal_open(sealedPayloadBytes, publicKey, privateKey);
+               
+               const decryptedPayload = JSON.parse(sodium.to_string(decryptedPushBytes));
+               
+               title = decryptedPayload.title || title;
+               body = decryptedPayload.body || body;
+               conversationId = decryptedPayload.conversationId || conversationId;
 
-                  // 5. Open the Push Notification Sealed Box
-                  const sealedPayloadBytes = sodium.from_base64(data.data.encryptedPushPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  const decryptedPushBytes = sodium.crypto_box_seal_open(sealedPayloadBytes, publicKey, privateKey);
-                  
-                  const decryptedPayload = JSON.parse(sodium.to_string(decryptedPushBytes));
-                  
-                  title = decryptedPayload.title || title;
-                  body = decryptedPayload.body || body;
-                  conversationId = decryptedPayload.conversationId || conversationId;
-
-                  // Cleanup memory
-                  sodium.memzero(kek);
-                  sodium.memzero(privateKey);
-              }
+               // Cleanup memory
+               sodium.memzero(kek);
+               sodium.memzero(privateKey);
+             }
            }
         } catch (cryptoError) {
-           console.error("[SW] Push decryption failed, falling back to generic payload:", cryptoError);
+           console.error("[SW] Push decryption failed ERROR:", cryptoError);
         }
       }
 
