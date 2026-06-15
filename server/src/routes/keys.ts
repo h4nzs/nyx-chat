@@ -171,67 +171,94 @@ router.get(
     try {
       const { userId } = req.params
 
-      const devices = await prisma.device.findMany({
-        where: { userId: String(userId) },
-        include: { preKeyBundle: true },
-        orderBy: { lastActiveAt: 'desc' },
-        take: 1
-      })
+      // 1. Try to get device template from Redis
+      let deviceTemplate: any = null;
+      const cacheKey = `cache:keys:bundle:${userId}`;
 
-      if (devices.length === 0) {
-        throw new ApiError(404, 'User does not have any active devices.')
+      try {
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+          deviceTemplate = JSON.parse(cached);
+        }
+      } catch (cacheError) {
+        console.error('[Cache] Redis get error in prekey-bundle:', cacheError);
       }
 
-      const responseBundles = await Promise.all(devices.map(async (device) => {
-          if (!device.signingKey || !device.publicKey) return null;
+      // 2. Fetch from DB if not in cache
+      if (!deviceTemplate) {
+        const devices = await prisma.device.findMany({
+          where: { userId: String(userId) },
+          include: { preKeyBundle: true },
+          orderBy: { lastActiveAt: 'desc' },
+          take: 1
+        })
 
-          let otpk = null;
-          if (device.preKeyBundle) {
-              otpk = await prisma.$queryRaw`
-                DELETE FROM "OneTimePreKey"
-                WHERE id = (
-                  SELECT id FROM "OneTimePreKey"
-                  WHERE "deviceId" = ${device.id}
-                  ORDER BY "createdAt" ASC
-                  FOR UPDATE SKIP LOCKED
-                  LIMIT 1
-                )
-                RETURNING id, "keyId", "publicKey", "pqPublicKey"
-              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
-          }
+        if (devices.length === 0) {
+          throw new ApiError(404, 'User does not have any active devices.')
+        }
 
-          // FIX 1: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
-          const bundle: Record<string, unknown> = {
-            deviceId: device.id,
-            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
-          }
+        const device = devices[0];
+        if (!device.signingKey || !device.publicKey) {
+          throw new ApiError(404, 'Device identity not fully initialized.');
+        }
 
-          if (device.preKeyBundle) {
-              bundle.signedPreKey = {
-                key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
-                pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
-                signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
-                pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
-              };
-          }
+        deviceTemplate = {
+          id: device.id,
+          identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
+          pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
+          signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey),
+          signedPreKey: device.preKeyBundle ? {
+            key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
+            pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
+            signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
+            pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
+          } : null
+        };
 
-          if (otpk) {
-            bundle.oneTimePreKey = {
-              keyId: otpk.keyId,
-              // FIX 2: Konversi jika publicKey OTPK itu Buffer
-              key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
-              pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
-            }
-          }
-          return bundle;
-      }));
+        // Save to Redis
+        try {
+          await redisClient.set(cacheKey, JSON.stringify(deviceTemplate), { EX: 3600 });
+        } catch (cacheError) {
+          console.error('[Cache] Redis set error in prekey-bundle:', cacheError);
+        }
+      }
 
-      const validBundles = responseBundles.filter(b => b !== null);
-      if (validBundles.length === 0) throw new ApiError(404, 'No valid key bundles found for this user.');
+      // 3. Fetch and DELETE one OTPK from DB (Atomic)
+      let otpk = null;
+      try {
+        otpk = await prisma.$queryRaw`
+          DELETE FROM "OneTimePreKey"
+          WHERE id = (
+            SELECT id FROM "OneTimePreKey"
+            WHERE "deviceId" = ${deviceTemplate.id}
+            ORDER BY "createdAt" ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+          )
+          RETURNING id, "keyId", "publicKey", "pqPublicKey"
+        `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
+      } catch (dbError) {
+        console.error('[DB] Failed to consume OTPK:', dbError);
+      }
 
-      res.json(validBundles[0])
+      // 4. Combine and return
+      const bundle: any = {
+        deviceId: deviceTemplate.id,
+        identityKey: deviceTemplate.identityKey,
+        pqIdentityKey: deviceTemplate.pqIdentityKey,
+        signingKey: deviceTemplate.signingKey,
+        signedPreKey: deviceTemplate.signedPreKey
+      };
+
+      if (otpk) {
+        bundle.oneTimePreKey = {
+          keyId: otpk.keyId,
+          key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
+          pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
+        };
+      }
+
+      res.json(bundle);
     } catch (e: unknown) {
       next(e)
     }

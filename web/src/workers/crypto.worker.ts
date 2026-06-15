@@ -1414,7 +1414,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const masterSeedBytes = new Uint8Array(masterSeed);
         const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("otpk-storage")));
         
-        const batch = [];
+        const batch: Array<{ keyId: number, publicKey: string, pqPublicKey: string, encryptedPrivateKey: Uint8Array }> = [];
         for (let i = 0; i < count; i++) {
           const keyId = startId + i;
           
@@ -2014,7 +2014,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           const pqResult = sodium.crypto_kem_xwing_enc(hPQPK);
           
           // Key Exchange Klasik (X25519)
-          const classicalShared = sodium.crypto_scalarmult(guestClassicalKeypair.privateKey, hCPK);
+          const classicalShared = sodium.crypto_scalarmult(guestClassicalKeypair.privateKey as Uint8Array, hCPK);
           
           // Gabungkan (Hybrid PQ-DR Root Key)
           const combinedSecret = new Uint8Array(classicalShared.length + pqResult.sharedSecret.length);
@@ -2043,8 +2043,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           sodium.memzero(combinedSecret);
         } finally {
            // Bersihkan memori worker
-           if (pqKeypair) sodium.memzero(pqKeypair.privateKey);
-           if (guestClassicalKeypair) sodium.memzero(guestClassicalKeypair.privateKey);
+           if (pqKeypair) sodium.memzero(pqKeypair.privateKey as Uint8Array);
+           if (guestClassicalKeypair) sodium.memzero(guestClassicalKeypair.privateKey as Uint8Array);
            sodium.memzero(hCPK);
            sodium.memzero(hPQPK);
         }

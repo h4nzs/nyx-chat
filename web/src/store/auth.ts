@@ -394,7 +394,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 
                 // Regenerate public keys from decrypted private keys for server sync
                 const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
-                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption);
+                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption!);
                 const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
                 newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -416,7 +416,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 const sodium = await getSodiumLib();
                 
                 const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
-                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption);
+                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption!);
                 const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
                 newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);

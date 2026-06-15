@@ -99,9 +99,9 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
     try {
       const storyKey = await generateStoryKey();
       
-      let mediaUrl = undefined;
-      let mimeType = undefined;
-      let fileKey = undefined;
+      let mediaUrl: string | undefined = undefined;
+      let mimeType: string | undefined = undefined;
+      let fileKey: string | undefined = undefined;
 
       if (file) {
         toast.loading('Processing media...', { id: toastId });
