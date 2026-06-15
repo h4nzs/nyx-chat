@@ -305,7 +305,9 @@ app.use("/uploads",
     next();
   },
   express.static(uploadsPath, {
-    index: false, 
+    index: false,
+    maxAge: '1y', // Cache agresif (1 tahun)
+    immutable: true, // Beritahu browser bahwa file tidak akan pernah berubah
     setHeaders: (res, filePath) => {
       const mimeType = mime.getType(filePath);
       if (mimeType && !mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {

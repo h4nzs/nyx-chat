@@ -1030,7 +1030,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         while (offset < dataBytes.length) {
           const chunk = dataBytes.slice(offset, Math.min(offset + chunkSize, dataBytes.length));
-          const pullRes = sodium.crypto_secretstream_xchacha20poly1305_pull(state, chunk);
+          const pullRes = sodium.crypto_secretstream_xchacha20poly1305_pull(state, chunk, null);
           if (!pullRes) {
              throw new Error("File decryption failed or corrupted data");
           }

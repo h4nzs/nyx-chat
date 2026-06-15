@@ -98,8 +98,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
 
       // Initialize Guest Double Ratchet State
       const initResult = await worker_burner_dr_init_guest({
-        hostClassicalPk: hostClassicalPkBytes.buffer,
-        hostPqPk: hostPqPkBytes.buffer
+        hostClassicalPk: hostClassicalPkBytes,
+        hostPqPk: hostPqPkBytes
       });
       const stateFromWorker = initResult.state;
       const guestPk = initResult.guestClassicalPk;

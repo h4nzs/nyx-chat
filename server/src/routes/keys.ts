@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { Buffer } from 'buffer'
+import { redisClient } from '../lib/redis.js'
 // ✅ Menggunakan AuthJwtPayload dari paket shared
 import type { AuthJwtPayload } from '@nyx/shared'
 
@@ -83,6 +84,15 @@ router.post(
       });
 
       res.status(201).json({ message: 'Pre-key bundle updated successfully.' });
+
+      // Invalidate Redis cache
+      try {
+        const userId = authUser.id;
+        await redisClient.del(`cache:keys:bundle:${userId}`);
+        await redisClient.del(`cache:keys:public:${userId}`);
+      } catch (cacheError) {
+        console.error('[Cache] Failed to invalidate bundle cache:', cacheError);
+      }
     } catch (e) {
       next(e);
     }
@@ -242,17 +252,42 @@ router.post(
         return res.json({});
       }
 
-      const devices = await prisma.device.findMany({
-        where: { userId: { in: userIds } },
-        select: { id: true, userId: true, publicKey: true, pqPublicKey: true, signingKey: true }
-      });
-
       const responseMap = new Map<string, Record<string, unknown>[]>();
-      for (const uid of userIds) {
-          responseMap.set(uid, []);
+      const missingUserIds: string[] = [];
+
+      // 1. Try to get from Redis first
+      try {
+        const cacheResults = await Promise.all(
+          userIds.map((uid: string) => redisClient.get(`cache:keys:public:${uid}`))
+        );
+
+        for (let i = 0; i < userIds.length; i++) {
+          const uid = userIds[i];
+          const cached = cacheResults[i];
+          if (cached) {
+            responseMap.set(uid, JSON.parse(cached));
+          } else {
+            missingUserIds.push(uid);
+          }
+        }
+      } catch (cacheError) {
+        console.error('[Cache] Redis get error in public-keys:', cacheError);
+        missingUserIds.push(...userIds);
       }
 
-      for (const device of devices) {
+      // 2. Fetch missing from DB
+      if (missingUserIds.length > 0) {
+        const devices = await prisma.device.findMany({
+          where: { userId: { in: missingUserIds } },
+          select: { id: true, userId: true, publicKey: true, pqPublicKey: true, signingKey: true }
+        });
+
+        const dbResults = new Map<string, Record<string, unknown>[]>();
+        for (const uid of missingUserIds) {
+          dbResults.set(uid, []);
+        }
+
+        for (const device of devices) {
           if (!device.signingKey || !device.publicKey) continue;
 
           const bundle: Record<string, unknown> = {
@@ -262,9 +297,25 @@ router.post(
             signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
           };
 
-          const arr = responseMap.get(device.userId) || [];
+          const arr = dbResults.get(device.userId) || [];
           arr.push(bundle);
-          responseMap.set(device.userId, arr);
+          dbResults.set(device.userId, arr);
+        }
+
+        // 3. Cache results in Redis and merge into responseMap
+        try {
+          await Promise.all(
+            Array.from(dbResults.entries()).map(([uid, data]) => 
+              redisClient.set(`cache:keys:public:${uid}`, JSON.stringify(data), { EX: 3600 }) // Cache for 1 hour
+            )
+          );
+        } catch (cacheError) {
+          console.error('[Cache] Redis set error in public-keys:', cacheError);
+        }
+
+        for (const [uid, data] of dbResults.entries()) {
+          responseMap.set(uid, data);
+        }
       }
 
       res.json(Object.fromEntries(responseMap));

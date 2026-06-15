@@ -12,15 +12,24 @@ export function useUserProfile(userInput?: { id: string | UserId; encryptedProfi
 
   const cachedProfile = useProfileStore(s => cacheKey ? s.profiles[cacheKey] : undefined);
   const decryptAndCache = useProfileStore(s => s.decryptAndCache);
+  const getCacheOnly = useProfileStore(s => s.getCacheOnly);
 
   const [localProfile, setLocalProfile] = useState<DecryptedProfile | null>(null);
 
   useEffect(() => {
-    if (!user || cachedProfile || !user.encryptedProfile) return;
-    
+    if (!user || !user.id || !user.encryptedProfile) return;
+
     let isMounted = true;
 
     const loadProfile = async () => {
+        // 1. Cepat: Cek cache (RAM/IndexedDB) dulu tanpa memicu worker dekripsi
+        const quickCache = await getCacheOnly(user.id, user.encryptedProfile!);
+        if (isMounted && quickCache) {
+          setLocalProfile(quickCache);
+          return; // Jika cocok, tidak perlu lanjut ke dekripsi berat
+        }
+
+        // 2. Latar Belakang: Dekripsi penuh via worker jika cache tidak ada/lama
         const decrypted = await decryptAndCache(user.id, user.encryptedProfile!);
         if (isMounted) setLocalProfile(decrypted);
     };
@@ -28,7 +37,7 @@ export function useUserProfile(userInput?: { id: string | UserId; encryptedProfi
     loadProfile();
 
     return () => { isMounted = false; };
-  }, [user?.id, user?.encryptedProfile, cachedProfile, decryptAndCache]);
+  }, [user?.id, user?.encryptedProfile, getCacheOnly, decryptAndCache]);
 
   if (!user) return { name: i18n.t('common:defaults.unknown', "Unknown"), avatarUrl: null, description: null };
   if (cachedProfile) return cachedProfile; 

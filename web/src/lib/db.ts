@@ -110,10 +110,22 @@ export interface VaultEntry {
   value: unknown;
 }
 
+export interface ProfileCacheRecord {
+  id: UserId;
+  name: string;
+  avatarUrl: string | null;
+  description: string | null;
+  encryptedHash: string; // Hash profil terenkripsi untuk deteksi perubahan
+  updatedAt: number;
+}
+
 export class NyxDatabase extends Dexie {
   // ShadowVault
   messages!: Table<DecryptedMessageRecord, string>;
   storyKeys!: Table<{ storyId: StoryId; key: string }, string>;
+
+  // Profile Cache
+  profileCache!: Table<ProfileCacheRecord, string>;
 
   // OfflineQueue
   offlineQueue!: Table<QueueItem, number>;
@@ -188,6 +200,10 @@ export class NyxDatabase extends Dexie {
         id: `${session.conversationId}_${session.peerDeviceId || 'unknown'}`
       }));
       await trans.table('pqDrSessionsV2').bulkAdd(newSessions);
+    });
+
+    this.version(5).stores({
+      profileCache: 'id, encryptedHash'
     });
   }
 }

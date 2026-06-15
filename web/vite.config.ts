@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { compression } from 'vite-plugin-compression2';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { createRequire } from 'module';
@@ -16,6 +17,16 @@ export default defineConfig(({ mode }) => {
   plugins: [
     tailwindcss(),
     react(),
+    // 1. Kompresi Brotli (Terbaik untuk Browser Modern)
+    compression({
+      algorithm: 'brotliCompress',
+      exclude: [/\.(br)$/, /\.(gz)$/],
+    }),
+    // 2. Kompresi Gzip (Fallback untuk Browser Lama)
+    compression({
+      algorithm: 'gzip',
+      exclude: [/\.(br)$/, /\.(gz)$/],
+    }),
     VitePWA({
       strategies: 'injectManifest', // Kita pakai custom SW
         srcDir: 'src',

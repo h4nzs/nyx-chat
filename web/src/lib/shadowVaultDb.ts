@@ -12,7 +12,7 @@ const getVaultKey = async () => {
   const { privateKey } = await getMyEncryptionKeyPair();
   if (!privateKey) throw new Error("Vault locked: Identity key not found in memory.");
   // Derive a deterministic 32-byte symmetric key from the user's private key
-  return sodium.crypto_generichash(32, privateKey);
+  return sodium.crypto_generichash(32, privateKey, null);
 };
 
 export const encryptVaultText = async (text: string): Promise<string> => {
@@ -299,7 +299,7 @@ class NyxShadowVaultProxy {
         // FIX 2: Hapus Zod parsing yang ketat di sini, karena record dari DB lokal sudah kita anggap valid bentuknya.
         // Zod parsing bisa memblokir pesan yang valid jika schema shared-nya sangat ketat.
         
-        let plainText = null;
+        let plainText: string | null = null;
         let decryptedRepliedTo: Message | undefined = undefined;
         let decryptedSenderName: string | undefined = undefined;
         let decryptedSenderUsername: string | undefined = undefined;

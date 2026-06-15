@@ -36,7 +36,7 @@ async function getPrfSalt(): Promise<Uint8Array> {
   const sodium = await getSodium();
   const encoder = new TextEncoder();
   const data = encoder.encode("NYX_CYPHERPUNK_LOCAL_UNLOCK_SALT_V1");
-  return sodium.crypto_generichash(32, data);
+  return sodium.crypto_generichash(32, data, null);
 }
 
 function bufferToBase64(buffer: ArrayBuffer): string {
@@ -61,7 +61,7 @@ async function encryptData(text: string, keyBuffer: ArrayBuffer): Promise<{ ciph
   const sodium = await getSodium();
   const key = new Uint8Array(keyBuffer);
   // Ensure the key is exactly 32 bytes for XChaCha20Poly1305
-  const finalKey = sodium.crypto_generichash(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES, key);
+  const finalKey = sodium.crypto_generichash(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES, key, null);
   const iv = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
   const encodedText = new TextEncoder().encode(text);
   
@@ -76,7 +76,7 @@ async function encryptData(text: string, keyBuffer: ArrayBuffer): Promise<{ ciph
 async function decryptData(ciphertextB64: string, ivB64: string, keyBuffer: ArrayBuffer): Promise<string> {
   const sodium = await getSodium();
   const key = new Uint8Array(keyBuffer);
-  const finalKey = sodium.crypto_generichash(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES, key);
+  const finalKey = sodium.crypto_generichash(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES, key, null);
   const iv = sodium.from_base64(ivB64, sodium.base64_variants.ORIGINAL);
   const encrypted = sodium.from_base64(ciphertextB64, sodium.base64_variants.ORIGINAL);
   
