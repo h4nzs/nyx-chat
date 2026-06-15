@@ -90,6 +90,13 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
     await prisma.refreshToken.create({
       data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
     })
+
+    // Store active device in Redis for instant WebTransport validation (Lapis 1 Security)
+    try {
+      await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, deviceId); // 30 days
+    } catch (redisErr) {
+      console.error('[Redis] Failed to set active device cache:', redisErr);
+    }
   }
   
   return { access, refresh }
@@ -491,6 +498,12 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
     const isProd = env.nodeEnv === 'production'
     res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
     res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+
+    // Clear active device cache from Redis
+    try {
+      await redisClient.del(`active_device:${req.user.id}`);
+    } catch (_re) {}
+
     res.json({ message: "All sessions terminated." });
   } catch (e) { next(e); }
 });
@@ -501,9 +514,14 @@ router.post('/logout', async (req, res) => {
     try { await prisma.pushSubscription.deleteMany({ where: { endpoint } }) } catch (_e) {}
   }
   try {
-    const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string };
+    const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string; sub?: string };
     if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
       await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
+      
+      // Clear active device cache if we have the user ID
+      if (payload.sub) {
+        try { await redisClient.del(`active_device:${payload.sub}`); } catch (_re) {}
+      }
     }
   } catch (_e) {}
   const isProd = env.nodeEnv === 'production'

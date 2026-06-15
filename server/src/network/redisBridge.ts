@@ -147,6 +147,26 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     case 99: // DISCONNECT
       await handleDisconnect(userId);
       break;
+    case 0x00: // AUTH (Lapis 1 Security: Active Session Check)
+      try {
+        const activeDeviceId = await redisClient.get(`active_device:${userId}`);
+        
+        // Jika ada catatan perangkat aktif dan tidak cocok dengan yang mencoba konek
+        if (activeDeviceId && activeDeviceId !== deviceId) {
+          console.warn(`[Security] Revoked device ${deviceId} (User ${userId}) tried to connect via WebTransport. Kicking...`);
+          // Kirim OpCode 0x07 (KICK) dengan JSON payload yang benar
+          const kickPayload = Buffer.from(JSON.stringify({ 
+            reason: 'SESSION_REVOKED', 
+            deviceId,
+            message: 'You have been logged in from another device.' 
+          })).toString('base64');
+          
+          await sendToDevice(userId, deviceId, TransportOpCode.KICK, kickPayload);
+        }
+      } catch (err) {
+        console.error('[Security] Failed to verify active session:', err);
+      }
+      break;
     default:
       console.warn(`⚠️ Unhandled OpCode: 0x${opCode.toString(16)} from user ${userId}`);
   }
