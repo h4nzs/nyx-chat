@@ -139,22 +139,18 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
 
     return () => {
       isMounted = false;
-      // Jangan revoke URL jika komponen hanya re-render (misal karena parent Virtuoso).
+      // JANGAN REVOKE di sini jika sudah masuk cache global!
+      // Kita hanya revoke jika proses gagal di tengah jalan.
       if (objectUrl && !hasDecryptedSuccessfully.current) {
-          URL.revokeObjectURL(objectUrl);
+          try { URL.revokeObjectURL(objectUrl); } catch (e) {}
       }
     };
   // ✅ OPTIMASI: Bersihkan dependency array, hapus message.content karena tidak relevan dengan dekripsi URL
   }, [message.fileUrl, message.fileType, message.fileKey, message.isBlindAttachment, lastKeychainUpdate, t]);
 
-  // Clean up Object URL when the component completely unmounts from the DOM
-  useEffect(() => {
-    return () => {
-       if (audioSrc && audioSrc.startsWith('blob:')) {
-           URL.revokeObjectURL(audioSrc);
-       }
-    };
-  }, [audioSrc]);
+  // JANGAN REVOKE audioSrc di sini karena ia mungkin berasal dari cache global.
+  // URL ini harus tetap hidup agar WaveSurfer bisa me-load ulang saat user scrolling di daftar virtual.
+
 
 
   // 2. Initialize WaveSurfer once we have the audioSrc

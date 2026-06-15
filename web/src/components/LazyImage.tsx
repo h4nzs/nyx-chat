@@ -56,10 +56,7 @@ export default function LazyImage({
       setRetryCount(0);
       setError(null);
       setDecryptionStatus('pending');
-      setImageUrl(prevUrl => {
-         if (prevUrl && prevUrl.startsWith('blob:')) URL.revokeObjectURL(prevUrl);
-         return null;
-      });
+      setImageUrl(null);
     }
 
     // Jika sudah sukses untuk sidik jari ini, JANGAN eksekusi ulang!
@@ -180,22 +177,19 @@ export default function LazyImage({
 
     return () => {
       isMounted = false;
-      // Jangan revoke URL jika komponen hanya re-render karena Virtuoso
+      // JANGAN REVOKE di sini jika sudah masuk cache global!
+      // Kita hanya revoke jika proses gagal di tengah jalan dan URL belum dibagikan ke cache.
       if (objectUrl && !hasDecryptedSuccessfully.current) {
-          URL.revokeObjectURL(objectUrl);
+          try { URL.revokeObjectURL(objectUrl); } catch (e) {}
       }
     };
   // ✅ OPTIMASI 3: Bersihkan dependency array
   }, [message.fileUrl, message.fileType, message.fileKey, message.sessionId, lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, isGroup]);
 
-  // Clean up Object URL when the component completely unmounts from the DOM
-  useEffect(() => {
-    return () => {
-       if (imageUrl && imageUrl.startsWith('blob:')) {
-           URL.revokeObjectURL(imageUrl);
-       }
-    };
-  }, [imageUrl]);
+  // JANGAN REVOKE imageUrl di sini karena ia mungkin berasal dari cache global 
+  // atau merupakan URL optimistik yang masih digunakan komponen lain.
+  // PWA/Virtual List membutuhkan URL ini tetap valid selama sesi aktif.
+
 
   // --- RENDER HELPERS ---
   const renderOverlay = () => {

@@ -21,6 +21,7 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
   const isMountedRef = useRef(true);
+  const hasDecryptedSuccessfully = useRef(false);
 
   useEffect(() => {
       isMountedRef.current = true;
@@ -94,8 +95,21 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       }
 
       try {
+        // 0. CHECK GLOBAL RAM CACHE (INSTANT)
+        const { getCachedBlobUrl, setCachedBlobUrl } = await import('@utils/blobCache');
+        const cachedUrl = getCachedBlobUrl(rawFileKey);
+        if (cachedUrl) {
+            if (isMounted) {
+                setDecryptedUrl(cachedUrl);
+                setIsLoading(false);
+                hasDecryptedSuccessfully.current = true;
+            }
+            return;
+        }
+
         // OPFS Caching
         const { getEncryptedFromOPFS, saveEncryptedToOPFS } = await import('@lib/opfsStorage');
+
         let encryptedBlob = await getEncryptedFromOPFS(rawFileKey);
 
         if (!encryptedBlob) {
@@ -130,7 +144,13 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
 
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
+          
+          // SAVE TO GLOBAL CACHE
+          const { setCachedBlobUrl } = await import('@utils/blobCache');
+          setCachedBlobUrl(rawFileKey, objectUrl);
+
           setDecryptedUrl(objectUrl);
+          hasDecryptedSuccessfully.current = true;
         }
       } catch (e: unknown) {
         console.error("Lightbox decryption failed:", e);
@@ -144,9 +164,15 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
 
     return () => {
       isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      // JANGAN REVOKE di sini jika sudah masuk cache global!
+      if (objectUrl && !hasDecryptedSuccessfully.current) {
+          try { URL.revokeObjectURL(objectUrl); } catch (e) {}
+      }
     };
   }, [message, lastKeychainUpdate, t]);
+
+  // JANGAN REVOKE decryptedUrl di sini karena ia mungkin berasal dari cache global.
+
 
   const isVideo = message.fileType?.startsWith('video/');
   const isAudio = message.fileType?.startsWith('audio/');

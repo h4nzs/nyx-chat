@@ -105,7 +105,22 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       try {
         let rawFileKey: string | undefined = message.fileKey || undefined;
 
-        // 2. Fallback: Jika tidak ada fileKey tapi ini adalah Blind Attachment, coba minta dari sesi ratchet
+        // 0. CHECK GLOBAL RAM CACHE (INSTANT)
+        if (rawFileKey) {
+            const { getCachedBlobUrl } = await import('@utils/blobCache');
+            const cachedUrl = getCachedBlobUrl(rawFileKey);
+            if (cachedUrl) {
+                if (isMounted) {
+                    setDecryptedUrl(cachedUrl);
+                    setStatus('success');
+                    hasDecryptedSuccessfully.current = true;
+                }
+                return;
+            }
+        }
+
+        // 2. Fallback: Jika tidak ada fileKey tapi ini adalah Blind Attachment...
+
         if (!rawFileKey && message.isBlindAttachment) {
             // Fallback for 1:1 chats where sessionId might be missing from the store
             const finalSessionId = message.sessionId || (isGroup ? '' : message.conversationId);
@@ -171,6 +186,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         // 5. Render ke layar!
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
+
+          // SAVE TO GLOBAL CACHE
+          if (rawFileKey) {
+            const { setCachedBlobUrl } = await import('@utils/blobCache');
+            setCachedBlobUrl(rawFileKey, objectUrl);
+          }
+
           setDecryptedUrl(objectUrl);
           setStatus('success');
           hasDecryptedSuccessfully.current = true;
@@ -189,22 +211,17 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
     return () => {
       isMounted = false;
+      // JANGAN REVOKE di sini jika sudah masuk cache global!
       if (objectUrl && !hasDecryptedSuccessfully.current) {
-         URL.revokeObjectURL(objectUrl);
+         try { URL.revokeObjectURL(objectUrl); } catch (e) {}
       }
     };
   // Tambahkan getFileType ke dependency array eslint jika diminta (opsional)
   }, [message, lastKeychainUpdate, retryCount, isGroup, t]);
 
-  useEffect(() => {
-    return () => {
-       if (decryptedUrl && decryptedUrl.startsWith('blob:')) {
-           setTimeout(() => {
-               URL.revokeObjectURL(decryptedUrl);
-           }, 10000);
-       }
-    };
-  }, [decryptedUrl]);
+  // JANGAN REVOKE decryptedUrl di sini karena ia mungkin berasal dari cache global 
+  // atau merupakan URL optimistik yang masih digunakan komponen lain.
+
 
   // Eksekusi ulang setelah getFileType dipindahkan ke atas
   const fileType = getFileType();

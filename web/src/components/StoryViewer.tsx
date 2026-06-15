@@ -60,11 +60,9 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
     setIsMediaReady(false);
     setDurationMs(DEFAULT_STORY_DURATION_MS);
 
-    // Hapus Blob URL sebelumnya untuk cegah memory leak
-    if (mediaBlobUrlRef.current) {
-        URL.revokeObjectURL(mediaBlobUrlRef.current);
-        mediaBlobUrlRef.current = null;
-    }
+    // Hapus referensi lokal saat pindah story, tapi JANGAN revoke 
+    // karena sudah dikelola oleh blobCache.
+    mediaBlobUrlRef.current = null;
     setMediaBlobUrl(null);
 
     if (!currentStory) return;
@@ -78,7 +76,24 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
 
       if (currentStory.decryptedData.fileKey) {
         try {
+          const rawFileKey = `story:${currentStory.id}`;
+          
+          // 0. CHECK GLOBAL RAM CACHE (INSTANT)
+          const { getCachedBlobUrl, setCachedBlobUrl } = await import('@utils/blobCache');
+          const cachedUrl = getCachedBlobUrl(rawFileKey);
+          if (cachedUrl) {
+              if (isActive) {
+                  setMediaBlobUrl(cachedUrl);
+                  mediaBlobUrlRef.current = cachedUrl;
+                  if (!currentStory.decryptedData.mimeType?.startsWith('video/')) {
+                      setIsMediaReady(true);
+                  }
+              }
+              return;
+          }
+
           const res = await fetch(currentStory.decryptedData.mediaUrl);
+
           const encryptedBlob = await res.blob();
           let originalType = currentStory.decryptedData.mimeType?.split(';')[0] || 'application/octet-stream';
           if (currentStory.decryptedData.mediaUrl?.toLowerCase().endsWith('.svg') || currentStory.decryptedData.mimeType?.includes('svg')) {
@@ -96,6 +111,11 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
 
           if (isActive) {
             const url = URL.createObjectURL(decryptedBlob);
+            
+            // SAVE TO GLOBAL CACHE
+            const { setCachedBlobUrl } = await import('@utils/blobCache');
+            setCachedBlobUrl(rawFileKey, url);
+
             mediaBlobUrlRef.current = url;
             setMediaBlobUrl(url);
             
@@ -116,12 +136,15 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
 
     return () => {
       isActive = false;
-      if (mediaBlobUrlRef.current) {
-        URL.revokeObjectURL(mediaBlobUrlRef.current);
-        mediaBlobUrlRef.current = null;
-      }
+      // JANGAN REVOKE di sini jika sudah masuk cache global!
+      // Karena kita menggunakan mediaBlobUrlRef untuk melacak apa yang kita buat secara lokal
+      // Kita hanya membiarkannya tetap hidup di cache.
+      mediaBlobUrlRef.current = null;
     };
-  }, [currentIndex, currentStory]);
+  }, [currentIndex, currentStory, t]);
+
+  // JANGAN REVOKE mediaBlobUrl di sini.
+
 
   // 2. SIKLUS HIDUP TIMER & PROGRESS BAR
   useEffect(() => {
