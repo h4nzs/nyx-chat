@@ -174,28 +174,38 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         }
 
         // 🛡️ LAPIS 2: HARDWARE BINDING (FINGERPRINT CHECK)
-        if (authData.identity) {
-          const device = await prisma.device.findUnique({
-            where: { id: deviceId },
-            select: { fingerprint: true, installationId: true }
-          });
+        const device = await prisma.device.findUnique({
+          where: { id: deviceId },
+          select: { fingerprint: true, installationId: true }
+        });
 
-          if (device && device.fingerprint) {
-             const isFingerprintMatch = device.fingerprint === authData.identity.fingerprint;
-             // Kita beri toleransi: Jika installationId (Anchor) cocok, kita izinkan meskipun fingerprint browser berubah sedikit
-             // (misal karena update browser atau resolusi layar berubah)
-             const isAnchorMatch = device.installationId && device.installationId === authData.identity.installationId;
+        if (device && device.fingerprint) {
+           // 🛡️ PERBAIKAN: Cegah bypass dengan menghilangkan payload 'identity'
+           if (!authData.identity) {
+              console.warn(`[Security-L2] Missing identity payload from device ${deviceId} (User ${userId}). Kicking...`);
+              const kickPayload = Buffer.from(JSON.stringify({ 
+                reason: 'HARDWARE_MISMATCH', 
+                deviceId,
+                message: 'Security Alert: Incomplete device identity. Please login again.' 
+              })).toString('base64');
+              await sendToDevice(userId, deviceId, TransportOpCode.KICK, kickPayload);
+              return;
+           }
 
-             if (!isFingerprintMatch && !isAnchorMatch) {
-                console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${userId}). Possible session cloning. Kicking...`);
-                const kickPayload = Buffer.from(JSON.stringify({ 
-                  reason: 'HARDWARE_MISMATCH', 
-                  deviceId,
-                  message: 'Security Alert: Device identity mismatch. Please login again.' 
-                })).toString('base64');
-                await sendToDevice(userId, deviceId, TransportOpCode.KICK, kickPayload);
-             }
-          }
+           const isFingerprintMatch = device.fingerprint === authData.identity.fingerprint;
+           // Kita beri toleransi: Jika installationId (Anchor) cocok, kita izinkan meskipun fingerprint browser berubah sedikit
+           const isAnchorMatch = device.installationId && device.installationId === authData.identity.installationId;
+
+           if (!isFingerprintMatch && !isAnchorMatch) {
+              console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${userId}). Possible session cloning. Kicking...`);
+              const kickPayload = Buffer.from(JSON.stringify({ 
+                reason: 'HARDWARE_MISMATCH', 
+                deviceId,
+                message: 'Security Alert: Device identity mismatch. Please login again.' 
+              })).toString('base64');
+              await sendToDevice(userId, deviceId, TransportOpCode.KICK, kickPayload);
+              return;
+           }
         }
       } catch (err) {
         console.error('[Security] Failed to verify session binding:', err);
