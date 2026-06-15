@@ -245,6 +245,9 @@ router.post('/:id/participants', async (req, res, next) => {
     
     const safeConversationId = asConversationId(conversationId);
 
+    const { invalidateParticipantCache } = await import('../utils/participantCache.js');
+    await invalidateParticipantCache(conversationId);
+
     await emitEventToConversation(conversationId, 'conversation:participants_added', { 
       conversationId: safeConversationId, 
       participants: safeParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[]
@@ -309,6 +312,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
         // No server-side key generation. Remaining clients will rotate keys.
     });
     
+    const { invalidateParticipantCache } = await import('../utils/participantCache.js');
+    await invalidateParticipantCache(conversationId);
+
     await emitEventToConversation(conversationId, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) });
     await emitEventToConversation(conversationId, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
     await emitEventToUser(userToRemoveId, 'conversation:deleted', { id: asConversationId(conversationId) });
@@ -335,6 +341,9 @@ router.delete('/:id/leave', async (req, res, next) => {
         // No server-side key generation. Remaining clients will rotate keys.
     });
     
+    const { invalidateParticipantCache } = await import('../utils/participantCache.js');
+    await invalidateParticipantCache(conversationId);
+
     await emitEventToConversation(conversationId, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToConversation(conversationId, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
     await emitEventToUser(userId, 'conversation:deleted', { id: asConversationId(conversationId) });

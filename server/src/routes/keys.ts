@@ -366,71 +366,108 @@ router.post(
         return res.json({});
       }
 
-      const devices = await prisma.device.findMany({
-        where: { userId: { in: userIds } },
-        include: { preKeyBundle: true }
-      })
-
       const responseMap = new Map<string, Record<string, unknown>[]>();
       for (const uid of userIds) {
           responseMap.set(uid, []);
       }
 
-      if (devices.length === 0) {
-        return res.json(Object.fromEntries(responseMap));
+      // 1. Try to get cached bundles from Redis first
+      const missingUserIds: string[] = [];
+      try {
+        const cacheResults = await Promise.all(
+          userIds.map((uid: string) => redisClient.get(`cache:keys:bundle:${uid}`))
+        );
+
+        for (let i = 0; i < userIds.length; i++) {
+          const uid = userIds[i];
+          const cached = cacheResults[i];
+          if (cached) {
+            // Redis stores deviceTemplate (one device per user usually for PQC)
+            const template = JSON.parse(cached);
+            responseMap.set(uid, [template]);
+          } else {
+            missingUserIds.push(uid);
+          }
+        }
+      } catch (cacheError) {
+        console.error('[Cache] Redis get error in prekey-bundles:', cacheError);
+        missingUserIds.push(...userIds);
       }
 
-      for (const device of devices) {
+      // 2. Fetch missing from DB
+      if (missingUserIds.length > 0) {
+        const devices = await prisma.device.findMany({
+          where: { userId: { in: missingUserIds } },
+          include: { preKeyBundle: true }
+        });
+
+        for (const device of devices) {
           if (!device.signingKey || !device.publicKey) continue;
 
-          let otpk = null;
-          if (device.preKeyBundle) {
+          const template = {
+            id: device.id,
+            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
+            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
+            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey),
+            signedPreKey: device.preKeyBundle ? {
+              key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
+              pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
+              signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
+              pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
+            } : null
+          };
+
+          // Cache individually
+          await redisClient.set(`cache:keys:bundle:${device.userId}`, JSON.stringify(template), { EX: 3600 });
+          
+          const arr = responseMap.get(device.userId) || [];
+          arr.push(template);
+          responseMap.set(device.userId, arr);
+        }
+      }
+
+      // 3. ATOMICALLY consume OTPKs for each device (Must ALWAYS come from DB)
+      const finalResults = new Map<string, any[]>();
+      for (const [uid, templates] of responseMap.entries()) {
+          const userBundles: any[] = [];
+          
+          for (const template of templates as any[]) {
+            let otpk = null;
+            try {
               otpk = await prisma.$queryRaw`
                 DELETE FROM "OneTimePreKey"
                 WHERE id = (
                   SELECT id FROM "OneTimePreKey"
-                  WHERE "deviceId" = ${device.id}
+                  WHERE "deviceId" = ${template.id}
                   ORDER BY "createdAt" ASC
                   FOR UPDATE SKIP LOCKED
                   LIMIT 1
                 )
                 RETURNING id, "keyId", "publicKey", "pqPublicKey"
               `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
-          }
+            } catch (e) {}
 
-          // FIX 3: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
-          const bundle: Record<string, unknown> = {
-            deviceId: device.id,
-            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
-          }
+            const bundle: any = {
+              deviceId: template.id,
+              identityKey: template.identityKey,
+              pqIdentityKey: template.pqIdentityKey,
+              signingKey: template.signingKey,
+              signedPreKey: template.signedPreKey
+            };
 
-          if (device.preKeyBundle) {
-              bundle.signedPreKey = {
-                key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
-                pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
-                signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
-                pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
+            if (otpk) {
+              bundle.oneTimePreKey = {
+                keyId: otpk.keyId,
+                key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
+                pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
               };
-          }
-
-          if (otpk) {
-            bundle.oneTimePreKey = {
-              keyId: otpk.keyId,
-               // FIX 4: Konversi jika publicKey OTPK itu Buffer
-              key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
-              pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
             }
+            userBundles.push(bundle);
           }
-          
-          const userBundles = responseMap.get(device.userId);
-          if (userBundles) {
-              userBundles.push(bundle);
-          }
+          finalResults.set(uid, userBundles);
       }
 
-      res.json(Object.fromEntries(responseMap))
+      res.json(Object.fromEntries(finalResults))
     } catch (e: unknown) {
       next(e)
     }

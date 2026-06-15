@@ -248,6 +248,8 @@ router.put('/me/keys',
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
       const { publicKey, pqPublicKey, signingKey } = req.body
+      const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
+      const installationId = req.headers['x-nyx-installation-id'] as string | undefined;
 
       // FIX 2: Konversi String Base64 dari Client menjadi Buffer untuk Prisma Bytes
       await prisma.device.update({
@@ -255,7 +257,9 @@ router.put('/me/keys',
         data: {
             publicKey: Buffer.from(publicKey, 'base64url'),
             pqPublicKey: Buffer.from(pqPublicKey, 'base64url'),
-            signingKey: Buffer.from(signingKey, 'base64url')
+            signingKey: Buffer.from(signingKey, 'base64url'),
+            fingerprint: fingerprint || undefined,
+            installationId: installationId || undefined
         }
       })
 

@@ -2,6 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import express, { Express, Request, Response, NextFunction } from "express";
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import logger from "morgan";
 import cors from "cors";
@@ -44,6 +45,8 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
 }
 
 const app: Express = express();
+
+app.use(compression());
 
 // Trust Proxy: Wajib true karena di belakang Cloudflare & Nginx
 app.set('trust proxy', true);

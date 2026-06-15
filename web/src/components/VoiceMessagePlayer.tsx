@@ -81,6 +81,18 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       }
 
       try {
+        // 0. CHECK GLOBAL RAM CACHE (INSTANT)
+        const { getCachedBlobUrl, setCachedBlobUrl } = await import('@utils/blobCache');
+        const cachedUrl = getCachedBlobUrl(rawFileKey);
+        if (cachedUrl) {
+            if (isMounted) {
+                setAudioSrc(cachedUrl);
+                hasDecryptedSuccessfully.current = true;
+                setIsLoading(false);
+            }
+            return;
+        }
+
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) {
           throw new Error(t('media.invalid_url'));
@@ -96,6 +108,11 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
         
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
+          
+          // SAVE TO GLOBAL CACHE
+          const { setCachedBlobUrl } = await import('@utils/blobCache');
+          setCachedBlobUrl(rawFileKey, objectUrl);
+
           setAudioSrc(objectUrl);
           hasDecryptedSuccessfully.current = true; // ✅ KUNCI STATUS SUKSES!
         }

@@ -238,6 +238,9 @@ router.post('/login', authLimiter, zodValidate({
 }),async (req, res, next) => {
   try {
     const { usernameHash, password, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
+    const explicitDeviceId = req.body.deviceId;
+    const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
+    const installationId = req.headers['x-nyx-installation-id'] as string | undefined;
     
     const user = await prisma.user.findUnique({
       where: { usernameHash },
@@ -252,7 +255,6 @@ router.post('/login', authLimiter, zodValidate({
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
 
-    const explicitDeviceId = req.body.deviceId;
     let activeDeviceId = '';
     let activeEncryptedPrivateKey = '';
 
@@ -279,6 +281,9 @@ router.post('/login', authLimiter, zodValidate({
               where: { id: device.id },
               data: { 
                 lastActiveAt: new Date(), 
+                // Update hardware binding
+                fingerprint: fingerprint || device.fingerprint,
+                installationId: installationId || device.installationId,
                 // Update keys in case they were regenerated locally
                 publicKey: Buffer.from(publicKey, 'base64url'),
                 pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : device.pqPublicKey,
@@ -295,7 +300,9 @@ router.post('/login', authLimiter, zodValidate({
               pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
               signingKey: Buffer.from(signingKey, 'base64url'),
               encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'),
-              name: deviceName || getGenericDeviceName(req.headers['user-agent'])
+              name: deviceName || getGenericDeviceName(req.headers['user-agent']),
+              fingerprint: fingerprint || null,
+              installationId: installationId || null
             }
           });
       }
@@ -303,24 +310,37 @@ router.post('/login', authLimiter, zodValidate({
       activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
 
     } else {
-      const explicitDeviceId = req.body.deviceId;
-      const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
-
       if (explicitDeviceId) {
           const device = user.devices.find(d => d.id === explicitDeviceId);
           
           // SECURITY CHECK: If device exists but fingerprint MISMATCHES, 
           // it means the browser data (LocalStorage) was cloned to a different hardware.
-          // In this case, we FORCE creating a new device ID.
           if (device && device.fingerprint && fingerprint && device.fingerprint !== fingerprint) {
-              console.warn(`[Security] Fingerprint mismatch for device ${explicitDeviceId}. Forcing new device creation.`);
-              // Fallback to "No device found" logic below which creates a new one or prompts recovery
-              activeDeviceId = ''; 
+              // Toleransi: Jika installationId (Anchor) masih cocok, kita izinkan update fingerprint
+              if (device.installationId && device.installationId === installationId) {
+                  await prisma.device.update({
+                      where: { id: device.id },
+                      data: { fingerprint, lastActiveAt: new Date() }
+                  });
+                  activeDeviceId = device.id;
+              } else {
+                  console.warn(`[Security] Hardware/Anchor mismatch for device ${explicitDeviceId}. Forcing recovery flow.`);
+                  activeDeviceId = ''; 
+              }
           } else {
               if (!device) throw new ApiError(404, 'Specified device not found.');
               activeDeviceId = device.id;
               activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
-              await prisma.device.update({ where: { id: device.id }, data: { lastActiveAt: new Date() } });
+              
+              // Update last active and sync IDs if missing
+              await prisma.device.update({ 
+                where: { id: device.id }, 
+                data: { 
+                  lastActiveAt: new Date(),
+                  fingerprint: fingerprint || device.fingerprint,
+                  installationId: installationId || device.installationId
+                } 
+              });
           }
       }
 
@@ -474,6 +494,9 @@ router.post('/recover', authLimiter, zodValidate({
 
     const passwordHash = await hashPassword(newPassword);
 
+    const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
+    const installationId = req.headers['x-nyx-installation-id'] as string | undefined;
+
     const [updatedUser, _, __, newDevice] = await prisma.$transaction([
         prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
         prisma.device.deleteMany({ where: { userId: user.id } }), 
@@ -486,7 +509,9 @@ router.post('/recover', authLimiter, zodValidate({
             pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
             signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: newEncryptedKeys ? Buffer.from(newEncryptedKeys, 'utf8') : null,
-            name: 'Recovered Device'
+            name: 'Recovered Device',
+            fingerprint: fingerprint || null,
+            installationId: installationId || null
           }
         })
     ]);

@@ -78,6 +78,7 @@ model Device {
   userId String
   name   String? // e.g., "Chrome on MacOS", "iPhone 15"
   fingerprint String? // Browser/Hardware fingerprint for security verification
+  installationId String? // Persistent installation anchor from IndexedDB
 
   // Identitas Kriptografi (Pindahan dari tabel User)
   publicKey           Bytes // Encryption/Identity Key

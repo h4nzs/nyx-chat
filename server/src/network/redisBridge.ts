@@ -328,24 +328,8 @@ async function handlePresence(userId: string, payload: { event: string, conversa
 
   if (payload.conversationId && (payload.event === 'typing:start' || payload.event === 'typing:stop' || payload.event === 'typing')) {
      const conversationId = payload.conversationId;
-     const cacheKey = `cache:participants:${conversationId}`;
-     
-     let participantIds: string[] = [];
-     const cached = await redisClient.get(cacheKey);
-     
-     if (cached) {
-       participantIds = JSON.parse(cached);
-     } else {
-       const conversation = await prisma.conversation.findUnique({
-         where: { id: conversationId },
-         include: { participants: { select: { userId: true } } }
-       });
-       
-       if (conversation) {
-         participantIds = conversation.participants.map(p => p.userId);
-         await redisClient.set(cacheKey, JSON.stringify(participantIds), { EX: 600 }); // Cache 10 mins
-       }
-     }
+     const { getParticipantIds } = await import('../utils/participantCache.js');
+     const participantIds = await getParticipantIds(conversationId);
 
      if (participantIds.length > 0) {
        const isTyping = payload.event === 'typing:start' || payload.event === 'typing';

@@ -113,12 +113,17 @@ export default function LazyImage({
       }
 
       try {
-        // No need to decrypt fileKey here because the store (decryptMessageObject) 
-        // already decrypted the message content and extracted the plaintext key.
         const rawFileKey = encryptedFileKey;
-
-        if (!rawFileKey) {
-            if (isMounted) { setDecryptionStatus('waiting_for_key'); setError("Waiting for key..."); }
+        
+        // 0. CHECK GLOBAL RAM CACHE (INSTANT)
+        const { getCachedBlobUrl, setCachedBlobUrl } = await import('@utils/blobCache');
+        const cachedUrl = getCachedBlobUrl(rawFileKey);
+        if (cachedUrl) {
+            if (isMounted) {
+                setImageUrl(cachedUrl);
+                setDecryptionStatus('succeeded');
+                hasDecryptedSuccessfully.current = true;
+            }
             return;
         }
 
@@ -153,6 +158,11 @@ export default function LazyImage({
 
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
+          
+          // SAVE TO GLOBAL CACHE
+          const { setCachedBlobUrl } = await import('@utils/blobCache');
+          setCachedBlobUrl(rawFileKey, objectUrl);
+
           setImageUrl(objectUrl);
           setDecryptionStatus('succeeded');
           hasDecryptedSuccessfully.current = true; // KUNCI!

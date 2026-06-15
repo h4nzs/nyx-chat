@@ -3,54 +3,30 @@ import { prisma } from '../lib/prisma.js';
 import { emitEventToConversation } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
 
-// Jalanin fungsi ini setiap 1 menit (* * * * *)
+// Job 1: FAST NOTIFIER (Setiap menit)
+// Fokus: Memberitahu klien bahwa pesan sudah kadaluarsa agar langsung hilang dari UI.
 export const startMessageSweeper = () => {
-  console.log('🧹 Message Sweeper Job started...');
+  console.log('🧹 Message Sweeper (Fast Notifier) started...');
 
   cron.schedule('* * * * *', async () => {
     try {
       const now = new Date();
-        const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
         
-        const BATCH_SIZE = 100;
-        let processedCount = 0;
+      // Ambil ID pesan yang kadaluarsa untuk diberitahukan ke klien
+      const expiredMessages = await prisma.message.findMany({
+        where: {
+          OR: [
+            { expiresAt: { not: null, lte: now } },
+            { createdAt: { lte: fourteenDaysAgo } }
+          ]
+        },
+        select: { id: true, conversationId: true },
+        take: 500 // Ambil lebih banyak karena ini hanya READ query yang ringan
+      });
 
-        while (true) {
-          // 1. Cari pesan dengan DUA kondisi (Disappearing Message ATAU Server TTL)
-          const expiredMessages = await prisma.message.findMany({
-            where: {
-              OR: [
-                {
-                  // Kondisi 1: Fitur Disappearing Message (expiresAt habis)
-                  expiresAt: {
-                    not: null,
-                    lte: now
-                  }
-                },
-                {
-                  // Kondisi 2: Server Store-and-Forward TTL (Umur pesan > 14 hari)
-                  createdAt: {
-                    lte: fourteenDaysAgo
-                  }
-                }
-              ]
-            },
-            select: { id: true, conversationId: true, conversation: { include: { participants: true } } },
-            take: BATCH_SIZE
-          });
-
-          if (expiredMessages.length === 0) break; // Selesai
-
-        const messageIds = expiredMessages.map(m => m.id);
-
-        console.log(`🔥 Sweeping batch of ${messageIds.length} expired messages...`);
-
-        // 3. HAPUS PERMANEN DARI DATABASE!
-        await prisma.message.deleteMany({
-          where: { id: { in: messageIds } }
-        });
-
-        // 4. Kasih tau Frontend lewat Redis Bridge
+      if (expiredMessages.length > 0) {
+        console.log(`📡 Notifying clients about ${expiredMessages.length} expired messages...`);
         const deletedByConversation = new Map<string, string[]>();
         for (const m of expiredMessages) {
             const arr = deletedByConversation.get(m.conversationId) || [];
@@ -61,17 +37,33 @@ export const startMessageSweeper = () => {
         for (const [conversationId, msgIds] of deletedByConversation.entries()) {
             await emitEventToConversation(conversationId, 'message:deleted_batch', { messageIds: msgIds, conversationId });
         }
-
-        processedCount += expiredMessages.length;
-        // Optional: Small delay to let event loop breathe if heavily loaded
-        await new Promise(r => setTimeout(r, 50));
       }
-
-      if (processedCount > 0) console.log(`✅ Total swept: ${processedCount}`);
-
     } catch (error) {
-      console.error('❌ Message Sweeper Error:', error);
+      console.error('❌ Fast Sweeper Error:', error);
     }
   }, { noOverlap: true });
+
+  // Job 2: LAZY PURGE (Setiap hari jam 03:00 AM)
+  // Fokus: Penghapusan fisik data dari DB saat traffic paling rendah.
+  cron.schedule('0 3 * * *', async () => {
+    console.log('🔥 Starting Daily Lazy Purge (03:00 AM)...');
+    try {
+      const now = new Date();
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+      const deleted = await prisma.message.deleteMany({
+        where: {
+          OR: [
+            { expiresAt: { not: null, lte: now } },
+            { createdAt: { lte: fourteenDaysAgo } }
+          ]
+        }
+      });
+
+      console.log(`✅ Lazy Purge Complete. Permanently deleted ${deleted.count} messages.`);
+    } catch (error) {
+      console.error('❌ Lazy Purge Error:', error);
+    }
+  });
 };
 

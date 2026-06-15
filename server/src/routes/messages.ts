@@ -40,11 +40,18 @@ router.get('/:conversationId', async (req, res, next) => {
     })
     if (!participant) return res.status(403).json({ error: 'You are not a member of this conversation.' })
 
-    // AMBIL PESAN TERTUNDA (Hanya pesan setelah user join)
+    const now = new Date();
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    // AMBIL PESAN TERTUNDA (Hanya pesan setelah user join dan belum kadaluarsa)
     const messages = await prisma.message.findMany({
       where: {
         conversationId,
-        createdAt: { gte: participant.joinedAt }
+        createdAt: { gte: participant.joinedAt, gt: fourteenDaysAgo },
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: now } }
+        ]
       },
       take: 250, // Ambil cukup banyak untuk offline catch-up
       orderBy: { createdAt: 'desc' }, 
@@ -54,27 +61,35 @@ router.get('/:conversationId', async (req, res, next) => {
       }
     })
 
-    // AMBIL SEMUA PESAN SYSTEM UNTUK CONVERSATION INI (Mencegah kehilangan distribusi kunci jika lebih dari 250 pesan)
+    // AMBIL SEMUA PESAN SYSTEM UNTUK CONVERSATION INI
     const systemMessagesDesc = await prisma.message.findMany({
       where: {
         conversationId,
         type: 'SYSTEM',
-        createdAt: { gte: participant.joinedAt }
+        createdAt: { gte: participant.joinedAt, gt: fourteenDaysAgo },
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: now } }
+        ]
       },
       orderBy: { createdAt: 'desc' },
-      take: 50, // Biasanya cukup untuk menampung semua perputaran kunci terbaru
+      take: 50,
       include: {
         sender: { select: { id: true, encryptedProfile: true } },
         statuses: true
       }
     })
 
-    // AMBIL PESAN SYSTEM PERTAMA (Untuk memastikan kunci awal selalu didapat)
+    // AMBIL PESAN SYSTEM PERTAMA
     const firstSystemMessage = await prisma.message.findFirst({
       where: {
         conversationId,
         type: 'SYSTEM',
-        createdAt: { gte: participant.joinedAt }
+        createdAt: { gte: participant.joinedAt, gt: fourteenDaysAgo },
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: now } }
+        ]
       },
       orderBy: { createdAt: 'asc' },
       include: {
@@ -129,12 +144,10 @@ router.post('/', zodValidate({
     const senderId = req.user.id
     const { conversationId, content, sessionId, tempId, expiresIn, isViewOnce } = req.body
 
-    const participants = await prisma.participant.findMany({
-      where: { conversationId },
-      select: { userId: true } 
-    })
+    const { getParticipantIds } = await import('../utils/participantCache.js');
+    const participantIds = await getParticipantIds(conversationId);
 
-    if (!participants.some(p => p.userId === senderId)) {
+    if (!participantIds.includes(senderId)) {
       return res.status(403).json({ error: 'You are not a participant.' })
     }
 
@@ -186,12 +199,12 @@ router.post('/', zodValidate({
     // EMIT & PUSH NOTIFICATION
     await broadcastToConversation(conversationId, TransportOpCode.CHAT_MESSAGE, safeMessage);
 
-    const pushRecipients = participants.filter(p => p.userId !== senderId)
+    const pushRecipients = participantIds.filter(pid => pid !== senderId)
     if (pushRecipients.length > 0) {
       const payload = {
         data: { conversationId, messageId: safeMessage.id }
       }
-      Promise.all(pushRecipients.map(p => sendPushNotification(p.userId, payload))).catch(err => console.error('[Push] Failed:', err))
+      Promise.all(pushRecipients.map(pId => sendPushNotification(pId, payload))).catch(err => console.error('[Push] Failed:', err))
     }
   } catch (error) {
     next(error)

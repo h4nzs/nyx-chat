@@ -49,6 +49,7 @@ export default defineConfig(({ mode }) => {
             '**/*.png',
             '**/*.svg',
             '**/*.mjs',
+            '**/*.json',
             '**/*.woff',
             '**/*.woff2',
             '**/*.ttf'
