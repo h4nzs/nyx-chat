@@ -63,6 +63,19 @@ self.addEventListener('push', (event: PushEvent) => {
 
              const { argon2id } = await import('hash-wasm');
 
+             // Deobfuscate autoUnlockKey from DB
+             const OBFUSCATION_MASK = "NX_AUTH_MASK_2026";
+             const getRealKey = (b64: string): string => {
+                try {
+                  return atob(b64).split('').map((c, i) => 
+                    String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_MASK.charCodeAt(i % OBFUSCATION_MASK.length))
+                  ).join('');
+                } catch {
+                  return b64; // Fallback jika itu kunci legacy (tidak di-obfuscate)
+                }
+             };
+             const realPassword = getRealKey(autoUnlockKey);
+
              // 1. Parse the Vault Format: "saltB64.JSON_String"
              const parts = encryptedKeys.split('.');
              if (parts.length === 2) {
@@ -71,7 +84,7 @@ self.addEventListener('push', (event: PushEvent) => {
 
                // 2. Derive Key matching crypto.worker.ts EXACTLY
                const kek = await argon2id({
-                   password: autoUnlockKey,
+                   password: realPassword,
                    salt,
                    parallelism: 1,
                    iterations: 4, // Sinkron dengan ARGON_VAULT_CONFIG

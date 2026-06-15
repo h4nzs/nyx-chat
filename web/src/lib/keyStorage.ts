@@ -178,8 +178,11 @@ const deobfuscate = (b64: string): string => {
 
 export const saveDeviceAutoUnlockKey = async (key: string) => {
   try {
+    const obfKey = obfuscate(key);
     // lgtm [js/clear-text-storage-in-browser]
-    sessionStorage.setItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, obfuscate(key));
+    sessionStorage.setItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, obfKey);
+    // Simpan juga ke IndexedDB agar bisa diakses oleh Service Worker untuk dekripsi notifikasi push
+    await set(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, obfKey);
   } catch (error) {
     console.error('Failed to save device auto unlock key');
     throw new Error('Storage failure');
