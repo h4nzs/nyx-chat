@@ -114,7 +114,18 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     }
 
     const hash = certificateHash || (import.meta.env.PROD ? undefined : import.meta.env.VITE_TRANSPORT_CERT_HASH);
-    this.worker.postMessage({ type: 'CONNECT', url: finalUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
+    
+    // 2. Get Device Identity for Hardware Binding (Lapis 2 Security)
+    let deviceIdentity: string | undefined = undefined;
+    try {
+      const { getFullDeviceIdentity } = await import('../utils/fingerprint');
+      const identity = await getFullDeviceIdentity();
+      deviceIdentity = JSON.stringify(identity);
+    } catch (e) {
+      console.warn("[Transport] Could not generate device identity:", e);
+    }
+
+    this.worker.postMessage({ type: 'CONNECT', url: finalUrl, token, certificateHash: hash, deviceIdentity } satisfies MainToTransportWorker);
   }
 
   public disconnect(): void {

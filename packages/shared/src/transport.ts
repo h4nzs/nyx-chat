@@ -25,7 +25,7 @@ export type TransportWorkerToMain =
   | { type: 'HANDSHAKE_COMPLETED'; success: boolean; error?: string };
 
 export type MainToTransportWorker =
-  | { type: 'CONNECT'; url: string; token: string; certificateHash?: string }
+  | { type: 'CONNECT'; url: string; token: string; certificateHash?: string; deviceIdentity?: string }
   | { type: 'DISCONNECT' }
   | { type: 'SEND_STREAM'; opCode: TransportOpCode; payload: BinaryPayload }
   | { type: 'SEND_DATAGRAM'; opCode: TransportOpCode; payload: BinaryPayload }

@@ -147,24 +147,57 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     case 99: // DISCONNECT
       await handleDisconnect(userId);
       break;
-    case 0x00: // AUTH (Lapis 1 Security: Active Session Check)
+    case 0x00: // AUTH (Lapis 1 & 2 Security: Session & Hardware Binding)
       try {
+        // Payload OpCode 0x00 sekarang adalah JSON string: { token: string, identity: { fingerprint, installationId } }
+        let authData: { token: string, identity?: { fingerprint: string, installationId: string } };
+        try {
+           authData = JSON.parse(payloadStr) as any;
+        } catch (e) {
+           // Fallback untuk klien lama yang hanya mengirim token sebagai string mentah
+           authData = { token: payloadStr };
+        }
+
+        // 🛡️ LAPIS 1: SINGLE ACTIVE DEVICE CHECK
         const activeDeviceId = await redisClient.get(`active_device:${userId}`);
         
-        // Jika ada catatan perangkat aktif dan tidak cocok dengan yang mencoba konek
         if (activeDeviceId && activeDeviceId !== deviceId) {
-          console.warn(`[Security] Revoked device ${deviceId} (User ${userId}) tried to connect via WebTransport. Kicking...`);
-          // Kirim OpCode 0x07 (KICK) dengan JSON payload yang benar
+          console.warn(`[Security-L1] Revoked device ${deviceId} (User ${userId}) tried to connect. Kicking...`);
           const kickPayload = Buffer.from(JSON.stringify({ 
             reason: 'SESSION_REVOKED', 
             deviceId,
             message: 'You have been logged in from another device.' 
           })).toString('base64');
-          
           await sendToDevice(userId, deviceId, TransportOpCode.KICK, kickPayload);
+          return;
+        }
+
+        // 🛡️ LAPIS 2: HARDWARE BINDING (FINGERPRINT CHECK)
+        if (authData.identity) {
+          const device = await prisma.device.findUnique({
+            where: { id: deviceId },
+            select: { fingerprint: true, installationId: true }
+          });
+
+          if (device && device.fingerprint) {
+             const isFingerprintMatch = device.fingerprint === authData.identity.fingerprint;
+             // Kita beri toleransi: Jika installationId (Anchor) cocok, kita izinkan meskipun fingerprint browser berubah sedikit
+             // (misal karena update browser atau resolusi layar berubah)
+             const isAnchorMatch = device.installationId && device.installationId === authData.identity.installationId;
+
+             if (!isFingerprintMatch && !isAnchorMatch) {
+                console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${userId}). Possible session cloning. Kicking...`);
+                const kickPayload = Buffer.from(JSON.stringify({ 
+                  reason: 'HARDWARE_MISMATCH', 
+                  deviceId,
+                  message: 'Security Alert: Device identity mismatch. Please login again.' 
+                })).toString('base64');
+                await sendToDevice(userId, deviceId, TransportOpCode.KICK, kickPayload);
+             }
+          }
         }
       } catch (err) {
-        console.error('[Security] Failed to verify active session:', err);
+        console.error('[Security] Failed to verify session binding:', err);
       }
       break;
     default:

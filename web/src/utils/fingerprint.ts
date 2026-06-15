@@ -13,18 +13,11 @@ export async function getBrowserFingerprint(): Promise<string> {
     new Date().getTimezoneOffset(),
     screen.colorDepth,
     screen.width + 'x' + screen.height,
-    // Attempt to get GPU info
-    (() => {
-        try {
-            const canvas = document.createElement('canvas');
-            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl') as WebGLRenderingContext;
-            if (!gl) return 'no-webgl';
-            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-            return debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'no-renderer-info';
-        } catch (e) { return 'error-webgl'; }
-    })(),
-    // Logic for fonts or hardware concurrency
     navigator.hardwareConcurrency || 'unknown',
+    (navigator as any).deviceMemory || 'unknown',
+    navigator.maxTouchPoints || 0,
+    // Kita gunakan resolusi layar yang tersedia (mengabaikan taskbar/dock) untuk stabilitas lebih tinggi
+    screen.availWidth + 'x' + screen.availHeight,
   ].join('|');
 
   // Hash the signals using SHA-256 for a fixed-length ID
@@ -63,7 +56,8 @@ export async function getPersistentInstallationId(): Promise<string> {
 }
 
 /**
- * Combines browser fingerprint and installation ID for maximum anti-spam strength.
+ * Combines browser fingerprint and installation ID for maximum security binding.
+ * Returns both separately so the server can decide how to handle mismatches.
  */
 export async function getFullDeviceIdentity(): Promise<{ fingerprint: string, installationId: string }> {
   const [fingerprint, installationId] = await Promise.all([

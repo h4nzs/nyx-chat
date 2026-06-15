@@ -172,6 +172,8 @@ async (req, res, next) => {
     const passwordHash = await hashPassword(password)
     
     const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
+    const installationId = req.headers['x-nyx-installation-id'] as string | undefined;
+    
     const user = await prisma.user.create({
       data: {
         usernameHash,
@@ -186,7 +188,8 @@ async (req, res, next) => {
             signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
             name: deviceName || 'Primary Device',
-            fingerprint: fingerprint || null
+            fingerprint: fingerprint || null,
+            installationId: installationId || null
           }
         }
       },

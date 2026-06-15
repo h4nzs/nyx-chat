@@ -5,7 +5,7 @@ let controlStream: WebTransportBidirectionalStream | null = null;
 let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 let datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 
-async function initWebTransport(url: string, token: string, certificateHash?: string) {
+async function initWebTransport(url: string, token: string, certificateHash?: string, deviceIdentity?: string) {
   try {
     const options: WebTransportOptions = {};
     if (certificateHash && certificateHash.trim()) {
@@ -42,13 +42,16 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
     controlWriter = controlStream.writable.getWriter();
     datagramWriter = transport.datagrams.writable.getWriter();
     
-    const tokenBytes = new TextEncoder().encode(token);
-    // Simple framing: OP_CODE (0x00 for auth) + length + token
-    const authFrame = new Uint8Array(1 + 4 + tokenBytes.length);
+    // Auth Payload: Combine JWT Token and Device Identity Metadata
+    const authData = JSON.stringify({ token, identity: deviceIdentity ? JSON.parse(deviceIdentity) : null });
+    const authBytes = new TextEncoder().encode(authData);
+    
+    // Simple framing: OP_CODE (0x00 for auth) + length + authData
+    const authFrame = new Uint8Array(1 + 4 + authBytes.length);
     authFrame[0] = 0x00;
     const view = new DataView(authFrame.buffer);
-    view.setUint32(1, tokenBytes.length, false); // Big endian
-    authFrame.set(tokenBytes, 5);
+    view.setUint32(1, authBytes.length, false); // Big endian
+    authFrame.set(authBytes, 5);
     
     await controlWriter.write(authFrame);
 
@@ -193,7 +196,7 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
         try { transport.close(); } catch (e) {}
         transport = null;
       }
-      await initWebTransport(data.url, data.token, data.certificateHash);
+      await initWebTransport(data.url, data.token, data.certificateHash, data.deviceIdentity);
       break;
     case 'DISCONNECT':
       if (transport) {
