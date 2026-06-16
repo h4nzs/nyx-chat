@@ -348,11 +348,11 @@ router.post('/login', authLimiter, zodValidate({
       if (!activeDeviceId) {
           if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
           
-          // If we are here because of fingerprint mismatch, we don't blindly pick the first device.
-          // We force recovery or return the most recent device if it's "clean".
-          activeDeviceId = user.devices[0].id;
-          activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey ? Buffer.from(user.devices[0].encryptedPrivateKey).toString('utf8') : '';
-          await prisma.device.update({ where: { id: activeDeviceId }, data: { lastActiveAt: new Date() } });
+          // DO NOT blindly pick the first device! 
+          // If we are here, it means this is a new device or the fingerprint mismatched.
+          // We must force the client into the recovery flow to establish a new device identity.
+          activeDeviceId = '';
+          activeEncryptedPrivateKey = '';
       }
     }
 
@@ -824,23 +824,57 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
       if (!safeUser) throw new ApiError(404, 'User not found')
       if (safeUser.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
 
-      const activeDeviceId = safeUser.devices[0]?.id;
-      if (!activeDeviceId) throw new ApiError(404, 'No device found for this account.');
+      const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
+      const installationId = req.headers['x-nyx-installation-id'] as string | undefined;
 
-      const tokens = await issueTokens({ id: safeUser.id, role: safeUser.role }, activeDeviceId, req)
-      setAuthCookies(res, tokens)
+      const latestDevice = safeUser.devices[0];
+      let activeDeviceId = latestDevice?.id;
+      let encryptedPrivKeyStr = null;
+
+      if (latestDevice) {
+         if (latestDevice.fingerprint && fingerprint && latestDevice.fingerprint !== fingerprint) {
+             if (latestDevice.installationId && latestDevice.installationId === installationId) {
+                 await prisma.device.update({
+                     where: { id: latestDevice.id },
+                     data: { fingerprint, lastActiveAt: new Date() }
+                 });
+             } else {
+                 console.warn(`[Security] Hardware/Anchor mismatch for device ${latestDevice.id} via WebAuthn. Forcing recovery flow.`);
+                 activeDeviceId = '';
+             }
+         } else {
+             await prisma.device.update({
+                 where: { id: latestDevice.id },
+                 data: { 
+                     lastActiveAt: new Date(), 
+                     fingerprint: fingerprint || latestDevice.fingerprint, 
+                     installationId: installationId || latestDevice.installationId 
+                 }
+             });
+         }
+      }
+
+      if (!activeDeviceId) {
+          // Force recovery flow by not sending tokens or keys.
+          // The client will see a 200 OK without keys and throw IDENTITY_RECOVERY_REQUIRED.
+      } else {
+          encryptedPrivKeyStr = latestDevice.encryptedPrivateKey
+            ? Buffer.from(latestDevice.encryptedPrivateKey).toString('utf8')
+            : null;
+      }
+
+      let tokens: { access: string; refresh: string } | null = null;
+      if (activeDeviceId) {
+          tokens = await issueTokens({ id: safeUser.id, role: safeUser.role }, activeDeviceId, req);
+          setAuthCookies(res, tokens);
+      }
       res.clearCookie('webauthn_challenge')
-
-      // FIX 5: Convert encryptedPrivateKey Buffer to string before sending
-      const encryptedPrivKeyStr = safeUser.devices[0]?.encryptedPrivateKey
-        ? Buffer.from(safeUser.devices[0].encryptedPrivateKey).toString('utf8')
-        : null;
 
       res.json({
         verified: true,
         user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role, subscriptionTier: safeUser.subscriptionTier },
-        accessToken: tokens.access,
-        encryptedPrivateKey: encryptedPrivKeyStr
+        accessToken: tokens?.access || undefined,
+        encryptedPrivateKey: encryptedPrivKeyStr || undefined
       })    } else {
       res.status(400).json({ verified: false })
     }

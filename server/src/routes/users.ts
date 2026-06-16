@@ -247,7 +247,7 @@ router.put('/me/keys',
       const deviceId = authUser.deviceId;
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
-      const { publicKey, pqPublicKey, signingKey } = req.body
+      const { publicKey, pqPublicKey, signingKey, encryptedPrivateKeys } = req.body
       const fingerprint = req.headers['x-nyx-fingerprint'] as string | undefined;
       const installationId = req.headers['x-nyx-installation-id'] as string | undefined;
 
@@ -258,6 +258,7 @@ router.put('/me/keys',
             publicKey: Buffer.from(publicKey, 'base64url'),
             pqPublicKey: Buffer.from(pqPublicKey, 'base64url'),
             signingKey: Buffer.from(signingKey, 'base64url'),
+            encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : undefined,
             fingerprint: fingerprint || undefined,
             installationId: installationId || undefined
         }

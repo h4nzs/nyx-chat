@@ -81,8 +81,15 @@ export default function RestorePage() {
           }
 
           // 3. Send Cryptographic Proof to Server
+          const { getFullDeviceIdentity } = await import('@utils/fingerprint');
+          const { fingerprint, installationId } = await getFullDeviceIdentity();
+          
           const res = await api<{ accessToken: string }>('/api/auth/recover', {
             method: 'POST',
+            headers: {
+              'X-Nyx-Fingerprint': fingerprint,
+              'X-Nyx-Installation-Id': installationId
+            },
             body: JSON.stringify({
               identifier,
               newPassword: password,

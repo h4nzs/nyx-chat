@@ -393,11 +393,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 const sodium = await getSodiumLib();
                 
                 // Regenerate public keys from decrypted private keys for server sync
-                const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
+                const encryptionPublicKey = sodium.crypto_scalarmult_base(result.keys.encryption);
                 const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption!);
                 const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
-                newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPublicKey = sodium.to_base64(encryptionPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newPqPublicKey = sodium.to_base64(pqEncryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newEncryptedPrivateKey = localEncryptedKeys;
@@ -415,11 +415,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 const { getSodiumLib } = await import('@utils/crypto');
                 const sodium = await getSodiumLib();
                 
-                const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
+                const encryptionPublicKey = sodium.crypto_scalarmult_base(result.keys.encryption);
                 const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption!);
                 const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
-                newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPublicKey = sodium.to_base64(encryptionPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newPqPublicKey = sodium.to_base64(pqEncryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newEncryptedPrivateKey = localEncryptedKeys;
@@ -542,10 +542,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           phrase
         } = await registerAndGenerateKeys(password);
 
-        const fingerprint = await getBrowserFingerprint();
+        const { getFullDeviceIdentity } = await import('@utils/fingerprint');
+        const { fingerprint, installationId } = await getFullDeviceIdentity();
         const res = await api<{ accessToken: string; user: User; deviceId?: string }>("/api/auth/register", {
           method: "POST",
-          headers: { 'X-Nyx-Fingerprint': fingerprint },
+          headers: { 
+            'X-Nyx-Fingerprint': fingerprint,
+            'X-Nyx-Installation-Id': installationId
+          },
           body: JSON.stringify({
             usernameHash,
             password,
@@ -700,7 +704,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       const { getSodiumLib } = await import('@utils/crypto');
       const sodium = await getSodiumLib();
-      return sodium.crypto_box_seed_keypair(keys.encryption);
+      const publicKey = sodium.crypto_scalarmult_base(keys.encryption);
+      return { publicKey, privateKey: keys.encryption };
     },
     async getPqEncryptionKeyPair() {
       const keys = await retrieveAndCacheKeys();
@@ -713,7 +718,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       const { getSodiumLib } = await import('@utils/crypto');
       const sodium = await getSodiumLib();
-      return sodium.crypto_box_seed_keypair(keys.signedPreKey);
+      const publicKey = sodium.crypto_scalarmult_base(keys.signedPreKey);
+      return { publicKey, privateKey: keys.signedPreKey };
     },
     async getPqSignedPreKeyPair() {
       const keys = await retrieveAndCacheKeys();
@@ -792,3 +798,4 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },  };
 }, Object.is);
 ;
+
