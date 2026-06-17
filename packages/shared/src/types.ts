@@ -24,6 +24,10 @@ export type User = z.infer<typeof MinimalUserSchema> & {
   hasCompletedOnboarding?: boolean;
   usernameHash?: string;
   autoDestructDays?: number | null;
+  systemAlert?: {
+    type: 'subscription_expiring';
+    daysLeft: number;
+  };
 };
 
 import { SubscriptionTier } from './constants.js';

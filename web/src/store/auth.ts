@@ -354,6 +354,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
           await get().tryAutoUnlock();
           get().loadBlockedUsers();
+
+          // [NEW] Process Subscription Alerts (Option 1 & 3)
+          if (me.systemAlert) {
+            import('@utils/systemAlerts').then(m => m.processSystemAlert(me));
+          }
         } else {
           throw new Error("No valid session.");
         }

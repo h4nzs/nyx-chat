@@ -34,16 +34,27 @@ router.get('/me', async (req, res, next) => {
     if (!user) throw new ApiError(404, 'User not found');
 
     // RESTORE: Lazy Expiration Check
-    if (user.subscriptionTier === 'SUBSCRIBER' && user.subscriptionExpiresAt && new Date() > user.subscriptionExpiresAt) {
-        console.log(`[Auth] Subscription expired for user ${userId}. Downgrading to FREE.`);
-        user = await prisma.user.update({
-            where: { id: userId },
-            data: { subscriptionTier: 'FREE' },
-            select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
-        });
+    let systemAlert: { type: 'subscription_expiring', daysLeft: number } | undefined = undefined;
+
+    if (user.subscriptionTier === 'SUBSCRIBER' && user.subscriptionExpiresAt) {
+        const now = new Date();
+        const expiry = new Date(user.subscriptionExpiresAt);
+        const timeDiff = expiry.getTime() - now.getTime();
+        const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+        if (daysLeft <= 0) {
+            console.log(`[Auth] Subscription expired for user ${userId}. Downgrading to FREE.`);
+            user = await prisma.user.update({
+                where: { id: userId },
+                data: { subscriptionTier: 'FREE' },
+                select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
+            });
+        } else if (daysLeft <= 7) {
+            systemAlert = { type: 'subscription_expiring', daysLeft };
+        }
     }
 
-    res.json(user)
+    res.json({ ...user, systemAlert })
   } catch (error) { next(error) }
 })
 

@@ -341,6 +341,11 @@ const ConversationItem = memo(function ConversationItem({
                 )}>
                   {title}
                 </p>
+                {peerUser?.role === 'ADMIN' && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30 leading-none flex-shrink-0">
+                    ADMIN
+                  </span>
+                )}
               </div>
               {conversation.lastMessage && (
                 <p className="text-[10px] font-medium text-text-secondary flex-shrink-0 opacity-80">
