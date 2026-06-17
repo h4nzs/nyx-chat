@@ -27,13 +27,18 @@ export const useSystemStore = create<SystemState>((set) => ({
   setBanner: (banner) => set({ banner }),
   checkStatus: async () => {
     try {
-      // Panggil fungsi api() secara langsung dan gunakan Generic untuk strict type
       const data = await api<SystemStatusResponse>('/api/system/status');
-      
-      // Jika custom fetch Anda MENGEMBALIKAN object { data: ... }, 
-      // gunakan: const { data } = await api<{data: SystemStatusResponse}>('/system/status');
-      
-      set({ maintenance: data.maintenance, banner: data.banner });
+      if (data) {
+        set((state) => {
+          const isPersonalAlertActive = state.banner.active && state.banner.alertType !== undefined;
+          return {
+            maintenance: data.maintenance,
+            banner: data.banner.active
+              ? data.banner
+              : (isPersonalAlertActive ? state.banner : data.banner)
+          };
+        });
+      }
     } catch (error) {
       console.error('Gagal mengecek status sistem', error);
     }

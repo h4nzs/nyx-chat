@@ -25,10 +25,6 @@ export async function processSystemAlert(user: User) {
         actionText: 'Renew Now',
         actionLink: '/settings'
       });
-      
-      // CATATAN UNTUK ANDA: Pastikan komponen Banner UI Anda (di React) 
-      // memanggil `localStorage.setItem(dismissedKey, new Date().toDateString())` 
-      // saat user menekan tombol [X] / Close pada banner.
     }
 
     // 2. Implementation of Option 1: Virtual System Message
