@@ -32,7 +32,7 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 | `stories.ts` | Encrypted story blob create/list/delete |
 | `uploads.ts` | Presigned R2 uploads (standard + burner), group avatars |
 | `previews.ts` | Link preview fetch / image proxy |
-| `subscriptions.ts` | Tripay + NOWPayments webhooks (HMAC verified, constant-time) |
+| `subscriptions.ts` | NOWPayments webhook (HMAC verified, constant-time) — crypto-only |
 | `engine.ts` | B2B room factory (tenant) |
 | `admin.ts` | Admin console: status, ban/unban, tenants |
 | `reports.ts` | Report user/bug (Discord webhook) |

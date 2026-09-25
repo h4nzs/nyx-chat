@@ -24,7 +24,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `stories.ts` | `/api/stories` | create, `user/:userId`, `:id`, `:id` (DELETE) |
 | `uploads.ts` | `/api/uploads` | `presigned`, `burner-presigned`, `groups/:id/avatar` |
 | `previews.ts` | `/api/previews` | `POST /` (link preview), `GET /image` (proxy) |
-| `subscriptions.ts` | `/api/subscriptions` | `create` (Tripay), `webhook`, `create-crypto-transaction`, `nowpayments-webhook` |
+| `subscriptions.ts` | `/api/subscriptions` | `create-crypto-transaction`, `nowpayments-webhook` (crypto-only) |
 | `engine.ts` | `/api/engine` | `rooms` (B2B) |
 | `admin.ts` | `/api/admin` | `system-status`, `banned-users`, `ban`/`unban`, `tenants` CRUD + toggle |
 | `reports.ts` | `/api/reports` | `user`, `POST /` (bug) |

@@ -64,6 +64,11 @@ tests. No schema migration and no new required environment variables.
   /api/keys/prekey-bundle` now accepts `encryptedPrivateKeys` (optional,
   backward compatible) and updates the device row in the same transaction;
   the client sends the latest copy on every bundle upload.
+* **Crypto-Only Payments:** Removed the fiat rail entirely (Tripay checkout
+  `POST /create`, its `POST /webhook` callback, and the Midtrans-branded UI
+  strings). Even with an anonymous alias, fiat rails create a financial paper
+  trail that contradicts the zero-knowledge promise. NOWPayments (crypto) is
+  now the only payment method; `TRIPAY_*` env vars are no longer read.
 
 ### 🧹 Cleanup
 * **Dead Locale Namespaces:** Removed `privacy`, `help`, and `landing` JSON

@@ -302,15 +302,11 @@
       "back_to_features": "Kembali ke fitur"
     },
     "payment": {
-      "select_method": "Pilih Metode Pembayaran",
-      "fiat_title": "Kartu Kredit / E-Wallet (Midtrans)",
-      "fiat_desc": "Cepat & mudah via Midtrans",
       "crypto_title": "Kripto (NOWPayments)",
       "crypto_desc": "Direkomendasikan untuk privasi maksimal"
     },
     "disclaimer": {
-      "guarantee": "Jaminan Zero-Knowledge:",
-      "desc": "Jika Anda memilih metode kartu kredit/e-wallet, pembayaran diproses secara eksternal oleh Midtrans menggunakan alias anonim (<1>nyx_pay_{{id}}...</1>). Detail pembayaran Anda tidak akan pernah dikaitkan dengan identitas kriptografi atau riwayat chat Anda. Namun jika Anda memilih kripto, kami bahkan tidak memiliki email Anda! Kami hanya memverifikasi bahwa Anda telah membayar jumlah tagihan, tanpa informasi pribadi apa pun. Privasi Anda 100% utuh terlepas dari metode pembayaran."
+      "guarantee": "Jaminan Zero-Knowledge:"
     },
     "trust_guarantee": "Garansi Uang Kembali 7 Hari. Pembayaran kripto tunduk pada ketentuan biaya jaringan.",
     "refund_policy": "Kebijakan Pengembalian Dana"

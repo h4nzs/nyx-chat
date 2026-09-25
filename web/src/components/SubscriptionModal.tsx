@@ -9,28 +9,10 @@ import { useTranslation, Trans } from 'react-i18next';
 export default function SubscriptionModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(['modals', 'common']);
   const [isLoading, setIsLoading] = useState(false);
-  const [showPaymentSelector, setShowPaymentSelector] = useState(false);
   const user = useAuthStore(s => s.user);
 
-  const handleUpgrade = async () => {
-    setIsLoading(true);
-    try {
-      const res = await api<{ checkout_url: string }>('/api/subscriptions/create', {
-        method: 'POST'
-      });
-
-      if (res.checkout_url) {
-        window.location.href = res.checkout_url;
-      } else {
-        throw new Error('Failed to get checkout URL');
-      }
-    } catch (error: unknown) {
-        setIsLoading(false);
-        const err = error as Error;
-        toast.error(err.message || 'Failed to initiate payment');
-    }
-  };
-
+  // [PAYMENTS CRYPTO-ONLY] Jalur fiat (Tripay/Midtrans) dihapus total —
+  // hanya NOWPayments. Selector metode pembayaran tidak diperlukan lagi.
   const handleCryptoUpgrade = async () => {
     setIsLoading(true);
     try {
@@ -59,49 +41,7 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
           </p>
         </div>
 
-        {showPaymentSelector ? (
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-2 text-center">{t('modals:subscription.payment.select_method')}</h3>
-            
-            {/* FIAT DISABLED TEMPORARILY DUE TO DOMAIN RESTRICTIONS */}
-            {false && (
-            <button
-              onClick={handleUpgrade}
-              disabled={isLoading}
-              className="w-full p-4 bg-bg-surface border border-text-secondary/10 hover:border-accent/50 hover:bg-accent/5 rounded-xl transition-all text-left flex items-center gap-4"
-            >
-              <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center shrink-0">
-                 <FiZap className="text-accent" />
-              </div>
-              <div>
-                <div className="text-text-primary font-bold">{t('modals:subscription.payment.fiat_title')}</div>
-                <div className="text-xs text-text-secondary">{t('modals:subscription.payment.fiat_desc')}</div>
-              </div>
-            </button>
-            )}
-
-            <button
-              onClick={handleCryptoUpgrade}
-              disabled={isLoading}
-              className="w-full p-4 bg-bg-surface border border-text-secondary/10 hover:border-yellow-500/50 hover:bg-yellow-500/5 rounded-xl transition-all text-left flex items-center gap-4"
-            >
-              <div className="w-10 h-10 rounded-full bg-yellow-500/10 flex items-center justify-center shrink-0">
-                 <FiLock className="text-yellow-500" />
-              </div>
-              <div>
-                <div className="text-text-primary font-bold">{t('modals:subscription.payment.crypto_title')}</div>
-                <div className="text-xs text-yellow-500/80">{t('modals:subscription.payment.crypto_desc')}</div>
-              </div>
-            </button>
-
-            <button 
-              onClick={() => setShowPaymentSelector(false)}
-              className="w-full py-2 text-text-secondary hover:text-text-primary text-sm transition-colors mt-2"
-            >
-              {t('modals:subscription.buttons.back_to_features')}
-            </button>
-          </div>
-        ) : (
+        {(
           <>
             {/* Features Comparison */}
             <div className="bg-bg-surface border border-text-secondary/10 rounded-xl p-5 space-y-4">
@@ -187,11 +127,11 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
           <FiLock className="text-yellow-500 shrink-0 mt-0.5" />
           <p className="text-xs text-text-secondary leading-relaxed">
             <strong className="text-yellow-500/90 font-medium">{t('modals:subscription.disclaimer.guarantee')}</strong>{' '}
-            <Trans 
-              i18nKey="modals:subscription.disclaimer.desc" 
-              values={{ id: user?.id?.substring(0, 5) }} 
-              components={{ 1: <span className="font-mono" /> }} 
-            />
+            {/* [PAYMENTS CRYPTO-ONLY] Disclaimer fiat (Midtrans alias) dihapus —
+                pembayaran hanya kripto: tidak ada email, tidak ada jejak keuangan fiat. */}
+            Payments are processed 100% anonymously via Cryptocurrency. We don't even
+            have your email — we only verify that you paid the invoice amount, without
+            any personal info.
           </p>
         </div>
 

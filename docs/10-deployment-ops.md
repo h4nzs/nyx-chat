@@ -77,7 +77,7 @@ ls /root/backups/                       # nightly pg_dumps
 | `R2_ACCOUNT_ID/ACCESS_KEY_ID/SECRET_ACCESS_KEY/BUCKET_NAME/PUBLIC_DOMAIN` | Cloudflare R2 |
 | `CF_ACCOUNT_ID/CF_TURN_KEY_ID/CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) |
 | `SUPABASE_URL/SUPABASE_SERVICE_KEY` | (legacy, optional) |
-| `NOWPAYMENTS_API_KEY/IPN_SECRET`, `TRIPAY_API_KEY/MERCHANT_CODE/PRIVATE_KEY` | Payments |
+| `NOWPAYMENTS_API_KEY/IPN_SECRET` | Payments (crypto-only) |
 | `DISCORD_REPORT_WEBHOOK_URL` | Abuse reports |
 | `RESEND_API_KEY` | Email (optional) |
 | `TRANSPORT_PORT` | Sidecar port (33333) |

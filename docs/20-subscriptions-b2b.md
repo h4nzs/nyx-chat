@@ -19,15 +19,13 @@ Anti-spam trust tiers, the paid subscription flow (fiat + crypto), and the B2B t
 
 ```mermaid
 flowchart LR
-    U[User] -->|POST /subscriptions/create| T[Tripay fiat checkout]
-    U -->|POST /subscriptions/create-crypto-transaction| N[NOWPayments invoice]
-    T -->|webhook| S[Server verify HMAC -> SUBSCRIBER 30d]
-    N -->|IPN| S
+    U[User] -->|POST /subscriptions/create-crypto-transaction| N[NOWPayments invoice]
+    N -->|IPN| S[Server verify HMAC -> SUBSCRIBER 30d]
 ```
 
-- **Fiat — Tripay** (`subscriptions.ts`): creates a QRIS/e-wallet checkout (Rp 55.000 / 30 days). The `POST /webhook` callback verifies the `X-Callback-Signature` (HMAC-SHA256); on `PAID` the user is upgraded and `subscription_updated` is emitted.
-- **Crypto — NOWPayments**: creates an invoice (`price_currency: idr`, `is_fee_paid_by_user`). `POST /nowpayments-webhook` verifies `X-NowPayments-Sig` (HMAC-SHA512 over key-sorted JSON); on `finished` the user is upgraded.
-- Both webhook routes are exempt from CSRF and use **constant-time** signature comparison.
+- **Crypto — NOWPayments (the only payment rail)**: creates an invoice (`price_currency: idr`, `is_fee_paid_by_user`). `POST /nowpayments-webhook` verifies `X-NowPayments-Sig` (HMAC-SHA512 over key-sorted JSON); on `finished` the user is upgraded and `subscription_updated` is emitted.
+- [PAYMENTS CRYPTO-ONLY] The fiat rail (Tripay: `POST /create` + `POST /webhook`) was removed entirely — even with an anonymous alias, fiat rails create a financial paper trail that contradicts the zero-knowledge promise.
+- The webhook route is exempt from CSRF and uses **constant-time** signature comparison.
 - **Expiry:** `GET /api/users/me` lazily downgrades expired subscribers; `systemSweeper` (daily) also downgrades.
 
 ## 20.3 B2B Engine (`/api/engine`)
@@ -48,7 +46,7 @@ flowchart LR
 | `web/src/store/verification.ts` | verified status |
 | `web/src/components/SubscriptionModal.tsx` | upgrade UI |
 | `web/src/pages/AdminDashboard.tsx` | admin console |
-| `server/src/routes/subscriptions.ts` | Tripay + NOWPayments |
+| `server/src/routes/subscriptions.ts` | NOWPayments (crypto-only) |
 | `server/src/routes/auth.ts` | PoW challenge/verify |
 | `server/src/routes/engine.ts` | B2B room factory |
 | `server/src/routes/admin.ts` | admin endpoints |

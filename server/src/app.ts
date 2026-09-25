@@ -311,7 +311,8 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
 });
 
 app.use((req, res, next) => {
-  if (req.path === '/api/subscriptions/webhook' || req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
+  // [PAYMENTS CRYPTO-ONLY] Exempt Tripay webhook dihapus — hanya NOWPayments.
+  if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
     return next();
   }
   doubleCsrfProtection(req, res, next);

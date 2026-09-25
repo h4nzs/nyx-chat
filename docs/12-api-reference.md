@@ -120,9 +120,7 @@ Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. R
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/create` | Create Tripay checkout (requireAuth) |
 | POST | `/create-crypto-transaction` | NOWPayments transaction (requireAuth) |
-| POST | `/webhook` | Tripay callback (HMAC, constant-time) |
 | POST | `/nowpayments-webhook` | NOWPayments IPN (HMAC, constant-time) |
 
 ## engine — `/api/engine` (B2B, tenant auth)

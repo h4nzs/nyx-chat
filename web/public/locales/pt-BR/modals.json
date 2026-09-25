@@ -302,15 +302,11 @@
       "back_to_features": "Voltar para as funcionalidades"
     },
     "payment": {
-      "select_method": "Selecionar Método de Pagamento",
-      "fiat_title": "Cartão de Crédito / E-Wallet (Midtrans)",
-      "fiat_desc": "Rápido e fácil via Midtrans",
       "crypto_title": "Cripto (NOWPayments)",
       "crypto_desc": "Recomendado para máxima privacidade"
     },
     "disclaimer": {
-      "guarantee": "Garantia Zero-Knowledge:",
-      "desc": "Se você escolher métodos de cartão de crédito/e-wallet, o pagamento é processado externamente pelo Midtrans usando um alias anônimo (<1>nyx_pay_{{id}}...</1>). Seus detalhes de pagamento nunca são vinculados à sua identidade criptográfica ou registros de bate-papo. Mas se você escolher cripto, nós nem temos seu e-mail! Apenas verificamos se você pagou o valor da fatura, sem nenhuma informação pessoal. Sua privacidade fica 100% intacta, independentemente do método de pagamento."
+      "guarantee": "Garantia Zero-Knowledge:"
     },
     "trust_guarantee": "Garantia de Devolução de 7 Dias. Pagamentos com criptomoedas sujeitos a taxas de rede.",
     "refund_policy": "Política de Reembolso"
