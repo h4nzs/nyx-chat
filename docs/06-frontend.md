@@ -55,9 +55,17 @@ Rules: prefer granular selectors (`useShallow`), never call `set()` in loops (ba
 
 Keychain writes go through a global write queue (`enqueueWrite` in `keychainDb.ts`).
 
-### Lazy-chunk prefetch
+### Lazy-chunk & modal Suspense pattern
 
-Global modals and pages are `React.lazy` under a single `<Suspense fallback={<LoadingScreen/>}>`. `lib/prefetch.ts` (`prefetchAppChunks`) warms these chunks (pages, modals, and heavy utilities such as `fileUtils`, `webrtc`, `opfsStorage`, `biometricUnlock`, `html5-qrcode`, `dompurify`) in the background after login/registration/bootstrap — using `requestIdleCallback` + staggering so it never competes with user actions. This avoids the full-screen "blink" on first open of e.g. the context menu or command palette.
+**Boundary layout (jangan disatukan lagi).** Pages are `React.lazy` under one `<Suspense fallback={<LoadingScreen/>}>` that wraps ONLY the routes tree. Each global modal (ConfirmModal, UserInfoModal, PasswordPromptModal, ChatInfoModal, DynamicIsland, CommandPalette, ContextMenu, CallOverlay, SystemInitModal) gets its OWN `<Suspense fallback={null}>` boundary (the `ModalSuspense` helper in `App.tsx`).
+
+**Why:** with a single shared boundary, opening any modal whose chunk wasn't loaded yet replaced the ENTIRE app (routes included) with the full-screen LoadingScreen — the user saw a blink "like a DOM refresh" (first right-click → ContextMenu was the visible case). With per-modal boundaries, a suspending modal never disturbs the surrounding app; only that modal is briefly absent.
+
+**Preload (dua lapis):**
+- `utils/modalPreload.ts` (`preloadOnIdle`) — warms all 9 modal chunks on idle (`requestIdleCallback`, 3s timeout, sequential queue) so in the normal path Suspense never suspends at all.
+- `lib/prefetch.ts` (`prefetchAppChunks`) — warms pages + modal + utility chunks (fileUtils, webrtc, opfsStorage, biometricUnlock, html5-qrcode, dompurify) in staggered batches after login/registration/bootstrap.
+
+Both fail silently on error and degrade to plain on-demand loading. When adding a new global modal: add it to `App.tsx` (lazy import + its own `ModalSuspense` + entry in the `preloadOnIdle` list) and to `lib/prefetch.ts`'s `MODALS`. Never render a global modal inside the routes-level Suspense boundary.
 
 ## 6.6 i18n
 

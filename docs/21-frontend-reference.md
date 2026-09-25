@@ -7,7 +7,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 | File | Role |
 |---|---|
 | `main.tsx` | Entry: `zodSetup` (must be first) → i18n → render `App` → `registerServiceWorker`; injects `setAuthFailureHandler` (logout on final refresh failure, skipped during bootstrap) |
-| `App.tsx` | BrowserRouter + routes; lazy pages & global modals under a single `<Suspense>`; `bootstrap()`; socket connect; theme/accent; visibility lock; maintenance gate; toast limiter |
+| `App.tsx` | BrowserRouter + routes; lazy pages under a routes-level `<Suspense>` (LoadingScreen); each global modal in its own `ModalSuspense` boundary (`fallback={null}`) + `preloadOnIdle` chunk warm-up; `bootstrap()`; socket connect; theme/accent; visibility lock; maintenance gate; toast limiter |
 | `zodSetup.ts` | `globalThis.__zod_globalConfig.jitless = true` (direct mutation — `zod.config()` is tree-shaken) |
 | `i18n.ts` | i18next + HttpBackend + LanguageDetector; `load:'languageOnly'`, `fallbackLng:'en'`, 7 runtime namespaces |
 | `index.css` | Tailwind v4 `@theme`, `@custom-variant dark (&:where(.dark,.dark *))`, neumorphic shadows, aurora gradient |
