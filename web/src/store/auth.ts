@@ -10,7 +10,7 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, setAutoUnlockIdentity } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy";
 import { getBrowserFingerprint } from "@utils/fingerprint";
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto";
@@ -382,9 +382,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       privateKeysCache = null;
       set({ hasRestoredKeys: false });
       
-      // Wipe sessionStorage so auto-unlock fails
-      const { setDeviceAutoUnlockReady } = await import('@lib/keyStorage');
-      sessionStorage.removeItem('nyx_device_auto_unlock_key');
+      // Wipe auto-unlock key USER AKTIF saja (scoped per user, [FIX #5])
+      const { clearKeys, setDeviceAutoUnlockReady } = await import('@lib/keyStorage');
+      await clearKeys();
       await setDeviceAutoUnlockReady(false);
     },
 
@@ -664,6 +664,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
            localStorage.setItem('deviceId', res.deviceId);
         }
 
+        // [FIX #5] identitas harus ter-set SEBELUM menulis auto-unlock key —
+        // di register, user belum ada di store/localStorage saat titik ini.
+        setAutoUnlockIdentity(res.user.id);
         await saveEncryptedKeys(encryptedPrivateKeys);
         await saveDeviceAutoUnlockKey(password);
         await setDeviceAutoUnlockReady(true);
@@ -705,9 +708,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         
-        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First)
-        sessionStorage.removeItem('nyx_device_auto_unlock_key');
-        sessionStorage.removeItem('nyx_device_auto_unlock_ready');
+        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First).
+        // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
+        // sesi unlock akun lain di tab yang sama tidak terganggu.
+        await clearKeys();
         localStorage.removeItem('user');
         
         set({ user: null, accessToken: null, hasRestoredKeys: false });
@@ -941,4 +945,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },  };
 }, Object.is);
 ;
+
+// [FIX #5] Ekspos store untuk keyStorage: scoping auto-unlock key per user
+// butuh identitas user aktif tanpa import statis (menghindari cycle module).
+// Harus SETELAH createWithEqualityFn selesai — reference di dalam initializer
+// dievaluasi sebelum const selesai (TDZ → ReferenceError).
+(globalThis as Record<string, unknown>).__nyxAuthStore = useAuthStore;
 
