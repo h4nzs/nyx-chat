@@ -39,6 +39,7 @@ import { decryptMessageObject, evaluateControlMessage, createRepliedToForStoryRe
 export { decryptMessageObject } from '../lib/messagePipeline';
 
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
+import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
 
 const incomingMessageLocks = new Map<string, Promise<void>>();
@@ -420,8 +421,10 @@ type Actions = {
   repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
 };
 
-let tempIdCounter = 0;
-const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
+// [Temuan #3] Generator tempId dipindah ke util bersama — skema packing bit
+// (epoch-detik | counter per-tab | boot-random) tahan collision antar-tab.
+// Kontrak retry-dengan-tempId-sama untuk dedupe server tidak berubah.
+const generateTempId = () => generateTempIdSafe();
 
 const initialState: State = {
   messages: {},

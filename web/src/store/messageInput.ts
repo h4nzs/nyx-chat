@@ -6,6 +6,7 @@ import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, handleApiError } from "@lib/api";
 import { ensureGroupSession } from "@utils/crypto";
+import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import { emitGroupKeyDistribution } from '@lib/transportClient';
 import toast from "react-hot-toast";
 import { useAuthStore } from "./auth";
@@ -92,8 +93,8 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
   return true;
 };
 
-let tempIdCounter = 0;
-const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
+// [Temuan #3] Skema packing bit tahan collision antar-tab — lihat utils/tempId.ts.
+const generateTempId = () => generateTempIdSafe();
 
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
