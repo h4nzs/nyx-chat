@@ -39,13 +39,37 @@ const PasswordPromptModal = lazy(() => import('@components/PasswordPromptModal')
 const ChatInfoModal = lazy(() => import('@components/ChatInfoModal'));
 const DynamicIsland = lazy(() => import('@components/DynamicIsland'));
 const CommandPalette = lazy(() => import('@components/CommandPalette'));
-// [NO-LAZY] ContextMenu HARUS eager: klik kanan pertama memicu chunk download
-// → Suspense fallback (LoadingScreen full-screen) menggantikan SELURUH UI
-// aplikasi selama fetch → terlihat seperti blink/refresh DOM. Chunk kecil
-// (emoji picker di dalamnya sudah di-lazy sendiri) tidak berdampak ke bundle.
-import ContextMenu from '@components/ContextMenu';
+const ContextMenu = lazy(() => import('@components/ContextMenu'));
 const CallOverlay = lazy(() => import('@components/CallOverlay'));
 const SystemInitModal = lazy(() => import('@components/SystemInitModal'));
+
+// [MODAL-PRELOAD] Preload semua chunk modal saat idle agar Suspense tidak pernah
+// suspend di jalur normal — chunk sudah di-cache jauh sebelum modal pertama dibuka.
+preloadOnIdle([
+  () => import('@components/ConfirmModal'),
+  () => import('@components/UserInfoModal'),
+  () => import('@components/PasswordPromptModal'),
+  () => import('@components/ChatInfoModal'),
+  () => import('@components/DynamicIsland'),
+  () => import('@components/CommandPalette'),
+  () => import('@components/ContextMenu'),
+  () => import('@components/CallOverlay'),
+  () => import('@components/SystemInitModal'),
+]);
+
+/**
+ * [MODAL-SUSPENSE] Boundary per-modal dengan fallback={null}.
+ * KERUSAKAN YANG DIHINDARI: sebelumnya SEMUA modal + seluruh routes berada di
+ * SATU Suspense dengan fallback LoadingScreen full-screen — membuka modal yang
+ * chunk-nya belum ada menggantikan SELURUH aplikasi dengan spinner (blink
+ * "seperti refresh DOM", terutama saat klik kanan pertama → ContextMenu).
+ * Kini setiap modal punya boundary sendiri; jika suspend, HANYA modal itu yang
+ * belum tampil — aplikasi di sekelilingnya tidak pernah terganggu. Ditambah
+ * preload on-idle di atas, suspend praktis tak pernah terjadi.
+ */
+const ModalSuspense = ({ children }: { children: React.ReactNode }) => (
+  <Suspense fallback={null}>{children}</Suspense>
+);
 
 // Stores & Hooks
 import { useAuthStore } from './store/auth';
@@ -53,6 +77,7 @@ import { useThemeStore } from './store/theme';
 import { useCommandPaletteStore } from './store/commandPalette';
 import { useModalStore } from './store/modal';
 import { useContextMenuStore } from './store/contextMenu';
+import { preloadOnIdle } from '@utils/modalPreload';
 import { useCallStore } from './store/callStore';
 import { useConversationStore } from './store/conversation';
 import { useSystemStore } from './store/systemStore';
@@ -373,19 +398,32 @@ const AppContent = () => {
       {/* Global Modals & UI Elements — render on-demand agar chunk modal
           hanya diunduh saat benar-benar dibutuhkan */}
       <ErrorBoundary>
-      <Suspense fallback={<LoadingScreen />}>
-        {/* CommandPalette wajib selalu ter-mount: dia mendaftarkan command
-            navigasi global di dalam dirinya */}
-        <CommandPalette />
-        {isConfirmOpen && <ConfirmModal />}
-        {isProfileModalOpen && <UserInfoModal />}
-        {isPasswordPromptOpen && <PasswordPromptModal />}
-        {isChatInfoModalOpen && <ChatInfoModal />}
-        <DynamicIsland />
-        {isContextMenuOpen && <ContextMenu />}
-        {isCallActive && <CallOverlay />}
-        <SystemInitModal />
+        {/* [MODAL-SUSPENSE] Setiap modal di boundary sendiri (fallback={null}):
+            suspend modal tidak pernah mengganggu app di sekelilingnya — dulu
+            SEMUA modal + routes berada di SATU boundary ber-fallback
+            LoadingScreen full-screen, sehingga membuka modal yang chunk-nya
+            belum ada menggantikan SELURUH aplikasi (blink "refresh DOM"). */}
+        <ModalSuspense>
+          {/* CommandPalette wajib selalu ter-mount: dia mendaftarkan command
+              navigasi global di dalam dirinya */}
+          <CommandPalette />
+        </ModalSuspense>
+        <ModalSuspense>{isConfirmOpen && <ConfirmModal />}</ModalSuspense>
+        <ModalSuspense>{isProfileModalOpen && <UserInfoModal />}</ModalSuspense>
+        <ModalSuspense>{isPasswordPromptOpen && <PasswordPromptModal />}</ModalSuspense>
+        <ModalSuspense>{isChatInfoModalOpen && <ChatInfoModal />}</ModalSuspense>
+        <ModalSuspense>
+          <DynamicIsland />
+        </ModalSuspense>
+        <ModalSuspense>{isContextMenuOpen && <ContextMenu />}</ModalSuspense>
+        <ModalSuspense>{isCallActive && <CallOverlay />}</ModalSuspense>
+        <ModalSuspense>
+          <SystemInitModal />
+        </ModalSuspense>
 
+        {/* [MODAL-SUSPENSE] Boundary untuk routes: hanya halaman lazy yang
+            suspend di sini (fallback per-navigasi, bukan per-modal). */}
+        <Suspense fallback={<LoadingScreen />}>
         <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main flex flex-col">
           {/* Banner Status Sistem */}
           <SystemBanner />
@@ -438,7 +476,7 @@ const AppContent = () => {
             </Routes>
           </div>
         </div>
-      </Suspense>
+        </Suspense>
       </ErrorBoundary>
     </>
   );
