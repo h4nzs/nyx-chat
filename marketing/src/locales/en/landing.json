@@ -51,7 +51,8 @@
     },
     "burner_chat": {
       "title": "BURNER SESSIONS",
-      "desc": "Create a temporary anonymous gateway. Share a link with outsiders to chat fully encrypted in memory without registering. Auto-nukes on close."
+      "desc": "Create a temporary anonymous gateway. Share a link with outsiders to chat fully encrypted in memory without registering. Auto-nukes on close.",
+      "ram_only": "RAM only"
     },
     "no_phone": {
       "title": "NO PHONE NUMBER",
@@ -171,5 +172,8 @@
   "a11y": {
     "not_supported": "Not Supported/Bad",
     "supported": "Supported/Good"
+  },
+  "app": {
+    "display_name": "NYX Secure Chat"
   }
 }

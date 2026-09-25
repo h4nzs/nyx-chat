@@ -2,11 +2,15 @@
 // marketing/src/layouts/MainLayout.astro
 import '../index.css';
 import SEO from '../components/SEO.astro'; // Komponen SEO Astro
+import { getLangFromUrl } from '../utils/i18n';
 
 const { title, description, canonicalUrl, schemaMarkup } = Astro.props;
+// [I18N] lang attribute harus mengikuti locale halaman — hardcoded "en" merusak
+// screen reader (pronunciation) dan SEO hreflang untuk halaman id/es/pt-BR.
+const lang = Astro.currentLocale || getLangFromUrl(Astro.url) || 'en';
 ---
 
-<html lang="en" data-theme="light" data-accent="purple">
+<html lang={lang} data-theme="light" data-accent="purple">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

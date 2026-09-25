@@ -51,7 +51,8 @@
     },
     "burner_chat": {
       "title": "SESI BURNER",
-      "desc": "Gerbang anonim sementara. Bagikan tautan ke pihak luar untuk chat terenkripsi murni di memori tab tanpa mendaftar. Otomatis hangus saat ditutup."
+      "desc": "Gerbang anonim sementara. Bagikan tautan ke pihak luar untuk chat terenkripsi murni di memori tab tanpa mendaftar. Otomatis hangus saat ditutup.",
+      "ram_only": "Hanya RAM"
     },
     "no_phone": {
       "title": "TANPA NOMOR TELEPON",
@@ -171,5 +172,8 @@
   "a11y": {
     "not_supported": "Tidak Didukung",
     "supported": "Didukung"
+  },
+  "app": {
+    "display_name": "NYX Secure Chat"
   }
 }

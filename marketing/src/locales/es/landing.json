@@ -67,7 +67,8 @@
     },
     "burner_chat": {
       "title": "SESIONES DESCARTABLES",
-      "desc": "Cree una puerta de enlace anónima temporal. Comparta un enlace para chatear completamente encriptado en memoria sin registrarse. Auto-destrucción al cerrar."
+      "desc": "Cree una puerta de enlace anónima temporal. Comparta un enlace para chatear completamente encriptado en memoria sin registrarse. Auto-destrucción al cerrar.",
+      "ram_only": "Solo RAM"
     }
   },
   "how_it_works": {
@@ -179,5 +180,8 @@
   "a11y": {
     "not_supported": "No compatible",
     "supported": "Compatible"
+  },
+  "app": {
+    "display_name": "NYX Secure Chat"
   }
 }

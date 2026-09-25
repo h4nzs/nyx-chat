@@ -67,7 +67,8 @@
     },
     "burner_chat": {
       "title": "SESSÕES DESCARTÁVEIS",
-      "desc": "Crie um gateway anônimo temporário. Compartilhe um link para conversar totalmente criptografado na memória sem se registrar. Autodestruição ao fechar."
+      "desc": "Crie um gateway anônimo temporário. Compartilhe um link para conversar totalmente criptografado na memória sem se registrar. Autodestruição ao fechar.",
+      "ram_only": "Somente RAM"
     }
   },
   "how_it_works": {
@@ -179,5 +180,8 @@
   "a11y": {
     "not_supported": "Não Suportado",
     "supported": "Suportado"
+  },
+  "app": {
+    "display_name": "NYX Secure Chat"
   }
 }
