@@ -76,8 +76,11 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
       };
     }
 
-    // 2. Wipe Bio Vault (WebAuthn PRF Storage)
-    localStorage.removeItem('nyx_bio_vault');
+    // 2. Wipe Bio Vault (WebAuthn PRF Storage) — semua credential (map v2 + legacy)
+    import('./biometricUnlock').then(m => m.clearAllBioVaults()).catch(() => {
+      localStorage.removeItem('nyx_bio_vault_v2');
+      localStorage.removeItem('nyx_bio_vault');
+    });
 
     // 3. Wipe Local & Session Storage completely
     localStorage.clear();

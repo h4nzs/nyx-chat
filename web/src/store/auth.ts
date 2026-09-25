@@ -244,6 +244,21 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             useModalStore.getState().showPasswordPrompt(async (password) => {
               if (isResolvedOrRejected) return;
 
+              // [BIOMETRIC RAM-UNLOCK] Modal mengirim null saat vault sudah
+              // terbuka via biometric (unlockFromRecoveryPhrase → setDecryptedKeys
+              // → privateKeysCache terisi, TANPA menyentuh bundle IDB). Ambil
+              // kunci dari cache — JANGAN reject sebagai "password not provided".
+              if (password === null || password === undefined) {
+                if (privateKeysCache) {
+                  cleanup();
+                  resolve(privateKeysCache);
+                  return;
+                }
+                cleanup();
+                reject(new Error("Password not provided."));
+                return;
+              }
+
               if (!password) { 
                 cleanup();
                 reject(new Error("Password not provided.")); 

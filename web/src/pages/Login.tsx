@@ -10,7 +10,7 @@ import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewe
 import { api } from "@lib/api";
 import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
 import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
-import { unlockWithBiometric } from "@lib/biometricUnlock";
+import { unlockWithBiometric, removeBioVaultEntry } from "@lib/biometricUnlock";
 import { executeLocalWipe } from "@lib/nukeProtocol";
 import { importDatabaseFromJson } from '@lib/keychainDb';
 import { sanitizeErrorLog } from '../utils/sanitize';
@@ -98,6 +98,8 @@ export default function Login() {
 
           if (parsed.encrypted) {
               useModalStore.getState().showPasswordPrompt(async (password) => {
+                  // [BIOMETRIC RAM-UNLOCK] null = vault terbuka via biometric;
+                  // tidak relevan untuk import vault (butuh password nyata).
                   if (!password) return;
                   await performImport(password);
               });
@@ -163,7 +165,7 @@ export default function Login() {
       const options = await api<unknown>("/api/auth/webauthn/login/options");
 
       // B. Browser minta fingerprint user (Login Server + Unlock Local Vault)
-      const { authResp, recoveryPhrase } = await unlockWithBiometric(options as Record<string, unknown>);
+      const { authResp, recoveryPhrase, credentialId } = await unlockWithBiometric(options as Record<string, unknown>);
 
       // C. Verifikasi ke Server (sertakan device identity agar perangkat dikenali)
       const { getBrowserFingerprint, getPersistentInstallationId } = await import('@utils/fingerprint');
@@ -223,18 +225,26 @@ export default function Login() {
 
         if (!autoUnlockSuccess) {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
-             if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
+             if (credentialId && !recoveryPhrase) {
                 console.warn("Biometric PRF key derivation failed or mismatched.");
                 toast.error(t('auth:errors.biometric_corrupt'));
-                localStorage.removeItem('nyx_bio_vault'); 
+                // [FIX SILENT-VAULT-OVERWRITE] hapus SELEKTIF hanya credential yang
+                // bermasalah — dulu satu removeItem menghabiskan vault milik
+                // credential lain (multi-akun / multi-authenticator).
+                removeBioVaultEntry(credentialId);
              }
 
              const hasKeys = await getEncryptedKeys();
              if (hasKeys) {
                 useModalStore.getState().showPasswordPrompt(async (password) => {
+                    // [BIOMETRIC RAM-UNLOCK] null = vault sudah terbuka via
+                    // biometric di modal (setDecryptedKeys). Lanjutkan ke /chat.
+                    if (password === null) {
+                        await useAuthStore.getState().loadBlockedUsers();
+                        navigate("/chat");
+                        return;
+                    }
                     if (!password) return;
-
-                    // --- PANIC PASSWORD CHECK ---
                     const isPanic = await checkPanicPassword(password);
                     if (isPanic) {
                       // Fake loading to deceive the attacker
@@ -314,6 +324,12 @@ export default function Login() {
       const hasKeys = await getEncryptedKeys();
       if (hasKeys) {
          useModalStore.getState().showPasswordPrompt(async (password) => {
+            // [BIOMETRIC RAM-UNLOCK] null = vault sudah terbuka via biometric.
+            if (password === null) {
+                await useAuthStore.getState().loadBlockedUsers();
+                navigate("/chat");
+                return;
+            }
             if (!password) return;
 
             const isPanic = await checkPanicPassword(password);

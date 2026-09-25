@@ -17,7 +17,8 @@ export default function PasswordPromptModal() {
 
   useEffect(() => {
     if (isPasswordPromptOpen) {
-      setHasBioVault(!!localStorage.getItem('nyx_bio_vault'));
+      // [FIX SILENT-VAULT-OVERWRITE] cek map v2 ATAU legacy — bukan satu key tunggal.
+      import('@lib/biometricUnlock').then(m => setHasBioVault(m.hasAnyBioVault()));
       setError('');
     }
   }, [isPasswordPromptOpen]);
@@ -60,28 +61,42 @@ export default function PasswordPromptModal() {
     try {
       const { api } = await import('@lib/api');
       const { unlockWithBiometric } = await import('@lib/biometricUnlock');
-      const { restoreFromPhrase } = await import('@lib/crypto-worker-proxy');
-      const { saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import('@lib/keyStorage');
-      
+      const { unlockFromRecoveryPhrase } = await import('@lib/biometricUnlockKeys');
+      const { restoreFromPhrase, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+      const { useAuthStore } = await import('@store/auth');
+
       const options = await api<unknown>("/api/auth/webauthn/login/options");
       const { recoveryPhrase } = await unlockWithBiometric(options as Record<string, unknown>);
 
       if (recoveryPhrase) {
-        const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-        const sessionPassword = sodium.to_hex(sodium.randombytes_buf(16)); 
-        
-        const { encryptedPrivateKeys } = await restoreFromPhrase(recoveryPhrase, sessionPassword);
-        
-        await saveEncryptedKeys(encryptedPrivateKeys);
-        await saveDeviceAutoUnlockKey(sessionPassword);
-        await setDeviceAutoUnlockReady(true);
-        
-        toast.success(t('auth:status.vault_unlocked'));
-        
-        // Pass the new session password to the caller so they can decrypt the new keys
-        await (onPasswordSubmit(sessionPassword) as unknown as Promise<void>);
-        setPassword('');
-        hidePasswordPrompt();
+        // [FIX PASSWORD-BECOMES-INVALID] RAM-only unlock, kontrak sama dengan
+        // handleBiometricLogin di Login.tsx (unlockFromRecoveryPhrase).
+        //
+        // Sebelumnya jalur ini MENIMPA `nyx_encrypted_keys` di IndexedDB dengan
+        // bundle yang dienkripsi sessionPassword acak + menyimpan
+        // sessionPassword sebagai auto-unlock key. Akibatnya login password
+        // berikutnya gagal dengan "kunci salah/korup" — bundle IDB bukan lagi
+        // milik password user. Lihat biometricUnlockKeys.ts untuk kontraknya.
+        //
+        // Sekarang: decrypt phrase → regenerate kunci ke MEMORI →
+        // setDecryptedKeys. Bundle IDB tetap milik password user, sehingga
+        // password DAN biometric tetap berfungsi kapan pun dipakai.
+        const ok = await unlockFromRecoveryPhrase(recoveryPhrase, {
+          restoreFromPhrase,
+          retrievePrivateKeys,
+          setDecryptedKeys: (keys) => useAuthStore.getState().setDecryptedKeys(keys),
+        });
+
+        if (ok) {
+          toast.success(t('auth:status.vault_unlocked'));
+          // Sinyal ke caller (promptForPassword / Login fallback) bahwa vault
+          // sudah terbuka via biometric — TANPA password, TANPA menulis storage.
+          await (onPasswordSubmit(null) as unknown as Promise<void>);
+          setPassword('');
+          hidePasswordPrompt();
+        } else {
+          throw new Error(t('auth:errors.biometric_corrupt'));
+        }
       } else {
         throw new Error(t('auth:errors.biometric_corrupt'));
       }

@@ -26,7 +26,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
-import { setupBiometricUnlock, browserSupportsWebAuthn } from '@lib/biometricUnlock';
+import { setupBiometricUnlock, browserSupportsWebAuthn, hasAnyBioVault } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
 import ImageCropperModal from '../components/ImageCropperModal';
@@ -230,8 +230,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const checkBioVault = () => {
-        const vault = localStorage.getItem('nyx_bio_vault');
-        setHasBioVault(!!vault);
+        // [FIX SILENT-VAULT-OVERWRITE] cek map v2 ATAU legacy — bukan satu key tunggal.
+        setHasBioVault(hasAnyBioVault());
     };
     checkBioVault();
     window.addEventListener('storage', checkBioVault);
