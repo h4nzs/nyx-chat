@@ -105,6 +105,81 @@ async function emitEventToUser(
 // ===========================================================================
 // CHAT_MESSAGE (0x01)
 // ===========================================================================
+// --- Idempotensi message:send (FIX duplicate-on-retry) ---
+// Client re-send pesan yang ACK-nya hilang (timeout 5s/15s). Tanpa dedupe,
+// retry tersimpan sebagai pesan baru → penerima melihat duplikat. Kunci dedupe
+// per (deviceId, tempId) dengan TTL 24 jam, reserve atomik via Redis SET NX.
+//
+// Kondisi tempId dari schema: number (z.number().int()) ATAU string numerik
+// (payload lama yang lolos coercion). String non-numerik tidak mungkin lolos
+// schema — z.number() menolaknya.
+const SEND_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
+
+function buildSendDedupeKey(deviceId: string, tempId: string | number): string {
+  return `nyx:send_dedupe:${deviceId}:${tempId}`;
+}
+
+// Hasil reserve: 'reserved' = boleh insert; { existingMsgId } = sudah pernah
+// tersimpan (duplicate) — nilainya disimpan SETELAH insert sukses.
+// "pending" = insert lain masih berjalan untuk kunci yang sama.
+async function reserveMessageSlot(
+  ctx: RealtimeContext,
+  userId: string,
+  deviceId: string,
+  tempId: string | number,
+  msgId?: string
+): Promise<'reserved' | 'pending' | { existingMsgId: string }> {
+  const key = buildSendDedupeKey(deviceId, tempId);
+  // SET NX: atomik — hanya satu request yang berhasil meng-claim kunci.
+  const set = await ctx.redisClient.set(key, 'pending', { NX: true, EX: SEND_DEDUPE_TTL_SECONDS });
+  if (set === 'OK') return 'reserved';
+
+  // Kunci sudah ada. Tunggu singkat insert paralel selesai, lalu baca msgId
+  // hasilnya (duplikat tersimpan memakai id pesan asli sebagai value).
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 150));
+    const val = await ctx.redisClient.get(key);
+    if (typeof val === 'string' && val !== 'pending') {
+      return { existingMsgId: val };
+    }
+  }
+  // Insert paralel belum selesai juga setelah ~1.5s: anggap gagal/stuck dan
+  // biarkan request ini jalan (dedupe bukan hard-gate; race bawah 1.5s pada
+  // pengiriman ganda nyata praktis mustahil — retry memakai tempId sama).
+  console.warn('[Dedupe] Slot pending terlalu lama, meneruskan tanpa dedupe:', sanitizeForLog(userId));
+  if (msgId) {
+    await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Duplicate send in progress, retry' });
+  }
+  return 'pending';
+}
+
+async function completeMessageSlot(
+  ctx: RealtimeContext,
+  deviceId: string,
+  tempId: string | number,
+  createdMessageId: string
+): Promise<void> {
+  // Simpan id pesan hasil insert sebagai value — request duplicate berikutnya
+  // menerima ACK ok:true dengan pesan yang SAMA, bukan error.
+  await ctx.redisClient.set(
+    buildSendDedupeKey(deviceId, tempId),
+    createdMessageId,
+    { EX: SEND_DEDUPE_TTL_SECONDS }
+  ).catch((e: unknown) => console.warn('[Dedupe] Failed to finalize dedupe slot:', e));
+}
+
+async function releaseMessageSlot(
+  ctx: RealtimeContext,
+  deviceId: string,
+  tempId: string | number
+): Promise<void> {
+  // Insert gagal → bebaskan slot agar retry nyata (mis. setelah perbaikan
+  // server) bisa tersimpan. Delete race-aman: paling buruk duplikat, paling
+  // baik retry sukses.
+  await ctx.redisClient.del(buildSendDedupeKey(deviceId, tempId))
+    .catch((e: unknown) => console.warn('[Dedupe] Failed to release dedupe slot:', e));
+}
+
 export async function handleChatMessage(
   ctx: RealtimeContext,
   userId: string,
@@ -124,6 +199,31 @@ export async function handleChatMessage(
   const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId, targetRecipients, deleteSecret } = validatedPayload;
 
   try {
+    // --- IDEMPOTENSI: reserve slot dedupe sebelum menyentuh DB ---
+    // Hanya bila tempId tersedia (selalu ada dari kedua jalur client).
+    if (tempId !== undefined && deviceId) {
+      const reservation = await reserveMessageSlot(ctx, userId, deviceId, tempId, msgId);
+      if (reservation === 'pending') return; // ACK error sudah dikirim
+      if (typeof reservation === 'object') {
+        // Duplicate: kirim ulang ACK sukses dengan pesan yang SUDAH ADA di DB
+        // (bukan insert baru), supaya removeFromQueue/update optimistic tetap
+        // berjalan seperti ACK asli.
+        const existing = await ctx.prisma.message.findUnique({
+          where: { id: reservation.existingMsgId },
+          include: { sender: { select: { id: true, encryptedProfile: true } } }
+        });
+        if (existing) {
+          const safeMessage = toRawServerMessage(existing) as RawServerMessage;
+          safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, msg: safeMessage });
+          return;
+        }
+        // Pesan sudah terhapus (mis. read + sweeper) → slot basi, lanjut insert
+        // ulang sebagai jalur biasa (jarang; bukan error state).
+        await releaseMessageSlot(ctx, deviceId, tempId);
+      }
+    }
+
     const conversation = await ctx.prisma.conversation.findUnique({
       where: { id: conversationId }
     });
@@ -148,6 +248,11 @@ export async function handleChatMessage(
         data: { lastMessageAt: new Date() }
       })
     ]);
+
+    // Finalisasi slot dedupe dengan id pesan hasil insert.
+    if (tempId !== undefined && deviceId) {
+      await completeMessageSlot(ctx, deviceId, tempId, newMessageRaw.id);
+    }
 
     const safeMessage = toRawServerMessage(newMessageRaw) as RawServerMessage;
     if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
@@ -185,6 +290,10 @@ export async function handleChatMessage(
     }
   } catch (error) {
     console.error('Failed to handle chat message:', error);
+    // Insert gagal → bebaskan slot dedupe agar retry berikutnya bisa tersimpan.
+    if (tempId !== undefined && deviceId) {
+      await releaseMessageSlot(ctx, deviceId, tempId);
+    }
     if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: "Internal server error" });
   }
 }

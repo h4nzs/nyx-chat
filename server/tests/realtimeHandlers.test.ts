@@ -52,7 +52,12 @@ function makeCtx() {
   }) as unknown as RealtimeContext['prisma'];
 
   const fakeRedis = new Proxy({}, {
-    get() {
+    get(_t, method: string) {
+      // SET NX default: selalu sukses (reserved). Test dedupe menggantikan
+      // redisClient ini dengan makeStatefulRedis yang benar-benar stateful.
+      if (method === 'set') return async () => 'OK';
+      if (method === 'get') return async () => null;
+      if (method === 'del') return async () => 1;
       return async () => ({});
     },
   }) as unknown as RealtimeContext['redisClient'];
@@ -120,6 +125,123 @@ test('handleChatMessage: menolak payload tidak valid tanpa melempar error (unhan
 
   const ackCall = calls.sendJsonToUser.find((c) => c[1] === TransportOpCode.ACK);
   assert.ok(ackCall, 'harus mengirim ACK penolakan');
+  assert.equal((ackCall![2] as { data: { ok: boolean } }).data.ok, false);
+});
+
+// Fake redis STATEFUL untuk menguji dedupe SET NX: set dengan NX benar-benar
+// atomik terhadap isi map, get/del membaca/menghapus entry.
+function makeStatefulRedis(store = new Map<string, string>()) {
+  return {
+    store,
+    client: new Proxy({}, {
+      get(_t, method: string) {
+        if (method === 'set') {
+          return async (key: string, val: string, opts?: { NX?: boolean; EX?: number }) => {
+            if (opts?.NX && store.has(key)) return null;
+            store.set(key, val);
+            return 'OK';
+          };
+        }
+        if (method === 'get') return async (key: string) => store.get(key) ?? null;
+        if (method === 'del') return async (key: string) => { store.delete(key); return 1; };
+        return async () => ({});
+      },
+    }),
+  };
+}
+
+// Context dengan fakeRedis stateful (menggantikan proxy generik makeCtx).
+function makeCtxWithRedis(redisClient: unknown) {
+  const base = makeCtx();
+  base.ctx.redisClient = redisClient as RealtimeContext['redisClient'];
+  return base;
+}
+
+test('handleChatMessage: idempotensi — retry dengan tempId sama TIDAK membuat pesan kedua, ACK ulang pesan asli', async () => {
+  const { store, client } = makeStatefulRedis();
+  const { ctx, calls } = makeCtxWithRedis(client);
+
+  // Hitung jumlah insert via counter di proxy prisma.
+  let createCount = 0;
+  const makeMessageModel = () => new Proxy({}, {
+    get(_m, method: string) {
+      if (method === 'create') {
+        return async () => {
+          createCount++;
+          return { id: 'm' + createCount, conversationId: 'c1', senderId: 'u1', content: 'x', createdAt: new Date().toISOString(), type: 'USER', isViewOnce: false, sender: { id: 'u1', encryptedProfile: null } };
+        };
+      }
+      if (method === 'findUnique') {
+        // Duplicate path membaca pesan existing berdasarkan id di slot dedupe.
+        return async ({ where }: { where?: { id?: string } }) => {
+          const id = where?.id;
+          if (id && store.get('nyx:send_dedupe:d1:777') === id) {
+            return { id, conversationId: 'c1', senderId: 'u1', content: 'x', createdAt: new Date().toISOString(), type: 'USER', isViewOnce: false, sender: { id: 'u1', encryptedProfile: null } };
+          }
+          return null;
+        };
+      }
+      return async () => ({});
+    },
+  });
+  const origPrisma = ctx.prisma as unknown as Record<string, unknown>;
+  const messageModel = makeMessageModel();
+  ctx.prisma = new Proxy(origPrisma, {
+    get(target, prop: string) {
+      if (prop === 'message') return messageModel;
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as RealtimeContext['prisma'];
+
+  const payload = { conversationId: 'c1', content: 'halo', tempId: 777 };
+
+  // Kirim pertama: reserved → insert → slot diisi msgId.
+  await handleChatMessage(ctx, 'u1', 'd1', payload, 'ack-1');
+  assert.equal(createCount, 1, 'kirim pertama harus insert sekali');
+  const slotKey = 'nyx:send_dedupe:d1:777';
+  assert.equal(store.get(slotKey), 'm1', 'slot harus berisi id pesan hasil insert');
+
+  // Retry (ACK pertama hilang): slot sudah terisi → duplicate path → ACK ulang
+  // pesan asli, TANPA insert baru.
+  calls.sendJsonToUser.length = 0;
+  await handleChatMessage(ctx, 'u1', 'd1', payload, 'ack-2');
+  assert.equal(createCount, 1, 'retry TIDAK boleh insert lagi (idempoten)');
+
+  const ackCall = calls.sendJsonToUser.find((c) => c[1] === TransportOpCode.ACK);
+  assert.ok(ackCall, 'retry harus tetap menerima ACK');
+  const ackData = (ackCall![2] as { data: { ok: boolean; msg?: { id: string } } }).data;
+  assert.equal(ackData.ok, true, 'ACK duplicate harus ok:true');
+  assert.equal(ackData.msg?.id, 'm1', 'ACK duplicate harus membawa pesan asli');
+});
+
+test('handleChatMessage: insert gagal melepaskan slot dedupe sehingga retry bisa tersimpan', async () => {
+  const { store, client } = makeStatefulRedis();
+  const { ctx, calls } = makeCtxWithRedis(client);
+
+  // Prisma yang selalu gagal saat create.
+  const origPrisma = ctx.prisma as unknown as Record<string, unknown>;
+  ctx.prisma = new Proxy(origPrisma, {
+    get(target, prop: string) {
+      if (prop === 'message') {
+        return new Proxy({}, {
+          get(_m, method: string) {
+            if (method === 'create') return async () => { throw new Error('db down'); };
+            return async () => ({});
+          },
+        });
+      }
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as RealtimeContext['prisma'];
+
+  const payload = { conversationId: 'c1', content: 'halo', tempId: 888 };
+  await handleChatMessage(ctx, 'u1', 'd1', payload, 'ack-1');
+
+  // Slot harus sudah dibebaskan setelah insert gagal.
+  assert.equal(store.has('nyx:send_dedupe:d1:888'), false, 'slot harus di-release saat insert gagal');
+
+  const ackCall = calls.sendJsonToUser.find((c) => c[1] === TransportOpCode.ACK);
+  assert.ok(ackCall, 'harus mengirim ACK error');
   assert.equal((ackCall![2] as { data: { ok: boolean } }).data.ok, false);
 });
 
