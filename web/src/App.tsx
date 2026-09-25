@@ -39,7 +39,11 @@ const PasswordPromptModal = lazy(() => import('@components/PasswordPromptModal')
 const ChatInfoModal = lazy(() => import('@components/ChatInfoModal'));
 const DynamicIsland = lazy(() => import('@components/DynamicIsland'));
 const CommandPalette = lazy(() => import('@components/CommandPalette'));
-const ContextMenu = lazy(() => import('@components/ContextMenu'));
+// [NO-LAZY] ContextMenu HARUS eager: klik kanan pertama memicu chunk download
+// → Suspense fallback (LoadingScreen full-screen) menggantikan SELURUH UI
+// aplikasi selama fetch → terlihat seperti blink/refresh DOM. Chunk kecil
+// (emoji picker di dalamnya sudah di-lazy sendiri) tidak berdampak ke bundle.
+import ContextMenu from '@components/ContextMenu';
 const CallOverlay = lazy(() => import('@components/CallOverlay'));
 const SystemInitModal = lazy(() => import('@components/SystemInitModal'));
 
