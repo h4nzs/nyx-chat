@@ -619,6 +619,14 @@ export async function handleKeySync(
 }
 
 // --- Internal: message status update (READ / DELIVERED) ---
+
+// [FIX OFFLINE-LOSS] Grace period antara receipt READ dan penghapusan ciphertext
+// 1:1 oleh messageSweeper. Receipt bisa tiba di server sebelum ciphertext tersimpan
+// aman di sisi penerima (sync ulang / kunci datang belakangan); menghapus segera
+// saat READ membuat pesan itu mustahil dipulihkan. Dengan grace period, pesan tetap
+// bisa di-fetch catch-up (GET /api/messages) selama 24 jam setelah dibaca.
+const READ_DELETE_GRACE_MS = 24 * 60 * 60 * 1000; // 24 jam
+
 async function handleMessageStatusUpdate(
   ctx: RealtimeContext,
   userId: string,
@@ -639,6 +647,14 @@ async function handleMessageStatusUpdate(
 
     // Jangan update status jika pengirim sedang membaca pesan sendiri
     if (msg.senderId === userId) return;
+
+    // [FIX OFFLINE-LOSS] Deteksi apakah pesan sudah pernah di-READ sebelumnya,
+    // agar receipt READ berulang tidak memperpanjang masa retensi (arm TTL hanya sekali).
+    const existingStatus = await ctx.prisma.messageStatus.findUnique({
+      where: { messageId_userId: { messageId, userId } },
+      select: { status: true }
+    });
+    const wasAlreadyRead = existingStatus?.status === 'READ';
 
     await ctx.prisma.messageStatus.upsert({
       where: { messageId_userId: { messageId, userId } },
@@ -661,8 +677,26 @@ async function handleMessageStatusUpdate(
     // 2. LOGIKA PENGHAPUSAN OTOMATIS (Store-and-Forward Ephemerality)
     if (status === 'READ') {
         if (!msg.conversation.isGroup) {
-            // Dalam chat 1:1, jika penerima sudah baca, hapus dari server.
-            await ctx.prisma.message.delete({ where: { id: messageId } }).catch(() => {});
+            // [FIX OFFLINE-LOSS] Jangan hapus segera saat READ. Receipt prematur
+            // (terkirim meski dekripsi di klien belum sukses) yang dulu langsung
+            // menghancurkan satu-satunya salinan server. Sekarang cukup arm TTL
+            // grace: messageSweeper menghapusnya lewat expiresAt, dan selama grace
+            // pesan tetap bisa di-fetch catch-up offline.
+            if (!wasAlreadyRead) {
+                const graceExpiresAt = new Date(Date.now() + READ_DELETE_GRACE_MS);
+                // One-shot: hanya persempit TTL (null atau lebih jauh dari grace);
+                // receipt READ berulang tidak boleh memperpanjang retensi.
+                await ctx.prisma.message.updateMany({
+                    where: {
+                        id: messageId,
+                        OR: [
+                            { expiresAt: null },
+                            { expiresAt: { gt: graceExpiresAt } }
+                        ]
+                    },
+                    data: { expiresAt: graceExpiresAt }
+                }).catch(() => {});
+            }
         }
         // Dalam grup (Opaque Mailbox), server tidak tahu jumlah partisipan.
         // Pesan akan dihapus otomatis oleh TTL (expiresAt).

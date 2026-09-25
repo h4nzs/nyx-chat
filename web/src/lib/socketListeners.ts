@@ -15,20 +15,33 @@ let isInitialized = false;
 // Module-level state for offline sync (lives across reconnects)
 // Exported for unit tests only.
 export let syncCompleted = false;
+// Guard anti-overlap: doSyncMessages bisa dipicu bersamaan dari connect handler,
+// polling, dan subscription Zustand. Tanpa ini, dua loop sync bisa jalan paralel.
+let syncInProgress = false;
+// ONE-shot delayed retry ketika sync loop gagal di tengah jalan (perbaikan #3).
+// Berbeda dengan syncRetryTimer (polling conversations kosong), timer ini
+// menangani kasus conversations SUDAH ada tapi loadMessagesForConversation gagal.
+let syncFailureRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubConversation: (() => void) | null = null;
 
 // ONE-shot delayed retry for the offline sync poll. If the conversations list
 // hasn't loaded after the normal 8×500ms polling window (e.g. during a reconnect
-// storm), we schedule a single 15s retry instead of silently giving up. It is
-// cleared/superseded on the next connect or when a real sync actually starts,
-// and it is never re-armed (no infinite loop, no overlapping syncs).
+// storm), we schedule delayed retries with escalating backoff (15s → 30s → 60s)
+// instead of silently giving up after a single 15s attempt (perbaikan #4). Still
+// bounded: maksimal 3 retry per siklus koneksi, tidak ada loop tak terbatas.
+// Timer dibersihkan/digantikan pada connect berikutnya atau saat sync nyata mulai.
 let syncRetryTimer: ReturnType<typeof setTimeout> | null = null;
-let finalRetryScheduled = false;
+let finalRetryAttempts = 0;
+const FINAL_RETRY_DELAYS_MS = [15_000, 30_000, 60_000];
 
 function clearSyncRetryTimer() {
   if (syncRetryTimer) {
     clearTimeout(syncRetryTimer);
     syncRetryTimer = null;
+  }
+  if (syncFailureRetryTimer) {
+    clearTimeout(syncFailureRetryTimer);
+    syncFailureRetryTimer = null;
   }
 }
 
@@ -39,20 +52,25 @@ let connectionLoginGeneration = 0;
 // Unit-test hook: reset the module-level sync flag between tests.
 export function resetSocketSyncForTests() {
   syncCompleted = false;
+  syncInProgress = false;
 }
 
 // Shared sync function — accessible from both connect handler and subscription
 // (exported for unit tests).
 export async function doSyncMessages() {
   if (syncCompleted) return;
+  // Anti-overlap: polling, connect handler, dan subscription bisa memicu sync
+  // hampir bersamaan — jangan biarkan dua loop berjalan paralel.
+  if (syncInProgress) return;
   // A real sync is starting (or being attempted) — supersede any pending retry.
   clearSyncRetryTimer();
+  syncInProgress = true;
   try {
     const conversations = useConversationStore.getState().conversations;
     if (conversations.length === 0) return;
 
-    syncCompleted = true;
     const messageStore = useMessageStore.getState();
+    const failed: string[] = [];
     for (const conv of conversations) {
       if (conv.id.startsWith('burner_')) continue;
       // BUGFIX: sebelumnya percakapan grup dengan metadata yang belum terdekripsi
@@ -60,14 +78,43 @@ export async function doSyncMessages() {
       // saat reconnect. loadMessagesForConversation memproses control message
       // (GROUP_KEY_DISTRIBUTION / METADATA_UPDATED) lebih dulu, jadi kunci + metadata
       // akan terpasang sebelum pesan didekripsi.
-      await messageStore.loadMessagesForConversation(conv.id);
+      try {
+        await messageStore.loadMessagesForConversation(conv.id);
+      } catch (convErr) {
+        // Satu conversation gagal tidak boleh membatalkan sync lainnya.
+        console.error(`[Offline Sync] Failed to sync conversation ${conv.id}:`, convErr);
+        failed.push(conv.id);
+      }
     }
-    // Kirim pesan offline yang tertahan (idempotent, self-guarded)
-    messageStore.processOfflineQueue().catch((e) => {
+    // Kirim pesan offline yang tertahan (idempotent, self-guarded).
+    // Dijalankan meski sebagian conversation gagal — pesan keluar tak boleh
+    // ikut tertahan karena kegagalan sync masuk. Promise.resolve() melindungi
+    // dari implementasi yang tidak mengembalikan Promise.
+    Promise.resolve(messageStore.processOfflineQueue()).catch((e) => {
       console.error('[Offline Queue] Failed to process after sync:', e);
     });
+
+    if (failed.length > 0) {
+      // Perbaikan #3: JANGAN set syncCompleted jika ada conversation yang gagal
+      // di-sync — sebelumnya flag di-set SEBELUM loop, sehingga kegagalan apa pun
+      // (jaringan putus di tengah, dekripsi error, dll.) membuat sync dianggap
+      // selesai dan pesan yang tertinggal tidak pernah diambil sampai reconnect.
+      // Jadwalkan SATU retry (bounded, tanpa loop tak terbatas).
+      console.warn(`[Offline Sync] ${failed.length} conversation(s) failed to sync, scheduling one retry.`);
+      if (!syncFailureRetryTimer) {
+        syncFailureRetryTimer = setTimeout(() => {
+          syncFailureRetryTimer = null;
+          if (!syncCompleted && !syncInProgress) void doSyncMessages();
+        }, 5000);
+      }
+    } else {
+      // Semua conversation tersync — baru tandai selesai.
+      syncCompleted = true;
+    }
   } catch (e) {
     console.error('[Offline Sync] Failed to sync messages on connect:', e);
+  } finally {
+    syncInProgress = false;
   }
 }
 
@@ -93,7 +140,7 @@ export function initSocketListeners() {
     syncCompleted = false;
     // Reset the one-shot retry state for this connection cycle.
     clearSyncRetryTimer();
-    finalRetryScheduled = false;
+    finalRetryAttempts = 0;
     // Capture the login generation so stale force_logout events from a prior
     // session can be ignored.
     connectionLoginGeneration = useAuthStore.getState().loginGeneration ?? 0;
@@ -108,15 +155,16 @@ export function initSocketListeners() {
         if (syncAttempts < maxSyncAttempts) {
           syncAttempts++;
           setTimeout(pollSyncMessages, 500);
-        } else if (!finalRetryScheduled) {
+        } else if (finalRetryAttempts < FINAL_RETRY_DELAYS_MS.length) {
           // Normal polling exhausted (conversations still empty after a reconnect
-          // storm). Schedule ONE delayed retry to catch up — no infinite loop,
-          // and it is cleared/superseded on the next connect or a real sync.
-          finalRetryScheduled = true;
+          // storm). Escalating backoff 15s → 30s → 60s, lalu berhenti — no infinite
+          // loop. Cleared/superseded on the next connect or a real sync.
+          const delay = FINAL_RETRY_DELAYS_MS[finalRetryAttempts];
+          finalRetryAttempts++;
           syncRetryTimer = setTimeout(() => {
             syncRetryTimer = null;
             if (!syncCompleted) pollSyncMessages();
-          }, 15000);
+          }, delay);
         }
         return;
       }

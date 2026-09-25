@@ -61,19 +61,20 @@ describe('socketListeners offline sync retry (FIX 2)', () => {
     expect(loadMessagesForConversation).toHaveBeenCalledWith('c1')
   })
 
-  it('does not loop infinitely after the single delayed retry also fails', async () => {
+  it('does not loop infinitely after the bounded backoff retries also fail', async () => {
     const socketListeners = await loadModule()
     socketListeners.initSocketListeners()
     connectHandlers.forEach((h) => h())
 
     // Exhaust normal polling (schedules the 15s retry).
     await vi.advanceTimersByTimeAsync(300 + 8 * 500) // 4300ms
-    // The one-shot retry fires with still-empty conversations → must NOT reschedule.
-    await vi.advanceTimersByTimeAsync(15000) // 19300ms
+    // Backoff retries fire at 15s, 30s, 60s with still-empty conversations.
+    // None may sync, and after the last one there must be NO further attempts.
+    await vi.advanceTimersByTimeAsync(15000 + 30000 + 60000) // all 3 retries
     expect(loadMessagesForConversation).not.toHaveBeenCalled()
 
-    // Even after a long wait, no further sync attempt (no infinite loop).
-    await vi.advanceTimersByTimeAsync(60000)
+    // Beyond the bounded backoff (15+30+60s), no further sync attempt.
+    await vi.advanceTimersByTimeAsync(120000)
     expect(loadMessagesForConversation).not.toHaveBeenCalled()
   })
 
@@ -93,6 +94,97 @@ describe('socketListeners offline sync retry (FIX 2)', () => {
 
     // The pending retry must be cleared, so advancing 15s does nothing further.
     await vi.advanceTimersByTimeAsync(15000)
+    expect(loadMessagesForConversation).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses escalating backoff 15s → 30s → 60s when conversations stay empty (FIX 4)', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    connectHandlers.forEach((h) => h())
+
+    // Exhaust normal polling.
+    await vi.advanceTimersByTimeAsync(300 + 8 * 500) // 4300ms
+    expect(loadMessagesForConversation).not.toHaveBeenCalled()
+
+    // At exactly 15s: first backoff retry fires → schedules 30s.
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(loadMessagesForConversation).not.toHaveBeenCalled()
+
+    // At exactly 30s more: second retry fires → schedules 60s.
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(loadMessagesForConversation).not.toHaveBeenCalled()
+
+    // At exactly 60s more: third (final) retry fires.
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(loadMessagesForConversation).not.toHaveBeenCalled()
+
+    // Nothing beyond the 3 bounded retries.
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(loadMessagesForConversation).not.toHaveBeenCalled()
+  })
+})
+
+describe('doSyncMessages failure retry (FIX 3)', () => {
+  it('does NOT set syncCompleted when a conversation sync fails, and retries once after 5s', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+
+    conversations = [{ id: 'c1', isGroup: false }, { id: 'c2', isGroup: false }]
+    // First call for c1 fails; c2 succeeds.
+    loadMessagesForConversation.mockImplementation((id: string) => {
+      if (id === 'c1') return Promise.reject(new Error('network glitch'))
+      return Promise.resolve()
+    })
+
+    await socketListeners.doSyncMessages()
+    expect(loadMessagesForConversation).toHaveBeenCalledTimes(2)
+
+    // syncCompleted must stay false so future polls/subscriptions can retry.
+    expect(socketListeners.syncCompleted).toBe(false)
+
+    // The one-shot failure retry (5s) re-runs doSyncMessages.
+    loadMessagesForConversation.mockResolvedValue(undefined)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(loadMessagesForConversation).toHaveBeenCalledWith('c1')
+    expect(loadMessagesForConversation).toHaveBeenCalledWith('c2')
+
+    // Now the full sync succeeded → syncCompleted flips true, no more retries.
+    expect(socketListeners.syncCompleted).toBe(true)
+    const callsAfterFirstRetry = loadMessagesForConversation.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(loadMessagesForConversation.mock.calls.length).toBe(callsAfterFirstRetry)
+  })
+
+  it('sets syncCompleted when all conversations sync successfully (no failure retry)', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+
+    conversations = [{ id: 'c1', isGroup: false }]
+    loadMessagesForConversation.mockResolvedValue(undefined)
+
+    await socketListeners.doSyncMessages()
+    expect(socketListeners.syncCompleted).toBe(true)
+
+    const calls = loadMessagesForConversation.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(loadMessagesForConversation.mock.calls.length).toBe(calls)
+  })
+
+  it('prevents overlapping syncs via the syncInProgress guard', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+
+    conversations = [{ id: 'c1', isGroup: false }]
+    let releaseFirst: () => void = () => {}
+    loadMessagesForConversation.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { releaseFirst = resolve })
+    )
+
+    const first = socketListeners.doSyncMessages()
+    // Second call while the first loop is still awaiting must be a no-op.
+    await socketListeners.doSyncMessages()
+    releaseFirst()
+    await first
     expect(loadMessagesForConversation).toHaveBeenCalledTimes(1)
   })
 })

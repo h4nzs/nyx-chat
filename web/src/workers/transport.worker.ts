@@ -17,6 +17,34 @@ let isChaffingActive = false;
 let sendChain: Promise<void> = Promise.resolve();
 let pendingSends = 0;
 
+// Perbaikan #5: antrean fallback untuk frame gagal kirim (bukan chaff).
+// Sebelumnya enqueueSend menelan error kirim — pesan user bisa hilang diam-diam
+// saat transport tertutup di tengah pengiriman. Frame yang gagal kini disimpan
+// dan di-flush ulang ke sendChain saat koneksi pulih (CONNECTED).
+// Koneksi putus lebih awal (transport null) ditangani offlineQueue di
+// transportClient.ts — di sini hanya error PENGIRIMAN yang di-re-queue.
+const MAX_RETRY_QUEUE = 200;
+const retryQueue: { item: { opCode: number, payload: Uint8Array, useStream: boolean }, attempts: number }[] = [];
+let flushingRetries = false;
+
+const RETRYABLE_OPCODES = new Set<number>([
+    TransportOpCode.CHAT_MESSAGE,
+    TransportOpCode.KEY_SYNC,
+    TransportOpCode.PRESENCE,
+]);
+
+function flushRetryQueue() {
+    if (flushingRetries || retryQueue.length === 0) return;
+    flushingRetries = true;
+    // Salin & kosongkan antrean; jika flush ulang gagal lagi, item akan
+    // masuk antrean lagi di catch (serahkan ke sendChain agar FIFO terjaga).
+    const pending = retryQueue.splice(0, retryQueue.length);
+    for (const entry of pending) {
+        enqueueSend(entry.item, entry.attempts);
+    }
+    flushingRetries = false;
+}
+
 async function sendFrameItem(item: { opCode: number, payload: Uint8Array, useStream: boolean }) {
   if (!transport) return;
   if (item.useStream) {
@@ -37,7 +65,7 @@ async function sendFrameItem(item: { opCode: number, payload: Uint8Array, useStr
   }
 }
 
-function enqueueSend(item: { opCode: number, payload: Uint8Array, useStream: boolean }) {
+function enqueueSend(item: { opCode: number, payload: Uint8Array, useStream: boolean }, attempts = 0) {
   pendingSends++;
   if (import.meta.env.DEV && pendingSends > 10) {
     console.debug(`[perf:transport] send chain depth ${pendingSends}`);
@@ -47,6 +75,13 @@ function enqueueSend(item: { opCode: number, payload: Uint8Array, useStream: boo
     .catch((e) => {
       // Expected race saat koneksi baru saja tertutup (reconnect) — bukan error nyata
       console.debug("Transport: failed to send frame (connection closing):", e instanceof Error ? e.message : e);
+      // Perbaikan #5: re-queue frame pesan user yang gagal kirim (maks 3 percobaan,
+      // maks 200 frame agar memori worker tidak membengkak). Chaff sengaja dibuang:
+      // dummy traffic yang hilang tidak berpengaruh.
+      if (RETRYABLE_OPCODES.has(item.opCode) && attempts < 3) {
+        if (retryQueue.length >= MAX_RETRY_QUEUE) retryQueue.shift();
+        retryQueue.push({ item, attempts: attempts + 1 });
+      }
     })
     .finally(() => { pendingSends--; });
 }
@@ -138,6 +173,9 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
 
     postMessage({ type: 'CONNECTED' } satisfies TransportWorkerToMain);
     startChaffing();
+    // Perbaikan #5: kirim ulang frame pesan user yang gagal terkirim pada
+    // koneksi sebelumnya (maks 3 percobaan per frame, dilihat enqueueSend).
+    flushRetryQueue();
 
     // Start reading streams
     readIncomingStreams(transport.incomingUnidirectionalStreams).catch(console.error);

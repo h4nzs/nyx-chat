@@ -435,9 +435,12 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
         this.socket.emit(mapping.event, this.decodeJson(payload));
         break;
       case 'derived': {
-        const json = this.decodeJson(payload) as { event?: string; data?: unknown } | null;
+        const json = this.decodeJson(payload) as { event?: string; data?: unknown; msgId?: string } | null;
         if (json && typeof json.event === 'string') {
-          this.socket.emit(json.event, json.data);
+          // Paritas ACK dengan jalur WT: msgId diteruskan sebagai arg ke-2 agar
+          // gateway WSS bisa mengirim ACK yang meng-resolve pendingAcks (dipakai
+          // mis. emitGroupKeyDistribution dengan callback).
+          this.socket.emit(json.event, json.data, typeof json.msgId === 'string' ? json.msgId : undefined);
         }
         break;
       }

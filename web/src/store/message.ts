@@ -1726,11 +1726,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         }
 
         // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
+        // [FIX OFFLINE-LOSS] Receipt READ hanya untuk pesan yang BERHASIL didekripsi.
+        // Server menghapus ciphertext 1:1 saat READ; receipt prematur untuk pesan
+        // 'waiting_for_key'/gagal dekrip menghancurkan satu-satunya salinan yang bisa
+        // dipulihkan saat kunci datang belakangan. Gunakan senderId HASIL DEKRIPSI
+        // (raw senderId dari server adalah '' untuk 1:1 sealed-sender), bukan raw.
+        const isUndecryptable = (m: Message): boolean =>
+            !!m.error ||
+            !m.content ||
+            m.content === 'waiting_for_key' ||
+            m.content === '[Requesting key to decrypt...]' ||
+            (typeof m.content === 'string' && m.content.startsWith('['));
         const socket = transportClient;
         const { user } = useAuthStore.getState();
         if (socket?.connected && user) {
           for (const msg of processedMessages) {
-            if (msg.senderId !== user.id) {
+            if (!isUndecryptable(msg) && msg.senderId && msg.senderId !== user.id) {
               transportClient.sendEvent('message:mark_as_read', { messageId: msg.id, conversationId: id, targetRecipient: msg.senderId });
             }
           }
@@ -2211,8 +2222,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               }
 
               // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
+              // [FIX OFFLINE-LOSS] Jangan receipt pesan yang gagal didekripsi —
+              // server menghapus ciphertext 1:1 saat READ, dan pendingDecryptions
+              // (in-memory) hilang saat reload. Tunggu reDecrypt sukses; pesan yang
+              // belum terbaca tetap aman di server untuk catch-up berikutnya.
               const socket = transportClient;
-              if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
+              const isLiveReadSafe = !finalDecrypted.error && !!finalDecrypted.content
+                  && finalDecrypted.content !== 'waiting_for_key'
+                  && !(typeof finalDecrypted.content === 'string' && finalDecrypted.content.startsWith('['));
+              if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent && isLiveReadSafe) {
                   transportClient.sendEvent('message:mark_as_read', {
                       messageId: finalDecrypted.id,
                       conversationId: conversationId,

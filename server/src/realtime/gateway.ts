@@ -218,29 +218,28 @@ export function attachWssGateway(httpServer: HttpServer): void {
     socket.on('message:send', async (payload: unknown) => {
       if (!await checkRateLimit(userId, 'chat_message', 30, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleChatMessage(wsCtx, userId, deviceId, payload);
+      // Paritas dengan jalur WT: client menempelkan msgId (UUID) pada payload
+      // message:send untuk korelasi ACK. Tanpa ini, callback pendingAcks di
+      // transportClient hanya bisa resolve lewat timeout 15s — pesan tetap
+      // terkirim, tapi watchdog 20s/UX "FAILED palsu" bisa terpicu.
+      const msgId =
+        typeof payload === 'object' && payload !== null && 'msgId' in payload
+          ? (payload as { msgId?: unknown }).msgId
+          : undefined;
+      await handleChatMessage(
+        wsCtx,
+        userId,
+        deviceId,
+        payload,
+        typeof msgId === 'string' ? msgId : undefined
+      );
     });
 
-    // --- Inbound: KEY_SYNC sub-events (rate limits enforced inside handleKeySync) ---
-    socket.on('session:request_key', async (payload: unknown) => {
+    // --- Inbound: ACK (delivery receipt) ---
+    socket.on('message:ack_delivered', async (payload: unknown) => {
+      if (!await checkRateLimit(userId, 'message_ack_delivered', 60, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleKeySync(wsCtx, userId, deviceId, { event: 'session:request_key', msgId: '', data: payload });
-    });
-    socket.on('session:fulfill_response', async (payload: unknown) => {
-      if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleKeySync(wsCtx, userId, deviceId, { event: 'session:fulfill_response', msgId: '', data: payload });
-    });
-    socket.on('group:request_key', async (payload: unknown) => {
-      if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleKeySync(wsCtx, userId, deviceId, { event: 'group:request_key', msgId: '', data: payload });
-    });
-    socket.on('group:fulfilled_key', async (payload: unknown) => {
-      if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleKeySync(wsCtx, userId, deviceId, { event: 'group:fulfilled_key', msgId: '', data: payload });
-    });
-    socket.on('messages:distribute_keys', async (payload: unknown) => {
-      if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleKeySync(wsCtx, userId, deviceId, { event: 'messages:distribute_keys', msgId: '', data: payload });
+      await handleAck(wsCtx, userId, deviceId, payload as { conversationId: string; messageId: string; targetRecipient?: string });
     });
 
     // --- Inbound: PRESENCE ---
@@ -250,12 +249,46 @@ export function attachWssGateway(httpServer: HttpServer): void {
       await handlePresence(wsCtx, userId, payload as { event: string; conversationId?: string });
     });
 
-    // --- Inbound: ACK (delivery receipt) ---
-    socket.on('message:ack_delivered', async (payload: unknown) => {
-      if (!await checkRateLimit(userId, 'message_ack_delivered', 60, 60)) return;
-      if (!await isActiveDeviceAllowed(userId, deviceId)) return;
-      await handleAck(wsCtx, userId, deviceId, payload as { conversationId: string; messageId: string; targetRecipient?: string });
-    });
+    // --- Inbound: KEY_SYNC sub-events (rate limits enforced inside handleKeySync) ---
+    // [PARITY FIX] Semua event KEY_SYNC diteruskan ke handleKeySync agar fallback
+    // WSS setara dengan jalur WebTransport (redisBridge.ts mengirim SEMUA payload
+    // KEY_SYNC ke handleKeySync). Sebelumnya hanya 5 event yang didaftarkan —
+    // mark_as_read, unsend, view_once_opened, metadata:updated, push:*, burner:*,
+    // migration:*, dan session:request_missing jatuh ke pintu kosong di mode WSS.
+    //
+    // msgId (arg ke-2, opsional) dipakai untuk korelasi ACK pendingAcks di client
+    // (paritas dengan jalur WT, di mana msgId ada di dalam payload KEY_SYNC).
+    const keySyncHandler =
+      (event: string) =>
+      async (data: unknown, msgId?: unknown) => {
+        if (!await isActiveDeviceAllowed(userId, deviceId)) return;
+        await handleKeySync(wsCtx, userId, deviceId, { event, msgId: typeof msgId === 'string' ? msgId : '', data });
+      };
+
+    socket.on('session:request_key', keySyncHandler('session:request_key'));
+    socket.on('session:fulfill_response', keySyncHandler('session:fulfill_response'));
+    socket.on('session:request_missing', keySyncHandler('session:request_missing'));
+    socket.on('group:request_key', keySyncHandler('group:request_key'));
+    socket.on('group:fulfilled_key', keySyncHandler('group:fulfilled_key'));
+    socket.on('messages:distribute_keys', keySyncHandler('messages:distribute_keys'));
+    socket.on('message:mark_as_read', keySyncHandler('message:mark_as_read'));
+    socket.on('message:mark_read', keySyncHandler('message:mark_read'));
+    socket.on('message:unsend', keySyncHandler('message:unsend'));
+    socket.on('message:view_once_opened', keySyncHandler('message:view_once_opened'));
+    socket.on('metadata:updated', keySyncHandler('metadata:updated'));
+    socket.on('push:subscribe', keySyncHandler('push:subscribe'));
+    socket.on('push:unsubscribe', keySyncHandler('push:unsubscribe'));
+    socket.on('auth:request_linking_qr', keySyncHandler('auth:request_linking_qr'));
+    socket.on('burner:join', keySyncHandler('burner:join'));
+    socket.on('burner:send', keySyncHandler('burner:send'));
+    socket.on('burner:reply', keySyncHandler('burner:reply'));
+    socket.on('burner:destroy', keySyncHandler('burner:destroy'));
+    socket.on('migration:prepare', keySyncHandler('migration:prepare'));
+    socket.on('migration:cancel', keySyncHandler('migration:cancel'));
+    socket.on('migration:join', keySyncHandler('migration:join'));
+    socket.on('migration:start', keySyncHandler('migration:start'));
+    socket.on('migration:chunk', keySyncHandler('migration:chunk'));
+    socket.on('migration:ack', keySyncHandler('migration:ack'));
   });
 
   // --- Outbound: subscribe to nyx:downstream and push to local sockets only ---
