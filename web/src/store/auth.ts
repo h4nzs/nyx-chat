@@ -73,10 +73,16 @@ export async function setupAndUploadPreKeyBundle() {
     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
     const pqSignature = sodium.crypto_sign_detached(pqSignedPreKey, signingPrivateKey);
 
+    // [Temuan #2] Kirim salinan encryptedPrivateKey terbaru bersama bundle —
+    // tanpa ini, rotasi kunci membiarkan kolom device di server memegang bundle
+    // identitas LAMA, dan login blind di device baru mengadopsi bundle basi itu.
+    const encryptedPrivateKeys = await getEncryptedKeys();
+
     const bundle = {
       identityKey: identityKeyB64,
       pqIdentityKey: pqIdentityKeyB64,
       signingKey: sodium.to_base64(signingPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+      ...(encryptedPrivateKeys ? { encryptedPrivateKeys } : {}),
       signedPreKey: {
         key: sodium.to_base64(signedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         pqKey: sodium.to_base64(pqSignedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),

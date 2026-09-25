@@ -14,6 +14,7 @@ import { redisClient } from '../lib/redis.js'
 // ✅ Menggunakan AuthJwtPayload dari paket shared
 import type { AuthJwtPayload, IDeviceTemplate, IPreKeyBundle } from '@nyx/shared'
 import { makeOtpkQuotaGate } from '../utils/otpkQuota.js'
+import { validateEncryptedPrivateKeysPayload, toEncryptedPrivateKeyPatch } from '../utils/encryptedKeysSync.js'
 
 // === Kuota harian konsumsi OTPK per pasangan (requester, target) ===
 // Lua INCR+EXPIRE atomik — pola yang sama dengan limiter lain di repo.
@@ -46,6 +47,10 @@ router.post(
       identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
       pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format'),
       signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format'),
+      // [Temuan #2] Salinan encryptedPrivateKey terbaru — sinkron dengan bundle
+      // yang diupload. Opsional di skema agar client lama tidak rusak; handler
+      // tetap menimpa kolom device setiap kali field dikirim.
+      encryptedPrivateKeys: z.string().min(1).max(100_000).optional(),
       signedPreKey: z.object({
         key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
         pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format'),
@@ -63,6 +68,11 @@ router.post(
       
       const deviceId = String(authUser.deviceId);
       const { identityKey, pqIdentityKey, signedPreKey, signingKey } = req.body;
+
+      // [Temuan #2] Validasi ulang payload encrypted keys (defense in depth;
+      // zod sudah memvalidasi bentuknya). Client lama tanpa field → undefined
+      // → kolom device tidak disentuh.
+      const encryptedKeysPayload = validateEncryptedPrivateKeysPayload(req.body.encryptedPrivateKeys);
 
       await prisma.$transaction(async (tx) => {
         // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
@@ -98,7 +108,11 @@ router.post(
           data: {
             ...(identityKey !== undefined && { publicKey: Buffer.from(identityKey, 'base64url') }),
             ...(pqIdentityKey !== undefined && { pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null }),
-            ...(signingKey !== undefined && { signingKey: Buffer.from(signingKey, 'base64url') })
+            ...(signingKey !== undefined && { signingKey: Buffer.from(signingKey, 'base64url') }),
+            // [Temuan #2] Sinkronkan salinan encryptedPrivateKey server SETIAP
+            // upload bundle — mencegah login blind di device baru menerima
+            // bundle basi dari identitas lama.
+            ...(encryptedKeysPayload !== undefined && toEncryptedPrivateKeyPatch(encryptedKeysPayload))
           }
         });
       });
