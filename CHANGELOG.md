@@ -2,6 +2,86 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 [Unreleased] - 2026-09-25
+
+Reliability, privacy, and multi-account hardening pass: eliminates silent
+message loss on flaky networks, closes two identity-mixing bugs (biometric
+vault and auto-unlock key scoping), removes the last third-party telemetry
+surfaces, and locks previously-untested server contracts behind regression
+tests. No schema migration and no new required environment variables.
+
+### 🚀 Reliability & Realtime
+* **Idempotent Message Send:** Retries after a lost ACK (5s offline-queue / 15s
+  emit timeout) no longer create duplicates. The server reserves a Redis slot
+  (`SET NX`, 24h TTL) keyed by `deviceId + tempId`; duplicate sends receive an
+  ACK replaying the original message instead of inserting again. Fail-open if
+  Redis is unavailable.
+* **Cursor Pagination for Offline Catch-Up:** `GET /api/messages/:conversationId`
+  supports `?before=` keyset pagination (clamped to the 14-day retention window)
+  and returns `hasMore`/`nextCursor`. Clients backfill up to 4×250 messages per
+  reconnect and fall back to server pages on scroll — a user offline for days
+  in an active group no longer silently misses everything past the first 250.
+* **Offline Message Loss (Receipts):** Read receipts no longer delete ciphertext
+  immediately; a 24-hour one-shot grace window keeps messages retrievable by
+  devices that were offline when they were read elsewhere.
+* **Batched Read Receipts:** Plural `messages:mark_as_read` now processes up to
+  100 receipts with 4 queries total instead of 2-3 per message — kills the N+1
+  spike when opening a busy group on the 1-core VPS.
+* **WSS Gateway Parity:** The socket.io fallback now registers all 24 KEY_SYNC
+  events through a single exported `WSS_KEYS_SYNC_EVENTS` list and forwards
+  `msgId` for ACK correlation, matching the WebTransport path. A new parity
+  test cross-checks the gateway against `handleKeySync`'s switch cases and
+  forces future divergences to be reviewed or explicitly documented.
+* **Collision-Resistant tempId:** Multi-tab message composition could mint
+  identical tempIds; with server dedupe that silently swallowed one message.
+  New scheme packs 53 JS-safe bits (`epoch-seconds | per-tab counter |
+  boot-random`) — duplicate-free up to 4096 msg/s/tab, valid until ~2106.
+  Retry-with-same-tempId contract unchanged.
+
+### 🔒 Privacy & Security
+* **Third-Party Telemetry & AI Removal:** Removed end-to-end: the AI Smart Reply
+  proxy (decrypted plaintext never leaves the device anymore, even opt-in),
+  Sentry crash reporting (errors stay in local pm2 logs), the Gemini
+  dependency, and all dead config (`SENTRY_*`, `GEMINI_API_KEY`,
+  `VITE_SENTRY_DSN`, `VITE_WS_URL`, `VITE_CHAT_SECRET`, legacy S3/Supabase).
+* **Biometric Vault per-Credential:** The biometric vault moved from a single
+  per-origin entry (`nyx_bio_vault`) to a map keyed by WebAuthn credential ID
+  (`nyx_bio_vault_v2`). Two accounts enrolling biometrics on the same browser no
+  longer overwrite each other; corrupt credentials are removed selectively.
+* **Biometric Unlock Is RAM-Only:** Biometric unlock regenerates keys into
+  memory via the recovery phrase without touching the password-encrypted
+  bundle in IndexedDB — fixing the regression where biometric login made the
+  next password login fail with "incorrect password".
+* **Per-User Auto-Unlock Key:** The sessionStorage auto-unlock key is scoped
+  `nyx_device_auto_unlock_key:<userId>` instead of a single global slot, so
+  alternating accounts in one tab can neither clobber nor decrypt with each
+  other's keys. Legacy global keys are still read for migration. Also fixes a
+  latent storage bug where short obfuscated keys were returned raw by the old
+  legacy-value heuristic.
+* **Server-Side Encrypted-Keys Sync:** The device's `encryptedPrivateKey` copy
+  was only written on register/login/recover — key rotation left a stale
+  identity bundle that broke blind logins on new devices. `POST
+  /api/keys/prekey-bundle` now accepts `encryptedPrivateKeys` (optional,
+  backward compatible) and updates the device row in the same transaction;
+  the client sends the latest copy on every bundle upload.
+
+### 🧹 Cleanup
+* **Dead Locale Namespaces:** Removed `privacy`, `help`, and `landing` JSON
+  (4 languages) from the web app — unreferenced by `i18n.ts` and stale copies
+  of the marketing site's (more current) locale files; they only bloated the
+  service-worker precache. Dead orphan component `EncryptionStatusNotification`
+  (localStorage-era contract) removed with its i18n keys.
+* **Docs Sync:** Purged all stale AI smart-reply / Sentry references from the
+  docs tree; CHANGELOG's Smart Reply entry annotated as removed rather than
+  deleted. Prekey-bundle docs updated for the new sync field.
+
+### 🧪 Tests
+* Server: +11 tests (send dedupe, batch receipts, encrypted-keys sync, WSS
+  parity) — 64 total, all without Postgres/Redis.
+* Web: +12 tests (bio vault v2, biometric RAM-unlock contract, auto-unlock
+  scoping, tempId collision) — 101 total. Test mocks for `keyStorage` hardened
+  against missing-export crashes; one-shot identity state now reset per test.
+
 ## 🔒 [2.6.5] - 2026-06-13
 
 This update introduces the cutting-edge Binary WebTransport Handshake (NYX-BWH-V1), significantly optimizing Post-Quantum Cryptography performance. We have also hardened our security model by strictly enforcing Single-Active-Device policies and introducing Biometric Vault unlocks for seamless session recovery.
