@@ -167,6 +167,45 @@ export function removeSocketFromRegistry(registry: SocketRegistry, key: string, 
 let ioRef: Server | null = null;
 let downstreamSubRef: typeof redisClient | null = null;
 
+/**
+ * Daftar otoritatif event KEY_SYNC yang diteruskan gateway WSS ke
+ * handleKeySync. [PARITY] `handleKeySync` (realtimeHandlers.ts) menangani
+ * superset dari daftar ini (mis. event batch `messages:mark_*`, `message:deleted`,
+ * `migration:chunk/ack/start` yang datang dari jalur WT) — gap yang sengaja
+ * didokumentasikan di gatewayParity.test.ts. Client WSS mengirim event-event itu
+ * melalui jalur tetap lain (ACK di atas), jadi daftar ini adalah "event tambahan
+ * yang hilang di WSS" SEBELUM parity fix — uji regresinya agar tidak menyusut.
+ *
+ * Diekspor agar test bisa membandingkan dengan daftar case `handleKeySync`
+ * tanpa perlu mem-parsing source atau mem-bangun server socket.io sungguhan.
+ */
+export const WSS_KEYS_SYNC_EVENTS = [
+  'session:request_key',
+  'session:fulfill_response',
+  'session:request_missing',
+  'group:request_key',
+  'group:fulfilled_key',
+  'messages:distribute_keys',
+  'message:mark_as_read',
+  'message:mark_read',
+  'message:unsend',
+  'message:view_once_opened',
+  'metadata:updated',
+  'push:subscribe',
+  'push:unsubscribe',
+  'auth:request_linking_qr',
+  'burner:join',
+  'burner:send',
+  'burner:reply',
+  'burner:destroy',
+  'migration:prepare',
+  'migration:cancel',
+  'migration:join',
+  'migration:start',
+  'migration:chunk',
+  'migration:ack',
+] as const;
+
 export function attachWssGateway(httpServer: HttpServer): void {
   const io = new Server(httpServer, {
     path: '/socket.io',
@@ -265,30 +304,12 @@ export function attachWssGateway(httpServer: HttpServer): void {
         await handleKeySync(wsCtx, userId, deviceId, { event, msgId: typeof msgId === 'string' ? msgId : '', data });
       };
 
-    socket.on('session:request_key', keySyncHandler('session:request_key'));
-    socket.on('session:fulfill_response', keySyncHandler('session:fulfill_response'));
-    socket.on('session:request_missing', keySyncHandler('session:request_missing'));
-    socket.on('group:request_key', keySyncHandler('group:request_key'));
-    socket.on('group:fulfilled_key', keySyncHandler('group:fulfilled_key'));
-    socket.on('messages:distribute_keys', keySyncHandler('messages:distribute_keys'));
-    socket.on('message:mark_as_read', keySyncHandler('message:mark_as_read'));
-    socket.on('message:mark_read', keySyncHandler('message:mark_read'));
-    socket.on('message:unsend', keySyncHandler('message:unsend'));
-    socket.on('message:view_once_opened', keySyncHandler('message:view_once_opened'));
-    socket.on('metadata:updated', keySyncHandler('metadata:updated'));
-    socket.on('push:subscribe', keySyncHandler('push:subscribe'));
-    socket.on('push:unsubscribe', keySyncHandler('push:unsubscribe'));
-    socket.on('auth:request_linking_qr', keySyncHandler('auth:request_linking_qr'));
-    socket.on('burner:join', keySyncHandler('burner:join'));
-    socket.on('burner:send', keySyncHandler('burner:send'));
-    socket.on('burner:reply', keySyncHandler('burner:reply'));
-    socket.on('burner:destroy', keySyncHandler('burner:destroy'));
-    socket.on('migration:prepare', keySyncHandler('migration:prepare'));
-    socket.on('migration:cancel', keySyncHandler('migration:cancel'));
-    socket.on('migration:join', keySyncHandler('migration:join'));
-    socket.on('migration:start', keySyncHandler('migration:start'));
-    socket.on('migration:chunk', keySyncHandler('migration:chunk'));
-    socket.on('migration:ack', keySyncHandler('migration:ack'));
+    // [PARITY] Satu loop, satu sumber kebenaran (WSS_KEYS_SYNC_EVENTS).
+    // Nama event socket.io === nama `event` di payload handleKeySync, dan msgId
+    // (arg ke-2, opsional dari client) diteruskan untuk korelasi ACK.
+    for (const event of WSS_KEYS_SYNC_EVENTS) {
+      socket.on(event, keySyncHandler(event));
+    }
   });
 
   // --- Outbound: subscribe to nyx:downstream and push to local sockets only ---
