@@ -378,6 +378,12 @@ type State = {
   pendingDecryptions: Message[];
   isFetchingMore: Record<string, boolean>;
   hasMore: Record<string, boolean>;
+  // [PAGINATION] Ada lagi pesan di SERVER yang belum ter-fetch (cursor belum
+  // habis). Berbeda dengan hasMore yang murni status vault lokal — serverHasMore
+  // memicu fallback fetch server di loadPreviousMessages ketika vault lokal
+  // sudah habis tapi riwayat server masih panjang (user offline lama di grup
+  // aktif yang window 250 pertamanya tidak cukup).
+  serverHasMore: Record<string, boolean>;
   hasLoadedHistory: Record<string, boolean>;
   selectedMessageIds: string[];
 };
@@ -422,6 +428,7 @@ const initialState: State = {
   pendingDecryptions: [],
   isFetchingMore: {},
   hasMore: {},
+  serverHasMore: {},
   hasLoadedHistory: {},
   selectedMessageIds: [],
 };
@@ -1517,10 +1524,40 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       console.error("[Local Vault] Failed to load messages from IndexedDB:", e);
     }
 
-    // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
+    // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server.
+    // [PAGINATION] Backfill bounded: user yang offline lama di grup aktif bisa
+    // punya >250 pesan tertunda. Fetch berulang dengan cursor ?before sampai
+    // hasMore=false ATAU batas MAX_BACKFILL_PAGES tercapai — sisanya di-fetch
+    // lazy via loadPreviousMessages (server fallback) saat user scroll ke atas.
     try {
-      const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=250`);
-      const fetchedMessages = res.items || [];
+      const MAX_BACKFILL_PAGES = 4;   // 4 × 250 = 1000 pesan per sync cycle
+      const MERGE_WINDOW = 150;       // selaras MAX_MESSAGES_IN_RAM
+
+      let allFetched: Message[] = [];
+      let serverHasMore = false;
+      let cursor: string | null = null;
+
+      for (let pageIndex = 0; pageIndex < MAX_BACKFILL_PAGES; pageIndex++) {
+        const cursorParam: string = cursor ? `&before=${encodeURIComponent(cursor)}` : '';
+        const res = await api<{ items: Message[]; hasMore?: boolean; nextCursor?: string | null }>(
+          `/api/messages/${id}?limit=250${cursorParam}`
+        );
+        const pageItems = res.items || [];
+        allFetched = allFetched.concat(pageItems);
+        serverHasMore = res.hasMore === true;
+        cursor = res.nextCursor || null;
+        if (!serverHasMore || !cursor || pageItems.length === 0) break;
+      }
+      // Backfill berhenti karena batas halaman (bukan karena habis) → tandai
+      // agar scroll-to-top bisa melanjutkan dari server.
+      if (serverHasMore && cursor) {
+        set(state => ({ serverHasMore: { ...state.serverHasMore, [id]: true } }));
+      }
+
+      // Dedupe antar halaman (system messages di-include di setiap halaman).
+      const fetchedMessages = allFetched.length > 1
+        ? Array.from(new Map(allFetched.map(m => [m.id, m])).values())
+        : allFetched;
 
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
@@ -1751,10 +1788,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const visibleMessages = enrichedMessages.filter(
         m => m.type !== 'SYSTEM' && String(m.type) !== 'SYSTEM_KEY_REQUEST'
       );
+        // [PAGINATION] Backfill bisa jauh melebihi window RAM (4×250). Simpan
+        // SEMUA ke vault lokal, tampilkan hanya window terbaru di RAM — pesan
+        // lebih lama tetap bisa di-scroll dari IndexedDB oleh loadPreviousMessages.
+        if (enrichedMessages.length > MERGE_WINDOW) {
+          await shadowVault.upsertMessages(enrichedMessages.slice(0, enrichedMessages.length - MERGE_WINDOW));
+        }
+        const ramWindow = enrichedMessages.length > MERGE_WINDOW
+          ? enrichedMessages.slice(enrichedMessages.length - MERGE_WINDOW)
+          : enrichedMessages;
+        const visibleRamMessages = ramWindow.filter(
+          m => m.type !== 'SYSTEM' && String(m.type) !== 'SYSTEM_KEY_REQUEST'
+        );
         set(state => {
           return {
-            messages: { ...state.messages, [id]: visibleMessages },
-            hasMore: { ...state.hasMore, [id]: enrichedMessages.length >= 50 },
+            messages: { ...state.messages, [id]: visibleRamMessages },
+            hasMore: { ...state.hasMore, [id]: ramWindow.length >= 50 },
+            // Cursor server habis → scroll-to-top cukup baca vault lokal.
+            serverHasMore: { ...state.serverHasMore, [id]: state.serverHasMore[id] === true },
             hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
           };
         });
@@ -1788,9 +1839,121 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     
     try {
-      // PAGINATION LOKAL: Server sudah tidak punya pesan lama kita (karena dihapus saat dibaca), 
-      // jadi kita gulir ke atas murni mengambil dari Shadow Vault (IndexedDB).
+      // PAGINATION LOKAL: ambil dari Shadow Vault (IndexedDB) dulu — pesan lama
+      // yang sudah pernah didekripsi tersimpan di sana.
       const localMessages = await shadowVault.getMessagesByConversation(conversationId, 50, oldestMessage.createdAt);
+
+      // [PAGINATION] VAULT HABIS + SERVER MASIH PUNYA STOK → fallback fetch
+      // server dengan cursor ?before. Kasus ini terjadi saat backfill reconnect
+      // berhenti di MAX_BACKFILL_PAGES (riwayat > 1000 pesan) atau user ganti
+      // device — pesan lebih lama ada di server tapi belum pernah tersimpan
+      // lokal. Tanpa fallback ini, scroll-to-top macet selamanya.
+      if (localMessages.length === 0 && get().serverHasMore[conversationId]) {
+        const before = oldestMessage.createdAt;
+        const res = await api<{ items: Message[]; hasMore?: boolean; nextCursor?: string | null }>(
+          `/api/messages/${conversationId}?limit=50&before=${encodeURIComponent(before)}`
+        );
+        const fetched = res.items || [];
+        // serverHasMore untuk conversation ini ikuti halaman terakhir.
+        set(state => ({ serverHasMore: { ...state.serverHasMore, [conversationId]: res.hasMore === true } }));
+
+        if (fetched.length > 0) {
+          // Oldest→newest sebelum dekripsi (alasan urutan: control message/key
+          // distribution harus terproses sebelum pesan yang bergantung padanya).
+          fetched.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          const processed: Message[] = [];
+          for (const message of fetched) {
+            // Pesan kontrol diserap (kunci/metadata), tidak masuk UI.
+            if (message.type === 'SYSTEM' && message.content && (message.content.includes('GROUP_KEY_DISTRIBUTION') || message.content.includes('"type":"GROUP_KEY"') || message.content.includes('"type":"METADATA_UPDATED"'))) {
+              try {
+                const payload = JSON.parse(message.content || '{}') as SystemMessagePayload;
+                if (payload.type === 'GROUP_KEY_DISTRIBUTION' || payload.type === 'GROUP_KEY') {
+                  const { getMyEncryptionKeyPair, getSodiumLib, storeReceivedSessionKey } = await import('@utils/crypto');
+                  const sodium = await getSodiumLib();
+                  const { publicKey } = await getMyEncryptionKeyPair();
+                  const myIdentityKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const myId = useAuthStore.getState().user?.id;
+                  const myDistributions = payload.distributions?.filter((d: { targetUserId?: string; userId: string; encryptedKey?: string; key?: string; senderDeviceKey?: string; targetDeviceKey?: string; }) =>
+                      (d.targetUserId === myId || d.userId === myId) &&
+                      (!d.targetDeviceKey || d.targetDeviceKey === myIdentityKeyB64)
+                  ) || [];
+                  for (const dist of myDistributions) {
+                    const extractedKey = dist.encryptedKey || dist.key;
+                    if (!extractedKey) continue;
+                    try {
+                      await storeReceivedSessionKey({
+                          ...payload,
+                          type: 'GROUP_KEY',
+                          conversationId: message.conversationId || payload.conversationId || "",
+                          senderId: message.senderId || payload.senderId || "",
+                          encryptedKey: extractedKey,
+                          senderDeviceKey: dist.senderDeviceKey || payload.senderDeviceKey
+                      });
+                      useKeychainStore.getState().keysUpdated();
+                      break;
+                    } catch { /* device lain, coba dist berikutnya */ }
+                  }
+                } else if (payload.encryptedKey || payload.key) {
+                  try {
+                    const { storeReceivedSessionKey } = await import('@utils/crypto');
+                    await storeReceivedSessionKey({
+                        ...payload,
+                        type: 'GROUP_KEY',
+                        conversationId: message.conversationId || payload.conversationId || "",
+                        senderId: message.senderId || payload.senderId || "",
+                        encryptedKey: (payload.encryptedKey || payload.key || ""),
+                    });
+                    useKeychainStore.getState().keysUpdated();
+                  } catch (e) {
+                    console.warn('[Scroll Pagination] Gagal decrypt key:', e);
+                  }
+                } else if (payload.encryptedMetadata) {
+                  const { useConversationStore } = await import('@store/conversation');
+                  await useConversationStore.getState().updateConversation(String(message.conversationId || conversationId), {
+                      encryptedMetadata: String(payload.encryptedMetadata)
+                  });
+                }
+              } catch (e) {
+                console.error('[Scroll Pagination] Gagal memproses pesan kontrol:', e);
+              }
+              continue;
+            }
+
+            // Cek vault lokal dulu (pesan mungkin sudah pernah didekripsi).
+            const localMessage = await shadowVault.getMessage(message.id);
+            const isLocalValid = localMessage && localMessage.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>'].includes(localMessage.content || '');
+            if (isLocalValid) {
+              processed.push({ ...message, ...localMessage });
+              continue;
+            }
+
+            const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
+            if (!decrypted) continue;
+            if (await evaluateControlMessage(decrypted, conversationId)) continue;
+            processed.push(decrypted);
+          }
+
+          if (processed.length > 0) {
+            await shadowVault.upsertMessages(processed);
+            set(state => {
+              const existingMessages = state.messages[conversationId] || [];
+              const combined = [...processed, ...existingMessages];
+              const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+              const allMessages = processMessagesAndReactions(uniqueMessages, []);
+              const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
+              const MAX_MESSAGES_IN_RAM = 150;
+              const prunedMessages = enrichedMessages.length > MAX_MESSAGES_IN_RAM
+                ? enrichedMessages.slice(enrichedMessages.length - MAX_MESSAGES_IN_RAM)
+                : enrichedMessages;
+              return {
+                messages: { ...state.messages, [conversationId]: prunedMessages },
+                hasMore: { ...state.hasMore, [conversationId]: true }, // server masih punya / baru sebagian terload
+              };
+            });
+          }
+        }
+        return; // Selesai (baik fetch sukses maupun kosong) — jangan lanjut ke path lokal di bawah.
+      }
 
       // Opaque Mailbox: reconstruct 1-1 participants from first valid message's senderId
       reconstructDirectParticipants(conversationId, localMessages);
@@ -1814,8 +1977,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         return { 
             messages: { ...state.messages, [conversationId]: prunedMessages },
-            // Jika IndexedDB mengembalikan kurang dari 50, berarti sudah sampai ujung (habis)
-            hasMore: { ...state.hasMore, [conversationId]: localMessages.length === 50 } 
+            // Jika IndexedDB mengembalikan kurang dari 50, berarti sudah sampai ujung (habis).
+            // [PAGINATION] Kecuali server masih punya stok → biarkan hasMore true agar
+            // scroll berikutnya mencoba fallback server lagi.
+            hasMore: { ...state.hasMore, [conversationId]: localMessages.length === 50 || !!state.serverHasMore[conversationId] } 
         };
       });
     } catch (error) {

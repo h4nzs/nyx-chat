@@ -27,26 +27,56 @@ const ensureLegacyMessageFields = <T extends Record<string, unknown>>(msg: T) =>
 
 // ==========================================
 // 1. GET PENDING MESSAGES (Offline Catch-up)
+//
+// Cursor pagination (keyset, by createdAt): klien yang tertinggal > PAGE_SIZE
+// mengulang permintaan dengan ?before=<createdAt pesan tertua yang sudah
+// dimiliki> hingga hasMore=false. Tanpa ini, pesan lebih tua dari window
+// 250 tidak pernah ter-fetch oleh client yang offline lama di grup aktif.
+// Backward compatible: tanpa ?before, respons & bentuk sama seperti sebelumnya
+// (hanya bertambah field hasMore/nextCursor pada objek respons).
 // ==========================================
+const CATCH_UP_PAGE_SIZE = 250;
+const CATCH_UP_MAX_CURSOR_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
 router.get('/:conversationId', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { conversationId } = req.params
 
     const now = new Date();
-    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(now.getTime() - CATCH_UP_MAX_CURSOR_AGE_MS);
 
-    // AMBIL PESAN TERTUNDA (Maksimal 14 hari terakhir)
+    // Validasi & clamp cursor: harus ISO date yang masih dalam window retensi.
+    // Cursor lebih tua dari 14 hari di-clamp — pesan lebih tua dari itu sudah
+    // dihapus sweeper, jadi meng-query lebih jauh hanya membuang index scan.
+    let beforeDate: Date | null = null;
+    const beforeRaw = typeof req.query.before === 'string' ? req.query.before : '';
+    if (beforeRaw) {
+      const parsed = new Date(beforeRaw);
+      if (!isNaN(parsed.getTime())) {
+        beforeDate = parsed.getTime() < fourteenDaysAgo.getTime() ? fourteenDaysAgo : parsed;
+      }
+    }
+    // Clamp jumlah juga (limit param legacy dari client lama, di-cap ke ukuran halaman).
+    const limitRaw = parseInt(String(req.query.limit ?? ''), 10);
+    const take = Math.min(!isNaN(limitRaw) && limitRaw > 0 ? limitRaw : CATCH_UP_PAGE_SIZE, CATCH_UP_PAGE_SIZE);
+
+    const messageWhere = {
+      conversationId,
+      createdAt: beforeDate
+        ? { gt: fourteenDaysAgo, lt: beforeDate }
+        : { gt: fourteenDaysAgo },
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: now } }
+      ]
+    };
+
+    // Ambil halaman pesan tertunda + satu pesan ekstra sebagai penanda hasMore
+    // (tanpa count() tambahan — query lebih murah di VPS 1-core).
     const messages = await prisma.message.findMany({
-      where: {
-        conversationId,
-        createdAt: { gt: fourteenDaysAgo },
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gt: now } }
-        ]
-      },
-      take: 250, // Ambil cukup banyak untuk offline catch-up
+      where: messageWhere,
+      take: take + 1,
       orderBy: { createdAt: 'desc' }, 
       include: {
         sender: { select: { id: true, encryptedProfile: true } },
@@ -54,12 +84,18 @@ router.get('/:conversationId', async (req, res, next) => {
       }
     })
 
-    // AMBIL SEMUA PESAN SYSTEM UNTUK CONVERSATION INI
+    const hasMore = messages.length > take;
+    const page = hasMore ? messages.slice(0, take) : messages;
+
+    // AMBIL SEMUA PESAN SYSTEM UNTUK CONVERSATION INI (control messages wajib
+    // ikut di setiap halaman — decrypt kunci grup tidak boleh ketinggalan).
     const systemMessagesDesc = await prisma.message.findMany({
       where: {
         conversationId,
         type: 'SYSTEM',
-        createdAt: { gt: fourteenDaysAgo },
+        createdAt: beforeDate
+          ? { gt: fourteenDaysAgo, lt: beforeDate }
+          : { gt: fourteenDaysAgo },
         OR: [
           { expiresAt: null },
           { expiresAt: { gt: now } }
@@ -78,7 +114,9 @@ router.get('/:conversationId', async (req, res, next) => {
       where: {
         conversationId,
         type: 'SYSTEM',
-        createdAt: { gt: fourteenDaysAgo },
+        createdAt: beforeDate
+          ? { gt: fourteenDaysAgo, lt: beforeDate }
+          : { gt: fourteenDaysAgo },
         OR: [
           { expiresAt: null },
           { expiresAt: { gt: now } }
@@ -93,7 +131,7 @@ router.get('/:conversationId', async (req, res, next) => {
 
     // Gabungkan pesan normal dan pesan system (tanpa duplikasi)
     const allMessagesMap = new Map();
-    [...messages, ...systemMessagesDesc].forEach(msg => allMessagesMap.set(msg.id, msg));
+    [...page, ...systemMessagesDesc].forEach(msg => allMessagesMap.set(msg.id, msg));
     if (firstSystemMessage) allMessagesMap.set(firstSystemMessage.id, firstSystemMessage);
     
     const mergedMessages = Array.from(allMessagesMap.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -102,7 +140,18 @@ router.get('/:conversationId', async (req, res, next) => {
     const safeMessages = mergedMessages.map(msg => toRawServerMessage(ensureLegacyMessageFields(msg)));
     
     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
-    res.json({ items: safeMessages.reverse() })
+    const items = safeMessages.reverse();
+
+    // Cursor berikutnya = createdAt pesan USER tertua di halaman ini (bukan
+    // system, yang di-include penuh tiap halaman agar tidak pernah bolong).
+    const oldestUserMessage = page.length > 0 ? page[page.length - 1] : null;
+    const nextCursor = hasMore && oldestUserMessage
+      ? (oldestUserMessage.createdAt instanceof Date
+          ? oldestUserMessage.createdAt.toISOString()
+          : new Date(oldestUserMessage.createdAt).toISOString())
+      : null;
+
+    res.json({ items, hasMore, nextCursor })
   } catch (error) {
     next(error)
   }
