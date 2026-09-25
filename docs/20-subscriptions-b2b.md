@@ -36,11 +36,7 @@ flowchart LR
 - `POST /api/engine/rooms` (authenticated by `x-nyx-engine-key` → `requireTenantAuth`): looks up/creates a tenant user (`usernameHash = sha256(tenant:externalId)`), creates a conversation, issues two short-lived iframe tokens, and returns `userAUrl`/`userBUrl` for `EmbedChatPage`.
 - `EmbedChatPage` (`/embed/chat/:id`) renders a bare `ChatWindow` with a token, suitable for an iframe — no sidebar/layout.
 
-## 20.4 AI smart reply
-
-- `POST /api/ai/smart-reply` (Gemini 2.5 Flash) returns 3 short replies. `SmartReply` renders them in the composer. Optional; gated by `generalLimiter`.
-
-## 20.5 Reports & admin
+## 20.4 Reports & admin
 
 - `POST /api/reports/user` and `POST /api/reports` forward to Discord webhooks ("NYX Watchdog" / "NYX Reporter").
 - **Admin console** (`/admin-console`, `AdminDashboard`): `GET /api/admin/system-status` (VPS/DB/R2 metrics), `banned-users`, `ban`/`unban`, `tenants` CRUD, `tenants/:id/toggle`.
@@ -56,7 +52,6 @@ flowchart LR
 | `server/src/routes/auth.ts` | PoW challenge/verify |
 | `server/src/routes/engine.ts` | B2B room factory |
 | `server/src/routes/admin.ts` | admin endpoints |
-| `server/src/routes/ai.ts` | smart reply |
 | `server/src/routes/reports.ts` | Discord reports |
 | `server/src/middleware/tenantAuth.ts` | tenant API key gate |
 | `packages/shared/src/constants.ts` | LIMITS |

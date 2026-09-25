@@ -6,7 +6,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 | File | Role |
 |---|---|
-| `main.tsx` | Entry: `zodSetup` (must be first) → Sentry → i18n → render `App` → `registerServiceWorker`; injects `setAuthFailureHandler` (logout on final refresh failure, skipped during bootstrap) |
+| `main.tsx` | Entry: `zodSetup` (must be first) → i18n → render `App` → `registerServiceWorker`; injects `setAuthFailureHandler` (logout on final refresh failure, skipped during bootstrap) |
 | `App.tsx` | BrowserRouter + routes; lazy pages & global modals under a single `<Suspense>`; `bootstrap()`; socket connect; theme/accent; visibility lock; maintenance gate; toast limiter |
 | `zodSetup.ts` | `globalThis.__zod_globalConfig.jitless = true` (direct mutation — `zod.config()` is tree-shaken) |
 | `i18n.ts` | i18next + HttpBackend + LanguageDetector; `load:'languageOnly'`, `fallbackLng:'en'`, 7 runtime namespaces |
@@ -32,7 +32,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 | `notification.ts` | `notifications[]`, `unreadCount` | `addNotification`, `markAllAsRead`, `clearNotifications`, `removeNotificationsForConversation` |
 | `presence.ts` | `onlineUsers` (Set), `typingIndicators` | `setOnlineUsers`, `userJoined`, `userLeft`, `addOrUpdate`, `clear` |
 | `profile.ts` | `profiles` cache | `decryptAndCache`, `getCacheOnly` |
-| `settings.ts` | `enableSmartReply`, `privacyCloak` | `setEnableSmartReply`, `setPrivacyCloak` |
+| `settings.ts` | `privacyCloak` | `setPrivacyCloak` |
 | `story.ts` | `stories[]`, `lastFetched`, `isLoading` | `fetchActiveStories`, `postStory` |
 | `systemStore.ts` | `maintenance`, `banner` | `checkStatus` (60 s poll), `setBanner` |
 | `theme.ts` | `theme`, `accent` | `toggleTheme`, `setAccent` |
@@ -58,7 +58,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 - `transportClient.ts` — `NyxWebTransportClient` (EventEmitter), `connectSocket`, `disconnectSocket`, `emitSessionKeyRequest/Fulfillment`, `emitGroupKeyDistribution/Request/Fulfillment`, `emitMetadataUpdated`, `fireGhostSync`; singleton `transportClient`.
 - `socketListeners.ts` — `initSocketListeners()`: transport events → stores; offline sync.
 - `webrtc.ts` — call signaling + peer connections.
-- `sentry.ts`, `serviceWorkerRegistration.ts`.
+- `serviceWorkerRegistration.ts`.
 
 **Pipeline / media**
 - `messagePipeline.ts` — `decryptMessageObject`, `evaluateControlMessage`, `createRepliedToForStoryReply`.
@@ -76,7 +76,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 ## 21.5 Components (`components/`, 72 + `ui/`)
 
 - **Global modals (lazy in App.tsx):** `ConfirmModal`, `UserInfoModal`, `PasswordPromptModal`, `ChatInfoModal`, `DynamicIsland`, `CommandPalette`, `ContextMenu`, `CallOverlay`, `SystemInitModal`.
-- **Chat core:** `ChatList`, `ChatWindow`, `ChatItem` (conversation row), `MessageItem`, `MessageBubble`, `MessageInput`, `MessageSkeleton`, `TypingIndicator`, `Reactions`, `FileAttachment`, `LazyImage`, `LinkPreviewCard`, `VoiceMessagePlayer`, `MarkdownMessage`, `SmartReply`, `NewMessageToast`, `EncryptionStatusNotification`, `AuthForm` (shared login/register form).
+- **Chat core:** `ChatList`, `ChatWindow`, `ChatItem` (conversation row), `MessageItem`, `MessageBubble`, `MessageInput`, `MessageSkeleton`, `TypingIndicator`, `Reactions`, `FileAttachment`, `LazyImage`, `LinkPreviewCard`, `VoiceMessagePlayer`, `MarkdownMessage`, `NewMessageToast`, `EncryptionStatusNotification`, `AuthForm` (shared login/register form).
 - **Panels/modals:** `GroupInfoPanel`, `UserInfoPanel`, `ParticipantList`, `SearchMessages`, `CreateGroupChat`, `EditGroupInfoModal`, `AddParticipantModal`, `CreateBurnerModal`, `RecoveryPhraseModal`, `SubscriptionModal`, `CreateStoryModal`, `StoryViewer`, `StoryTray`, `ScanQRModal`, `ShareProfileModal`, `SafetyNumberModal`, `BanUserModal`, `ReportUserModal`, `ReportBugModal`, `Lightbox`, `MediaGallery`, `ImageCropperModal`, `ImageEditorModal`, `AttachmentCropperModal`, `OnboardingTour`, `StartNewChat`, `KeyManagement`.
 - **Chrome:** `ConnectionStatusBanner`, `SystemBanner`, `PrivacyCloak`, `ErrorBoundary`, `SEO`, `LanguageSwitcher`, `ProtectedRoute`, `NotificationBell` (bell + popover trigger), `NotificationPopover` (in-app notification list).
 - **`ui/` primitives:** `ModalBase`, `Portal`, `card`, `DefaultAvatar`, `AnimatedTabs`; plus `Spinner`, `Alert`, `OnlineDot`, `SwipeableItem`.

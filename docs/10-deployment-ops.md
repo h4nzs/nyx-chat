@@ -76,8 +76,6 @@ ls /root/backups/                       # nightly pg_dumps
 | `VAPID_SUBJECT/PUBLIC_KEY/PRIVATE_KEY` | Web Push |
 | `R2_ACCOUNT_ID/ACCESS_KEY_ID/SECRET_ACCESS_KEY/BUCKET_NAME/PUBLIC_DOMAIN` | Cloudflare R2 |
 | `CF_ACCOUNT_ID/CF_TURN_KEY_ID/CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) |
-| `GEMINI_API_KEY` | Smart reply |
-| `SENTRY_DSN/AUTH_TOKEN/ORG/PROJECT/PROFILING` | Error tracking |
 | `SUPABASE_URL/SUPABASE_SERVICE_KEY` | (legacy, optional) |
 | `NOWPAYMENTS_API_KEY/IPN_SECRET`, `TRIPAY_API_KEY/MERCHANT_CODE/PRIVATE_KEY` | Payments |
 | `DISCORD_REPORT_WEBHOOK_URL` | Abuse reports |
@@ -87,12 +85,12 @@ ls /root/backups/                       # nightly pg_dumps
 
 ### Web (`web/.env` → build-time `VITE_*`)
 
-`VITE_API_URL`, `VITE_TRANSPORT_URL`, `VITE_TRANSPORT_CERT_HASH` (dev pinning), `VITE_TURNSTILE_SITE_KEY`, `VITE_SENTRY_DSN`, `VITE_VAPID_PUBLIC_KEY`, `INDEXNOW_API_KEY`.
+`VITE_API_URL`, `VITE_TRANSPORT_URL`, `VITE_TRANSPORT_CERT_HASH` (dev pinning), `VITE_TURNSTILE_SITE_KEY`, `VITE_VAPID_PUBLIC_KEY`, `INDEXNOW_API_KEY`.
 
 ## 10.7 Secrets policy
 
 - `.env` files are gitignored; `.env.example` (root) and `server/.env.example` are the templates.
-- GitHub Actions secrets: `VPS_HOST/PORT/USER/PASSWORD`, `VITE_*`, `SENTRY_*`, `INDEXNOW_API_KEY`, `CI_DATABASE_URL` (optional).
+- GitHub Actions secrets: `VPS_HOST/PORT/USER/PASSWORD`, `VITE_*`, `INDEXNOW_API_KEY`, `CI_DATABASE_URL` (optional).
 - Do not commit: DB passwords (VPS: `/root/.nyx_db_pass`), VAPID private keys, R2 secret keys, sidecar private keys (`*.der`).
 
 ## 10.8 Rollback

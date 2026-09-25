@@ -340,11 +340,9 @@ This landmark release transforms NYX into a "Fortress of Privacy" with a complet
 
 ### Added (New Features)
 
--   **AI Smart Reply (Powered by Gemini):**
-    -   Integrated Google Gemini 1.5 Flash to provide privacy-first, on-device smart reply suggestions.
-    -   **Privacy-First Design:** Messages are decrypted locally, sent ephemerally to the AI for analysis, and never stored.
-    -   **Context-Aware:** The AI intelligently detects if the last message was from the other party to prevent self-reply suggestions.
-    -   **Opt-In:** This feature is disabled by default and must be explicitly enabled in Settings.
+-   **AI Smart Reply (REMOVED in later releases):**
+    -   A Gemini-powered smart reply suggestion feature existed in this version.
+    -   It has since been fully removed in the name of maximum anonymity — no third-party AI service ever sees message content.
 -   **Legal & Privacy Center:**
     -   Added a comprehensive `/privacy` page detailing the Data Policy, Terms of Service, and Security Architecture.
     -   Accessible from the Login/Register footer and the Settings menu.

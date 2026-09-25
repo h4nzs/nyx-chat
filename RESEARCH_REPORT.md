@@ -74,7 +74,6 @@
 | `/api/engine` | — | app.ts:386 | B2B room creation | PostgreSQL |
 | `/api/sessions` | — | app.ts:387 | Session list/revoke by JTI | Redis blacklist |
 | `/api/subscriptions` | — | app.ts:388 | Tripay/crypto checkout | PostgreSQL |
-| `/api/ai` | — | app.ts:389 | Smart-reply (Gemini) | — |
 | `/api/stories` | — | app.ts:390 | Create/fetch/delete stories | PostgreSQL |
 | `/api/system` | — | app.ts:391 | Status + banner (public) | Redis |
 | `/.well-known` | — | app.ts:392 | MCP/OIDC discovery | — |

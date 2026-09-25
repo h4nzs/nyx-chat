@@ -429,7 +429,6 @@ Source-derived route table (Express routers; auth column = middleware observed):
 | stories | POST /; GET user/:userId, :id; DELETE :id | requireAuth |
 | reports | POST user, / | public |
 | subscriptions | POST create, webhook, create-crypto-transaction, nowpayments-webhook | mixed (webhooks CSRF-exempt) |
-| ai | POST smart-reply | requireAuth |
 | engine | POST rooms | CSRF-exempt by design |
 | admin | GET system-status, banned-users, tenants; POST ban, unban, tenants; PATCH tenants/:id/toggle | requireAdmin |
 | system / wellKnown | GET status; /.well-known/* handlers | public |

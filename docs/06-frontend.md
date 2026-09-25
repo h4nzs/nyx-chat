@@ -2,11 +2,11 @@
 
 ## 6.1 Tech stack
 
-React 19, Vite 8, TypeScript (strict + `noUncheckedIndexedAccess`), Zustand v5, Tailwind v4, react-router v7, react-i18next, react-virtuoso, libsodium-wrappers (WASM, in a Web Worker), vite-plugin-pwa, Sentry.
+React 19, Vite 8, TypeScript (strict + `noUncheckedIndexedAccess`), Zustand v5, Tailwind v4, react-router v7, react-i18next, react-virtuoso, libsodium-wrappers (WASM, in a Web Worker), vite-plugin-pwa.
 
 ## 6.2 Boot sequence
 
-1. `main.tsx`: `import './zodSetup'` (Zod jitless — must stay first) → Sentry init → i18n init → **wait for i18n `initialized` before rendering** (prevents transient missingKey warnings) → render `<App/>` → `registerServiceWorker()`.
+1. `main.tsx`: `import './zodSetup'` (Zod jitless — must stay first) → i18n init → **wait for i18n `initialized` before rendering** (prevents transient missingKey warnings) → render `<App/>` → `registerServiceWorker()`.
 2. `App.tsx`: `bootstrap()` (silent refresh) → routes; global modals are `React.lazy` + render-on-demand via store flags.
 
 ## 6.3 State — 21 Zustand stores
@@ -87,7 +87,6 @@ Global modals and pages are `React.lazy` under a single `<Suspense fallback={<Lo
 | `VITE_TRANSPORT_URL` | WebTransport origin (dev: `http://localhost:33333`) |
 | `VITE_TRANSPORT_CERT_HASH` | SHA-256 pin for the sidecar cert (dev) |
 | `VITE_TURNSTILE_SITE_KEY` | Cloudflare Turnstile site key |
-| `VITE_SENTRY_DSN` | Sentry DSN |
 | `VITE_VAPID_PUBLIC_KEY` | Web Push VAPID |
 | `INDEXNOW_API_KEY` | Post-build SEO ping (optional) |
 

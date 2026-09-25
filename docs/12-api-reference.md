@@ -68,7 +68,7 @@ Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. R
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/prekey-bundle` | Upload own bundle (identity/pq/signing + signed prekeys + OTPK) |
+| POST | `/prekey-bundle` | Upload own bundle (identity/pq/signing + signed prekeys + OTPK) — also carries `encryptedPrivateKeys?` to keep the server's device copy in sync ([temuan #2]) |
 | GET | `/prekey-bundle/:userId` | Fetch a user's bundle (Redis-cached 1h) |
 | POST | `/prekey-bundles` | Batch fetch (≤50 users) |
 | POST | `/public-keys` | Batch public keys (≤50 users) |
@@ -130,12 +130,6 @@ Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. R
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/rooms` | Create an embeddable room (`requireTenantAuth`); returns room URL |
-
-## ai — `/api/ai`
-
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/smart-reply` | Gemini-powered reply suggestions (requireAuth) |
 
 ## admin — `/api/admin`
 

@@ -6,7 +6,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 
 | File | Role |
 |---|---|
-| `src/index.ts` | Sentry → Redis connect (awaited) → dynamic-import `app.ts`, `redisBridge`, sweepers → listen(4000) |
+| `src/index.ts` | Redis connect (awaited) → dynamic-import `app.ts`, `redisBridge`, sweepers → listen(4000) |
 | `src/config.ts` | `env` object (port, cors, secrets, R2, VAPID, CF TURN…); CSRF_SECRET trim; prod JWT guard |
 | `src/app.ts` | Express app: CORS, helmet/CSP, compression, CSRF (`csrf-csrf` keyed per `x-nyx-installation-id`), rate limiters, `/api/csrf-token`, `/health`, error handler |
 
@@ -26,7 +26,6 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `previews.ts` | `/api/previews` | `POST /` (link preview), `GET /image` (proxy) |
 | `subscriptions.ts` | `/api/subscriptions` | `create` (Tripay), `webhook`, `create-crypto-transaction`, `nowpayments-webhook` |
 | `engine.ts` | `/api/engine` | `rooms` (B2B) |
-| `ai.ts` | `/api/ai` | `smart-reply` |
 | `admin.ts` | `/api/admin` | `system-status`, `banned-users`, `ban`/`unban`, `tenants` CRUD + toggle |
 | `reports.ts` | `/api/reports` | `user`, `POST /` (bug) |
 | `system.ts` | `/api/system` | `status` |
@@ -61,7 +60,6 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `r2.ts` | `s3Client`, `getPresignedUploadUrl`, `deleteR2File(s)` |
 | `secureLinkPreview.ts` | SSRF-safe link preview |
 | `sendPushNotification.ts` | VAPID per-device encrypted push |
-| `sentry.ts` | Sentry init + redaction |
 | `sessionKeys.ts` | `relaySessionKeys` (blind relay) |
 | `sessionUtils.ts` | `clearAuthCookies`, `revokeFamily` |
 | `lib/prisma.ts` | PrismaClient + `@prisma/adapter-pg`; sslmode only for non-local hosts |

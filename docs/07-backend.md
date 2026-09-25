@@ -3,7 +3,7 @@
 ## 7.1 Overview
 
 - Express 5, ESM TypeScript with `.js` import specifiers, executed via `tsx` (dev) or compiled `dist/` (prod, `node --max-old-space-size=1024 dist/index.js`).
-- Boot order (`src/index.ts`): Sentry init → **Redis connect (awaited, hard prerequisite)** → dynamic-import `app.ts`, `redisBridge`, sweepers → `listen(4000)`.
+- Boot order (`src/index.ts`): **Redis connect (awaited, hard prerequisite)** → dynamic-import `app.ts`, `redisBridge`, sweepers → `listen(4000)`.
 - DB access only through `src/lib/prisma.ts` (Prisma 7 + `@prisma/adapter-pg`). **Local DB hosts must not get `sslmode=require`** (self-signed snakeoil TLS would kill every query) — the code adds it only for non-local hosts.
 - Rate limiting, CSRF, compression, helmet CSP, and CORS are configured in `app.ts`.
 
@@ -34,7 +34,6 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 | `previews.ts` | Link preview fetch / image proxy |
 | `subscriptions.ts` | Tripay + NOWPayments webhooks (HMAC verified, constant-time) |
 | `engine.ts` | B2B room factory (tenant) |
-| `ai.ts` | Smart reply (Gemini) |
 | `admin.ts` | Admin console: status, ban/unban, tenants |
 | `reports.ts` | Report user/bug (Discord webhook) |
 | `system.ts` | `/status` (VPS metrics) |
@@ -76,7 +75,6 @@ All increment-based limits use the atomic Lua pattern (`RATE_LIMIT_LUA`) — nev
 | `utils/jwt.ts` | Token sign/verify helpers |
 | `utils/password.ts` | Argon2id hash/verify (32MB/3 iter) |
 | `utils/sanitizeForLog` (`logger.ts`) | Log scrubbing |
-| `utils/sentry.ts` | Sentry init + redaction |
 
 ## 7.7 Security invariants
 
