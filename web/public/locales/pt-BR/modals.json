@@ -93,7 +93,12 @@
       "leave_failed": "Falha ao sair do grupo: {{error}}",
       "create_failed": "O nome do grupo e pelo menos um membro são obrigatórios.",
       "created": "Grupo \"{{name}}\" criado!",
-      "create_error": "Falha ao criar o grupo: {{error}}"
+      "create_error": "Falha ao criar o grupo: {{error}}",
+      "rotating_keys": "Girando chaves de criptografia via ML-KEM...",
+      "keys_rotated": "Chaves de criptografia giradas com sucesso via ML-KEM",
+      "distribute_failed": "Falha ao distribuir novas chaves — nenhum participante sincronizado ainda",
+      "rotate_failed": "Falha na rotação de chaves: {{error}}",
+      "rotate_button": "Girar chaves de criptografia agora"
     }
   },
   "user_info": {
@@ -325,5 +330,13 @@
   "logout": {
     "title": "Confirmar Saída",
     "desc": "Tem certeza de que deseja encerrar sua sessão?"
+  },
+  "burner": {
+    "title": "Burner Chat",
+    "generate_failed": "Falha ao gerar link burner seguro.",
+    "link_copied": "Link do Burner Chat copiado!",
+    "copy_secure_link": "Copiar link seguro",
+    "subtitle": "Gere um link efêmero de chat com criptografia pós-quântica de uso único. Os dados existem apenas na RAM.",
+    "provisioning": "Provisionando chaves..."
   }
 }

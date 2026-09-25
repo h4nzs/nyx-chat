@@ -93,7 +93,12 @@
       "leave_failed": "Gagal meninggalkan grup: {{error}}",
       "create_failed": "Nama grup dan setidaknya satu anggota wajib diisi.",
       "created": "Grup \"{{name}}\" dibuat!",
-      "create_error": "Gagal membuat grup: {{error}}"
+      "create_error": "Gagal membuat grup: {{error}}",
+      "rotating_keys": "Merotasi kunci enkripsi via ML-KEM...",
+      "keys_rotated": "Kunci enkripsi berhasil dirotasi via ML-KEM",
+      "distribute_failed": "Gagal mendistribusikan kunci baru — belum ada peserta tersinkron",
+      "rotate_failed": "Rotasi kunci gagal: {{error}}",
+      "rotate_button": "Rotasi Kunci Enkripsi Sekarang"
     }
   },
   "user_info": {
@@ -325,5 +330,13 @@
   "logout": {
     "title": "Konfirmasi Keluar",
     "desc": "Apakah Anda yakin ingin mengakhiri sesi Anda?"
+  },
+  "burner": {
+    "title": "Burner Chat",
+    "generate_failed": "Gagal membuat link burner yang aman.",
+    "link_copied": "Link Burner Chat disalin!",
+    "copy_secure_link": "Salin Link Aman",
+    "subtitle": "Buat link chat efemeral terenkripsi post-quantum sekali pakai. Data hanya ada di RAM.",
+    "provisioning": "Menyiapkan kunci..."
   }
 }

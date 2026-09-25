@@ -4,11 +4,13 @@ import { useAuthStore } from '../store/auth';
 import { useConversationStore, type Conversation } from '../store/conversation';
 import { authFetch } from '../lib/api';
 import { setSecureCookie } from '../lib/tokenStorage';
+import { useTranslation } from 'react-i18next';
 import { Spinner } from '../components/Spinner';
 import ChatWindow from '../components/ChatWindow';
 import type { User } from '@nyx/shared';
 
 export default function EmbedChatPage() {
+  const { t } = useTranslation('chat');
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
@@ -19,7 +21,7 @@ export default function EmbedChatPage() {
   useEffect(() => {
     async function initEmbed() {
       if (!id) {
-        setError('Missing conversation ID');
+        setError(t('embed.missing_id'));
         setLoading(false);
         return;
       }
@@ -41,7 +43,7 @@ export default function EmbedChatPage() {
         connectSocket();
       } catch (err: unknown) {
         console.error('Embed initialization error:', err);
-        setError('Failed to load chat. Please check your token or connection.');
+        setError(t('embed.load_failed'));
       } finally {
         setLoading(false);
       }

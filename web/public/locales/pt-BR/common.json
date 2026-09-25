@@ -35,7 +35,8 @@
     "toggle_cloak": "Alternar Capa de Privacidade",
     "settings": "Configurações",
     "logout": "Sair",
-    "more_reactions": "Mais reações"
+    "more_reactions": "Mais reações",
+    "close_modal": "Fechar modal"
   },
   "maintenance": {
     "title": "Sistema em Manutenção",
@@ -199,7 +200,11 @@
   "user_unbanned": "Usuário @{{username}} desbanido!",
   "security_key_changed": "A chave de segurança de {{name}} mudou. Você pode querer verificar a identidade deles.",
   "uploading_to_cloud": "Enviando para a nuvem...",
-  "avatar_uploaded": "Avatar enviado! (Requer atualização do perfil)",
+  "avatar_uploaded": "Avatar enviado! (Atualização de perfil necessária)",
   "user_blocked": "Usuário bloqueado",
-  "user_unblocked": "Usuário desbloqueado"
+  "user_unblocked": "Usuário desbloqueado",
+  "story_processing_media": "Processando mídia...",
+  "story_encrypting": "Criptografando...",
+  "story_distributing_keys": "Distribuindo chaves com segurança...",
+  "user_unblocked_plain": "Usuário desbloqueado"
 }

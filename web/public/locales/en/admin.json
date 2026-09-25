@@ -34,5 +34,10 @@
   "tenant_created": "Tenant created successfully",
   "failed_to_create_tenant": "Failed to create tenant",
   "tenant_status_updated": "Tenant status updated",
-  "failed_to_toggle_tenant": "Failed to update tenant status"
+  "failed_to_toggle_tenant": "Failed to update tenant status",
+  "unban_failed": "Failed to unban user.",
+  "refresh_data": "Refresh Data",
+  "tenant_name_placeholder": "E.g. Acme Corp",
+  "domains_placeholder": "app.acme.com, acme.local",
+  "copy_api_key": "Copy API Key"
 }

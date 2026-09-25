@@ -60,7 +60,7 @@ export default function BurnerChat() {
             connectSocket();
          } catch (e) {
             console.error("Failed to get guest token:", e);
-            toast.error("Failed to initialize guest session. Please try again.");
+            toast.error(t('chat:burner.init_failed'));
          }
       } else if (!socket.connected) {
         connectSocket();
@@ -165,7 +165,7 @@ export default function BurnerChat() {
       await sendMessage(finalContent);
     } catch (err) {
       console.error(err);
-      toast.error('Failed to upload file');
+      toast.error(t('chat:burner.upload_failed'));
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -226,7 +226,7 @@ export default function BurnerChat() {
             <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <p>Session is live. Messages are ephemeral.</p>
+            <p>{t('chat:burner.session_live')}</p>
           </div>
         ) : (
           messages.map((msg, index) => {
@@ -294,7 +294,7 @@ export default function BurnerChat() {
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Type an ephemeral message..."
+            placeholder={t('chat:burner.placeholder')}
             className="flex-1 bg-transparent px-2 py-2 text-text-primary focus:outline-none placeholder-text-secondary/50"
             autoFocus
           />

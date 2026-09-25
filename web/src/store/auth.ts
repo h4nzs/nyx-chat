@@ -791,9 +791,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         try { fileToProcess = await compressImage(avatar); } catch (_e) {}
       }
       try {
-        toast.loading('Uploading to Cloud...', { id: toastId });
+        toast.loading(i18n.t('common:uploading_to_cloud', 'Uploading to Cloud...'), { id: toastId });
         const fileUrl = await uploadToR2(fileToProcess, 'avatars', () => {});
-        toast.success('Avatar uploaded! (Profile update required)', { id: toastId });
+        toast.success(i18n.t('common:avatar_uploaded', 'Avatar uploaded! (Profile update required)'), { id: toastId });
         return fileUrl; 
       } catch (e: unknown) {
         console.error(e);
@@ -862,7 +862,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const toastId = toast.loading(i18n.t('common:unblocking_user', 'Unblocking user...'));
       try {
         await authFetch(`/api/users/${userId}/block`, { method: 'DELETE' });
-        toast.success('User unblocked', { id: toastId });
+        toast.success(i18n.t('common:user_unblocked_plain', 'User unblocked'), { id: toastId });
         set(state => ({ blockedUserIds: state.blockedUserIds.filter(id => id !== userId) }));
       } catch (error: unknown) {
         const errorDetails = typeof error === 'object' && error !== null && 'details' in error ? (error as Record<string, unknown>).details : undefined;

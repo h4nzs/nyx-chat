@@ -18,5 +18,10 @@
   "unban": "Desbanir",
   "unban_title": "Desbanir Usuário",
   "unban_desc": "Tem certeza que deseja remover o banimento de @{{username}}?",
-  "initializing": "INICIALIZANDO LINK DO SISTEMA..."
+  "initializing": "INICIALIZANDO LINK DO SISTEMA...",
+  "unban_failed": "Falha ao remover o ban do usuário.",
+  "refresh_data": "Atualizar dados",
+  "tenant_name_placeholder": "Ex. Acme Corp",
+  "domains_placeholder": "app.acme.com, acme.local",
+  "copy_api_key": "Copiar chave de API"
 }

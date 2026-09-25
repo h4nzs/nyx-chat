@@ -35,7 +35,8 @@
     "toggle_cloak": "Toggle Privacy Cloak",
     "settings": "Settings",
     "logout": "Logout",
-    "more_reactions": "More Reactions"
+    "more_reactions": "More Reactions",
+    "close_modal": "Close modal"
   },
   "action": {
     "abort": "ABORT",
@@ -200,5 +201,9 @@
   "uploading_to_cloud": "Uploading to Cloud...",
   "avatar_uploaded": "Avatar uploaded! (Profile update required)",
   "user_blocked": "User blocked",
-  "user_unblocked": "User unblocked"
+  "user_unblocked": "User unblocked",
+  "story_processing_media": "Processing media...",
+  "story_encrypting": "Encrypting...",
+  "story_distributing_keys": "Distributing keys securely...",
+  "user_unblocked_plain": "User unblocked"
 }

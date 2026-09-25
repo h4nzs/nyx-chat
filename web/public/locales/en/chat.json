@@ -186,5 +186,15 @@
   },
   "user_info": {
     "view_profile": "View Full Profile"
+  },
+  "burner": {
+    "init_failed": "Failed to initialize guest session. Please try again.",
+    "upload_failed": "Failed to upload file",
+    "session_live": "Session is live. Messages are ephemeral.",
+    "placeholder": "Type an ephemeral message..."
+  },
+  "embed": {
+    "missing_id": "Missing conversation ID",
+    "load_failed": "Failed to load chat. Please check your token or connection."
   }
 }

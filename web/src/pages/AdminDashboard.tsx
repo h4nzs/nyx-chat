@@ -107,7 +107,7 @@ export default function AdminDashboard() {
           toast.success(i18n.t('common:user_unbanned', `User @${bannedUser.username} unbanned!`, { username: bannedUser.username }));
           loadAllData();
         } catch (e: unknown) {
-          toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to unban user.");
+          toast.error((e instanceof Error ? e.message : i18n.t('common:errors.unknown', 'Unknown error')) || t('unban_failed'));
         }
       }
     );
@@ -171,7 +171,7 @@ export default function AdminDashboard() {
         <button 
           onClick={loadAllData} 
           className="p-2 hover:bg-black/5 dark:hover:bg-black/5 dark:bg-white/5 rounded-full text-text-secondary transition-colors"
-          title="Refresh Data"
+          title={t('refresh_data')}
         >
           <FiRefreshCw size={20} />
         </button>
@@ -305,7 +305,7 @@ export default function AdminDashboard() {
                     value={newTenantName}
                     onChange={(e) => setNewTenantName(e.target.value)}
                     className="w-full bg-bg-main border border-border-subtle rounded-lg px-4 py-2 text-text-primary focus:outline-none focus:border-accent"
-                    placeholder="E.g. Acme Corp"
+                    placeholder={t('tenant_name_placeholder')}
                   />
                 </div>
                 <div>
@@ -315,7 +315,7 @@ export default function AdminDashboard() {
                     value={newTenantDomains}
                     onChange={(e) => setNewTenantDomains(e.target.value)}
                     className="w-full bg-bg-main border border-border-subtle rounded-lg px-4 py-2 text-text-primary focus:outline-none focus:border-accent"
-                    placeholder="app.acme.com, acme.local"
+                    placeholder={t('domains_placeholder')}
                   />
                 </div>
                 <button
@@ -380,7 +380,7 @@ export default function AdminDashboard() {
                           <button
                             onClick={() => copyApiKey(tenant.apiKey)}
                             className="bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-black/10 dark:bg-white/10 p-2 rounded transition-colors text-text-secondary hover:text-white"
-                            title="Copy API Key"
+                            title={t('copy_api_key')}
                           >
                             <FiCopy />
                           </button>

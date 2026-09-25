@@ -93,7 +93,12 @@
       "leave_failed": "Failed to leave group: {{error}}",
       "create_failed": "Group name and at least one member are required.",
       "created": "Group \"{{name}}\" created!",
-      "create_error": "Failed to create group: {{error}}"
+      "create_error": "Failed to create group: {{error}}",
+      "rotating_keys": "Rotating encryption keys via ML-KEM...",
+      "keys_rotated": "Encryption keys rotated successfully via ML-KEM",
+      "distribute_failed": "Failed to distribute new keys — no participants synced yet",
+      "rotate_failed": "Key rotation failed: {{error}}",
+      "rotate_button": "Rotate Encryption Keys Now"
     }
   },
   "user_info": {
@@ -325,5 +330,13 @@
   "logout": {
     "title": "Confirm Logout",
     "desc": "Are you sure you want to end your session?"
+  },
+  "burner": {
+    "title": "Burner Chat",
+    "generate_failed": "Failed to generate secure burner link.",
+    "link_copied": "Burner Chat link copied!",
+    "copy_secure_link": "Copy Secure Link",
+    "subtitle": "Generate a one-time, post-quantum encrypted ephemeral chat link. Data exists only in RAM.",
+    "provisioning": "Provisioning keys..."
   }
 }

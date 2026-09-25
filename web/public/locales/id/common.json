@@ -35,7 +35,8 @@
     "toggle_cloak": "Alihkan Jubah Privasi",
     "settings": "Pengaturan",
     "logout": "Keluar",
-    "more_reactions": "Reaksi Lainnya"
+    "more_reactions": "Reaksi Lainnya",
+    "close_modal": "Tutup modal"
   },
   "action": {
     "abort": "BATALKAN",
@@ -198,7 +199,11 @@
   "user_unbanned": "Pengguna @{{username}} telah di-unban!",
   "security_key_changed": "Kunci keamanan untuk {{name}} telah berubah. Anda mungkin ingin memverifikasi identitas mereka.",
   "uploading_to_cloud": "Mengunggah ke Cloud...",
-  "avatar_uploaded": "Avatar diunggah! (Pembaruan profil diperlukan)",
+  "avatar_uploaded": "Avatar terunggah! (Perbarui profil diperlukan)",
   "user_blocked": "Pengguna diblokir",
-  "user_unblocked": "Blokir pengguna dibuka"
+  "user_unblocked": "Blokir pengguna dibuka",
+  "story_processing_media": "Memproses media...",
+  "story_encrypting": "Mengenkripsi...",
+  "story_distributing_keys": "Mendistribusikan kunci dengan aman...",
+  "user_unblocked_plain": "User dibuka blokirnya"
 }

@@ -93,7 +93,12 @@
       "leave_failed": "Error al salir del grupo: {{error}}",
       "create_failed": "El nombre del grupo y al menos un miembro son obligatorios.",
       "created": "¡Grupo \"{{name}}\" creado!",
-      "create_error": "Error al crear el grupo: {{error}}"
+      "create_error": "Error al crear el grupo: {{error}}",
+      "rotating_keys": "Rotando claves de cifrado vía ML-KEM...",
+      "keys_rotated": "Claves de cifrado rotadas con éxito vía ML-KEM",
+      "distribute_failed": "No se pudieron distribuir las nuevas claves — aún no hay participantes sincronizados",
+      "rotate_failed": "Falló la rotación de claves: {{error}}",
+      "rotate_button": "Rotar claves de cifrado ahora"
     }
   },
   "user_info": {
@@ -325,5 +330,13 @@
   "logout": {
     "title": "Confirmar cierre de sesión",
     "desc": "¿Estás seguro de que quieres finalizar tu sesión?"
+  },
+  "burner": {
+    "title": "Burner Chat",
+    "generate_failed": "No se pudo generar el enlace burner seguro.",
+    "link_copied": "¡Enlace de Burner Chat copiado!",
+    "copy_secure_link": "Copiar enlace seguro",
+    "subtitle": "Genera un enlace efímero de chat cifrado post-cuántico de un solo uso. Los datos existen solo en RAM.",
+    "provisioning": "Generando claves..."
   }
 }

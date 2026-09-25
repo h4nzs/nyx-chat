@@ -186,5 +186,15 @@
   },
   "user_info": {
     "view_profile": "Lihat Profil Lengkap"
+  },
+  "burner": {
+    "init_failed": "Gagal menginisialisasi sesi tamu. Silakan coba lagi.",
+    "upload_failed": "Gagal mengunggah file",
+    "session_live": "Sesi aktif. Pesan bersifat efemeral.",
+    "placeholder": "Ketik pesan efemeral..."
+  },
+  "embed": {
+    "missing_id": "ID percakapan tidak ditemukan",
+    "load_failed": "Gagal memuat chat. Periksa token atau koneksi Anda."
   }
 }

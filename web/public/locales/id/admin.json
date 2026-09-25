@@ -34,5 +34,10 @@
   "tenant_created": "Tenant berhasil dibuat",
   "failed_to_create_tenant": "Gagal membuat tenant",
   "tenant_status_updated": "Status tenant diperbarui",
-  "failed_to_toggle_tenant": "Gagal memperbarui status tenant"
+  "failed_to_toggle_tenant": "Gagal memperbarui status tenant",
+  "unban_failed": "Gagal mencabut ban user.",
+  "refresh_data": "Muat Ulang Data",
+  "tenant_name_placeholder": "Mis. Acme Corp",
+  "domains_placeholder": "app.acme.com, acme.local",
+  "copy_api_key": "Salin API Key"
 }

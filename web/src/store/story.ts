@@ -104,7 +104,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       let fileKey: string | undefined = undefined;
 
       if (file) {
-        toast.loading('Processing media...', { id: toastId });
+        toast.loading(i18n.t('common:story_processing_media', 'Processing media...'), { id: toastId });
         let fileToProcess = file;
         if (file.type.startsWith('image/')) {
            try { fileToProcess = await compressImage(file, false); } catch (_e) {}
@@ -129,7 +129,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
         mediaUrl = presignedRes.publicUrl;
       }
 
-      toast.loading('Encrypting...', { id: toastId });
+      toast.loading(i18n.t('common:story_encrypting', 'Encrypting...'), { id: toastId });
       const payload = { text, mediaUrl, mimeType, fileKey };
       const encryptedPayload = await encryptStoryPayload(payload, storyKey);
 
@@ -179,7 +179,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
 
       // SEND SILENT KEYS
       const messageStore = useMessageStore.getState();
-      toast.loading('Distributing keys securely...', { id: toastId });
+      toast.loading(i18n.t('common:story_distributing_keys', 'Distributing keys securely...'), { id: toastId });
       
       for (const targetId of targets) {
         const convId = userToConvMap.get(targetId);

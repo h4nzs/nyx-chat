@@ -124,7 +124,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
   };
 
   const handleForceRotateKeys = async () => {
-    const toastId = toast.loading('Rotating encryption keys via ML-KEM...');
+    const toastId = toast.loading(t('modals:group_info.toasts.rotating_keys'));
     try {
       const { forceRotateGroupSenderKey, ensureGroupSession } = await import('@utils/crypto');
       const { emitGroupKeyDistribution } = await import('@lib/transportClient');
@@ -134,13 +134,13 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants, true);
       if (distributionKeys && distributionKeys.length > 0) {
           await emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
-          toast.success('Encryption keys rotated successfully via ML-KEM', { id: toastId });
+          toast.success(t('modals:group_info.toasts.keys_rotated'), { id: toastId });
       } else {
-          toast.error('Failed to distribute new keys — no participants synced yet', { id: toastId });
+          toast.error(t('modals:group_info.toasts.distribute_failed'), { id: toastId });
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');
-      toast.error(`Key rotation failed: ${msg}`, { id: toastId });
+      toast.error(t('modals:group_info.toasts.rotate_failed', { error: msg }), { id: toastId });
     }
   };
 
@@ -248,7 +248,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                       className="w-full flex items-center justify-center p-4 font-semibold text-orange-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-t-xl border-b border-border"
                     >
                       <FiLock className="mr-3" />
-                      <span>Rotate Encryption Keys Now</span>
+                      <span>{t('modals:group_info.toasts.rotate_button')}</span>
                     </button>
                     <button
                       onClick={handleLeaveGroup}

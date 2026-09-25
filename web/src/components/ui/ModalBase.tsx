@@ -2,6 +2,7 @@ import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { FiX } from 'react-icons/fi';
 import React from 'react';
 import { useGlobalEscape } from '../../hooks/useGlobalEscape';
+import { useTranslation } from 'react-i18next';
 
 interface ModalBaseProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ const dropIn: Variants = {
 };
 
 const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children, footer }) => {
+  const { t } = useTranslation('common');
   useGlobalEscape(onClose);
 
   return (
@@ -87,7 +89,7 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
               </div>
               <button
                 onClick={onClose}
-                aria-label="Close modal"
+                aria-label={t('actions.close_modal', 'Close modal')}
                 className="
                   group
                   p-2 rounded-full 

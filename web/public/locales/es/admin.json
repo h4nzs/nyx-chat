@@ -18,5 +18,10 @@
   "unban": "Desbloquear",
   "unban_title": "Desbloquear Usuario",
   "unban_desc": "¿Estás seguro de que deseas levantar el bloqueo para @{{username}}?",
-  "initializing": "INICIALIZANDO ENLACE DE SISTEMA..."
+  "initializing": "INICIALIZANDO ENLACE DE SISTEMA...",
+  "unban_failed": "No se pudo levantar el ban del usuario.",
+  "refresh_data": "Actualizar datos",
+  "tenant_name_placeholder": "P. ej. Acme Corp",
+  "domains_placeholder": "app.acme.com, acme.local",
+  "copy_api_key": "Copiar clave API"
 }

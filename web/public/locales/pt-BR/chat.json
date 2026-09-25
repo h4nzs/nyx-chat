@@ -184,5 +184,15 @@
   },
   "user_info": {
     "view_profile": "Ver Perfil Completo"
+  },
+  "burner": {
+    "init_failed": "Falha ao inicializar a sessão de convidado. Tente novamente.",
+    "upload_failed": "Falha ao enviar o arquivo",
+    "session_live": "Sessão ativa. As mensagens são efêmeras.",
+    "placeholder": "Digite uma mensagem efêmera..."
+  },
+  "embed": {
+    "missing_id": "ID da conversa ausente",
+    "load_failed": "Falha ao carregar o chat. Verifique seu token ou conexão."
   }
 }
