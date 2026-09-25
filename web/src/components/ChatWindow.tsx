@@ -322,16 +322,21 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
              (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
          );
 
-         // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket
+         // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket.
+         // [BATCH] Kirim satu event plural (chunk 100 = BATCH_RECEIPT_MAX server)
+         // alih-alih N event per-pesan — 1 round-trip untuk semua receipt. targets
+         // (Opaque Mailbox) dipetakan per messageId karena DB 1:1 sealed-sender
+         // menyimpan senderId null; server pakai peta ini untuk notifikasi.
          const msgsToAck = unreadVisible.slice(-20);
-
-         msgsToAck.forEach(msg => {
-             transportClient.sendEvent('message:mark_as_read', {
-                 messageId: msg.id,
-                 conversationId: id,
-                 targetRecipient: msg.senderId
-             });
-         });
+         const CHUNK = 100;
+         for (let i = 0; i < msgsToAck.length; i += CHUNK) {
+           const chunk = msgsToAck.slice(i, i + CHUNK);
+           transportClient.sendEvent('messages:mark_as_read', {
+             conversationId: id,
+             messageIds: chunk.map(m => m.id),
+             targets: Object.fromEntries(chunk.map(m => [m.id, m.senderId])),
+           });
+         }
     };
 
     markUnreadAsRead();

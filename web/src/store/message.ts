@@ -1780,10 +1780,20 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const socket = transportClient;
         const { user } = useAuthStore.getState();
         if (socket?.connected && user) {
-          for (const msg of processedMessages) {
-            if (!isUndecryptable(msg) && msg.senderId && msg.senderId !== user.id) {
-              transportClient.sendEvent('message:mark_as_read', { messageId: msg.id, conversationId: id, targetRecipient: msg.senderId });
-            }
+          // [BATCH] Satu event plural (chunk 100 = BATCH_RECEIPT_MAX server)
+          // alih-alih N event per-pesan. targets (Opaque Mailbox) dipetakan per
+          // messageId karena DB 1:1 sealed-sender menyimpan senderId null.
+          const receiptable = processedMessages.filter(
+            (m) => !isUndecryptable(m) && m.senderId && m.senderId !== user.id
+          );
+          const CHUNK = 100;
+          for (let i = 0; i < receiptable.length; i += CHUNK) {
+            const chunk = receiptable.slice(i, i + CHUNK);
+            transportClient.sendEvent('messages:mark_as_read', {
+              conversationId: id,
+              messageIds: chunk.map((m) => m.id),
+              targets: Object.fromEntries(chunk.map((m) => [m.id, m.senderId as string])),
+            });
           }
         }
 

@@ -362,6 +362,33 @@ test('batch receipt DELIVERED: tidak meng-arm TTL grace', async () => {
   assert.equal(ttlUpdates.length, 0, 'DELIVERED tidak boleh meng-arm TTL');
 });
 
+test('batch receipt Opaque Mailbox: senderId null 1:1 pakai targets dari klien untuk broadcast', async () => {
+  const messages = [
+    { id: 'm1', senderId: null, conversation: { isGroup: false } }, // sealed-sender
+    { id: 'm2', senderId: 'u2', conversation: { isGroup: false } }, // senderId di DB
+    { id: 'm3', senderId: null, conversation: { isGroup: false } }, // tanpa target → skip
+  ];
+  const { ctx, calls } = makeCtxForBatch({ messages });
+
+  await handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: {
+      conversationId: 'c1',
+      messageIds: ['m1', 'm2', 'm3'],
+      targets: { m1: 'u9', m2: 'u2' }, // m2: target diabaikan, pakai senderId DB
+    },
+  });
+
+  const statusEvents = calls.sendJsonToUser.filter(
+    (c) => c[1] === TransportOpCode.KEY_SYNC && (c[2] as { event?: string }).event === 'message:status_updated'
+  );
+  assert.equal(statusEvents.length, 2, 'm1 → u9 (targets), m2 → u2 (DB); m3 tanpa target → skip');
+  const byTarget = new Map(statusEvents.map((c) => [c[0], c[2]]));
+  assert.ok(byTarget.has('u9'), 'targets harus dipakai untuk pesan sealed-sender (senderId null)');
+  assert.ok(byTarget.has('u2'), 'senderId DB tetap prioritas di atas targets');
+});
+
 test('batch receipt: pesan kosong / array tidak valid diabaikan tanpa error', async () => {
   const { ctx } = makeCtxForBatch({ messages: [] });
   await assert.doesNotReject(handleKeySync(ctx, 'u1', 'd1', {

@@ -80,16 +80,11 @@ test('setiap case handleKeySync bisa dicapai dari WSS ATAU di-dokumentasikan seb
   // Gap yang DIKETAHUI dan aman: event ini hanya dikirim client via jalur fixed
   // (bukan derived KEY_SYNC) atau belum dipakai client WSS sama sekali.
   //  - message:ack_delivered  → jalur fixed ACK (gateway socket.on terpisah).
-  //  - messages:mark_*        → client lama WT-only; client saat ini pakai
-  //                             message:mark_read per-pesan di kedua jalur.
   //  - message:deleted        → WT-only; unsend di WSS lewat message:unsend.
   //  - migration:chunk/start/ack → WT-only (transfer vault device-to-device
   //                             butuh through-put stream; WSS fallback belum).
   const KNOWN_WT_ONLY = new Set([
     'message:ack_delivered',
-    'messages:mark_as_read',
-    'messages:mark_read',
-    'messages:mark_delivered',
     'message:deleted',
     'migration:chunk',
     'migration:start',

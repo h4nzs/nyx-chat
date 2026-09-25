@@ -686,12 +686,15 @@ export async function handleKeySync(
        case 'messages:mark_as_read':
        case 'messages:mark_read':
        case 'messages:mark_delivered': {
-         const { conversationId, messageIds } = data as { conversationId: string, messageIds: string[] };
+         const { conversationId, messageIds, targets } = data as { conversationId: string, messageIds: string[], targets?: Record<string, string> };
          const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
 
          // [PERF N+1] Batch path — lihat handleMessageStatusBatchUpdate.
-         await handleMessageStatusBatchUpdate(ctx, userId, conversationId, messageIds, status);
+         // `targets` (Opaque Mailbox): peta messageId → pengirim hasil dekripsi
+         // klien, karena DB 1:1 sealed-sender menyimpan senderId null sehingga
+         // server tidak tahu ke mana notifikasi harus dikirim.
+         await handleMessageStatusBatchUpdate(ctx, userId, conversationId, messageIds, status, targets);
          break;
        }
 
@@ -830,7 +833,8 @@ async function handleMessageStatusBatchUpdate(
   userId: string,
   conversationId: string,
   messageIds: string[],
-  status: 'READ' | 'DELIVERED'
+  status: 'READ' | 'DELIVERED',
+  targets?: Record<string, string>
 ): Promise<void> {
   if (!conversationId || !Array.isArray(messageIds) || messageIds.length === 0) return;
   // Dedupe + batasi ukuran batch (client mengirim list per conversation; cap
@@ -868,15 +872,26 @@ async function handleMessageStatusBatchUpdate(
       ));
 
     // 4. Broadcast status ke pengirim — paralel (senderId bisa null pada pesan
-    //    1:1 sealed-sender → tidak ada target notifikasi, dilewati).
+    //    1:1 sealed-sender → fallback ke target Opaque Mailbox dari klien;
+    //    pesan tanpa keduanya tidak punya penerima notifikasi, dilewati).
     await Promise.all(messages
-      .filter((m) => m.senderId !== null && m.senderId !== userId)
-      .map((m) => emitEventToUser(ctx, m.senderId as string, 'message:status_updated', {
-        conversationId,
-        messageId: m.id,
-        userId,
-        status
-      }).catch(() => {})));
+      .filter((m) => {
+        if (m.senderId !== null && m.senderId !== userId) return true;
+        if (m.senderId === null) {
+          const t = targets?.[m.id];
+          return typeof t === 'string' && t !== userId;
+        }
+        return false;
+      })
+      .map((m) => {
+        const notifyTarget = m.senderId ?? targets?.[m.id];
+        return emitEventToUser(ctx, notifyTarget as string, 'message:status_updated', {
+          conversationId,
+          messageId: m.id,
+          userId,
+          status
+        }).catch(() => {});
+      }));
 
     // 5. Grace TTL READ 1:1 — SATU updateMany untuk semua kandidat yang belum
     //    pernah READ. One-shot tetap terjaga: filter `wasAlreadyRead` + kondisi

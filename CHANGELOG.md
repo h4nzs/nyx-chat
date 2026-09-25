@@ -26,7 +26,11 @@ tests. No schema migration and no new required environment variables.
   devices that were offline when they were read elsewhere.
 * **Batched Read Receipts:** Plural `messages:mark_as_read` now processes up to
   100 receipts with 4 queries total instead of 2-3 per message — kills the N+1
-  spike when opening a busy group on the 1-core VPS.
+  spike when opening a busy group on the 1-core VPS. The client now actually
+  sends the plural event (chunks of 100) on both transports, and the socket.io
+  fallback registers all `messages:mark_*` events (previously WT-only).
+  Opaque Mailbox preserved via a per-message `targets` map so 1:1
+  sealed-sender notifications still reach the sender.
 * **WSS Gateway Parity:** The socket.io fallback now registers all 24 KEY_SYNC
   events through a single exported `WSS_KEYS_SYNC_EVENTS` list and forwards
   `msgId` for ACK correlation, matching the WebTransport path. A new parity
