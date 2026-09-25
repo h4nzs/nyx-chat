@@ -99,7 +99,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 ## 21.8 i18n & PWA
 
-- Locales `public/locales/{en,es,id,pt-BR}` × 10 namespaces; app uses 7 (`common, auth, errors, chat, settings, modals, admin`). Every key must exist in all four languages.
+- Locales `public/locales/{en,es,id,pt-BR}` × 7 namespaces (`common, auth, errors, chat, settings, modals, admin`) — exactly matching the `ns` array in `i18n.ts`. Every key must exist in all four languages. (Former `privacy/help/landing` namespaces were dead copies of the marketing site's locales and were removed — the marketing Astro site keeps its own under `marketing/src/locales`.)
 - PWA: `vite-plugin-pwa` injectManifest, source `src/sw.ts`; no `/api` runtime caching by design.
 
 ## 21.9 E2E (`e2e/`, 7 specs + global setup)
