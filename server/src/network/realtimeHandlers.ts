@@ -690,11 +690,8 @@ export async function handleKeySync(
          const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
 
-         // 1. Lakukan update status secara batch
-         for (const messageId of messageIds) {
-             // Re-use logic penghapusan yang sudah matang di handleMessageStatusUpdate
-             await handleMessageStatusUpdate(ctx, userId, conversationId, messageId, status);
-         }
+         // [PERF N+1] Batch path — lihat handleMessageStatusBatchUpdate.
+         await handleMessageStatusBatchUpdate(ctx, userId, conversationId, messageIds, status);
          break;
        }
 
@@ -814,5 +811,96 @@ async function handleMessageStatusUpdate(
     // Tangani P2003 (FK Violation) jika pesan dihapus tepat saat kueri berjalan
     if ((e as Record<string, unknown>).code === 'P2003') return;
     console.error(`[RedisBridge] Failed to update message status:`, e);
+  }
+}
+
+// --- Batch receipt (N+1 fix) ---
+// [PERF] `messages:mark_as_read` (plural) dulu memanggil
+// handleMessageStatusUpdate per messageId = 2-3 query sequential per pesan
+// (findUnique message + findUnique existing status + upsert + optional
+// updateMany TTL). Membuka grup dengan banyak unread = ratusan round-trip DB
+// di VPS 1-core. Kini: 1x fetch pesan (findMany), 1x fetch existing status
+// (findMany), 1x promise.all upsert (paralel, tetap per-baris karena
+// upsert massal belum didukung Prisma untuk composite-unique), 1x updateMany
+// TTL (sekali untuk semua pesan 1:1 yang belum READ), dan broadcast paralel.
+const BATCH_RECEIPT_MAX = 100;
+
+async function handleMessageStatusBatchUpdate(
+  ctx: RealtimeContext,
+  userId: string,
+  conversationId: string,
+  messageIds: string[],
+  status: 'READ' | 'DELIVERED'
+): Promise<void> {
+  if (!conversationId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+  // Dedupe + batasi ukuran batch (client mengirim list per conversation; cap
+  // melindungi server dari payload tak wajar — sisanya bisa direceipt ulang).
+  const ids = Array.from(new Set(messageIds.filter((id) => typeof id === 'string' && id))).slice(0, BATCH_RECEIPT_MAX);
+  if (ids.length === 0) return;
+
+  try {
+    // 1. Satu query untuk semua pesan: keberadaan + sender + isGroup
+    const messages = await ctx.prisma.message.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, senderId: true, conversation: { select: { isGroup: true } } }
+    });
+    if (messages.length === 0) return;
+
+    const msgById = new Map(messages.map((m) => [m.id, m]));
+
+    // 2. Satu query untuk semua status existing milik user ini
+    const existingStatuses = await ctx.prisma.messageStatus.findMany({
+      where: { messageId: { in: messages.map((m) => m.id) }, userId },
+      select: { messageId: true, status: true }
+    });
+    const wasReadSet = new Set(
+      existingStatuses.filter((s) => s.status === 'READ').map((s) => s.messageId)
+    );
+
+    // 3. Upsert paralel — skip pesan sendiri (pengirim tidak me-receipt dirinya)
+    await Promise.all(messages
+      .filter((m) => m.senderId !== userId)
+      .map((m) => ctx.prisma.messageStatus.upsert({
+        where: { messageId_userId: { messageId: m.id, userId } },
+        update: { status },
+        create: { messageId: m.id, userId, status }
+      }).catch(() => {}) // P2003: pesan dihapus race — abaikan per-item
+      ));
+
+    // 4. Broadcast status ke pengirim — paralel (senderId bisa null pada pesan
+    //    1:1 sealed-sender → tidak ada target notifikasi, dilewati).
+    await Promise.all(messages
+      .filter((m) => m.senderId !== null && m.senderId !== userId)
+      .map((m) => emitEventToUser(ctx, m.senderId as string, 'message:status_updated', {
+        conversationId,
+        messageId: m.id,
+        userId,
+        status
+      }).catch(() => {})));
+
+    // 5. Grace TTL READ 1:1 — SATU updateMany untuk semua kandidat yang belum
+    //    pernah READ. One-shot tetap terjaga: filter `wasAlreadyRead` + kondisi
+    //    `expiresAt null atau lebih jauh dari grace` sama seperti jalur tunggal.
+    if (status === 'READ') {
+      const oneToOneCandidates = messages.filter((m) =>
+        m.senderId !== userId && !m.conversation.isGroup && !wasReadSet.has(m.id)
+      );
+      if (oneToOneCandidates.length > 0) {
+        const graceExpiresAt = new Date(Date.now() + READ_DELETE_GRACE_MS);
+        await ctx.prisma.message.updateMany({
+          where: {
+            id: { in: oneToOneCandidates.map((m) => m.id) },
+            OR: [
+              { expiresAt: null },
+              { expiresAt: { gt: graceExpiresAt } }
+            ]
+          },
+          data: { expiresAt: graceExpiresAt }
+        }).catch(() => {});
+      }
+    }
+  } catch (e: unknown) {
+    if ((e as Record<string, unknown>).code === 'P2003') return;
+    console.error(`[RedisBridge] Failed to batch update message statuses:`, e);
   }
 }

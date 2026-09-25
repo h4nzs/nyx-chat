@@ -259,3 +259,119 @@ test('handleKeySync: meneruskan session:request_key ke target lewat emitEventToU
   assert.ok(call, 'harus meneruskan session:request_key ke target');
   assert.equal(call![0], 't1');
 });
+
+// --- Batch receipt (N+1 fix) ---
+
+// Prisma fake untuk batch: pesan + status existing terkontrol per test.
+function makeCtxForBatch(opts: {
+  messages: Array<{ id: string; senderId: string | null; conversation: { isGroup: boolean } }>;
+  existingStatuses?: Array<{ messageId: string; status: string }>;
+}) {
+  const base = makeCtx();
+  const upserts: Array<{ messageId: string; status: string }> = [];
+  const ttlUpdates: Array<{ ids: string[]; expiresAt: Date }> = [];
+
+  const prisma = {
+    message: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        opts.messages.filter((m) => where.id.in.includes(m.id)),
+      updateMany: async ({ where, data }: { where: { id: { in: string[] } }; data: { expiresAt: Date } }) => {
+        ttlUpdates.push({ ids: where.id.in, expiresAt: data.expiresAt });
+        return { count: where.id.in.length };
+      },
+    },
+    messageStatus: {
+      findMany: async () => opts.existingStatuses ?? [],
+      upsert: async ({ where, create, update }: {
+        where: { messageId_userId: { messageId: string; userId: string } };
+        create: { messageId: string; userId: string; status: string };
+        update: { status: string };
+      }) => {
+        upserts.push({ messageId: where.messageId_userId.messageId, status: update.status ?? create.status });
+        return {};
+      },
+    },
+  };
+  base.ctx.prisma = prisma as unknown as RealtimeContext['prisma'];
+  return { ...base, upserts, ttlUpdates };
+}
+
+test('batch receipt: N pesan diproses dengan upsert + broadcast paralel (bukan N loop query)', async () => {
+  const messages = [
+    { id: 'm1', senderId: 'u2', conversation: { isGroup: false } },
+    { id: 'm2', senderId: 'u2', conversation: { isGroup: false } },
+    { id: 'm3', senderId: 'u3', conversation: { isGroup: true } },
+  ];
+  const { ctx, calls, upserts } = makeCtxForBatch({ messages });
+
+  await handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: ['m1', 'm2', 'm3', 'm1'] }, // m1 duplikat
+  });
+
+  // Semua pesan milik orang lain di-upsert (duplikat di-dedupe).
+  assert.equal(upserts.length, 3, '3 pesan unik harus di-upsert');
+  assert.deepEqual(upserts.map((u) => u.messageId).sort(), ['m1', 'm2', 'm3']);
+
+  // Broadcast status ke pengirim: u2 (m1, m2) dan u3 (m3) → 3 event.
+  const statusEvents = calls.sendJsonToUser.filter(
+    (c) => c[1] === TransportOpCode.KEY_SYNC && (c[2] as { event?: string }).event === 'message:status_updated'
+  );
+  assert.equal(statusEvents.length, 3, '3 broadcast status (2 ke u2, 1 ke u3)');
+});
+
+test('batch receipt READ 1:1: satu updateMany TTL untuk kandidat yang belum READ, grup dikecualikan', async () => {
+  const messages = [
+    { id: 'm1', senderId: 'u2', conversation: { isGroup: false } },
+    { id: 'm2', senderId: 'u2', conversation: { isGroup: false } },
+    { id: 'm3', senderId: 'u2', conversation: { isGroup: true } },  // grup → tanpa TTL
+    { id: 'm4', senderId: 'u1', conversation: { isGroup: false } },  // pesan sendiri → skip
+  ];
+  const { ctx, ttlUpdates } = makeCtxForBatch({
+    messages,
+    existingStatuses: [{ messageId: 'm2', status: 'READ' }], // m2 sudah READ → tanpa TTL
+  });
+
+  await handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: ['m1', 'm2', 'm3', 'm4'] },
+  });
+
+  // Satu updateMany, hanya m1 (1:1, belum READ, bukan pesan sendiri).
+  assert.equal(ttlUpdates.length, 1, 'TTL harus di-arm sekali untuk seluruh batch');
+  assert.deepEqual(ttlUpdates[0].ids, ['m1']);
+  // One-shot: TTL baru = now + 24 jam (kira-kira).
+  const delta = ttlUpdates[0].expiresAt.getTime() - Date.now();
+  assert.ok(delta > 23 * 60 * 60 * 1000 && delta <= 24 * 60 * 60 * 1000, 'grace ~24 jam');
+});
+
+test('batch receipt DELIVERED: tidak meng-arm TTL grace', async () => {
+  const messages = [{ id: 'm1', senderId: 'u2', conversation: { isGroup: false } }];
+  const { ctx, ttlUpdates, upserts } = makeCtxForBatch({ messages });
+
+  await handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_delivered',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: ['m1'] },
+  });
+
+  assert.equal(upserts.length, 1);
+  assert.equal(upserts[0].status, 'DELIVERED');
+  assert.equal(ttlUpdates.length, 0, 'DELIVERED tidak boleh meng-arm TTL');
+});
+
+test('batch receipt: pesan kosong / array tidak valid diabaikan tanpa error', async () => {
+  const { ctx } = makeCtxForBatch({ messages: [] });
+  await assert.doesNotReject(handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: [] },
+  }));
+  await assert.doesNotReject(handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1' },
+  }));
+});
