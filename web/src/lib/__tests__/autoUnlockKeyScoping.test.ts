@@ -48,6 +48,7 @@ import {
   setDeviceAutoUnlockReady,
   clearKeys,
   setAutoUnlockIdentity,
+  __resetAutoUnlockIdentityForTest,
 } from '../keyStorage'
 
 const KEY_A = 'nyx_device_auto_unlock_key:user-A'
@@ -62,8 +63,12 @@ beforeEach(() => {
   sessionStore.clear()
   localStore.clear()
   fakeAuthState.user = null
-  // reset pending identity (dipakai register flow)
-  // setAutoUnlockIdentity('') tidak valid; cukup set user lain untuk override
+  // [Temuan #4] pendingIdentity adalah state module-level one-shot — tanpa reset
+  // eksplisit, identity dari test sebelumnya bocor ke test berikutnya dan bisa
+  // membuat assertion pass secara semu (mis. key ditulis ke slot user yang salah
+  // tapi assertion kebetulan cocok). Reset di sini menjamin setiap test mulai
+  // dari state identitas yang bersih.
+  __resetAutoUnlockIdentityForTest()
 })
 
 describe('auto-unlock key per user (kontrak [FIX #5])', () => {

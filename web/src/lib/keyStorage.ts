@@ -190,6 +190,15 @@ let pendingIdentity: string | null = null;
 export const setAutoUnlockIdentity = (userId: string) => {
   pendingIdentity = userId;
 };
+
+/**
+ * [TEST-ISOLATION] `pendingIdentity` adalah state module-level one-shot; tanpa
+ * reset, kebocoran antar-test bisa membuat test pass secara semu (identity dari
+ * test sebelumnya dipakai oleh test berikutnya). Hanya untuk test.
+ */
+export const __resetAutoUnlockIdentityForTest = () => {
+  pendingIdentity = null;
+};
 const consumeScopedKey = (base: string): string => {
   if (pendingIdentity) {
     const uid = pendingIdentity;
