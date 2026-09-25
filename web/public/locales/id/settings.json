@@ -9,7 +9,6 @@
     "visual": "Antarmuka Visual",
     "privacy": "Perisai Privasi",
     "data": "Port Data",
-    "smart": "Bantuan Cerdas",
     "support": "Dukungan & Umpan Balik"
   },
   "identity": {
@@ -54,12 +53,6 @@
     "export_vault": "Ekspor Brankas",
     "import_vault": "Impor Brankas",
     "transfer": "Transfer ke Perangkat Baru (QR)"
-  },
-  "smart": {
-    "ai_reply": "Balasan Cerdas AI",
-    "ai_desc": "Hasilkan saran balasan otomatis.",
-    "privacy_note": "Catatan Privasi:",
-    "privacy_desc": "Pesan masuk didekripsi di perangkat dan dikirim secara aman ke Google Gemini untuk analisis. Pesan <1>tidak disimpan</1> oleh server kami."
   },
   "support": {
     "push_notif": "Notifikasi Push",

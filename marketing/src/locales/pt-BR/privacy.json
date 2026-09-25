@@ -8,7 +8,6 @@
     "terms": "Termos de Serviço",
     "licensing": "Licenciamento de Software",
     "cookies": "Política de Cookies",
-    "ai": "IA e Telemetria",
     "security": "Arquitetura de Segurança"
   },
   "privacy": {
@@ -25,8 +24,10 @@
     "logging_1": "Endereços IP (hasheados irreversivelmente na conexão).",
     "logging_2": "Timestamps de conexão WebSocket (removidos automaticamente do Redis).",
     "logging_3": "Filas de mensagens offline criptografadas (removidas automaticamente após a entrega bem-sucedida ao destinatário).",
-    "logging_4": "Impressões Digitais de Hardware (hasheadas irreversivelmente para identificar e vincular seu dispositivo à sua identidade de forma exclusiva, evitando ataques de clonagem de contas)."
-    },
+    "logging_4": "Impressões Digitais de Hardware (hasheadas irreversivelmente para identificar e vincular seu dispositivo à sua identidade de forma exclusiva, evitando ataques de clonagem de contas).",
+    "zero_telemetry_title": "Zero Telemetria",
+    "zero_telemetry_desc": "O NYX opera com <strong>zero telemetria</strong>: o aplicativo não inclui análises, anúncios ou scripts de rastreamento, e nunca relata seu uso. Nenhum serviço de relatório de falhas é utilizado — os erros são registrados localmente na nossa própria infraestrutura, nunca enviados a terceiros."
+  },
   "terms": {
     "title": "Termos de Serviço",
     "liability_title": "Isenção de Responsabilidade Crítica",
@@ -54,15 +55,6 @@
     "idb_keys_desc": "Armazenamento local das suas chaves privadas criptografadas.",
     "idb_vault_desc": "Armazenamento local do seu histórico de chat E2EE.",
     "id_desc": "Identificação persistente do dispositivo para aplicar a regra 'Um usuário, um dispositivo ativo' e evitar o bypass de clonagem de hardware."
-    },
-  "ai": {
-    "title": "IA e Telemetria",
-    "intro": "O NYX executa <strong>zero telemetria no lado do cliente</strong>: o aplicativo não inclui scripts de análise, anúncios ou rastreamento, e nunca relata o seu uso. A única exceção é o <strong>relatório de falhas do servidor</strong>: quando a nossa própria infraestrutura apresenta erros, diagnósticos sanitizados (stack traces, sem cabeçalhos de autenticação nem material de chaves) são enviados ao Sentry (EUA) para mantermos o serviço confiável.",
-    "smart_reply_title": "Resposta Inteligente (IA Opcional)",
-    "smart_reply_desc": "Fornecemos um recurso experimental de \"Resposta Inteligente\" usando a API do Google Gemini. Este recurso é <strong>estritamente Opt-In</strong>.",
-    "smart_reply_1": "As mensagens são descriptografadas localmente antes de serem enviadas para a IA.",
-    "smart_reply_2": "O Servidor NYX atua como um proxy cego; ele não registra o comando (prompt) nem a resposta da IA.",
-    "smart_reply_3": "Os dados processados pela API do Gemini são efêmeros e não são usados para treinar modelos de IA fundamentais, conforme os termos da API empresarial do Google."
   },
   "security": {
     "title": "Arquitetura de Segurança",
@@ -77,7 +69,7 @@
     "migration_desc": "A migration de dispositivos usa um túnel WebSocket criptografado. O servidor retransmite os pedaços cegamente sem acesso às chaves.",
     "hardware_binding_title": "Vinculação de Hardware",
     "hardware_binding_desc": "Cada ID de dispositivo está vinculado criptograficamente à sua impressão digital de hardware. Se os dados do seu navegador forem clonados para uma máquina diferente, o servidor detectará a incompatibilidade de hardware e bloqueará o acesso."
-    },
+  },
   "seo": {
     "title": "Jurídico e Privacidade | NYX",
     "description": "Leia sobre nossa arquitetura Zero-Knowledge, licenciamento comercial e como o NYX protege seus dados."

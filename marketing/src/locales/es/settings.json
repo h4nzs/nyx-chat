@@ -9,7 +9,6 @@
     "visual": "Interfaz visual",
     "privacy": "Escudo de privacidad",
     "data": "Puerto de datos",
-    "smart": "Asistencia inteligente",
     "support": "Soporte y comentarios"
   },
   "identity": {
@@ -52,12 +51,6 @@
     "export_vault": "Exportar bóveda",
     "import_vault": "Importar bóveda",
     "transfer": "Transferir a nuevo dispositivo (QR)"
-  },
-  "smart": {
-    "ai_reply": "Respuestas Inteligentes (IA)",
-    "ai_desc": "Generar sugerencias de respuesta automáticas.",
-    "privacy_note": "Nota de privacidad:",
-    "privacy_desc": "Los mensajes entrantes se descifran en el dispositivo y se envían de forma segura a Google Gemini para su análisis. Los mensajes <1>no se guardan</1> en nuestros servidores."
   },
   "support": {
     "push_notif": "Notificaciones Push",

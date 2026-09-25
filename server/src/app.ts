@@ -2,7 +2,6 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import express, { Express, Request, Response, NextFunction } from "express";
-import * as Sentry from "@sentry/node";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import logger from "morgan";
@@ -24,7 +23,6 @@ import keysRouter from "./routes/keys.js";
 import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
-import aiRoutes from "./routes/ai.js";
 import adminRouter from "./routes/admin.js";
 import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
@@ -206,8 +204,8 @@ const corsMiddleware = cors({
     } else {
       console.warn(`Blocked by CORS: ${origin}`);
       // Deny WITHOUT throwing: an Error here would fall through to the generic
-      // error handler (Sentry.captureException + 500). callback(null, false)
-      // omits ACAO headers so the browser blocks the response instead.
+      // error handler (500). callback(null, false) omits ACAO headers so the
+      // browser blocks the response instead.
       callback(null, false);
     }
   },
@@ -351,19 +349,6 @@ app.use("/uploads",
   })
 );
 
-// === SENTRY REQUEST CONTEXT ===
-app.use("/api", (req, _res, next) => {
-  // Tag request with route and method for Sentry filtering
-  Sentry.setTag('route', req.path);
-  Sentry.setTag('method', req.method);
-  // Tag with user ID if authenticated
-  const userId = req.user?.id;
-  if (userId) {
-    Sentry.setUser({ id: userId });
-  }
-  next();
-});
-
 // === DISABLE CACHING FOR API ===
 app.use("/api", (req, res, next) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -386,7 +371,6 @@ app.use("/api/admin", adminRouter);
 app.use("/api/engine", engineRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
-app.use("/api/ai", aiRoutes);
 app.use("/api/stories", storiesRoutes);
 app.use("/api/system", systemRouter);
 app.use("/.well-known", wellKnownRouter);
@@ -407,12 +391,6 @@ app.use((err: Error & { type?: string, status?: number, code?: string }, _req: R
   if (err?.status && err?.message) {
     return res.status(err.status).json({ error: err.message });
   }
-
-  // Report unhandled errors to Sentry
-  Sentry.captureException(err, {
-    level: 'error',
-    tags: { handler: 'express_generic' },
-  });
 
   console.error("❌ Server Error:", err);
   res.status(500).json({ error: "Internal server error" });

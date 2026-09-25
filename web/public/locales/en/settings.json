@@ -9,7 +9,6 @@
     "visual": "Visual Interface",
     "privacy": "Privacy Shield",
     "data": "Data Ports",
-    "smart": "Smart Assistance",
     "support": "Support & Feedback"
   },
   "identity": {
@@ -54,12 +53,6 @@
     "export_vault": "Export Vault",
     "import_vault": "Import Vault",
     "transfer": "Transfer to New Device (QR)"
-  },
-  "smart": {
-    "ai_reply": "AI Smart Reply",
-    "ai_desc": "Auto-generate response suggestions.",
-    "privacy_note": "Privacy Note:",
-    "privacy_desc": "Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <1>not stored</1> by our servers."
   },
   "support": {
     "push_notif": "Push Notifications",

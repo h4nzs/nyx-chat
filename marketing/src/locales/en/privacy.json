@@ -8,7 +8,6 @@
     "terms": "Terms of Service",
     "licensing": "Software Licensing",
     "cookies": "Cookie Policy",
-    "ai": "AI & Telemetry",
     "security": "Security Architecture"
   },
   "privacy": {
@@ -25,7 +24,9 @@
     "logging_1": "IP addresses (irreversibly hashed upon connection).",
     "logging_2": "WebSocket connection timestamps (swept automatically from Redis).",
     "logging_3": "Encrypted offline message queues (automatically purged upon successful delivery to the recipient).",
-    "logging_4": "Hardware Fingerprints (irreversibly hashed to uniquely identify and bind your device to your identity, preventing account cloning attacks)."
+    "logging_4": "Hardware Fingerprints (irreversibly hashed to uniquely identify and bind your device to your identity, preventing account cloning attacks).",
+    "zero_telemetry_title": "Zero Telemetry",
+    "zero_telemetry_desc": "NYX runs <strong>zero telemetry</strong>: the app ships no analytics, ads, or tracking scripts, and never reports your usage. No crash-reporting service is used — errors are logged locally on our own infrastructure only, never sent to any third party."
   },
   "terms": {
     "title": "Terms of Service",
@@ -54,15 +55,6 @@
     "idb_keys_desc": "Local storage of your encrypted Private Keys.",
     "idb_vault_desc": "Local storage of your E2EE chat history.",
     "id_desc": "Persistent device identification to enforce 'One User, One Active Device' and prevent hardware-cloning bypasses."
-  },
-  "ai": {
-    "title": "AI & Telemetry",
-    "intro": "NYX runs <strong>zero client-side telemetry</strong>: the app ships no analytics, ads, or tracking scripts, and never reports your usage. The only exception is <strong>server-side crash reporting</strong>: when our own infrastructure errors, sanitized diagnostics (stack traces, scrubbed of authentication headers and key material) are sent to Sentry (US) so we can keep the service reliable.",
-    "smart_reply_title": "Smart Reply (Optional AI)",
-    "smart_reply_desc": "We provide an experimental \"Smart Reply\" feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.",
-    "smart_reply_1": "Messages are decrypted locally before being sent to the AI.",
-    "smart_reply_2": "The NYX Server acts as a blind proxy; it does not log the prompt or the AI's response.",
-    "smart_reply_3": "Data processed by the Gemini API is ephemeral and is not used to train foundational AI models, per Google's enterprise API terms."
   },
   "security": {
     "title": "Security Architecture",

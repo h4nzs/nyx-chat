@@ -3,7 +3,7 @@ import MainLayout from '../layouts/MainLayout.astro';
 import Footer from '../components/Footer.astro';
 import '../index.css';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
-import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
+import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
 
 const { lang: propLang } = Astro.props;
 const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
@@ -29,7 +29,6 @@ const navItems = [
   { id: 'terms', label: t('privacy:nav.terms') },
   { id: 'licensing', label: t('privacy:nav.licensing') },
   { id: 'cookies', label: t('privacy:nav.cookies') },
-  { id: 'ai', label: t('privacy:nav.ai') },
   { id: 'security', label: t('privacy:nav.security') },
 ];
 ---
@@ -93,6 +92,9 @@ const navItems = [
               <li>{t('privacy:privacy.logging_2')}</li>
               <li>{t('privacy:privacy.logging_3')}</li>
             </ul>
+
+            <h3 class="font-display text-lg font-bold text-text-primary mt-8 mb-3 border-b border-text-secondary/10 pb-2">{t('privacy:privacy.zero_telemetry_title')}</h3>
+            <p set:html={t('privacy:privacy.zero_telemetry_desc')} />
           </div>
         </section>
 
@@ -189,24 +191,6 @@ const navItems = [
                 </tbody>
               </table>
             </div>
-          </div>
-        </section>
-
-        <section id="ai" class="mb-14 scroll-mt-28 content-section">
-          <div class="flex items-center gap-4 mb-6">
-            <div class="icon-well w-12 h-12 flex-shrink-0"><FiCpu size={22} /></div>
-            <h2 class="font-display text-2xl md:text-3xl font-bold tracking-tight">{t('privacy:ai.title')}</h2>
-          </div>
-          <div class="max-w-none text-text-secondary leading-relaxed">
-            <p set:html={t('privacy:ai.intro')} />
-
-            <h3 class="font-display text-lg font-bold text-text-primary mt-6 mb-3">{t('privacy:ai.smart_reply_title')}</h3>
-            <p set:html={t('privacy:ai.smart_reply_desc')} />
-            <ul class="list-disc pl-5 space-y-2 mt-2">
-              <li>{t('privacy:ai.smart_reply_1')}</li>
-              <li>{t('privacy:ai.smart_reply_2')}</li>
-              <li>{t('privacy:ai.smart_reply_3')}</li>
-            </ul>
           </div>
         </section>
 

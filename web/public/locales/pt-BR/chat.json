@@ -182,9 +182,6 @@
     "close": "Fechar busca",
     "label": "Buscar mensagens nesta conversa"
   },
-  "smart_reply": {
-    "thinking": "A IA está pensando..."
-  },
   "encryption": {
     "not_enabled_title": "Criptografia de ponta a ponta desativada",
     "not_enabled_desc": "Suas mensagens não estão criptografadas. Vá em Configurações > Criptografia para ativar a proteção e ter mais segurança.",

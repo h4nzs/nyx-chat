@@ -184,9 +184,6 @@
     "close": "Close search",
     "label": "Search messages in this conversation"
   },
-  "smart_reply": {
-    "thinking": "AI is thinking..."
-  },
   "encryption": {
     "not_enabled_title": "End-to-end encryption is not enabled",
     "not_enabled_desc": "Your messages are not encrypted. Go to Settings > Encryption to enable end-to-end encryption for better security.",

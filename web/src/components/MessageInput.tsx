@@ -13,7 +13,6 @@ import { useThemeStore } from '@store/theme';
 import { useBurnerStore } from '@store/burner';
 import useDynamicIslandStore from '@store/dynamicIsland';
 import LinkPreviewCard from './LinkPreviewCard';
-import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
 import { triggerSendFeedback } from '@utils/feedback';
 import { useUserProfile } from '@hooks/useUserProfile';
@@ -196,10 +195,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     return t('chat:input.placeholder');
   };
 
-  const absoluteLastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
-  const isValidTextMessage = absoluteLastMessage && !absoluteLastMessage.fileUrl && !absoluteLastMessage.imageUrl && absoluteLastMessage.content;
-  const lastDecryptedText = (isLastMessageFromOther && isValidTextMessage) ? (absoluteLastMessage.content || null) : null;
 
   // Set nilai awal jika sedang membalas/mengedit
   useEffect(() => {
@@ -412,14 +407,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     setShowTimerMenu(false);
   };
 
-  const handleSmartReplySelect = (reply: string) => {
-    if (inputRef.current) {
-        inputRef.current.value = reply;
-        setHasTextUI(true);
-    }
-    if (isConnected) onTyping();
-  };
-
   const handleStartRecording = async () => {
     if (!isConnected) return;
     try {
@@ -509,7 +496,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   return (
     <div className="bg-bg-main border-t border-text-secondary/10 z-20 relative pb-safe pb-3 md:pb-0">
       <div className="absolute bottom-full left-0 w-full">
-        <SmartReply lastMessage={lastDecryptedText} isFromMe={!isLastMessageFromOther} onSelectReply={handleSmartReplySelect} />
         <div className="px-4">
             <EditPreview />
             <ReplyPreview />

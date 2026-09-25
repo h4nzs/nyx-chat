@@ -2,10 +2,6 @@
 import { connectRedis } from './lib/redis.js'
 import { createServer } from 'http'
 
-// Initialize Sentry BEFORE loading any application modules
-import { initSentry } from './utils/sentry.js';
-await initSentry();
-
 async function main() {
   // 1. Konek Redis DULU, tungguin sampai beneran sukses
   await connectRedis()

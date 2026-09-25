@@ -26,7 +26,6 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
-import { useSettingsStore } from '@store/settings';
 import { setupBiometricUnlock, browserSupportsWebAuthn } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
@@ -147,9 +146,6 @@ export default function SettingsPage() {
     theme: s.theme, toggleTheme: s.toggleTheme, accent: s.accent, setAccent: s.setAccent
   })));
   const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
-  const { enableSmartReply, setEnableSmartReply } = useSettingsStore(useShallow(s => ({
-    enableSmartReply: s.enableSmartReply, setEnableSmartReply: s.setEnableSmartReply
-  })));
 
   const { 
     isSubscribed, 
@@ -940,33 +936,7 @@ export default function SettingsPage() {
           </ControlModule>
         </div>
 
-        {/* 7. SMART ASSISTANCE */}
-        <div className="col-span-1 md:col-span-6 lg:col-span-4">
-          <ControlModule title={t('settings:modules.smart')} icon={FiActivity}>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-text-primary">{t('settings:smart.ai_reply')}</h3>
-                  <p className="text-[10px] text-text-secondary mt-0.5">{t('settings:smart.ai_desc')}</p>
-                </div>
-                <RockerSwitch
-                  checked={enableSmartReply}
-                  onChange={() => setEnableSmartReply(!enableSmartReply)}
-                />
-              </div>
-
-              {enableSmartReply && (
-                <div className="p-3 bg-accent/5 border border-accent/10 rounded-lg">
-                  <p className="text-[10px] text-text-secondary leading-relaxed">
-                    <strong className="text-accent">{t('settings:smart.privacy_note')}</strong> <Trans i18nKey="settings:smart.privacy_desc">Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.</Trans>
-                  </p>
-                </div>
-              )}
-            </div>
-          </ControlModule>
-        </div>
-
-        {/* 8. SUPPORT MODULE */}
+        {/* 7. SUPPORT MODULE */}
         <div className="col-span-1 md:col-span-12 lg:col-span-12">
           <ControlModule title={t('settings:modules.support')} className="flex flex-col md:flex-row gap-6">
             <div className="flex-1 space-y-4">

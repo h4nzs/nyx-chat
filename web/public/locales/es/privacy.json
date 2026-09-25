@@ -8,7 +8,6 @@
     "terms": "Términos de Servicio",
     "licensing": "Licencia de Software",
     "cookies": "Política de Cookies",
-    "ai": "IA y Telemetría",
     "security": "Arquitectura de Seguridad"
   },
   "privacy": {
@@ -49,15 +48,6 @@
     "cookie_desc": "Autenticación segura y mantener la sesión.",
     "idb_keys_desc": "Almacenamiento local de tus Claves Privadas cifradas.",
     "idb_vault_desc": "Almacenamiento local de tu historial de chats E2EE."
-  },
-  "ai": {
-    "title": "IA y Telemetría",
-    "intro": "NYX funciona con <0>Cero Telemetría</0>. No rastreamos tus clics, tiempo de uso ni qué funciones utilizas.",
-    "smart_reply_title": "Respuestas Inteligentes (IA Opcional)",
-    "smart_reply_desc": "Ofrecemos una función experimental de \"Respuestas Inteligentes\" usando la API de Google Gemini. Esta función es <0>totalmente opcional</0>.",
-    "smart_reply_1": "Los mensajes se descifran localmente antes de enviarse a la IA.",
-    "smart_reply_2": "El servidor de NYX actúa como un proxy ciego; no guarda el prompt ni la respuesta de la IA.",
-    "smart_reply_3": "Los datos procesados por la API de Gemini son temporales y no se usan para entrenar modelos de IA, según las reglas de privacidad de Google."
   },
   "security": {
     "title": "Arquitectura de Seguridad",

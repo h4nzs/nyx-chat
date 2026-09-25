@@ -8,7 +8,6 @@
     "terms": "Ketentuan Layanan",
     "licensing": "Lisensi Perangkat Lunak",
     "cookies": "Kebijakan Cookie",
-    "ai": "AI & Telemetri",
     "security": "Arsitektur Keamanan"
   },
   "privacy": {
@@ -49,15 +48,6 @@
     "cookie_desc": "Autentikasi aman & persistensi sesi.",
     "idb_keys_desc": "Penyimpanan lokal Kunci Pribadi terenkripsi Anda.",
     "idb_vault_desc": "Penyimpanan lokal riwayat chat E2EE Anda."
-  },
-  "ai": {
-    "title": "AI & Telemetri",
-    "intro": "NYX beroperasi dengan <0>Nol Telemetri</0>. Kami tidak melacak klik, waktu layar, atau penggunaan fitur Anda.",
-    "smart_reply_title": "Balasan Cerdas (AI Opsional)",
-    "smart_reply_desc": "Kami menyediakan fitur eksperimental \"Balasan Cerdas\" menggunakan API Google Gemini. Fitur ini <0>benar-benar Opt-In</0>.",
-    "smart_reply_1": "Pesan didekripsi secara lokal sebelum dikirim ke AI.",
-    "smart_reply_2": "Server NYX bertindak sebagai proksi buta; tidak mencatat prompt atau respons AI.",
-    "smart_reply_3": "Data yang diproses oleh API Gemini bersifat sementara dan tidak digunakan untuk melatih model AI dasar, sesuai ketentuan API perusahaan Google."
   },
   "security": {
     "title": "Arsitektur Keamanan",

@@ -184,9 +184,6 @@
     "close": "Tutup pencarian",
     "label": "Cari pesan dalam percakapan ini"
   },
-  "smart_reply": {
-    "thinking": "AI sedang berpikir..."
-  },
   "encryption": {
     "not_enabled_title": "Enkripsi ujung-ke-ujung tidak aktif",
     "not_enabled_desc": "Pesan Anda tidak terenkripsi. Buka Pengaturan > Enkripsi untuk mengaktifkan enkripsi ujung-ke-ujung demi keamanan yang lebih baik.",
