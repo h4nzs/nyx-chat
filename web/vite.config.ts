@@ -5,7 +5,7 @@ import { compression } from 'vite-plugin-compression2';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { createRequire } from 'module';
-import packageJson from './package.json';
+import packageJson from './package.json' with { type: 'json' };
 
 // Bikin fungsi 'require' palsu karena kita di environment Module (ESM)
 const require = createRequire(import.meta.url);
@@ -88,15 +88,15 @@ export default defineConfig(({ mode }) => {
 
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, "src"),
-      '@components': path.resolve(__dirname, './src/components'),
-      '@store': path.resolve(__dirname, './src/store'),
-      '@utils': path.resolve(__dirname, './src/utils'),
-      '@lib': path.resolve(__dirname, './src/lib'),
-      '@pages': path.resolve(__dirname, './src/pages'),
-      '@hooks': path.resolve(__dirname, './src/hooks'),
-      '@services': path.resolve(__dirname, './src/services'),
-      '@tests': path.resolve(__dirname, './src/tests'),
+      '@': path.resolve(import.meta.dirname, "src"),
+      '@components': path.resolve(import.meta.dirname, './src/components'),
+      '@store': path.resolve(import.meta.dirname, './src/store'),
+      '@utils': path.resolve(import.meta.dirname, './src/utils'),
+      '@lib': path.resolve(import.meta.dirname, './src/lib'),
+      '@pages': path.resolve(import.meta.dirname, './src/pages'),
+      '@hooks': path.resolve(import.meta.dirname, './src/hooks'),
+      '@services': path.resolve(import.meta.dirname, './src/services'),
+      '@tests': path.resolve(import.meta.dirname, './src/tests'),
       'libsodium-wrappers': require.resolve('libsodium-wrappers'),
     },
   },
