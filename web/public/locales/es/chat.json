@@ -182,11 +182,6 @@
     "close": "Cerrar búsqueda",
     "label": "Buscar mensajes en este chat"
   },
-  "encryption": {
-    "not_enabled_title": "Cifrado de extremo a extremo desactivado",
-    "not_enabled_desc": "Tus mensajes no están cifrados. Ve a Configuración > Cifrado para activar el cifrado de extremo a extremo para mayor seguridad.",
-    "enable_btn": "Activar cifrado"
-  },
   "user_info": {
     "view_profile": "Ver perfil completo"
   }

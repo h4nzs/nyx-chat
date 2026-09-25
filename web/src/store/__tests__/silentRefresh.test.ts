@@ -34,7 +34,7 @@ vi.mock('react-hot-toast', () => ({ default: { error: vi.fn(), success: vi.fn(),
 vi.mock('@lib/keyStorage', () => ({
   getEncryptedKeys: vi.fn(), saveEncryptedKeys: vi.fn(), clearKeys: vi.fn(),
   hasStoredKeys: vi.fn(), getDeviceAutoUnlockKey: vi.fn(), saveDeviceAutoUnlockKey: vi.fn(),
-  setDeviceAutoUnlockReady: vi.fn(),
+  setDeviceAutoUnlockReady: vi.fn(), setAutoUnlockIdentity: vi.fn(),
 }))
 vi.mock('@utils/fingerprint', () => ({ getBrowserFingerprint: vi.fn(async () => 'fp') }))
 vi.mock('@utils/crypto', () => ({ checkAndRefillOneTimePreKeys: vi.fn(), resetOneTimePreKeys: vi.fn() }))

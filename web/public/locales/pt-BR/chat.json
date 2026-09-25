@@ -182,11 +182,6 @@
     "close": "Fechar busca",
     "label": "Buscar mensagens nesta conversa"
   },
-  "encryption": {
-    "not_enabled_title": "Criptografia de ponta a ponta desativada",
-    "not_enabled_desc": "Suas mensagens não estão criptografadas. Vá em Configurações > Criptografia para ativar a proteção e ter mais segurança.",
-    "enable_btn": "Ativar Criptografia"
-  },
   "user_info": {
     "view_profile": "Ver Perfil Completo"
   }

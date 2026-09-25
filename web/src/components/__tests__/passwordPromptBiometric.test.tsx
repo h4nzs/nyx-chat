@@ -41,6 +41,15 @@ vi.mock('@lib/keyStorage', () => ({
   saveEncryptedKeys: (...args: unknown[]) => saveEncryptedKeys(...args),
   saveDeviceAutoUnlockKey: (...args: unknown[]) => saveDeviceAutoUnlockKey(...args),
   setDeviceAutoUnlockReady: vi.fn(),
+  // [JAGA KONTRAK] auth store mengimpor ini secara statis — tanpa stub di sini,
+  // pemanggilan di jalur register (yang diuji test lain) crash dengan
+  // "undefined is not a function". Stub flat mencegah mock rapuh saat
+  // keyStorage menambah export baru.
+  setAutoUnlockIdentity: vi.fn(),
+  getEncryptedKeys: vi.fn(),
+  clearKeys: vi.fn(),
+  hasStoredKeys: vi.fn(),
+  getDeviceAutoUnlockKey: vi.fn(),
 }))
 
 const authState = {
