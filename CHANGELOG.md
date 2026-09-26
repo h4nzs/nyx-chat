@@ -31,6 +31,27 @@ schema push**, `prisma db push`, at deploy time).
 * **UI resolution:** message enrichment resolves pseudonyms to accounts via
   the local map; receipts, unread checks, and sender profiles work unchanged.
 
+### 🎭 26.8.1 — ZKGroup-Style Anonymous Credentials (blind RSA, doc 26.8.1)
+* **Blind RSA Credentials (RFC 9474):** the upgrade path reserved by the T3
+  token slot is now executed — RSABSSA-SHA384-PSS-Randomized via
+  `@cloudflare/blindrsa-ts` (WebCrypto in the client crypto worker,
+  node:crypto/WebCrypto on the server). Members hold a blind-signed random
+  message per group; the issuer never sees the unblinded form, and
+  presentations are unlinkable to the issuance session.
+* **Issuance & Presentation:** `POST /conversations/credential-issuance`
+  signs blinded messages (quota per user/conversation/day);
+  `credential-commit` registers the serial (SHA-384 of the prepared message —
+  no identity link) for verification and revocation; sync accepts
+  `X-Group-Credentials` presentations verified kryptografis against the
+  stored issuer key. Issuer keys are versioned in DB for rotation; rotation
+  invalidates credentials signed under old versions.
+* **Revocation:** `POST /:id/credential-revoke` (X-Group-Token authed)
+  deletes serials — credentials die without the server learning who held
+  them. Residual (documented): issuance-time linkage (user requested a
+  credential for a conversation) is accepted; presentations afterward are
+  unlinkable. Delivery tokens remain the routing slot; credentials own
+  verification.
+
 ### 🧾 T3a — Pseudonym-Scoped Receipts (doc 26.4)
 * **Blind Read Receipts:** Group `MessageStatus.userId` now stores the
   reader's pseudonym (from `readerPseudonym` on `message:mark_read`,

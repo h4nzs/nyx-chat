@@ -560,3 +560,22 @@ export function worker_burner_dr_decrypt(payload: {
     mk: new Uint8Array(res.mk)
   }));
 }
+// [26.8.1] Blind RSA (RFC 9474) credential helpers — group membership.
+// Server hanya melihat blinded message; finalisasi memakai `inv` yang tidak
+// pernah meninggalkan klien.
+
+export function worker_credential_blind(payload: {
+  publicJwk: JsonWebKey;
+  message: string;
+}): Promise<{ preparedMsgB64: string; blindedMsgB64: string; inv: string }> {
+  return sendToWorker<{ preparedMsgB64: string; blindedMsgB64: string; inv: string }>('credential_blind', payload);
+}
+
+export function worker_credential_finalize(payload: {
+  publicJwk: JsonWebKey;
+  preparedMsgB64: string;
+  blindSigB64: string;
+  inv: string;
+}): Promise<{ preparedMsgB64: string; signatureB64: string }> {
+  return sendToWorker<{ preparedMsgB64: string; signatureB64: string }>('credential_finalize', payload);
+}

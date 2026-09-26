@@ -211,16 +211,22 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
       // 2. Sync with server by local IDs (or discover new conversations for fresh users)
       let rawConversations: Conversation[] = [];
-      // [T3b] Kirim delivery tokens milik saya — discovery via possession token
-      // (transitional: jalur userId tetap berjalan paralel sampai backfill tuntas).
+      // [T3b] Kirim delivery tokens milik saya — discovery via possession token.
       const { collectMyDeliveryTokens } = await import('@lib/groupPseudonyms');
       const myTokens = collectMyDeliveryTokens();
-      const tokenHeaders = myTokens.length > 0 ? { 'X-Delivery-Tokens': myTokens.map(t => String(t)).join(',') } : undefined;
+      // [26.8.1] Presentasi credential untuk grup yang sudah punya credential —
+      // server verifikasi tanda tangan tanpa tahu siapa pemiliknya.
+      const { buildCredentialPresentationHeader } = await import('@lib/groupCredentials');
+      const credHeader = await buildCredentialPresentationHeader(localIds.filter(id => id.startsWith('g') || id.includes('-')));
+      const syncHeaders: Record<string, string> = {};
+      if (myTokens.length > 0) syncHeaders['X-Delivery-Tokens'] = myTokens.map(t => String(t)).join(',');
+      if (credHeader) syncHeaders['X-Group-Credentials'] = credHeader;
+      const hasHeaders = Object.keys(syncHeaders).length > 0;
       if (localIds.length > 0) {
-        rawConversations = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`, { headers: tokenHeaders });
+        rawConversations = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`, { headers: hasHeaders ? syncHeaders : undefined });
       } else {
         // New user with no local conversations — discover from UserHiddenConversation
-        rawConversations = await api<Conversation[]>('/api/conversations/sync', { headers: tokenHeaders });
+        rawConversations = await api<Conversation[]>('/api/conversations/sync', { headers: hasHeaders ? syncHeaders : undefined });
       }
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
@@ -331,6 +337,15 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
       set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
+
+      // [26.8.1] Fire-and-forget issuance: grup v2 yang belum punya credential
+      // mendapatkannya di latar belakang (blind RSA — server tak tahu isinya).
+      // Gagal bersifat non-fatal; sync tetap berjalan via delivery-token.
+      import('@lib/groupCredentials').then(({ ensureCredential }) => {
+        for (const c of reconciledConversations) {
+          if (c.isGroup) ensureCredential(c.id).catch(() => {});
+        }
+      }).catch(() => {});
 
       const socket = transportClient;
 

@@ -238,6 +238,40 @@ without identifying the presenter, even then.
 **Concretely:** T3 tokens are the enabler. Upgrade path = re-issue tokens as blind
 signatures via an issuance sub-protocol, keep verification semantics identical.
 
+**[IMPLEMENTED 2026-09-27 — blind RSA execution record]** All three trigger
+conditions closed: #1 by the T3b token-first work (token-only sync), #2 by
+policy (single-VPS timing logs accepted as out of scope, documented in 26.3/26.10.6),
+#3 allocated. Scheme: **blind RSA** per the pairing-free-first rule —
+RSABSSA-SHA384-PSS-Randomized (RFC 9474), via `@cloudflare/blindrsa-ts` (WebCrypto
+in the client crypto worker, node:crypto/WebCrypto on the server).
+
+* **Model:** per-(group, member) credential over a RANDOM message
+  (`nyx-grp-cred:v1:<convId>:<128-bit random>`) — the message carries no
+  identity. Client blinds it (`credential_blind` in `crypto.worker.ts`) and the
+  issuer signs the blinded form; only the client can unblind (`inv` never
+  leaves the client).
+* **Issuance:** `POST /conversations/credential-issuance` (blinded message
+  only) + `POST /conversations/credential-commit` (serial + conversationId for
+  verification/revocation). Server stores serial = SHA-384(preparedMsg) — it
+  cannot link serial to identity. Anti-abuse quota per (user, conversation,
+  day). Public issuer key: `GET /conversations/credential-issuer-key`.
+* **Presentation:** sync accepts an `X-Group-Credentials` header —
+  (keyVersion, convId, preparedMsg, signature) tuples; server verifies the
+  signature against the stored issuer key AND checks the serial is registered
+  for that conversation. Possession of a valid (msg, sig) = membership proof,
+  unlinkable at presentation time.
+* **Revocation:** kick/leave → `POST /:id/credential-revoke` (X-Group-Token
+  authed) deletes the serial rows. Credentials die without the server learning
+  who held them.
+* **Rotation:** issuer keys versioned (`CredentialIssuerKey.keyVersion`);
+  presentations bind to a keyVersion so rotation invalidates old credentials.
+* **Residual (honest):** issuance is over the account-authenticated session —
+  the server sees "user X requested a credential for conversation C" at
+  issuance time (unavoidable without an anonymous-transport issuance tier).
+  Presentations afterward are unlinkable. Single-VPS timing/volume remain
+  accepted limits. DB dump now yields serial↔conversation rows (still no
+  identity link) instead of deliveryToken↔conversation rows.
+
 ### 26.8.2 MLS with post-quantum ciphersuites
 
 **State of the draft (checked 2026-09-26):** `draft-ietf-mls-pq-ciphersuites-06`
@@ -287,6 +321,12 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
   required+unique; sync discovery = token possession only, no userId join;
   membership rows keyed by token with userId routing-only). Remaining triggers:
   #2 (transport-level correlation acceptance) and #3 (issuance-protocol budget).
+- **Update 2026-09-27 (later): 26.8.1 IMPLEMENTED.** Trigger #2 closed by
+  documented policy, trigger #3 closed by execution (blind RSA first, per the
+  pairing-free rule). See the execution record above. The "Later" decision is
+  now the present: T3 delivery tokens and blind-RSA credentials coexist —
+  tokens remain the delivery/routing slot, credentials replace the
+  *verification* step at sync presentation.
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 

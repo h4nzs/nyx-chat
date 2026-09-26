@@ -283,6 +283,31 @@ model UserHiddenConversation {
   @@index([conversationId])
 }
 
+// [26.8.1 ZKGROUP-STYLE CREDENTIALS — blind RSA / RFC 9474]
+// Serial 64-hex dari credential yang SUDAH diterbitkan server (blind-signed).
+// Disimpan untuk: (a) dedupe issuance, (b) presentasi = cek keanggotaan.
+// Serial tidak membawa identitas — klien yang membawa (msg, sig) valid dianggap
+// anggota. Baris dihapus saat revocation (kick/leave) → credential mati.
+model GroupCredential {
+  id             String   @id @default(cuid())
+  serial         String   @unique // 64-hex = SHA-384 dari prepared message
+  conversationId String
+  keyVersion     Int // versi issuer key yang menandatangani
+  issuedAt       DateTime @default(now())
+
+  @@index([conversationId])
+}
+
+// State issuer key blind RSA. Satu row aktif (keyVersion tertinggi); private
+// key JNGAN di-commit — disimpan di DB (prod: backup terenkripsi) agar
+// multi-instance pm2 cluster memakai key yang sama.
+model CredentialIssuerKey {
+  keyVersion      Int      @id
+  publicKeyJwk    String // JSON Web Key (public) — dibagikan ke klien
+  privateKeyPkcs8 String // PKCS#8 base64 (PRIVATE — tetap di server)
+  createdAt       DateTime @default(now())
+}
+
 model Authenticator {
   id                   String  @id
   credentialID         String  @unique

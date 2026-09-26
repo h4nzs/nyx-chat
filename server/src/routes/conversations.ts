@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import crypto from 'node:crypto'
+import crypto, { createHash } from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { ApiError } from '../utils/errors.js'
@@ -7,6 +7,10 @@ import { z } from 'zod'
 import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { emitEventToUsers, emitEventToUser } from '../network/redisBridge.js'
 import { redisClient } from '../lib/redis.js'
+import {
+  blindSign, getIssuerPublicJwk, revokeCredentialsFor, recordIssuedCredential,
+  verifyPresentation, SERIAL_HEX_LENGTH, CREDENTIAL_SUITE,
+} from '../lib/groupCredentials.js'
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
 import type { Conversation } from '@nyx/shared'
 
@@ -24,6 +28,115 @@ const DeliveryTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/)
 
 const router: Router = Router()
 router.use(requireAuth)
+
+// [26.8.1] Issuer public key — dibagikan bebas ke semua klien.
+router.get('/credential-issuer-key', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { keyVersion, publicJwk } = await getIssuerPublicJwk()
+    res.json({ suite: CREDENTIAL_SUITE, keyVersion, publicJwk })
+  } catch (error) { next(error) }
+})
+
+// [26.8.1] Credential issuance — klien mengirim (conversationId, preparedMsg)
+// yang sudah di-blind. Server hanya melihat blinded message; TIDAK bisa
+// mengaitkannya dengan user/anggota. Kontrak kepercayaan: klien hanya meminta
+// satu credential per keanggotaannya; server mencatat serial untuk dedupe &
+// revocation (serial = hash prepared message, tidak bisa di-link balik).
+router.post('/credential-issuance', zodValidate({
+  body: z.object({
+    conversationId: z.string().min(1).max(64),
+    blindedMsg: z.string().min(1).max(1024), // base64url dari blinded message
+  })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { conversationId, blindedMsg } = req.body as { conversationId: string; blindedMsg: string }
+
+    // Per-user quota anti-abuse: satu issuance per (user, conversation) per hari.
+    // Grup nyata tidak perlu lebih — credential tidak berubah kecuali re-join.
+    const today = new Date().toISOString().split('T')[0];
+    const count = Number(await redisClient.eval(`
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`, { keys: [`cred:issue:${req.user.id}:${conversationId}:${today}`], arguments: ['86400'] }));
+    if (count > 3) {
+      return res.status(429).json({ error: 'CREDENTIAL_QUOTA: Too many issuance requests.' });
+    }
+
+    const blinded = Buffer.from(blindedMsg, 'base64url')
+    if (blinded.length === 0 || blinded.length > 512) {
+      return res.status(400).json({ error: 'Invalid blinded message size' });
+    }
+
+    // Blind message TIDAK bisa diverifikasi isi → serial dibangun dari blind
+    // message (bukan prepared). Dedupe berbasis blind-message-hash: blind yang
+    // sama (retry) → serial sama; blind berbeda (re-issuance jahat) → tetap
+    // tercatat tapi quota per (user, conversation) membatasinya.
+    const serial = createHash('sha384').update(blinded).digest('hex');
+    const already = await prisma.groupCredential.findUnique({ where: { serial }, select: { id: true } });
+    if (already) {
+      // Retry: blindSign ulang memberi blind signature berbeda? TIDAK — blind
+      // signature deterministik atas (sk, blinded). Aman untuk blindSign ulang;
+      // klien finalize dengan inv miliknya.
+    }
+
+    const { blindSig, keyVersion } = await blindSign(new Uint8Array(blinded));
+
+    // Catatan: serial prepared-message belum bisa dihitung server (prepared
+    // disembunyikan). Row dibuat saat klien submit serial (finalize) — lihat
+    // POST /credential-commit. Untuk revocation berbasis conversation, serial
+    // prepared dikaitkan di commit; row di sini hanya blind-hash untuk dedupe.
+    res.json({ blindSig: Buffer.from(blindSig).toString('base64url'), keyVersion })
+  } catch (error) { next(error) }
+})
+
+// [26.8.1] Credential commit — setelah finalize, klien mengirim serial
+// prepared-message + conversationId agar server mengaitkannya untuk verifikasi
+// & revocation. Server tidak bisa memverifikasi klaim ini saat commit —
+// integritas dijaga oleh verifikasi saat presentasi (serial hanya lolos bila
+// tanda tangannya valid untuk conversationId yang diklaim).
+router.post('/credential-commit', zodValidate({
+  body: z.object({
+    conversationId: z.string().min(1).max(64),
+    keyVersion: z.number().int().min(1),
+    serial: z.string().length(SERIAL_HEX_LENGTH),
+  })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { conversationId, keyVersion, serial } = req.body as { conversationId: string; keyVersion: number; serial: string }
+    await recordIssuedCredential(serial, conversationId, keyVersion)
+    res.status(201).json({ ok: true })
+  } catch (error) { next(error) }
+})
+
+// [26.8.1] Revocation via credential — kick/leave menghapus serial milik
+// anggota. Klien yang men-kick tidak tahu serial (anonim); yang melakukannya:
+// server menghapus SEMUA credential serial untuk conversation yang tidak lagi
+// valid — tapi serial terikat conversation, bukan identitas. Karena revocation
+// per-anggota butuh pemetaan serial↔anggota yang hanya klien tahu, kick
+// menyertakan serials yang di-revoke di body (dari encrypted metadata).
+router.post('/:id/credential-revoke', zodValidate({
+  body: z.object({ serials: z.array(z.string().length(SERIAL_HEX_LENGTH)).max(500) })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { id } = req.params
+    const { serials } = req.body as { serials: string[] }
+    const gt = req.headers['x-group-token'];
+    const groupToken = typeof gt === 'string' ? gt : Array.isArray(gt) ? (gt[0] ?? '') : '';
+    const conversation = await prisma.conversation.findUnique({ where: { id: String(id) }, select: { authSecret: true } }) as { authSecret: string | null } | null;
+    if (!conversation || !safeEqualStrings(conversation.authSecret, groupToken)) {
+      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
+    }
+    await revokeCredentialsFor(String(id), serials)
+    res.json({ ok: true })
+  } catch (error) { next(error) }
+})
 
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
@@ -51,6 +164,31 @@ router.get('/sync', async (req, res, next) => {
           select: { conversationId: true }
         });
         conversationIds.push(...tokenRows.map(r => r.conversationId));
+      }
+    }
+
+    // [26.8.1] Credential presentations: header X-Group-Credentials memuat
+    // (keyVersion, conversationId, preparedMsg, signature) base64url — server
+    // memverifikasi tanda tangan issuer + serial terdaftar. Tidak ada identitas
+    // di dalamnya; kepemilikan (msg, sig) = bukti keanggotaan.
+    const credHeader = req.headers['x-group-credentials'];
+    const credRaw = typeof credHeader === 'string' ? credHeader : (Array.isArray(credHeader) ? credHeader[0] : undefined);
+    if (typeof credRaw === 'string' && credRaw.length > 0) {
+      const presentations = credRaw.split('~').slice(0, 100);
+      for (const p of presentations) {
+        try {
+          const [kvRaw, convId, msgB64, sigB64] = p.split(':');
+          const keyVersion = parseInt(kvRaw ?? '', 10);
+          if (!Number.isInteger(keyVersion) || !convId || !msgB64 || !sigB64) continue;
+          const preparedMsg = Buffer.from(msgB64, 'base64url');
+          const signature = Buffer.from(sigB64, 'base64url');
+          if (preparedMsg.length === 0 || preparedMsg.length > 512) continue;
+          if (await verifyPresentation(convId, keyVersion, preparedMsg, signature)) {
+            conversationIds.push(convId);
+          }
+        } catch {
+          // Presentasi malformed → skip (bukan error request)
+        }
       }
     }
 

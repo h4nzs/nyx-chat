@@ -596,6 +596,10 @@ export type WorkerMessage =
   | { type: 'burner_dr_decrypt'; payload: { state: BurnerDoubleRatchetState; header: BurnerDoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string }
   | { type: 'xchacha_seal'; payload: { keyB64: string; plaintext: string }; id: string }
   | { type: 'xchacha_open'; payload: { keyB64: string; sealedB64: string }; id: string }
+  // [26.8.1] Blind RSA (RFC 9474) — credential group membership. Prepared
+  // message = random (bukan identitas); server hanya melihat blinded form.
+  | { type: 'credential_blind'; payload: { publicJwk: JsonWebKey; message: string }; id: string }
+  | { type: 'credential_finalize'; payload: { publicJwk: JsonWebKey; preparedMsgB64: string; blindSigB64: string; inv: string }; id: string }
   | { type: 'panic_hash'; payload: { password: string; saltB64: string; iterations: number; memorySize: number; parallelism: number }; id: string };
 
 self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
@@ -743,6 +747,42 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         } finally {
           sodium.memzero(keyBytes);
         }
+        break;
+      }
+      // [26.8.1] Blind RSA (RFC 9474): blind random message dengan issuer
+      // public key → (blindedMsg, inv). Server menandatangani blinded form
+      // tanpa tahu isinya. Suite: RSABSSA-SHA384-PSS-Randomized.
+      case 'credential_blind': {
+        const { publicJwk, message } = payload as { publicJwk: JsonWebKey; message: string };
+        const { RSABSSA } = await import('@cloudflare/blindrsa-ts');
+        const suite = RSABSSA.SHA384.PSS.Randomized();
+        const publicKey = await crypto.subtle.importKey(
+          'jwk', publicJwk, { name: 'RSA-PSS', hash: 'SHA-384' }, false, ['verify']
+        );
+        const prepared = suite.prepare(new TextEncoder().encode(message));
+        const { blindedMsg, inv } = await suite.blind(publicKey, prepared);
+        const toB64 = (b: Uint8Array | ArrayBuffer) =>
+          sodium.to_base64(b instanceof Uint8Array ? b : new Uint8Array(b), sodium.base64_variants.URLSAFE_NO_PADDING);
+        result = {
+          preparedMsgB64: toB64(prepared as Uint8Array),
+          blindedMsgB64: toB64(blindedMsg),
+          // inv diserialisasi sebagai base64url agar aman melewati postMessage.
+          inv: toB64(inv),
+        };
+        break;
+      }
+      case 'credential_finalize': {
+        const { publicJwk, preparedMsgB64, blindSigB64, inv } = payload as { publicJwk: JsonWebKey; preparedMsgB64: string; blindSigB64: string; inv: string };
+        const { RSABSSA } = await import('@cloudflare/blindrsa-ts');
+        const suite = RSABSSA.SHA384.PSS.Randomized();
+        const publicKey = await crypto.subtle.importKey(
+          'jwk', publicJwk, { name: 'RSA-PSS', hash: 'SHA-384' }, false, ['verify']
+        );
+        const preparedBytes = sodium.from_base64(preparedMsgB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const blindSigBytes = sodium.from_base64(blindSigB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const invBytes = sodium.from_base64(inv, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const signature = await suite.finalize(publicKey, preparedBytes, blindSigBytes, invBytes);
+        result = { preparedMsgB64, signatureB64: sodium.to_base64(signature instanceof Uint8Array ? signature : new Uint8Array(signature), sodium.base64_variants.URLSAFE_NO_PADDING) };
         break;
       }
       case 'crypto_box_seal_open': {

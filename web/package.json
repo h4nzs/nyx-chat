@@ -19,6 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@cloudflare/blindrsa-ts": "^0.4.6",
     "@marsidev/react-turnstile": "^1.6.1",
     "@nyx/shared": "workspace:*",
     "@radix-ui/react-dropdown-menu": "^2.1.24",
