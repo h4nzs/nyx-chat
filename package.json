@@ -48,16 +48,5 @@
     "@types/react": ">=19.2.15",
     "@types/react-dom": ">=19.2.3"
   },
-  "pnpm.onlyBuiltDependencies": [
-    "@parcel/watcher",
-    "@prisma/engines",
-    "argon2",
-    "esbuild",
-    "prisma",
-    "sharp",
-    "unrs-resolver",
-    "@sentry/cli",
-    "@sentry/node-cpu-profiler"
-  ],
   "packageManager": "pnpm@11.4.0"
 }

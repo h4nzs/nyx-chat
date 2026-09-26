@@ -4,6 +4,14 @@ packages:
   - marketing
   - packages/*
 
+# [SECURITY] Dependabot #229/#230/#233: mysql2 & deepmerge-ts dibawa oleh
+# Prisma CLI (dev-only toolchain; runtime NYX pakai Postgres via `postgres`).
+# Pin ke versi yang sudah menambal decompression-bomb DoS (mysql2),
+# auth-downgrade (mysql2), dan stack exhaustion (deepmerge-ts).
+overrides:
+  mysql2: '>=3.23.1'
+  deepmerge-ts: '>=8.0.0'
+
 allowBuilds:
   '@parcel/watcher': true
   '@prisma/engines': true
