@@ -258,7 +258,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
 
     // --- Inbound: CHAT_MESSAGE ---
     socket.on('message:send', async (payload: unknown) => {
-      if (!await checkRateLimit(userId, 'chat_message', 30, 60)) return;
+      if (!await checkRateLimit(userId, 'chat_message', 120, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       // Paritas dengan jalur WT: client menempelkan msgId (UUID) pada payload
       // message:send untuk korelasi ACK. Tanpa ini, callback pendingAcks di
@@ -279,7 +279,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
 
     // --- Inbound: ACK (delivery receipt) ---
     socket.on('message:ack_delivered', async (payload: unknown) => {
-      if (!await checkRateLimit(userId, 'message_ack_delivered', 60, 60)) return;
+      if (!await checkRateLimit(userId, 'message_ack_delivered', 240, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handleAck(wsCtx, userId, deviceId, payload as { conversationId: string; messageId: string; targetRecipient?: string });
     });

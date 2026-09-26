@@ -43,7 +43,10 @@ export function samplePoissonInterval(lambdaPerMin: number, rng: () => number = 
  * bucket `chat_message` (30/min). Dipanggil sebelum mengirim cover.
  */
 const recentSendTimestamps: number[] = [];
-const CHAT_MESSAGE_LIMIT_PER_MIN = 28; // sedikit di bawah 30 server-side — margin
+// [27.2.4] Server bucket naik ke 120/min (VPS baru). Soft cap cover tetap
+// sedikit di bawah limit server; cover hanya perlu menjaga ~2 slot bebas —
+// jangan sampai cover memenuhi bucket (cover yield ke real, 26.10.4).
+const CHAT_MESSAGE_LIMIT_PER_MIN = 118; // margin 2 slot di bawah 120 server-side
 
 export function notifyRealSend(now: number = Date.now()): void {
   recentSendTimestamps.push(now);

@@ -434,7 +434,7 @@ export async function handleKeySync(
             if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Invalid payload' });
             return;
          }
-         if (!await ctx.checkRateLimit(userId, 'distribute_keys', 40, 60)) {
+         if (!await ctx.checkRateLimit(userId, 'distribute_keys', 120, 60)) {
             if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Rate limit exceeded' });
             return;
          }
@@ -470,7 +470,7 @@ export async function handleKeySync(
        case 'group:request_key': {
          const { conversationId, targetSenderId, targetDeviceKey } = data as GroupKeyRequestPayload;
          if (!conversationId) return;
-         if (!await ctx.checkRateLimit(userId, 'group_request_key', 20, 60)) return;
+         if (!await ctx.checkRateLimit(userId, 'group_request_key', 60, 60)) return;
 
          let fulfillerId = targetSenderId;
          if (!fulfillerId) {
@@ -514,7 +514,7 @@ export async function handleKeySync(
         case 'metadata:updated': {
            const { conversationId, encryptedMetadata, targetRecipients } = data as { conversationId: string; encryptedMetadata: string; targetRecipients: string[] };
            if (!conversationId || !encryptedMetadata || !Array.isArray(targetRecipients)) return;
-           if (!await ctx.checkRateLimit(userId, 'metadata_updated', 20, 60)) return;
+           if (!await ctx.checkRateLimit(userId, 'metadata_updated', 60, 60)) return;
 
            // Persist to DB for offline delivery (like messages:distribute_keys)
            await ctx.prisma.message.create({

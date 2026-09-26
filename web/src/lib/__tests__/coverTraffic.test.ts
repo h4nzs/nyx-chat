@@ -61,18 +61,25 @@ describe('coverShouldYield (rate-limit backoff 26.10.4)', () => {
     expect(coverShouldYield(Date.now())).toBe(false)
   })
 
-  it('yield setelah banyak real send mendekati limit 30/min', () => {
+  it('yield setelah banyak real send mendekati soft cap 118/min [27.2.4: bucket server 120]', () => {
     const now = Date.now()
-    for (let i = 0; i < 30; i++) notifyRealSend(now - i * 100)
+    for (let i = 0; i < 118; i++) notifyRealSend(now - i * 100)
     expect(coverShouldYield(now)).toBe(true)
+  })
+
+  it('tidak yield di bawah soft cap (100 real send dalam window 60s)', () => {
+    const now = Date.now()
+    // Spread 100 send di seluruh window (spacing 600ms) — semuanya > now-60s.
+    for (let i = 0; i < 100; i++) notifyRealSend(now - i * 600)
+    expect(coverShouldYield(now)).toBe(false)
   })
 
   it('real send yang lebih tua dari 60s tidak dihitung', () => {
     const now = Date.now()
     // Baris pertama juga mem-prune sisa state test sebelumnya (semuanya
     // lebih tua dari now-60s karena fake timers maju). Setelah prune,
-    // tambahkan 30 real send 61s lalu — semuanya di luar window.
-    for (let i = 0; i < 30; i++) notifyRealSend(now - 61_000)
+    // tambahkan real send 61s lalu — semuanya di luar window.
+    for (let i = 0; i < 118; i++) notifyRealSend(now - 61_000)
     notifyRealSend(now - 120_000) // trigger prune
     expect(coverShouldYield(now)).toBe(false)
   })
