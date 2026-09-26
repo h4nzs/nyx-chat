@@ -49,6 +49,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 | [10-deployment-ops.md](10-deployment-ops.md) | CI/CD, VPS runbook, env vars, post-deploy checklist |
 | [11-testing.md](11-testing.md) | Unit tests, E2E, environment limitations |
 | [13-troubleshooting.md](13-troubleshooting.md) | Known errors and their fixes |
+| [26-group-privacy-blueprint.md](26-group-privacy-blueprint.md) | Group metadata hardening blueprint: sender pseudonyms, pairwise key distribution, blinded membership & receipts | Plan the next-generation group privacy work |
 | [25-repo-infra-agents.md](25-repo-infra-agents.md) | Root repo files, CI/agent workflows, Docker Compose, agent-skills content, ambient type declarations |
 
 ## Quick facts
