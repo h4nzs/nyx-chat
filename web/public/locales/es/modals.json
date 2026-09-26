@@ -105,7 +105,9 @@
       "description": "Tu dispositivo envía mensajes cifrados de relleno para que sea más difícil distinguir la actividad real. Usa ~{{mb}} MB/día en este grupo.",
       "disabled_by_master": "El tráfico de cobertura está desactivado en Ajustes globales.",
       "enabled_toast": "Tráfico de cobertura activado (~{{mb}} MB/día en este grupo).",
-      "disabled_toast": "Tráfico de cobertura desactivado."
+      "disabled_toast": "Tráfico de cobertura desactivado.",
+      "bundle_cover": "Mensajes cifrados de relleno (~{{mb}} MB/día)",
+      "bundle_ephemeral": "Confirmaciones de lectura retrasadas (con jitter) — hasta 45 s"
     }
   },
   "user_info": {

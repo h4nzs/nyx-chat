@@ -13,12 +13,18 @@ interface SettingsState {
   /** Conversation IDs dengan privacy level Maximum (client-local enumeration). */
   coverTrafficMaximumGroups: string[];
   setGroupCoverTraffic: (conversationId: string, enabled: boolean) => void;
+  // [26.10.5] Bundle Maximum — ephemeral receipts. Client-local seperti cover:
+  // server tidak boleh tahu pengaturan privasi percakapan.
+  /** Grup yang mengirim receipt ephemeral (delay acak + tanpa persist status). */
+  ephemeralReceiptsGroups: string[];
+  setGroupEphemeralReceipts: (conversationId: string, enabled: boolean) => void;
 }
 
 const SettingsSchema = z.object({
   privacyCloak: z.boolean().optional(),
   coverTrafficMasterEnabled: z.boolean().optional(),
   coverTrafficMaximumGroups: z.array(z.string()).optional(),
+  ephemeralReceiptsGroups: z.array(z.string()).optional(),
 }).passthrough();
 
 export const useSettingsStore = create<SettingsState>()(
@@ -34,6 +40,13 @@ export const useSettingsStore = create<SettingsState>()(
           coverTrafficMaximumGroups: enabled
             ? Array.from(new Set([...s.coverTrafficMaximumGroups, conversationId]))
             : s.coverTrafficMaximumGroups.filter((id) => id !== conversationId),
+        })),
+      ephemeralReceiptsGroups: [],
+      setGroupEphemeralReceipts: (conversationId, enabled) =>
+        set((s) => ({
+          ephemeralReceiptsGroups: enabled
+            ? Array.from(new Set([...s.ephemeralReceiptsGroups, conversationId]))
+            : s.ephemeralReceiptsGroups.filter((id) => id !== conversationId),
         })),
     }),
     { 

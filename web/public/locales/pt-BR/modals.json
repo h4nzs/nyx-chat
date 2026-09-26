@@ -105,7 +105,9 @@
       "description": "Seu dispositivo envia mensagens cifradas de preenchimento para dificultar a identificação da atividade real. Usa ~{{mb}} MB/dia neste grupo.",
       "disabled_by_master": "O tráfego de cobertura está desativado nas Configurações globais.",
       "enabled_toast": "Tráfego de cobertura ativado (~{{mb}} MB/dia neste grupo).",
-      "disabled_toast": "Tráfego de cobertura desativado."
+      "disabled_toast": "Tráfego de cobertura desativado.",
+      "bundle_cover": "Mensagens cifradas de preenchimento (~{{mb}} MB/dia)",
+      "bundle_ephemeral": "Recibos de leitura atrasados (com jitter) — até 45 s"
     }
   },
   "user_info": {

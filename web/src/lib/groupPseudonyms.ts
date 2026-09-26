@@ -17,6 +17,8 @@ import type { Pseudonym, DeliveryToken } from '@nyx/shared';
 import { asPseudonym, asDeliveryToken } from '@nyx/shared';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
+import { useSettingsStore } from '@store/settings';
+import { isBurnerConversation } from '@lib/coverTraffic';
 
 const PSEUDONYM_BYTES = 16; // 22-char base64url
 
@@ -142,3 +144,37 @@ export async function getMyPseudonym(conversationId: string): Promise<Pseudonym 
 export function resolvePseudonymToUserId(conversationId: string, pseudonym: string): string | undefined {
   return getPseudonymMap(conversationId)?.[pseudonym];
 }
+
+// --- [26.10.5] Bundle Maximum: ephemeral + jittered receipts ---
+
+/**
+ * Burner default ephemeral (26.10.7); grup reguler opt-in via settings store
+ * (client-local — server tidak boleh tahu pengaturan privasi percakapan).
+ */
+export function isEphemeralReceipts(conversationId: string): boolean {
+  if (isBurnerConversation(conversationId)) return true;
+  return useSettingsStore.getState().ephemeralReceiptsGroups.includes(conversationId);
+}
+
+/**
+ * Jittered release (26.10.5): tunda pengiriman receipt dengan delay acak
+ * [0, maxDelayMs]. Menyamarkan korelasi "waktu baca vs waktu buka chat" —
+ * server tidak bisa membedakan baca-benar dari baca-yang-di-jitter.
+ * Resolve via callback setelah delay; `true` = tetap kirim (masih memenuhi
+ * kontrak caller), `false` = batalkan (mis. percakapan berpindah).
+ */
+export function scheduleEphemeralReceipt(
+  conversationId: string,
+  maxDelayMs: number,
+  send: () => void,
+): void {
+  const delay = Math.floor(Math.random() * Math.max(0, maxDelayMs));
+  if (delay === 0) {
+    send();
+    return;
+  }
+  setTimeout(send, delay);
+}
+
+/** Delay jitter maksimum untuk receipt — kecil, jangan merusak UX 'Read'. */
+export const RECEIPT_JITTER_MAX_MS = 45_000; // 0–45 detik

@@ -128,12 +128,24 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       if (entry?.isIntersecting) {
         onVisibilityChange?.(message.id, true);
         // [T3a] Pembaca grup v2 dikenali via pseudonym (bukan userId akun).
-        import('@utils/crypto').then(({ getMyPseudonym }) => getMyPseudonym(message.conversationId)).then((readerPseudonym) => {
+        Promise.all([
+          import('@utils/crypto').then(({ getMyPseudonym }) => getMyPseudonym(message.conversationId)),
+          // [26.10.5] Ephemeral receipts: jitter acak 0-45s untuk grup Maximum
+          // (scheduleEphemeralReceipt mengirim langsung bila delay = 0 atau
+          // percakapan tidak ephemeral — caller tak perlu tahu bedanya).
+          import('@lib/groupPseudonyms').then(({ isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS }) => ({
+            isEphemeral: isEphemeralReceipts(message.conversationId),
+            jitter: scheduleEphemeralReceipt,
+            maxJitter: RECEIPT_JITTER_MAX_MS,
+          })),
+        ]).then(([readerPseudonym, receiptCfg]) => {
           const isMyRead = (s: MessageStatus) =>
             (s.userId === meId || (meId && resolvePseudonymToUserId(message.conversationId, s.userId) === meId)) && s.status === 'READ';
           const alreadyRead = message.statuses?.some(isMyRead);
           if (!alreadyRead) {
-            transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId, targetRecipient: message.senderId, readerPseudonym });
+            const sendRead = () => transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId, targetRecipient: message.senderId, readerPseudonym });
+            if (receiptCfg.isEphemeral) receiptCfg.jitter(message.conversationId, receiptCfg.maxJitter, sendRead);
+            else sendRead();
           }
         });
         observer.disconnect();

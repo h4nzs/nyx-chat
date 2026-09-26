@@ -43,6 +43,7 @@ export { decryptMessageObject } from '../lib/messagePipeline';
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import { isBurnerConversation } from '@lib/coverTraffic';
+import { isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS } from '@lib/groupPseudonyms';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
 
 const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
@@ -1839,14 +1840,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           const CHUNK = 100;
           // [T3a] Identitas pembaca = pseudonym (grup metadata v2).
           const readerPseudonym = await getMyPseudonym(id);
-          for (let i = 0; i < receiptable.length; i += CHUNK) {
-            const chunk = receiptable.slice(i, i + CHUNK);
-            transportClient.sendEvent('messages:mark_as_read', {
-              conversationId: id,
-              messageIds: chunk.map((m) => m.id),
-              targets: Object.fromEntries(chunk.map((m) => [m.id, m.senderId as string])),
-              readerPseudonym,
-            });
+          const sendReceiptBatch = () => {
+            for (let i = 0; i < receiptable.length; i += CHUNK) {
+              const chunk = receiptable.slice(i, i + CHUNK);
+              transportClient.sendEvent('messages:mark_as_read', {
+                conversationId: id,
+                messageIds: chunk.map((m) => m.id),
+                targets: Object.fromEntries(chunk.map((m) => [m.id, m.senderId as string])),
+                readerPseudonym,
+              });
+            }
+          };
+          // [26.10.5] Ephemeral receipts (grup Maximum / burner): kirim via
+          // jitter acak 0-45s agar waktu-baca tidak berkorelasi dengan
+          // waktu-buka. Receipt tetap pseudonym-scoped (T3a).
+          if (receiptable.length > 0 && isEphemeralReceipts(id)) {
+            scheduleEphemeralReceipt(id, RECEIPT_JITTER_MAX_MS, sendReceiptBatch);
+          } else if (receiptable.length > 0) {
+            sendReceiptBatch();
           }
         }
 
@@ -2501,13 +2512,23 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   && finalDecrypted.content !== 'waiting_for_key'
                   && !(typeof finalDecrypted.content === 'string' && finalDecrypted.content.startsWith('['));
               if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent && isLiveReadSafe) {
-                  transportClient.sendEvent('message:mark_as_read', {
-                      messageId: finalDecrypted.id,
-                      conversationId: conversationId,
-                      targetRecipient: finalDecrypted.senderId,
-                      // [T3a] pembaca grup v2 dikenali via pseudonym
-                      readerPseudonym: await getMyPseudonym(conversationId)
-                  });
+                  // [T3a] pembaca grup v2 dikenali via pseudonym
+                  const readerPseudonym = await getMyPseudonym(conversationId);
+                  const sendLiveRead = () => {
+                      transportClient.sendEvent('message:mark_as_read', {
+                          messageId: finalDecrypted.id,
+                          conversationId: conversationId,
+                          targetRecipient: finalDecrypted.senderId,
+                          readerPseudonym,
+                      });
+                  };
+                  // [26.10.5] Ephemeral receipts (grup Maximum / burner): jitter acak
+                  // 0-45s — receipt tetap terkirim, waktunya tidak bisa dikorelasikan.
+                  if (isEphemeralReceipts(conversationId)) {
+                      scheduleEphemeralReceipt(conversationId, RECEIPT_JITTER_MAX_MS, sendLiveRead);
+                  } else {
+                      sendLiveRead();
+                  }
               }
 
               // ✅ 3. UPDATE STATE UI ZUSTAND (Synchronous)

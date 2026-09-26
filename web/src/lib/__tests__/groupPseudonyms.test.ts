@@ -31,6 +31,15 @@ vi.mock('@store/auth', () => ({
     subscribe: vi.fn(),
   },
 }))
+// [26.10.5] Settings store untuk isEphemeralReceipts — stateful via variabel test.
+let ephemeralGroups: string[] = []
+vi.mock('@store/settings', () => ({
+  useSettingsStore: {
+    getState: () => ({ ephemeralReceiptsGroups: ephemeralGroups }),
+    setState: vi.fn(),
+    subscribe: vi.fn(),
+  },
+}))
 vi.mock('../sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({
     randombytes_buf: (n: number) => {
@@ -58,6 +67,9 @@ import {
   getPseudonymMap,
   getMyPseudonym,
   resolvePseudonymToUserId,
+  isEphemeralReceipts,
+  scheduleEphemeralReceipt,
+  RECEIPT_JITTER_MAX_MS,
 } from '../groupPseudonyms'
 
 async function setConversations(convs: Array<Record<string, unknown>>) {
@@ -67,6 +79,7 @@ async function setConversations(convs: Array<Record<string, unknown>>) {
 describe('T1 pseudonym helpers (lib/groupPseudonyms)', () => {
   beforeEach(async () => {
     counter = 0
+    ephemeralGroups = []
     await setConversations([])
   })
 
@@ -122,5 +135,47 @@ describe('T1 pseudonym helpers (lib/groupPseudonyms)', () => {
     const newMap = await generatePseudonymMap(['u1'])
     expect(oldMap).toEqual({ OLDPSEUDO: 'u1' })
     expect(Object.keys(newMap)[0]).not.toBe('OLDPSEUDO')
+  })
+})
+
+describe('[26.10.5] ephemeral + jittered receipts (lib/groupPseudonyms)', () => {
+  beforeEach(async () => {
+    ephemeralGroups = []
+    await setConversations([])
+  })
+
+  it('isEphemeralReceipts: burner selalu ephemeral (26.10.7), grup reguler default false', () => {
+    expect(isEphemeralReceipts('burner_abc')).toBe(true)
+    expect(isEphemeralReceipts('conv-reguler')).toBe(false)
+  })
+
+  it('isEphemeralReceipts: grup yang opt-in via settings store → true', () => {
+    ephemeralGroups = ['conv-max']
+    expect(isEphemeralReceipts('conv-max')).toBe(true)
+    expect(isEphemeralReceipts('conv-lain')).toBe(false)
+  })
+
+  it('scheduleEphemeralReceipt: delay 0 (maxDelayMs=0) → kirim langsung sinkron', () => {
+    let sent = false
+    scheduleEphemeralReceipt('burner_x', 0, () => { sent = true })
+    expect(sent).toBe(true)
+  })
+
+  it('scheduleEphemeralReceipt: delay > 0 → terjadwal via setTimeout', () => {
+    vi.useFakeTimers()
+    try {
+      let sent = false
+      scheduleEphemeralReceipt('burner_x', 45_000, () => { sent = true })
+      expect(sent).toBe(false)
+      vi.advanceTimersByTime(RECEIPT_JITTER_MAX_MS + 1)
+      expect(sent).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('RECEIPT_JITTER_MAX_MS: kecil, jangan merusak UX read (≤60s)', () => {
+    expect(RECEIPT_JITTER_MAX_MS).toBeGreaterThan(0)
+    expect(RECEIPT_JITTER_MAX_MS).toBeLessThanOrEqual(60_000)
   })
 })

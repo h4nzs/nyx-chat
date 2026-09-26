@@ -25,17 +25,22 @@ import clsx from 'clsx';
 
 // [T4] Cover traffic (26.10.5): per-group opt-in, client-local state.
 // Master kill-switch hidup di global Settings, bukan di sini.
+// [26.10.5] Bundle "Maximum" — satu switch: cover traffic + ephemeral receipts
+// (batched/jittered release menyusul). Semua state client-local.
 const CoverTrafficCard = ({ conversationId }: { conversationId: ConversationId }) => {
   const { t } = useTranslation(['modals']);
-  const { maximum, masterEnabled } = useSettingsStore(useShallow((s) => ({
+  const { maximum, masterEnabled, ephemeral } = useSettingsStore(useShallow((s) => ({
     maximum: s.coverTrafficMaximumGroups.includes(conversationId),
     masterEnabled: s.coverTrafficMasterEnabled,
+    ephemeral: s.ephemeralReceiptsGroups.includes(conversationId),
   })));
   const dailyMb = (estimateDailyCoverBytes() / (1024 * 1024)).toFixed(1);
 
   const handleToggle = (enabled: boolean) => {
     const settings = useSettingsStore.getState();
+    // Bundle: cover + ephemeral receipts selalu bersama (satu privacy level).
     settings.setGroupCoverTraffic(conversationId, enabled);
+    settings.setGroupEphemeralReceipts(conversationId, enabled);
     import('@lib/coverTraffic').then(({ getCoverScheduler }) => {
       const scheduler = getCoverScheduler();
       scheduler.updatePreferences({
@@ -49,6 +54,8 @@ const CoverTrafficCard = ({ conversationId }: { conversationId: ConversationId }
       : t('modals:group_info.cover.disabled_toast'));
   };
 
+  const isOn = maximum && masterEnabled;
+
   return (
     <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6">
       <div className="flex items-center justify-between">
@@ -59,21 +66,32 @@ const CoverTrafficCard = ({ conversationId }: { conversationId: ConversationId }
               ? t('modals:group_info.cover.description', { mb: dailyMb })
               : t('modals:group_info.cover.disabled_by_master')}
           </p>
+          {/* [26.10.5] Rincian bundle — dua fitur yang ikut switch ini */}
+          <ul className="mt-3 space-y-1 text-xs text-text-secondary">
+            <li className={clsx('flex items-center gap-2', isOn && 'text-text-primary')}>
+              <span className={clsx('w-1.5 h-1.5 rounded-full', isOn ? 'bg-emerald-500' : 'bg-gray-500')} />
+              {t('modals:group_info.cover.bundle_cover')}
+            </li>
+            <li className={clsx('flex items-center gap-2', isOn && ephemeral && 'text-text-primary')}>
+              <span className={clsx('w-1.5 h-1.5 rounded-full', isOn && ephemeral ? 'bg-emerald-500' : 'bg-gray-500')} />
+              {t('modals:group_info.cover.bundle_ephemeral')}
+            </li>
+          </ul>
         </div>
         <button
           role="switch"
-          aria-checked={maximum && masterEnabled}
+          aria-checked={isOn}
           disabled={!masterEnabled}
           onClick={() => handleToggle(!maximum)}
           className={clsx(
             'relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ml-4',
-            maximum && masterEnabled ? 'bg-accent-color' : 'bg-bg-tertiary',
+            isOn ? 'bg-accent-color' : 'bg-bg-tertiary',
             !masterEnabled && 'opacity-50 cursor-not-allowed'
           )}
         >
           <span className={clsx(
             'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-            maximum && masterEnabled ? 'translate-x-6' : 'translate-x-1'
+            isOn ? 'translate-x-6' : 'translate-x-1'
           )} />
         </button>
       </div>

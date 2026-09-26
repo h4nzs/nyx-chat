@@ -105,7 +105,9 @@
       "description": "Perangkat Anda mengirim pesan pengisi terenkripsi agar aktivitas nyata lebih sulit dibedakan. Memakai ~{{mb}} MB/hari untuk grup ini.",
       "disabled_by_master": "Trafik penyamar dimatikan di Pengaturan global.",
       "enabled_toast": "Trafik penyamar aktif (~{{mb}} MB/hari untuk grup ini).",
-      "disabled_toast": "Trafik penyamar dimatikan."
+      "disabled_toast": "Trafik penyamar dimatikan.",
+      "bundle_cover": "Pesan pengisi terenkripsi (~{{mb}} MB/hari)",
+      "bundle_ephemeral": "Laporan dibaca tertunda (berjacak) — hingga 45 detik"
     }
   },
   "user_info": {
