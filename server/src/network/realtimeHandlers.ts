@@ -237,7 +237,12 @@ export async function handleChatMessage(
       ctx.prisma.message.create({
         data: {
             conversationId, senderId: conversation.isGroup ? userId : null, content, sessionId: sessionId || null,
-            repliedToId: repliedToId || null, expiresAt: expiresAt ? new Date(expiresAt) : null,
+            repliedToId: repliedToId || null,
+            // [PARITY TTL] Jalur REST (routes/messages.ts) memakai default 14 hari
+            // (store-and-forward). Tanpa default yang sama di sini, payload WT
+            // tanpa `expiresAt` tersimpan TANPA TTL — pesan jadi persisten
+            // selamanya (ditemukan saat inspeksi DB lokal: 1 dari 10 pesan).
+            expiresAt: expiresAt ? new Date(expiresAt) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
             isViewOnce: isViewOnce === true,
             deleteSecret
         },
