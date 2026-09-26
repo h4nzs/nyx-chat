@@ -202,7 +202,75 @@ Signal V2's *stored*-data posture without Signal's credential machinery.
   reuses it as the *transport* for group keys, which is exactly how Signal moves
   Sender Keys between members.
 
-## 26.7 Open questions — DECIDED (2026-09-26, maintainer)
+## 26.8 Upgrade paths — when ZKGroup / MLS become the right call
+
+Researched 2026-09-26. Neither is built today (rationale in 26.3), but both have
+concrete entry points; the T1–T3 design deliberately leaves their slots free.
+
+### 26.8.1 ZKGroup-style anonymous credentials
+
+**What closes:** the last gap T3 cannot — the *presentation moment*. Delivery tokens
+are clean at rest, but if presented over the account-authenticated session, the server
+can correlate `user ↔ token` at runtime/log level. Blind credentials prove membership
+without identifying the presenter, even then.
+
+**Trigger conditions (all three):**
+
+1. Group endpoints accept **token-only auth** (no account session) — the endpoint
+   isolation work from T3 is the prerequisite, not a rewrite.
+2. Transport-level correlation is treated as a threat worth closing (multi-homed
+   delivery, or acceptance of single-VPS timing logs as out of scope).
+3. Budget for a pairing-free scheme first: blind RSA or CL signatures before BBS+ —
+   the token slot in T3 is exactly the credential slot, so the upgrade is a swap of
+   the token's *issuance protocol*, not an architecture change.
+
+**Concretely:** T3 tokens are the enabler. Upgrade path = re-issue tokens as blind
+signatures via an issuance sub-protocol, keep verification semantics identical.
+
+### 26.8.2 MLS with post-quantum ciphersuites
+
+**State of the draft (checked 2026-09-26):** `draft-ietf-mls-pq-ciphersuites-06`
+(Mahy & Barnes, updated 2026-07-21, expires 2027-01-22) — nine suites registered:
+ML-KEM-768+X25519 hybrid, ML-KEM-768/P-256, ML-KEM-1024+P-384, pure ML-KEM variants,
+some with ML-DSA signatures. WG state: **"Waiting for WG Chair Go-Ahead" + "Revised
+I-D Needed"** — i.e. content is mature (rev 6) but not yet at WGLC, no AD assigned.
+
+**Ecosystem:** OpenMLS has active PQ research integrated (eprint 2026/034 benchmarks
+an amortized PQ combiner on ML-KEM/ML-DSA in OpenMLS) but no production PQ release
+yet; MLS itself is already shipping at scale (GSMA RCS Universal Profile).
+
+**Realistic timeline for NYX:**
+
+| Milestone | Estimate |
+|---|---|
+| Draft → RFC (WGLC + IESG) | 2027 ("revised needed" state can slip) |
+| OpenMLS PQ suites production-grade | 2027, months after RFC |
+| Sound evaluation point for NYX | 2027–2028 |
+
+**Why migration will be cheap when the time comes:** the draft's flagship suite
+(`MLS_128_MLKEM768X25519_*`) uses the same primitives NYX already runs (ML-KEM-768 +
+X25519, ChaCha20-Poly1305 option present) — only the group key-management architecture
+(tree-KEM replacing sender-key distribution) changes, not the crypto primitives.
+
+**Trigger conditions (all three):**
+
+1. PQ-MLS is an RFC **and** OpenMLS (or equivalent) ships PQ suites production-grade.
+2. NYX group sizes/frequency genuinely need O(log n) ops or real inter-rotation PCS
+   (today's 25-msg/1h rotation already bounds chain-compromise exposure sharply).
+3. Willingness to accept **non-PQ or PQ-MLS without** the metadata tiers — note MLS
+   contributes nothing to sender anonymity, membership blinding, or key-graph removal
+   (26.3); T1–T3 and MLS solve disjoint problems.
+
+### 26.8.3 Decision record
+
+- **Now (2026):** implement T1–T3. They close the stored-data metadata gap with additive,
+  versioned changes and zero frozen-format churn.
+- **2027+:** if 26.8.2 triggers fire, evaluate PQ-MLS as the *key-management layer*
+  underneath T1 pseudonyms/T3 tokens — the identity/routing tiers remain necessary
+  regardless (MLS never hides membership from the DS by itself).
+- **Later:** if 26.8.1 triggers fire, upgrade T3 tokens to blind credentials in place.
+  Never build credentials before endpoint isolation — credential math does not fix
+  transport-log correlation.
 
 1. **Pseudonym map format: full rewrite + generation counter.** Metadata is already
    fully re-encrypted at every rotation (key changes), so an append-only log saves
