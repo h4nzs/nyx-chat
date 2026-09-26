@@ -330,6 +330,117 @@ load is itself a privacy property; relaxing it amplifies traffic signatures).
   (maximum-privacy mode), measured for battery/latency, then default-on only with
   evidence it does not hurt UX.
 
+## 26.10 Cover traffic (T4) — detailed design
+
+### 26.10.1 Layering: what exists vs what T4 adds
+
+The codebase already has **wire-level chaff** (`transport.worker.ts`: opcode
+`0x00`, 1000-byte datagrams every 3s ± 500ms jitter; the sidecar drops them at the
+edge — `main.rs` `if op_code == 0x00 { return; }`). That hides *frame timing* on the
+client↔sidecar link. It cannot hide:
+
+- **server-side logs**: which conversation received a real app-layer message, when,
+  from which authenticated connection;
+- **recipient-side correlation**: a burst of deliveries to members of group G.
+
+T4 = **application-level cover messages** that traverse the *full* pipeline (sidecar →
+redisBridge → Postgres store-and-forward → recipient delivery → client decrypt) and
+are then dropped client-side. To every layer below the recipient's crypto worker they
+are indistinguishable from real messages.
+
+### 26.10.2 Message shape — bit-for-bit identical metadata
+
+The cardinal rule: **cover messages must be produced by the same `sendMessage`
+pipeline** as real ones, differing *only* in the encrypted payload:
+
+| Field | Real message | Cover message |
+|---|---|---|
+| opCode / envelope / 8KB padding | same | same |
+| `tempId` (53-bit scheme) | yes | yes (full pipeline → server dedupe works) |
+| `deleteSecret` | yes | yes (so unsend metadata shape matches) |
+| TTL | client-set (24h groups) | **identical distribution** — a distinct TTL would be a tag |
+| `isSilent` | false (normal) | true — reuses existing silent infra: no push payload, no unread increment, no Dynamic Island |
+| encrypted content | user text | `{ type: 'COVER', ts }` inside the existing `parseSilent` family |
+
+Client drop rule mirrors `GHOST_SYNC`: after decrypt, `silentPayload.type === 'COVER'`
+→ return `null` (no bubble, no vault persistence, no conversation preview update).
+Cover messages **advance the sender-key chain** — by design: chain index N no longer
+maps to real message count, and skipped-key machinery already handles the resulting
+gaps. (T1 interplay: cover senders use pseudonyms like everyone else.)
+
+### 26.10.3 Scheduling — Poisson, per member, per group
+
+- Each member runs an independent **Poisson scheduler** per opted-in conversation:
+  next cover sent at `Δ = -ln(U) / λ` (uniform sampling), clamped to
+  `[10s, 15min]`. Superposition of independent Poisson processes is Poisson — real
+  sends hide in cover traffic *without any coordination* between members.
+- λ default: **one cover message / 2 min / conversation** (while the client is
+  connected). Only fires while `document.visibilityState === 'visible'` or the app
+  holds a WT connection — background-throttled tabs must not correlate cover with
+  user attention anyway.
+- **Do not suppress** cover right after a real send (a human-noticeable silence or
+  burst pattern is itself a signal); Poisson independence is the feature.
+- Only **connected** members emit. Cover traffic cannot be faked for offline users
+  without a server-side generator — explicitly rejected: the server must never be
+  the source of traffic patterns (it would know exactly which messages are cover).
+
+### 26.10.4 Budget (server + client)
+
+Per group with M active members at λ=0.5/min, 8KB padded envelope:
+
+- Bandwidth: `M × 0.5 × 8KB ≈ M × 4KB/min` per direction (20-member group ≈ 80KB/min
+  ≈ 1.3KB/s — negligible on the upgraded VPS, impossible on 1-core: this is why T4
+  is gated on 26.9).
+- DB writes: `M × 0.5/min` rows, swept by TTL like any message.
+- Battery/bandwidth UX estimate at defaults: ≈ 11.5MB/day per opted-in group per
+  member — shown honestly in the UI (26.10.5).
+- **Rate-limit interplay (critical):** cover messages consume the same
+  `message_send` rate-limit bucket as real sends. The scheduler must back off when
+  real sends + pending covers approach the bucket (cover yields to real, never the
+  reverse). A user who hits the limit by chatting simply stops emitting cover —
+  their real traffic already dominates the distribution at that moment anyway.
+
+### 26.10.5 Opt-in UX
+
+- Per-group setting: **Privacy level — Standard / Maximum** (aligned with the Q4
+  decision's per-group toggle pattern). Maximum = cover traffic + ephemeral receipts
+  + (later) batched/jittered release, bundled as one switch with a plain-language
+  explainer: "Your device sends encrypted filler messages so real activity is harder
+  to single out. Uses ~X MB/day here."
+- Show the honest per-group data estimate before enabling; no silent data burn.
+- Burner groups: **Maximum by default** (per Q5 — burners inherit everything from
+  day one, no fallback paths).
+- The toggle is **client-local state** (like the metadata cache): the server must not
+  learn which conversations run cover traffic — that would tag exactly the messages
+  we most want to protect. Members who opted in simply emit cover; membership in the
+  "cover set" is not a queryable fact server-side.
+- Global settings gain only a master kill-switch ("never send cover traffic"),
+  not per-group enumeration.
+
+### 26.10.6 Residual leaks (documented honestly)
+
+1. **Volume bursts:** a real-message burst raises total volume above the cover
+   baseline; a long-running observer can see *that* something happened (not who or
+   what). Mitigation path: adaptive λ that raises cover rate after detecting own
+   real sends — planned, measured, never defaults.
+2. **Participation correlation:** cover traffic confirms a member is online; it does
+   not confirm group membership beyond what T3 leaves (tokens). Combined with T3b,
+   the server-side join `user ↔ cover-emitting conversation` still exists via the
+   authenticated connection — same accepted limit as 26.8.1, closed only by
+   token-only endpoints later.
+3. **Endpoint diversity:** all members' cover converges on one VPS IP — protects
+   against DB dumps and passive wire taps on member links, not against the server
+   operator itself.
+
+### 26.10.7 Rollout
+
+1. Ship behind the same conversation-version flag as T1/T3 (client gauges: cover
+   messages from non-upgraded peers are already safe — they decrypt-drop).
+2. Instrument (client-side, privacy-preserving counts only): cover/real ratio,
+   dropped-vs-decrypted, bandwidth used. Compare against estimates before widening.
+3. Default-on only for burner groups first; then opt-in Maximum mode; never silent
+   global rollout.
+
 1. **Pseudonym map format: full rewrite + generation counter.** Metadata is already
    fully re-encrypted at every rotation (key changes), so an append-only log saves
    nothing and only grows the blob. Receivers care about the latest map only.
