@@ -27,9 +27,16 @@ vi.mock('@lib/refreshRetry', () => ({
 // --- everything else: trivial no-op mocks so the store module loads ---
 vi.mock('@lib/transportClient', () => ({ disconnectSocket: vi.fn(), connectSocket: vi.fn() }))
 vi.mock('@lib/tokenStorage', () => ({ clearAuthCookies: vi.fn() }))
-vi.mock('./modal', () => ({ useModalStore: { getState: () => ({}) } }))
-vi.mock('./conversation', () => ({ useConversationStore: { getState: () => ({}) } }))
-vi.mock('./message', () => ({ useMessageStore: { getState: () => ({}) } }))
+// CATATAN PATH MOCK: file test ini ada di src/store/__tests__/, sehingga
+// specifier relatif di-resolve RELATIF TERHADAP FOLDER INI, bukan terhadap
+// src/store/ tempat auth.ts berada. Mock '../modal' dsb. menunjuk ke
+// src/store/modal.ts (module yang di-import auth.ts); mock '../../i18n'
+// menunjuk ke src/i18n.ts. Specifier yang salah ('./modal', '../i18n') tidak
+// pernah match — module ASLI ikut termuat (i18n asli memicu HttpBackend fetch
+// /locales/*.json di jsdom) dan membuat teardown environment flaky.
+vi.mock('../modal', () => ({ useModalStore: { getState: () => ({}) } }))
+vi.mock('../conversation', () => ({ useConversationStore: { getState: () => ({}) } }))
+vi.mock('../message', () => ({ useMessageStore: { getState: () => ({}) } }))
 vi.mock('react-hot-toast', () => ({ default: { error: vi.fn(), success: vi.fn(), loading: vi.fn() } }))
 vi.mock('@lib/keyStorage', () => ({
   getEncryptedKeys: vi.fn(), saveEncryptedKeys: vi.fn(), clearKeys: vi.fn(),
@@ -39,7 +46,7 @@ vi.mock('@lib/keyStorage', () => ({
 vi.mock('@utils/fingerprint', () => ({ getBrowserFingerprint: vi.fn(async () => 'fp') }))
 vi.mock('@utils/crypto', () => ({ checkAndRefillOneTimePreKeys: vi.fn(), resetOneTimePreKeys: vi.fn() }))
 vi.mock('@lib/nukeProtocol', () => ({ executeLocalWipe: vi.fn() }))
-vi.mock('../i18n', () => ({ default: { t: (k: string) => k } }))
+vi.mock('../../i18n', () => ({ default: { t: (k: string) => k } }))
 vi.mock('@lib/prefetch', () => ({ prefetchAppChunks: vi.fn() }))
 // @nyx/shared MinimalUserSchema is imported for real (pure schema, no side effects).
 

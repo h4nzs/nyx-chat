@@ -32,7 +32,9 @@ vi.mock('../db', () => ({
 vi.mock('../keychainDb', () => ({
   migrateKeychainAtRestEncryption: vi.fn(async () => {}),
 }))
-vi.mock('./sodiumInitializer', () => ({
+// Path mock harus dari folder file test ini (__tests__/): '../sodiumInitializer'
+// menunjuk src/lib/sodiumInitializer.ts yang benar-benar di-import target.
+vi.mock('../sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({})),
 }))
 

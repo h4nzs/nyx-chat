@@ -87,8 +87,8 @@ vi.mock('@lib/transportClient', () => {
 });
 
 vi.mock('react-hot-toast', () => ({ default: { error: vi.fn(), success: vi.fn() } }));
-vi.mock('../i18n', () => ({ default: { t: (k: string, d: string) => d } }));
-vi.mock('../lib/messagePipeline', () => ({
+vi.mock('../../i18n', () => ({ default: { t: (k: string, d: string) => d } }));
+vi.mock('@lib/messagePipeline', () => ({
   decryptMessageObject: vi.fn(),
   evaluateControlMessage: vi.fn(),
   createRepliedToForStoryReply: vi.fn(),
