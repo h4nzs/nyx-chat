@@ -99,6 +99,13 @@
       "distribute_failed": "Failed to distribute new keys — no participants synced yet",
       "rotate_failed": "Key rotation failed: {{error}}",
       "rotate_button": "Rotate Encryption Keys Now"
+    },
+    "cover": {
+      "title": "Cover Traffic",
+      "description": "Your device sends encrypted filler messages so real activity is harder to single out. Uses ~{{mb}} MB/day for this group.",
+      "disabled_by_master": "Cover traffic is turned off in global Settings.",
+      "enabled_toast": "Cover traffic enabled (~{{mb}} MB/day for this group).",
+      "disabled_toast": "Cover traffic disabled."
     }
   },
   "user_info": {

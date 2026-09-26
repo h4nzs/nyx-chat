@@ -19,6 +19,67 @@ import { compressImage } from '@lib/fileUtils';
 import ImageCropperModal from './ImageCropperModal';
 import type { ConversationId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import { useSettingsStore } from '@store/settings';
+import { estimateDailyCoverBytes } from '@lib/coverTraffic';
+import clsx from 'clsx';
+
+// [T4] Cover traffic (26.10.5): per-group opt-in, client-local state.
+// Master kill-switch hidup di global Settings, bukan di sini.
+const CoverTrafficCard = ({ conversationId }: { conversationId: ConversationId }) => {
+  const { t } = useTranslation(['modals']);
+  const { maximum, masterEnabled } = useSettingsStore(useShallow((s) => ({
+    maximum: s.coverTrafficMaximumGroups.includes(conversationId),
+    masterEnabled: s.coverTrafficMasterEnabled,
+  })));
+  const dailyMb = (estimateDailyCoverBytes() / (1024 * 1024)).toFixed(1);
+
+  const handleToggle = (enabled: boolean) => {
+    const settings = useSettingsStore.getState();
+    settings.setGroupCoverTraffic(conversationId, enabled);
+    import('@lib/coverTraffic').then(({ getCoverScheduler }) => {
+      const scheduler = getCoverScheduler();
+      scheduler.updatePreferences({
+        masterEnabled: settings.coverTrafficMasterEnabled,
+        maximumGroups: new Set(settings.coverTrafficMaximumGroups),
+      });
+      scheduler.sync(settings.coverTrafficMaximumGroups);
+    }).catch(() => {});
+    toast.success(enabled
+      ? t('modals:group_info.cover.enabled_toast', { mb: dailyMb })
+      : t('modals:group_info.cover.disabled_toast'));
+  };
+
+  return (
+    <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-lg font-semibold text-text-primary">{t('modals:group_info.cover.title')}</h4>
+          <p className="text-sm text-text-secondary mt-1">
+            {masterEnabled
+              ? t('modals:group_info.cover.description', { mb: dailyMb })
+              : t('modals:group_info.cover.disabled_by_master')}
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={maximum && masterEnabled}
+          disabled={!masterEnabled}
+          onClick={() => handleToggle(!maximum)}
+          className={clsx(
+            'relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ml-4',
+            maximum && masterEnabled ? 'bg-accent-color' : 'bg-bg-tertiary',
+            !masterEnabled && 'opacity-50 cursor-not-allowed'
+          )}
+        >
+          <span className={clsx(
+            'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+            maximum && masterEnabled ? 'translate-x-6' : 'translate-x-1'
+          )} />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: ConversationId; onClose: () => void; }) => {
   const { t } = useTranslation(['modals', 'common']);
@@ -223,6 +284,9 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                       </button>
                     )}
                   </div>
+
+                  {/* [T4] Privacy level — cover traffic toggle (client-local) */}
+                  <CoverTrafficCard conversationId={conversation.id} />
 
                   {/* Members Card */}
                   <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex">

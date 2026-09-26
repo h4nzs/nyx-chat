@@ -423,6 +423,8 @@ type Actions = {
   reset: () => void;
   resendPendingMessages: () => void;
   sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
+  /** [T4] Kirim satu cover message (26.10) — dipanggil scheduler Poisson. */
+  sendCoverTraffic: (conversationId: string) => Promise<void>;
   toggleMessageSelection: (id: string) => void;
   clearMessageSelection: () => void;
   repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
@@ -567,6 +569,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       await get().sendMessage(conversationId, {
           content: JSON.stringify(metadata)
       }, timestamp);
+  },
+
+  // [T4] Cover traffic (doc 26.10) — pesan pengisi via pipeline sendMessage
+  // PENUH (metadata bit-for-bit sama: tempId, deleteSecret, TTL distribusi
+  // identik, 8KB padding, senderPseudonym). Hanya payload terenkripsi yang
+  // beda: { type: 'COVER', ts }. Penerima drop setelah dekripsi.
+  sendCoverTraffic: async (conversationId) => {
+    const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!conv?.isGroup) return;
+    try {
+      await get().sendMessage(conversationId, {
+        content: JSON.stringify({ type: 'COVER', ts: Date.now() }),
+        isSilent: true,
+      }, undefined, true);
+    } catch (e) {
+      // Cover gagal = tidak masalah; jangan sampai mengganggu UX real.
+      console.debug('[T4] Cover send failed (ignored):', e);
+    }
   },
 
   sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
@@ -717,8 +737,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
     const isUnsend = silentPayload?.type === 'UNSEND';
     const isReactionRemove = silentPayload?.type === 'reaction_remove';
+    // [T4] Cover traffic: silent penuh — tanpa bubble optimistik, tanpa push.
+    const isCover = silentPayload?.type === 'COVER';
     const isSystemKeyRequest = silentPayload?.type === 'SYSTEM_KEY_REQUEST' || (typeof data.content === 'string' && data.content.includes('SYSTEM_KEY_REQUEST')) || (typeof data.content === 'string' && data.content.includes('GROUP_KEY_DISTRIBUTION'));
-    const shouldBeSilent = isSilent || data.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isSystemKeyRequest;
+    const shouldBeSilent = isSilent || data.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isSystemKeyRequest || isCover;
+
+    // [T4] Kirim nyata tercatat untuk backoff scheduler cover (cover yield ke real).
+    if (!isCover) {
+        import('@lib/coverTraffic').then(m => m.notifyRealSend()).catch(() => {});
+    }
 
     if (!shouldBeSilent) {
         let optimisticContent = data.content;
@@ -2302,6 +2329,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               cleanUpOptimisticBubble(); // ✅ Bersihkan
               console.debug(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
+          }
+
+          // [T4] COVER traffic (doc 26.10): drop setelah dekripsi — tidak ada
+          // bubble, tidak persist ke vault, tidak update preview. Pesan ini
+          // sengaja MENGITUNG sender-key chain (N tak lagi = jumlah pesan
+          // nyata); skipped-key machinery menangani gap yang dihasilkan.
+          if (silentPayload.type === 'COVER') {
+              cleanUpOptimisticBubble();
+              return null;
           }
 
           // [T2] GROUP_KEY distribution via pairwise session (doc 26.2) —

@@ -171,6 +171,33 @@ const AppContent = () => {
     return () => clearInterval(interval);
   }, [checkStatus]);
 
+  // --- [T4] Cover traffic scheduler (doc 26.10) ---
+  // Client-local: server TIDAK boleh tahu percakapan mana yang menjalankan
+  // cover — toggle disimpan lokal (settings store), timer disinkronkan dengan
+  // daftar grup "Maximum" milik klien ini saja.
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+    Promise.all([
+      import('@lib/coverTraffic'),
+      import('@store/message'),
+      import('@store/connection'),
+      import('@store/settings'),
+    ]).then(([cover, msgStore, connStore, settingsMod]) => {
+      if (!mounted) return;
+      const scheduler = cover.getCoverScheduler((conversationId) => {
+        msgStore.useMessageStore.getState().sendCoverTraffic(conversationId);
+      });
+      scheduler.updatePreferences({
+        isTransportConnected: () => connStore.useConnectionStore.getState().status === 'connected',
+      });
+      const { coverTrafficMaximumGroups, coverTrafficMasterEnabled } = settingsMod.useSettingsStore.getState();
+      scheduler.updatePreferences({ masterEnabled: coverTrafficMasterEnabled, maximumGroups: new Set(coverTrafficMaximumGroups) });
+      scheduler.sync(coverTrafficMaximumGroups);
+    }).catch(e => console.warn('[T4] Cover scheduler init failed:', e));
+    return () => { mounted = false; };
+  }, [user]);
+
   // --- Service Worker SPA Routing ---
   useEffect(() => {
     const handleSwMessage = (event: MessageEvent) => {

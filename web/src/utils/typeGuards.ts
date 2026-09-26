@@ -50,7 +50,10 @@ export type SilentType =
   | 'SYSTEM_KEY_REQUEST'
   // [T2] Sender-key distribution via pairwise session (doc 26.2): kunci grup
   // dikirim sebagai pesan kontrol 1:1, tak lagi lewat messages:distribute_keys.
-  | 'GROUP_KEY';
+  | 'GROUP_KEY'
+  // [T4] Application-level cover traffic (doc 26.10): pesan pengisi yang
+  // melewati pipeline penuh lalu di-drop klien setelah dekripsi.
+  | 'COVER';
 
 export interface SilentPayload {
   type: SilentType;
@@ -75,7 +78,7 @@ export interface SilentPayload {
 
 const SILENT_TYPES: ReadonlySet<string> = new Set<SilentType>([
   'silent', 'CALL_INIT', 'GHOST_SYNC', 'STORY_KEY',
-  'UNSEND', 'reaction_remove', 'SYSTEM_KEY_REQUEST', 'GROUP_KEY',
+  'UNSEND', 'reaction_remove', 'SYSTEM_KEY_REQUEST', 'GROUP_KEY', 'COVER',
 ]);
 
 export function isSilentPayload(data: unknown): data is SilentPayload {

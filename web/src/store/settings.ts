@@ -5,10 +5,20 @@ import { z } from 'zod';
 interface SettingsState {
   privacyCloak: boolean;
   setPrivacyCloak: (val: boolean) => void;
+  // [T4] Cover traffic (doc 26.10) — client-local state. Server tidak boleh
+  // tahu percakapan mana yang menjalankan cover (itu menandai pesannya).
+  /** Master kill-switch: false → tidak pernah kirim cover apa pun. */
+  coverTrafficMasterEnabled: boolean;
+  setCoverTrafficMasterEnabled: (val: boolean) => void;
+  /** Conversation IDs dengan privacy level Maximum (client-local enumeration). */
+  coverTrafficMaximumGroups: string[];
+  setGroupCoverTraffic: (conversationId: string, enabled: boolean) => void;
 }
 
 const SettingsSchema = z.object({
   privacyCloak: z.boolean().optional(),
+  coverTrafficMasterEnabled: z.boolean().optional(),
+  coverTrafficMaximumGroups: z.array(z.string()).optional(),
 }).passthrough();
 
 export const useSettingsStore = create<SettingsState>()(
@@ -16,6 +26,15 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       privacyCloak: false,
       setPrivacyCloak: (val) => set({ privacyCloak: val }),
+      coverTrafficMasterEnabled: true,
+      setCoverTrafficMasterEnabled: (val) => set({ coverTrafficMasterEnabled: val }),
+      coverTrafficMaximumGroups: [],
+      setGroupCoverTraffic: (conversationId, enabled) =>
+        set((s) => ({
+          coverTrafficMaximumGroups: enabled
+            ? Array.from(new Set([...s.coverTrafficMaximumGroups, conversationId]))
+            : s.coverTrafficMaximumGroups.filter((id) => id !== conversationId),
+        })),
     }),
     { 
       name: 'nyx-app-settings',

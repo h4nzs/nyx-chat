@@ -99,6 +99,13 @@
       "distribute_failed": "Falha ao distribuir novas chaves — nenhum participante sincronizado ainda",
       "rotate_failed": "Falha na rotação de chaves: {{error}}",
       "rotate_button": "Girar chaves de criptografia agora"
+    },
+    "cover": {
+      "title": "Tráfego de cobertura",
+      "description": "Seu dispositivo envia mensagens cifradas de preenchimento para dificultar a identificação da atividade real. Usa ~{{mb}} MB/dia neste grupo.",
+      "disabled_by_master": "O tráfego de cobertura está desativado nas Configurações globais.",
+      "enabled_toast": "Tráfego de cobertura ativado (~{{mb}} MB/dia neste grupo).",
+      "disabled_toast": "Tráfego de cobertura desativado."
     }
   },
   "user_info": {
