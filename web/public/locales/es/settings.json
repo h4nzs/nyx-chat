@@ -34,6 +34,12 @@
   },
   "privacy": {
     "read_receipts": "Confirmación de lectura",
+    "cover_traffic_master": "Tráfico de cobertura",
+    "cover_traffic_desc": "Mensajes señuelo en segundo plano para grupos de privacidad Máxima, indistinguibles del tráfico real (~{{mb}} MB/día por grupo). Activados actualmente: {{count}}.",
+    "cover_traffic_enabled_toast": "Tráfico de cobertura activado — los grupos de nivel Máximo emitirán tráfico señuelo.",
+    "cover_traffic_disabled_toast": "Tráfico de cobertura desactivado globalmente. No se enviarán mensajes señuelo.",
+    "cover_traffic_status_active": "{{count}} grupo(s) armado(s)",
+    "cover_traffic_status_off": "Desactivado globalmente",
     "biometric_active": "Bóveda activa (VIP)",
     "biometric_enable": "Activar biometría",
     "panic_password": "Contraseña de pánico",

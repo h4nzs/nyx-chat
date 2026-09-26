@@ -34,6 +34,12 @@
   },
   "privacy": {
     "read_receipts": "Laporan Dibaca",
+    "cover_traffic_master": "Trafik Penutup",
+    "cover_traffic_desc": "Pesan umpan di latar belakang untuk grup dengan privasi Maksimum, tidak bisa dibedakan dari trafik asli (~{{mb}} MB/hari per grup). Saat ini aktif: {{count}}.",
+    "cover_traffic_enabled_toast": "Trafik penutup diaktifkan — grup level Maksimum akan mengirim trafik umpan.",
+    "cover_traffic_disabled_toast": "Trafik penutup dinonaktifkan global. Tidak ada pesan umpan yang akan dikirim.",
+    "cover_traffic_status_active": "{{count}} grup bersenjata",
+    "cover_traffic_status_off": "Dimatikan global",
     "biometric_active": "Brankas Aktif (VIP)",
     "biometric_enable": "Aktifkan Biometrik",
     "panic_password": "Kata Sandi Panik",

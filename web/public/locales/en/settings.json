@@ -34,6 +34,12 @@
   },
   "privacy": {
     "read_receipts": "Read Receipts",
+    "cover_traffic_master": "Cover Traffic",
+    "cover_traffic_desc": "Background decoy messages for Maximum-privacy groups, indistinguishable from real traffic (~{{mb}} MB/day per group). Currently opted-in: {{count}}.",
+    "cover_traffic_enabled_toast": "Cover traffic enabled — groups at Maximum level will emit decoy traffic.",
+    "cover_traffic_disabled_toast": "Cover traffic disabled globally. No decoy messages will be sent.",
+    "cover_traffic_status_active": "{{count}} group(s) armed",
+    "cover_traffic_status_off": "Globally disarmed",
     "biometric_active": "Vault Active (VIP)",
     "biometric_enable": "Enable Biometrics",
     "panic_password": "Panic Password",

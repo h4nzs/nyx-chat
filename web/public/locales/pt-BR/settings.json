@@ -34,6 +34,12 @@
   },
   "privacy": {
     "read_receipts": "Recibos de Leitura",
+    "cover_traffic_master": "Tráfego de Cobertura",
+    "cover_traffic_desc": "Mensagens chamariz em segundo plano para grupos de privacidade Máxima, indistinguíveis do tráfego real (~{{mb}} MB/dia por grupo). Ativos atualmente: {{count}}.",
+    "cover_traffic_enabled_toast": "Tráfego de cobertura ativado — grupos no nível Máximo emitirão tráfego chamariz.",
+    "cover_traffic_disabled_toast": "Tráfego de cobertura desativado globalmente. Nenhuma mensagem chamariz será enviada.",
+    "cover_traffic_status_active": "{{count}} grupo(s) armado(s)",
+    "cover_traffic_status_off": "Desarmado globalmente",
     "biometric_active": "Cofre Ativo (VIP)",
     "biometric_enable": "Ativar Biometria",
     "panic_password": "Senha de Pânico",

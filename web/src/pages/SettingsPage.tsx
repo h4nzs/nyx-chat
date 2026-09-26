@@ -24,6 +24,7 @@ import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@l
 import { executeLocalWipe } from '@lib/nukeProtocol';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
+import { useSettingsStore } from '@store/settings';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
 import { setupBiometricUnlock, browserSupportsWebAuthn, hasAnyBioVault } from '@lib/biometricUnlock';
@@ -31,6 +32,8 @@ import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib
 import { useMessageStore } from '@store/message';
 import ImageCropperModal from '../components/ImageCropperModal';
 import SubscriptionModal from '../components/SubscriptionModal';
+import { estimateDailyCoverBytes } from '@lib/coverTraffic';
+import clsx from 'clsx';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -146,6 +149,10 @@ export default function SettingsPage() {
     theme: s.theme, toggleTheme: s.toggleTheme, accent: s.accent, setAccent: s.setAccent
   })));
   const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
+  const { coverTrafficMaster, coverTrafficMaximumGroups } = useSettingsStore(useShallow(s => ({
+    coverTrafficMaster: s.coverTrafficMasterEnabled,
+    coverTrafficMaximumGroups: s.coverTrafficMaximumGroups,
+  })));
 
   const { 
     isSubscribed, 
@@ -776,6 +783,52 @@ export default function SettingsPage() {
                   setReadReceipts(!readReceipts);
                 }} 
               />
+              {/* [T4] Cover traffic master kill-switch (26.10.5) — client-local, server tak boleh tahu */}
+              <div className="pt-4 border-t border-text-secondary/10 space-y-3 mt-4">
+                <RockerSwitch
+                  label={t('settings:privacy.cover_traffic_master')}
+                  checked={coverTrafficMaster}
+                  onChange={() => {
+                    const settings = useSettingsStore.getState();
+                    const next = !coverTrafficMaster;
+                    settings.setCoverTrafficMasterEnabled(next);
+                    import('@lib/coverTraffic').then(({ getCoverScheduler }) => {
+                      const scheduler = getCoverScheduler();
+                      scheduler.updatePreferences({
+                        masterEnabled: next,
+                        maximumGroups: new Set(settings.coverTrafficMaximumGroups),
+                      });
+                      // off → stopAll (dilakukan updatePreferences); on → re-arm timer grup Maximum
+                      scheduler.sync(settings.coverTrafficMaximumGroups);
+                    }).catch(() => {});
+                    toast.success(next
+                      ? t('settings:privacy.cover_traffic_enabled_toast')
+                      : t('settings:privacy.cover_traffic_disabled_toast'));
+                  }}
+                />
+                <p className="text-xs text-text-secondary px-3 -mt-1">
+                  {t('settings:privacy.cover_traffic_desc', {
+                    mb: (estimateDailyCoverBytes() / (1024 * 1024)).toFixed(1),
+                    count: coverTrafficMaximumGroups.length,
+                  })}
+                </p>
+                <div
+                  className={clsx(
+                    'flex items-center gap-2 px-3 text-[10px] font-bold uppercase tracking-wider',
+                    coverTrafficMaster ? 'text-emerald-500' : 'text-text-secondary/60'
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      'w-2 h-2 rounded-full',
+                      coverTrafficMaster ? 'bg-emerald-500 shadow-[0_0_5px] shadow-emerald-500' : 'bg-gray-500'
+                    )}
+                  />
+                  {coverTrafficMaster
+                    ? t('settings:privacy.cover_traffic_status_active', { count: coverTrafficMaximumGroups.length })
+                    : t('settings:privacy.cover_traffic_status_off')}
+                </div>
+              </div>
               {browserSupportsWebAuthn() && (
                 <button
                   onClick={handleRegisterPasskey}
