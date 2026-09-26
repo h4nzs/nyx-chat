@@ -43,6 +43,20 @@ describe('isSilentPayload', () => {
     expect(isSilentPayload(parse('{"type":"tidak-ada"}'))).toBe(false)
     expect(isSilentPayload('string')).toBe(false)
   })
+  it('[T2] mengenali GROUP_KEY control payload dengan envelope groupKey', () => {
+    const payload = parse('{"type":"GROUP_KEY","groupKey":{"key":"sealed-envelope","senderId":"AAAAAAAAAAAAAAAAAAAAAA","senderDeviceKey":"dev-key-b64","targetDeviceKey":"my-device-b64"}}')
+    expect(isSilentPayload(payload)).toBe(true)
+    if (isSilentPayload(payload)) {
+      expect(payload.type).toBe('GROUP_KEY')
+      expect(payload.groupKey?.key).toBe('sealed-envelope')
+      expect(payload.groupKey?.targetDeviceKey).toBe('my-device-b64')
+    }
+  })
+  it('[T2] GROUP_KEY tanpa groupKey tetap silent tapi tanpa envelope', () => {
+    const payload = parse('{"type":"GROUP_KEY"}')
+    expect(isSilentPayload(payload)).toBe(true)
+    if (isSilentPayload(payload)) expect(payload.groupKey).toBeUndefined()
+  })
 })
 
 describe('isStoryReplyPayload / isStoryKeyPayload', () => {

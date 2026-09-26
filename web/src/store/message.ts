@@ -1017,7 +1017,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         repliedToId: payload.repliedToId ?? undefined,
         isViewOnce: payload.isViewOnce ?? false,
         targetRecipients: conversation.participants.map(p => p.userId || p.id),
-        deleteSecret
+        deleteSecret,
+        // [T1] Grup metadata v2: pseudonym pengirim (server simpan verbatim).
+        senderPseudonym: conversation.isGroup ? await getMyPseudonym(conversationId) : undefined
       };
 
       // [BUG-FIX H1] Sabuk-dan-gesper: jika callback emit transport tidak pernah
@@ -1647,7 +1649,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                           }
                     } else if (payload.encryptedKey || payload.key) {
                         try {
-                            const finalConvId = message.conversationId || payload.conversationId || "";
+                            // [T2] Pesan kontrol pairwise disimpan di virtual conv `<group>:pw:<peer>` —
+                            // normalisasi ke conversation grup asli sebelum store.
+                            const finalConvId = (message.conversationId || payload.conversationId || "").replace(/:pw:[A-Za-z0-9_-]+$/, '');
                             const finalSenderId = message.senderId || payload.senderId || "";
                             const finalEncKey = (payload.encryptedKey || payload.key || "");
                             const { storeReceivedSessionKey } = await import('@utils/crypto');
@@ -2104,7 +2108,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       // 1. PENCEGAHAN GHOST MESSAGE (Bypass UI/Storage untuk Pesan Kontrol)
-      if (typeof message.content === 'string' && (message.content.includes('SYSTEM_KEY_REQUEST') || message.content.includes('GROUP_KEY_DISTRIBUTION'))) {
+      if (typeof message.content === 'string' && (message.content.includes('SYSTEM_KEY_REQUEST') || message.content.includes('GROUP_KEY_DISTRIBUTION') || message.content.includes('"type":"GROUP_KEY"'))) {
           // Hanya tangkap payload kontrol, jangan simpan / kembalikan objek pesannya ke UI
           try {
               const decryptedControl = await decryptMessageObject(message);
@@ -2298,6 +2302,36 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               cleanUpOptimisticBubble(); // ✅ Bersihkan
               console.debug(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
+          }
+
+          // [T2] GROUP_KEY distribution via pairwise session (doc 26.2) —
+          // unseal inner envelope + store receiver state. conversationId grup
+          // asli ada di payload (bukan virtual :pw: conversation).
+          if (silentPayload.type === 'GROUP_KEY' && silentPayload.groupKey) {
+              cleanUpOptimisticBubble(); // ✅ Bersihkan
+              try {
+                  const gk = silentPayload.groupKey;
+                  const { getMyEncryptionKeyPair, getSodiumLib, storeReceivedSessionKey } = await import('@utils/crypto');
+                  const sodium = await getSodiumLib();
+                  const { publicKey } = await getMyEncryptionKeyPair();
+                  const myIdentityKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  // Abaikan paket yang ditujukan untuk perangkat lain.
+                  if (gk.targetDeviceKey && gk.targetDeviceKey !== myIdentityKeyB64) {
+                      return null;
+                  }
+                  const realConvId = String(conversationId).replace(/:pw:[A-Za-z0-9_-]+$/, '');
+                  await storeReceivedSessionKey({
+                      conversationId: realConvId as ConversationId,
+                      encryptedKey: gk.key,
+                      type: 'GROUP_KEY',
+                      senderId: (gk.senderId || decrypted.senderId || '') as UserId,
+                      senderDeviceKey: gk.senderDeviceKey,
+                  });
+                  console.debug(`[T2] Pairwise GROUP_KEY stored for conv=${realConvId}`);
+              } catch (e) {
+                  console.warn('[T2] Failed to process pairwise GROUP_KEY:', e);
+              }
+              return null;
           }
 
           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {

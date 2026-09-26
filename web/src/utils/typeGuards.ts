@@ -47,7 +47,10 @@ export type SilentType =
   | 'STORY_KEY'
   | 'UNSEND'
   | 'reaction_remove'
-  | 'SYSTEM_KEY_REQUEST';
+  | 'SYSTEM_KEY_REQUEST'
+  // [T2] Sender-key distribution via pairwise session (doc 26.2): kunci grup
+  // dikirim sebagai pesan kontrol 1:1, tak lagi lewat messages:distribute_keys.
+  | 'GROUP_KEY';
 
 export interface SilentPayload {
   type: SilentType;
@@ -57,11 +60,22 @@ export interface SilentPayload {
   targetMessageId?: string;
   emoji?: string;
   url?: string;
+  /** [T2] GROUP_KEY distribution payload — sealed sender key + routing metadata. */
+  groupKey?: {
+    /** Sealed sender-key envelope (inner pq_box_seal, dipertahankan dari jalur lama). */
+    key: string;
+    /** Pseudonym pengirim distribusi (metadata v2) — di-resolve penerima via peta. */
+    senderId?: string;
+    senderDeviceKey?: string;
+    /** Device filtering: envelope ditolak bila identity key device penerima tidak cocok. */
+    targetDeviceId?: string;
+    targetDeviceKey?: string;
+  };
 }
 
 const SILENT_TYPES: ReadonlySet<string> = new Set<SilentType>([
   'silent', 'CALL_INIT', 'GHOST_SYNC', 'STORY_KEY',
-  'UNSEND', 'reaction_remove', 'SYSTEM_KEY_REQUEST',
+  'UNSEND', 'reaction_remove', 'SYSTEM_KEY_REQUEST', 'GROUP_KEY',
 ]);
 
 export function isSilentPayload(data: unknown): data is SilentPayload {

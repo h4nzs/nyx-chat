@@ -850,6 +850,92 @@ export async function ensureGroupSession(conversationId: string, participants: P
   }
 }
 
+// [T2 PAIRWISE KEY DELIVERY — doc 26.2] ======================================
+// Sender key grup didistribusikan DI DALAM sesi pairwise 1:1 yang sudah ada
+// (Double Ratchet + PQ X3DH, `gspqr_<peerId>`) sebagai pesan kontrol SILENT
+// per-device — server hanya melihat ciphertext yang sama bentuknya dengan
+// pesan biasa, sehingga graf "siapa mengirim kunci ke siapa" hilang dan kunci
+// mendapat transport FS (envelope lama yang disimpan server tak bisa dibuka
+// ulang dengan static key yang bocor belakangan).
+//
+// Fallback: bila pairwise session dengan peer/device belum terbentuk (mis.
+// anggota baru yang belum pernah chat), envelope tetap dikirim via jalur lama
+// `messages:distribute_keys` — interop dengan klien lama tetap terjaga
+// (blueprint 26.2 Migration).
+export type PairwiseKeyDistributionResult = {
+  pairwise: number;
+  legacy: Array<Record<string, unknown>>;
+};
+
+/**
+ * Kirim kunci grup via pairwise DR ke setiap device target yang sudah punya
+ * sesi `gspqr_<peerId>`. Return envelope legacy untuk device yang BELUM punya
+ * sesi (caller meneruskannya ke emitGroupKeyDistribution).
+ */
+export async function sendGroupKeyDistributionPairwise(
+  conversationId: string,
+  distributionKeys: Array<Record<string, unknown>>
+): Promise<PairwiseKeyDistributionResult> {
+  const result: PairwiseKeyDistributionResult = { pairwise: 0, legacy: [] };
+  if (!Array.isArray(distributionKeys) || distributionKeys.length === 0) return result;
+
+  const sodium = await getSodiumLib();
+  const myId = useAuthStore.getState().user?.id;
+  const senderIdForPayload = (await getMyPseudonym(conversationId)) ?? myId;
+
+  for (const dk of distributionKeys) {
+    const { userId, targetDeviceId, targetDeviceKey, key } = dk as {
+      userId: string; targetDeviceId?: string; targetDeviceKey?: string; key: string;
+    };
+    if (!userId || !key) continue;
+
+    try {
+      // Pairwise session per-PEER (bukan per-device): header DR membawa device
+      // tujuan agar kunci hanya dipakai device yang tepat.
+      await ensureSpqrSessionWithPeer(userId);
+      const controlPayload = JSON.stringify({
+        type: 'GROUP_KEY',
+        groupKey: {
+          key,
+          targetDeviceId,
+          targetDeviceKey,
+          senderId: senderIdForPayload,
+          senderDeviceKey: (dk as { senderDeviceKey?: string }).senderDeviceKey,
+        },
+      });
+      const { header, ciphertext } = await encryptWithSpqrSession(
+        userId,
+        sodium.from_string(controlPayload)
+      );
+
+      const { transportClient } = await import('@lib/transportClient');
+      transportClient.sendEvent('message:send', {
+        conversationId: pairwiseControlConversationId(conversationId, userId),
+        content: JSON.stringify({ dr: header, ciphertext: sodium.to_base64(new Uint8Array(ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING) }),
+        tempId: Date.now() + Math.floor(Math.random() * 100000),
+        targetRecipients: [userId],
+        senderPseudonym: await getMyPseudonym(conversationId),
+      });
+      result.pairwise++;
+    } catch (e) {
+      // Tanpa pairwise session → jalur legacy (interop, blueprint 26.2).
+      console.debug(`[T2] No pairwise session with ${userId} — falling back to distribute_keys`, e);
+      result.legacy.push(dk);
+    }
+  }
+  return result;
+}
+
+/**
+ * Id pesan kontrol pairwise: 1:1 dengan peer DIluar grup tidak punya
+ * conversationId sendiri — kontrol GROUP_KEY berjalan pada conversation ID
+ * virtual `<groupConvId>:pw:<peerId>` (server-side ini hanya conversation id
+ * opaque; penerima mengenali suffix-nya dan tidak menampilkannya sebagai chat).
+ */
+export function pairwiseControlConversationId(groupConversationId: string, peerId: string): string {
+  return `${groupConversationId}:pw:${peerId}`;
+}
+
 export async function handleGroupKeyDistribution(
     conversationId: string,
     encryptedKey: string,

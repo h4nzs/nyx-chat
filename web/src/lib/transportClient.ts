@@ -591,6 +591,22 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
 export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderId?: string }[]): Promise<void> {
   return new Promise(async (resolve, reject) => {
     if (!transportClient.connected) return reject(new Error('Socket not connected'));
+    // [T2] Coba distribusi via pairwise DR session dulu (server tak bisa
+    // mengorelasikan sebagai key material — hanya melihat pesan biasa).
+    // Device tanpa pairwise session jatuh ke jalur legacy `distribute_keys`
+    // (interop — blueprint 26.2 Migration).
+    try {
+      const { sendGroupKeyDistributionPairwise } = await import('../utils/crypto');
+      const { pairwise, legacy } = await sendGroupKeyDistributionPairwise(conversationId, keys);
+      if (legacy.length === 0) {
+        if (pairwise > 0) console.debug(`[T2] ${pairwise} envelope(s) dikirim via pairwise session`);
+        return resolve();
+      }
+      console.debug(`[T2] ${legacy.length} envelope via legacy distribute_keys (fallback)`);
+      keys = legacy as typeof keys;
+    } catch (e) {
+      console.warn('[T2] Pairwise distribution failed entirely — legacy fallback:', e);
+    }
     // [T1] Sertakan pseudonym pengirim agar relay kunci tak bisa di-link ke akun.
     const { getMyPseudonym } = await import('../utils/crypto');
     const senderPseudonym = await getMyPseudonym(conversationId);
