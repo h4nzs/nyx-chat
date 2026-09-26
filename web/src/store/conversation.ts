@@ -26,6 +26,25 @@ function getToastErrorMessage(error: unknown, i18nKey: string, fallback: string)
 
 // --- Helper Functions ---
 
+// [FIX #98] Watermark anti re-count: id pesan yang SUDAH pernah menaikkan
+// unreadCount tidak boleh menaikkannya lagi dalam satu sesi UI. Tanpa ini,
+// pesan yang sama bisa dihitung 2× (live event `message:new` diproses oleh
+// socketListeners DAN doAddIncomingMessage) atau dihitung ulang saat pesan
+// lama di-emit ulang (re-delivery/sync race, edit pesan lama) — itulah bug
+// "unread count keep reappearing" setelah reload. In-memory saja memang
+// sengaja: setelah reload, loadConversations mereset unreadCount ke 0 dulu.
+const unreadCountedMessageIds = new Set<string>();
+const UNREAD_WATERMARK_MAX = 500;
+
+function markUnreadCounted(messageId: string): void {
+  if (unreadCountedMessageIds.size >= UNREAD_WATERMARK_MAX) {
+    // Hapus entri tertua (Set mempertahankan urutan insert).
+    const oldest = unreadCountedMessageIds.values().next().value;
+    if (oldest !== undefined) unreadCountedMessageIds.delete(oldest);
+  }
+  unreadCountedMessageIds.add(messageId);
+}
+
 const sortConversations = (list: Conversation[], currentUserId: string | undefined) =>
   [...list].sort((a, b) => {
     // First, sort by pinned status (pinned conversations first)
@@ -733,9 +752,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       
       const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`) && document.visibilityState === 'visible';
 
+      // [FIX #98] Satu pesan hanya boleh menaikkan unread SEKALI per sesi.
+      // Cek watermark SEBELUM cabang mana pun yang menaikkan counter.
+      // Pesan milik sendiri tidak pernah masuk watermark (tidak relevan).
+      const incrementsUnread = !isMine && !isViewingChat;
+      if (incrementsUnread && unreadCountedMessageIds.has(message.id)) {
+        // Pesan ini sudah pernah dihitung — jangan sentuh unreadCount lagi.
+        // (Preview tetap boleh diperbarui.)
+        if (newMsgTime >= currentLastMsgTime) {
+          const updatedConversation = { ...conversation, lastMessage: withPreview(message) };
+          const otherConversations = state.conversations.filter(c => c.id !== conversationId);
+          return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
+        }
+        return state;
+      }
+
       if (newMsgTime < currentLastMsgTime) {
           // FIX: Pastikan kita tetap mengembalikan hasil array yang di-sort!
-          if (!isMine && !isViewingChat) {
+          if (incrementsUnread) {
+              markUnreadCounted(message.id);
               const updatedConvos = state.conversations.map(c =>
                   c.id === conversationId
                       ? { ...c, unreadCount: (c.unreadCount || 0) + 1 }
@@ -746,14 +781,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           return state;
       }
 
-      const shouldIncrementUnread = !isMine && !isViewingChat;
+      if (incrementsUnread) markUnreadCounted(message.id);
       
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
-        unreadCount: isViewingChat 
-            ? 0 
-            : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
+        unreadCount: (incrementsUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
       
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);

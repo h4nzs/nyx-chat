@@ -10,6 +10,13 @@ vault and auto-unlock key scoping), removes the last third-party telemetry
 surfaces, and locks previously-untested server contracts behind regression
 tests. No schema migration and no new required environment variables.
 
+### Fixed
+* **Unread Badge Re-appearing (#98):** One message could raise the unread
+  badge more than once — live `message:new` events were processed by two
+  call sites, and re-delivered/edited old messages re-incremented the
+  counter. A per-session per-message watermark now guarantees each message
+  increments the badge at most once (covered by unit tests).
+
 ### 🚀 Reliability & Realtime
 * **Idempotent Message Send:** Retries after a lost ACK (5s offline-queue / 15s
   emit timeout) no longer create duplicates. The server reserves a Redis slot
