@@ -695,21 +695,21 @@ export async function handleKeySync(
 
        case 'message:mark_read':
        case 'message:mark_as_read': {
-         const { conversationId, messageId, targetRecipient } = data as { conversationId: string, messageId: string, targetRecipient?: string };
-         await handleMessageStatusUpdate(ctx, userId, conversationId, messageId, 'READ', targetRecipient);
+         const { conversationId, messageId, targetRecipient, readerPseudonym } = data as { conversationId: string, messageId: string, targetRecipient?: string, readerPseudonym?: string };
+         await handleMessageStatusUpdate(ctx, userId, conversationId, messageId, 'READ', targetRecipient, readerPseudonym);
          break;
        }
 
        case 'message:ack_delivered': {
-         const { conversationId, messageId, targetRecipient } = data as { conversationId: string, messageId: string, targetRecipient?: string };
-         await handleMessageStatusUpdate(ctx, userId, conversationId, messageId, 'DELIVERED', targetRecipient);
+         const { conversationId, messageId, targetRecipient, readerPseudonym } = data as { conversationId: string, messageId: string, targetRecipient?: string, readerPseudonym?: string };
+         await handleMessageStatusUpdate(ctx, userId, conversationId, messageId, 'DELIVERED', targetRecipient, readerPseudonym);
          break;
        }
 
        case 'messages:mark_as_read':
        case 'messages:mark_read':
        case 'messages:mark_delivered': {
-         const { conversationId, messageIds, targets } = data as { conversationId: string, messageIds: string[], targets?: Record<string, string> };
+         const { conversationId, messageIds, targets, readerPseudonym } = data as { conversationId: string, messageIds: string[], targets?: Record<string, string>, readerPseudonym?: string };
          const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
 
@@ -717,7 +717,8 @@ export async function handleKeySync(
          // `targets` (Opaque Mailbox): peta messageId → pengirim hasil dekripsi
          // klien, karena DB 1:1 sealed-sender menyimpan senderId null sehingga
          // server tidak tahu ke mana notifikasi harus dikirim.
-         await handleMessageStatusBatchUpdate(ctx, userId, conversationId, messageIds, status, targets);
+         // [T3a] `readerPseudonym`: identitas pembaca untuk grup metadata v2.
+         await handleMessageStatusBatchUpdate(ctx, userId, conversationId, messageIds, status, targets, readerPseudonym);
          break;
        }
 
@@ -765,7 +766,8 @@ async function handleMessageStatusUpdate(
   conversationId: string,
   messageId: string,
   status: 'READ' | 'DELIVERED',
-  targetRecipient?: string
+  targetRecipient?: string,
+  readerPseudonym?: string
 ): Promise<void> {
   if (!conversationId || !messageId) return;
 
@@ -777,21 +779,27 @@ async function handleMessageStatusUpdate(
     });
     if (!msg) return;
 
+    // [T3a] Identitas pembaca yang DIPERSIST: grup metadata v2 → pseudonym
+    // (opaque, unlinkable); 1:1 / grup v1 → userId seperti sebelumnya.
+    const persistedReaderId = msg.conversation.isGroup && readerPseudonym ? readerPseudonym : userId;
+
     // Jangan update status jika pengirim sedang membaca pesan sendiri
-    if (msg.senderId === userId) return;
+    // (bandingkan dengan identitas PERSISTED — pseudonym adalah milik pengirim
+    // di peta; userId auth adalah milik pembaca. Keduanya ≠ → bukan self-read).
+    if (msg.senderId === persistedReaderId) return;
 
     // [FIX OFFLINE-LOSS] Deteksi apakah pesan sudah pernah di-READ sebelumnya,
     // agar receipt READ berulang tidak memperpanjang masa retensi (arm TTL hanya sekali).
     const existingStatus = await ctx.prisma.messageStatus.findUnique({
-      where: { messageId_userId: { messageId, userId } },
+      where: { messageId_userId: { messageId, userId: persistedReaderId } },
       select: { status: true }
     });
     const wasAlreadyRead = existingStatus?.status === 'READ';
 
     await ctx.prisma.messageStatus.upsert({
-      where: { messageId_userId: { messageId, userId } },
+      where: { messageId_userId: { messageId, userId: persistedReaderId } },
       update: { status },
-      create: { messageId, userId, status }
+      create: { messageId, userId: persistedReaderId, status }
     });
 
     // Notify the original message sender about the status update
@@ -801,7 +809,7 @@ async function handleMessageStatusUpdate(
       await emitEventToUser(ctx, notifyTarget, 'message:status_updated', {
         conversationId,
         messageId,
-        userId,
+        userId: persistedReaderId,
         status
       });
     }
@@ -857,7 +865,8 @@ async function handleMessageStatusBatchUpdate(
   conversationId: string,
   messageIds: string[],
   status: 'READ' | 'DELIVERED',
-  targets?: Record<string, string>
+  targets?: Record<string, string>,
+  readerPseudonym?: string
 ): Promise<void> {
   if (!conversationId || !Array.isArray(messageIds) || messageIds.length === 0) return;
   // Dedupe + batasi ukuran batch (client mengirim list per conversation; cap
@@ -873,11 +882,16 @@ async function handleMessageStatusBatchUpdate(
     });
     if (messages.length === 0) return;
 
+    // [T3a] Semua pesan dalam satu batch berasal dari satu conversation;
+    // cukup cek isGroup dari pesan pertama untuk memilih identitas persist.
+    const isGroupBatch = messages[0]!.conversation.isGroup;
+    const persistedReaderId = isGroupBatch && readerPseudonym ? readerPseudonym : userId;
+
     const msgById = new Map(messages.map((m) => [m.id, m]));
 
     // 2. Satu query untuk semua status existing milik user ini
     const existingStatuses = await ctx.prisma.messageStatus.findMany({
-      where: { messageId: { in: messages.map((m) => m.id) }, userId },
+      where: { messageId: { in: messages.map((m) => m.id) }, userId: persistedReaderId },
       select: { messageId: true, status: true }
     });
     const wasReadSet = new Set(
@@ -886,11 +900,11 @@ async function handleMessageStatusBatchUpdate(
 
     // 3. Upsert paralel — skip pesan sendiri (pengirim tidak me-receipt dirinya)
     await Promise.all(messages
-      .filter((m) => m.senderId !== userId)
+      .filter((m) => m.senderId !== persistedReaderId)
       .map((m) => ctx.prisma.messageStatus.upsert({
-        where: { messageId_userId: { messageId: m.id, userId } },
+        where: { messageId_userId: { messageId: m.id, userId: persistedReaderId } },
         update: { status },
-        create: { messageId: m.id, userId, status }
+        create: { messageId: m.id, userId: persistedReaderId, status }
       }).catch(() => {}) // P2003: pesan dihapus race — abaikan per-item
       ));
 
@@ -911,7 +925,7 @@ async function handleMessageStatusBatchUpdate(
         return emitEventToUser(ctx, notifyTarget as string, 'message:status_updated', {
           conversationId,
           messageId: m.id,
-          userId,
+          userId: persistedReaderId, // [T3a] pseudonym untuk grup v2
           status
         }).catch(() => {});
       }));

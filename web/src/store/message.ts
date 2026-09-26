@@ -1797,12 +1797,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             (m) => !isUndecryptable(m) && m.senderId && m.senderId !== user.id
           );
           const CHUNK = 100;
+          // [T3a] Identitas pembaca = pseudonym (grup metadata v2).
+          const readerPseudonym = await getMyPseudonym(id);
           for (let i = 0; i < receiptable.length; i += CHUNK) {
             const chunk = receiptable.slice(i, i + CHUNK);
             transportClient.sendEvent('messages:mark_as_read', {
               conversationId: id,
               messageIds: chunk.map((m) => m.id),
               targets: Object.fromEntries(chunk.map((m) => [m.id, m.senderId as string])),
+              readerPseudonym,
             });
           }
         }
@@ -2422,7 +2425,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   transportClient.sendEvent('message:mark_as_read', {
                       messageId: finalDecrypted.id,
                       conversationId: conversationId,
-                      targetRecipient: finalDecrypted.senderId
+                      targetRecipient: finalDecrypted.senderId,
+                      // [T3a] pembaca grup v2 dikenali via pseudonym
+                      readerPseudonym: await getMyPseudonym(conversationId)
                   });
               }
 
@@ -2687,6 +2692,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               
               // 1. Pastikan status adalah tipe literal (bukan sembarang string)
               const validStatus = status as 'SENT' | 'DELIVERED' | 'READ';
+              // [T3a] userId dari event bisa pseudonym (grup metadata v2) — simpan
+              // apa adanya; UI read-check me-resolve lewat peta yang sama.
             
               newMessages[conversationId] = convoMessages.map(m => {
                 if (m.id === messageId) {

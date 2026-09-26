@@ -10,6 +10,7 @@ import { Spinner } from "./Spinner";
 import { useConversationStore, type Conversation, type Message } from "@store/conversation";
 import { useMessageStore } from '@store/message';
 import { useMessageInputStore } from '@store/messageInput';
+import { getMyPseudonym } from '@utils/crypto';
 import { useMessageSearchStore } from '@store/messageSearch';
 import { usePresenceStore } from "@store/presence";
 import { toAbsoluteUrl } from "@utils/url";
@@ -314,12 +315,20 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
          const socket = transportClient;
          if (!socket?.connected) return;
 
+         // [T3a] Pseudonym saya untuk grup metadata v2 — dipakai untuk (a)
+         // mendeteksi pesan sendiri (senderId = pseudonym, bukan meId) dan (b)
+         // cek own-read (receipt sendiri tersimpan dengan pseudonym).
+         const myPseudonym = await getMyPseudonym(id);
          // Hanya ACK pesan yang terlihat di viewport DAN belum READ
          const visibleMessageIds = visibleMessageIdsRef.current;
+         const isMine = (senderId: string) =>
+             senderId === meId || (myPseudonym !== undefined && senderId === myPseudonym);
+         const isMyRead = (s: { userId: string; status: string }) =>
+             (s.userId === meId || (myPseudonym !== undefined && s.userId === myPseudonym)) && s.status === 'READ';
          const unreadVisible = messages.filter(m =>
-             m.senderId !== meId &&
+             !isMine(m.senderId) &&
              visibleMessageIds.has(m.id) &&
-             (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
+             (!m.statuses || !m.statuses.some(isMyRead))
          );
 
          // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket.
@@ -329,12 +338,16 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
          // menyimpan senderId null; server pakai peta ini untuk notifikasi.
          const msgsToAck = unreadVisible.slice(-20);
          const CHUNK = 100;
+         // [T3a] Identitas pembaca = pseudonym (grup metadata v2) — server
+         // menyimpannya di MessageStatus.userId, bukan akun.
+         const readerPseudonym = myPseudonym;
          for (let i = 0; i < msgsToAck.length; i += CHUNK) {
            const chunk = msgsToAck.slice(i, i + CHUNK);
            transportClient.sendEvent('messages:mark_as_read', {
              conversationId: id,
              messageIds: chunk.map(m => m.id),
              targets: Object.fromEntries(chunk.map(m => [m.id, m.senderId])),
+             readerPseudonym,
            });
          }
     };

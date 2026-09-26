@@ -20,13 +20,19 @@ import SwipeableItem from "./SwipeableItem";
 import { useContextMenuStore } from "../store/contextMenu";
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from "react-i18next";
+import { resolvePseudonymToUserId } from '@lib/groupPseudonyms';
 
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const retrySendMessage = useMessageInputStore(s => s.retrySendMessage);
   const { t } = useTranslation('chat');
   
-  if (message.senderId !== meId) return null;
+  // [T3a] Di grup metadata v2, senderId pesan sendiri = pseudonym — cek kedua
+  // bentuknya (grup v1/1:1 tetap userId langsung).
+  const mineCheck = (senderId: string | null | undefined) =>
+    senderId === meId || (senderId && resolvePseudonymToUserId(message.conversationId, senderId) === meId);
+  
+  if (!mineCheck(message.senderId)) return null;
   
   if (message.status === 'FAILED' || message.error) {
     return (
@@ -44,10 +50,17 @@ const MessageStatusIcon = ({ message, participants }: { message: Message; partic
   if (otherParticipants.length === 0) return <FaCheck size={14} className="text-text-secondary" />;
   
   const statuses = message.statuses || [];
-  const isReadAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'READ'));
+  // [T3a] Status pembaca grup v2 tersimpan dengan pseudonym — samakan dengan
+  // participant via peta metadata (resolvePseudonymToUserId). Grup v1/1:1:
+  // status.userId langsung = participant id (jalur lama tetap jalan).
+  const statusMatches = (p: Participant, st: 'READ' | 'DELIVERED') =>
+    statuses.some((s: MessageStatus) =>
+      (s.userId === p.id || resolvePseudonymToUserId(message.conversationId, s.userId) === p.id) && s.status === st
+    );
+  const isReadAll = otherParticipants.every((p: Participant) => statusMatches(p, 'READ'));
   if (isReadAll) return <FaCheckDouble size={14} className="text-blue-500" />;
   
-  const isDeliveredAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'DELIVERED'));
+  const isDeliveredAll = otherParticipants.every((p: Participant) => statusMatches(p, 'DELIVERED'));
   if (isDeliveredAll) return <FaCheckDouble size={14} className="text-text-secondary" />;
   
   return <FaCheck size={14} className="text-text-secondary" />;
@@ -101,7 +114,11 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   const isSelected = selectedMessageIds.includes(message.id);
 
   const profile = useUserProfile(message.sender as { id: string; encryptedProfile?: string | null });
-  const mine = message.senderId === meId;
+  // [T3a] Di grup metadata v2 senderId pesan sendiri = pseudonym (bukan meId) —
+  // cek keduanya (resolvePseudonymToUserId sinkron, baca peta metadata lokal).
+  const mineCheck = (senderId: string | null | undefined) =>
+    senderId === meId || (!!senderId && !!meId && resolvePseudonymToUserId(message.conversationId, senderId) === meId);
+  const mine = mineCheck(message.senderId);
   const ref = useRef<HTMLDivElement>(null);
   const openMenu = useContextMenuStore(s => s.openMenu);
 
@@ -110,10 +127,15 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     const observer = new IntersectionObserver(([entry]) => {
       if (entry?.isIntersecting) {
         onVisibilityChange?.(message.id, true);
-        const alreadyRead = message.statuses?.some((s: MessageStatus) => s.userId === meId && s.status === 'READ');
-  if (!alreadyRead) {
-    transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId, targetRecipient: message.senderId });
-  }
+        // [T3a] Pembaca grup v2 dikenali via pseudonym (bukan userId akun).
+        import('@utils/crypto').then(({ getMyPseudonym }) => getMyPseudonym(message.conversationId)).then((readerPseudonym) => {
+          const isMyRead = (s: MessageStatus) =>
+            (s.userId === meId || (meId && resolvePseudonymToUserId(message.conversationId, s.userId) === meId)) && s.status === 'READ';
+          const alreadyRead = message.statuses?.some(isMyRead);
+          if (!alreadyRead) {
+            transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId, targetRecipient: message.senderId, readerPseudonym });
+          }
+        });
         observer.disconnect();
       }
     }, { threshold: 0.8 });

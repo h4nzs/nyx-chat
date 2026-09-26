@@ -379,7 +379,7 @@ function makeCtxForBatch(opts: {
   existingStatuses?: Array<{ messageId: string; status: string }>;
 }) {
   const base = makeCtx();
-  const upserts: Array<{ messageId: string; status: string }> = [];
+  const upserts: Array<{ messageId: string; userId: string; status: string }> = [];
   const ttlUpdates: Array<{ ids: string[]; expiresAt: Date }> = [];
 
   const prisma = {
@@ -398,7 +398,7 @@ function makeCtxForBatch(opts: {
         create: { messageId: string; userId: string; status: string };
         update: { status: string };
       }) => {
-        upserts.push({ messageId: where.messageId_userId.messageId, status: update.status ?? create.status });
+        upserts.push({ messageId: where.messageId_userId.messageId, userId: where.messageId_userId.userId, status: update.status ?? create.status });
         return {};
       },
     },
@@ -512,4 +512,106 @@ test('batch receipt: pesan kosong / array tidak valid diabaikan tanpa error', as
     msgId: '',
     data: { conversationId: 'c1' },
   }));
+});
+
+// --- T3a: Blind receipts (doc 26.4) — MessageStatus grup v2 menyimpan pseudonym ---
+
+test('T3a: receipt READ grup v2 tersimpan dengan readerPseudonym, broadcast membawa pseudonym', async () => {
+  const pseudo = 'PSEUDORECEIVER0000000';
+  const messages = [
+    { id: 'm1', senderId: 'u2', conversation: { isGroup: true } },
+    { id: 'm2', senderId: 'u2', conversation: { isGroup: true } },
+  ];
+  const { ctx, calls, upserts } = makeCtxForBatch({ messages });
+
+  await handleKeySync(ctx, 'u-real', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: ['m1', 'm2'], readerPseudonym: pseudo },
+  });
+
+  assert.equal(upserts.length, 2, 'kedua pesan di-upsert');
+  assert.equal(upserts[0].status, 'READ');
+  // Composite key upsert harus memakai pseudonym — bukan userId auth.
+  assert.ok(upserts.every((u) => u.userId === pseudo), 'MessageStatus.userId = readerPseudonym (bukan u-real)');
+  const statusEvents = calls.sendJsonToUser.filter(
+    (c) => c[1] === TransportOpCode.KEY_SYNC && (c[2] as { event?: string }).event === 'message:status_updated'
+  );
+  assert.equal(statusEvents.length, 2, 'broadcast ke sender u2 untuk m1 & m2');
+  for (const ev of statusEvents) {
+    assert.equal(ev[0], 'u2', 'notifikasi ke pengirim');
+    const data = (ev[2] as { data: { userId: string; status: string } }).data;
+    assert.equal(data.userId, pseudo, 'broadcast membawa pseudonym pembaca, bukan userId auth');
+    assert.equal(data.status, 'READ');
+  }
+});
+
+test('T3a: receipt 1:1 TIDAK terpengaruh — tanpa readerPseudonym tetap pakai userId auth', async () => {
+  const messages = [
+    { id: 'm1', senderId: 'u2', conversation: { isGroup: false } },
+  ];
+  const { ctx, calls, upserts, ttlUpdates } = makeCtxForBatch({ messages });
+
+  await handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: ['m1'] },
+  });
+
+  assert.equal(upserts.length, 1);
+  const statusEvents = calls.sendJsonToUser.filter(
+    (c) => c[1] === TransportOpCode.KEY_SYNC && (c[2] as { event?: string }).event === 'message:status_updated'
+  );
+  assert.equal(statusEvents.length, 1);
+  const data = (statusEvents[0]![2] as { data: { userId: string } }).data;
+  assert.equal(data.userId, 'u1', '1:1: identity tetap userId auth');
+  assert.equal(ttlUpdates.length, 1, 'grace TTL 1:1 tetap berjalan');
+});
+
+test('T3a: readerPseudonym DIABAIKAN untuk 1:1 meski klien mengirimnya', async () => {
+  const messages = [
+    { id: 'm1', senderId: 'u2', conversation: { isGroup: false } },
+  ];
+  const { ctx, calls, upserts } = makeCtxForBatch({ messages });
+
+  await handleKeySync(ctx, 'u1', 'd1', {
+    event: 'messages:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageIds: ['m1'], readerPseudonym: 'FAKELEAKATTEMPT000001' },
+  });
+
+  assert.equal(upserts.length, 1);
+  const statusEvents = calls.sendJsonToUser.filter(
+    (c) => c[1] === TransportOpCode.KEY_SYNC && (c[2] as { event?: string }).event === 'message:status_updated'
+  );
+  const data = (statusEvents[0]![2] as { data: { userId: string } }).data;
+  assert.equal(data.userId, 'u1', 'pseudonym tidak boleh bocor ke jalur 1:1');
+});
+
+test('T3a singular: pengirim tidak me-receipt pesannya sendiri (senderId === pseudonym)', async () => {
+  const pseudo = 'PSEUDOOWNERMSG000000000';
+  // Fake prisma minimal untuk jalur singular: pesan grup milik pseudonym kita.
+  const base = makeCtx();
+  const upsertCalls: Array<{ userId: string; status: string }> = [];
+  base.ctx.prisma = {
+    message: {
+      findUnique: async () => ({ id: 'm1', senderId: pseudo, conversation: { isGroup: true } }),
+      updateMany: async () => ({ count: 0 }),
+    },
+    messageStatus: {
+      findUnique: async () => null,
+      upsert: async ({ where }: { where: { messageId_userId: { userId: string } } }) => {
+        upsertCalls.push({ userId: where.messageId_userId.userId, status: 'READ' });
+        return {};
+      },
+    },
+  } as unknown as RealtimeContext['prisma'];
+
+  await handleKeySync(base.ctx, 'u-real', 'd1', {
+    event: 'message:mark_as_read',
+    msgId: '',
+    data: { conversationId: 'c1', messageId: 'm1', readerPseudonym: pseudo },
+  });
+
+  assert.equal(upsertCalls.length, 0, 'self-read (pengirim = pseudonym yang sama) harus di-skip');
 });
