@@ -1,6 +1,13 @@
 # 26 — Group Privacy Blueprint (pseudonyms, pairwise key distribution, blind receipts)
 
-> **Status: PROPOSAL / BLUEPRINT — not yet implemented.** This document is the agreed
+> **Status: ✅ IMPLEMENTED (T1–T4, 2026-09-26) — retained as the design record.**
+> All four tiers shipped: T1 pseudonyms (`e4778071`-era commits), T3a blind
+> receipts, T3b delivery tokens, T2 pairwise key delivery, T4 cover traffic.
+> Deviations from this text are minor: fallbacks retained (see 26.5.3), and the
+> removal of `messages:distribute_keys` is deferred per the migration note.
+> Implementation notes live in docs/16-groups.md and CHANGELOG.md.
+>
+> **Original status: PROPOSAL / BLUEPRINT.** This document is the agreed
 > design direction for closing the group-metadata gap between NYX's 1:1 path (sealed
 > sender) and its group path. Nothing in here changes frozen crypto formats; where a
 > schema or wire payload changes, the change is additive and versioned.

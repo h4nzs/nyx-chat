@@ -2,6 +2,106 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🕵️ [Unreleased] - Group Privacy Blueprint (docs 26, tiers T1–T4)
+
+Implements the full group-privacy blueprint: per-group sender pseudonyms,
+pseudonym-scoped receipts, blinded membership via delivery tokens, sender-key
+distribution over pairwise sessions, and opt-in application-level cover
+traffic. Server changes are additive and versioned (metadata v2, nullable
+token column); legacy groups and clients keep working through explicit
+fallback paths. **Requires one schema push** (`prisma db push` — new nullable
+column + index on `UserHiddenConversation`) at deploy time.
+
+### 🎭 T1 — Sender Pseudonyms (doc 26.2)
+* **Unlinkable Group Senders:** Group messages in metadata-v2 groups store a
+  random per-group pseudonym (22-char base64url) in `Message.senderId`
+  instead of the authenticated userId; the `pseudonym → userId` map lives
+  ONLY inside encrypted metadata (v2) with a generation counter that bumps on
+  every key/membership rotation — pre/post-rotation messages cannot be
+  stitched by the server. 1:1 conversations stay sealed-sender; legacy v1
+  groups keep the old path.
+* **Metadata v2:** `GroupMetadataV2` (`v, generation, pseudonymMap`) is the
+  single choke point for pseudonym regeneration (`encryptGroupMetadata`):
+  calls without an explicit map auto-regenerate at generation+1; key rotation
+  and membership changes re-encrypt metadata with a fresh map (PCS rotation
+  path is fire-and-forget to keep the hot path fast).
+* **Server stores verbatim:** `handleChatMessage`, `messages:distribute_keys`,
+  and `group:fulfilled_key` relay/store the client-supplied pseudonym.
+  Group unsend is deleteSecret-only (a pseudonym never matches userId auth).
+* **UI resolution:** message enrichment resolves pseudonyms to accounts via
+  the local map; receipts, unread checks, and sender profiles work unchanged.
+
+### 🧾 T3a — Pseudonym-Scoped Receipts (doc 26.4)
+* **Blind Read Receipts:** Group `MessageStatus.userId` now stores the
+  reader's pseudonym (from `readerPseudonym` on `message:mark_read`,
+  `message:mark_as_read`, `message:ack_delivered`, and the batch variants)
+  instead of the raw account id; `message:status_updated` broadcasts carry
+  the pseudonym. 1:1 receipts and the 1:1 TTL-grace path are untouched, and
+  client-supplied pseudonyms are ignored outside groups.
+* **Client-side own-read resolution:** all receipt senders attach
+  `getMyPseudonym()`; is-mine and already-read checks resolve pseudonyms via
+  the metadata map (own messages carry a pseudonym `senderId` in v2 groups).
+
+### 🎟️ T3b — Delivery Tokens (doc 26.2 membership)
+* **Blinded Membership Discovery:** `UserHiddenConversation` gains a nullable
+  unique `deliveryToken` (additive, with a `conversationId` index). The group
+  creator issues one 16-byte token per member; the same map is stored in
+  encrypted metadata v2 (`deliveryTokenMap`) and registered server-side.
+* **Dual-Accept Sync:** `GET /conversations/sync` accepts an
+  `X-Delivery-Tokens` header (token-possession lookup, capped at 500/request)
+  in parallel with the legacy userId rows until the token backfill completes.
+* **Dual-Write at Every Invite Surface:** conversation creation, participant
+  add, and both chat-relay paths (WebTransport + REST) register
+  `(conversationId, token)` rows. **Revocation:** kick/leave deletes the row
+  — the token dies with membership.
+* **Client:** `generateDeliveryToken(Map)`, `getMyDeliveryToken`,
+  `collectMyDeliveryTokens`; sync sends owned tokens; token maps are
+  inherited (never rotated) across pseudonym rotations.
+
+### 🔀 T2 — Pairwise Key Delivery (doc 26.2)
+* **Key Graph Removed:** Sender-key envelopes now travel inside the existing
+  pairwise Double Ratchet session (`gspqr_<peer>`) as a silent `GROUP_KEY`
+  control message — the server sees ordinary DR-encrypted messages, so the
+  sender→target key-delivery graph is gone and stored envelopes gain
+  transport FS (no more re-open with later-compromised static keys).
+* **Inner Seal Preserved:** the per-device `pq_box_seal` envelope is kept
+  inside (defense in depth: FS + PQ in transit).
+* **Fallback:** devices without an established pairwise session fall back to
+  the legacy `messages:distribute_keys` path (interop; removal deferred until
+  both sides ship — gateway parity test is the enforcement point).
+* **Routing:** control messages use a virtual `<group>:pw:<peer>`
+  conversation id; receivers strip the suffix, filter by device key, and feed
+  the envelope into the existing `storeReceivedSessionKey` pipeline. Offline
+  catch-up recognizes the new shape.
+
+### 🌫️ T4 — Cover Traffic (doc 26.10)
+* **Application-Level Filler:** Opt-in per group. Cover messages traverse the
+  FULL pipeline (sendMessage → sidecar → redisBridge → Postgres → recipient
+  decrypt) with bit-for-bit identical metadata (tempId, deleteSecret,
+  identical TTL distribution, 8KB padding, pseudonyms) and differ only in the
+  encrypted payload (`{ type: 'COVER', ts }`); receivers drop them after
+  decryption (mirroring GHOST_SYNC: no bubble, no vault, no preview, no push).
+  Complements the existing wire-level chaff (opcode 0x00).
+* **Poisson Scheduling:** Independent per-conversation process
+  (Δ = -ln(U)/λ clamped [10s, 15min], λ = 0.5/min default), memoryless
+  resampling, no inter-member coordination — real sends hide by superposition.
+  Skipped ticks (hidden tab / disconnected) are not queued.
+* **Cover Yields to Real (26.10.4):** real sends are tracked in a rolling
+  60s window; cover backs off as the shared `chat_message` bucket fills
+  (soft cap 28/min) — real traffic is never throttled by cover.
+* **Honest UX (26.10.5):** per-group toggle in Group Info showing the ~5.6
+  MB/day estimate before enabling; global master kill-switch in Settings;
+  i18n in all four locales. Cover advancing the sender-key chain means chain
+  index N no longer maps to real message counts (by design).
+
+### 🧪 Tests (this tier set)
+* Server: +11 tests — T1 pseudonym storage/relay/unsend, T3a receipt
+  persistence & broadcast (incl. 1:1 isolation and self-read skip), T3b
+  schema/sync/revocation contract (82 total).
+* Web: +22 tests — pseudonym map helpers, pairwise key delivery wire
+  contract, cover-traffic Poisson sampling/scheduler/backoff, GROUP_KEY and
+  COVER silent-payload guards (134 total).
+
 ## 🔒 [Unreleased] - 2026-09-25
 
 Reliability, privacy, and multi-account hardening pass: eliminates silent

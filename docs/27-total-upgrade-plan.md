@@ -6,6 +6,12 @@
 > for the "rebuild and re-launch" cycle: infrastructure, server, transport, client,
 > the privacy tiers of doc 26, and new capabilities. Nothing here touches frozen
 > crypto formats (8KB padding, `ENC1:`, XChaCha envelope, tempId scheme).
+>
+> **Update 2026-09-26:** the doc-26 privacy tiers (27.4) are **fully implemented
+> ahead of the infra upgrade** — T1 → T3a → T3b → T2 → T4 all shipped in code
+> (verified: server 82/82, web 134/134). Note: T4 was implemented on the current
+> era's rate limits (cover yields at 28/min vs the 30/min bucket); revisit 27.2.4
+> and the T4 soft cap together after the 27.2 recalibration lands.
 
 ## 27.0 Audit summary — what the 1-core era constrained
 

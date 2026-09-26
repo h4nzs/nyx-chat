@@ -22,7 +22,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 |---|---|
 | [14-auth-identity.md](14-auth-identity.md) | Registration, password & biometric login, refresh, recovery, devices, ghost profiles, safety numbers, vault export/migration |
 | [15-messaging.md](15-messaging.md) | Send/receive pipeline, statuses, reactions/edit/unsend, view-once, silent, expiry, voice, offline/reconnect |
-| [16-groups.md](16-groups.md) | Group creation, metadata E2EE, sender-key distribution, membership, key rotation |
+| [16-groups.md](16-groups.md) | Group creation, metadata E2EE, sender-key distribution, membership, key rotation — **blueprint 26 (T1–T4) implemented, see banner** |
 | [17-burner.md](17-burner.md) | Burner chats: link, anonymous guest, PQ-DR, file sharing, destroy |
 | [18-realtime-transport.md](18-realtime-transport.md) | WebTransport worker, Rust sidecar, Redis bridge, presence/typing, calls, push, reconnect |
 | [19-media-stories.md](19-media-stories.md) | Attachment encryption/upload/cache, stories, media tools |
@@ -49,7 +49,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 | [10-deployment-ops.md](10-deployment-ops.md) | CI/CD, VPS runbook, env vars, post-deploy checklist |
 | [11-testing.md](11-testing.md) | Unit tests, E2E, environment limitations |
 | [13-troubleshooting.md](13-troubleshooting.md) | Known errors and their fixes |
-| [26-group-privacy-blueprint.md](26-group-privacy-blueprint.md) | Group metadata hardening blueprint: sender pseudonyms, pairwise key distribution, blinded membership & receipts | Plan the next-generation group privacy work |
+| [26-group-privacy-blueprint.md](26-group-privacy-blueprint.md) | Group metadata hardening blueprint: sender pseudonyms, pairwise key distribution, blinded membership & receipts — **T1–T4 fully implemented (2026-09-26)** | Design record & residual leaks |
 | [27-total-upgrade-plan.md](27-total-upgrade-plan.md) | Master plan post-VPS-closure: infra rebuild, server/client lifting, privacy tiers, calls, media, observability | Run the rebuild-and-relaunch cycle |
 | [25-repo-infra-agents.md](25-repo-infra-agents.md) | Root repo files, CI/agent workflows, Docker Compose, agent-skills content, ambient type declarations |
 
