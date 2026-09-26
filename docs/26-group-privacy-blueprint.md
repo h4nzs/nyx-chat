@@ -202,10 +202,22 @@ Signal V2's *stored*-data posture without Signal's credential machinery.
   reuses it as the *transport* for group keys, which is exactly how Signal moves
   Sender Keys between members.
 
-## 26.7 Open questions (decide during implementation)
+## 26.7 Open questions — DECIDED (2026-09-26, maintainer)
 
-1. Pseudonym map growth: full-map rewrite vs append-only log inside metadata v2?
-2. Should pseudonyms also replace `deleteSecret` binding for unsend in groups?
-3. Delivery token rotation cadence (per group rotation? per re-login?).
-4. Ephemeral receipts: per-group toggle vs global setting default?
-5. Burner conversations: inherit all three tiers from day one (recommended).
+1. **Pseudonym map format: full rewrite + generation counter.** Metadata is already
+   fully re-encrypted at every rotation (key changes), so an append-only log saves
+   nothing and only grows the blob. Receivers care about the latest map only.
+2. **Group unsend authorization: deleteSecret-only.** After T1, `msg.senderId` holds a
+   pseudonym so the server-side `isSender` branch is dead code; `deleteSecret` (already
+   a random 64-hex client token, blind-compared via `safeEqualStrings`) becomes the
+   sole proof. Server: drop the `isSender` branch for group messages; REST
+   `X-Delete-Token` path is already consistent.
+3. **Delivery-token rotation: revocation-driven + optional 30-day refresh.** Tokens are
+   routing/membership proofs, not message secrets; coupling them to the 25-msg/1h key
+   rotation would punish offline members. Kick/leave kills the token immediately.
+4. **Read receipts: persistent (pseudonym-scoped) ON by default, per-group ephemeral
+   toggle; burner groups default ephemeral.** Balances offline read-count UX with a
+   maximum-privacy option.
+5. **Burner conversations inherit all tiers from day one** — shared conversation
+   infrastructure makes this near-zero extra cost, and burners get NO fallback path to
+   legacy userId rows (pseudonym + token only, always).
