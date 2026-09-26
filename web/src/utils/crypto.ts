@@ -308,11 +308,15 @@ export const fetchPreKeyBundles = async (userIds: string[]): Promise<Record<stri
 
 let isUploadingPrekeys = false;
 let lastPrekeyRefill = 0;
+// [MID-SESSION REFILL] Ambang stok rendah untuk pemicu di tengah sesi
+// (visibilitychange / bundle tanpa OTPK). Refill penuh ke 50 tetap dilakukan;
+// angka kecil ini hanya menentukan KAPAN cek tengah sesi bersedia mengisi.
+export const OTPK_LOW_STOCK_THRESHOLD = 3;
 
-export async function checkAndRefillOneTimePreKeys(): Promise<void> {
+export async function checkAndRefillOneTimePreKeys(opts?: { force?: boolean }): Promise<void> {
   if (isUploadingPrekeys) return;
   const now = Date.now();
-  if (now - lastPrekeyRefill < 60000) return; // 1 minute cooldown
+  if (!opts?.force && now - lastPrekeyRefill < 60000) return; // 1 minute cooldown
 
   isUploadingPrekeys = true;
   
@@ -356,6 +360,33 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
     isUploadingPrekeys = false;
   }
 }
+// [MID-SESSION REFILL] Fire-and-forget: cek stok OTPK server; refill (melewati
+// cooldown) HANYA bila stok < OTPK_LOW_STOCK_THRESHOLD (termasuk habis = 0).
+// Aman dipanggil sering — cek murah (1 GET) dan error di-swallow.
+export function scheduleOtpkTopUpCheck(): void {
+  void (async () => {
+    try {
+      const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
+      if (count < OTPK_LOW_STOCK_THRESHOLD) {
+        await checkAndRefillOneTimePreKeys({ force: true });
+      }
+    } catch {
+      // Off-line / belum auth — coba lagi di pemicu berikutnya.
+    }
+  })();
+}
+
+// Dipanggil dari lifecycle app (visibilitychange): user kembali ke tab →
+// kesempatan alami mengecek stok di tengah sesi tanpa menunggu login berikutnya.
+export function installOtpkMidSessionRefill(): void {
+  if (typeof document === 'undefined') return;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      scheduleOtpkTopUpCheck();
+    }
+  });
+}
+
 export async function resetOneTimePreKeys(): Promise<void> {
   try {
     await authFetch('/api/keys/otpk', { method: 'DELETE' });
@@ -1468,7 +1499,13 @@ export async function establishSessionFromPreKeyBundle(
 
   let theirOneTimePreKey: Uint8Array | undefined;
   let theirPqOneTimePreKey: Uint8Array | undefined;
-  if (preKeyBundle.oneTimePreKey) {
+  if (!preKeyBundle.oneTimePreKey) {
+    // [MID-SESSION REFILL] Bundle tanpa OTPK = stok PEER habis (server tidak
+    // menerbitkan apa pun). Pemicu pengaman: coba bangunkan refill di device
+    // kita (peer akan refill saat mereka aktif lagi — visibilitychange atau
+    // sesi berikutnya). Fire-and-forget, tidak boleh menggagalkan handshake.
+    scheduleOtpkTopUpCheck();
+  } else {
     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
     if (!preKeyBundle.oneTimePreKey.pqKey) {
       throw new Error("Post-Quantum Handshake Mandatory");

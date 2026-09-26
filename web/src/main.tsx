@@ -12,6 +12,7 @@ import App from './App';
 import { registerServiceWorker } from '@lib/serviceWorkerRegistration';
 import { setAuthFailureHandler } from '@lib/api';
 import { useAuthStore } from '@store/auth';
+import { installOtpkMidSessionRefill } from '@utils/crypto';
 
 // === WebMCP: Expose site tools to AI agents via the browser ===
 // See: https://webmachinelearning.github.io/webmcp/
@@ -180,6 +181,9 @@ async function bootstrap() {
   } catch (_e) {
     // Jangan blokir render bila i18n gagal — fallbackLng akan menangani
   }
+  // [MID-SESSION REFILL] Pemicu refill OTPK saat user kembali ke tab —
+  // pengaman kedua selain refill saat login (stok < 50 → isi ulang).
+  installOtpkMidSessionRefill();
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <HelmetProvider>
