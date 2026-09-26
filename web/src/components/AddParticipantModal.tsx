@@ -100,9 +100,14 @@ const AddParticipantModal = ({ conversationId, onClose }: {
     try {
       // Notify existing members about new participants
       const addRecipients = conversation?.participants?.filter(p => p.id !== me?.id)?.map(p => p.id) || [];
+      // [T3b] Inviter issues one delivery token per new member — server stores
+      // (conversation, token) rows for blinded discovery.
+      const { generateDeliveryToken } = await import('@lib/groupPseudonyms');
+      const deliveryTokens: Record<string, string> = {};
+      for (const uid of selectedUserIds) deliveryTokens[uid] = await generateDeliveryToken();
       await api(`/api/conversations/${conversationId}/participants`, {
         method: 'POST',
-        body: JSON.stringify({ userIds: selectedUserIds, targetRecipients: addRecipients }),
+        body: JSON.stringify({ userIds: selectedUserIds, targetRecipients: addRecipients, deliveryTokens }),
       });
       toast.success(t('modals:add_participant.success'));
       onClose();

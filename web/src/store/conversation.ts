@@ -16,6 +16,7 @@ import toast from 'react-hot-toast';
 import { captureAndLog } from '@utils/feedback';
 
 import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession, generatePseudonymMap } from "@utils/crypto";
+import { generateDeliveryToken } from '@lib/groupPseudonyms';
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
@@ -140,6 +141,19 @@ const initialState: State = {
   initialLoadCompleted: false,
 };
 
+/**
+ * [T3b] Bangun peta userId → delivery token untuk invite. Satu token acak
+ * per anggota, di-issue creator dan didistribusikan via encrypted metadata
+ * (anggota menemukan token miliknya setelah metadata ter-decrypt).
+ */
+const buildDeliveryTokensPayload = async (userIds: string[]): Promise<Record<string, string>> => {
+  const map: Record<string, string> = {};
+  for (const uid of userIds) {
+    map[uid] = await generateDeliveryToken();
+  }
+  return map;
+};
+
 export const useConversationStore = createWithEqualityFn<State & Actions>((set, get) => ({
   ...initialState,
 
@@ -197,11 +211,16 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
       // 2. Sync with server by local IDs (or discover new conversations for fresh users)
       let rawConversations: Conversation[] = [];
+      // [T3b] Kirim delivery tokens milik saya — discovery via possession token
+      // (transitional: jalur userId tetap berjalan paralel sampai backfill tuntas).
+      const { collectMyDeliveryTokens } = await import('@lib/groupPseudonyms');
+      const myTokens = collectMyDeliveryTokens();
+      const tokenHeaders = myTokens.length > 0 ? { 'X-Delivery-Tokens': myTokens.map(t => String(t)).join(',') } : undefined;
       if (localIds.length > 0) {
-        rawConversations = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`);
+        rawConversations = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`, { headers: tokenHeaders });
       } else {
         // New user with no local conversations — discover from UserHiddenConversation
-        rawConversations = await api<Conversation[]>('/api/conversations/sync');
+        rawConversations = await api<Conversation[]>('/api/conversations/sync', { headers: tokenHeaders });
       }
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
@@ -419,12 +438,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     let conv: Conversation | null = null;
 
     try {
+        // [T3b] Creator-issued delivery tokens — SAMA yang masuk encrypted
+        // metadata di bawah (single source, full roster termasuk creator).
+        const deliveryTokens = await buildDeliveryTokensPayload(userIds);
         const createRes = await authFetch<Conversation & { authSecret: string }>("/api/conversations", {
             method: "POST",
             body: JSON.stringify({
                 userIds,
                 isGroup: true,
-                encryptedMetadata: null 
+                encryptedMetadata: null,
+                // [T3b] Creator-issued delivery tokens per invited member —
+                // server menyimpan (conversation, token) untuk discovery.
+                deliveryTokens
             })
         });
         conv = createRes;
@@ -446,7 +471,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // [T1] Metadata v2: pseudonym map lives ONLY inside encrypted metadata —
         // server never learns pseudonym→account linkage (doc 26.2).
         const pseudonymMap = await generatePseudonymMap(allParticipantIds);
-        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id);
+        // [T3b] Peta token yang SAMA dikirim ke server (row discovery) dan
+        // disimpan di encrypted metadata (backup + anggota menemukan token
+        // miliknya setelah decrypt). Token anggota yang ditambahkan belakangan
+        // di-issue saat invite message (targetDeliveryTokens).
+        const deliveryTokenMap = { ...deliveryTokens, ...(await buildDeliveryTokensPayload([user.id])) };
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap, deliveryTokenMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id);
         
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',

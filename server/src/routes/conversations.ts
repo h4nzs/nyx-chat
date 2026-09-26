@@ -16,17 +16,41 @@ const ConversationSchema = z.object({
   encryptedMetadata: z.string().nullable().optional(),
 })
 
+// [T3b] Delivery tokens: creator issues one opaque token per invited member.
+// Server stores (conversationId, token) — it cannot link token → identity
+// beyond the row it is told to create for routing (dual-write transition).
+const DeliveryTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/)
+
 const router: Router = Router()
 router.use(requireAuth)
 
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
+// [T3b] Dual-accept: clients send their delivery tokens via `X-Delivery-Tokens`
+// (comma-separated base64url, 22-char each). Token possession authenticates
+// discovery without identity joins; the legacy userId path stays until the
+// token backfill completes (doc 26.2 migration).
 router.get('/sync', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     
     const ids = String(req.query.ids ?? '');
     let conversationIds: string[] = ids ? ids.split(',') : [];
+
+    // [T3b] Token-presented conversations: exact-match against deliveryToken
+    // (unique index). Timing-safe not required — tokens are random 128-bit
+    // values looked up by unique index; a wrong guess is just a miss.
+    const tokenHeader = req.headers['x-delivery-tokens'];
+    if (typeof tokenHeader === 'string' && tokenHeader.length > 0) {
+      const tokens = tokenHeader.split(',').map(t => t.trim()).filter(t => /^[A-Za-z0-9_-]{22}$/.test(t)).slice(0, 500);
+      if (tokens.length > 0) {
+        const tokenRows = await prisma.userHiddenConversation.findMany({
+          where: { deliveryToken: { in: tokens } },
+          select: { conversationId: true }
+        });
+        conversationIds.push(...tokenRows.map(r => r.conversationId));
+      }
+    }
 
     // Discover conversations from UserHiddenConversation records
     // (created when conversations are created or messages are sent)
@@ -94,13 +118,19 @@ const initialSessionSchema = z.object({
 router.post('/', zodValidate({
   body: ConversationSchema.pick({ isGroup: true, encryptedMetadata: true }).extend({
     userIds: z.array(z.string()).min(1),
-    initialSession: initialSessionSchema.optional()
+    initialSession: initialSessionSchema.optional(),
+    // [T3b] Map userId -> delivery token, issued client-side by the creator.
+    deliveryTokens: z.record(DeliveryTokenSchema, DeliveryTokenSchema).optional(),
   })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const creatorId = req.user.id
-    const { userIds, isGroup, encryptedMetadata, initialSession } = req.body
+    const { userIds, isGroup, encryptedMetadata, initialSession, deliveryTokens } = req.body as {
+      userIds: string[]; isGroup?: boolean; encryptedMetadata?: string | null;
+      initialSession?: { sessionId: string; initialKeysPerDevice: Record<string, string>; initiatorCiphertextsPerDevice: Record<string, string> };
+      deliveryTokens?: Record<string, string>;
+    }
 
     const today = new Date().toISOString().split('T')[0];
     // INCR+EXPIRE atomik (Lua) — mencegah key hidup selamanya bila proses mati di antaranya
@@ -136,12 +166,15 @@ return current
           const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession;
           const keyRecords = [];
           for (const deviceId in initialKeysPerDevice) {
+            const encryptedKey = initialKeysPerDevice[deviceId];
+            const initiatorCiphertext = initiatorCiphertextsPerDevice[deviceId];
+            if (typeof encryptedKey !== 'string' || typeof initiatorCiphertext !== 'string') continue;
             keyRecords.push({
               conversationId: convo.id,
               deviceId,
               sessionId,
-              encryptedKey: initialKeysPerDevice[deviceId],
-              initiatorCiphertext: initiatorCiphertextsPerDevice[deviceId]
+              encryptedKey: Buffer.from(encryptedKey, 'base64'),
+              initiatorCiphertext: Buffer.from(initiatorCiphertext, 'base64')
             });
           }
           if (keyRecords.length > 0) {
@@ -166,10 +199,13 @@ return current
     
     // Register discovery records for offline recipients
     for (const uid of allUserIds.filter(uid => uid !== creatorId)) {
+        // [T3b] Dual-write transition: userId row (legacy sync path) AND the
+        // creator-issued delivery token on the same row. Once token backfill
+        // completes, the userId join path is dropped (doc 26.2).
         prisma.userHiddenConversation.upsert({
             where: { userId_conversationId: { userId: uid, conversationId: newConversation.id } },
-            create: { userId: uid, conversationId: newConversation.id },
-            update: {}
+            create: { userId: uid, conversationId: newConversation.id, deliveryToken: deliveryTokens?.[uid] ?? null },
+            update: deliveryTokens?.[uid] ? { deliveryToken: deliveryTokens[uid] } : {}
         }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
     
@@ -235,7 +271,20 @@ router.post('/:id/participants', async (req, res, next) => {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
   }    const safeConv = toConversation(hoistConvoKeys(conversation as unknown as RawConversationData));
   safeConv.participants = [];
-  
+
+  // [T3b] Dual-write discovery rows for the NEW members, with the inviter-
+  // issued delivery tokens (same contract as POST /conversations).
+  const deliveryTokens = req.body.deliveryTokens as Record<string, string> | undefined;
+  if (Array.isArray(userIds)) {
+    for (const uid of userIds) {
+      prisma.userHiddenConversation.upsert({
+        where: { userId_conversationId: { userId: uid, conversationId } },
+        create: { userId: uid, conversationId, deliveryToken: deliveryTokens?.[uid] ?? null },
+        update: deliveryTokens?.[uid] ? { deliveryToken: deliveryTokens[uid] } : {}
+      }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
+    }
+  }
+
   for (const uid of userIds) {
       await emitEventToUser(uid, 'conversation:new', safeConv);
   }
@@ -264,6 +313,11 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     await emitEventToUsers(removeRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(removeRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
+  // [T3b] Token revocation = delete row (doc 26.2): kicked member's delivery
+  // token dies — they can no longer discover the conversation via sync.
+  prisma.userHiddenConversation.delete({
+    where: { userId_conversationId: { userId, conversationId } }
+  }).catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
   await emitEventToUser(userId, 'conversation:deleted', { id: asConversationId(conversationId) });
   res.status(204).end();
 });
@@ -285,6 +339,10 @@ router.delete('/:id/leave', async (req, res, next) => {
     await emitEventToUsers(leaveRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(leaveRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
+  // [T3b] Leave = revoke own delivery token.
+  prisma.userHiddenConversation.delete({
+    where: { userId_conversationId: { userId, conversationId } }
+  }).catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
   res.status(204).end();
 });
 

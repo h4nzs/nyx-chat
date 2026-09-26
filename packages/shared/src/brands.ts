@@ -6,9 +6,12 @@ export type MessageId = Branded<string, 'MessageId'>;
 export type StoryId = Branded<string, 'StoryId'>;
 /** [T1] Per-group sender pseudonym — opaque, unlinkable to accounts server-side. */
 export type Pseudonym = Branded<string, 'Pseudonym'>;
+/** [T3b] Per-(group, member) delivery token — membership attestation without identity. */
+export type DeliveryToken = Branded<string, 'DeliveryToken'>;
 
 export const asUserId = (id: string): UserId => id as unknown as UserId;
 export const asConversationId = (id: string): ConversationId => id as unknown as ConversationId;
 export const asMessageId = (id: string): MessageId => id as unknown as MessageId;
 export const asStoryId = (id: string): StoryId => id as unknown as StoryId;
 export const asPseudonym = (id: string): Pseudonym => id as unknown as Pseudonym;
+export const asDeliveryToken = (id: string): DeliveryToken => id as unknown as DeliveryToken;

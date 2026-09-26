@@ -28,6 +28,8 @@ export interface MessageSendPayload {
   deleteSecret?: string; // Secret for blind authorization of message deletion
   /** [T1] Opaque per-group sender pseudonym (doc 26.2). Absent → legacy. */
   senderPseudonym?: string;
+  /** [T3b] Map userId -> delivery token, piggybacked on invite messages. */
+  targetDeliveryTokens?: Record<string, string>;
 }
 
 export interface PushSubscribePayload {

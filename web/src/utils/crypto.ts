@@ -8,6 +8,8 @@ import {
   getPseudonymMap,
   getMyPseudonym,
   resolvePseudonymToUserId,
+  getDeliveryTokenMap,
+  getMyDeliveryToken,
 } from '@lib/groupPseudonyms';
 export {
   generateGroupPseudonym,
@@ -15,6 +17,11 @@ export {
   getPseudonymMap,
   getMyPseudonym,
   resolvePseudonymToUserId,
+  generateDeliveryToken,
+  generateDeliveryTokenMap,
+  getDeliveryTokenMap,
+  getMyDeliveryToken,
+  collectMyDeliveryTokens,
 } from '@lib/groupPseudonyms';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
@@ -66,7 +73,7 @@ import type { Participant } from '@store/conversation';
 export async function encryptGroupMetadata(
   // [T1] metadata v2 membawa v/generation/pseudonymMap; v1 (tanpa field itu)
   // tetap valid untuk grup lawas.
-  metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2; generation?: number; pseudonymMap?: Record<string, string> },
+  metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2; generation?: number; pseudonymMap?: Record<string, string>; deliveryTokenMap?: Record<string, string> },
   conversationId: string
 ): Promise<string> {
   // [T1 ROTATION] Regenerasi peta pseudonym SEKALI di sini — single choke point
@@ -89,6 +96,16 @@ export async function encryptGroupMetadata(
       pseudonymMap: await generatePseudonymMap(metadata.participants ?? []),
     };
     void prev; // peta lama sengaja tidak dipertahankan — unlinkability requirement
+  }
+  // [T3b] Token TIDAK di-rotate bersama pseudonym: delivery token adalah
+  // identitas penyinkronan yang stabil per anggota (server match by unique
+  // index). Re-encrypt tanpa peta eksplisit → warisi peta dari metadata lama
+  // (anggota yang keluar hilang otomatis karena metadata baru hanya membawa
+  // anggota aktif; server-side revocation = hapus row token). Panggilan dengan
+  // peta eksplisit (createGroup) → dipakai apa adanya.
+  if (metadata.v === 2 && !metadata.deliveryTokenMap) {
+    const prevTokens = getDeliveryTokenMap(conversationId);
+    if (prevTokens) metadata = { ...metadata, deliveryTokenMap: prevTokens };
   }
   // Ensure we have a valid session before encrypting metadata
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);

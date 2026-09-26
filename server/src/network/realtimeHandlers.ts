@@ -196,7 +196,7 @@ export async function handleChatMessage(
     return;
   }
 
-  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId, targetRecipients, deleteSecret, senderPseudonym } = validatedPayload;
+  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId, targetRecipients, deleteSecret, senderPseudonym, targetDeliveryTokens } = validatedPayload;
 
   try {
     // --- IDEMPOTENSI: reserve slot dedupe sebelum menyentuh DB ---
@@ -292,10 +292,12 @@ export async function handleChatMessage(
 
                 // Register this conversation for the target recipient so they can discover it later
                 // (Critical for new users who have never synced this conversation before)
+                // [T3b] Dual-write: userId row (legacy sync) + creator-issued delivery
+                // token when the sender piggybacked one (doc 26.2).
                 ctx.prisma.userHiddenConversation.upsert({
                     where: { userId_conversationId: { userId: targetId, conversationId } },
-                    create: { userId: targetId, conversationId },
-                    update: {} // No-op if already exists
+                    create: { userId: targetId, conversationId, deliveryToken: targetDeliveryTokens?.[targetId] ?? null },
+                    update: targetDeliveryTokens?.[targetId] ? { deliveryToken: targetDeliveryTokens[targetId] } : {} // No-op if already exists
                 }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
             }
         }));

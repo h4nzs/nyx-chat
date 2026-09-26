@@ -33,13 +33,13 @@ model User {
   devices Device[]
 
   // --- RELASI PENGGUNA ---
-  messages             Message[]
-  messageStatuses      MessageStatus[]
-  stories              Story[]
-  hiddenConversations  UserHiddenConversation[]
-  authenticators       Authenticator[]
-  blockedUsers         BlockedUser[]            @relation("Blocker")
-  blockedBy            BlockedUser[]            @relation("Blocked")
+  messages            Message[]
+  messageStatuses     MessageStatus[]
+  stories             Story[]
+  hiddenConversations UserHiddenConversation[]
+  authenticators      Authenticator[]
+  blockedUsers        BlockedUser[]            @relation("Blocker")
+  blockedBy           BlockedUser[]            @relation("Blocked")
 
   // --- MULTI-TENANCY (B2B BaaS) ---
   tenantId   String?
@@ -72,10 +72,10 @@ model Tenant {
 // 📱 TABEL BARU: DEVICE (PERANGKAT)
 // ==========================================
 model Device {
-  id     String  @id @default(cuid())
-  userId String
-  name   String? // e.g., "Chrome on MacOS", "iPhone 15"
-  fingerprint String? // Browser/Hardware fingerprint for security verification
+  id             String  @id @default(cuid())
+  userId         String
+  name           String? // e.g., "Chrome on MacOS", "iPhone 15"
+  fingerprint    String? // Browser/Hardware fingerprint for security verification
   installationId String? // Persistent installation anchor from IndexedDB
 
   // Identitas Kriptografi (Pindahan dari tabel User)
@@ -128,20 +128,20 @@ model PreKeyBundle {
 }
 
 model RefreshToken {
-  id           String    @id @default(cuid())
-  jti          String    @unique
-  familyId     String    @default("legacy") // Groups tokens from the same original session (rotation chain). Default for legacy tokens pre-migration.
-  deviceId     String // Sesi login diikat ke Perangkat
-  device       Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  userAgent    String?
-  ipAddress    String?
-  revokedAt    DateTime?
-  replacedById String? @unique // Points to the previous token in this family chain
-  replacedBy   RefreshToken? @relation("TokenReplacement", fields: [replacedById], references: [id])
+  id            String        @id @default(cuid())
+  jti           String        @unique
+  familyId      String        @default("legacy") // Groups tokens from the same original session (rotation chain). Default for legacy tokens pre-migration.
+  deviceId      String // Sesi login diikat ke Perangkat
+  device        Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  userAgent     String?
+  ipAddress     String?
+  revokedAt     DateTime?
+  replacedById  String?       @unique // Points to the previous token in this family chain
+  replacedBy    RefreshToken? @relation("TokenReplacement", fields: [replacedById], references: [id])
   replacedToken RefreshToken? @relation("TokenReplacement")
-  createdAt    DateTime  @default(now())
-  lastUsedAt   DateTime  @updatedAt
-  expiresAt    DateTime
+  createdAt     DateTime      @default(now())
+  lastUsedAt    DateTime      @updatedAt
+  expiresAt     DateTime
 
   @@index([deviceId])
   @@index([expiresAt])
@@ -203,8 +203,6 @@ model Conversation {
   @@index([createdAt])
   @@index([isGroup])
 }
-
-
 
 enum MessageType {
   USER
@@ -270,10 +268,17 @@ model UserHiddenConversation {
   id             String       @id @default(cuid())
   userId         String
   conversationId String
+  // [T3b DELIVERY TOKENS — doc 26.2] Opaque per-(group, member) delivery token.
+  // Nullable: legacy rows (pre-T3b) have none — dual-accept during transition,
+  // new membership writes are token-only. Sync/discovery resolves via token
+  // possession; the userId join path stays until the token backfill completes.
+  deliveryToken  String?      @unique
+  createdAt      DateTime     @default(now())
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@unique([userId, conversationId])
+  @@index([conversationId])
 }
 
 model Authenticator {

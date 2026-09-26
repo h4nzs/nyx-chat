@@ -169,7 +169,9 @@ router.post('/', zodValidate({
     expiresIn: z.number().optional().nullable(),
     isViewOnce: z.boolean().optional(),
     // Cap sama dengan jalur WebTransport: mencegah amplifikasi relay via REST
-    targetRecipients: z.array(z.string()).max(500).optional()
+    targetRecipients: z.array(z.string()).max(500).optional(),
+    // [T3b] Delivery tokens (dual-write saat invite relay) — jalur REST fallback
+    targetDeliveryTokens: z.record(z.string().regex(/^[A-Za-z0-9_-]{22}$/), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
     // repliedToId dihapus validasinya karena relasi DB sudah diputus
   }).refine(data => data.content, { message: "Message must contain content" })
 }), async (req, res, next) => {
@@ -231,10 +233,12 @@ router.post('/', zodValidate({
                 await sendJsonToUser(targetId, TransportOpCode.CHAT_MESSAGE, safeMessage);
 
                 // Register for offline discovery
+                // [T3b] Dual-write: userId row + creator-issued delivery token.
+                const targetDeliveryTokens = req.body.targetDeliveryTokens as Record<string, string> | undefined;
                 prisma.userHiddenConversation.upsert({
                     where: { userId_conversationId: { userId: targetId, conversationId } },
-                    create: { userId: targetId, conversationId },
-                    update: {}
+                    create: { userId: targetId, conversationId, deliveryToken: targetDeliveryTokens?.[targetId] ?? null },
+                    update: targetDeliveryTokens?.[targetId] ? { deliveryToken: targetDeliveryTokens[targetId] } : {}
                 }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
             }
         }));

@@ -168,6 +168,10 @@ export interface GroupMetadataV2 {
   generation: number;
   /** pseudonym (22-char base64url of 16 random bytes) -> userId. */
   pseudonymMap: Record<string, string>;
+  /** [T3b] Per-member delivery token (base64url of 16 random bytes) -> userId.
+   *  Lives ONLY inside encrypted metadata; server stores the token for the
+   *  member it was issued to, without learning the full roster. */
+  deliveryTokenMap?: Record<string, string>;
 }
 
 export type ConversationUi = Conversation & {

@@ -13,12 +13,76 @@
  * Di-extract sebagai module ringan (pola `groupMetadata.ts`) agar bisa
  * diuji unit tanpa memuat graph crypto worker yang berat.
  */
-import type { Pseudonym } from '@nyx/shared';
-import { asPseudonym } from '@nyx/shared';
+import type { Pseudonym, DeliveryToken } from '@nyx/shared';
+import { asPseudonym, asDeliveryToken } from '@nyx/shared';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
 
 const PSEUDONYM_BYTES = 16; // 22-char base64url
+
+// --- [T3b] Delivery tokens (doc 26.2) ---
+
+/** Random per-(group, member) delivery token (base64url of 16 random bytes). */
+export async function generateDeliveryToken(): Promise<DeliveryToken> {
+  const { getSodium } = await import('./sodiumInitializer');
+  const sodium = await getSodium();
+  const raw = sodium.randombytes_buf(PSEUDONYM_BYTES);
+  try {
+    return asDeliveryToken(sodium.to_base64(raw, sodium.base64_variants.URLSAFE_NO_PADDING));
+  } finally {
+    sodium.memzero(raw);
+  }
+}
+
+/**
+ * Bangun peta token lengkap untuk seluruh anggota (creator-issued, full-rewrite
+ * per rotasi — pola sama dengan pseudonymMap, keputusan 26.7.1).
+ */
+export async function generateDeliveryTokenMap(participantIds: string[]): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const uid of participantIds) {
+    let token = await generateDeliveryToken();
+    while (seen.has(token)) token = await generateDeliveryToken();
+    seen.add(token);
+    map[token] = uid;
+  }
+  return map;
+}
+
+/** Peta token grup ini dari decryptedMetadata v2 (undefined = legacy). */
+export function getDeliveryTokenMap(conversationId: string): Record<string, string> | undefined {
+  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  const meta = conv?.decryptedMetadata as { v?: number; deliveryTokenMap?: Record<string, string> } | undefined;
+  return meta?.v === 2 ? meta.deliveryTokenMap : undefined;
+}
+
+/**
+ * Token SAYA untuk percakapan ini — dikirim saat sync agar discovery memakai
+ * possession token, bukan join userId (jalur legacy tetap jalan transitional).
+ */
+export function getMyDeliveryToken(conversationId: string): DeliveryToken | undefined {
+  const map = getDeliveryTokenMap(conversationId);
+  if (!map) return undefined;
+  const myId = useAuthStore.getState().user?.id;
+  if (!myId) return undefined;
+  const found = Object.entries(map).find(([, uid]) => uid === myId);
+  return found ? asDeliveryToken(found[0]) : undefined;
+}
+
+/** Semua token milik saya lintas grup (untuk header X-Delivery-Tokens saat sync). */
+export function collectMyDeliveryTokens(): DeliveryToken[] {
+  const myId = useAuthStore.getState().user?.id;
+  if (!myId) return [];
+  const tokens: DeliveryToken[] = [];
+  for (const conv of useConversationStore.getState().conversations) {
+    const meta = conv.decryptedMetadata as { v?: number; deliveryTokenMap?: Record<string, string> } | undefined;
+    if (meta?.v !== 2 || !meta.deliveryTokenMap) continue;
+    const found = Object.entries(meta.deliveryTokenMap).find(([, uid]) => uid === myId);
+    if (found) tokens.push(asDeliveryToken(found[0]));
+  }
+  return tokens;
+}
 
 /** Random per-group sender pseudonym (base64url of 16 random bytes). */
 export async function generateGroupPseudonym(): Promise<Pseudonym> {
@@ -53,6 +117,7 @@ export async function generatePseudonymMap(participantIds: string[]): Promise<Re
 /**
  * Baca peta pseudonym dari decryptedMetadata (bila metadata v2).
  * Return undefined untuk metadata v1 (grup lawas — jalur userId lama tetap jalan).
+ * [T3b] Lihat juga helper deliveryToken di bawah — pola akses identik.
  */
 export function getPseudonymMap(conversationId: string): Record<string, string> | undefined {
   const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);

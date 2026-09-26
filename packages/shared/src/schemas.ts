@@ -108,7 +108,11 @@ export const MessageSendPayloadSchema = z.object({
   // [T1 GROUP PSEUDONYMS] Opaque per-group sender id (doc 26.2). Group senders
   // supply this instead of letting the server bind the authenticated userId;
   // server stores it verbatim in Message.senderId. Absent → legacy behavior.
-  senderPseudonym: z.string().regex(/^[A-Za-z0-9_-]{22}$/).optional()
+  senderPseudonym: z.string().regex(/^[A-Za-z0-9_-]{22}$/).optional(),
+  // [T3b DELIVERY TOKENS] Map userId -> delivery token, piggybacked on invite
+  // messages so the server can register (conversation, token) rows for offline
+  // discovery without learning the roster beyond routing rows.
+  targetDeliveryTokens: z.record(z.string().regex(/^[A-Za-z0-9_-]{22}$/), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
 });
 
 export const IncomingMessageSchema = z.object({
