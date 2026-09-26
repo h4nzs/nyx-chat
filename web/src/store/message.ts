@@ -18,6 +18,8 @@ import {
   deriveSessionKeyAsRecipient,
   storeRatchetStateSecurely,
   retrieveRatchetStateSecurely,
+  getPseudonymMap,
+  getMyPseudonym,
   PreKeyBundle 
 } from "@utils/crypto";
 import toast from "react-hot-toast";
@@ -42,13 +44,17 @@ import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload,
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
 
-const incomingMessageLocks = new Map<string, Promise<void>>();
-
-function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
+const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conv) return messages;
-    
-    const participantsMap = new Map(conv.participants.map(p => [('userId' in p ? (p.userId || p.id) : p.id), p]));
+    // [T1] Metadata v2 membawa peta pseudonym→userId. Resolusi dilakukan SEKALI
+    // di sini: sisa pipeline (profil, receipts UI, dsb.) tetap bekerja dengan
+    // userId seperti biasa. Pseudonym asli TETAP di field senderId pesan yang
+    // tersimpan/diteruskan server — hanya tampilan yang di-resolve.
+    const pseudoMap = getPseudonymMap(conversationId);
+    const resolveSender = (senderId: string): string =>
+      (pseudoMap && pseudoMap[senderId]) ? pseudoMap[senderId] : senderId;
+    const participantsMap = new Map(conv.participants.map(p => [('userId' in p ? (p.userId || p.id) : p.id) as string, p]));
     const cachedProfiles = useProfileStore.getState().profiles;
     
     // O(profiles) sekali: petakan profile cache by userId (format key: `<userId>_<hash32>`).
@@ -60,8 +66,9 @@ function enrichMessagesWithSenderProfile(conversationId: string, messages: Messa
     }
     
     return messages.map(m => {
-        const pInfo = participantsMap.get(m.senderId);
-        const globalProfile = profilesByUser.get(m.senderId) ?? null;
+        const resolvedUserId = resolveSender(m.senderId);
+        const pInfo = participantsMap.get(resolvedUserId);
+        const globalProfile = profilesByUser.get(resolvedUserId) ?? null;
 
         const resolvedName = globalProfile?.name || pInfo?.name;
         const resolvedUsername = globalProfile?.username || pInfo?.username;
@@ -1254,7 +1261,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           pushPayloads: payloadData.pushPayloads ?? undefined,
           repliedToId: payloadData.repliedToId ?? undefined,
           isViewOnce: payloadData.isViewOnce ?? false,
-          targetRecipients
+          targetRecipients,
+          // [T1] Grup dengan metadata v2: kirim pseudonym (server menyimpan
+          // verbatim). undefined → server pakai jalur legacy (userId).
+          senderPseudonym: await getMyPseudonym(conversationId)
       };
 
       await new Promise<void>((resolve) => {

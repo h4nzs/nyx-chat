@@ -1,4 +1,5 @@
-import type { DoubleRatchetState, ConversationId, UserId } from '@nyx/shared';
+import type { DoubleRatchetState, ConversationId, UserId, Pseudonym } from '@nyx/shared';
+import { asPseudonym } from '@nyx/shared';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -47,7 +48,9 @@ import type { Participant } from '@store/conversation';
 // --- Group Metadata Helpers ---
 
 export async function encryptGroupMetadata(
-  metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[] },
+  // [T1] metadata v2 membawa v/generation/pseudonymMap; v1 (tanpa field itu)
+  // tetap valid untuk grup lawas.
+  metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2; generation?: number; pseudonymMap?: Record<string, string> },
   conversationId: string
 ): Promise<string> {
   // Ensure we have a valid session before encrypting metadata
@@ -156,6 +159,72 @@ export async function decryptGroupMetadata(
     console.error("Failed to decrypt group metadata", e);
     return null;
   }
+}
+
+// --- T1: Group sender pseudonyms (doc 26.2 / 26.7) ---
+//
+// Peta `pseudonym -> userId` HIDUP HANYA di dalam encrypted metadata (v2).
+// Server melihat `senderId` pseudonym acak yang tidak bisa di-link ke akun
+// maupun antar grup. Generation naik pada tiap full key/membership rotation
+// sehingga pesan pra/pasca rotasi tidak bisa di-stitch oleh server.
+
+const PSEUDONYM_BYTES = 16; // 22-char base64url
+
+/** Random per-group sender pseudonym (base64url of 16 random bytes). */
+export async function generateGroupPseudonym(): Promise<Pseudonym> {
+  const sodium = await getSodiumLib();
+  const raw = sodium.randombytes_buf(PSEUDONYM_BYTES);
+  try {
+    return asPseudonym(sodium.to_base64(raw, sodium.base64_variants.URLSAFE_NO_PADDING));
+  } finally {
+    sodium.memzero(raw);
+  }
+}
+
+/**
+ * Bangun peta pseudonym lengkap untuk seluruh anggota (full rewrite per
+ * rotasi — keputusan 26.7.1). Dipanggil creator saat createGroup dan setiap
+ * kali metadata v2 di-encrypt ulang (rotasi kunci/keanggotaan).
+ */
+export async function generatePseudonymMap(participantIds: string[]): Promise<Record<string, string>> {
+  const map: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const uid of participantIds) {
+    // (Sangat tidak mungkin) collision guard — regenerasi bila tabrakan.
+    let pseudo = await generateGroupPseudonym();
+    while (seen.has(pseudo)) pseudo = await generateGroupPseudonym();
+    seen.add(pseudo);
+    map[pseudo] = uid;
+  }
+  return map;
+}
+
+/**
+ * Baca peta pseudonym dari decryptedMetadata (bila metadata v2).
+ * Return undefined untuk metadata v1 (grup lawas — jalur userId lama tetap jalan).
+ */
+export function getPseudonymMap(conversationId: string): Record<string, string> | undefined {
+  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  const meta = conv?.decryptedMetadata as { v?: number; pseudonymMap?: Record<string, string> } | undefined;
+  return meta?.v === 2 ? meta.pseudonymMap : undefined;
+}
+
+/**
+ * Pseudonym SAYA untuk percakapan ini. Fallback: undefined → caller harus
+ * memakai jalur lama (metadata v1) atau menunggu metadata v2 ter-decrypt.
+ */
+export async function getMyPseudonym(conversationId: string): Promise<Pseudonym | undefined> {
+  const map = getPseudonymMap(conversationId);
+  if (!map) return undefined;
+  const myId = useAuthStore.getState().user?.id;
+  if (!myId) return undefined;
+  const found = Object.entries(map).find(([, uid]) => uid === myId);
+  return found ? asPseudonym(found[0]) : undefined;
+}
+
+/** Resolve pseudonym -> userId (untuk penerima). Bukan anggota peta → undefined. */
+export function resolvePseudonymToUserId(conversationId: string, pseudonym: string): string | undefined {
+  return getPseudonymMap(conversationId)?.[pseudonym];
 }
 
 // --- Secure Storage Helpers ---
@@ -732,7 +801,12 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   targetDeviceKey: bundle.identityKey,
                   key: finalEncryptedKeyStr,
                   type: 'GROUP_KEY',
-                  senderId: myId,
+                  // [T1] senderId di sini = identitas routing distribusi kunci.
+                  // Pakai pseudonym bila peta v2 tersedia agar server tidak bisa
+                  // menghubungkan "siapa mendistribusikan kunci ke siapa" dengan
+                  // akun. Penerima resolve ke userId via metadata untuk
+                  // receiver-state store (handleGroupKeyDistribution).
+                  senderId: (await getMyPseudonym(conversationId)) ?? myId,
                   senderDeviceKey: myIdentityKeyB64
               });
           }
@@ -1108,6 +1182,9 @@ async function doEncryptMessage(
   const { publicKey } = await getMyEncryptionKeyPair();
   const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
+  // [T1] Di dalam payload terenkripsi, identitas pengirim tetap userId penuh
+  // (dipakai penerima untuk resolve profile). YANG DIKIRIM KE SERVER (wrapper
+  // di bawah) memakai pseudonym bila metadata v2 tersedia.
   const sealedPayload = JSON.stringify({
       content: text,
       senderId: myId,
@@ -1128,12 +1205,21 @@ async function doEncryptMessage(
 
   const keyId = senderState.CK.substring(0, 8);
 
+  // [T1] Wrapper yang diteruskan server memakai PSEUDONYM (bukan userId) bila
+  // peta metadata v2 tersedia. Server menyimpan nilai ini apa adanya di
+  // Message.senderId → tidak bisa di-link ke akun. Penerima resolve balik ke
+  // userId via peta di decryptedMetadata; receiver-state tetap dikunci per
+  // (conversationId, senderId-wrapper, senderDeviceKey) — konsisten untuk
+  // distribusi kunci yang memakai pseudonym yang sama.
+  const myPseudo = await getMyPseudonym(conversationId);
+  const senderIdForServer = myPseudo ?? myId;
+
   const payload = JSON.stringify({
       header: result.header,
       ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
       signature: result.signature,
       keyId: keyId,
-      senderId: myId,
+      senderId: senderIdForServer,
       senderDeviceKey: myPublicKeyB64
   });
   
@@ -1659,11 +1745,14 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
     const encryptedKeyForRequester = await worker_pq_box_seal(payloadToEncrypt, requesterPqPublicKey, requesterPublicKey);
     const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
     const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    // [T1] Fulfillment = replay distribusi kunci → sertakan pseudonym agar
+    // requester mengenali sender via peta metadata (bukan via userId).
     emitGroupKeyFulfillment({
         requesterId, conversationId,
         encryptedKey: sodium.to_base64(encryptedKeyForRequester, sodium.base64_variants.URLSAFE_NO_PADDING),
         targetDeviceId: payload.requesterDeviceId,
-        senderDeviceKey: myIdentityKeyB64
+        senderDeviceKey: myIdentityKeyB64,
+        senderPseudonym: await getMyPseudonym(conversationId)
     });
   } catch (e) {
     console.error('[Group Key] Failed to encrypt sender key for fulfillment:', e);
@@ -1721,9 +1810,11 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
         return;
     }
     
-    // Skip our own key distribution — we already have the sender state
+    // Skip our own key distribution — we already have the sender state.
+    // [T1] senderId bisa pseudonym (metadata v2) atau userId (legacy) — cek keduanya.
     const myId = useAuthStore.getState().user?.id;
-    if (senderId === myId) {
+    const senderUserId = resolvePseudonymToUserId(conversationId, senderId) ?? senderId;
+    if (senderUserId === myId) {
         console.debug(`[storeReceivedSessionKey] Skipping own GROUP_KEY distribution for conv=${conversationId}`);
         return;
     }
@@ -1786,7 +1877,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
         // If offline key is stale (keys regenerated), request fresh key from sender
         const authStore = useAuthStore.getState();
         const myId = authStore.user?.id;
-        if (senderId && myId !== senderId) {
+        if (senderId && myId !== senderUserId) {
             import('@lib/transportClient').then(({ emitGroupKeyRequest }) => {
                 emitGroupKeyRequest(conversationId, senderId, senderDeviceKey).catch(() => {});
             });

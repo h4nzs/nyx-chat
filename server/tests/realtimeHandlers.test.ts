@@ -245,6 +245,117 @@ test('handleChatMessage: insert gagal melepaskan slot dedupe sehingga retry bisa
   assert.equal((ackCall![2] as { data: { ok: boolean } }).data.ok, false);
 });
 
+// --- T1: Group sender pseudonyms (doc 26.2/26.7) ---
+
+test('T1: chat_message grup dengan senderPseudonym tersimpan dengan pseudonym, bukan userId auth', async () => {
+  const { ctx, calls } = makeCtx();
+  // Prisma fake: capture create args (ganti default Proxy makeCtx untuk message.create).
+  let created: Record<string, unknown> | null = null;
+  const baseCreate = (ctx.prisma as unknown as Record<string, never>);
+  void baseCreate;
+  const origPrisma = ctx.prisma;
+  ctx.prisma = new Proxy(origPrisma as unknown as Record<string, unknown>, {
+    get(target, prop: string) {
+      if (prop === 'message') {
+        return {
+          findUnique: async () => null,
+          create: async (args: { data: Record<string, unknown> }) => {
+            created = args.data;
+            return {
+              id: 'm-t1',
+              conversationId: 'c1',
+              content: 'x',
+              createdAt: new Date().toISOString(),
+              type: 'USER',
+              isViewOnce: false,
+              sender: { id: 'pseudonym', encryptedProfile: null },
+              ...args.data,
+            };
+          },
+          update: async () => ({}),
+          delete: async () => ({}),
+        };
+      }
+      if (prop === 'conversation') {
+        return {
+          findUnique: async () => ({ id: 'c1', isGroup: true }),
+          update: async () => ({}),
+        };
+      }
+      if (prop === '$transaction') return async (fns: unknown[]) => Promise.all(fns as Promise<unknown>[]);
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as RealtimeContext['prisma'];
+
+  await handleChatMessage(ctx, 'u-real', 'd1', {
+    conversationId: 'c1',
+    content: 'sealed-payload',
+    tempId: 1,
+    senderPseudonym: 'AAAAAAAAAAAAAAAAAAAAAA',
+  } as never, 'ack-t1');
+
+  assert.ok(created, 'pesan harus dibuat');
+  assert.equal(created!['senderId'], 'AAAAAAAAAAAAAAAAAAAAAA', 'senderId DB = pseudonym (bukan userId)');
+});
+
+test('T1: distribute_keys merelay senderPseudonym ke penerima & SYSTEM message', async () => {
+  const { ctx, calls } = makeCtx();
+  const created: Array<Record<string, unknown>> = [];
+  const origPrisma = ctx.prisma;
+  ctx.prisma = new Proxy(origPrisma as unknown as Record<string, unknown>, {
+    get(target, prop: string) {
+      if (prop === 'message') {
+        return {
+          create: async (args: { data: Record<string, unknown> }) => {
+            created.push(args.data);
+            return args.data;
+          },
+          findUnique: async () => null,
+          update: async () => ({}),
+          delete: async () => ({}),
+        };
+      }
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as RealtimeContext['prisma'];
+
+  await handleKeySync(ctx, 'u-real', 'd1', {
+    event: 'messages:distribute_keys',
+    msgId: '',
+    data: {
+      conversationId: 'c1',
+      senderPseudonym: 'BBBBBBBBBBBBBBBBBBBBBB',
+      keys: [{ userId: 'u2', key: 'sealed-key-material', senderDeviceKey: 'dev-u-real' }],
+    },
+  });
+
+  assert.equal(created.length, 1, 'SYSTEM message untuk offline catchup');
+  assert.equal(created[0]!['senderId'], 'BBBBBBBBBBBBBBBBBBBBBB', 'SYSTEM senderId = pseudonym');
+  const relay = calls.sendJsonToUser.find((c) => c[0] === 'u2');
+  assert.ok(relay, 'relay ke target harus ada');
+  assert.equal((relay![2] as { data?: { senderId?: string } }).data?.senderId, 'BBBBBBBBBBBBBBBBBBBBBB');
+});
+
+test('T1: unsend grup tanpa deleteSecret ditolak (deleteSecret-only untuk grup)', async () => {
+  const { ctx } = makeCtx();
+  (ctx.prisma as unknown as { message: { findUnique: () => unknown; delete: () => Promise<void> } }).message = {
+    findUnique: () => ({ conversationId: 'c1', senderId: 'PSEUDO-not-user', deleteSecret: 'secret123' }),
+    delete: async () => {},
+  };
+  // Tidak ada deleteSecret → meski senderId cocok userId auth pun tidak (pseudonym ≠ userId).
+  await assert.doesNotReject(handleKeySync(ctx, 'u-real', 'd1', {
+    event: 'message:unsend',
+    msgId: '',
+    data: { messageId: 'm1', conversationId: 'c1' },
+  }));
+  // deleteSecret valid → lolos (tidak ada error).
+  await assert.doesNotReject(handleKeySync(ctx, 'u-real', 'd1', {
+    event: 'message:unsend',
+    msgId: '',
+    data: { messageId: 'm1', conversationId: 'c1', deleteSecret: 'secret123' },
+  }));
+});
+
 test('handleKeySync: meneruskan session:request_key ke target lewat emitEventToUser (bukti injeksi)', async () => {
   const { ctx, calls } = makeCtx();
   await handleKeySync(ctx, 'u1', 'd1', {

@@ -196,7 +196,7 @@ export async function handleChatMessage(
     return;
   }
 
-  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId, targetRecipients, deleteSecret } = validatedPayload;
+  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId, targetRecipients, deleteSecret, senderPseudonym } = validatedPayload;
 
   try {
     // --- IDEMPOTENSI: reserve slot dedupe sebelum menyentuh DB ---
@@ -236,7 +236,14 @@ export async function handleChatMessage(
     const [newMessageRaw] = await ctx.prisma.$transaction([
       ctx.prisma.message.create({
         data: {
-            conversationId, senderId: conversation.isGroup ? userId : null, content, sessionId: sessionId || null,
+            conversationId,
+            // [T1 GROUP PSEUDONYMS — doc 26.2] Group messages: store the client-
+            // supplied `senderPseudonym` (opaque, unlinkable to accounts) instead
+            // of the authenticated userId. 1:1 stays sealed (senderId: null).
+            // Fallback: legacy clients (metadata v1) that do not send the field →
+            // previous behavior (userId) so old groups keep working.
+            senderId: conversation.isGroup ? (senderPseudonym ?? userId) : null,
+            content, sessionId: sessionId || null,
             repliedToId: repliedToId || null,
             // [PARITY TTL] Jalur REST (routes/messages.ts) memakai default 14 hari
             // (store-and-forward). Tanpa default yang sama di sini, payload WT
@@ -420,7 +427,7 @@ export async function handleKeySync(
        }
 
        case 'messages:distribute_keys': {
-         const { conversationId, keys } = data as DistributeKeysPayload;
+         const { conversationId, keys, senderPseudonym } = data as DistributeKeysPayload;
          if (!conversationId || !Array.isArray(keys)) {
             if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Invalid payload' });
             return;
@@ -430,9 +437,13 @@ export async function handleKeySync(
             return;
          }
 
+         // [T1] senderId yang di-relay & dipersist = pseudonym klien (bila ada),
+         // sehingga graf distribusi kunci tidak bisa di-link ke akun.
+         const relaySenderId = senderPseudonym ?? userId;
+
          for (const k of keys) {
               const { userId: targetId, key, targetDeviceId, senderDeviceKey, drHeader } = k;
-              const emitPayload: Record<string, unknown> = { conversationId, encryptedKey: key, type: 'GROUP_KEY', senderId: userId, senderDeviceKey };
+              const emitPayload: Record<string, unknown> = { conversationId, encryptedKey: key, type: 'GROUP_KEY', senderId: relaySenderId, senderDeviceKey };
               if (drHeader) emitPayload.drHeader = drHeader;
 
              // Restore offline catchup: persist distributed keys to the database
@@ -440,7 +451,7 @@ export async function handleKeySync(
                  data: {
                      id: `msg_sys_key_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
                      conversationId,
-                     senderId: userId, // Store actual sender for group key routing
+                     senderId: relaySenderId, // [T1] pseudonym for group key routing
                      type: 'SYSTEM',
                      content: JSON.stringify(emitPayload),
                      isViewOnce: false,
@@ -486,11 +497,13 @@ export async function handleKeySync(
        }
 
        case 'group:fulfilled_key': {
-           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, drHeader } = data as KeyFulfillmentPayload;
+           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, drHeader, senderPseudonym } = data as KeyFulfillmentPayload & { senderPseudonym?: string };
            if (!requesterId || !conversationId || !encryptedKey) return;
            if (!await ctx.checkRateLimit(userId, 'group_fulfilled_key', 60, 60)) return;
 
-           const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: userId, senderDeviceKey };
+           // [T1] Fulfillment replay pakai pseudonym pengirim asli (bila klien
+           // menyertakan) — requester mengenali sender via peta metadata.
+           const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: senderPseudonym ?? userId, senderDeviceKey };
            if (drHeader) emitPayload.drHeader = drHeader;
            await emitEventToUser(ctx, requesterId, 'session:new_key', emitPayload, targetDeviceId);
            break;
@@ -542,12 +555,17 @@ export async function handleKeySync(
 
           // Authorization: pengirim pesan ATAU pemegang deleteSecret (blind auth) yang boleh unsend.
           // Pesan 1:1 disimpan dengan senderId null (Opaque Mailbox), jadi proof via deleteSecret.
+          // [T1] Grup: senderId sekarang pseudonym (bukan userId auth) — cabang
+          // isSender tidak bisa dipakai untuk grup; deleteSecret-only (keputusan 26.7.2).
           const isSender = msg.senderId !== null && msg.senderId === userId;
           const hasValidSecret = typeof deleteSecret === 'string' && !!msg.deleteSecret && safeEqualStrings(deleteSecret, msg.deleteSecret);
           if (!isSender && !hasValidSecret) {
             console.warn('[Security] Unauthorized unsend attempt by', sanitizeForLog(userId), 'for message', sanitizeForLog(messageId));
             return;
           }
+          // [T1] deletedBy pada notifikasi = pseudonym bila ada (jangan bocorkan
+          // akun pengirim unsend ke penerima).
+          const deletedBy = msg.senderId ?? userId;
 
           await ctx.prisma.message.delete({ where: { id: messageId } });
 
@@ -557,7 +575,7 @@ export async function handleKeySync(
            : (msg.senderId ? [msg.senderId] : []);
          for (const targetId of recipients) {
            if (typeof targetId === 'string' && targetId !== userId) {
-             await emitEventToUser(ctx, targetId, 'message:deleted_remotely', { messageId, conversationId, deletedBy: userId });
+             await emitEventToUser(ctx, targetId, 'message:deleted_remotely', { messageId, conversationId, deletedBy });
            }
          }
          break;

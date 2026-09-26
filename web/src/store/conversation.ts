@@ -15,7 +15,7 @@ import { asUserId } from '@nyx/shared';
 import toast from 'react-hot-toast';
 import { captureAndLog } from '@utils/feedback';
 
-import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
+import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession, generatePseudonymMap } from "@utils/crypto";
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
@@ -443,7 +443,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // for Opaque Mailbox, which meant targetRecipients was empty and ensureGroupSessionIfNeeded
         // couldn't distribute the member's sender key to the creator.
         const allParticipantIds = Array.from(new Set([user.id, ...userIds]));
-        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret } as { title: string; avatarUrl?: string; participants: string[]; authSecret: string }, conv.id);
+        // [T1] Metadata v2: pseudonym map lives ONLY inside encrypted metadata —
+        // server never learns pseudonym→account linkage (doc 26.2).
+        const pseudonymMap = await generatePseudonymMap(allParticipantIds);
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id);
         
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',

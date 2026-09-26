@@ -10,6 +10,9 @@ export interface TypingPayload {
 export interface DistributeKeysPayload {
   conversationId: string;
   keys: { userId: string; targetDeviceId?: string; targetDeviceKey?: string; key: string; senderDeviceKey?: string; drHeader?: any }[];
+  /** [T1] Opaque per-group sender pseudonym — relayed verbatim instead of the
+   *  authenticated userId so the key-distribution graph stays unlinkable. */
+  senderPseudonym?: string;
 }
 
 export interface MessageSendPayload {
@@ -23,6 +26,8 @@ export interface MessageSendPayload {
   isViewOnce?: boolean;
   targetRecipients?: string[]; // Opaque Mailbox: list of user IDs to receive this message
   deleteSecret?: string; // Secret for blind authorization of message deletion
+  /** [T1] Opaque per-group sender pseudonym (doc 26.2). Absent → legacy. */
+  senderPseudonym?: string;
 }
 
 export interface PushSubscribePayload {

@@ -588,10 +588,13 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   transportClient.sendEvent('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string }[]): Promise<void> {
-  return new Promise((resolve, reject) => {
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderId?: string }[]): Promise<void> {
+  return new Promise(async (resolve, reject) => {
     if (!transportClient.connected) return reject(new Error('Socket not connected'));
-    transportClient.sendEvent('messages:distribute_keys', { conversationId, keys }, (err: unknown, res?: { ok: boolean }) => {
+    // [T1] Sertakan pseudonym pengirim agar relay kunci tak bisa di-link ke akun.
+    const { getMyPseudonym } = await import('../utils/crypto');
+    const senderPseudonym = await getMyPseudonym(conversationId);
+    transportClient.sendEvent('messages:distribute_keys', { conversationId, keys, senderPseudonym }, (err: unknown, res?: { ok: boolean }) => {
       if (err || !res?.ok) return reject(new Error('Failed to distribute keys'));
       resolve();
     });
@@ -605,13 +608,20 @@ export async function emitGroupKeyRequest(conversationId: string, targetSenderId
   
   const { getEncryptionKeyPair } = state;
   const { publicKey } = await getEncryptionKeyPair();
-  const { getSodiumLib } = await import('../utils/crypto');
+  const { getSodiumLib, resolvePseudonymToUserId } = await import('../utils/crypto');
   const sodium = await getSodiumLib();
   const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  // [T1] targetSenderId bisa pseudonym (dari wrapper pesan). Routing request
+  // butuh AKUN asli (server mem-emit ke user tersebut) → resolve via metadata;
+  // kalau bukan pseudonym (grup v1), nilai asli dipakai.
+  const targetUserId = targetSenderId
+    ? (resolvePseudonymToUserId(conversationId, targetSenderId) ?? targetSenderId)
+    : undefined;
   
   transportClient.sendEvent('group:request_key', { 
       conversationId, 
-      targetSenderId, 
+      targetSenderId: targetUserId, 
       targetDeviceKey,
       requesterId: myId,
       requesterDeviceId: myPublicKeyB64,
@@ -619,7 +629,7 @@ export async function emitGroupKeyRequest(conversationId: string, targetSenderId
   });
 }
 
-export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; drHeader?: any; }) {
+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; drHeader?: any; senderPseudonym?: string }) {
   transportClient.sendEvent('group:fulfilled_key', payload);
 }
 

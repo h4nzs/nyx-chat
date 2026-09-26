@@ -104,7 +104,11 @@ export const MessageSendPayloadSchema = z.object({
   repliedToId: z.string().optional(),
   isViewOnce: z.boolean().optional(),
   targetRecipients: z.array(z.string()).max(500).optional(), // Hard limit of 500 recipients
-  deleteSecret: z.string().optional()
+  deleteSecret: z.string().optional(),
+  // [T1 GROUP PSEUDONYMS] Opaque per-group sender id (doc 26.2). Group senders
+  // supply this instead of letting the server bind the authenticated userId;
+  // server stores it verbatim in Message.senderId. Absent → legacy behavior.
+  senderPseudonym: z.string().regex(/^[A-Za-z0-9_-]{22}$/).optional()
 });
 
 export const IncomingMessageSchema = z.object({

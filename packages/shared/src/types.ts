@@ -5,7 +5,7 @@ import {
   MinimalConversationSchema,
   RawServerMessageSchema
 } from './schemas.js';
-import type { UserId, ConversationId, MessageId, StoryId } from './brands.js';
+import type { UserId, ConversationId, MessageId, StoryId, Pseudonym } from './brands.js';
 
 // 1. Ekspor Branded Types
 export type { UserId, ConversationId, MessageId, StoryId };
@@ -152,13 +152,31 @@ export type Conversation = z.infer<typeof MinimalConversationSchema> & {
   authSecret?: string; // Secret for blind authorization of group management
 };
 
+// [T1 GROUP PSEUDONYMS — doc 26.2] Per-group sender pseudonyms. The mapping
+// `pseudonym -> userId` lives ONLY inside encrypted metadata (v2); the server
+// sees opaque `senderId` values that cannot be linked to accounts or across
+// groups. Generation bumps on every full key rotation so pre/post-rotation
+// messages are unlinkable server-side.
+export interface GroupMetadataV2 {
+  title?: string;
+  description?: string;
+  avatarUrl?: string;
+  participants?: string[];
+  /** version marker — metadata without this field is v1 (no pseudonyms). */
+  v: 2;
+  /** monotonically increasing per full key/membership rotation. */
+  generation: number;
+  /** pseudonym (22-char base64url of 16 random bytes) -> userId. */
+  pseudonymMap: Record<string, string>;
+}
+
 export type ConversationUi = Conversation & {
-  decryptedMetadata?: {
+  decryptedMetadata?: ({
     title?: string;
     description?: string;
     avatarUrl?: string;
     authSecret?: string; // Stored inside encrypted metadata for participants
-  };
+  }) & Partial<GroupMetadataV2>;
 };
 
 export type Story = {
