@@ -272,6 +272,64 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
   Never build credentials before endpoint isolation — credential math does not fix
   transport-log correlation.
 
+## 26.9 Resource-scaling appendix (post-VPS-upgrade)
+
+Written under the assumption that the VPS constraint (1 core / ~1GB RAM) will be
+lifted. Principle: **a resource upgrade buys margin for privacy features, not bloat** —
+rate limits, validation strictness, and consistent load patterns stay (predictable
+load is itself a privacy property; relaxing it amplifies traffic signatures).
+
+### 26.9.1 Blueprint resequencing
+
+- **New order: T1 → T3a → T3b → T2** (was T1 → T3a → T2 → T3b). Rationale: token schema
+  should be final before server-side caching/batching work lands (avoid migrating data
+  twice); T2's parallel per-device sealing benefits most from extra CPU.
+
+### 26.9.2 New capabilities unlocked (privacy features first)
+
+1. **Cover traffic (proposed T4):** silent dummy store-and-forward messages with
+   jittered per-conversation intervals, dropped client-side. The padding (8KB) already
+   hides message *size*; cover traffic attacks the remaining fundamental leak —
+   *timing correlation* between senders and recipients (the same leak Signal V2
+   accepts, see 26.8.1). Cost: low CPU, modest bandwidth. This becomes NYX's
+   differentiator if shipped.
+2. **Batched/jittered release:** server holds outgoing messages for a random
+   200–800ms window (per-group "maximum privacy mode" opt-in) to decorrelate
+   sender→recipient timing.
+3. **Parallel key fan-out (T2 enabler):** per-device pq_box_seal under
+   `p-limit`-style concurrency instead of serial awaits — 20-member distribution
+   drops from ~200ms to ~20ms.
+4. **Noisy prekey-bundle cache:** prefetch bundles for likely contacts (co-members of
+   shared groups) so cache-miss no longer signals first-contact. Trade: more compute
+   per request for less access-pattern leakage — affordable only post-upgrade.
+5. **Tighter ephemerality:** sweeper can run more frequently with shorter windows —
+   the 24h READ grace and 14d default TTL become tunable downward without sweep
+   cost dominating.
+6. **Sidecar anonymity helpers (Rust, no frozen-format touch):** per-user connection
+   pools (round-robin, breaking 1-connection=1-user correlation) and uniform datagram
+   padding at the transport layer.
+
+### 26.9.3 Codebase changes (now-deliberate compromises to revisit)
+
+| Area | Today (1-core) | Post-upgrade | Privacy impact |
+|---|---|---|---|
+| `handleKeySync` relay loops | Serial `for…of await` | `Promise.all` with concurrency cap 10–20 | Faster T2 fan-out |
+| `messageSweeper` cadence | Sparse (CPU-bound) | Frequent, short windows | Tighter ephemerality |
+| `BATCH_RECEIPT_MAX` | 100 | 250–500 | 1 event per busy-group open |
+| Message RAM window / backfill (`MERGE_WINDOW=150`, 4×250) | Deliberate VPS mercy | Raise both, fewer server paging fallbacks | Less server-visible paging pattern |
+| Postgres tuning | Low-memory profile | Larger `shared_buffers`, parallel queries, composite index on `MessageStatus` (batch receipts), `UserHiddenConversation` (T3b sync) | Cheaper blinded sync |
+| Redis usage | Per-op round trips | In-memory rate-limit shards in sidecar; noisy caches (26.9.2.4) | Smaller access-trace footprint |
+
+### 26.9.4 Non-negotiables
+
+- Frozen formats stay frozen (8KB padding, `ENC1:`, XChaCha envelope, tempId scheme).
+- Rate limits and payload validation do **not** loosen with capacity — predictable,
+  uniform load is a privacy feature; easing it increases DoS surface and makes
+  traffic analysis easier, not harder.
+- Any new batching/jitter/cover-traffic feature must be **opt-in per group** first
+  (maximum-privacy mode), measured for battery/latency, then default-on only with
+  evidence it does not hurt UX.
+
 1. **Pseudonym map format: full rewrite + generation counter.** Metadata is already
    fully re-encrypted at every rotation (key changes), so an append-only log saves
    nothing and only grows the blob. Receivers care about the latest map only.
