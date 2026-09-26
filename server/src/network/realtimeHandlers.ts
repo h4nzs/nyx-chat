@@ -292,13 +292,17 @@ export async function handleChatMessage(
 
                 // Register this conversation for the target recipient so they can discover it later
                 // (Critical for new users who have never synced this conversation before)
-                // [T3b] Dual-write: userId row (legacy sync) + creator-issued delivery
-                // token when the sender piggybacked one (doc 26.2).
-                ctx.prisma.userHiddenConversation.upsert({
-                    where: { userId_conversationId: { userId: targetId, conversationId } },
-                    create: { userId: targetId, conversationId, deliveryToken: targetDeliveryTokens?.[targetId] ?? null },
-                    update: targetDeliveryTokens?.[targetId] ? { deliveryToken: targetDeliveryTokens[targetId] } : {} // No-op if already exists
-                }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
+                // [T3b TOKEN-FIRST] Membership row kunci token (issuer = pengirim);
+                // userId disertai HANYA untuk routing (push, sweeper). Pesan tanpa
+                // token untuk target tidak membuat baris — discovery = possession.
+                const targetToken = targetDeliveryTokens?.[targetId];
+                if (targetToken) {
+                    ctx.prisma.userHiddenConversation.upsert({
+                        where: { userId_conversationId: { userId: targetId, conversationId } },
+                        create: { userId: targetId, conversationId, deliveryToken: targetToken },
+                        update: { deliveryToken: targetToken }
+                    }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
+                }
             }
         }));
     }
@@ -429,41 +433,12 @@ export async function handleKeySync(
        }
 
        case 'messages:distribute_keys': {
-         const { conversationId, keys, senderPseudonym } = data as DistributeKeysPayload;
-         if (!conversationId || !Array.isArray(keys)) {
-            if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Invalid payload' });
-            return;
-         }
-         if (!await ctx.checkRateLimit(userId, 'distribute_keys', 120, 60)) {
-            if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Rate limit exceeded' });
-            return;
-         }
-
-         // [T1] senderId yang di-relay & dipersist = pseudonym klien (bila ada),
-         // sehingga graf distribusi kunci tidak bisa di-link ke akun.
-         const relaySenderId = senderPseudonym ?? userId;
-
-         for (const k of keys) {
-              const { userId: targetId, key, targetDeviceId, senderDeviceKey, drHeader } = k;
-              const emitPayload: Record<string, unknown> = { conversationId, encryptedKey: key, type: 'GROUP_KEY', senderId: relaySenderId, senderDeviceKey };
-              if (drHeader) emitPayload.drHeader = drHeader;
-
-             // Restore offline catchup: persist distributed keys to the database
-             await ctx.prisma.message.create({
-                 data: {
-                     id: `msg_sys_key_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-                     conversationId,
-                     senderId: relaySenderId, // [T1] pseudonym for group key routing
-                     type: 'SYSTEM',
-                     content: JSON.stringify(emitPayload),
-                     isViewOnce: false,
-                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-                 }
-             });
-
-             await emitEventToUser(ctx, targetId, 'session:new_key', emitPayload, targetDeviceId);
-         }
-         if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true });
+         // [T2 FINAL — REMOVED] Jalur legacy distribusi kunci grup dihapus
+         // (blueprint 26.5: deferred removal kini dieksekusi — prod di-reset,
+         // semua klien ter-update, pairwise GROUP_KEY adalah satu-satunya jalur).
+         // Handler menjadi no-op yang selalu menolak: klien lama yang masih
+         // mengirim event ini mendapat ACK error eksplisit, bukan hening.
+         if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'distribute_keys removed — use pairwise GROUP_KEY delivery' });
          break;
        }
 

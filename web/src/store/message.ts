@@ -43,8 +43,19 @@ export { decryptMessageObject } from '../lib/messagePipeline';
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import { isBurnerConversation } from '@lib/coverTraffic';
-import { isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS } from '@lib/groupPseudonyms';
+import { isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS, getDeliveryTokenMap } from '@lib/groupPseudonyms';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
+
+/**
+ * [T3b TOKEN-FIRST] Peta target-userId → delivery token dari encrypted
+ * metadata v2. Dipiggyback ke SETIAP pesan grup: server mendaftarkan row
+ * keanggotaan (token-keyed, userId routing-only) untuk target yang belum
+ * punya. undefined (metadata v1) → server tidak membuat row baru.
+ */
+function buildTargetDeliveryTokens(conv: { isGroup?: boolean }): Record<string, string> | undefined {
+  if (!conv.isGroup) return undefined;
+  return getDeliveryTokenMap(String((conv as { id?: string }).id ?? ''));
+}
 
 const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
@@ -1056,7 +1067,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         targetRecipients: conversation.participants.map(p => p.userId || p.id),
         deleteSecret,
         // [T1] Grup metadata v2: pseudonym pengirim (server simpan verbatim).
-        senderPseudonym: conversation.isGroup ? await getMyPseudonym(conversationId) : undefined
+        senderPseudonym: conversation.isGroup ? await getMyPseudonym(conversationId) : undefined,
+        // [T3b TOKEN-FIRST] Piggyback token target — server mendaftarkan row
+        // keanggotaan (token-keyed) untuk penerima yang belum punya. Peta di
+        // sini keyed by userId server-side (routing), token datang dari
+        // encrypted metadata (server tidak bisa men-generate sendiri).
+        targetDeliveryTokens: conversation.isGroup ? buildTargetDeliveryTokens(conversation) : undefined
       };
 
       // [BUG-FIX H1] Sabuk-dan-gesper: jika callback emit transport tidak pernah
@@ -1303,7 +1319,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           targetRecipients,
           // [T1] Grup dengan metadata v2: kirim pseudonym (server menyimpan
           // verbatim). undefined → server pakai jalur legacy (userId).
-          senderPseudonym: await getMyPseudonym(conversationId)
+          senderPseudonym: await getMyPseudonym(conversationId),
+          // [T3b TOKEN-FIRST] Sama seperti jalur live — piggyback token target
+          // agar penerima offline baru tetap terdaftar (token-keyed row).
+          targetDeliveryTokens: conv?.isGroup ? buildTargetDeliveryTokens(conv) : undefined
       };
 
       await new Promise<void>((resolve) => {

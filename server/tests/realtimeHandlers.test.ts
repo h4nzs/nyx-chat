@@ -298,30 +298,11 @@ test('T1: chat_message grup dengan senderPseudonym tersimpan dengan pseudonym, b
   assert.equal(created!['senderId'], 'AAAAAAAAAAAAAAAAAAAAAA', 'senderId DB = pseudonym (bukan userId)');
 });
 
-test('T1: distribute_keys merelay senderPseudonym ke penerima & SYSTEM message', async () => {
+test('T2 FINAL: distribute_keys ditolak eksplisit (legacy path dihapus, pairwise-only)', async () => {
   const { ctx, calls } = makeCtx();
-  const created: Array<Record<string, unknown>> = [];
-  const origPrisma = ctx.prisma;
-  ctx.prisma = new Proxy(origPrisma as unknown as Record<string, unknown>, {
-    get(target, prop: string) {
-      if (prop === 'message') {
-        return {
-          create: async (args: { data: Record<string, unknown> }) => {
-            created.push(args.data);
-            return args.data;
-          },
-          findUnique: async () => null,
-          update: async () => ({}),
-          delete: async () => ({}),
-        };
-      }
-      return (target as Record<string, unknown>)[prop];
-    },
-  }) as unknown as RealtimeContext['prisma'];
-
   await handleKeySync(ctx, 'u-real', 'd1', {
     event: 'messages:distribute_keys',
-    msgId: '',
+    msgId: 'ack-removed',
     data: {
       conversationId: 'c1',
       senderPseudonym: 'BBBBBBBBBBBBBBBBBBBBBB',
@@ -329,11 +310,11 @@ test('T1: distribute_keys merelay senderPseudonym ke penerima & SYSTEM message',
     },
   });
 
-  assert.equal(created.length, 1, 'SYSTEM message untuk offline catchup');
-  assert.equal(created[0]!['senderId'], 'BBBBBBBBBBBBBBBBBBBBBB', 'SYSTEM senderId = pseudonym');
+  const ack = calls.sendJsonToUser.find((c) => (c[2] as { data?: { error?: string } } | undefined)?.data?.error?.includes('distribute_keys removed'));
+  assert.ok(ack, 'ACK error eksplisit harus dikirim (bukan hening)');
+  assert.equal((ack![2] as { data: { ok: boolean } }).data.ok, false, 'ACK = gagal (event tidak lagi didukung)');
   const relay = calls.sendJsonToUser.find((c) => c[0] === 'u2');
-  assert.ok(relay, 'relay ke target harus ada');
-  assert.equal((relay![2] as { data?: { senderId?: string } }).data?.senderId, 'BBBBBBBBBBBBBBBBBBBBBB');
+  assert.ok(!relay, 'TIDAK boleh ada relay ke target');
 });
 
 test('T1: unsend grup tanpa deleteSecret ditolak (deleteSecret-only untuk grup)', async () => {

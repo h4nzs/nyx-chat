@@ -858,19 +858,18 @@ export async function ensureGroupSession(conversationId: string, participants: P
 // mendapat transport FS (envelope lama yang disimpan server tak bisa dibuka
 // ulang dengan static key yang bocor belakangan).
 //
-// Fallback: bila pairwise session dengan peer/device belum terbentuk (mis.
-// anggota baru yang belum pernah chat), envelope tetap dikirim via jalur lama
-// `messages:distribute_keys` — interop dengan klien lama tetap terjaga
-// (blueprint 26.2 Migration).
+// [T2 FINAL] Jalur legacy `messages:distribute_keys` DIHAPUS (26.5 — deferred
+// removal kini dieksekusi; prod di-reset, semua klien ter-update). Pairwise DR
+// adalah SATU-SATUNYA jalur distribusi kunci grup: sesi `gspqr_<peer>` dengan
+// peer yang belum pernah chat dibentuk on-demand via ensureSpqrSessionWithPeer.
 export type PairwiseKeyDistributionResult = {
   pairwise: number;
   legacy: Array<Record<string, unknown>>;
 };
 
 /**
- * Kirim kunci grup via pairwise DR ke setiap device target yang sudah punya
- * sesi `gspqr_<peerId>`. Return envelope legacy untuk device yang BELUM punya
- * sesi (caller meneruskannya ke emitGroupKeyDistribution).
+ * Kirim kunci grup via pairwise DR ke setiap target. Return `legacy` SELALU
+ * kosong (dipertahankan untuk kompatibilitas pemanggil — emitGroupKeyDistribution).
  */
 export async function sendGroupKeyDistributionPairwise(
   conversationId: string,
@@ -918,9 +917,9 @@ export async function sendGroupKeyDistributionPairwise(
       });
       result.pairwise++;
     } catch (e) {
-      // Tanpa pairwise session → jalur legacy (interop, blueprint 26.2).
-      console.debug(`[T2] No pairwise session with ${userId} — falling back to distribute_keys`, e);
-      result.legacy.push(dk);
+      // [T2 FINAL] Tidak ada fallback — kegagalan membentuk sesi pairwise
+      // untuk satu target tidak menggagalkan yang lain (log untuk diagnostik).
+      console.warn(`[T2] Pairwise key delivery to ${userId} failed:`, e);
     }
   }
   return result;
