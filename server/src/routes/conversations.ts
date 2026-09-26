@@ -18,7 +18,8 @@ const ConversationSchema = z.object({
 
 // [T3b] Delivery tokens: creator issues one opaque token per invited member.
 // Server stores (conversationId, token) — it cannot link token → identity
-// beyond the row it is told to create for routing (dual-write transition).
+// beyond the routing-only row it is told to create. TOKEN-FIRST: discovery
+// adalah possession token, bukan join userId (26.8.1 trigger #1 tertutup).
 const DeliveryTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/)
 
 const router: Router = Router()
@@ -26,10 +27,11 @@ router.use(requireAuth)
 
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
-// [T3b] Dual-accept: clients send their delivery tokens via `X-Delivery-Tokens`
-// (comma-separated base64url, 22-char each). Token possession authenticates
-// discovery without identity joins; the legacy userId path stays until the
-// token backfill completes (doc 26.2 migration).
+// [T3b TOKEN-FIRST] Discovery = possession of a delivery token — NO userId
+// join. Klien mengirim token miliknya via `X-Delivery-Tokens` (base64url,
+// 22-char, cap 500). Ketiga sumber lain (ids eksplisit dari klien, backfill
+// SessionKey) tetap ada karena bersifat client-supplied, bukan identity join.
+// Ini menutup trigger condition #1 upgrade 26.8.1 (token-only endpoints).
 router.get('/sync', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
@@ -37,7 +39,7 @@ router.get('/sync', async (req, res, next) => {
     const ids = String(req.query.ids ?? '');
     let conversationIds: string[] = ids ? ids.split(',') : [];
 
-    // [T3b] Token-presented conversations: exact-match against deliveryToken
+    // Token-presented conversations: exact-match against deliveryToken
     // (unique index). Timing-safe not required — tokens are random 128-bit
     // values looked up by unique index; a wrong guess is just a miss.
     const tokenHeader = req.headers['x-delivery-tokens'];
@@ -52,19 +54,11 @@ router.get('/sync', async (req, res, next) => {
       }
     }
 
-    // Discover conversations from UserHiddenConversation records
-    // (created when conversations are created or messages are sent)
-    const userConvs = await prisma.userHiddenConversation.findMany({
-      where: { userId: req.user.id },
-      select: { conversationId: true }
-    });
-    const hiddenIds = userConvs.map(uc => uc.conversationId);
-    
-    // Backfill for legacy conversations (pre-dating UserHiddenConversation tracking):
-    // If no discovery records and no client-provided IDs, try SessionKey table
-    // (covers conversations where E2EE session was established)
+    // [T3b TOKEN-FIRST] userId join DIHAPUS — membership tidak didiscovery
+    // dari identitas akun. Backfill SessionKey (per-device, client-derived)
+    // dipertahankan sebagai jalur pemulihan 1:1.
     let backfillIds: string[] = [];
-    if (hiddenIds.length === 0 && conversationIds.length === 0) {
+    if (conversationIds.length === 0) {
       try {
         const userDevices = await prisma.device.findMany({
           where: { userId: req.user.id },
@@ -85,7 +79,7 @@ router.get('/sync', async (req, res, next) => {
     }
     
     // Merge known IDs with discovered IDs + backfill, deduplicate
-    const allIds = [...new Set([...conversationIds, ...hiddenIds, ...backfillIds])];
+    const allIds = [...new Set([...conversationIds, ...backfillIds])];
     
     if (allIds.length === 0) return res.json([]);
 
@@ -197,15 +191,18 @@ return current
     // PUSH creation event to userIds passed in the body
     await emitEventToUsers(allUserIds.filter(uid => uid !== creatorId), 'conversation:new', safeConversation);
     
-    // Register discovery records for offline recipients
+    // Register membership rows for offline recipients.
+    // [T3b TOKEN-FIRST] Baris keanggotaan kunci POSISI TOKEN; userId hanya
+    // routing-only. Anggota tanpa token (klien lama) TIDAK didaftarkan —
+    // mereka menemukan percakapan via pesan relay berikutnya yang membawa
+    // token (handleChatMessage targetDeliveryTokens).
     for (const uid of allUserIds.filter(uid => uid !== creatorId)) {
-        // [T3b] Dual-write transition: userId row (legacy sync path) AND the
-        // creator-issued delivery token on the same row. Once token backfill
-        // completes, the userId join path is dropped (doc 26.2).
+        const token = deliveryTokens?.[uid];
+        if (!token) continue;
         prisma.userHiddenConversation.upsert({
             where: { userId_conversationId: { userId: uid, conversationId: newConversation.id } },
-            create: { userId: uid, conversationId: newConversation.id, deliveryToken: deliveryTokens?.[uid] ?? null },
-            update: deliveryTokens?.[uid] ? { deliveryToken: deliveryTokens[uid] } : {}
+            create: { userId: uid, conversationId: newConversation.id, deliveryToken: token },
+            update: { deliveryToken: token }
         }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
     
@@ -272,15 +269,17 @@ router.post('/:id/participants', async (req, res, next) => {
   }    const safeConv = toConversation(hoistConvoKeys(conversation as unknown as RawConversationData));
   safeConv.participants = [];
 
-  // [T3b] Dual-write discovery rows for the NEW members, with the inviter-
-  // issued delivery tokens (same contract as POST /conversations).
+  // [T3b TOKEN-FIRST] Membership rows for the NEW members: token-keyed
+  // (inviter-issued), userId routing-only. Same contract as POST /conversations.
   const deliveryTokens = req.body.deliveryTokens as Record<string, string> | undefined;
   if (Array.isArray(userIds)) {
     for (const uid of userIds) {
+      const token = deliveryTokens?.[uid];
+      if (!token) continue;
       prisma.userHiddenConversation.upsert({
         where: { userId_conversationId: { userId: uid, conversationId } },
-        create: { userId: uid, conversationId, deliveryToken: deliveryTokens?.[uid] ?? null },
-        update: deliveryTokens?.[uid] ? { deliveryToken: deliveryTokens[uid] } : {}
+        create: { userId: uid, conversationId, deliveryToken: token },
+        update: { deliveryToken: token }
       }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
   }

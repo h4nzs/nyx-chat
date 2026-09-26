@@ -190,10 +190,14 @@ Signal V2's *stored*-data posture without Signal's credential machinery.
    for `handleKeySync` cases (`messages:mark_*`, `distribute_keys`, `request/fulfilled`)
    accepting pseudonyms. Web + server, no frozen-format touch.
 2. **T3a (pseudonym receipts):** piggybacks on T1 — `MessageStatus.userId` becomes
-   pseudonym; `message:status_updated` routing via pairwise or opaque relay.
-3. **T2 (pairwise key delivery):** biggest but self-contained; behind conversation
-   version flag; remove `distribute_keys` after both sides ship (gateway parity test
-   is the enforcement point).
+   pseudonym; `message:status_updated` routing via pairwise or opaque relay.3. **T2 (pairwise key delivery):** biggest but self-contained; behind conversation
+   version flag; remove `distribute_keys` after both sides ship (gateway parity
+   test is the enforcement point).
+   **[REMOVED 2026-09-27]** `messages:distribute_keys` is gone (prod reset →
+   no legacy clients to interop with). Server handler is a no-op that ACKs an
+   explicit error; client `emitGroupKeyDistribution` is pairwise-only —
+   `ensureSpqrSessionWithPeer` forms the session on demand. Parity test now
+   asserts the rejection instead of the relay.
 4. **T3b (delivery tokens):** schema additive column + sync endpoint change + invite
    UX (token push via pairwise). Do last — it touches auth flows the most.
 5. Each step ships with: unit tests, `gatewayParity` updates, CHANGELOG entry, and a
@@ -278,6 +282,11 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
 - **Later:** if 26.8.1 triggers fire, upgrade T3 tokens to blind credentials in place.
   Never build credentials before endpoint isolation — credential math does not fix
   transport-log correlation.
+- **Update 2026-09-27:** trigger condition #1 of 26.8.1 is now CLOSED — T3b went
+  token-first (schema: `UserHiddenConversation.userId` nullable, `deliveryToken`
+  required+unique; sync discovery = token possession only, no userId join;
+  membership rows keyed by token with userId routing-only). Remaining triggers:
+  #2 (transport-level correlation acceptance) and #3 (issuance-protocol budget).
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 

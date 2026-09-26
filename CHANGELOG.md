@@ -7,10 +7,10 @@ All notable changes to this project will be documented in this file.
 Implements the full group-privacy blueprint: per-group sender pseudonyms,
 pseudonym-scoped receipts, blinded membership via delivery tokens, sender-key
 distribution over pairwise sessions, and opt-in application-level cover
-traffic. Server changes are additive and versioned (metadata v2, nullable
-token column); legacy groups and clients keep working through explicit
-fallback paths. **Requires one schema push** (`prisma db push` — new nullable
-column + index on `UserHiddenConversation`) at deploy time.
+traffic. With the prod DB reset (2026-09-27), legacy interop paths are GONE:
+key distribution is pairwise-only, and membership/discovery is token-first
+(`UserHiddenConversation.userId` nullable, token required — **requires a
+schema push**, `prisma db push`, at deploy time).
 
 ### 🎭 T1 — Sender Pseudonyms (doc 26.2)
 * **Unlinkable Group Senders:** Group messages in metadata-v2 groups store a
@@ -43,17 +43,20 @@ column + index on `UserHiddenConversation`) at deploy time.
   the metadata map (own messages carry a pseudonym `senderId` in v2 groups).
 
 ### 🎟️ T3b — Delivery Tokens (doc 26.2 membership)
-* **Blinded Membership Discovery:** `UserHiddenConversation` gains a nullable
-  unique `deliveryToken` (additive, with a `conversationId` index). The group
-  creator issues one 16-byte token per member; the same map is stored in
-  encrypted metadata v2 (`deliveryTokenMap`) and registered server-side.
-* **Dual-Accept Sync:** `GET /conversations/sync` accepts an
-  `X-Delivery-Tokens` header (token-possession lookup, capped at 500/request)
-  in parallel with the legacy userId rows until the token backfill completes.
-* **Dual-Write at Every Invite Surface:** conversation creation, participant
-  add, and both chat-relay paths (WebTransport + REST) register
-  `(conversationId, token)` rows. **Revocation:** kick/leave deletes the row
-  — the token dies with membership.
+* **Token-First Membership (2026-09-27):** `UserHiddenConversation` is now
+  keyed by a **required** unique `deliveryToken` (16-byte creator-issued); the
+  `userId` column is nullable and **routing-only** (push, sweeper, profile
+  broadcast) — never a discovery key. **Sync is token-possession only**:
+  `GET /conversations/sync` matches the `X-Delivery-Tokens` header (cap 500)
+  with NO userId join — closing 26.8.1 trigger condition #1 (token-only
+  endpoints). The token map still lives in encrypted metadata v2
+  (`deliveryTokenMap`), and every group message piggybacks
+  `targetDeliveryTokens` so the server can register token-keyed rows for
+  offline recipients (skip without a token).
+* **Token-Keyed Rows at Every Invite Surface:** conversation creation,
+  participant add, and both chat-relay paths (WebTransport + REST) register
+  `(conversationId, token)` rows — only when the sender piggybacked a token.
+  **Revocation:** kick/leave deletes the row — the token dies with membership.
 * **Client:** `generateDeliveryToken(Map)`, `getMyDeliveryToken`,
   `collectMyDeliveryTokens`; sync sends owned tokens; token maps are
   inherited (never rotated) across pseudonym rotations.
@@ -66,9 +69,10 @@ column + index on `UserHiddenConversation`) at deploy time.
   transport FS (no more re-open with later-compromised static keys).
 * **Inner Seal Preserved:** the per-device `pq_box_seal` envelope is kept
   inside (defense in depth: FS + PQ in transit).
-* **Fallback:** devices without an established pairwise session fall back to
-  the legacy `messages:distribute_keys` path (interop; removal deferred until
-  both sides ship — gateway parity test is the enforcement point).
+* **Fallback removed (2026-09-27):** with the prod DB reset (no legacy clients
+  to interop with), the deferred removal of `messages:distribute_keys` is
+  executed — pairwise is the ONLY key-delivery route. Server handler ACKs an
+  explicit error; the parity test asserts the rejection.
 * **Routing:** control messages use a virtual `<group>:pw:<peer>`
   conversation id; receivers strip the suffix, filter by device key, and feed
   the envelope into the existing `storeReceivedSessionKey` pipeline. Offline
@@ -88,7 +92,8 @@ column + index on `UserHiddenConversation`) at deploy time.
   Skipped ticks (hidden tab / disconnected) are not queued.
 * **Cover Yields to Real (26.10.4):** real sends are tracked in a rolling
   60s window; cover backs off as the shared `chat_message` bucket fills
-  (soft cap 28/min) — real traffic is never throttled by cover.
+  (soft cap 118/min after the 27.2.4 recalibration) — real traffic is never
+  throttled by cover.
 * **Honest UX (26.10.5):** per-group toggle in Group Info showing the ~5.6
   MB/day estimate before enabling; global master kill-switch in Settings
   (Privacy Shield module, with live "N group(s) armed" status); i18n in all
@@ -103,16 +108,22 @@ column + index on `UserHiddenConversation`) at deploy time.
   is derivative of the id prefix: never persisted, never sent to the server.
   Burner sends also stay out of the cover backoff accounting (no shared
   `chat_message` bucket).
+* **Maximum Bundle Completed (26.10.5):** the per-group Maximum switch now
+  bundles **ephemeral receipts** alongside cover traffic — receipts in
+  opted-in groups (and all burners, 26.10.7) are released with a random
+  0–45s jitter (`scheduleEphemeralReceipt`), decorrelating read-time from
+  open-time; the toggle, burners included, is client-local. Batched/jittered
+  release for message payloads remains a future bundle addition.
 
 ### 🧪 Tests (this tier set)
-* Server: +11 tests — T1 pseudonym storage/relay/unsend, T3a receipt
+* Server: 82 total — T1 pseudonym storage/relay/unsend, T3a receipt
   persistence & broadcast (incl. 1:1 isolation and self-read skip), T3b
-  schema/sync/revocation contract (82 total).
-* Web: +29 tests — pseudonym map helpers, pairwise key delivery wire
+  token-first schema/sync/revocation contract, T2 pairwise-only rejection.
+* Web: 147 total — pseudonym map helpers, pairwise key delivery wire
   contract, cover-traffic Poisson sampling/scheduler/backoff (incl. burner
   default-Maximum arming, master-switch precedence, `isCoverPayload`,
-  `collectCoverArmedIds`), GROUP_KEY and COVER silent-payload guards (141
-  total).
+  `collectCoverArmedIds`), ephemeral-receipt gating and jitter scheduling,
+  GROUP_KEY and COVER silent-payload guards.
 
 ## 🔒 [Unreleased] - 2026-09-25
 

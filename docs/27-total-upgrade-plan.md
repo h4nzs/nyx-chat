@@ -12,6 +12,15 @@
 > (verified: server 82/82, web 134/134). Note: T4 was implemented on the current
 > era's rate limits (cover yields at 28/min vs the 30/min bucket); revisit 27.2.4
 > and the T4 soft cap together after the 27.2 recalibration lands.
+>
+> **Update 2026-09-27:** prod DB will be reset (no user migration) → the two
+> deferred removals executed early: (1) legacy `messages:distribute_keys` path
+> deleted — pairwise GROUP_KEY is the only route (26.5 deferred-removal note);
+> (2) T3b went **token-first** (`UserHiddenConversation.userId` nullable,
+> token required & unique; sync discovery = token possession only). This also
+> closes **26.8.1 trigger condition #1** (token-only endpoints). 27.2.4 rate
+> limits recalibrated (chat_message 120/min etc.), client cover soft cap
+> 28 → 118/min.
 
 ## 27.0 Audit summary — what the 1-core era constrained
 
@@ -71,6 +80,11 @@
    `metadata_updated 60/min`, `ack 240/min`. Keep the atomic Lua shape; keep
    per-opcode buckets; do NOT merge buckets (per-bucket granularity is the
    abuse-control).
+   **[implemented 2026-09-27]** chat_message 120, message_ack_delivered 240,
+   group_request_key 60, metadata_updated 60 applied in gateway.ts +
+   realtimeHandlers.ts (distribute_keys bucket moot — event removed, see
+   26.5 note). Client cover soft cap moved 28 → 118/min (margin 2 slots under
+   the server bucket; cover still yields to real, 26.10.4).
 5. **`BATCH_RECEIPT_MAX` → 250** (with the new index), keep dedupe + TTL logic.
 6. **Sidecar:** enable multi-threaded tokio runtime (2–3 workers), raise datagram
    queue depths; add per-user connection pools (round-robin) to decorrelate

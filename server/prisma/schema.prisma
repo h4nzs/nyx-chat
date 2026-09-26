@@ -266,15 +266,17 @@ model MessageStatus {
 
 model UserHiddenConversation {
   id             String       @id @default(cuid())
-  userId         String
+  // [T3b TOKEN-FIRST — doc 26.2/26.8.1] Membership/discovery bar = POSES
+  // TOKEN, bukan join userId. `userId` nullable & HANYA untuk routing internal
+  // (relay pesan, push, sweeper) — tidak pernah dipakai untuk discovery.
+  // Trigger #1 upgrade 26.8.1 (token-only endpoints) kini tertutup.
+  userId         String?
   conversationId String
-  // [T3b DELIVERY TOKENS — doc 26.2] Opaque per-(group, member) delivery token.
-  // Nullable: legacy rows (pre-T3b) have none — dual-accept during transition,
-  // new membership writes are token-only. Sync/discovery resolves via token
-  // possession; the userId join path stays until the token backfill completes.
-  deliveryToken  String?      @unique
+  // Opaque per-(group, member) delivery token. Wajib: setiap baris keanggotaan
+  // diterbitkan klien (creator) — server tidak bisa membuatnya sendiri.
+  deliveryToken  String       @unique
   createdAt      DateTime     @default(now())
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@unique([userId, conversationId])

@@ -46,6 +46,9 @@ export const startMessageSweeper = () => {
 
         const recipientsByConversation = new Map<string, string[]>();
         for (const uc of userConvs) {
+            // [T3b TOKEN-FIRST] userId nullable (routing-only) — baris tanpa
+            // userId dilewati (membership murni token tidak punya jalur push).
+            if (!uc.userId) continue;
             const arr = recipientsByConversation.get(uc.conversationId) || [];
             arr.push(uc.userId);
             recipientsByConversation.set(uc.conversationId, arr);

@@ -233,13 +233,16 @@ router.post('/', zodValidate({
                 await sendJsonToUser(targetId, TransportOpCode.CHAT_MESSAGE, safeMessage);
 
                 // Register for offline discovery
-                // [T3b] Dual-write: userId row + creator-issued delivery token.
+                // [T3b TOKEN-FIRST] Membership row kunci token; userId routing-only.
                 const targetDeliveryTokens = req.body.targetDeliveryTokens as Record<string, string> | undefined;
-                prisma.userHiddenConversation.upsert({
-                    where: { userId_conversationId: { userId: targetId, conversationId } },
-                    create: { userId: targetId, conversationId, deliveryToken: targetDeliveryTokens?.[targetId] ?? null },
-                    update: targetDeliveryTokens?.[targetId] ? { deliveryToken: targetDeliveryTokens[targetId] } : {}
-                }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
+                const targetToken = targetDeliveryTokens?.[targetId];
+                if (targetToken) {
+                    prisma.userHiddenConversation.upsert({
+                        where: { userId_conversationId: { userId: targetId, conversationId } },
+                        create: { userId: targetId, conversationId, deliveryToken: targetToken },
+                        update: { deliveryToken: targetToken }
+                    }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
+                }
             }
         }));
     }

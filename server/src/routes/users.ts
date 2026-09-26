@@ -133,6 +133,8 @@ router.put('/me',
         // di chatlist/header tidak pernah melihat nama/avatar baru sampai mereka
         // menerima pesan baru (yang menyertakan encryptedProfile terbaru).
         // Broadcast ke semua pengguna yang berbagi percakapan dengan user ini.
+        // [T3b TOKEN-FIRST] userId bersifat routing-only & nullable — baris tanpa
+        // userId (membership murni token) dilewati (tidak ada jalur push ke sana).
         try {
           const memberships = await prisma.userHiddenConversation.findMany({
             where: { userId },
@@ -141,13 +143,13 @@ router.put('/me',
           const convIds = memberships.map(m => m.conversationId)
           if (convIds.length > 0) {
             const peers = await prisma.userHiddenConversation.findMany({
-              where: { conversationId: { in: convIds }, userId: { not: userId } },
+              where: { conversationId: { in: convIds }, userId: { not: null, notIn: [userId] } },
               select: { userId: true },
               distinct: ['userId']
             })
             const peerPayload = { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile }
             for (const p of peers) {
-              await emitEventToUser(p.userId, 'user:updated', peerPayload)
+              if (p.userId) await emitEventToUser(p.userId, 'user:updated', peerPayload)
             }
           }
         } catch (broadcastErr) {
