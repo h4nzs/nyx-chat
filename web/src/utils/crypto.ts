@@ -1,5 +1,21 @@
 import type { DoubleRatchetState, ConversationId, UserId, Pseudonym } from '@nyx/shared';
 import { asPseudonym } from '@nyx/shared';
+// [T1] Helper pseudonym ada di module ringan (testable tanpa graph worker);
+// di-import + di-re-export agar pemakaian lama tetap jalan.
+import {
+  generateGroupPseudonym,
+  generatePseudonymMap,
+  getPseudonymMap,
+  getMyPseudonym,
+  resolvePseudonymToUserId,
+} from '@lib/groupPseudonyms';
+export {
+  generateGroupPseudonym,
+  generatePseudonymMap,
+  getPseudonymMap,
+  getMyPseudonym,
+  resolvePseudonymToUserId,
+} from '@lib/groupPseudonyms';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -53,6 +69,27 @@ export async function encryptGroupMetadata(
   metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2; generation?: number; pseudonymMap?: Record<string, string> },
   conversationId: string
 ): Promise<string> {
+  // [T1 ROTATION] Regenerasi peta pseudonym SEKALI di sini — single choke point
+  // untuk SEMUA penulisan metadata (createGroup, edit info/avatar, rotasi
+  // keanggotaan). Aturan (keputusan 26.7.1):
+  //  - Panggilan TANPA pseudonymMap eksplisit (edit biasa / rotasi) → peta baru
+  //    di-generate full-rewrite dengan generation+1 (pesannya tak bisa di-link
+    //    ke peta lama oleh server).
+  //  - Panggilan DENGAN pseudonymMap eksplisit (createGroup men-set generation:1)
+  //    → dipakai apa adanya (peta awal).
+  //  - Grup lawas v1 (tidak pernah punya peta) TIDAK dimigrasi otomatis di sini:
+  //    mereka tetap jalan di jalur legacy; migrasi v1→v2 lazy terjadi saat
+  //    createGroup-pattern rewrite (doc 26.5 rollout) — tidak dipaksakan.
+  if (metadata.v === 2 && !metadata.pseudonymMap) {
+    const prev = getPseudonymMap(conversationId);
+    const nextGeneration = ((metadata.generation ?? 0) || 0) + 1;
+    metadata = {
+      ...metadata,
+      generation: nextGeneration,
+      pseudonymMap: await generatePseudonymMap(metadata.participants ?? []),
+    };
+    void prev; // peta lama sengaja tidak dipertahankan — unlinkability requirement
+  }
   // Ensure we have a valid session before encrypting metadata
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (conversation) {
@@ -162,70 +199,8 @@ export async function decryptGroupMetadata(
 }
 
 // --- T1: Group sender pseudonyms (doc 26.2 / 26.7) ---
-//
-// Peta `pseudonym -> userId` HIDUP HANYA di dalam encrypted metadata (v2).
-// Server melihat `senderId` pseudonym acak yang tidak bisa di-link ke akun
-// maupun antar grup. Generation naik pada tiap full key/membership rotation
-// sehingga pesan pra/pasca rotasi tidak bisa di-stitch oleh server.
-
-const PSEUDONYM_BYTES = 16; // 22-char base64url
-
-/** Random per-group sender pseudonym (base64url of 16 random bytes). */
-export async function generateGroupPseudonym(): Promise<Pseudonym> {
-  const sodium = await getSodiumLib();
-  const raw = sodium.randombytes_buf(PSEUDONYM_BYTES);
-  try {
-    return asPseudonym(sodium.to_base64(raw, sodium.base64_variants.URLSAFE_NO_PADDING));
-  } finally {
-    sodium.memzero(raw);
-  }
-}
-
-/**
- * Bangun peta pseudonym lengkap untuk seluruh anggota (full rewrite per
- * rotasi — keputusan 26.7.1). Dipanggil creator saat createGroup dan setiap
- * kali metadata v2 di-encrypt ulang (rotasi kunci/keanggotaan).
- */
-export async function generatePseudonymMap(participantIds: string[]): Promise<Record<string, string>> {
-  const map: Record<string, string> = {};
-  const seen = new Set<string>();
-  for (const uid of participantIds) {
-    // (Sangat tidak mungkin) collision guard — regenerasi bila tabrakan.
-    let pseudo = await generateGroupPseudonym();
-    while (seen.has(pseudo)) pseudo = await generateGroupPseudonym();
-    seen.add(pseudo);
-    map[pseudo] = uid;
-  }
-  return map;
-}
-
-/**
- * Baca peta pseudonym dari decryptedMetadata (bila metadata v2).
- * Return undefined untuk metadata v1 (grup lawas — jalur userId lama tetap jalan).
- */
-export function getPseudonymMap(conversationId: string): Record<string, string> | undefined {
-  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-  const meta = conv?.decryptedMetadata as { v?: number; pseudonymMap?: Record<string, string> } | undefined;
-  return meta?.v === 2 ? meta.pseudonymMap : undefined;
-}
-
-/**
- * Pseudonym SAYA untuk percakapan ini. Fallback: undefined → caller harus
- * memakai jalur lama (metadata v1) atau menunggu metadata v2 ter-decrypt.
- */
-export async function getMyPseudonym(conversationId: string): Promise<Pseudonym | undefined> {
-  const map = getPseudonymMap(conversationId);
-  if (!map) return undefined;
-  const myId = useAuthStore.getState().user?.id;
-  if (!myId) return undefined;
-  const found = Object.entries(map).find(([, uid]) => uid === myId);
-  return found ? asPseudonym(found[0]) : undefined;
-}
-
-/** Resolve pseudonym -> userId (untuk penerima). Bukan anggota peta → undefined. */
-export function resolvePseudonymToUserId(conversationId: string, pseudonym: string): string | undefined {
-  return getPseudonymMap(conversationId)?.[pseudonym];
-}
+// Helper dipindah ke lib/groupPseudonyms.ts (module ringan, testable tanpa
+// graph worker) — import + re-export di atas.
 
 // --- Secure Storage Helpers ---
 
@@ -942,6 +917,33 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
       if (distributionKeys && distributionKeys.length > 0) {
         await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       }
+
+      // [T1 ROTATION] Keanggotaan berubah → re-encrypt metadata dengan peta
+      // pseudonym BARU (generation+1) agar anggota yang keluar tidak lagi
+      // muncul di peta, dan pesan pra/pasca rotasi tak bisa di-stitch.
+      // Hanya untuk metadata v2; v1 tetap jalur legacy (doc 26.5).
+      const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
+      if (existingMeta?.v === 2) {
+        try {
+          const participantIds = conversation.participants.map(p => (p.userId || p.id) as string);
+          const newEncrypted = await encryptGroupMetadata({
+            ...existingMeta,
+            participants: participantIds,
+            v: 2,
+          }, conversationId);
+          // authSecret dari metadata (blind authorization untuk PUT details).
+          if (existingMeta.authSecret) {
+            await authFetch(`/api/conversations/${conversationId}/details`, {
+              method: 'PUT',
+              headers: { 'X-Group-Token': existingMeta.authSecret },
+              body: JSON.stringify({ encryptedMetadata: newEncrypted }),
+            });
+            useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
+          }
+        } catch (e) {
+          console.error('[T1] Metadata re-encryption on rotation failed:', e);
+        }
+      }
     }
   }
 }
@@ -1165,6 +1167,27 @@ async function doEncryptMessage(
              const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
              if (distributionKeys) {
                await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+               // [T1 ROTATION] Periodic/PCS rotation (25 msgs / 1 jam) memicu
+               // rotasi peta pseudonym juga — fire-and-forget: re-encrypt metadata
+               // v2 dengan peta baru (generation+1) + push ke server. TIDAK di-await
+               // agar hot path encrypt tetap cepat; kegagalan hanya menunda
+               // unlinkability antar-era, tidak merusak konsistensi pesan.
+               const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
+               if (existingMeta?.v === 2 && existingMeta.authSecret) {
+                   void encryptGroupMetadata({
+                       ...existingMeta,
+                       participants: conversation.participants.map(p => (p.userId || p.id) as string),
+                       v: 2,
+                   }, conversationId)
+                       .then(newEncrypted => authFetch(`/api/conversations/${conversationId}/details`, {
+                           method: 'PUT',
+                           headers: { 'X-Group-Token': existingMeta.authSecret as string },
+                           body: JSON.stringify({ encryptedMetadata: newEncrypted }),
+                       }).then(() => {
+                           useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
+                       }))
+                       .catch(e => console.warn('[T1] Background pseudonym-map rotation failed:', e));
+               }
              } else {
                throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
              }
