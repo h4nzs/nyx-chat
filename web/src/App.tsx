@@ -183,7 +183,7 @@ const AppContent = () => {
       import('@store/message'),
       import('@store/connection'),
       import('@store/settings'),
-    ]).then(([cover, msgStore, connStore, settingsMod]) => {
+    ]).then(async ([cover, msgStore, connStore, settingsMod]) => {
       if (!mounted) return;
       const scheduler = cover.getCoverScheduler((conversationId) => {
         msgStore.useMessageStore.getState().sendCoverTraffic(conversationId);
@@ -193,7 +193,19 @@ const AppContent = () => {
       });
       const { coverTrafficMaximumGroups, coverTrafficMasterEnabled } = settingsMod.useSettingsStore.getState();
       scheduler.updatePreferences({ masterEnabled: coverTrafficMasterEnabled, maximumGroups: new Set(coverTrafficMaximumGroups) });
-      scheduler.sync(coverTrafficMaximumGroups);
+      // [26.10.5 Q5] Burner default Maximum: gabungkan grup Maximum eksplisit
+      // dengan semua burner yang diketahui conversation store, dan ikuti
+      // perubahannya live (burner baru/pulih otomatis ter-arm). Snapshot grup
+      // Maximum di-refresh tiap callback agar perubahan toggle terbaca.
+      const convMod = await import('@store/conversation');
+      const armFromStore = () => {
+        const { coverTrafficMaximumGroups: currentMax } = settingsMod.useSettingsStore.getState();
+        scheduler.updatePreferences({ maximumGroups: new Set(currentMax) });
+        const { conversations } = convMod.useConversationStore.getState();
+        scheduler.sync(cover.collectCoverArmedIds(currentMax, conversations));
+      };
+      armFromStore();
+      convMod.useConversationStore.subscribe(armFromStore);
     }).catch(e => console.warn('[T4] Cover scheduler init failed:', e));
     return () => { mounted = false; };
   }, [user]);

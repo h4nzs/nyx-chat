@@ -90,17 +90,29 @@ column + index on `UserHiddenConversation`) at deploy time.
   60s window; cover backs off as the shared `chat_message` bucket fills
   (soft cap 28/min) — real traffic is never throttled by cover.
 * **Honest UX (26.10.5):** per-group toggle in Group Info showing the ~5.6
-  MB/day estimate before enabling; global master kill-switch in Settings;
-  i18n in all four locales. Cover advancing the sender-key chain means chain
-  index N no longer maps to real message counts (by design).
+  MB/day estimate before enabling; global master kill-switch in Settings
+  (Privacy Shield module, with live "N group(s) armed" status); i18n in all
+  four locales. Cover advancing the sender-key chain means chain index N no
+  longer maps to real message counts (by design).
+* **Burners Default Maximum (26.10.5 Q5):** burner conversations (1:1,
+  `burner_<hex>`) emit cover traffic from day one without opt-in — the
+  scheduler treats every `burner_*` id as opted-in (master kill-switch still
+  wins), the conversation store subscription arms new/recovered burners live,
+  and the burner DR receive path drops `COVER` payloads after decryption
+  (`isCoverPayload`; the burner path bypasses `parseSilent`). Maximum status
+  is derivative of the id prefix: never persisted, never sent to the server.
+  Burner sends also stay out of the cover backoff accounting (no shared
+  `chat_message` bucket).
 
 ### 🧪 Tests (this tier set)
 * Server: +11 tests — T1 pseudonym storage/relay/unsend, T3a receipt
   persistence & broadcast (incl. 1:1 isolation and self-read skip), T3b
   schema/sync/revocation contract (82 total).
-* Web: +22 tests — pseudonym map helpers, pairwise key delivery wire
-  contract, cover-traffic Poisson sampling/scheduler/backoff, GROUP_KEY and
-  COVER silent-payload guards (134 total).
+* Web: +29 tests — pseudonym map helpers, pairwise key delivery wire
+  contract, cover-traffic Poisson sampling/scheduler/backoff (incl. burner
+  default-Maximum arming, master-switch precedence, `isCoverPayload`,
+  `collectCoverArmedIds`), GROUP_KEY and COVER silent-payload guards (141
+  total).
 
 ## 🔒 [Unreleased] - 2026-09-25
 

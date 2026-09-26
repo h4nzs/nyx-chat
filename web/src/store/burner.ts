@@ -327,6 +327,17 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         let parsedContent = content;
         let fileData = {};
 
+        // [T4][26.10.5 Q5] Cover traffic: drop setelah dekripsi — jalur burner
+        // DR tidak lewat parseSilent message store, jadi butuh guard sendiri
+        // agar cover tidak muncul sebagai bubble JSON mentah. Pesan cover TIDAK
+        // menghitung ratchet burner lebih jauh dari yang sudah terjadi (DR
+        // state sudah di-commit di atas — sama seperti jalur grup, cover
+        // memang menghitung chain by design).
+        {
+          const { isCoverPayload } = await import('@lib/coverTraffic');
+          if (isCoverPayload(content)) return;
+        }
+
         if (content.startsWith('{')) {
           try {
             const data = JSON.parse(content);

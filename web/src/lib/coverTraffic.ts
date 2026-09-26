@@ -63,6 +63,53 @@ export function coverShouldYield(now: number = Date.now()): boolean {
   return recentSendTimestamps.length >= CHAT_MESSAGE_LIMIT_PER_MIN - 2;
 }
 
+/**
+ * [26.10.5 Q5] Burner default Maximum: setiap percakapan dengan prefix
+ * `burner_` di-arm otomatis tanpa opt-in eksplisit dan TANPA persist ke
+ * settings store — status Maximum burner bersifat derivatif (client-local,
+ * server tetap tidak pernah tahu). Master kill-switch tetap menang.
+ */
+export const BURNER_CONVERSATION_PREFIX = 'burner_';
+
+export function isBurnerConversation(conversationId: string): boolean {
+  return conversationId.startsWith(BURNER_CONVERSATION_PREFIX);
+}
+
+/**
+ * Gabungan conversation ids yang harus di-arm scheduler: grup Maximum
+ * eksplisit (settings store) + semua burner yang diketahui conversation
+ * store (26.10.5 Q5). Dedupe mempertahankan urutan (grup dulu, burner belakangan).
+ */
+export function collectCoverArmedIds(
+  maximumGroups: Iterable<string>,
+  conversations: Iterable<{ id: string }>,
+): string[] {
+  const ids: string[] = [];
+  for (const id of maximumGroups) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+  for (const conv of conversations) {
+    if (typeof conv.id === 'string' && isBurnerConversation(conv.id) && !ids.includes(conv.id)) {
+      ids.push(conv.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Deteksi payload COVER dari konten yang SUDAH didekripsi. Dipakai jalur
+ * burner DR (receiveMessage) yang tidak lewat parseSilent message store —
+ * tanpa ini, cover burner akan muncul sebagai bubble JSON mentah.
+ */
+export function isCoverPayload(content: string): boolean {
+  if (typeof content !== 'string' || !content.startsWith('{')) return false;
+  try {
+    return (JSON.parse(content) as { type?: unknown }).type === 'COVER';
+  } catch {
+    return false;
+  }
+}
+
 /** Hanya untuk test — kosongkan riwayat real-send (state modul). */
 export function _resetCoverTrafficStateForTests(): void {
   recentSendTimestamps.length = 0;
@@ -151,7 +198,10 @@ export class CoverTrafficScheduler {
   }
 
   private isOptedIn(conversationId: string): boolean {
-    return this.prefs.masterEnabled === true && this.prefs.maximumGroups.has(conversationId);
+    if (this.prefs.masterEnabled !== true) return false;
+    // [26.10.5 Q5] Burner default Maximum — selalu opted-in (master menang).
+    if (isBurnerConversation(conversationId)) return true;
+    return this.prefs.maximumGroups.has(conversationId);
   }
 
   private fireIfEligible(conversationId: string): void {

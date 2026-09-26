@@ -21,6 +21,9 @@ import {
   notifyRealSend,
   makeCoverContent,
   estimateDailyCoverBytes,
+  isBurnerConversation,
+  isCoverPayload,
+  collectCoverArmedIds,
   _resetCoverTrafficStateForTests,
   COVER_MIN_INTERVAL_MS,
   COVER_MAX_INTERVAL_MS,
@@ -140,6 +143,82 @@ describe('CoverTrafficScheduler', () => {
     vi.advanceTimersByTime(COVER_MAX_INTERVAL_MS + 1000)
     expect(sentTo).toContain('g1')
     expect(sentTo).not.toContain('gX')
+  })
+})
+
+describe('[26.10.5 Q5] burner default Maximum', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('isBurnerConversation mengenali prefix burner_', () => {
+    expect(isBurnerConversation('burner_abc123')).toBe(true)
+    expect(isBurnerConversation('conv-123')).toBe(false)
+    expect(isBurnerConversation('')).toBe(false)
+  })
+
+  it('scheduler FIRE untuk burner tanpa opt-in eksplisit (default Maximum)', () => {
+    const sentTo: string[] = []
+    const scheduler = new CoverTrafficScheduler({
+      masterEnabled: true,
+      maximumGroups: new Set<string>(), // TIDAK ada burner di sini
+      isVisible: () => true,
+      isTransportConnected: () => true,
+      onSendCover: (id) => sentTo.push(id),
+    })
+    scheduler.start('burner_abc123')
+    vi.advanceTimersByTime(COVER_MAX_INTERVAL_MS + 1000)
+    expect(sentTo).toContain('burner_abc123')
+  })
+
+  it('master kill-switch TETAP menang atas default burner', () => {
+    const sentTo: string[] = []
+    const scheduler = new CoverTrafficScheduler({
+      masterEnabled: false,
+      maximumGroups: new Set<string>(),
+      isVisible: () => true,
+      isTransportConnected: () => true,
+      onSendCover: (id) => sentTo.push(id),
+    })
+    scheduler.start('burner_abc123')
+    vi.advanceTimersByTime(COVER_MAX_INTERVAL_MS * 3)
+    expect(sentTo).toEqual([])
+  })
+
+  it('collectCoverArmedIds menggabungkan grup Maximum + semua burner (dedupe)', () => {
+    const armed = collectCoverArmedIds(
+      ['g1', 'g2'],
+      [{ id: 'burner_a' }, { id: 'conv-x' }, { id: 'g1' }, { id: 'burner_b' }],
+    )
+    expect(armed).toEqual(['g1', 'g2', 'burner_a', 'burner_b'])
+    // burners tanpa conversation store entry tetap ter-unggulkan dari daftar Maximum
+    expect(collectCoverArmedIds(['burner_a'], [{ id: 'burner_a' }])).toEqual(['burner_a'])
+  })
+
+  it('collectCoverArmedIds mengabaikan id non-string / entri kosong', () => {
+    const armed = collectCoverArmedIds([], [{ id: undefined as unknown as string }, { id: 'burner_ok' }])
+    expect(armed).toEqual(['burner_ok'])
+  })
+
+  it('isCoverPayload mengenali payload COVER yang didekripsi (jalur burner DR)', () => {
+    expect(isCoverPayload(makeCoverContent())).toBe(true)
+    expect(isCoverPayload(JSON.stringify({ type: 'file', url: 'x' }))).toBe(false)
+    expect(isCoverPayload('halo biasa')).toBe(false)
+    expect(isCoverPayload('{not json')).toBe(false)
+    expect(isCoverPayload('')).toBe(false)
+  })
+
+  it('sync() meng-arm burner yang baru muncul di conversation store', () => {
+    const sentTo: string[] = []
+    const scheduler = new CoverTrafficScheduler({
+      masterEnabled: true,
+      maximumGroups: new Set<string>(),
+      isVisible: () => true,
+      isTransportConnected: () => true,
+      onSendCover: (id) => sentTo.push(id),
+    })
+    scheduler.sync(collectCoverArmedIds([], [{ id: 'burner_new' }]))
+    vi.advanceTimersByTime(COVER_MAX_INTERVAL_MS + 1000)
+    expect(sentTo).toContain('burner_new')
   })
 })
 

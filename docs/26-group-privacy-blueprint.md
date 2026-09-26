@@ -414,15 +414,29 @@ Per group with M active members at λ=0.5/min, 8KB padded envelope:
   + (later) batched/jittered release, bundled as one switch with a plain-language
   explainer: "Your device sends encrypted filler messages so real activity is harder
   to single out. Uses ~X MB/day here."
+  **[implemented]** Cover-traffic toggle in Group Info (CoverTrafficCard) with the
+  ~5.6 MB/day estimate shown before enabling; ephemeral receipts and
+  batched/jittered release remain future additions to the bundle.
 - Show the honest per-group data estimate before enabling; no silent data burn.
 - Burner groups: **Maximum by default** (per Q5 — burners inherit everything from
   day one, no fallback paths).
+  **[implemented 2026-09-27]** Cover applies to burner conversations too. Note the
+  implementation reality: NYX burners are 1:1 (`burner_<hex>`), not groups, so
+  "burner groups default Maximum" translates to: the cover scheduler treats every
+  `burner_*` conversation as opted-in (`isBurnerConversation` in `coverTraffic.ts`),
+  the conversation store subscription arms new/recovered burners live, and the
+  burner DR receive path (`burner.ts`) drops `COVER` payloads after decryption via
+  `isCoverPayload` (the burner path does not go through `parseSilent`). The Maximum
+  status is **derivative of the id prefix** — never persisted, never sent to the
+  server; the master kill-switch still wins.
 - The toggle is **client-local state** (like the metadata cache): the server must not
   learn which conversations run cover traffic — that would tag exactly the messages
   we most want to protect. Members who opted in simply emit cover; membership in the
   "cover set" is not a queryable fact server-side.
 - Global settings gain only a master kill-switch ("never send cover traffic"),
   not per-group enumeration.
+  **[implemented]** RockerSwitch in Settings › Privacy Shield + live status line
+  ("N group(s) armed" / disarmed); i18n in all four locales.
 
 ### 26.10.6 Residual leaks (documented honestly)
 
@@ -447,6 +461,8 @@ Per group with M active members at λ=0.5/min, 8KB padded envelope:
    dropped-vs-decrypted, bandwidth used. Compare against estimates before widening.
 3. Default-on only for burner groups first; then opt-in Maximum mode; never silent
    global rollout.
+   **[implemented 2026-09-27]** Burners default-on shipped together with the
+   opt-in UI (26.10.5); general Maximum mode is opt-in per group, no silent rollout.
 
 1. **Pseudonym map format: full rewrite + generation counter.** Metadata is already
    fully re-encrypted at every rotation (key changes), so an append-only log saves

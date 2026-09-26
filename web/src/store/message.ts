@@ -42,6 +42,7 @@ export { decryptMessageObject } from '../lib/messagePipeline';
 
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
+import { isBurnerConversation } from '@lib/coverTraffic';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
 
 const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
@@ -575,9 +576,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   // PENUH (metadata bit-for-bit sama: tempId, deleteSecret, TTL distribusi
   // identik, 8KB padding, senderPseudonym). Hanya payload terenkripsi yang
   // beda: { type: 'COVER', ts }. Penerima drop setelah dekripsi.
+  // [26.10.5 Q5] Burner default Maximum: cover dikirim juga ke burner (1:1,
+  // prefix burner_) tanpa opt-in eksplisit — jalur burner sendMessage sudah
+  // menangani isSilent (tanpa bubble optimistik) di atas.
   sendCoverTraffic: async (conversationId) => {
-    const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-    if (!conv?.isGroup) return;
+    const isBurner = isBurnerConversation(String(conversationId));
+    if (!isBurner) {
+      const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+      if (!conv?.isGroup) return;
+    }
     try {
       await get().sendMessage(conversationId, {
         content: JSON.stringify({ type: 'COVER', ts: Date.now() }),
@@ -743,7 +750,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const shouldBeSilent = isSilent || data.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isSystemKeyRequest || isCover;
 
     // [T4] Kirim nyata tercatat untuk backoff scheduler cover (cover yield ke real).
-    if (!isCover) {
+    // Jalur burner kembali lebih awal sebelum titik ini — burner tidak masuk
+    // bucket chat_message yang sama, tidak dihitung sebagai real send.
+    if (!isCover && !conversationId.startsWith('burner_')) {
         import('@lib/coverTraffic').then(m => m.notifyRealSend()).catch(() => {});
     }
 
