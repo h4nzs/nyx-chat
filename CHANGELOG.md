@@ -137,9 +137,11 @@ schema push**, `prisma db push`, at deploy time).
   release for message payloads remains a future bundle addition.
 
 ### 🧪 Tests (this tier set)
-* Server: 82 total — T1 pseudonym storage/relay/unsend, T3a receipt
+* Server: 89 total — T1 pseudonym storage/relay/unsend, T3a receipt
   persistence & broadcast (incl. 1:1 isolation and self-read skip), T3b
-  token-first schema/sync/revocation contract, T2 pairwise-only rejection.
+  token-first schema/sync/revocation contract, T2 pairwise-only rejection,
+  26.8.1 blind RSA credentials (roundtrip, serial parity, issuance quota,
+  sync presentation, verify rejections).
 * Web: 147 total — pseudonym map helpers, pairwise key delivery wire
   contract, cover-traffic Poisson sampling/scheduler/backoff (incl. burner
   default-Maximum arming, master-switch precedence, `isCoverPayload`,
