@@ -120,8 +120,15 @@ schema push**, `prisma db push`, at deploy time).
   fallbacks for pre-existing states. Also fixed in the same pass: creator's
   cached `decryptedMetadata` now mirrors the full v2 object (v, generation,
   `pseudonymMap`, `deliveryTokenMap`) — previously only title/avatar/authSecret,
-  so the creator could never resolve incoming pseudonyms (its own cache guard
+  so the creator  could never resolve incoming pseudonyms (its own cache guard
   prevented re-decryption, permanently hiding the map).
+* **First key distribution no longer leaks userId (2026-09-28, DB
+  audit):** during `createGroup`, the creator's GROUP_KEY envelope routed
+  with the real userId — the pseudonym map existed only in memory while
+  `ensureGroupSession` (invoked inside `encryptGroupMetadata`) reads the
+  not-yet-populated conversation store. The creator's pseudonym is now
+  injected explicitly through the call chain (`opts.pseudonym`); store
+  lookup remains the fallback for later distributions.
 
 ### 🌫️ T4 — Cover Traffic (doc 26.10)
 * **Application-Level Filler:** Opt-in per group. Cover messages traverse the

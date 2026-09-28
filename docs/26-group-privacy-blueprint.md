@@ -362,6 +362,16 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
   of the sealed envelope (it rides the wrapper), but it is bound to an
   envelope-bound chain key and verified by usage — a server swap is detectable
   via signature failure.
+- **Update 2026-09-28 (DB audit finding):** the creator's FIRST key
+  distribution still carried the real userId as routing identity —
+  `ensureGroupSession` (triggered from inside `encryptGroupMetadata` during
+  `createGroup`) resolves the sender pseudonym via the conversation store,
+  which is only populated AFTER metadata encryption completes. Fix: explicit
+  pseudonym injection through the call chain (`createGroup` →
+  `encryptGroupMetadata` → `ensureGroupSession`, `opts.pseudonym`), with the
+  store lookup kept as fallback for all other paths. Group-userId linkage
+  from key envelopes is now only observable for keys distributed BEFORE the
+  fix (pre-rotation legacy data — moot after the prod reset).
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 

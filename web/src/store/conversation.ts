@@ -491,7 +491,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // miliknya setelah decrypt). Token anggota yang ditambahkan belakangan
         // di-issue saat invite message (targetDeliveryTokens).
         const deliveryTokenMap = { ...deliveryTokens, ...(await buildDeliveryTokensPayload([user.id])) };
-        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap, deliveryTokenMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id);
+        // [T1 FIX 2026-09-28] Suntikkan pseudonym SAYA dari peta yang baru dibuat
+        // (peta belum ada di store saat ensureGroupSession jalan di dalam sini →
+        // kalau tidak, GROUP_KEY pertama terkirim dengan userId asli sebagai
+        // senderId — ditemukan saat audit DB lokal 2026-09-28).
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap, deliveryTokenMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id, { pseudonym: pseudonymMap[user.id] });
         
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',

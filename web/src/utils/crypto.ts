@@ -74,7 +74,11 @@ export async function encryptGroupMetadata(
   // [T1] metadata v2 membawa v/generation/pseudonymMap; v1 (tanpa field itu)
   // tetap valid untuk grup lawas.
   metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2; generation?: number; pseudonymMap?: Record<string, string>; deliveryTokenMap?: Record<string, string> },
-  conversationId: string
+  conversationId: string,
+  // [T1 FIX 2026-09-28] Pseudonym eksplisit untuk distribusi kunci yang dipicu
+  // di dalam sini (ensureGroupSession) — penting saat createGroup, peta baru
+  // dibuat SEBELUM store terisi (lihat ensureGroupSession).
+  opts?: { pseudonym?: string }
 ): Promise<string> {
   // [T1 ROTATION] Regenerasi peta pseudonym SEKALI di sini — single choke point
   // untuk SEMUA penulisan metadata (createGroup, edit info/avatar, rotasi
@@ -110,7 +114,7 @@ export async function encryptGroupMetadata(
   // Ensure we have a valid session before encrypting metadata
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (conversation) {
-    const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+    const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, false, opts);
     if (distributionKeys && distributionKeys.length > 0) {
       await emitGroupKeyDistribution(
         conversationId,
@@ -659,7 +663,18 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 // --- Group Key Management & Recovery ---
 
 // ✅ FASE 3: FAN-OUT GROUP SESSION BUILDER
-export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<Record<string, unknown>[] | null> {
+export async function ensureGroupSession(
+  conversationId: string,
+  participants: Participant[],
+  forceRotate: boolean = false,
+  // [T1 FIX 2026-09-28] Pseudonym eksplisit untuk distribusi kunci PERTAMA.
+  // Saat createGroup, peta pseudonym baru dibuat di memori SEBELUM store
+  // diisi — getMyPseudonym() (yang baca store) return undefined → fallback
+  // myId bocorkan userId pengirim ke server pada GROUP_KEY pertama. Caller
+  // yang pegang peta (createGroup → encryptGroupMetadata) menyuntikkan
+  // pseudonym-nya di sini; jalur lain tetap fallback ke store.
+  opts?: { pseudonym?: string }
+): Promise<Record<string, unknown>[] | null> {
   const cacheKey = `${conversationId}:${forceRotate}`;
   const pending = pendingGroupSessionPromises.get(cacheKey);
   if (pending) return pending;
@@ -669,7 +684,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const interval = setInterval(() => {
         if (!groupSessionLocks.has(conversationId)) {
           clearInterval(interval);
-          ensureGroupSession(conversationId, participants, forceRotate)
+          ensureGroupSession(conversationId, participants, forceRotate, opts)
             .then(resolve)
             .catch(reject);
         }
@@ -802,7 +817,11 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   // menghubungkan "siapa mendistribusikan kunci ke siapa" dengan
                   // akun. Penerima resolve ke userId via metadata untuk
                   // receiver-state store (handleGroupKeyDistribution).
-                  senderId: (await getMyPseudonym(conversationId)) ?? myId,
+                  // [T1 FIX 2026-09-28] Prioritas: pseudonym eksplisit dari caller
+                  // (createGroup — peta belum ada di store) → store → fallback.
+                  senderId: opts?.pseudonym
+                      ?? (await getMyPseudonym(conversationId))
+                      ?? myId,
                   senderDeviceKey: myIdentityKeyB64,
                   // [T2 FIX #9 2026-09-28] Pola libsignal SenderKeyState: public
                   // signing key pengirim dibawa dalam distribusi (yang dienkripsi
