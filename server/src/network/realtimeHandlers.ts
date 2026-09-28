@@ -210,7 +210,7 @@ export async function handleChatMessage(
         // berjalan seperti ACK asli.
         const existing = await ctx.prisma.message.findUnique({
           where: { id: reservation.existingMsgId },
-          include: { sender: { select: { id: true, encryptedProfile: true } } }
+          include: {}
         });
         if (existing) {
           const safeMessage = toRawServerMessage(existing) as RawServerMessage;
@@ -253,7 +253,7 @@ export async function handleChatMessage(
             isViewOnce: isViewOnce === true,
             deleteSecret
         },
-        include: { sender: { select: { id: true, encryptedProfile: true } } }
+        include: {}
       }),
       ctx.prisma.conversation.update({
         where: { id: conversationId },
@@ -474,14 +474,32 @@ export async function handleKeySync(
        }
 
        case 'group:fulfilled_key': {
-           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, drHeader, senderPseudonym } = data as KeyFulfillmentPayload & { senderPseudonym?: string };
+           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, senderSigningKey, drHeader, senderPseudonym } = data as KeyFulfillmentPayload & { senderPseudonym?: string; senderSigningKey?: string };
            if (!requesterId || !conversationId || !encryptedKey) return;
            if (!await ctx.checkRateLimit(userId, 'group_fulfilled_key', 60, 60)) return;
 
            // [T1] Fulfillment replay pakai pseudonym pengirim asli (bila klien
            // menyertakan) — requester mengenali sender via peta metadata.
-           const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: senderPseudonym ?? userId, senderDeviceKey };
+           // [T2 FIX #9 2026-09-28] senderSigningKey = public signing key pengirim,
+           // diikat ke receiver state penerima (pola libsignal SenderKeyState).
+           const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: senderPseudonym ?? userId, senderDeviceKey, senderSigningKey };
            if (drHeader) emitPayload.drHeader = drHeader;
+
+           // [OFFLINE-KEY PERSIST — FIX 2026-09-27] Kunci juga dipersist sebagai
+           // SYSTEM message (TTL 7d, pola = metadata:updated): fulfillment yang
+           // datang saat requester OFFLINE tidak boleh hilang, kalau tidak dia
+           // terjebak waiting_for_key sampai pengirim online lagi. Offline catch-up
+           // mengenali content '"type":"GROUP_KEY"' dan meng-unseal envelope-nya.
+           await ctx.prisma.message.create({
+               data: {
+                   conversationId,
+                   senderId: senderPseudonym ?? userId,
+                   type: 'SYSTEM',
+                   content: JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId }),
+                   expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+               }
+           }).catch((e: unknown) => console.warn('[KeySync] Failed to persist group key envelope:', e));
+
            await emitEventToUser(ctx, requesterId, 'session:new_key', emitPayload, targetDeviceId);
            break;
          }

@@ -79,7 +79,6 @@ router.get('/:conversationId', async (req, res, next) => {
       take: take + 1,
       orderBy: { createdAt: 'desc' }, 
       include: {
-        sender: { select: { id: true, encryptedProfile: true } },
         statuses: true // Biarkan untuk kompatibilitas tipe balikan (meskipun isinya mungkin kosong)
       }
     })
@@ -104,7 +103,6 @@ router.get('/:conversationId', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 50,
       include: {
-        sender: { select: { id: true, encryptedProfile: true } },
         statuses: true
       }
     })
@@ -124,7 +122,6 @@ router.get('/:conversationId', async (req, res, next) => {
       },
       orderBy: { createdAt: 'asc' },
       include: {
-        sender: { select: { id: true, encryptedProfile: true } },
         statuses: true
       }
     })
@@ -171,7 +168,8 @@ router.post('/', zodValidate({
     // Cap sama dengan jalur WebTransport: mencegah amplifikasi relay via REST
     targetRecipients: z.array(z.string()).max(500).optional(),
     // [T3b] Delivery tokens (dual-write saat invite relay) — jalur REST fallback
-    targetDeliveryTokens: z.record(z.string().regex(/^[A-Za-z0-9_-]{22}$/), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
+    // [T3b] Key = userId, value = token (Zod 4: argumen pertama z.record = schema KEY).
+    targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
     // repliedToId dihapus validasinya karena relasi DB sudah diputus
   }).refine(data => data.content, { message: "Message must contain content" })
 }), async (req, res, next) => {
@@ -199,7 +197,6 @@ router.post('/', zodValidate({
           isViewOnce: isViewOnce === true
         },
         include: {
-          sender: { select: { id: true, encryptedProfile: true } },
           statuses: true
         }
       }),

@@ -33,8 +33,6 @@ model User {
   devices Device[]
 
   // --- RELASI PENGGUNA ---
-  messages            Message[]
-  messageStatuses     MessageStatus[]
   stories             Story[]
   hiddenConversations UserHiddenConversation[]
   authenticators      Authenticator[]
@@ -218,7 +216,8 @@ model Message {
   id             String       @id @default(cuid())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
-  sender         User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  // [T1 GROUP PSEUDONYMS] Bukan FK ke User: pesan grup v2 mem-persist
+  // PSEUDONYM di kolom ini (opaque); 1:1 selalu NULL (sealed sender).
   senderId       String?
   content        String?      @db.Text
   type           MessageType  @default(USER)
@@ -252,7 +251,8 @@ model MessageStatus {
   id        String         @id @default(cuid())
   message   Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
   messageId String
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // [T3a] Bukan FK ke User: grup metadata v2 mem-persist PSEUDONYM di kolom
+  // ini (opaque, unlinkable); 1:1 / grup v1 tetap menyimpan userId asli.
   userId    String
   status    DeliveryStatus @default(SENT)
   updatedAt DateTime       @updatedAt

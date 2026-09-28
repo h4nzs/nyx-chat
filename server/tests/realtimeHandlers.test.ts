@@ -298,7 +298,7 @@ test('T1: chat_message grup dengan senderPseudonym tersimpan dengan pseudonym, b
   assert.equal(created!['senderId'], 'AAAAAAAAAAAAAAAAAAAAAA', 'senderId DB = pseudonym (bukan userId)');
 });
 
-test('T2 FINAL: distribute_keys ditolak eksplisit (legacy path dihapus, pairwise-only)', async () => {
+test('T2 FINAL: distribute_keys ditolak eksplisit (legacy path dihapus; distribusi via group:fulfilled_key)', async () => {
   const { ctx, calls } = makeCtx();
   await handleKeySync(ctx, 'u-real', 'd1', {
     event: 'messages:distribute_keys',
@@ -315,6 +315,51 @@ test('T2 FINAL: distribute_keys ditolak eksplisit (legacy path dihapus, pairwise
   assert.equal((ack![2] as { data: { ok: boolean } }).data.ok, false, 'ACK = gagal (event tidak lagi didukung)');
   const relay = calls.sendJsonToUser.find((c) => c[0] === 'u2');
   assert.ok(!relay, 'TIDAK boleh ada relay ke target');
+});
+
+test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima offline tetap dapat kunci)', async () => {
+  const { ctx, calls } = makeCtx();
+  const createdMessages: Record<string, unknown>[] = [];
+  // makeCtx pakai Proxy tanpa set-trap efektif — bungkus prisma agar
+  // message.create terekam (delegasi properti lain ke proxy asli).
+  const origPrisma = ctx.prisma as unknown as Record<string, unknown>;
+  (ctx as { prisma: unknown }).prisma = new Proxy(origPrisma, {
+    get(target, prop: string) {
+      if (prop === 'message') {
+        return { create: async (args: { data: Record<string, unknown> }) => { createdMessages.push(args.data); return { id: 'm-sys' }; } };
+      }
+      return target[prop];
+    },
+  });
+
+  await handleKeySync(ctx, 'u-sender', 'd1', {
+    event: 'group:fulfilled_key',
+    msgId: '',
+    data: {
+      requesterId: 'u-b',
+      conversationId: 'c1',
+      encryptedKey: 'sealed-envelope-b64',
+      targetDeviceId: 'dev-b',
+      senderDeviceKey: 'dev-sender-key',
+      senderPseudonym: 'BBBBBBBBBBBBBBBBBBBBBB',
+    },
+  });
+
+  // 1. Live relay tetap jalan (session:new_key ke requester).
+  const relay = calls.sendJsonToUser.find((c) => c[0] === 'u-b');
+  assert.ok(relay, 'live relay session:new_key harus tetap terkirim');
+
+  // 2. Envelope dipersist — penerima yang offline saat fulfillment tetap
+  //    mendapat kunci lewat offline catch-up (SYSTEM message TTL 7d).
+  assert.equal(createdMessages.length, 1, 'harus ada 1x message.create (persist)');
+  const persisted = createdMessages[0]!;
+  assert.equal(persisted['type'], 'SYSTEM');
+  assert.equal(persisted['conversationId'], 'c1');
+  assert.equal(persisted['senderId'], 'BBBBBBBBBBBBBBBBBBBBBB', 'senderId = pseudonym, bukan userId auth');
+  const content = JSON.parse(String(persisted['content'])) as { type: string; key: string };
+  assert.equal(content.type, 'GROUP_KEY');
+  assert.equal(content.key, 'sealed-envelope-b64', 'envelope utuh (opaque) dipersist');
+  assert.ok(persisted['expiresAt'] instanceof Date, 'TTL 7d terpasang');
 });
 
 test('T1: unsend grup tanpa deleteSecret ditolak (deleteSecret-only untuk grup)', async () => {

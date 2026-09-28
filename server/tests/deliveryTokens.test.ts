@@ -42,9 +42,11 @@ test('T3b TOKEN-FIRST: schema — deliveryToken wajib unique, userId nullable ro
 
 test('T3b: format token = 22-char base64url (16 random bytes), konsisten dengan shared schemas', () => {
   const schemas = read('../../packages/shared/src/schemas.ts');
-  // zod 4: z.record(keySchema, valueSchema) — keduanya 22-char base64url.
-  assert.match(schemas, /targetDeliveryTokens:\s*z\.record\(z\.string\(\)\.regex\(\/\^\[A-Za-z0-9_-]\{22\}\$\/\),\s*z\.string\(\)\.regex\(\/\^\[A-Za-z0-9_-]\{22\}\$\/\)\)/,
-    'MessageSendPayloadSchema memvalidasi targetDeliveryTokens (key & value 22-char)');
+  // zod 4: z.record(keySchema, valueSchema) — KEY = userId (string bebas),
+  // VALUE = 22-char base64url. (Fix: key dulu salah divalidasi sebagai token,
+  // bikin POST /conversations & relay grup selalu 400.)
+  assert.match(schemas, /targetDeliveryTokens:\s*z\.record\(z\.string\(\)\.min\(1\),\s*z\.string\(\)\.regex\(\/\^\[A-Za-z0-9_-]\{22\}\$\/\)\)/,
+    'MessageSendPayloadSchema memvalidasi targetDeliveryTokens (key=userId, value=token 22-char)');
   assert.ok(TOKEN_RE.test(TOKEN));
   assert.ok(!TOKEN_RE.test('short'), 'token terlalu pendek ditolak');
   assert.ok(!TOKEN_RE.test('contains+plus-and/slash0000'), 'karakter non-base64url ditolak');

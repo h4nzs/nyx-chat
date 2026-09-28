@@ -252,7 +252,9 @@ router.post('/', zodValidate({
     userIds: z.array(z.string()).min(1),
     initialSession: initialSessionSchema.optional(),
     // [T3b] Map userId -> delivery token, issued client-side by the creator.
-    deliveryTokens: z.record(DeliveryTokenSchema, DeliveryTokenSchema).optional(),
+    // NOTE Zod 4: argumen pertama z.record = schema KEY (userId), jadi harus
+    // string biasa — DeliveryTokenSchema hanya untuk VALUE (token 22-char).
+    deliveryTokens: z.record(z.string().min(1), DeliveryTokenSchema).optional(),
   })
 }), async (req, res, next) => {
   try {
