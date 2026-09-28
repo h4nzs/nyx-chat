@@ -58,6 +58,9 @@ export interface SystemMessagePayload {
   conversationId?: string;
   senderId?: string;
   senderDeviceKey?: string;
+  // [T2 FIX #9 2026-09-28] Public signing key pengirim (bawaan envelope
+  // fulfilled_key — diikat ke receiver state penerima).
+  senderSigningKey?: string;
   deviceId?: string;
   hostClassicalPk?: string;
   hostPqPk?: string;
@@ -71,6 +74,7 @@ export interface SystemMessagePayload {
     encryptedKey?: string;
     key?: string;
     senderDeviceKey?: string;
+    senderSigningKey?: string;
   }[];
   targetUserId?: string;
   targetDeviceKey?: string;

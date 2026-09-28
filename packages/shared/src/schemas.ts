@@ -112,7 +112,8 @@ export const MessageSendPayloadSchema = z.object({
   // [T3b DELIVERY TOKENS] Map userId -> delivery token, piggybacked on invite
   // messages so the server can register (conversation, token) rows for offline
   // discovery without learning the roster beyond routing rows.
-  targetDeliveryTokens: z.record(z.string().regex(/^[A-Za-z0-9_-]{22}$/), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
+  // [T3b] Key = userId, value = token (Zod 4: argumen pertama z.record = schema KEY).
+  targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
 });
 
 export const IncomingMessageSchema = z.object({
