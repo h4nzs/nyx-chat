@@ -95,6 +95,11 @@ export interface GroupReceiverState {
   CK: string;
   N: number;
   skippedKeys?: Record<string, string>;
+  // [T2 FIX #9 2026-09-28] Public signing key pengirim, diikat SEJAK distribusi
+  // kunci (pola libsignal SenderKeyState: sender_signing_key tersimpan di state
+  // penerima). Sumber utama verifikasi signature pesan grup — menghapus
+  // ketergantungan decrypt pada pseudonymMap/bundle API (chicken-and-egg).
+  signingKey?: string;
 }
 
 // --- GLOBAL WRITE QUEUE ---
@@ -193,7 +198,8 @@ export async function getGroupReceiverState(conversationId: string, senderId: st
         senderId: asUserId(senderId),
         CK: ckPlain,
         N: record.state.N,
-        skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys)
+        skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys),
+        signingKey: record.state.signingKey
     } : null;
   });
 }
@@ -205,7 +211,9 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
           state: {
             CK: await encryptValueAtRest(state.CK),
             N: state.N,
-            skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys)
+            skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
+            // Public key — tidak sensitif (bukan private), simpan plaintext.
+            signingKey: state.signingKey
           }
       });
   });

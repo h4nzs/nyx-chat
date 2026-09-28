@@ -690,6 +690,10 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const { groupInitSenderKey, worker_pq_box_seal, worker_pq_box_seal_open } = await getWorkerProxy();
       const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
       const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      // [T2 FIX #9 2026-09-28] Public signing key dibawa dalam distribusi kunci
+      // (lihat komentar di distributionKeys.push di bawah).
+      const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
+      const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
 
       const { senderKeyB64 } = await groupInitSenderKey();
 
@@ -799,7 +803,13 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   // akun. Penerima resolve ke userId via metadata untuk
                   // receiver-state store (handleGroupKeyDistribution).
                   senderId: (await getMyPseudonym(conversationId)) ?? myId,
-                  senderDeviceKey: myIdentityKeyB64
+                  senderDeviceKey: myIdentityKeyB64,
+                  // [T2 FIX #9 2026-09-28] Pola libsignal SenderKeyState: public
+                  // signing key pengirim dibawa dalam distribusi (yang dienkripsi
+                  // E2E pq_box_seal → server tak lihat) dan diikat ke receiver
+                  // state penerima. Verifikasi signature pesan selanjutnya tidak
+                  // butuh lookup metadata/bundle lagi.
+                  senderSigningKey: mySigningKeyB64
               });
           }
       }
@@ -850,26 +860,28 @@ export async function ensureGroupSession(conversationId: string, participants: P
   }
 }
 
-// [T2 PAIRWISE KEY DELIVERY — doc 26.2] ======================================
-// Sender key grup didistribusikan DI DALAM sesi pairwise 1:1 yang sudah ada
-// (Double Ratchet + PQ X3DH, `gspqr_<peerId>`) sebagai pesan kontrol SILENT
-// per-device — server hanya melihat ciphertext yang sama bentuknya dengan
-// pesan biasa, sehingga graf "siapa mengirim kunci ke siapa" hilang dan kunci
-// mendapat transport FS (envelope lama yang disimpan server tak bisa dibuka
-// ulang dengan static key yang bocor belakangan).
-//
-// [T2 FINAL] Jalur legacy `messages:distribute_keys` DIHAPUS (26.5 — deferred
-// removal kini dieksekusi; prod di-reset, semua klien ter-update). Pairwise DR
-// adalah SATU-SATUNYA jalur distribusi kunci grup: sesi `gspqr_<peer>` dengan
-// peer yang belum pernah chat dibentuk on-demand via ensureSpqrSessionWithPeer.
+// [T2 KEY DELIVERY — doc 26.2] ==============================================
+// Sender key grup didistribusikan via event `group:fulfilled_key` (envelope
+// pq_box_seal per-device; server hanya melihat envelope opaque + routing).
+// Jalur legacy `messages:distribute_keys` dan pairwise SPQR sama-sama dihapus
+// (lihat komentar [REMOVED 2026-09-27] di bawah).
 export type PairwiseKeyDistributionResult = {
   pairwise: number;
   legacy: Array<Record<string, unknown>>;
 };
 
 /**
- * Kirim kunci grup via pairwise DR ke setiap target. Return `legacy` SELALU
- * kosong (dipertahankan untuk kompatibilitas pemanggil — emitGroupKeyDistribution).
+ * Kirim kunci grup ke setiap target via event `group:fulfilled_key` (jalur
+ * KEY_SYNC server → `session:new_key` → storeReceivedSessionKey di penerima).
+ *
+ * SEJARAH: dulu pairwise SPQR (pesan kontrol `:pw:` virtual) — TIDAK PERNAH
+ * lengkap: server menolak conversation virtual ("Conversation not found") dan
+ * client tidak punya hook decryptWithSpqrSession, jadi kunci TIDAK PERNAH sampai
+ * (ditemukan E2E manual 2026-09-27: pesan grup B waiting_for_key di A). Jalur
+ * fulfilled_key sudah ter-wiring penuh server+client (dipakai auto-heal) dan
+ * membawa envelope pq_box_seal per-device yang sama — server tetap hanya melihat
+ * envelope opaque + routing, tanpa bisa membuka isinya.
+ * Return `legacy` SELALU kosong (dipertahankan untuk kompatibilitas pemanggil).
  */
 export async function sendGroupKeyDistributionPairwise(
   conversationId: string,
@@ -878,7 +890,6 @@ export async function sendGroupKeyDistributionPairwise(
   const result: PairwiseKeyDistributionResult = { pairwise: 0, legacy: [] };
   if (!Array.isArray(distributionKeys) || distributionKeys.length === 0) return result;
 
-  const sodium = await getSodiumLib();
   const myId = useAuthStore.getState().user?.id;
   const senderIdForPayload = (await getMyPseudonym(conversationId)) ?? myId;
 
@@ -889,50 +900,24 @@ export async function sendGroupKeyDistributionPairwise(
     if (!userId || !key) continue;
 
     try {
-      // Pairwise session per-PEER (bukan per-device): header DR membawa device
-      // tujuan agar kunci hanya dipakai device yang tepat.
-      await ensureSpqrSessionWithPeer(userId);
-      const controlPayload = JSON.stringify({
-        type: 'GROUP_KEY',
-        groupKey: {
-          key,
-          targetDeviceId,
-          targetDeviceKey,
-          senderId: senderIdForPayload,
-          senderDeviceKey: (dk as { senderDeviceKey?: string }).senderDeviceKey,
-        },
-      });
-      const { header, ciphertext } = await encryptWithSpqrSession(
-        userId,
-        sodium.from_string(controlPayload)
-      );
-
       const { transportClient } = await import('@lib/transportClient');
-      transportClient.sendEvent('message:send', {
-        conversationId: pairwiseControlConversationId(conversationId, userId),
-        content: JSON.stringify({ dr: header, ciphertext: sodium.to_base64(new Uint8Array(ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING) }),
-        tempId: Date.now() + Math.floor(Math.random() * 100000),
-        targetRecipients: [userId],
-        senderPseudonym: await getMyPseudonym(conversationId),
+      transportClient.sendEvent('group:fulfilled_key', {
+        requesterId: userId,
+        conversationId,
+        encryptedKey: key,
+        targetDeviceId,
+        senderDeviceKey: (dk as { senderDeviceKey?: string }).senderDeviceKey,
+        // [T2 FIX #9 2026-09-28] Public signing key pengirim — diikat ke
+        // receiver state penerima (pola libsignal SenderKeyState).
+        senderSigningKey: (dk as { senderSigningKey?: string }).senderSigningKey,
+        senderPseudonym: senderIdForPayload,
       });
       result.pairwise++;
     } catch (e) {
-      // [T2 FINAL] Tidak ada fallback — kegagalan membentuk sesi pairwise
-      // untuk satu target tidak menggagalkan yang lain (log untuk diagnostik).
-      console.warn(`[T2] Pairwise key delivery to ${userId} failed:`, e);
+      console.warn(`[T2] Key delivery to ${userId} failed:`, e);
     }
   }
   return result;
-}
-
-/**
- * Id pesan kontrol pairwise: 1:1 dengan peer DIluar grup tidak punya
- * conversationId sendiri — kontrol GROUP_KEY berjalan pada conversation ID
- * virtual `<groupConvId>:pw:<peerId>` (server-side ini hanya conversation id
- * opaque; penerima mengenali suffix-nya dan tidak menampilkannya sebagai chat).
- */
-export function pairwiseControlConversationId(groupConversationId: string, peerId: string): string {
-  return `${groupConversationId}:pw:${peerId}`;
 }
 
 export async function handleGroupKeyDistribution(
@@ -940,7 +925,10 @@ export async function handleGroupKeyDistribution(
     encryptedKey: string,
     senderId: string,
     senderDeviceKey?: string,
-    drHeader?: any
+    drHeader?: any,
+    // [T2 FIX #9 2026-09-28] Public signing key pengirim dari envelope — diikat
+    // ke receiver state agar verifikasi signature pesan tidak butuh lookup lagi.
+    senderSigningKey?: string
 ): Promise<void> {
   const { privateKey: classicalPrivateKey } = await getMyEncryptionKeyPair();
   const { privateKey: pqPrivateKey } = await useAuthStore.getState().getPqEncryptionKeyPair();
@@ -990,7 +978,9 @@ export async function handleGroupKeyDistribution(
           conversationId: conversationId as ConversationId,
           senderId: senderId as UserId,
           CK: senderKeyB64,
-          N: currentN
+          N: currentN,
+          // [T2 FIX #9 2026-09-28] Ikat signing key pengirim sejak distribusi.
+          signingKey: senderSigningKey ?? existingReceiverState?.signingKey
       });
   }
 
@@ -1458,20 +1448,65 @@ async function doDecryptMessage(
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
 
+        // [T1 FIX 2026-09-27] senderId di wrapper = PSEUDONYM (metadata v2).
+        // Resolusi signing key butuh USER ID: lookup bundle/partisipan server
+        // di-key by userId — tanpa resolve, fetchPreKeyBundles([pseudonym])
+        // selalu kosong → "Missing sender signing key" (ditemukan E2E manual).
+        const senderUserId = resolvePseudonymToUserId(conversationId, senderId) ?? senderId;
+
         let keyToUse: string | undefined = undefined;
 
         // --- Resolve Sender Signing Key ---
+        // [T2 FIX #9 2026-09-28] SUMBER UTAMA: signing key yang diikat ke receiver
+        // state sejak distribusi kunci (pola libsignal SenderKeyState.sender_signing_key).
+        // Tidak butuh resolve pseudonym/bundle API — hilangkan chicken-and-egg.
+        if (receiverState.signingKey) {
+            keyToUse = receiverState.signingKey;
+        }
         // ✅ FIX: Perbaikan Key Resolution untuk Sinkronisasi Perangkat (Device Migration)
+        // [T1 FIX 2026-09-28 #2] Fallback berbasis DEVICE IDENTITY KEY: kalau
+        // resolvePseudonymToUserId gagal (metadata v2 belum ter-decrypt / cache
+        // ShadowVault lama tanpa pseudonymMap), senderUserId masih pseudonym →
+        // fetchPreKeyBundles([pseudonym]) kosong. senderDeviceKey adalah identity
+        // key device pengirim — unik global & tidak butuh resolve pseudonym:
+        // fetch bundles SEMUA participant + self, lalu match identityKey.
         if (senderDeviceKey) {
              try {
                  // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
-                 const bundlesMap = await fetchPreKeyBundles([senderId]);
-                 const bundles = bundlesMap[senderId] || [];
+                 const bundlesMap = await fetchPreKeyBundles([senderUserId]);
+                 const bundles = bundlesMap[senderUserId] || [];
                  
                  // Temukan perangkat yang public key-nya cocok dengan senderDeviceKey
                  const deviceBundle = bundles.find(b => b.identityKey === senderDeviceKey);
                  if (deviceBundle) {
                      keyToUse = deviceBundle.signingKey;
+                 }
+
+                 // [T1 FIX 2026-09-28 #2] FALLBACK: semua-participant (bypass resolve
+                 // pseudonym), dipakai bila receiver state belum membawa signingKey
+                 // (state lama pra-fix #9). Match murni by device identity key.
+                 if (!keyToUse) {
+                     const { useConversationStore } = await import('@store/conversation');
+                     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                     const participantUserIds = (conv?.participants ?? [])
+                         .map(p => ('userId' in p && p.userId) || p.id)
+                         .map(id => String(id))
+                         .filter(id => id.length > 0);
+                     const myIdForScan = useAuthStore.getState().user?.id;
+                     if (myIdForScan && !participantUserIds.includes(myIdForScan)) {
+                         participantUserIds.push(myIdForScan);
+                     }
+                     if (participantUserIds.length > 0) {
+                         const allBundles = await fetchPreKeyBundles(participantUserIds);
+                         for (const uid of participantUserIds) {
+                             const list = allBundles[uid] || [];
+                             const match = list.find(b => b.identityKey === senderDeviceKey);
+                             if (match?.signingKey) {
+                                 keyToUse = match.signingKey;
+                                 break;
+                             }
+                         }
+                     }
                  }
              } catch (e) {
                  console.warn("Failed to fetch sender device bundle, falling back to legacy lookup");
@@ -1481,11 +1516,11 @@ async function doDecryptMessage(
         // Fallback jika tidak ketemu via senderDeviceKey (hanya cocok jika pengirim adalah orang lain dengan 1 device)
         if (!keyToUse) {
             const myId = useAuthStore.getState().user?.id;
-            if (senderId === myId) {
+            if (senderUserId === myId) {
                 console.warn("Cannot fallback to current device signing key for a message sent from our other device.");
             } else {
                 const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as Participant | undefined;
+                const sender = conversation?.participants.find(p => p.id === senderUserId || ('userId' in p && p.userId === senderUserId)) as Participant | undefined;
                 keyToUse = sender?.signingKey || sender?.user?.signingKey;
             }
         }
@@ -1829,6 +1864,8 @@ interface ReceiveKeyPayload {
   type?: 'GROUP_KEY' | 'SESSION_KEY';
   senderId?: string;
   senderDeviceKey?: string;
+  // [T2 FIX #9 2026-09-28] Public signing key pengirim dari envelope distribusi.
+  senderSigningKey?: string;
   drHeader?: any;
   initiatorCiphertextsStr?: string;
   initiatorSigningKey?: string;
@@ -1923,6 +1960,8 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
   const { conversationId, sessionId, encryptedKey, type, senderId, senderDeviceKey, drHeader, initiatorCiphertextsStr, initiatorSigningKey } = payload;
+  // [T2 FIX #9 2026-09-28] Public signing key pengirim dari envelope distribusi.
+  const senderSigningKey = (payload as { senderSigningKey?: string }).senderSigningKey;
   
   if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
       console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
@@ -1955,7 +1994,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
 
     try {
-        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey, drHeader);
+        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey, drHeader, senderSigningKey);
         
         // Opaque Mailbox: update metadata FIRST (before re-decrypting messages)
         // so the receiver state CK hasn't been ratcheted by message decryption yet.
@@ -2124,64 +2163,14 @@ export async function forceRotateGroupSenderKey(conversationId: string) {
     }
 }
 
-const SPQR_SESSION_PREFIX = 'gspqr_';
-
-export async function ensureSpqrSessionWithPeer(peerId: string, peerBundle?: PreKeyBundle): Promise<void> {
-  const sessionKey = SPQR_SESSION_PREFIX + peerId;
-  const existing = await retrieveRatchetStateSecurely(sessionKey);
-  if (existing) return;
-
-  const bundle = peerBundle || await fetchPreKeyBundle(peerId);
-
-  const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
-  if (!signingPrivateKey) throw new Error("My signing key missing");
-  const mySigningKey = {
-    publicKey: signingPrivateKey.slice(32),
-    privateKey: signingPrivateKey
-  };
-
-  const { sessionKey: sk, initiatorCiphertexts, otpkId } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peerId);
-
-  if (!bundle.signedPreKey.pqKey) throw new Error("Peer does not have PQ keys");
-
-  const sodium = await getSodiumLib();
-  const theirPqSignedPreKeyPublic = sodium.from_base64(bundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const { worker_dr_init_alice } = await getWorkerProxy();
-
-  const state = await worker_dr_init_alice({
-    sk: sk,
-    theirPqSignedPreKeyPublic
-  });
-
-  await storeRatchetStateSecurely(sessionKey, state);
-}
-
-export async function encryptWithSpqrSession(peerId: string, plaintext: Uint8Array): Promise<{ header: any, ciphertext: Uint8Array }> {
-  const sessionKey = SPQR_SESSION_PREFIX + peerId;
-  let state = await retrieveRatchetStateSecurely(sessionKey);
-  if (!state) throw new Error(`No SPQR session with peer ${peerId}`);
-
-  const { worker_dr_ratchet_encrypt } = await getWorkerProxy();
-  const result = await worker_dr_ratchet_encrypt({ serializedState: state, plaintext });
-  await storeRatchetStateSecurely(sessionKey, result.state);
-  return { header: result.header, ciphertext: result.ciphertext };
-}
-
-export async function decryptWithSpqrSession(peerId: string, header: any, ciphertext: Uint8Array): Promise<Uint8Array> {
-  const sessionKey = SPQR_SESSION_PREFIX + peerId;
-  let state = await retrieveRatchetStateSecurely(sessionKey);
-  if (!state) throw new Error(`No SPQR session with peer ${peerId}`);
-
-  const { worker_dr_ratchet_decrypt } = await getWorkerProxy();
-  const result = await worker_dr_ratchet_decrypt({ serializedState: state, header, ciphertext });
-
-  for (const sk of result.skippedKeys) {
-    const hKey = `${sessionKey}_${sk.kemPk}_${sk.n}`;
-    await storeSkippedMessageKeySecurely(hKey, sk.mk);
-  }
-
-  await storeRatchetStateSecurely(sessionKey, result.state);
-  return result.plaintext;
-}
+/* [REMOVED 2026-09-27] Sesi pairwise SPQR (`gspqr_<peerId>`) dihapus total.
+Dulu dipakai sebagai jalur distribusi kunci grup T2 (pesan kontrol di
+conversation virtual `<convId>:pw:<peer>`), tapi jalur itu TIDAK PERNAH lengkap:
+server menolak conversation virtual dan client tidak punya hook penerima
+(decryptWithSpqrSession tak pernah dipanggil) — kunci tidak pernah sampai.
+Distribusi kini lewat `group:fulfilled_key` → `session:new_key` →
+storeReceivedSessionKey (satu jalur + auto-heal request/fulfill).
+Full-graph-privacy key distribution (SPQR/MLS) = backlog, lihat doc 26.8.
+*/
 
 

@@ -511,7 +511,24 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         const updatedConv: Conversation = {
             ...conv,
             participants: constructedParticipants as Participant[],
-            decryptedMetadata: { title: name, avatarUrl, authSecret },
+            // [T1 FIX 2026-09-28] decryptedMetadata creator harus MIRROR penuh
+            // objek metadata v2 yang dienkripsi (termasuk v/generation/
+            // pseudonymMap/deliveryTokenMap). Sebelumnya hanya { title,
+            // avatarUrl, authSecret } → getPseudonymMap() lihat meta.v !== 2 →
+            // resolvePseudonymToUserId() gagal → pesan member gagal dekripsi
+            // "Missing sender signing key" di sisi creator (ditemukan E2E manual).
+            // Tanpa ini creator tak pernah decrypt ulang metadata-nya sendiri
+            // (cache guard) sehingga peta hilang permanen sesi berjalan.
+            decryptedMetadata: {
+                title: name,
+                avatarUrl,
+                participants: allParticipantIds,
+                authSecret,
+                v: 2 as const,
+                generation: 1,
+                pseudonymMap,
+                deliveryTokenMap
+            },
             encryptedMetadata
         };
         

@@ -17,6 +17,9 @@ export interface GroupRatchetState {
   messageCount?: number;
   lastActivityTime?: number;
   requiresImmediateRotation?: boolean;
+  // [T2 FIX #9 2026-09-28] Public signing key pengirim (receiver state saja).
+  // Pola libsignal SenderKeyState: diikat sejak distribusi kunci.
+  signingKey?: string;
 }
 
 export interface GroupRatchetHeader {

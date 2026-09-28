@@ -312,7 +312,7 @@ export function initSocketListeners() {
     // This is handled in transportClient helpers usually, but we can hook it here if needed
   });
 
-  transportClient.on('session:new_key', (data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string }) => {
+  transportClient.on('session:new_key', (data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string; senderSigningKey?: string }) => {
     import('../utils/crypto').then(m => m.storeReceivedSessionKey(data))
       .then(() => {
         import('../store/keychain').then(m => m.useKeychainStore.getState().keysUpdated());

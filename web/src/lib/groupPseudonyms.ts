@@ -39,6 +39,8 @@ export async function generateDeliveryToken(): Promise<DeliveryToken> {
 /**
  * Bangun peta token lengkap untuk seluruh anggota (creator-issued, full-rewrite
  * per rotasi — pola sama dengan pseudonymMap, keputusan 26.7.1).
+ * ORIENTASI KANONIS: { userId -> token } — sama dengan kontrak server
+ * (deliveryTokens/targetDeliveryTokens diindeks by userId).
  */
 export async function generateDeliveryTokenMap(participantIds: string[]): Promise<Record<string, string>> {
   const map: Record<string, string> = {};
@@ -47,7 +49,7 @@ export async function generateDeliveryTokenMap(participantIds: string[]): Promis
     let token = await generateDeliveryToken();
     while (seen.has(token)) token = await generateDeliveryToken();
     seen.add(token);
-    map[token] = uid;
+    map[uid] = token;
   }
   return map;
 }
@@ -62,14 +64,15 @@ export function getDeliveryTokenMap(conversationId: string): Record<string, stri
 /**
  * Token SAYA untuk percakapan ini — dikirim saat sync agar discovery memakai
  * possession token, bukan join userId (jalur legacy tetap jalan transitional).
+ * Peta kanonis { userId -> token }.
  */
 export function getMyDeliveryToken(conversationId: string): DeliveryToken | undefined {
   const map = getDeliveryTokenMap(conversationId);
   if (!map) return undefined;
   const myId = useAuthStore.getState().user?.id;
   if (!myId) return undefined;
-  const found = Object.entries(map).find(([, uid]) => uid === myId);
-  return found ? asDeliveryToken(found[0]) : undefined;
+  const token = map[myId];
+  return token ? asDeliveryToken(token) : undefined;
 }
 
 /** Semua token milik saya lintas grup (untuk header X-Delivery-Tokens saat sync). */
@@ -80,8 +83,8 @@ export function collectMyDeliveryTokens(): DeliveryToken[] {
   for (const conv of useConversationStore.getState().conversations) {
     const meta = conv.decryptedMetadata as { v?: number; deliveryTokenMap?: Record<string, string> } | undefined;
     if (meta?.v !== 2 || !meta.deliveryTokenMap) continue;
-    const found = Object.entries(meta.deliveryTokenMap).find(([, uid]) => uid === myId);
-    if (found) tokens.push(asDeliveryToken(found[0]));
+    const token = meta.deliveryTokenMap[myId];
+    if (token) tokens.push(asDeliveryToken(token));
   }
   return tokens;
 }

@@ -1695,7 +1695,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                                       conversationId: message.conversationId || payload.conversationId || "",
                                       senderId: senderIdToUse,
                                       encryptedKey: extractedKey,
-                                      senderDeviceKey: dist.senderDeviceKey || payload.senderDeviceKey
+                                      senderDeviceKey: dist.senderDeviceKey || payload.senderDeviceKey,
+                                      senderSigningKey: (dist as { senderSigningKey?: string }).senderSigningKey || payload.senderSigningKey
                                   });
                                   success = true;
                                   break; // Kunci valid untuk device ini
@@ -1717,6 +1718,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                                 conversationId: finalConvId,
                                 senderId: finalSenderId,
                                 encryptedKey: finalEncKey,
+                                senderDeviceKey: payload.senderDeviceKey,
+                                // [T2 FIX #9 2026-09-28] Signing key ikut dipersist
+                                // ke receiver state (bawaan envelope fulfilled_key).
+                                senderSigningKey: payload.senderSigningKey,
                             });
                             success = true;
                         } catch(e) {

@@ -588,7 +588,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   transportClient.sendEvent('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderId?: string }[]): Promise<void> {
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderSigningKey?: string, senderId?: string }[]): Promise<void> {
   return new Promise(async (resolve, reject) => {
     if (!transportClient.connected) return reject(new Error('Socket not connected'));
     // [T2 FINAL] Pairwise DR adalah satu-satunya jalur — fallback legacy
