@@ -129,6 +129,18 @@ schema push**, `prisma db push`, at deploy time).
   not-yet-populated conversation store. The creator's pseudonym is now
   injected explicitly through the call chain (`opts.pseudonym`); store
   lookup remains the fallback for later distributions.
+* **Active rotation on membership changes (2026-09-28):** admin kick/add
+  now runs full active rotation — metadata re-encrypted with a fresh
+  pseudonym map (kicked member absent, generation+1) and the new sender
+  key distributed immediately instead of lazily (the kicked member can no
+  longer decrypt new-era messages at all, not just until their next
+  send). Fixes included: the membership-change re-encrypt branch was
+  never invoked (only periodic rotation was), key distribution ran under
+  the old map identity before the new map was generated, and
+  `group:participants_changed` had no client listener so non-admin
+  members never learned of roster changes until reload (they now refresh
+  metadata and mark rotation needed). Manual "Force rotate keys" in
+  Group Info uses the same active-rotation path.
 
 ### 🌫️ T4 — Cover Traffic (doc 26.10)
 * **Application-Level Filler:** Opt-in per group. Cover messages traverse the

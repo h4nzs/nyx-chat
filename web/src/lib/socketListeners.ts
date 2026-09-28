@@ -253,6 +253,32 @@ export function initSocketListeners() {
 
   transportClient.on('conversation:participant_removed', (data: { conversationId: string; userId: string }) => {
     useConversationStore.getState().removeParticipant(data.conversationId, data.userId);
+    // [T1 FIX 2026-09-28] Kick/leave = perubahan keanggotaan: tandai perlu
+    // rotasi agar kirim pesan berikutnya men-distribusikan kunci era baru
+    // (jalur pasif untuk non-admin; admin melakukan rotasi aktif di UI).
+    useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
+  });
+
+  // [T1 FIX 2026-09-28] Sebelumnya TIDAK ADA listener untuk event ini (server
+  // meng-emit-nya pada add/kick/leave) — member non-admin tak tahu keanggotaan
+  // berubah sampai reload. Aksi: refresh metadata dari server (metadata baru
+  // membawa peta pseudonym generation+1 dari admin) + tandai rotasi kunci.
+  transportClient.on('group:participants_changed', (data: { conversationId: string }) => {
+    void (async () => {
+      const conversationId = data.conversationId;
+      useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
+      try {
+        const { authFetch } = await import('@lib/api');
+        const serverConv = await authFetch<{ encryptedMetadata?: string }>(`/api/conversations/${conversationId}`);
+        if (serverConv?.encryptedMetadata) {
+          await useConversationStore.getState().updateConversation(conversationId, {
+            encryptedMetadata: serverConv.encryptedMetadata
+          });
+        }
+      } catch (e) {
+        console.warn('[T1] Failed to refresh metadata after membership change:', e);
+      }
+    })();
   });
 
   transportClient.on('conversation:participant_updated', (data: { conversationId: string; userId: string; role: 'ADMIN' | 'MEMBER' | 'admin' | 'member' }) => {

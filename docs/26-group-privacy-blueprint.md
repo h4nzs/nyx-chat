@@ -372,6 +372,20 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
   store lookup kept as fallback for all other paths. Group-userId linkage
   from key envelopes is now only observable for keys distributed BEFORE the
   fix (pre-rotation legacy data — moot after the prod reset).
+- **Update 2026-09-28 (membership-change rotation audit):** three gaps closed
+  in the kick/add paths. (1) Admin kick/add now performs ACTIVE rotation
+  (`rotateGroupKey(..., isActive=true)`): metadata re-encrypted with a fresh
+  pseudonym map (generation+1, kicked member absent) AND the new-era key is
+  distributed immediately — previously rotation was lazy (each member only
+  rotated when they next sent a message, so the kicked member could keep
+  decrypting with the old chain until then), and the membership-change
+  re-encrypt branch existed but was NEVER called. (2) Ordering fixed: the
+  metadata re-encrypt (which generates the new map and distributes keys
+  inside itself) now runs BEFORE the explicit key distribution — previously
+  keys went out under the OLD map identity while metadata carried a NEW map.
+  (3) `group:participants_changed` (emitted by the server on add/kick/leave)
+  had NO client listener — non-admin members never learned of membership
+  changes until reload; they now refresh metadata + mark key rotation needed.
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 

@@ -1008,7 +1008,14 @@ export async function handleGroupKeyDistribution(
   // when they first send a message. Sharing the same CK between sender and receiver
   // causes keyId collision and signing key resolution failure.
 }
-export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
+export async function rotateGroupKey(
+  conversationId: string,
+  reason: 'membership_change' | 'periodic_rotation' = 'membership_change',
+  // [T1 FIX 2026-09-28] 'true' = dipanggil oleh ADMIN saat kick/add (rotasi
+  // AKTIF — peta baru + metadata re-encrypt + distribusi kunci baru SEKARANG,
+  // bukan menunggu kirim pesan berikutnya). 'false' = periodic (lazy).
+  isActive: boolean = false
+): Promise<void> {
   // Clear OLD states
   await deleteGroupStates(conversationId);
   
@@ -1021,40 +1028,53 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
     console.error(`[crypto] Failed to notify server about key rotation for ${conversationId}:`, error);
   }
 
-  if (reason === 'membership_change') {
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-    if (conversation) {
-      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+  if (reason !== 'membership_change') return;
+
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) return;
+
+  // [T1 ROTATION — ORDER FIXED 2026-09-28] Keanggotaan berubah → re-encrypt
+  // metadata dengan peta pseudonym BARU (generation+1) DULU (encryptGroupMetadata
+  // memicu ensureGroupSession + distribusi kunci di dalamnya — dengan peta baru
+  // sudah terpasang di local cache). Sebelumnya urutannya terbalik: distribusi
+  // kunci jalan dengan peta LAMA lalu peta baru di-generate — identitas
+  // distribusi tak konsisten dengan metadata baru. Kicked member tidak ada di
+  // peta baru → era kunci baru tak bisa dia ikuti (doc 26.5/26.7.1).
+  const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
+  if (existingMeta?.v === 2) {
+    try {
+      const participantIds = conversation.participants.map(p => (p.userId || p.id) as string);
+      const newEncrypted = await encryptGroupMetadata({
+        ...existingMeta,
+        participants: participantIds,
+        v: 2,
+      }, conversationId);
+      // authSecret dari metadata (blind authorization untuk PUT details).
+      if (existingMeta.authSecret) {
+        await authFetch(`/api/conversations/${conversationId}/details`, {
+          method: 'PUT',
+          headers: { 'X-Group-Token': existingMeta.authSecret },
+          body: JSON.stringify({ encryptedMetadata: newEncrypted }),
+        });
+        useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
+      }
+    } catch (e) {
+      console.error('[T1] Metadata re-encryption on rotation failed:', e);
+    }
+  }
+
+  // Distribusi kunci eksplisit (isActive) — pastikan member lain menerima
+  // kunci era baru SEKARANG, bukan saat mereka kirim pesan berikutnya.
+  if (isActive) {
+    try {
+      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
       if (distributionKeys && distributionKeys.length > 0) {
         await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       }
-
-      // [T1 ROTATION] Keanggotaan berubah → re-encrypt metadata dengan peta
-      // pseudonym BARU (generation+1) agar anggota yang keluar tidak lagi
-      // muncul di peta, dan pesan pra/pasca rotasi tak bisa di-stitch.
-      // Hanya untuk metadata v2; v1 tetap jalur legacy (doc 26.5).
-      const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
-      if (existingMeta?.v === 2) {
-        try {
-          const participantIds = conversation.participants.map(p => (p.userId || p.id) as string);
-          const newEncrypted = await encryptGroupMetadata({
-            ...existingMeta,
-            participants: participantIds,
-            v: 2,
-          }, conversationId);
-          // authSecret dari metadata (blind authorization untuk PUT details).
-          if (existingMeta.authSecret) {
-            await authFetch(`/api/conversations/${conversationId}/details`, {
-              method: 'PUT',
-              headers: { 'X-Group-Token': existingMeta.authSecret },
-              body: JSON.stringify({ encryptedMetadata: newEncrypted }),
-            });
-            useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
-          }
-        } catch (e) {
-          console.error('[T1] Metadata re-encryption on rotation failed:', e);
-        }
-      }
+      useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
+    } catch (e) {
+      console.error('[crypto] Active key distribution on membership change failed:', e);
+      useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
     }
   }
 }

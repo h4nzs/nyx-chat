@@ -205,18 +205,12 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
   const handleForceRotateKeys = async () => {
     const toastId = toast.loading(t('modals:group_info.toasts.rotating_keys'));
     try {
-      const { forceRotateGroupSenderKey, ensureGroupSession } = await import('@utils/crypto');
-      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
-      
-      await forceRotateGroupSenderKey(conversation.id);
-      
-      const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants, true);
-      if (distributionKeys && distributionKeys.length > 0) {
-          await emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
-          toast.success(t('modals:group_info.toasts.keys_rotated'), { id: toastId });
-      } else {
-          toast.error(t('modals:group_info.toasts.distribute_failed'), { id: toastId });
-      }
+      // [T1 FIX 2026-09-28] Rotasi manual = rotasi aktif penuh: peta pseudonym
+      // baru (generation+1) + metadata re-encrypt + distribusi kunci era baru
+      // (semua di dalam rotateGroupKey, urutan peta-dulu-lalu-kunci).
+      const { rotateGroupKey } = await import('@utils/crypto');
+      await rotateGroupKey(conversation.id, 'membership_change', true);
+      toast.success(t('modals:group_info.toasts.keys_rotated'), { id: toastId });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');
       toast.error(t('modals:group_info.toasts.rotate_failed', { error: msg }), { id: toastId });

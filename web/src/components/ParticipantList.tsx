@@ -54,6 +54,16 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
             method: 'DELETE',
             body: JSON.stringify({ targetRecipients: removeRecipients }),
           });
+          // [T1 FIX 2026-09-28] Rotasi AKTIF oleh admin: hapus kicked member
+          // dari metadata (peta baru, generation+1) + distribusikan kunci era
+          // baru SEKARANG — kicked member tak bisa mengikuti era kunci baru.
+          // (Sebelumnya hanya lazy: menunggu tiap member kirim pesan.)
+          try {
+            const { rotateGroupKey } = await import('@utils/crypto');
+            await rotateGroupKey(conversationId, 'membership_change', true);
+          } catch (rotErr) {
+            console.warn('[T1] Active rotation after kick failed (will retry lazily):', rotErr);
+          }
           toast.success(t('modals:participants.toasts.removed', { name: profile.name }));
         } catch (error: unknown) {
           const msg = error instanceof Error ? error.message : t('common:errors.unknown');

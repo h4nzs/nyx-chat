@@ -33,6 +33,9 @@ type TransportEvents = {
   'conversation:participants_added': [data: { conversationId: string; participants: Participant[] }];
   'conversation:participant_removed': [data: { conversationId: string; userId: string }];
   'conversation:participant_updated': [data: { conversationId: string; userId: string; role: 'ADMIN' | 'MEMBER' | 'admin' | 'member' }];
+  // [T1 FIX 2026-09-28] Perubahan keanggotaan (add/kick/leave) — pemicu refresh
+  // metadata + rotasi kunci pasif di member non-admin.
+  'group:participants_changed': [data: { conversationId: string }];
   
   // Users
   'user:updated': [user: Partial<User>];

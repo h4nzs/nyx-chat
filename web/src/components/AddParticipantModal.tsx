@@ -109,6 +109,15 @@ const AddParticipantModal = ({ conversationId, onClose }: {
         method: 'POST',
         body: JSON.stringify({ userIds: selectedUserIds, targetRecipients: addRecipients, deliveryTokens }),
       });
+      // [T1 FIX 2026-09-28] Rotasi AKTIF: metadata baru (member baru masuk peta,
+      // generation+1) + distribusi kunci era baru SEKARANG — member baru tidak
+      // perlu menunggu pesan berikutnya untuk menerima sender key.
+      try {
+        const { rotateGroupKey } = await import('@utils/crypto');
+        await rotateGroupKey(conversationId, 'membership_change', true);
+      } catch (rotErr) {
+        console.warn('[T1] Active rotation after add failed (will retry lazily):', rotErr);
+      }
       toast.success(t('modals:add_participant.success'));
       onClose();
     } catch (error: unknown) {
