@@ -123,6 +123,21 @@ neither Signal (no PQ) nor today's NYX (PQ but no FS transit) has alone.
 established pairwise session, else fall back to `distribute_keys` (interop with
 non-upgraded clients). Feature-flag per conversation version.
 
+> **[REMOVED 2026-09-27] T2 pairwise SPQR delivery did not ship — tier delivered
+> via `group:fulfilled_key` instead.** E2E manual testing (2026-09-27, pre-deploy)
+> proved the SPQR path was never complete: the server rejects the virtual
+> `<convId>:pw:<peerId>` control conversation ("Conversation not found") and the
+> client never had a receiver hook (`decryptWithSpqrSession` existed but had zero
+> call sites) — group keys NEVER reached recipients. Executed fix: distribution
+> now goes through the fully-wired `group:fulfilled_key` → `session:new_key` →
+> `storeReceivedSessionKey` path (same inner `pq_box_seal` per-device envelope;
+> server still sees only opaque envelopes + routing). The dormant SPQR session
+> helpers were deleted. **Trade-off accepted:** `fulfilled_key` routes by real
+> userId, so the server can still observe the key-delivery graph (pseudonym is
+> payload-only) — the "kill the key graph" goal of this tier is NOT met and moves
+> to the 26.8 backlog (alongside PQ-MLS). Mitigation: single delivery path +
+> request/fulfill auto-heal, so no cross-path correlation signal exists.
+
 ### Tier 3 — Blinded membership & receipts (hide the roster)
 
 **Goal:** the server stops learning `userId ↔ conversationId`, and read receipts stop
@@ -327,6 +342,26 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
   now the present: T3 delivery tokens and blind-RSA credentials coexist —
   tokens remain the delivery/routing slot, credentials replace the
   *verification* step at sync presentation.
+- **Update 2026-09-27 (E2E finding):** T2's pairwise SPQR transport never worked
+  (receiver + relay unimplemented — keys silently never arrived). Delivery runs
+  on `group:fulfilled_key` (server observes the key-delivery graph); graph-hiding
+  transport rejoins this backlog together with 26.8.2 PQ-MLS, since MLS solves
+  the same key-management layer.
+- **Update 2026-09-28 (E2E finding #2, T1 decrypt coupling):** signature
+  verification of group messages depended on a fragile resolution chain
+  (pseudonymMap from decryptedMetadata v2 → userId → prekey-bundle API →
+  participant list). Two E2E-pass bugs broke it: creator's cached
+  `decryptedMetadata` lacked the v2 mirror (no `pseudonymMap`), and cached
+  ShadowVault metadata predated the fix (cache guard never re-decrypted).
+  Fix adopts the **libsignal SenderKeyState pattern** (`libsignal/rust/protocol/src/sender_keys.rs`):
+  the sender's public signing key travels INSIDE the key distribution
+  (`group:fulfilled_key`, itself E2E-sealed per device) and is bound to the
+  receiver state at acceptance time. Message signature verification now reads
+  `receiverState.signingKey` directly — zero lookup, no metadata involvement,
+  chicken-and-egg structurally gone. Note: the signing key itself is NOT part
+  of the sealed envelope (it rides the wrapper), but it is bound to an
+  envelope-bound chain key and verified by usage — a server swap is detectable
+  via signature failure.
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 

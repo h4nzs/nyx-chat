@@ -92,12 +92,36 @@ schema push**, `prisma db push`, at deploy time).
   inside (defense in depth: FS + PQ in transit).
 * **Fallback removed (2026-09-27):** with the prod DB reset (no legacy clients
   to interop with), the deferred removal of `messages:distribute_keys` is
-  executed — pairwise is the ONLY key-delivery route. Server handler ACKs an
+  executed — one key-delivery route remains. Server handler ACKs an
   explicit error; the parity test asserts the rejection.
-* **Routing:** control messages use a virtual `<group>:pw:<peer>`
-  conversation id; receivers strip the suffix, filter by device key, and feed
-  the envelope into the existing `storeReceivedSessionKey` pipeline. Offline
-  catch-up recognizes the new shape.
+* **CORRECTION (2026-09-27, E2E finding):** the pairwise SPQR transport was
+  never complete — the server rejected the virtual `<group>:pw:<peer>` control
+  conversation and the client had no receiver hook, so group keys silently
+  NEVER arrived (recipients stuck in `waiting_for_key`). Key delivery now runs
+  through the fully-wired `group:fulfilled_key` → `session:new_key` →
+  `storeReceivedSessionKey` path (same inner `pq_box_seal` per-device envelope,
+  request/fulfill auto-heal as safety net); dormant SPQR helpers deleted.
+  Trade-off: the server still observes the key-delivery graph (routes by real
+  userId) — graph-hiding transport moves to the 26.8 backlog with PQ-MLS.
+  Related schema fixes found by the same E2E pass: `MessageStatus.userId` and
+  `Message.senderId` are no longer FKs to `User` (T3a/T1 persist pseudonyms
+  there), and `deliveryTokens`/`targetDeliveryTokens` zod schemas validate
+  keys as userIds (Zod 4: first `z.record` arg = key schema) — group creation
+  and relay 400'd before the fix. Client token maps standardized to
+  `{userId → token}` (server contract orientation).
+* **Signing key bound to receiver state (2026-09-28, libsignal pattern):**
+  group message signature verification no longer re-resolves the sender via
+  pseudonymMap → userId → prekey-bundle API. The sender's public signing key
+  now travels with the key distribution (`group:fulfilled_key` payload +
+  offline SYSTEM GROUP_KEY persistence) and is stored on the group receiver
+  state (`GroupReceiverState.signingKey`, plaintext — public material).
+  Verification reads `receiverState.signingKey` first (libsignal
+  `SenderKeyState.sender_signing_key` pattern); bundle lookups remain as
+  fallbacks for pre-existing states. Also fixed in the same pass: creator's
+  cached `decryptedMetadata` now mirrors the full v2 object (v, generation,
+  `pseudonymMap`, `deliveryTokenMap`) — previously only title/avatar/authSecret,
+  so the creator could never resolve incoming pseudonyms (its own cache guard
+  prevented re-decryption, permanently hiding the map).
 
 ### 🌫️ T4 — Cover Traffic (doc 26.10)
 * **Application-Level Filler:** Opt-in per group. Cover messages traverse the
@@ -137,12 +161,13 @@ schema push**, `prisma db push`, at deploy time).
   release for message payloads remains a future bundle addition.
 
 ### 🧪 Tests (this tier set)
-* Server: 89 total — T1 pseudonym storage/relay/unsend, T3a receipt
+* Server: 90 total — T1 pseudonym storage/relay/unsend, T3a receipt
   persistence & broadcast (incl. 1:1 isolation and self-read skip), T3b
   token-first schema/sync/revocation contract, T2 pairwise-only rejection,
-  26.8.1 blind RSA credentials (roundtrip, serial parity, issuance quota,
-  sync presentation, verify rejections).
-* Web: 147 total — pseudonym map helpers, pairwise key delivery wire
+  T2 OFFLINE-KEY (fulfilled_key persisted as SYSTEM GROUP_KEY for offline
+  catch-up), 26.8.1 blind RSA credentials (roundtrip, serial parity, issuance
+  quota, sync presentation, verify rejections).
+* Web: 143 total — pseudonym map helpers, pairwise key delivery wire
   contract, cover-traffic Poisson sampling/scheduler/backoff (incl. burner
   default-Maximum arming, master-switch precedence, `isCoverPayload`,
   `collectCoverArmedIds`), ephemeral-receipt gating and jitter scheduling,

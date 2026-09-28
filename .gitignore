@@ -35,3 +35,7 @@ vspostgre.session.sql
 gha-creds-*.json
 test-results/
 *.tgz
+
+# Local debugging / testing artifacts
+dump.rdb
+temp_log.txt
