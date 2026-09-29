@@ -996,7 +996,14 @@ export async function handleGroupKeyDistribution(
   const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
 
   const existingReceiverState = await getGroupReceiverState(conversationId, senderId, senderDeviceKey || undefined);
-  if (!existingReceiverState || existingReceiverState.N < currentN) {
+  // [T2 FIX #13 2026-09-29] Deteksi GANTI-ERA: setelah rotasi, kunci baru selalu
+  // mulai di N=0 — kondisi lama (existing.N < currentN) MENOLAK kunci era baru
+  // (0 < 0 false) sehingga penerima terjebak di era lama dan SEMUA pesan pasca-
+  // rotasi gagal "ciphertext cannot be decrypted using that key" (log 2-browser
+  // 2026-09-29). Kunci diterima bila: state belum ada, N benar-benar maju,
+  // atau CK BERBEDA (rantai/era baru — duplikat delivery era sama tetap di-skip).
+  const isNewChain = !existingReceiverState || existingReceiverState.CK !== senderKeyB64;
+  if (!existingReceiverState || existingReceiverState.N < currentN || (isNewChain && currentN <= existingReceiverState.N)) {
       await saveGroupReceiverState({
           id: stateId,
           conversationId: conversationId as ConversationId,

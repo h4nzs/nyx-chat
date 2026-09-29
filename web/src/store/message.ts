@@ -2585,7 +2585,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
             const sender = finalDecrypted.sender;
-            const senderName = sender?.name || (sender as typeof sender & { decryptedProfile?: { name?: string } }).decryptedProfile?.name || 'Someone'; 
+            // [T2 FIX #12 2026-09-29] decryptedProfile diakses TANPA optional
+            // chaining di cast sebelumnya → TypeError "can't access property
+            // decryptedProfile, sender is undefined" membunuh handler
+            // message:new untuk pesan berikutnya (log B 2026-09-29).
+            const senderName = sender?.name || (sender as (typeof sender & { decryptedProfile?: { name?: string } }) | undefined)?.decryptedProfile?.name || 'Someone'; 
                       let snippet = finalDecrypted.content || 'New secure message';
                       if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
                       if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';

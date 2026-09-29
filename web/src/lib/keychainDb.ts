@@ -767,7 +767,13 @@ export async function getGroupReceiverStateByKeyId(conversationId: string, keyId
                 senderId: asUserId(senderId),
                 CK: ckPlain,
                 N: record.state.N,
-                skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys ?? {})
+                skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys ?? {}),
+                // [T2 FIX #13 2026-09-29] signingKey WAJIB ikut di jalur byId —
+                // semua pesan grup (dan metadata) lookup receiver state via keyId,
+                // BUKAN by-id. Tanpa ini fix #9 tidak berlaku di jalur utama:
+                // verifikasi signature butuh resolve pseudonym → metadata →
+                // chicken-and-egg → invitee gagal dekripsi total (log 2-browser).
+                signingKey: record.state.signingKey
             };
         }
     }

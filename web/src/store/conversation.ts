@@ -326,9 +326,22 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
               if (existing) {
                   const existingIds = existing.participants.map(p => p.id).sort().join(',');
                   const fetchedIds = fetched.participants.map(p => p.id).sort().join(',');
-                  if (existingIds !== fetchedIds) {
+                  // [T2 FIX #12 2026-09-29] Server Opaque Mailbox SELALU mengembalikan
+                  // participants kosong — perbandingan buta existing (isi) vs fetched
+                  // (kosong) selalu "berubah" → requiresKeyRotation setiap kali sync
+                  // jalan → pesan pertama setelah reload memaksa rotasi era baru →
+                  // penerima dengan receiver state era lama menolak envelope
+                  // (N duplikat) → "ciphertext cannot be decrypted using that key"
+                  // untuk SEMUA pesan. Rotasi hanya bila server BENAR-BENAR
+                  // mengirim roster non-kosong yang berbeda.
+                  const rosterChanged = fetchedIds.length > 0 && existingIds !== fetchedIds;
+                  if (rosterChanged) {
                       fireGhostSync(fetched.id, 2000);
                       return { ...fetched, requiresKeyRotation: true };
+                  }
+                  // participants server kosong → pertahankan roster lokal.
+                  if (fetchedIds.length === 0) {
+                      fetched.participants = existing.participants;
                   }
               }
           }
