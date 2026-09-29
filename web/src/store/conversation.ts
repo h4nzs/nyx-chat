@@ -15,8 +15,8 @@ import { asUserId } from '@nyx/shared';
 import toast from 'react-hot-toast';
 import { captureAndLog } from '@utils/feedback';
 
-import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession, generatePseudonymMap } from "@utils/crypto";
-import { generateDeliveryToken } from '@lib/groupPseudonyms';
+import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, generatePseudonymMap } from "@utils/crypto";
+import { generateDeliveryToken, findPseudonymInMap } from '@lib/groupPseudonyms';
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
@@ -472,10 +472,16 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
         // Opaque Mailbox: server returns empty participants, reconstruct from userIds
         const constructedParticipants = userIds.map(id => ({ id, name: '', role: 'MEMBER' as const })) as Participant[];
-        const distributionKeys = await ensureGroupSession(conv.id, constructedParticipants, true);
-        if (distributionKeys && distributionKeys.length > 0) {
-            await emitGroupKeyDistribution(conv.id, distributionKeys as { userId: string; key: string }[]);
-        }
+        // [T2 FIX #10 2026-09-29] ensureGroupSession TIDAK dipanggil di sini lagi —
+        // encryptGroupMetadata di bawah memicunya internally DENGAN pseudonym
+        // eksplisit. DULU ada panggilan awal tanpa opts yang membuat sender state
+        // terlanjur ter-create, lalu panggilan dalam encryptGroupMetadata di-skip
+        // (guard existingSenderState) → distribusi kunci pertama jalan dengan
+        // userId asli (audit DB: GROUP_KEY pertama 25-char).
+        // Syaratnya: conv HARUS sudah ada di store dengan participants lengkap
+        // sebelum encryptGroupMetadata (lookup store untuk ensureGroupSession
+        // internal) — server mengembalikan participants kosong (Opaque Mailbox).
+        get().addOrUpdateConversation({ ...conv, participants: constructedParticipants } as Conversation);
         
         // 🛡️ Fix: Include ALL participants (creator + invited users) in the encrypted metadata.
         // Previously only userIds (other members) were included, causing the decrypted metadata
@@ -486,6 +492,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // [T1] Metadata v2: pseudonym map lives ONLY inside encrypted metadata —
         // server never learns pseudonym→account linkage (doc 26.2).
         const pseudonymMap = await generatePseudonymMap(allParticipantIds);
+        // [T2 FIX #10 2026-09-29] Pseudonym SAYA di-resolve REVERSE dari peta —
+        // map[myId] selalu undefined karena peta pseudo→uid (leak sebelumnya).
+        const myPseudonym = findPseudonymInMap(pseudonymMap, user.id);
         // [T3b] Peta token yang SAMA dikirim ke server (row discovery) dan
         // disimpan di encrypted metadata (backup + anggota menemukan token
         // miliknya setelah decrypt). Token anggota yang ditambahkan belakangan
@@ -495,7 +504,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // (peta belum ada di store saat ensureGroupSession jalan di dalam sini →
         // kalau tidak, GROUP_KEY pertama terkirim dengan userId asli sebagai
         // senderId — ditemukan saat audit DB lokal 2026-09-28).
-        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap, deliveryTokenMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id, { pseudonym: pseudonymMap[user.id] });
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap, deliveryTokenMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id, { pseudonym: myPseudonym });
         
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',
@@ -511,7 +520,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                 // [T2 FIX #10 2026-09-29] Sertakan pseudonym SAYA — pesan SYSTEM
                 // METADATA_UPDATED di server tidak boleh membawa userId asli
                 // sebagai senderId (audit DB: leak 25-char saat createGroup).
-                emitMetadataUpdated(conv.id, encryptedMetadata, notifyTargets, pseudonymMap[user.id]);
+                emitMetadataUpdated(conv.id, encryptedMetadata, notifyTargets, myPseudonym);
             }
         }
         

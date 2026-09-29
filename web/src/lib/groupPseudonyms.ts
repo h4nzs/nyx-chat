@@ -148,6 +148,20 @@ export function resolvePseudonymToUserId(conversationId: string, pseudonym: stri
   return getPseudonymMap(conversationId)?.[pseudonym];
 }
 
+/**
+ * [T2 FIX #10 2026-09-29] Cari pseudonym SAYA dari peta eksplisit yang baru
+ * di-generate (createGroup — peta belum masuk store saat distribusi kunci
+ * pertama jalan). Peta berorientasi pseudo→uid, jadi lookup-nya REVERSE via
+ * Object.entries — DULU dipanggil sebagai map[myId] yang selalu undefined
+ * (fallback myId bocorkan userId ke server pada GROUP_KEY/METADATA_UPDATED
+ * pertama; terlihat di audit DB lokal 2026-09-29).
+ */
+export function findPseudonymInMap(map: Record<string, string> | undefined, userId: string | undefined): string | undefined {
+  if (!map || !userId) return undefined;
+  const found = Object.entries(map).find(([, uid]) => uid === userId);
+  return found?.[0];
+}
+
 // --- [26.10.5] Bundle Maximum: ephemeral + jittered receipts ---
 
 /**
