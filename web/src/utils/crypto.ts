@@ -1951,6 +1951,11 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
     const encryptedKeyForRequester = await worker_pq_box_seal(payloadToEncrypt, requesterPqPublicKey, requesterPublicKey);
     const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
     const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    // [T2 FIX #11 2026-09-29] Signing key WAJIB ikut di fulfillment — tanpa ini
+    // envelope offline catch-up tanpa senderSigningKey → penerima gagal
+    // verifikasi signature ("Missing sender signing key") walau kunci ter-unseal.
+    const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
+    const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
     // [T1] Fulfillment = replay distribusi kunci → sertakan pseudonym agar
     // requester mengenali sender via peta metadata (bukan via userId).
     emitGroupKeyFulfillment({
@@ -1958,6 +1963,7 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
         encryptedKey: sodium.to_base64(encryptedKeyForRequester, sodium.base64_variants.URLSAFE_NO_PADDING),
         targetDeviceId: payload.requesterDeviceId,
         senderDeviceKey: myIdentityKeyB64,
+        senderSigningKey: mySigningKeyB64,
         senderPseudonym: await getMyPseudonym(conversationId)
     });
   } catch (e) {

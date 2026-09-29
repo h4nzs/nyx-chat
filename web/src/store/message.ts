@@ -1705,6 +1705,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                               }
                           }
                     } else if (payload.encryptedKey || payload.key) {
+                        // [T2 FIX #11 2026-09-29] Filter target SEBELUM unseal —
+                        // envelope fulfilled_key disimpan sebagai SATU baris SYSTEM
+                        // per pasangan (requester, device). Tanpa filter, SETIAP
+                        // member mencoba membuka envelope yang dienkripsi untuk
+                        // device lain → pq_box_seal_open gagal ("ciphertext cannot
+                        // be decrypted using that key") → di-retry tiap sync +
+                        // spam emitGroupKeyRequest ke pengirim (terlihat di log
+                        // 2-browser 2026-09-29).
+                        // CATATAN: targetDeviceKey di envelope persist adalah
+                        // Device ID (dari bundle.deviceId), BUKAN identityKey —
+                        // device saya = localStorage 'deviceId'.
+                        const targetKey = (payload as { targetDeviceKey?: string }).targetDeviceKey;
+                        const myDeviceId = localStorage.getItem('deviceId');
+                        const addressedToMe = !targetKey || (myDeviceId !== null && targetKey === myDeviceId);
+                        if (!addressedToMe) {
+                            console.debug(`[Offline Sync] Skip GROUP_KEY envelope untuk device lain (${String(targetKey).slice(0, 8)}…)`);
+                            continue;
+                        }
                         try {
                             // [T2] Pesan kontrol pairwise disimpan di virtual conv `<group>:pw:<peer>` —
                             // normalisasi ke conversation grup asli sebelum store.
