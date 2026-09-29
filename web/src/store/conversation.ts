@@ -508,7 +508,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         if (myId) {
             const notifyTargets = userIds.filter(uid => uid !== myId);
             if (notifyTargets.length > 0) {
-                emitMetadataUpdated(conv.id, encryptedMetadata, notifyTargets);
+                // [T2 FIX #10 2026-09-29] Sertakan pseudonym SAYA — pesan SYSTEM
+                // METADATA_UPDATED di server tidak boleh membawa userId asli
+                // sebagai senderId (audit DB: leak 25-char saat createGroup).
+                emitMetadataUpdated(conv.id, encryptedMetadata, notifyTargets, pseudonymMap[user.id]);
             }
         }
         

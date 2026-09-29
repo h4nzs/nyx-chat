@@ -910,7 +910,6 @@ export async function sendGroupKeyDistributionPairwise(
   if (!Array.isArray(distributionKeys) || distributionKeys.length === 0) return result;
 
   const myId = useAuthStore.getState().user?.id;
-  const senderIdForPayload = (await getMyPseudonym(conversationId)) ?? myId;
 
   for (const dk of distributionKeys) {
     const { userId, targetDeviceId, targetDeviceKey, key } = dk as {
@@ -929,7 +928,13 @@ export async function sendGroupKeyDistributionPairwise(
         // [T2 FIX #9 2026-09-28] Public signing key pengirim — diikat ke
         // receiver state penerima (pola libsignal SenderKeyState).
         senderSigningKey: (dk as { senderSigningKey?: string }).senderSigningKey,
-        senderPseudonym: senderIdForPayload,
+        // [T2 FIX #10 2026-09-29] Pakai senderId yang sudah dihitung di
+        // ensureGroupSession (opts.pseudonym → store → fallback). DULU dihitung
+        // ulang di sini via getMyPseudonym() — saat createGroup store belum
+        // terisi → NULL → fallback myId membocorkan userId ke server pada
+        // GROUP_KEY pertama (terlihat di audit DB lokal: 1 SYSTEM GROUP_KEY
+        // senderId 25-char saat grup dibuat).
+        senderPseudonym: (dk as { senderId?: string }).senderId ?? myId,
       });
       result.pairwise++;
     } catch (e) {

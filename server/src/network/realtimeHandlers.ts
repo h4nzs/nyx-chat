@@ -505,7 +505,11 @@ export async function handleKeySync(
          }
 
         case 'metadata:updated': {
-           const { conversationId, encryptedMetadata, targetRecipients } = data as { conversationId: string; encryptedMetadata: string; targetRecipients: string[] };
+           // [T2 FIX #10 2026-09-29] senderPseudonym opsional dari klien —
+           // tanpa ini baris SYSTEM METADATA_UPDATED dipersist dengan userId
+           // asli (leak terlihat di audit DB lokal 2026-09-29). Fallback userId
+           // dipertahankan untuk klien legacy (grup v1).
+           const { conversationId, encryptedMetadata, targetRecipients, senderPseudonym } = data as { conversationId: string; encryptedMetadata: string; targetRecipients: string[]; senderPseudonym?: string };
            if (!conversationId || !encryptedMetadata || !Array.isArray(targetRecipients)) return;
            if (!await ctx.checkRateLimit(userId, 'metadata_updated', 60, 60)) return;
 
@@ -514,7 +518,7 @@ export async function handleKeySync(
                data: {
                    id: `msg_sys_meta_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
                    conversationId,
-                   senderId: userId,
+                   senderId: senderPseudonym ?? userId,
                    type: 'SYSTEM',
                    content: JSON.stringify({ type: 'METADATA_UPDATED', encryptedMetadata }),
                    isViewOnce: false,

@@ -639,8 +639,11 @@ export function emitGroupKeyFulfillment(payload: { requesterId: string; conversa
   transportClient.sendEvent('group:fulfilled_key', payload);
 }
 
-export function emitMetadataUpdated(conversationId: string, encryptedMetadata: string, targetRecipients: string[]): void {
-  transportClient.sendEvent('metadata:updated', { conversationId, encryptedMetadata, targetRecipients });
+// [T2 FIX #10 2026-09-29] senderPseudonym opsional — dipersist server sebagai
+// senderId pesan SYSTEM METADATA_UPDATED. Tanpa ini server menyimpan userId
+// asli (25-char) di baris pesan SYSTEM — terlihat di audit DB lokal.
+export function emitMetadataUpdated(conversationId: string, encryptedMetadata: string, targetRecipients: string[], senderPseudonym?: string): void {
+  transportClient.sendEvent('metadata:updated', { conversationId, encryptedMetadata, targetRecipients, senderPseudonym });
 }
 
 export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
