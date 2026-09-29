@@ -73,6 +73,11 @@ type TransportEvents = {
 export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private worker: Worker;
   public connected: boolean = false;
+  // [WT FIX 2026-09-29] Ekspos status menyambung agar connectSocket() bisa
+  // mencegah panggilan ganda (loop reconnect saat reload).
+  public get connecting(): boolean {
+    return this.mode === 'wt' && this.wtConnecting;
+  }
   private pendingAcks = new Map<string, { resolve: (val: unknown) => void, reject: (err: unknown) => void, startedAt: number, timeoutId: ReturnType<typeof setTimeout> }>();
 
   private offlineQueue: MainToTransportWorker[] = [];
@@ -87,6 +92,16 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private wtConnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wtConnecting = false;
   private lastConnectParams: { url: string; token: string; certificateHash?: string } = { url: '', token: '' };
+  // [WT FIX 2026-09-29] Sesi yang DITOLAK server sesaat setelah handshake
+  // (mis. sidecar auth gagal / cert hash basi) tidak boleh dianggap koneksi
+  // sehat. Tanpa grace window, DISCONNECTED tiba setelah wtConnecting=false →
+  // tidak dihitung gagal → wtFailCount tak pernah mencapai ambang → fallback
+  // WSS tidak pernah aktif → loop reconnect tanpa henti (ditemukan di log
+  // "Percobaan WebTransport ke-1 gagal" berulang ~20× saat reload).
+  private connectedAt = 0;
+  private wtStableTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly WT_REJECT_GRACE_MS = 15000;
+  private readonly WT_STABLE_MS = 15000;
   private socket: Socket | null = null;
   private wssOfflineQueue: { opCode: TransportOpCode; payload: BinaryPayload }[] = [];
   private silentNoopOpcodes = new Set<TransportOpCode>();
@@ -129,6 +144,11 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
    * triggers the WebSocket fallback.
    */
   private async connectWt(url: string, token: string, certificateHash?: string): Promise<void> {
+    // [WT FIX 2026-09-29] Guard duplikat: connectSocket() bisa dipanggil ulang
+    // saat upaya sebelumnya masih berjalan (worker menutup transport lama
+    // mid-connect → error "close() called on WebTransport while connecting"
+    // → counter gagal tercemar oleh race, bukan kegagalan jaringan sungguhan).
+    if (this.wtConnecting) return;
     this.lastConnectParams = { url, token, certificateHash };
     const rawUrl = url || import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
     
@@ -226,6 +246,10 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
   public disconnect(): void {
     this.clearWtTimer();
+    if (this.wtStableTimer) {
+      clearTimeout(this.wtStableTimer);
+      this.wtStableTimer = null;
+    }
     this.wtConnecting = false;
     if (this.mode === 'wss' && this.socket) {
       this.socket.disconnect();
@@ -241,22 +265,32 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       case 'CONNECTED':
         this.clearWtTimer();
         this.wtConnecting = false;
-        this.wtFailCount = 0;
         this.connected = true;
+        this.connectedAt = Date.now();
+        // [WT FIX 2026-09-29] Reset counter gagal TIDAK instan — tunggu sesi
+        // terbukti stabil. Bila sesi ditolak server sebelum timer ini habis,
+        // DISCONNECTED tetap dihitung sebagai kegagalan (grace window).
+        if (this.wtStableTimer) clearTimeout(this.wtStableTimer);
+        this.wtStableTimer = setTimeout(() => {
+          this.wtStableTimer = null;
+          this.wtFailCount = 0;
+        }, this.WT_STABLE_MS);
         this.emit('connect');
         break;
       case 'DISCONNECTED':
         this.connected = false;
         this.emit('disconnect', data.reason);
-        // Jika terputus saat masih dalam upaya konek WT, hitung sebagai kegagalan.
-        if (this.mode === 'wt' && this.wtConnecting) {
+        // Hitung sebagai kegagalan bila masih menyambung ATAU sesi baru saja
+        // terbuka lalu langsung ditutup (ditolak sidecar — pola loop reload).
+        if (this.mode === 'wt' && (this.wtConnecting || this.wasRecentlyConnected())) {
           this.handleWtFailure();
         }
         break;
       case 'ERROR':
         console.error("Transport Worker Error:", data.error);
-        // Hitung sebagai kegagalan WT hanya saat sedang mencoba menyambung.
-        if (this.mode === 'wt' && this.wtConnecting) {
+        // Hitung sebagai kegagalan WT saat menyambung atau sesi baru saja
+        // gagal (bukan error pinggir saat sesi sudah lama stabil).
+        if (this.mode === 'wt' && (this.wtConnecting || this.wasRecentlyConnected())) {
           this.handleWtFailure();
         }
         break;
@@ -340,6 +374,11 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       clearTimeout(this.wtConnectTimer);
       this.wtConnectTimer = null;
     }
+  }
+
+  /** Sesi WT apakah ditutup dalam grace window setelah CONNECTED? */
+  private wasRecentlyConnected(): boolean {
+    return this.connectedAt > 0 && (Date.now() - this.connectedAt) < this.WT_REJECT_GRACE_MS;
   }
 
   /**
@@ -565,7 +604,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 export const transportClient = new NyxWebTransportClient();
 
 export function connectSocket() {
-  if (transportClient.connected) return;
+  if (transportClient.connected || transportClient.connecting) return;
   const token = useAuthStore.getState().accessToken || '';
   const certHash = import.meta.env.PROD ? undefined : import.meta.env.VITE_TRANSPORT_CERT_HASH;
   transportClient.connect('', token, certHash);
