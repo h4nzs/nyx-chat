@@ -1668,6 +1668,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  try {
                     const payload = JSON.parse(message.content || '{}') as SystemMessagePayload;
                     if (payload.type === 'GROUP_KEY_DISTRIBUTION' || payload.type === 'GROUP_KEY') {
+                      // [26.9 RBAC] Amplop admin capability token — serahkan ke
+                      // storeReceivedSessionKey (hook tryReceiveAdminToken yang
+                      // unseal + cache), JANGAN diproses sebagai chain key.
+                      if ((payload as { adminToken?: boolean }).adminToken) {
+                        try {
+                          const { storeReceivedSessionKey } = await import('@utils/crypto');
+                          await storeReceivedSessionKey({
+                            ...payload,
+                            type: 'GROUP_KEY',
+                            conversationId: message.conversationId || payload.conversationId || '',
+                            senderId: message.senderId || payload.senderId || '',
+                            encryptedKey: (payload as { encryptedKey?: string; key?: string }).encryptedKey || (payload as { key?: string }).key || '',
+                            senderDeviceKey: (payload as { senderDeviceKey?: string }).senderDeviceKey,
+                          });
+                        } catch (e) {
+                          console.warn('[Offline Sync] Failed to process admin token envelope:', e);
+                        }
+                        continue;
+                      }
                       console.debug('[Offline Sync] Memproses Kunci Distribusi untuk conversation:', message.conversationId || payload.conversationId);
 
                       const { getMyEncryptionKeyPair, getSodiumLib } = await import('@utils/crypto');

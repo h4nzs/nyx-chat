@@ -474,7 +474,7 @@ export async function handleKeySync(
        }
 
        case 'group:fulfilled_key': {
-           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, senderSigningKey, drHeader, senderPseudonym } = data as KeyFulfillmentPayload & { senderPseudonym?: string; senderSigningKey?: string };
+           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, senderSigningKey, drHeader, senderPseudonym, adminToken } = data as KeyFulfillmentPayload & { senderPseudonym?: string; senderSigningKey?: string; adminToken?: boolean };
            if (!requesterId || !conversationId || !encryptedKey) return;
            if (!await ctx.checkRateLimit(userId, 'group_fulfilled_key', 60, 60)) return;
 
@@ -484,6 +484,9 @@ export async function handleKeySync(
            // diikat ke receiver state penerima (pola libsignal SenderKeyState).
            const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: senderPseudonym ?? userId, senderDeviceKey, senderSigningKey };
            if (drHeader) emitPayload.drHeader = drHeader;
+           // [26.9 RBAC] Amplop admin capability token ditandai eksplisit agar
+           // penerima TIDAK memprosesnya sebagai chain key GROUP_KEY.
+           if (adminToken) emitPayload.adminToken = true;
 
            // [OFFLINE-KEY PERSIST — FIX 2026-09-27] Kunci juga dipersist sebagai
            // SYSTEM message (TTL 7d, pola = metadata:updated): fulfillment yang
@@ -495,7 +498,7 @@ export async function handleKeySync(
                    conversationId,
                    senderId: senderPseudonym ?? userId,
                    type: 'SYSTEM',
-                   content: JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId }),
+                   content: JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) }),
                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
                }
            }).catch((e: unknown) => console.warn('[KeySync] Failed to persist group key envelope:', e));

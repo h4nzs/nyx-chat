@@ -361,6 +361,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         }
       }).catch(() => {});
 
+      // [26.9 RBAC] Muat admin capability token dari kvStore (terenkripsi
+      // at-rest) ke store — agar guard UI & header X-Admin-Token hidup setelah
+      // reload. Fire-and-forget: gagal = token di-receive ulang via distribusi.
+      import('@lib/groupPseudonyms').then(({ hydrateMyAdminTokens }) => hydrateMyAdminTokens()).catch(() => {});
+
       const socket = transportClient;
 
     } catch (error) {
@@ -470,6 +475,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // [T3b] Creator-issued delivery tokens — SAMA yang masuk encrypted
         // metadata di bawah (single source, full roster termasuk creator).
         const deliveryTokens = await buildDeliveryTokensPayload(userIds);
+        // [26.9 RBAC] Admin capability token: dibuat creator (OWNER), hash-nya
+        // saja dikirim ke server; token asli di-cache lokal + di-seal pairwise
+        // ke admin lain saat promosi (di bawah).
+        const { generateAdminCapabilityToken, hashAdminCapabilityToken, storeMyAdminToken } = await import('@lib/groupPseudonyms');
+        const adminToken = await generateAdminCapabilityToken();
+        const adminSecretHash = await hashAdminCapabilityToken(adminToken);
         const createRes = await authFetch<Conversation & { authSecret: string }>("/api/conversations", {
             method: "POST",
             body: JSON.stringify({
@@ -478,7 +489,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                 encryptedMetadata: null,
                 // [T3b] Creator-issued delivery tokens per invited member —
                 // server menyimpan (conversation, token) untuk discovery.
-                deliveryTokens
+                deliveryTokens,
+                // [26.9 RBAC] SHA-256(adminToken) — server verifikasi X-Admin-Token.
+                adminSecretHash
             })
         });
         conv = createRes;
@@ -572,6 +585,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         
   
         get().addOrUpdateConversation(updatedConv);
+        // [26.9 RBAC] Cache token admin creator (store + kvStore terenkripsi).
+        storeMyAdminToken(conv.id, adminToken);
         set({ activeId: conv.id, isSidebarOpen: false });
         
         return conv.id;

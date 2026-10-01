@@ -236,6 +236,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       const { rotateGroupKey } = await import('@utils/crypto');
       await rotateGroupKey(conversation.id, 'membership_change', true);
       toast.success(t('modals:group_info.toasts.keys_rotated'), { id: toastId });
+      // Catatan: header X-Admin-Token dikirim di dalam rotateGroupKey →
+      // POST /:id/key-rotation (guard server-side RBAC).
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');
       toast.error(t('modals:group_info.toasts.rotate_failed', { error: msg }), { id: toastId });
@@ -274,7 +276,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
         const newMembers = remaining.map(m =>
           m.userId === successor?.userId ? { ...m, role: 'OWNER' as const } : m
         );
-        const { encryptGroupMetadata } = await import('@utils/crypto');
+        const { encryptGroupMetadata, distributeAdminToken } = await import('@utils/crypto');
+        const { getMyAdminToken } = await import('@lib/groupPseudonyms');
         const encryptedMetadata = await encryptGroupMetadata({
           ...(meta as object),
           participants: leaveRecipients,
@@ -282,9 +285,20 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
         } as Parameters<typeof encryptGroupMetadata>[0], conversation.id);
         await api(`/api/conversations/${conversation.id}/details`, {
           method: 'PUT',
-          headers: { 'X-Group-Token': groupToken },
+          headers: {
+            'X-Group-Token': groupToken,
+            // [26.9 RBAC] Mutasi roster = operasi admin (guard server-side).
+            'X-Admin-Token': getMyAdminToken(conversation.id) ?? '',
+          },
           body: JSON.stringify({ encryptedMetadata, targetRecipients: leaveRecipients }),
         });
+        // [26.9 RBAC] Owner keluar → penerus WAJIB menerima admin capability
+        // token sebelum leave (seandainya gagal, leave tetap jalan — token bisa
+        // di-issue ulang oleh admin lain / creator via re-seal).
+        if (successor) {
+          await distributeAdminToken(conversation.id, successor.userId).catch(e =>
+            console.warn('[RBAC] Failed to transfer admin token on owner leave:', e));
+        }
       }
 
       await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE', headers: { 'X-Group-Token': groupToken }, body: JSON.stringify({ targetRecipients: leaveRecipients }) });
@@ -292,7 +306,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       // [26.9 SOLO-LEAVE] Anggota terakhir keluar → grup dihapus permanen di
       // server (guard server: nol delivery token tersisa → purge cascade).
       if (deleteGroup) {
-        await api(`/api/conversations/${conversation.id}/group`, { method: 'DELETE', headers: { 'X-Group-Token': groupToken } });
+        const { getMyAdminToken } = await import('@lib/groupPseudonyms');
+        await api(`/api/conversations/${conversation.id}/group`, {
+          method: 'DELETE',
+          headers: {
+            'X-Group-Token': groupToken,
+            // [26.9 RBAC] Purge = operasi admin (guard server-side).
+            'X-Admin-Token': getMyAdminToken(conversation.id) ?? '',
+          },
+        });
         useConversationStore.getState().removeConversation(conversation.id);
       }
 

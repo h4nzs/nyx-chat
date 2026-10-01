@@ -184,6 +184,10 @@ model Conversation {
   isGroup           Boolean @default(false)
   encryptedMetadata String?
   authSecret        String? // Secret token for blind authorization (Opaque Mailbox)
+  // [26.9 RBAC] SHA-256 hex dari admin capability token. Server TIDAK menyimpan
+  // token-nya (hanya hash) — kepemilikan token = bukti role ADMIN/OWNER tanpa
+  // server tahu roster/role. Hash boleh plaintext-kolom (input 256-bit random).
+  adminSecretHash   String?
 
   // --- MULTI-TENANCY (B2B BaaS) ---
   tenantId String?

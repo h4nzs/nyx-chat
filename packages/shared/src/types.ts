@@ -251,6 +251,11 @@ export type ConversationUi = Conversation & {
     avatarUrl?: string;
     authSecret?: string; // Stored inside encrypted metadata for participants
   }) & Partial<GroupMetadataV2 | GroupMetadataV3>;
+  // [26.9 RBAC] Admin capability token grup ini (client-local, TIDAK pernah
+  // dikirim ke server kecuali sebagai header X-Admin-Token saat mutasi admin).
+  // Diisi: pembuatan grup (creator/OWNER) atau unseal amplop distribusi
+  // pairwise (admin lain). Bukan bagian dari Conversation server.
+  adminToken?: string;
 };
 
 export type Story = {

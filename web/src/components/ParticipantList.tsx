@@ -51,14 +51,27 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, my
         members,
       } as Parameters<typeof encryptGroupMetadata>[0], conversationId);
       const { useAuthStore } = await import('@store/auth');
+      const { getMyAdminToken } = await import('@lib/groupPseudonyms');
       const meId = useAuthStore.getState().user?.id;
       const targets = conv.participants.filter(p => p.id !== meId).map(p => p.id);
       await api(`/api/conversations/${conversationId}/details`, {
         method: 'PUT',
-        headers: { 'X-Group-Token': meta.authSecret },
+        headers: {
+          'X-Group-Token': meta.authSecret,
+          // [26.9 RBAC] Mutasi roster = operasi admin (guard server-side).
+          'X-Admin-Token': getMyAdminToken(conversationId) ?? '',
+        },
         body: JSON.stringify({ encryptedMetadata, targetRecipients: targets }),
       });
       useConversationStore.getState().updateParticipantRole(conversationId, participant.id, newRole);
+      // [26.9 RBAC] Promosi MEMBER→ADMIN/OWNER → seal admin capability token
+      // ke penerima (pairwise opaque; server hanya relay). Fire-and-forget.
+      if (newRole === 'ADMIN') {
+        import('@utils/crypto').then(({ distributeAdminToken }) =>
+          distributeAdminToken(conversationId, participant.id).catch(e =>
+            console.warn('[RBAC] Failed to distribute admin token on promote:', e))
+        );
+      }
       toast.success(t('modals:participants.toasts.role_changed', { name: profile.name, role: newRole.toLowerCase() }));
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');

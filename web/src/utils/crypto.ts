@@ -10,6 +10,7 @@ import {
   resolvePseudonymToUserId,
   getDeliveryTokenMap,
   getMyDeliveryToken,
+  getMyAdminToken,
 } from '@lib/groupPseudonyms';
 export {
   generateGroupPseudonym,
@@ -1035,8 +1036,13 @@ export async function rotateGroupKey(
   await deleteGroupStates(conversationId);
   
   try {
+    const { getMyAdminToken } = await import('@lib/groupPseudonyms');
     await authFetch(`/api/conversations/${conversationId}/key-rotation`, {
       method: 'POST',
+      headers: {
+        // [26.9 RBAC] Rotasi aktif = operasi admin (guard server-side).
+        'X-Admin-Token': getMyAdminToken(conversationId) ?? '',
+      },
       body: JSON.stringify({ reason })
     });
   } catch (error) {
@@ -1078,9 +1084,14 @@ export async function rotateGroupKey(
       }, conversationId);
       // authSecret dari metadata (blind authorization untuk PUT details).
       if (existingMeta.authSecret) {
+        const { getMyAdminToken } = await import('@lib/groupPseudonyms');
         await authFetch(`/api/conversations/${conversationId}/details`, {
           method: 'PUT',
-          headers: { 'X-Group-Token': existingMeta.authSecret },
+          headers: {
+            'X-Group-Token': existingMeta.authSecret,
+            // [26.9 RBAC] Re-encrypt metadata = mutasi roster (guard server).
+            'X-Admin-Token': getMyAdminToken(conversationId) ?? '',
+          },
           body: JSON.stringify({ encryptedMetadata: newEncrypted }),
         });
         useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
@@ -1113,6 +1124,23 @@ export async function rotateGroupKey(
     } catch (e) {
       console.error('[crypto] Active key distribution on membership change failed:', e);
       useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
+    }
+  }
+
+  // [26.9 RBAC] Re-seal admin capability token ke admin lain — menutup akses
+  // admin lama yang baru saja dikick/demote (token di-rotate bersama era).
+  const { getMyAdminToken: getCurrentAdminToken, getGroupMembers } = await import('@lib/groupPseudonyms');
+  const adminToken = getCurrentAdminToken(conversationId);
+  if (adminToken) {
+    const myId2 = useAuthStore.getState().user?.id;
+    const otherAdmins = (getGroupMembers(conversationId) || [])
+      .filter(m => m.userId !== myId2 && (m.role === 'ADMIN' || m.role === 'OWNER'));
+    for (const admin of otherAdmins) {
+      try {
+        await distributeAdminToken(conversationId, admin.userId, adminToken);
+      } catch (e) {
+        console.warn(`[RBAC] Failed to re-seal admin token to ${admin.userId}:`, e);
+      }
     }
   }
 }
@@ -1861,6 +1889,95 @@ async function doDecryptMessage(
   }
 }
 
+// --- [26.9 RBAC] Admin capability token distribution ========================
+
+/**
+ * Seal admin capability token ke satu device via pq_box_seal (pola GROUP_KEY —
+ * server hanya relay amplop opaque via `group:fulfilled_key`).
+ */
+async function sealAdminTokenEnvelope(
+  adminToken: string,
+  theirPqPublicKey: string,
+  theirPublicKey: string
+): Promise<string> {
+  const sodium = await getSodiumLib();
+  const { worker_pq_box_seal } = await getWorkerProxy();
+  const sealed = await worker_pq_box_seal(
+    new TextEncoder().encode(JSON.stringify({ adminToken })),
+    sodium.from_base64(theirPqPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+    sodium.from_base64(theirPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+  );
+  return sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
+}
+
+/**
+ * Distribusi admin capability token ke satu user (semua device-nya).
+ * Dipanggil saat: promosi MEMBER→ADMIN, transfer ownership, dan rotasi
+ * (re-seal ke admin saat ini). Receiver mengenalinya via `adminToken: true`.
+ */
+export async function distributeAdminToken(
+  conversationId: string,
+  targetUserId: string,
+  adminToken?: string
+): Promise<void> {
+  const token = adminToken ?? getMyAdminToken(conversationId);
+  if (!token) throw new Error('No admin capability token available to distribute');
+
+  const sodium = await getSodiumLib();
+  const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+  const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  const bundlesMap = await fetchPreKeyBundles([targetUserId]);
+  const bundles = bundlesMap[targetUserId] || [];
+  if (bundles.length === 0) throw new Error(`No prekey bundles for ${targetUserId}`);
+
+  for (const bundle of bundles) {
+    if (!bundle.pqIdentityKey) continue;
+    try {
+      const encryptedKey = await sealAdminTokenEnvelope(token, bundle.pqIdentityKey, bundle.identityKey);
+      const { transportClient } = await import('@lib/transportClient');
+      transportClient.sendEvent('group:fulfilled_key', {
+        requesterId: targetUserId,
+        conversationId,
+        encryptedKey,
+        targetDeviceId: bundle.deviceId,
+        senderDeviceKey: myIdentityKeyB64,
+        adminToken: true,
+      });
+    } catch (e) {
+      console.warn(`[RBAC] Failed to seal admin token for device ${bundle.deviceId}:`, e);
+    }
+  }
+}
+
+/**
+ * Coba unseal amplop admin capability token dari payload `session:new_key`.
+ * Return token bila `adminToken: true` dan unseal sukses; null bila bukan
+ * amplop admin (biarkan jalur GROUP_KEY normal menangani).
+ */
+async function tryReceiveAdminToken(payload: ReceiveKeyPayload): Promise<string | null> {
+  if (!(payload as { adminToken?: boolean }).adminToken) return null;
+  const { conversationId, encryptedKey } = payload;
+  if (!conversationId || !encryptedKey) return null;
+
+  const sodium = await getSodiumLib();
+  const { privateKey: classicalPrivateKey } = await getMyEncryptionKeyPair();
+  const { privateKey: pqPrivateKey } = await useAuthStore.getState().getPqEncryptionKeyPair();
+  const { worker_pq_box_seal_open } = await getWorkerProxy();
+  try {
+    const sealed = sodium.from_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const opened = await worker_pq_box_seal_open(sealed, pqPrivateKey, classicalPrivateKey);
+    const parsed = JSON.parse(new TextDecoder().decode(opened)) as { adminToken?: string };
+    if (!parsed.adminToken) return null;
+    const { storeMyAdminToken } = await import('@lib/groupPseudonyms');
+    storeMyAdminToken(conversationId, parsed.adminToken);
+    return parsed.adminToken;
+  } catch (e) {
+    console.warn('[RBAC] Failed to unseal admin token envelope:', e);
+    return null;
+  }
+}
+
 // --- Pre-Key Handshake (Full X3DH with OTPK) ---
 
 export async function establishSessionFromPreKeyBundle(
@@ -2156,6 +2273,11 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
         console.debug(`[storeReceivedSessionKey] Skipping own GROUP_KEY distribution for conv=${conversationId}`);
         return;
     }
+
+    // [26.9 RBAC] Amplop admin capability token (adminToken: true) — unseal &
+    // cache, JANGAN diproses sebagai GROUP_KEY (bukan chain key).
+    const adminReceived = await tryReceiveAdminToken(payload);
+    if (adminReceived) return;
     
     console.debug(`[storeReceivedSessionKey] conv=${conversationId} senderId=${senderId} senderDeviceKey=${senderDeviceKey} encryptedKeyLen=${encryptedKey?.length}`);
 

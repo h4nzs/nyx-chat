@@ -130,6 +130,74 @@ export function getPseudonymMap(conversationId: string): Record<string, string> 
   return (meta?.v === 2 || meta?.v === 3) ? meta.pseudonymMap : undefined;
 }
 
+// --- [26.9 RBAC] Admin capability token (server-side admin guard) ---
+
+/**
+ * Admin capability token: rahasia acak yang HANYA dimiliki OWNER/ADMIN.
+ * Server menyimpan SHA-256(token); kepemilikan token = bukti role admin
+ * tanpa server tahu roster. Token asli tidak pernah dikirim ke server dalam
+ * bentuk mentah saat provisioning — hanya hash-nya (createGroup).
+ */
+export async function generateAdminCapabilityToken(): Promise<string> {
+  const { getSodium } = await import('./sodiumInitializer');
+  const sodium = await getSodium();
+  return sodium.to_base64(sodium.randombytes_buf(32), sodium.base64_variants.URLSAFE_NO_PADDING);
+}
+
+/** SHA-256 hex dari admin capability token — kontrak kolom Conversation.adminSecretHash. */
+export async function hashAdminCapabilityToken(token: string): Promise<string> {
+  const subtle = crypto.subtle;
+  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Admin capability token SAYA untuk grup ini (undefined = bukan admin / belum ter-distribusi). */
+export function getMyAdminToken(conversationId: string): string | undefined {
+  return useConversationStore.getState().conversations
+    .find(c => c.id === conversationId)?.adminToken;
+}
+
+/**
+ * Simpan admin capability token: mirror di store (akses sinkron saat guard UI)
+ * + persist di kvStore terenkripsi at-rest (masterSeed-bound) agar tok hidup
+ * setelah reload. Fire-and-forget — pemanggil tidak perlu menunggu.
+ */
+export function storeMyAdminToken(conversationId: string, token: string): void {
+  useConversationStore.getState().updateConversation(conversationId, { adminToken: token } as never);
+  void (async () => {
+    try {
+      const { encryptValueAtRest } = await import('./keychainDb');
+      const { db } = await import('./db');
+      const KV_KEY = 'nyx_group_admin_tokens';
+      const item = await db.kvStore.get(KV_KEY);
+      const existing = ((item?.value as Record<string, string> | undefined) || {});
+      existing[conversationId] = await encryptValueAtRest(token);
+      await db.kvStore.put({ key: KV_KEY, value: existing });
+    } catch (e) {
+      console.warn('[RBAC] Failed to persist admin token:', e);
+    }
+  })();
+}
+
+/** Muat admin token dari kvStore ke store (panggil saat loadConversations / unlock). */
+export async function hydrateMyAdminTokens(): Promise<void> {
+  try {
+    const { decryptValueAtRest } = await import('./keychainDb');
+    const { db } = await import('./db');
+    const item = await db.kvStore.get('nyx_group_admin_tokens');
+    const existing = ((item?.value as Record<string, string> | undefined) || {});
+    const convStore = useConversationStore.getState();
+    for (const [convId, enc] of Object.entries(existing)) {
+      if (!convStore.conversations.some(c => c.id === convId)) continue; // grup sudah tidak ada
+      if (convStore.conversations.find(c => c.id === convId)?.adminToken) continue;
+      const plain = enc ? await decryptValueAtRest(enc) : null;
+      if (plain) convStore.updateConversation(convId, { adminToken: plain } as never);
+    }
+  } catch (e) {
+    console.warn('[RBAC] Failed to hydrate admin tokens:', e);
+  }
+}
+
 // --- [T4 ROSTER v3] Role & membership helpers (baca dari metadata) ---
 
 /**
