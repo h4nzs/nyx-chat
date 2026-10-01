@@ -82,6 +82,14 @@ export interface GroupSenderState {
   conversationId: ConversationId;
   CK: string;
   N: number;
+  // [T2 FIX 2026-10-01] Chain key AWAL era (posisi N=0). Fulfillment key request
+  // harus menyegel INI — bukan CK ratchet saat ini. Jika pengirim seal state
+  // terkini (CK_n, N=n), penerima yang telat mustahil menurunkan message key
+  // untuk pesan < n (KDF chain satu arah) → "Ratchet Advanced! Cannot decrypt
+  // old message (header.n=0, state.N=1)" (log 2-browser 2026-10-01). Pola
+  // Sender Key Distribution Message libsignal: distribusi era selalu memuat
+  // sender key awal; semua anggota menurunkan message key sendiri dari sana.
+  initialCK?: string;
   createdAt?: number;
   messageCount?: number;
   lastActivityTime?: number;
@@ -143,11 +151,14 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
 
     const ckPlain = await decryptValueAtRest(ckString);
     if (ckPlain === null) return null; // encrypted but unreadable (locked/corrupt)
-    
+
     return record ? {
         conversationId: asConversationId(record.conversationId),
         CK: ckPlain,
         N: record.state.N,
+        initialCK: record.state.initialCK
+            ? (await decryptValueAtRest(record.state.initialCK)) ?? undefined
+            : undefined,
         createdAt: record.state.createdAt,
         messageCount: record.state.messageCount,
         lastActivityTime: record.state.lastActivityTime,
@@ -165,6 +176,7 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
           state: {
             CK: await encryptValueAtRest(state.CK),
             N: state.N,
+            initialCK: state.initialCK ? await encryptValueAtRest(state.initialCK) : undefined,
             createdAt: state.createdAt,
             messageCount: state.messageCount,
             lastActivityTime: state.lastActivityTime,
@@ -549,8 +561,18 @@ export async function migrateKeychainAtRestEncryption(): Promise<void> {
     const senderRecords = await db.groupSenderStates.toArray();
     for (const r of senderRecords) {
       const rawCk: unknown = r.state.CK;
-      if (typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX)) {
-        await db.groupSenderStates.put({ conversationId: r.conversationId, state: { ...r.state, CK: await encryptValueAtRest(rawCk) } });
+      const rawInitialCk: unknown = r.state.initialCK;
+      const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+      const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
+      if (needsCk || needsInitialCk) {
+        await db.groupSenderStates.put({
+          conversationId: r.conversationId,
+          state: {
+            ...r.state,
+            CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
+            initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : r.state.initialCK
+          }
+        });
       }
     }
 

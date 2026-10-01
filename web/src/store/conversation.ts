@@ -709,6 +709,15 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
              const dec = await decryptGroupMetadata(data.encryptedMetadata, id);
              if (dec) {
                  decryptedMetadata = dec;
+                 // [HEAL 2026-10-01] Metadata baru sukses terdekripsi → pesan pending
+                 // yang sebelumnya gagal (waiting_for_key / ratchet advanced) perlu
+                 // diproses ulang. Retry di message.ts hanya jalan SEKALI; tanpa
+                 // trigger ini pesan gagal permanen walau kunci sudah sampai
+                 // (log 2-browser 2026-10-01: metadata terdekripsi via offline sync
+                 // tapi pesan user tidak pernah di-decrypt ulang).
+                 import('@store/message').then(({ useMessageStore }) => {
+                     setTimeout(() => useMessageStore.getState().reDecryptPendingMessages(id), 150);
+                 }).catch(() => {});
                  // Opaque Mailbox: extract participants from decrypted metadata
                  const metaParticipants = (dec as { participants?: string[] }).participants;
                  if (Array.isArray(metaParticipants) && metaParticipants.length > 0) {

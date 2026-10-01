@@ -12,6 +12,9 @@ export interface SodiumKeyPair {
 export interface GroupRatchetState {
   CK: string;
   N: number;
+  // [T2 FIX 2026-10-01] Chain key awal era (sender state saja) — fulfillment
+  // key request menyegel INI dengan N=0, bukan posisi ratchet saat ini.
+  initialCK?: string;
   skippedKeys?: Record<string, string>;
   createdAt?: number;
   messageCount?: number;

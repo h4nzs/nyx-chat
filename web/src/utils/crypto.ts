@@ -847,10 +847,13 @@ export async function ensureGroupSession(
 
       // Always save sender state even if distribution is empty (opaque mailbox:
       // participants may not be synced yet, key request/fulfillment handles delivery).
+      // [T2 FIX 2026-10-01] initialCK disimpan agar fulfillment key request selalu
+      // menyegel chain key AWAL era (N=0) — bukan posisi ratchet saat ini.
       await saveGroupSenderState({
           conversationId: conversationId as ConversationId,
           CK: senderKeyB64,
           N: 0,
+          initialCK: senderKeyB64,
           messageCount: 0,
           requiresImmediateRotation: false
       });
@@ -1406,6 +1409,11 @@ async function doEncryptMessage(
       conversationId: conversationId as ConversationId,
       CK: result.state.CK,
       N: result.state.N,
+      // [T2 FIX 2026-10-01] initialCK era HARUS dipertahankan — tanpa ini,
+      // pesan pertama yang ratchet state menghapus chain key awal era dan
+      // fulfillment key request berikutnya kembali seal state terkini
+      // (Ratchet Advanced di penerima yang telat).
+      initialCK: senderState.initialCK,
       createdAt: senderState.createdAt || Date.now(),
       messageCount: (senderState.messageCount || 0) + 1,
       lastActivityTime: Date.now(),
@@ -1952,10 +1960,23 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   if (!senderState) return;
 
   const sodium = await getSodiumLib();
-  const senderKeyBytes = sodium.from_base64(senderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  // [T2 FIX 2026-10-01] WAJIB seal chain key AWAL era (N=0), bukan state ratchet
+  // saat ini. Jika pengirim sudah kirim beberapa pesan (N maju) lalu fulfill
+  // request dengan (CK_n, N=n), penerima yang telat tidak punya cara menurunkan
+  // message key pesan < n (KDF chain satu arah — forward secrecy) → SEMUA pesan
+  // lama gagal "Ratchet Advanced! Cannot decrypt old message (header.n=0,
+  // state.N=1)" (log 2-browser 2026-10-01). Pola libsignal Sender Key
+  // Distribution Message: distribusi era selalu memuat sender key awal; semua
+  // anggota menurunkan sendiri message key dari situ. Fallback ke perilaku lama
+  // untuk state legacy yang belum punya initialCK.
+  const ckToSeal = senderState.initialCK ?? senderState.CK;
+  const nToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
+
+  const senderKeyBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   const payloadToEncrypt = new Uint8Array(4 + senderKeyBytes.length);
-  new DataView(payloadToEncrypt.buffer).setUint32(0, senderState.N || 0, false);
+  new DataView(payloadToEncrypt.buffer).setUint32(0, nToSeal, false);
   payloadToEncrypt.set(senderKeyBytes, 4);
 
   // Encrypt sender key with PQ box seal
