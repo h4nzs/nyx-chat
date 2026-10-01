@@ -156,18 +156,12 @@ export type Conversation = z.infer<typeof MinimalConversationSchema> & {
   authSecret?: string; // Secret for blind authorization of group management
 };
 
-// [T1 GROUP PSEUDONYMS — doc 26.2] Per-group sender pseudonyms. The mapping
-// `pseudonym -> userId` lives ONLY inside encrypted metadata (v2); the server
-// sees opaque `senderId` values that cannot be linked to accounts or across
-// groups. Generation bumps on every full key rotation so pre/post-rotation
-// messages are unlinkable server-side.
-export interface GroupMetadataV2 {
+/** version marker — metadata tanpa field ini = v1 (tanpa pseudonym). */
+export interface GroupMetadataBase {
   title?: string;
   description?: string;
   avatarUrl?: string;
   participants?: string[];
-  /** version marker — metadata without this field is v1 (no pseudonyms). */
-  v: 2;
   /** monotonically increasing per full key/membership rotation. */
   generation: number;
   /** pseudonym (22-char base64url of 16 random bytes) -> userId. */
@@ -178,13 +172,85 @@ export interface GroupMetadataV2 {
   deliveryTokenMap?: Record<string, string>;
 }
 
+// [T1 GROUP PSEUDONYMS — doc 26.2] Per-group sender pseudonyms. The mapping
+// `pseudonym -> userId` lives ONLY inside encrypted metadata (v2); the server
+// sees opaque `senderId` values that cannot be linked to accounts or across
+// groups. Generation bumps on every full key rotation so pre/post-rotation
+// messages are unlinkable server-side.
+export interface GroupMetadataV2 extends GroupMetadataBase {
+  /** version marker — metadata tanpa field ini = v1 (tanpa pseudonym). */
+  v: 2;
+}
+
+// [T4 GROUP ROSTER v3 — 2026-09-30] Roster keanggotaan hidup DI DALAM
+// encrypted metadata (satu sumber kebenaran), mengikuti pola membersV2
+// Signal: setiap entri membawa role eksplisit. Server Opaque Mailbox tetap
+// tidak tahu siapa anggota grup, role-nya, maupun perubahan keanggotaan —
+// hanya melihat blob metadata opaque + blind auth (X-Group-Token).
+export type GroupRole = 'OWNER' | 'ADMIN' | 'MEMBER';
+
+export interface GroupMemberEntry {
+  /** userId asli anggota (22-char). */
+  userId: string;
+  role: GroupRole;
+  /** generation metadata saat anggota bergabung (audit + ordering). */
+  joinedAtGeneration: number;
+}
+
+export interface GroupMetadataV3 extends GroupMetadataBase {
+  /** version marker — metadata v3 membawa roster ber-role. */
+  v: 3;
+  /** Roster lengkap (termasuk creator sebagai OWNER). */
+  members: GroupMemberEntry[];
+}
+
+// --- [T4] Role & roster helpers (kontrak lintas client/server) ---
+
+/** Guard role dari input tak terpercaya (metadata terdekripsi / payload). */
+export function isGroupRole(value: unknown): value is GroupRole {
+  return value === 'OWNER' || value === 'ADMIN' || value === 'MEMBER';
+}
+
+/** Urutan hierarki role: OWNER > ADMIN > MEMBER. */
+export const GROUP_ROLE_RANK: Record<GroupRole, number> = {
+  OWNER: 3,
+  ADMIN: 2,
+  MEMBER: 1,
+};
+
+export function roleAtLeast(role: GroupRole, minimum: GroupRole): boolean {
+  return GROUP_ROLE_RANK[role] >= GROUP_ROLE_RANK[minimum];
+}
+
+/**
+ * Validasi & normalisasi roster v3 dari metadata terdekripsi. Entri tanpa
+ * userId valid dibuang; role tidak dikenal → MEMBER (fail-safe, bukan fail
+ * closed — anggota tak boleh hilang cuma karena field role korup).
+ */
+export function parseGroupMembers(input: unknown): GroupMemberEntry[] {
+  if (!Array.isArray(input)) return [];
+  const out: GroupMemberEntry[] = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    const rec = raw as Record<string, unknown>;
+    if (typeof rec.userId !== 'string' || rec.userId.length === 0) continue;
+    out.push({
+      userId: rec.userId,
+      role: isGroupRole(rec.role) ? rec.role : 'MEMBER',
+      joinedAtGeneration:
+        typeof rec.joinedAtGeneration === 'number' ? rec.joinedAtGeneration : 0,
+    });
+  }
+  return out;
+}
+
 export type ConversationUi = Conversation & {
   decryptedMetadata?: ({
     title?: string;
     description?: string;
     avatarUrl?: string;
     authSecret?: string; // Stored inside encrypted metadata for participants
-  }) & Partial<GroupMetadataV2>;
+  }) & Partial<GroupMetadataV2 | GroupMetadataV3>;
 };
 
 export type Story = {

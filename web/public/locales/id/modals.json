@@ -136,6 +136,8 @@
     "block": "Blokir Pengguna",
     "unblock": "Buka Blokir",
     "admin_role": "Admin",
+    "owner_role": "Owner",
+    "member_role": "Member",
     "remove_title": "Hapus Peserta",
     "remove_desc": "Apakah Anda yakin ingin menghapus {{name}} dari grup?",
     "toasts": {

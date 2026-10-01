@@ -1,5 +1,5 @@
-import type { DoubleRatchetState, ConversationId, UserId, Pseudonym } from '@nyx/shared';
-import { asPseudonym } from '@nyx/shared';
+import type { DoubleRatchetState, ConversationId, UserId, Pseudonym, GroupMemberEntry } from '@nyx/shared';
+import { asPseudonym, parseGroupMembers } from '@nyx/shared';
 // [T1] Helper pseudonym ada di module ringan (testable tanpa graph worker);
 // di-import + di-re-export agar pemakaian lama tetap jalan.
 import {
@@ -71,9 +71,9 @@ import type { Participant } from '@store/conversation';
 // --- Group Metadata Helpers ---
 
 export async function encryptGroupMetadata(
-  // [T1] metadata v2 membawa v/generation/pseudonymMap; v1 (tanpa field itu)
-  // tetap valid untuk grup lawas.
-  metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2; generation?: number; pseudonymMap?: Record<string, string>; deliveryTokenMap?: Record<string, string> },
+  // [T1/T4] metadata v2/v3 membawa v/generation/pseudonymMap (+ members untuk
+  // v3); v1 (tanpa field itu) tetap valid untuk grup lawas.
+  metadata: { title?: string; description?: string; avatarUrl?: string; participants?: string[]; authSecret?: string; v?: 2 | 3; generation?: number; pseudonymMap?: Record<string, string>; deliveryTokenMap?: Record<string, string>; members?: GroupMemberEntry[] },
   conversationId: string,
   // [T1 FIX 2026-09-28] Pseudonym eksplisit untuk distribusi kunci yang dipicu
   // di dalam sini (ensureGroupSession) — penting saat createGroup, peta baru
@@ -91,7 +91,7 @@ export async function encryptGroupMetadata(
   //  - Grup lawas v1 (tidak pernah punya peta) TIDAK dimigrasi otomatis di sini:
   //    mereka tetap jalan di jalur legacy; migrasi v1→v2 lazy terjadi saat
   //    createGroup-pattern rewrite (doc 26.5 rollout) — tidak dipaksakan.
-  if (metadata.v === 2 && !metadata.pseudonymMap) {
+  if ((metadata.v === 2 || metadata.v === 3) && !metadata.pseudonymMap) {
     const prev = getPseudonymMap(conversationId);
     const nextGeneration = ((metadata.generation ?? 0) || 0) + 1;
     metadata = {
@@ -107,7 +107,7 @@ export async function encryptGroupMetadata(
   // (anggota yang keluar hilang otomatis karena metadata baru hanya membawa
   // anggota aktif; server-side revocation = hapus row token). Panggilan dengan
   // peta eksplisit (createGroup) → dipakai apa adanya.
-  if (metadata.v === 2 && !metadata.deliveryTokenMap) {
+  if ((metadata.v === 2 || metadata.v === 3) && !metadata.deliveryTokenMap) {
     const prevTokens = getDeliveryTokenMap(conversationId);
     if (prevTokens) metadata = { ...metadata, deliveryTokenMap: prevTokens };
   }
@@ -1052,14 +1052,26 @@ export async function rotateGroupKey(
   // kunci jalan dengan peta LAMA lalu peta baru di-generate — identitas
   // distribusi tak konsisten dengan metadata baru. Kicked member tidak ada di
   // peta baru → era kunci baru tak bisa dia ikuti (doc 26.5/26.7.1).
-  const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
-  if (existingMeta?.v === 2) {
+  const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string; generation?: number; members?: GroupMemberEntry[] } | undefined;
+  if (existingMeta && (existingMeta.v === 2 || existingMeta.v === 3)) {
     try {
       const participantIds = conversation.participants.map(p => (p.userId || p.id) as string);
+      // [T4 ROSTER v3] Roster di-reconcile dengan participants store saat
+      // rotasi: anggota baru masuk sebagai MEMBER, yang keluar dibuang; role
+      // lain dipertahankan. Roster v2 lama dimigrasi ke v3 otomatis.
+      const prevMembers = parseGroupMembers(existingMeta.members);
+      const prevById = new Map(prevMembers.map(m => [m.userId, m]));
+      const generation = (existingMeta.generation ?? 0) + 1;
+      const members: GroupMemberEntry[] = participantIds.map(uid => {
+        const prev = prevById.get(uid);
+        return prev ?? { userId: uid, role: 'MEMBER' as const, joinedAtGeneration: generation };
+      });
       const newEncrypted = await encryptGroupMetadata({
         ...existingMeta,
         participants: participantIds,
-        v: 2,
+        v: 3,
+        generation,
+        members,
       }, conversationId);
       // authSecret dari metadata (blind authorization untuk PUT details).
       if (existingMeta.authSecret) {

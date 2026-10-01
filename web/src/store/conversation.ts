@@ -9,7 +9,7 @@ import { transportClient, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDist
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import { asConversationId, asMessageId } from '@nyx/shared';
-import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation } from '@nyx/shared';
+import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation, GroupMemberEntry } from '@nyx/shared';
 import { asUserId } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
@@ -121,6 +121,7 @@ type Actions = {
   addParticipants: (conversationId: string, participants: Participant[]) => void;
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
+  syncParticipantsFromMetadata: (conversationId: string, members: GroupMemberEntry[]) => void;
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
   performHandshake: (conversationId: string) => Promise<void>;
   markKeyRotationNeeded: (conversationId: string, needed: boolean) => void;
@@ -513,11 +514,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // miliknya setelah decrypt). Token anggota yang ditambahkan belakangan
         // di-issue saat invite message (targetDeliveryTokens).
         const deliveryTokenMap = { ...deliveryTokens, ...(await buildDeliveryTokensPayload([user.id])) };
+        // [T4 ROSTER v3] Roster ber-role hidup di dalam metadata: creator = OWNER,
+        // undangan = MEMBER. Satu sumber kebenaran untuk UI (admin check, daftar
+        // anggota) — server tidak pernah melihat roster/role (Opaque Mailbox).
+        const members: GroupMemberEntry[] = [
+            { userId: user.id, role: 'OWNER', joinedAtGeneration: 1 },
+            ...userIds.filter(uid => uid !== user.id).map(uid => ({ userId: uid, role: 'MEMBER' as const, joinedAtGeneration: 1 })),
+        ];
         // [T1 FIX 2026-09-28] Suntikkan pseudonym SAYA dari peta yang baru dibuat
         // (peta belum ada di store saat ensureGroupSession jalan di dalam sini →
         // kalau tidak, GROUP_KEY pertama terkirim dengan userId asli sebagai
         // senderId — ditemukan saat audit DB lokal 2026-09-28).
-        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 2, generation: 1, pseudonymMap, deliveryTokenMap } as Parameters<typeof encryptGroupMetadata>[0], conv.id, { pseudonym: myPseudonym });
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 3, generation: 1, pseudonymMap, deliveryTokenMap, members } as Parameters<typeof encryptGroupMetadata>[0], conv.id, { pseudonym: myPseudonym });
         
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',
@@ -553,10 +561,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                 avatarUrl,
                 participants: allParticipantIds,
                 authSecret,
-                v: 2 as const,
+                v: 3 as const,
                 generation: 1,
                 pseudonymMap,
-                deliveryTokenMap
+                deliveryTokenMap,
+                members
             },
             encryptedMetadata
         };
@@ -829,6 +838,31 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           return { ...c, participants: c.participants.map(p => p.id === userId ? { ...p, role } : p) };
         }
         return c;
+      }),
+    }));
+  },
+
+  // [T4 ROSTER v3] Mirror roster metadata (sumber kebenaran) ke participants
+  // store — UI lama yang masih baca participants tetap konsisten (nama kosong
+  // diperbolehkan; profil di-resolve via useUserProfile). Hanya menambah/
+  // meng-update role; TIDAK menghapus pesan/metadata lain.
+  syncParticipantsFromMetadata: (conversationId, members) => {
+    set(state => ({
+      conversations: state.conversations.map(c => {
+        if (c.id !== conversationId) return c;
+        const existingById = new Map<string, Participant>(c.participants.map(p => [p.id as string, p]));
+        const participants = members.map(m => {
+          const existing = existingById.get(m.userId);
+          return {
+            id: existing?.id ?? (asUserId(m.userId)),
+            name: existing?.name || '',
+            username: existing?.username,
+            avatarUrl: existing?.avatarUrl,
+            encryptedProfile: existing?.encryptedProfile,
+            role: m.role as Participant['role'],
+          } as Participant;
+        });
+        return { ...c, participants };
       }),
     }));
   },

@@ -9,10 +9,14 @@ import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
 import { useUserProfile } from "@hooks/useUserProfile";
 import { DecryptedProfile } from "@store/profile";
-import type { ConversationId } from '@nyx/shared';
+import type { ConversationId, GroupRole } from '@nyx/shared';
+import { parseGroupMembers } from '@nyx/shared';
+import { getGroupMembers } from '@lib/groupPseudonyms';
+import { useEffect } from 'react';
+import { useProfileStore } from '@store/profile';
 import { useTranslation } from 'react-i18next';
 
-const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: ConversationId, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
+const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, myRole }: { conversationId: ConversationId, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean, myRole?: GroupRole }) => {
   const { t } = useTranslation(['modals', 'common']);
   const [isOpen, setIsOpen] = useState(false);
   const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore(useShallow(s => ({
@@ -26,13 +30,35 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
 
   const isBlocked = blockedUserIds.includes(participant.id);
 
-  const handleRoleChange = async (newRole: "ADMIN" | "MEMBER") => {
+  const handleRoleChange = async (newRole: 'ADMIN' | 'MEMBER') => {
     setIsOpen(false);
     try {
-      await api(`/api/conversations/${conversationId}/participants/${participant.id}/role`, {
+      const { useConversationStore } = await import('@store/conversation');
+      const { encryptGroupMetadata } = await import('@utils/crypto');
+      const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+      const meta = conv?.decryptedMetadata as { v?: number; authSecret?: string; members?: unknown; generation?: number } | undefined;
+      if (!conv || !meta || meta.v !== 3 || !meta.authSecret) {
+        throw new Error('Roster unavailable (metadata v3 not decrypted)');
+      }
+      // [T4] Role change = mutasi roster di metadata (server hanya menerima
+      // blob terenkripsi + blind auth — tidak tahu role siapa pun).
+      const members = parseGroupMembers(meta.members).map(m =>
+        m.userId === participant.id ? { ...m, role: newRole } : m
+      );
+      if (!members.some(m => m.userId === participant.id)) throw new Error('Member not in roster');
+      const encryptedMetadata = await encryptGroupMetadata({
+        ...(meta as object),
+        members,
+      } as Parameters<typeof encryptGroupMetadata>[0], conversationId);
+      const { useAuthStore } = await import('@store/auth');
+      const meId = useAuthStore.getState().user?.id;
+      const targets = conv.participants.filter(p => p.id !== meId).map(p => p.id);
+      await api(`/api/conversations/${conversationId}/details`, {
         method: 'PUT',
-        body: JSON.stringify({ role: newRole }),
+        headers: { 'X-Group-Token': meta.authSecret },
+        body: JSON.stringify({ encryptedMetadata, targetRecipients: targets }),
       });
+      useConversationStore.getState().updateParticipantRole(conversationId, participant.id, newRole);
       toast.success(t('modals:participants.toasts.role_changed', { name: profile.name, role: newRole.toLowerCase() }));
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');
@@ -101,13 +127,16 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
       {isOpen && (
         <div className="absolute right-0 mt-2 w-48 bg-bg-primary rounded-md shadow-lg z-10 border border-border">
           <ul className="py-1">
-            {amIAdmin && participant.role === 'MEMBER' && (
+            {/* [T4 v3] Hierarki: OWNER tak bisa diubah role-nya; ADMIN boleh
+                promote MEMBER→ADMIN & demote ADMIN→MEMBER; hanya OWNER yang
+                boleh kick admin lain. */}
+            {amIAdmin && myRole !== 'ADMIN' && participant.role === 'MEMBER' && (
               <li><button onClick={() => handleRoleChange('ADMIN')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">{t('modals:participants.make_admin')}</button></li>
             )}
-            {amIAdmin && participant.role === 'ADMIN' && user?.id !== participant.id && (
+            {amIAdmin && myRole !== 'ADMIN' && participant.role === 'ADMIN' && user?.id !== participant.id && (
               <li><button onClick={() => handleRoleChange('MEMBER')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">{t('modals:participants.dismiss_admin')}</button></li>
             )}
-            {amIAdmin && user?.id !== participant.id && (
+            {amIAdmin && user?.id !== participant.id && (String(participant.role).toUpperCase() !== 'OWNER' && !(String(participant.role).toUpperCase() === 'ADMIN' && myRole === 'ADMIN')) && (
               <li><button onClick={handleRemove} className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground">{t('modals:participants.remove')}</button></li>
             )}
             <li><button onClick={handleBlockToggle} className={`w-full text-left px-4 py-2 text-sm ${isBlocked ? 'text-green-500 hover:bg-green-500/10' : 'text-destructive hover:bg-destructive/10'}`}>
@@ -120,9 +149,15 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
   );
 };
 
-const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { p: Participant, conversationId: ConversationId, amIAdmin: boolean, handleProfileClick: (p: Participant) => void }) => {
+const ROLE_LABEL_KEY: Record<string, string> = {
+  OWNER: 'modals:participants.owner_role',
+  ADMIN: 'modals:participants.admin_role',
+  MEMBER: 'modals:participants.member_role',
+};
+
+const ParticipantItem = ({ p, conversationId, amIAdmin, myRole, handleProfileClick }: { p: Participant, conversationId: ConversationId, amIAdmin: boolean, myRole?: GroupRole, handleProfileClick: (p: Participant) => void }) => {
   const profile = useUserProfile(p);
-  const { t } = useTranslation(['modals', 'common']); 
+  const { t } = useTranslation(['modals', 'common']);
   return (
     <li className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
       <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left min-w-0">
@@ -138,16 +173,41 @@ const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { 
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-text-primary truncate">{profile.name || t('common:defaults.user')}</p>
           <p className="text-xs text-text-secondary truncate">{profile.description || t('modals:group_info.no_desc')}</p>
-          {p.role === 'ADMIN' && <p className="text-xs text-accent-color">{t('modals:participants.admin_role', 'Admin')}</p>}
+          {String(p.role).toUpperCase() !== 'MEMBER' && (
+            <p className="text-xs text-accent-color">{t(ROLE_LABEL_KEY[p.role] ?? 'modals:participants.member_role', String(p.role))}</p>
+          )}
         </div>
       </button>
-      <ParticipantActions conversationId={conversationId} participant={p} profile={profile} amIAdmin={amIAdmin} />
+      <ParticipantActions conversationId={conversationId} participant={p} profile={profile} amIAdmin={amIAdmin} myRole={myRole} />
     </li>
   );
 };
 
 const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversationId: ConversationId, participants: Participant[], amIAdmin: boolean }) => {
   const openProfileModal = useModalStore(s => s.openProfileModal);
+  const myId = useAuthStore.getState().user?.id;
+  const myRole = getGroupMembers(conversationId)?.find(m => m.userId === myId)?.role;
+
+  // [T4] Prefetch profil anggota (GET /api/users/:id → encryptedProfile,
+  // didekripsi dengan profileKey dari pesan bila tersedia). Mengurangi
+  // "Anonymous" di panel untuk anggota yang belum kirim pesan.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const p of participants) {
+        if (cancelled) break;
+        const cached = await useProfileStore.getState().getCacheOnly(p.id, p.encryptedProfile ?? null);
+        if (cached) continue;
+        try {
+          const remote = await api<{ encryptedProfile?: string | null }>(`/api/users/${p.id}`);
+          if (remote?.encryptedProfile && !cancelled) {
+            await useProfileStore.getState().decryptAndCache(p.id, remote.encryptedProfile);
+          }
+        } catch { /* offline / 404 — biarkan fallback nama */ }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [participants]);
 
   const handleProfileClick = (participant: Participant) => {
     openProfileModal(participant.id);
@@ -156,7 +216,7 @@ const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversat
   return (
     <ul className="space-y-2">
       {participants.map(p => (
-        <ParticipantItem key={p.id} p={p} conversationId={conversationId} amIAdmin={amIAdmin} handleProfileClick={handleProfileClick} />
+        <ParticipantItem key={p.id} p={p} conversationId={conversationId} amIAdmin={amIAdmin} myRole={myRole} handleProfileClick={handleProfileClick} />
       ))}
     </ul>
   );

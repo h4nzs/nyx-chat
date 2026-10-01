@@ -136,6 +136,8 @@
     "block": "Bloquear Usuário",
     "unblock": "Desbloquear",
     "admin_role": "Admin",
+    "owner_role": "Owner",
+    "member_role": "Member",
     "remove_title": "Remover Participante",
     "remove_desc": "Tem certeza de que deseja remover {{name}} do grupo?",
     "toasts": {

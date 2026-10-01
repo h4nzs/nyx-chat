@@ -13,8 +13,8 @@
  * Di-extract sebagai module ringan (pola `groupMetadata.ts`) agar bisa
  * diuji unit tanpa memuat graph crypto worker yang berat.
  */
-import type { Pseudonym, DeliveryToken } from '@nyx/shared';
-import { asPseudonym, asDeliveryToken } from '@nyx/shared';
+import type { Pseudonym, DeliveryToken, GroupMemberEntry, GroupRole } from '@nyx/shared';
+import { asPseudonym, asDeliveryToken, parseGroupMembers, roleAtLeast } from '@nyx/shared';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
 import { useSettingsStore } from '@store/settings';
@@ -54,11 +54,11 @@ export async function generateDeliveryTokenMap(participantIds: string[]): Promis
   return map;
 }
 
-/** Peta token grup ini dari decryptedMetadata v2 (undefined = legacy). */
+/** Peta token grup ini dari decryptedMetadata v2/v3 (undefined = legacy). */
 export function getDeliveryTokenMap(conversationId: string): Record<string, string> | undefined {
   const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   const meta = conv?.decryptedMetadata as { v?: number; deliveryTokenMap?: Record<string, string> } | undefined;
-  return meta?.v === 2 ? meta.deliveryTokenMap : undefined;
+  return (meta?.v === 2 || meta?.v === 3) ? meta.deliveryTokenMap : undefined;
 }
 
 /**
@@ -127,7 +127,40 @@ export async function generatePseudonymMap(participantIds: string[]): Promise<Re
 export function getPseudonymMap(conversationId: string): Record<string, string> | undefined {
   const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   const meta = conv?.decryptedMetadata as { v?: number; pseudonymMap?: Record<string, string> } | undefined;
-  return meta?.v === 2 ? meta.pseudonymMap : undefined;
+  return (meta?.v === 2 || meta?.v === 3) ? meta.pseudonymMap : undefined;
+}
+
+// --- [T4 ROSTER v3] Role & membership helpers (baca dari metadata) ---
+
+/**
+ * Roster ber-role grup dari decryptedMetadata v3. Return undefined = bukan
+ * v3 (grup v1/v2 lawas → UI pakai fallback role lama dari participants).
+ */
+export function getGroupMembers(conversationId: string): GroupMemberEntry[] | undefined {
+  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  const meta = conv?.decryptedMetadata as { v?: number; members?: unknown } | undefined;
+  return meta?.v === 3 ? parseGroupMembers(meta.members) : undefined;
+}
+
+/** Role saya di grup ini dari roster metadata (undefined = bukan v3 / bukan anggota). */
+export function getMyGroupRole(conversationId: string): GroupRole | undefined {
+  const myId = useAuthStore.getState().user?.id;
+  if (!myId) return undefined;
+  return getGroupMembers(conversationId)?.find(m => m.userId === myId)?.role;
+}
+
+/**
+ * Boleh saya lakukan aksi admin di grup ini? OWNER/ADMIN boleh; fallback:
+ * grup v1/v2 tanpa roster → role lama dari participants store (kompat).
+ */
+export function amIGroupAdmin(conversationId: string): boolean {
+  const role = getMyGroupRole(conversationId);
+  if (role) return roleAtLeast(role, 'ADMIN');
+  // Fallback legacy (grup lawas tanpa roster v3).
+  const myId = useAuthStore.getState().user?.id;
+  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  const legacyRole = conv?.participants.find(p => p.id === myId)?.role as string | undefined;
+  return legacyRole === 'ADMIN' || legacyRole === 'OWNER';
 }
 
 /**

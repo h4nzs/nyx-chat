@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
 import { FiEdit2, FiLogOut, FiPlus, FiX, FiLock } from 'react-icons/fi';
 import { useGlobalEscape } from '../hooks/useGlobalEscape';
+import { amIGroupAdmin } from '@lib/groupPseudonyms';
 import MediaGallery from './MediaGallery';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
@@ -138,11 +139,32 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
 
   useGlobalEscape(handleClose);
 
+  // [T4 ROSTER SYNC] Metadata v3 = sumber kebenaran roster. Mirror ke
+  // participants store SEKALI per mount panel (dan saat metadata berubah) —
+  // bila roster metadata lebih baru dari mirror store, store di-update.
+  // Ini memperbaiki: creator tidak terdeteksi sebagai admin (mirror lama
+  // tidak pernah mengenal role OWNER) dan roster kosong/track saat v3.
+  const metaV3Members = conversation?.decryptedMetadata?.v === 3
+    ? conversation.decryptedMetadata.members
+    : undefined;
+  useEffect(() => {
+    if (!conversation || !metaV3Members || metaV3Members.length === 0) return;
+    const storeIds = new Set<string>(conversation.participants.map(p => p.id as string));
+    const metaIds = new Set(metaV3Members.map(m => m.userId));
+    const needsSync =
+      storeIds.size !== metaIds.size ||
+      metaV3Members.some(m => !storeIds.has(m.userId));
+    if (!needsSync) return;
+    useConversationStore.getState().syncParticipantsFromMetadata(conversationId, metaV3Members);
+  }, [conversationId, metaV3Members]);
+
   if (!conversation || !conversation.isGroup) {
     return null;
   }
 
-  const amIAdmin = conversation.participants.find(p => p.id === user?.id)?.role === 'ADMIN';
+  // [T4] Admin check dari roster metadata v3 (fallback legacy v1/v2 via
+  // participants). OWNER dan ADMIN sama-sama boleh mengelola grup.
+  const amIAdmin = amIGroupAdmin(conversation.id);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return;
