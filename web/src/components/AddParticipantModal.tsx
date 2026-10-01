@@ -26,13 +26,13 @@ const AddParticipantModal = ({ conversationId, onClose }: {
   })));
 
   const existingParticipantIds = conversation?.participants.map(p => p.id) || [];
+  const existingSet = useMemo(() => new Set<string>(existingParticipantIds.map(id => id as string)), [conversation]);
 
-  // [T4 UX] Pencarian ter-debounce + stale-guard via hook (dulu: debounce 500ms
-  // lebih pendek dari hashUsername ~1.1s → hasil bisa kosong karena resolve
-  // out-of-order menimpa state dengan hasil lama).
-  const { results: rawResults, isSearching } = useUserSearch(searchTerm, {
-    excludeIds: existingParticipantIds,
-  });
+  // [T4 UX] Pencarian ter-debounce + stale-guard via hook. Hasil TIDAK
+  // difilter: anggota grup yang dicari tetap muncul (ditandai "sudah
+  // anggota", nonaktif) — dulu disembunyikan sehingga user mengira
+  // pencariannya rusak padahal server balas 200 OK.
+  const { results: rawResults, isSearching } = useUserSearch(searchTerm);
   const searchResults = useMemo(() => {
     const rawQuery = searchTerm.trim();
     // Optimistic name/username: respons server tidak membawa nama plaintext.
@@ -153,29 +153,36 @@ const AddParticipantModal = ({ conversationId, onClose }: {
 
         <div className="max-h-60 overflow-y-auto mb-4 border border-border rounded-md">
           {searchResults.length > 0 ? (
-            searchResults.map(user => (
-              <div 
-                key={user.id} 
-                className={`flex items-center justify-between p-2 cursor-pointer ${selectedUserIds.includes(user.id) ? 'bg-accent/20' : 'hover:bg-secondary'}`}
-                onClick={() => handleSelectUser(user.id)}
-              >
-                <div className="flex items-center gap-3">
-                  {user.avatarUrl ? (
-                    <img
-                      src={toAbsoluteUrl(user.avatarUrl)}
-                      alt={user.name}
-                      className="w-8 h-8 rounded-full object-cover bg-secondary"
-                    />
-                  ) : (
-                    <DefaultAvatar name={user.name} id={user.id} className="w-8 h-8 bg-secondary" />
+            searchResults.map(user => {
+              const isExisting = existingSet.has(user.id);
+              const isSelected = selectedUserIds.includes(user.id);
+              return (
+                <div
+                  key={user.id}
+                  className={`flex items-center justify-between p-2 ${isExisting ? 'opacity-50 cursor-not-allowed' : isSelected ? 'bg-accent/20 cursor-pointer' : 'hover:bg-secondary cursor-pointer'}`}
+                  onClick={() => { if (!isExisting) handleSelectUser(user.id); }}
+                >
+                  <div className="flex items-center gap-3">
+                    {user.avatarUrl ? (
+                      <img
+                        src={toAbsoluteUrl(user.avatarUrl)}
+                        alt={user.name}
+                        className="w-8 h-8 rounded-full object-cover bg-secondary"
+                      />
+                    ) : (
+                      <DefaultAvatar name={user.name} id={user.id} className="w-8 h-8 bg-secondary" />
+                    )}
+                    <div>
+                      <p className="text-text-primary">{user.name} (@{user.username})</p>
+                      {isExisting && <p className="text-xs text-text-secondary">{t('modals:add_participant.already_member')}</p>}
+                    </div>
+                  </div>
+                  {isSelected && (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   )}
-                  <p className="text-text-primary">{user.name} (@{user.username})</p>
                 </div>
-                {selectedUserIds.includes(user.id) && (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                )}
-              </div>
-            ))
+              );
+            })
           ) : ( searchTerm.trim().length >= 3 && !isSearching &&
             <p className="p-2 text-text-secondary">{t('modals:add_participant.no_users')}</p>
           )}

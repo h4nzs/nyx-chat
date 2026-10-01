@@ -27,21 +27,23 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
 
   // [T4 UX] Pencarian ter-debounce + stale-guard via hook (dulu: debounce 300ms
   // lebih pendek dari hashUsername ~1.1s → hasil bisa kosong/out-of-order).
-  const selectedIds = selectedUsers.map(u => u.id);
-  const { results: rawResults, isSearching } = useUserSearch(searchQuery, {
-    excludeIds: [...(me?.id ? [me.id] : []), ...selectedIds] as UserId[],
-  });
+  // Filter sendiri/dirinya + yang sudah dipilih dilakukan di memo (bukan di
+  // hook — hasil mentah tetap tersedia untuk render future).
+  const { results: rawResults, isSearching } = useUserSearch(searchQuery);
   const userList = useMemo(() => {
     const rawQuery = searchQuery.trim();
+    const selectedIdSet = new Set(selectedUsers.map(u => u.id));
     const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
-    return rawResults.map(u => {
-      const known = knownUsers.find(k => k.id === u.id);
-      if (known?.name && known.name !== 'Unknown') {
-        return { ...u, name: known.name, username: known.username || rawQuery };
-      }
-      return { ...u, username: rawQuery, name: rawQuery };
-    });
-  }, [rawResults, searchQuery]);
+    return rawResults
+      .filter(u => u.id !== me?.id && !selectedIdSet.has(u.id))
+      .map(u => {
+        const known = knownUsers.find(k => k.id === u.id);
+        if (known?.name && known.name !== 'Unknown') {
+          return { ...u, name: known.name, username: known.username || rawQuery };
+        }
+        return { ...u, username: rawQuery, name: rawQuery };
+      });
+  }, [rawResults, searchQuery, selectedUsers, me?.id]);
 
   const handleSelectUser = (user: MinimalProfile) => {
     const maxMembers = me?.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;

@@ -5,6 +5,7 @@
     "searching": "Buscando...",
     "min_query": "Sigue escribiendo (mín. 3 caracteres): la búsqueda se ejecuta al dejar de escribir.",
     "no_users": "No se encontraron usuarios.",
+    "already_member": "Ya es miembro",
     "add_selected": "Añadir seleccionados",
     "adding": "Añadiendo...",
     "cancel": "Cancelar",

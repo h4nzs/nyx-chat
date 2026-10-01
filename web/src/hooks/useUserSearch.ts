@@ -20,8 +20,7 @@
  * kadang kosong (resolve out-of-order menimpa state dengan array lama).
  */
 import { useEffect, useRef, useState } from 'react';
-import { asUserId } from '@nyx/shared';
-import type { UserId, MinimalProfile } from '@nyx/shared';
+import type { MinimalProfile } from '@nyx/shared';
 import { api } from '@lib/api';
 
 /** Jeda setelah user berhenti mengetik sebelum search dieksekusi. */
@@ -30,14 +29,12 @@ export const SEARCH_DEBOUNCE_MS = 600;
 export const MIN_QUERY_LENGTH = 3;
 
 interface UseUserSearchOptions {
-  /** UserId yang dikecualikan dari hasil (mis. anggota grup yang sudah ada). */
-  excludeIds?: UserId[];
-  /** Eksekusi pencarian (default: GET /api/users/search via blind index). */
+  /** Eksekusi pencarian kustom (default: GET /api/users/search via blind index). */
   searchFn?: (query: string) => Promise<MinimalProfile[]>;
 }
 
 export function useUserSearch(rawSearchTerm: string, options: UseUserSearchOptions = {}) {
-  const { excludeIds = [], searchFn } = options;
+  const { searchFn } = options;
   const [results, setResults] = useState<MinimalProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -104,8 +101,10 @@ export function useUserSearch(rawSearchTerm: string, options: UseUserSearchOptio
           if (oldest !== undefined) cacheRef.current.delete(oldest);
         }
 
-        const exclude = new Set(excludeIds.map(id => id as string));
-        setResults(users.filter(u => !exclude.has(u.id)));
+        // [T4 UX] TIDAK memfilter di sini — pemanggil yang memutuskan
+        // (mis. anggota grup ditampilkan nonaktif, bukan disembunyikan;
+        // menyembunyikan membuat user mengira pencariannya rusak).
+        setResults(users);
       } catch (err) {
         if (seqRef.current !== mySeq) return;
         console.error('[useUserSearch] Search failed:', err);
