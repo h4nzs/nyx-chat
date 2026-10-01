@@ -87,6 +87,8 @@
     "leave_solo_title": "Leave and delete group?",
     "leave_solo_desc": "You are the only member of this group. If you leave, the group will be permanently deleted for everyone and cannot be restored.",
     "leave_solo_confirm": "Leave & Delete",
+    "leave_solo_member_title": "Leave group?",
+    "leave_solo_member_desc": "You are the only member of this group. The group will be left as-is — only the group owner or an admin can delete it.",
     "leave_owner_title": "Leave group?",
     "leave_owner_desc": "You are the owner of this group. Ownership will be automatically transferred to {{name}} when you leave.",
     "toasts": {

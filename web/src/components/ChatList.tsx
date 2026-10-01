@@ -28,6 +28,7 @@ import { Spinner } from './Spinner';
 import SwipeableItem from './SwipeableItem';
 import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
+import { amIGroupAdmin } from '@lib/groupPseudonyms';
 import StoryTray from './StoryTray';
 import type { UserId } from '@nyx/shared';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
@@ -246,6 +247,10 @@ const ConversationItem = memo(function ConversationItem({
 
   const previewText = renderPreviewText();
 
+  // [26.9 RBAC] Hapus grup = operasi admin — menu disembunyikan untuk MEMBER.
+  // Chat 1-on-1 tetap bebas dihapus (deleteConversation = hide lokal).
+  const canDeleteGroup = !conversation.isGroup || amIGroupAdmin(conversation.id);
+
   const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     openMenu(e, [
@@ -258,7 +263,7 @@ const ConversationItem = memo(function ConversationItem({
            else blockUser(other.id);
          }
       } }] : []),
-      { label: conversation.isGroup ? t('chat:actions.delete_group', 'Delete Group') : t('chat:actions.delete_chat', 'Delete Chat'), icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
+      ...(canDeleteGroup ? [{ label: conversation.isGroup ? t('chat:actions.delete_group', 'Delete Group') : t('chat:actions.delete_chat', 'Delete Chat'), icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') }] : []),
     ]);
   };
 
@@ -277,7 +282,7 @@ const ConversationItem = memo(function ConversationItem({
     >
       <SwipeableItem
         leftAction={{ icon: <FiMaximize2 size={24} />, color: isPinnedByMe ? 'bg-blue-500' : 'bg-green-500', onAction: () => onTogglePin(conversation.id) }}
-        rightAction={{ icon: <FiTrash2 size={24} />, color: 'bg-red-500', onAction: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') }}
+        rightAction={canDeleteGroup ? { icon: <FiTrash2 size={24} />, color: 'bg-red-500', onAction: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') } : undefined}
       >
         <div 
           onContextMenu={handleContextMenu}

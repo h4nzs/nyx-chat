@@ -307,16 +307,26 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
   const handleLeaveGroup = () => {
     const others = conversation.participants?.filter(p => p.id !== user?.id) || [];
 
-    // [26.9 SOLO-LEAVE] Satu-satunya anggota → tidak ada yang bisa melanjutkan
-    // grup. Konfirmasi eksplisit: keluar = grup DIHAPUS PERMANEN.
+    // [26.9 RBAC + SOLO-LEAVE] Satu-satunya anggota → tidak ada yang bisa
+    // melanjutkan grup. Konfirmasi eksplisit: keluar = grup DIHAPUS PERMANEN.
+    // Hanya OWNER/ADMIN yang boleh menghapus grup — MEMBER solo hanya di-
+    // beri tahu grup ditinggalkan tanpa dihapus (server menolak purge).
     if (others.length === 0) {
-      showConfirm(
-        t('modals:group_info.leave_solo_title'),
-        t('modals:group_info.leave_solo_desc'),
-        () => { void performLeave(true); },
-        undefined,
-        t('modals:group_info.leave_solo_confirm')
-      );
+      if (amIGroupAdmin(conversation.id)) {
+        showConfirm(
+          t('modals:group_info.leave_solo_title'),
+          t('modals:group_info.leave_solo_desc'),
+          () => { void performLeave(true); },
+          undefined,
+          t('modals:group_info.leave_solo_confirm')
+        );
+      } else {
+        showConfirm(
+          t('modals:group_info.leave_solo_member_title'),
+          t('modals:group_info.leave_solo_member_desc'),
+          () => { void performLeave(false); }
+        );
+      }
       return;
     }
 
@@ -427,13 +437,16 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
 
                   {/* Actions Card */}
                   <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex flex flex-col">
-                    <button
-                      onClick={handleForceRotateKeys}
-                      className="w-full flex items-center justify-center p-4 font-semibold text-orange-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-t-xl border-b border-border"
-                    >
-                      <FiLock className="mr-3" />
-                      <span>{t('modals:group_info.toasts.rotate_button')}</span>
-                    </button>
+                    {/* [26.9 RBAC] Rotasi kunci = operasi admin — hanya OWNER/ADMIN. */}
+                    {amIAdmin && (
+                      <button
+                        onClick={handleForceRotateKeys}
+                        className="w-full flex items-center justify-center p-4 font-semibold text-orange-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-t-xl border-b border-border"
+                      >
+                        <FiLock className="mr-3" />
+                        <span>{t('modals:group_info.toasts.rotate_button')}</span>
+                      </button>
+                    )}
                     <button
                       onClick={handleLeaveGroup}
                       className="w-full flex items-center justify-center p-4 font-semibold text-red-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-b-xl"

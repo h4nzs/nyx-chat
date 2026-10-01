@@ -87,6 +87,8 @@
     "leave_solo_title": "¿Salir y eliminar el grupo?",
     "leave_solo_desc": "Eres el único miembro de este grupo. Si sales, el grupo se eliminará permanentemente para todos y no se podrá restaurar.",
     "leave_solo_confirm": "Salir y eliminar",
+    "leave_solo_member_title": "¿Salir del grupo?",
+    "leave_solo_member_desc": "Eres el único miembro de este grupo. El grupo se dejará tal cual — solo el propietario o un administrador puede eliminarlo.",
     "leave_owner_title": "¿Salir del grupo?",
     "leave_owner_desc": "Eres el propietario de este grupo. La propiedad se transferirá automáticamente a {{name}} cuando salgas.",
     "toasts": {
