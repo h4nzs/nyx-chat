@@ -12,6 +12,7 @@ import {
   verifyPresentation, SERIAL_HEX_LENGTH, CREDENTIAL_SUITE,
 } from '../lib/groupCredentials.js'
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
+import { isAdminTokenValid, extractHeader } from '../utils/adminCapability.js'
 import type { Conversation } from '@nyx/shared'
 
 const ConversationSchema = z.object({
@@ -29,28 +30,7 @@ const DeliveryTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/)
 const router: Router = Router()
 router.use(requireAuth)
 
-// [26.9 RBAC] Admin capability guard ======================================
-// Server tidak tahu roster/role (Opaque Mailbox) — role diverifikasi via
-// POSSESSION of admin capability token: creator menaruh SHA-256(token) di
-// kolom Conversation.adminSecretHash, token asli hanya dimiliki OWNER/ADMIN
-// (pairwise-sealed ke device mereka; server hanya relay amplop opaque).
-// Header `X-Admin-Token` dibandingkan timing-safe terhadap hash. Kolom NULL
-// (grup legacy pra-26.9) = BYPASS kompatibilitas — tidak bisa di-rotate
-// retroaktif tanpa creator online; grup baru selalu terisi.
-function extractHeader(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return (value[0] as string) ?? '';
-  return '';
-}
-
-function isAdminTokenValid(adminSecretHash: string | null | undefined, presentedToken: string): boolean {
-  if (!adminSecretHash) return true; // legacy group: compat bypass
-  if (!presentedToken) return false;
-  const presentedHash = createHash('sha256').update(presentedToken, 'utf8').digest('hex');
-  return safeEqualStrings(adminSecretHash, presentedHash);
-}
-
-async function requireAdminCapability(conversationId: string, req: { headers: Record<string, unknown> }): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+async function requireAdminCapabilityForRequest(conversationId: string, req: { headers: Record<string, unknown> }): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { adminSecretHash: true },
@@ -425,7 +405,7 @@ router.put('/:id/details', async (req, res, next) => {
         return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
     }
     // [26.9 RBAC] Menulis ulang metadata = mutasi roster/role — ADMIN ONLY.
-    const adminCheck = await requireAdminCapability(id, req);
+    const adminCheck = await requireAdminCapabilityForRequest(id, req);
     if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
 
     const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata } })
@@ -561,7 +541,7 @@ router.delete('/:id/group', async (req, res, next) => {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' })
     }
     // [26.9 RBAC] Purge grup permanen = operasi admin.
-    const adminCheck = await requireAdminCapability(id, req);
+    const adminCheck = await requireAdminCapabilityForRequest(id, req);
     if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
 
     const remainingMembers = await prisma.userHiddenConversation.count({ where: { conversationId: id } })
@@ -605,7 +585,7 @@ router.post('/:id/key-rotation', async (req, res, next) => {
     // [26.9 RBAC] Rotasi kunci = operasi admin (non-admin tetap bisa lazy-rotate
     // lokal via ensureGroupSession saat kirim pesan — endpoint ini hanya untuk
     // rotasi AKTIF oleh pengelola grup).
-    const adminCheck = await requireAdminCapability(id, req);
+    const adminCheck = await requireAdminCapabilityForRequest(id, req);
     if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
 
     const updatedConversation = await prisma.conversation.update({
