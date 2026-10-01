@@ -10,7 +10,7 @@ import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import { asConversationId, asMessageId } from '@nyx/shared';
 import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation, GroupMemberEntry } from '@nyx/shared';
-import { asUserId } from '@nyx/shared';
+import { asUserId, parseGroupMembers } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 import { captureAndLog } from '@utils/feedback';
@@ -847,11 +847,15 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   // diperbolehkan; profil di-resolve via useUserProfile). Hanya menambah/
   // meng-update role; TIDAK menghapus pesan/metadata lain.
   syncParticipantsFromMetadata: (conversationId, members) => {
+    // [T4] Validasi roster di boundary store (parseGroupMembers buang entri
+    // korup + fail-safe role MEMBER) — mirror tidak pernah lebih longgar
+    // dari parser metadata.
+    const roster = parseGroupMembers(members);
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id !== conversationId) return c;
         const existingById = new Map<string, Participant>(c.participants.map(p => [p.id as string, p]));
-        const participants = members.map(m => {
+        const participants = roster.map(m => {
           const existing = existingById.get(m.userId);
           return {
             id: existing?.id ?? (asUserId(m.userId)),
