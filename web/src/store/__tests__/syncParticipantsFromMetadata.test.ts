@@ -177,3 +177,69 @@ describe('syncParticipantsFromMetadata (T4 roster v3 mirror)', () => {
     expect(participants[0]).toMatchObject({ id: asUserId('u1'), role: 'MEMBER' })
   })
 })
+
+describe('removeParticipant + addParticipants sinkron metadata.members (T4 race fix)', () => {
+  beforeEach(() => {
+    useConversationStore.setState({
+      conversations: [
+        {
+          id: convId,
+          isGroup: true,
+          requiresKeyRotation: false,
+          participants: [
+            { id: asUserId('me'), role: 'OWNER' },
+            { id: asUserId('peer-1'), role: 'MEMBER' },
+          ],
+          decryptedMetadata: {
+            v: 3,
+            generation: 2,
+            participants: ['me', 'peer-1'],
+            pseudonymMap: { P1: 'me', P2: 'peer-1' },
+            members: [
+              { userId: 'me', role: 'OWNER', joinedAtGeneration: 1 },
+              { userId: 'peer-1', role: 'MEMBER', joinedAtGeneration: 1 },
+            ],
+          },
+        },
+      ],
+      activeId: null,
+    } as never)
+  })
+
+  it('kick: removeParticipant menghapus JUGA dari metadata.members/participants', () => {
+    useConversationStore.getState().removeParticipant(convId, 'peer-1')
+
+    const conv = findConv()
+    // Mirror & metadata sama-sama bersih dari kicked member.
+    expect(conv.participants.map(p => p.id)).toEqual([asUserId('me')])
+    const meta = conv.decryptedMetadata as { members: GroupMemberEntry[]; participants: string[] }
+    expect(meta.members.map(m => m.userId)).toEqual(['me'])
+    expect(meta.participants).toEqual(['me'])
+    // Regresi lama: roster-sync tidak boleh mem-mirror kicked member kembali.
+    expect(conv.requiresKeyRotation).toBe(true)
+  })
+
+  it('add: addParticipants memasukkan anggota baru ke metadata.members (MEMBER)', () => {
+    useConversationStore.getState().addParticipants(convId, [
+      { id: asUserId('newbie'), name: '', role: 'MEMBER' },
+    ])
+
+    const conv = findConv()
+    expect(conv.participants.map(p => p.id)).toContain(asUserId('newbie'))
+    const meta = conv.decryptedMetadata as { members: GroupMemberEntry[]; participants: string[] }
+    expect(meta.members.map(m => m.userId)).toContain('newbie')
+    const newbie = meta.members.find(m => m.userId === 'newbie')!
+    expect(newbie.role).toBe('MEMBER')
+    expect(newbie.joinedAtGeneration).toBe(2) // generation berjalan
+    expect(meta.participants).toContain('newbie')
+  })
+
+  it('kick → sync mirror: kicked member TIDAK hidup kembali (regresi utama)', () => {
+    useConversationStore.getState().removeParticipant(convId, 'peer-1')
+    // Simulasi GroupInfoPanel roster-sync yang memicu ulang dengan metadata
+    // TERBARU (tanpa peer-1) — mirror harus tetap konsisten.
+    const meta = findConv().decryptedMetadata as { members: GroupMemberEntry[] }
+    useConversationStore.getState().syncParticipantsFromMetadata(convId, meta.members)
+    expect(findConv().participants.map(p => p.id)).toEqual([asUserId('me')])
+  })
+})

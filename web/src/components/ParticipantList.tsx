@@ -84,6 +84,12 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, my
             headers: { 'X-Group-Token': groupToken },
             body: JSON.stringify({ targetRecipients: removeRecipients }),
           });
+          // [T4 RACE FIX] Hapus dari store SEKARANG (jangan tunggu event socket
+          //): rotateGroupKey di bawah membaca participants store — kalau
+          // kicked member masih ada di store saat rotasi, metadata v3 baru
+          // terenkripsi DENGAN dia masih di roster (bug: kicked user tetap
+          // "Already a member" di modal add setelah kick).
+          useConversationStore.getState().removeParticipant(conversationId, participant.id);
           // [T1 FIX 2026-09-28] Rotasi AKTIF oleh admin: hapus kicked member
           // dari metadata (peta baru, generation+1) + distribusikan kunci era
           // baru SEKARANG — kicked member tak bisa mengikuti era kunci baru.

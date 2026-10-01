@@ -805,14 +805,35 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
           const merged = [...c.participants, ...newParticipants];
-          
+
           // FIX: Type-safe unique map based on strict Participant ID
           const uniqueMap = new Map<string, Participant>();
           merged.forEach(p => {
              if (p && p.id) uniqueMap.set(p.id, p);
           });
 
-          return { ...c, participants: Array.from(uniqueMap.values()), requiresKeyRotation: true };
+          // [T4 ROSTER v3] Metadata = sumber kebenaran roster: anggota baru
+          // masuk members (MEMBER, generation berjalan) SEKARANG — tanpa ini
+          // rotateGroupKey yang dipanggil segera setelah POST akan
+          // mengenkripsi roster TANPA anggota baru (race mirip kick).
+          let decryptedMetadata = c.decryptedMetadata;
+          const meta = decryptedMetadata as { v?: number; generation?: number; participants?: string[]; members?: GroupMemberEntry[] } | undefined;
+          if (meta?.v === 3) {
+            const known = new Set((meta.members ?? []).map(m => m.userId));
+            const additions = newParticipants.filter(p => !known.has(p.id as string));
+            if (additions.length > 0) {
+              decryptedMetadata = {
+                ...meta,
+                participants: Array.from(new Set([...(meta.participants ?? []), ...additions.map(p => p.id as string)])),
+                members: [
+                  ...(meta.members ?? []),
+                  ...additions.map(p => ({ userId: p.id as string, role: 'MEMBER' as const, joinedAtGeneration: meta.generation ?? 1 })),
+                ],
+              } as typeof decryptedMetadata;
+            }
+          }
+
+          return { ...c, participants: Array.from(uniqueMap.values()), decryptedMetadata, requiresKeyRotation: true };
         }
         return c;
       }),
@@ -824,7 +845,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          return { ...c, participants: c.participants.filter(p => p.id !== userId), requiresKeyRotation: true };
+          // [T4 ROSTER v3] Hapus JUGA dari metadata.members/participants —
+          // kalau tidak, roster-sync (metadata = sumber kebenaran) akan
+          // mem-mirror kicked member KEMBALI ke participants (bug: kicked
+          // user tetap "Already a member" di modal add).
+          let decryptedMetadata = c.decryptedMetadata;
+          const meta = decryptedMetadata as { v?: number; participants?: string[]; members?: GroupMemberEntry[] } | undefined;
+          if (meta?.v === 3) {
+            decryptedMetadata = {
+              ...meta,
+              participants: meta.participants?.filter(pid => pid !== userId),
+              members: meta.members?.filter(m => m.userId !== userId),
+            } as typeof decryptedMetadata;
+          }
+          return {
+            ...c,
+            participants: c.participants.filter(p => p.id !== userId),
+            decryptedMetadata,
+            requiresKeyRotation: true,
+          };
         }
         return c;
       }),

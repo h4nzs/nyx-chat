@@ -91,6 +91,15 @@ const AddParticipantModal = ({ conversationId, onClose }: {
         headers: { 'X-Group-Token': groupToken },
         body: JSON.stringify({ userIds: selectedUserIds, targetRecipients: addRecipients, deliveryTokens }),
       });
+      // [T4 RACE FIX] Tambah ke store SEKARANG (jangan tunggu event socket):
+      // rotateGroupKey di bawah membaca participants store — kalau member baru
+      // belum ada di store saat rotasi, metadata v3 baru terenkripsi TANPA dia
+      // (bug: member baru tak pernah masuk roster; kick ulang jadi ambigu).
+      const { useConversationStore } = await import('@store/conversation');
+      useConversationStore.getState().addParticipants(
+        conversationId,
+        selectedUserIds.map(uid => ({ id: uid as never, name: '', role: 'MEMBER' as const }))
+      );
       // [T1 FIX 2026-09-28] Rotasi AKTIF: metadata baru (member baru masuk peta,
       // generation+1) + distribusi kunci era baru SEKARANG — member baru tidak
       // perlu menunggu pesan berikutnya untuk menerima sender key.
