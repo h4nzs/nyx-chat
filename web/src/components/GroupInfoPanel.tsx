@@ -220,8 +220,13 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
   const handleLeaveGroup = async () => {
     const toastId = toast.loading(t('modals:group_info.toasts.leaving'));
     try {
+      // [26.8.1] Blind auth: leave = mutasi grup, wajib bukti tau authSecret
+      // (X-Group-Token dari metadata ter-dekripsi) — bukti keanggotaan tanpa
+      // membocorkan roster ke server.
+      const groupToken = (conversation.decryptedMetadata as { authSecret?: string } | undefined)?.authSecret;
+      if (!groupToken) throw new Error('Group token unavailable (metadata not decrypted)');
       const leaveRecipients = conversation.participants?.filter(p => p.id !== user?.id)?.map(p => p.id) || [];
-      await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE', body: JSON.stringify({ targetRecipients: leaveRecipients }) });
+      await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE', headers: { 'X-Group-Token': groupToken }, body: JSON.stringify({ targetRecipients: leaveRecipients }) });
       toast.success(t('modals:group_info.toasts.left_success'), { id: toastId });
       handleClose(); 
     } catch (error: unknown) {

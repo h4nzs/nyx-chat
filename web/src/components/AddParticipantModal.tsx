@@ -105,8 +105,12 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       const { generateDeliveryToken } = await import('@lib/groupPseudonyms');
       const deliveryTokens: Record<string, string> = {};
       for (const uid of selectedUserIds) deliveryTokens[uid] = await generateDeliveryToken();
+      // [26.8.1] Blind auth: add = mutasi grup, wajib X-Group-Token.
+      const groupToken = (conversation?.decryptedMetadata as { authSecret?: string } | undefined)?.authSecret;
+      if (!groupToken) throw new Error('Group token unavailable (metadata not decrypted)');
       await api(`/api/conversations/${conversationId}/participants`, {
         method: 'POST',
+        headers: { 'X-Group-Token': groupToken },
         body: JSON.stringify({ userIds: selectedUserIds, targetRecipients: addRecipients, deliveryTokens }),
       });
       // [T1 FIX 2026-09-28] Rotasi AKTIF: metadata baru (member baru masuk peta,

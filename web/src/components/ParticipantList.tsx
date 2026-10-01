@@ -49,9 +49,13 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
         try {
           const { useConversationStore } = await import('@store/conversation');
           const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+          // [26.8.1] Blind auth: kick = mutasi grup, wajib X-Group-Token.
+          const groupToken = (conv?.decryptedMetadata as { authSecret?: string } | undefined)?.authSecret;
+          if (!groupToken) throw new Error('Group token unavailable (metadata not decrypted)');
           const removeRecipients = conv?.participants?.filter(p => p.id !== participant.id)?.map(p => p.id) || [];
           await api(`/api/conversations/${conversationId}/participants/${participant.id}`, {
             method: 'DELETE',
+            headers: { 'X-Group-Token': groupToken },
             body: JSON.stringify({ targetRecipients: removeRecipients }),
           });
           // [T1 FIX 2026-09-28] Rotasi AKTIF oleh admin: hapus kicked member
