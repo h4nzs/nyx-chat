@@ -36,7 +36,8 @@
     "settings": "Pengaturan",
     "logout": "Keluar",
     "more_reactions": "Reaksi Lainnya",
-    "close_modal": "Tutup modal"
+    "close_modal": "Tutup modal",
+    "saved": "Tersimpan"
   },
   "action": {
     "abort": "BATALKAN",
@@ -65,7 +66,8 @@
   "errors": {
     "unknown": "Terjadi kesalahan yang tidak diketahui",
     "network": "Kesalahan jaringan, silakan coba lagi",
-    "required": "Kolom ini wajib diisi"
+    "required": "Kolom ini wajib diisi",
+    "error_prefix": "Kesalahan:"
   },
   "defaults": {
     "encrypted_user": "Pengguna Terenkripsi",
@@ -77,7 +79,10 @@
     "you": "ANDA",
     "anonymous": "Anonim",
     "unknown_group": "Grup Tidak Dikenal",
-    "unknown_user": "Pengguna Tidak Dikenal"
+    "group_unknown": "Grup Tidak Dikenal",
+    "unknown_user": "Pengguna Tidak Dikenal",
+    "conversation": "Percakapan",
+    "preview": "Pratinjau"
   },
   "status": {
     "connection_lost": "KONEKSI_TERPUTUS // SISTEM_OFFLINE",
@@ -205,5 +210,11 @@
   "story_processing_media": "Memproses media...",
   "story_encrypting": "Mengenkripsi...",
   "story_distributing_keys": "Mendistribusikan kunci dengan aman...",
-  "user_unblocked_plain": "User dibuka blokirnya"
+  "user_unblocked_plain": "User dibuka blokirnya",
+  "posting_error": "Gagal memposting story: {{message}}",
+  "posting_success": "Story diposting!",
+  "device_revoked_successfully": "Perangkat berhasil dicabut",
+  "history_sync_payload_broadcasted_success": "Sinkronisasi riwayat berhasil disiarkan.",
+  "preparing_history_sync_for_your_linked_d": "Menyiapkan sinkronisasi riwayat untuk perangkat terhubungmu...",
+  "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat lainmu..."
 }

@@ -36,7 +36,8 @@
     "settings": "Settings",
     "logout": "Logout",
     "more_reactions": "More Reactions",
-    "close_modal": "Close modal"
+    "close_modal": "Close modal",
+    "saved": "Saved"
   },
   "action": {
     "abort": "ABORT",
@@ -65,7 +66,8 @@
   "errors": {
     "unknown": "Unknown error occurred",
     "network": "Network error, please try again",
-    "required": "This field is required"
+    "required": "This field is required",
+    "error_prefix": "Error:"
   },
   "defaults": {
     "encrypted_user": "Encrypted User",
@@ -77,7 +79,10 @@
     "unknown": "Unknown",
     "anonymous": "Anonymous",
     "unknown_group": "Unknown Group",
-    "unknown_user": "Unknown User"
+    "group_unknown": "Unknown Group",
+    "unknown_user": "Unknown User",
+    "conversation": "Conversation",
+    "preview": "Preview"
   },
   "status": {
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
@@ -205,5 +210,11 @@
   "story_processing_media": "Processing media...",
   "story_encrypting": "Encrypting...",
   "story_distributing_keys": "Distributing keys securely...",
-  "user_unblocked_plain": "User unblocked"
+  "user_unblocked_plain": "User unblocked",
+  "posting_error": "Failed to post story: {{message}}",
+  "posting_success": "Story posted!",
+  "device_revoked_successfully": "Device revoked successfully",
+  "history_sync_payload_broadcasted_success": "History sync broadcast successfully.",
+  "preparing_history_sync_for_your_linked_d": "Preparing history sync for your linked devices...",
+  "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device..."
 }

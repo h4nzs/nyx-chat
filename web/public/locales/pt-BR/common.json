@@ -36,7 +36,8 @@
     "settings": "Configurações",
     "logout": "Sair",
     "more_reactions": "Mais reações",
-    "close_modal": "Fechar modal"
+    "close_modal": "Fechar modal",
+    "saved": "Salvo"
   },
   "maintenance": {
     "title": "Sistema em Manutenção",
@@ -70,7 +71,8 @@
   "errors": {
     "unknown": "Ocorreu um erro desconhecido",
     "network": "Erro de rede, tente novamente",
-    "required": "Este campo é obrigatório"
+    "required": "Este campo é obrigatório",
+    "error_prefix": "Erro:"
   },
   "defaults": {
     "encrypted_user": "Usuário Criptografado",
@@ -82,7 +84,10 @@
     "you": "VOCÊ",
     "anonymous": "Anônimo",
     "unknown_group": "Grupo Desconhecido",
-    "unknown_user": "Usuário Desconhecido"
+    "group_unknown": "Grupo Desconhecido",
+    "unknown_user": "Usuário Desconhecido",
+    "conversation": "Conversa",
+    "preview": "Pré-visualização"
   },
   "status": {
     "connection_lost": "CONEXÃO_PERDIDA // SISTEMA_OFFLINE",
@@ -142,7 +147,10 @@
     "send_title": "Transferência de Cofre",
     "send_desc": "Envie os dados para o seu novo dispositivo",
     "preparing": "PREPARANDO COFRE...",
-    "status_tunneling": "ENVIANDO..."
+    "status_tunneling": "ENVIANDO...",
+    "identity_regen_notice": "Após a transferência, este dispositivo gerará uma nova identidade única para garantir a segurança máxima.",
+    "important_note": "Importante",
+    "syncing_hardware": "Sincronizando hardware..."
   },
   "not_found": {
     "title": "Página Não Encontrada",
@@ -185,7 +193,7 @@
     "yesterday": "Ontem"
   },
   "device_revoked_successfully": "Dispositivo revogado com sucesso",
-  "history_sync_payload_broadcasted_success": "Sincronização do histórico transmitida com sucesso.",
+  "history_sync_payload_broadcasted_success": "Sincronização de histórico transmitida com sucesso.",
   "notifications_enabled": "Notificações ativadas!",
   "notifications_disabled": "Notificações desativadas",
   "profile_updated": "Perfil atualizado!",
@@ -206,5 +214,7 @@
   "story_processing_media": "Processando mídia...",
   "story_encrypting": "Criptografando...",
   "story_distributing_keys": "Distribuindo chaves com segurança...",
-  "user_unblocked_plain": "Usuário desbloqueado"
+  "user_unblocked_plain": "Usuário desbloqueado",
+  "posting_error": "Falha ao publicar story: {{message}}",
+  "posting_success": "Story publicado!"
 }

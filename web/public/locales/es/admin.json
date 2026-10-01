@@ -23,5 +23,21 @@
   "refresh_data": "Actualizar datos",
   "tenant_name_placeholder": "P. ej. Acme Corp",
   "domains_placeholder": "app.acme.com, acme.local",
-  "copy_api_key": "Copiar clave API"
+  "copy_api_key": "Copiar clave API",
+  "active": "ACTIVE",
+  "add_tenant": "ADD TENANT",
+  "allowed_domains": "Allowed Domains (Comma separated)",
+  "api_key_copied": "API Key copied to clipboard",
+  "b2b_tenants": "B2B ENGINE / TENANTS",
+  "failed_to_create_tenant": "Failed to create tenant",
+  "failed_to_load_tenants": "Failed to load tenants",
+  "failed_to_toggle_tenant": "Failed to update tenant status",
+  "generate_key": "GENERATE KEY",
+  "inactive": "INACTIVE",
+  "no_tenants_found": "No tenants found",
+  "system_dashboard": "SYSTEM DASHBOARD",
+  "tenant_created": "Tenant created successfully",
+  "tenant_name": "Tenant Name",
+  "tenant_name_required": "Tenant name is required",
+  "tenant_status_updated": "Tenant status updated"
 }

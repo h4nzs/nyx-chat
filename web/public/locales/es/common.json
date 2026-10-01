@@ -36,7 +36,8 @@
     "settings": "Ajustes",
     "logout": "Cerrar sesión",
     "more_reactions": "Más reacciones",
-    "close_modal": "Cerrar modal"
+    "close_modal": "Cerrar modal",
+    "saved": "Guardado"
   },
   "maintenance": {
     "title": "Sistema en Mantenimiento",
@@ -70,7 +71,8 @@
   "errors": {
     "unknown": "Ocurrió un error desconocido",
     "network": "Error de red, inténtalo de nuevo",
-    "required": "Este campo es obligatorio"
+    "required": "Este campo es obligatorio",
+    "error_prefix": "Error:"
   },
   "defaults": {
     "encrypted_user": "Usuario Encriptado",
@@ -82,7 +84,10 @@
     "you": "TÚ",
     "anonymous": "Anónimo",
     "unknown_group": "Grupo Desconocido",
-    "unknown_user": "Usuario Desconocido"
+    "group_unknown": "Grupo Desconocido",
+    "unknown_user": "Usuario Desconocido",
+    "conversation": "Conversación",
+    "preview": "Vista previa"
   },
   "status": {
     "connection_lost": "CONEXIÓN_PERDIDA // SISTEMA_OFFLINE",
@@ -142,7 +147,10 @@
     "send_title": "Transferencia de bóveda",
     "send_desc": "Envía los datos a tu nuevo dispositivo",
     "preparing": "PREPARANDO BÓVEDA...",
-    "status_tunneling": "ENVIANDO..."
+    "status_tunneling": "ENVIANDO...",
+    "identity_regen_notice": "Una vez completada la transferencia, este dispositivo generará una identidad nueva única para garantizar la máxima seguridad.",
+    "important_note": "Importante",
+    "syncing_hardware": "Sincronizando hardware..."
   },
   "not_found": {
     "title": "Página no encontrada",
@@ -206,5 +214,7 @@
   "story_processing_media": "Procesando multimedia...",
   "story_encrypting": "Cifrando...",
   "story_distributing_keys": "Distribuyendo claves de forma segura...",
-  "user_unblocked_plain": "Usuario desbloqueado"
+  "user_unblocked_plain": "Usuario desbloqueado",
+  "posting_error": "No se pudo publicar la historia: {{message}}",
+  "posting_success": "¡Historia publicada!"
 }

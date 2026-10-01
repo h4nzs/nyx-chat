@@ -1092,11 +1092,22 @@ export async function rotateGroupKey(
 
   // Distribusi kunci eksplisit (isActive) — pastikan member lain menerima
   // kunci era baru SEKARANG, bukan saat mereka kirim pesan berikutnya.
+  // [BUGFIX 2026-10-01] JANGAN buat era LAGI di sini (ensureGroupSession(true)
+  // lama membuat era-2 SETELAH encryptGroupMetadata membuat era-1): metadata
+  // blob dienkripsi era-1 tapi yang terdistribusi era-2 → penerima selamanya
+  // "waiting_for_key" saat add/kick member (keyId metadata ≠ receiver state).
+  // Kunci era-1 SUDAH didistribusikan di dalam encryptGroupMetadata; di sini
+  // cukup RE-DISTRIBUSI kunci era yang sama (initialCK, N=0) ke semua device.
   if (isActive) {
     try {
-      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
-      if (distributionKeys && distributionKeys.length > 0) {
-        await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+      let sent = await redistributeCurrentGroupKey(conversationId);
+      if (sent === 0) {
+        // Fallback: era belum ada sama sekali (metadata bukan v2/v3) — buat baru.
+        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
+        if (distributionKeys && distributionKeys.length > 0) {
+          await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+          sent = distributionKeys.length;
+        }
       }
       useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
     } catch (e) {
@@ -1104,6 +1115,79 @@ export async function rotateGroupKey(
       useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
     }
   }
+}
+
+/**
+ * [26.9] Re-distribusi kunci era SAAT INI (initialCK, N=0) ke semua device
+ * anggota — pola Sender Key Distribution Message libsignal: kirim ulang
+ * distribusi era yang sama aman (penerima menyimpan state yang identik).
+ * Return jumlah envelope terkirim (0 bila era belum ada).
+ */
+export async function redistributeCurrentGroupKey(conversationId: string): Promise<number> {
+  const senderState = await getGroupSenderState(conversationId);
+  if (!senderState) return 0;
+
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) return 0;
+
+  const sodium = await getSodiumLib();
+  const { worker_pq_box_seal } = await getWorkerProxy();
+  const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+  const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
+  const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  const ckToSeal = senderState.initialCK ?? senderState.CK;
+  const nToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
+  const ckBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  const userIds: string[] = [];
+  for (const p of conversation.participants) {
+    const uId = (p.userId || p.user?.id || p.id) as string;
+    if (uId) userIds.push(uId);
+  }
+  const myId = useAuthStore.getState().user?.id;
+  if (myId && !userIds.includes(myId)) userIds.push(myId);
+
+  let bundlesMap: Record<string, PreKeyBundle[]> = {};
+  try {
+    bundlesMap = await fetchPreKeyBundles(userIds);
+  } catch (e) {
+    console.warn('[redistribute] Failed to fetch prekey bundles:', e);
+    return 0;
+  }
+
+  const distributionKeys: Record<string, unknown>[] = [];
+  for (const uId of userIds) {
+    for (const bundle of (bundlesMap[uId] || [])) {
+      if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
+      try {
+        const packed = new Uint8Array(4 + ckBytes.length);
+        new DataView(packed.buffer).setUint32(0, nToSeal, false);
+        packed.set(ckBytes, 4);
+        const encryptedKey = await worker_pq_box_seal(
+          packed,
+          sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+          sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+        );
+        distributionKeys.push({
+          userId: uId,
+          targetDeviceId: bundle.deviceId,
+          targetDeviceKey: bundle.identityKey,
+          key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+          type: 'GROUP_KEY',
+          senderId: await getMyPseudonym(conversationId) ?? myId,
+          senderDeviceKey: myIdentityKeyB64,
+          senderSigningKey: mySigningKeyB64
+        });
+      } catch (e) {
+        console.warn(`[redistribute] Seal failed for ${uId} device ${bundle.deviceId}:`, e);
+      }
+    }
+  }
+  if (distributionKeys.length === 0) return 0;
+  await sendGroupKeyDistributionPairwise(conversationId, distributionKeys);
+  return distributionKeys.length;
 }
 
 const periodicGroupKeyRotationTimers = new Map<string, NodeJS.Timeout>();

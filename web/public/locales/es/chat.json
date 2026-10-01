@@ -72,7 +72,9 @@
     "key_rotation": "Alerta de seguridad: Rotación de claves requerida",
     "key_rotation_desc": "Las claves de cifrado no están sincronizadas. Envía un mensaje para restablecer la conexión segura.",
     "encryption_recommendation": "Recomendación del protocolo de cifrado",
-    "encryption_desc": "Para la conexión inicial, asegúrate de que ambos estén EN LÍNEA."
+    "encryption_desc": "Para la conexión inicial, asegúrate de que ambos estén EN LÍNEA.",
+    "burner_warning_desc": "No actualices ni cierres esta página. Todo el historial del chat vive solo en RAM y se perderá permanentemente.",
+    "burner_warning_title": "Sesión efímera activa"
   },
   "status": {
     "signal_lost": "Señal perdida",

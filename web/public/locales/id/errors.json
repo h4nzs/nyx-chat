@@ -33,5 +33,9 @@
   "failed_to_delete_conversation": "Gagal menghapus obrolan.",
   "failed_to_delete_group": "Gagal menghapus grup.",
   "failed_to_toggle_pinned_conversation": "Gagal menyematkan/melepas sematan obrolan.",
-  "failed_to_send_message_timeout": "Gagal mengirim pesan (Waktu Habis)."
+  "failed_to_send_message_timeout": "Gagal mengirim pesan (Waktu Habis).",
+  "failed_to_broadcast_history_sync": "Gagal menyiarkan sinkronisasi riwayat.",
+  "failed_to_load_linked_devices": "Gagal memuat perangkat terhubung",
+  "failed_to_revoke_device": "Gagal mencabut perangkat",
+  "please_start_a_chat_with_yourself_saved_": "Mulai chat dengan dirimu sendiri ('Pesan Tersimpan') dulu untuk memakainya sebagai kanal sinkronisasi."
 }

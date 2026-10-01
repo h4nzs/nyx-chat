@@ -32,5 +32,10 @@
   "failed_to_delete_conversation": "Failed to delete conversation.",
   "failed_to_delete_group": "Failed to delete group.",
   "failed_to_toggle_pinned_conversation": "Failed to toggle pinned conversation.",
-  "failed_to_send_message_timeout": "Failed to send message (Timeout)."
+  "failed_to_send_message_timeout": "Failed to send message (Timeout).",
+  "failed_to_broadcast_history_sync": "Failed to broadcast history sync.",
+  "failed_to_disable_notifications": "Failed to disable notifications",
+  "failed_to_load_linked_devices": "Failed to load linked devices",
+  "failed_to_revoke_device": "Failed to revoke device",
+  "please_start_a_chat_with_yourself_saved_": "Please start a chat with yourself ('Saved Messages') first to use it as a sync channel."
 }

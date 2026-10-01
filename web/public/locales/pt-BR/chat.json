@@ -72,7 +72,9 @@
     "key_rotation": "Alerta de Segurança: Rotação de Chave Necessária",
     "key_rotation_desc": "As chaves de criptografia não estão sincronizadas. Envie uma mensagem para restabelecer a conexão segura.",
     "encryption_recommendation": "Recomendação do Protocolo de Criptografia",
-    "encryption_desc": "Para a conexão inicial, certifique-se de que ambos estejam ONLINE."
+    "encryption_desc": "Para a conexão inicial, certifique-se de que ambos estejam ONLINE.",
+    "burner_warning_desc": "Não atualize nem feche esta página. Todo o histórico do chat vive apenas na RAM e será perdido permanentemente.",
+    "burner_warning_title": "Sessão efêmera ativa"
   },
   "status": {
     "signal_lost": "Sinal Perdido",

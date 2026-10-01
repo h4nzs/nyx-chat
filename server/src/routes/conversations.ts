@@ -409,9 +409,12 @@ router.post('/:id/participants', async (req, res, next) => {
   }
   // [BUGFIX 2026-10-01] JANGAN pass record parsial (select: authSecret saja) ke
   // toConversation — Date.toISOString(undefined) meledak "Invalid time value"
-  // → 500 saat add participant. Broadcast cukup payload minimal (Opaque
-  // Mailbox: klien mengisi roster dari metadata terenkripsi).
-  const safeConv = toConversation({ id: conversationId, isGroup: true, createdAt: new Date(), updatedAt: new Date() } as unknown as RawConversationData);
+  // → 500 saat add participant. Broadcast pakai payload minimal (Opaque
+  // Mailbox: klien mengisi roster dari metadata terenkripsi) + sertakan
+  // encryptedMetadata TERKINI agar anggota baru langsung bisa decrypt tanpa
+  // fetch ulang (dulu kosong → "Unknown Group" sampai offline sync).
+  const currentConv = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { encryptedMetadata: true } });
+  const safeConv = toConversation({ id: conversationId, isGroup: true, encryptedMetadata: currentConv?.encryptedMetadata ?? undefined, createdAt: new Date(), updatedAt: new Date() } as unknown as RawConversationData);
   safeConv.participants = [];
 
   // [T3b TOKEN-FIRST] Membership rows for the NEW members: token-keyed
