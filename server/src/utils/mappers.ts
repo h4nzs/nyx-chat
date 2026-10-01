@@ -142,14 +142,22 @@ export const toParticipant = (p: PrismaParticipantInput): Participant => ({
   devices: p.user?.devices ?? undefined,
 });
 
+// [BUGFIX 2026-10-01] Guard invalid/undefined date — caller yang melewatkan
+// record parsial tidak boleh membuat seluruh endpoint 500
+// ("RangeError: Invalid time value" di Date.toISOString).
+const safeDate = (d: unknown): string => {
+  const parsed = d instanceof Date ? d : new Date(d as string | number);
+  return Number.isNaN(parsed.getTime()) ? new Date(0).toISOString() : parsed.toISOString();
+};
+
 export const toConversation = (conv: PrismaConversationInput): Conversation => ({
   id: asConversationId(conv.id),
   isGroup: conv.isGroup ?? (conv.type === 'GROUP'), 
   encryptedMetadata: conv.encryptedMetadata ?? undefined,
   creatorId: conv.creatorId ? asUserId(conv.creatorId) : undefined,
-  // FIX: Aman memanggil toISOString meski input aslinya sudah berupa string
-  createdAt: new Date(conv.createdAt).toISOString(),
-  updatedAt: new Date(conv.updatedAt).toISOString(),
+  // FIX: Aman memanggil toISOString meski input aslinya sudah berupa string.
+  createdAt: safeDate(conv.createdAt),
+  updatedAt: safeDate(conv.updatedAt),
   participants: conv.participants ? conv.participants.map(toParticipant) : [],
   unreadCount: 0,
   lastMessage: null,

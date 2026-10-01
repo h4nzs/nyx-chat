@@ -406,7 +406,12 @@ router.post('/:id/participants', async (req, res, next) => {
   if (!conversation) return res.status(404).json({ error: 'Not found' });
   if (!safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
-  }    const safeConv = toConversation(hoistConvoKeys(conversation as unknown as RawConversationData));
+  }
+  // [BUGFIX 2026-10-01] JANGAN pass record parsial (select: authSecret saja) ke
+  // toConversation — Date.toISOString(undefined) meledak "Invalid time value"
+  // → 500 saat add participant. Broadcast cukup payload minimal (Opaque
+  // Mailbox: klien mengisi roster dari metadata terenkripsi).
+  const safeConv = toConversation({ id: conversationId, isGroup: true, createdAt: new Date(), updatedAt: new Date() } as unknown as RawConversationData);
   safeConv.participants = [];
 
   // [T3b TOKEN-FIRST] Membership rows for the NEW members: token-keyed
