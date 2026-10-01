@@ -1,13 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
+import { useUserSearch } from '@hooks/useUserSearch';
 import { toAbsoluteUrl } from '@utils/url';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
-import { hashUsername } from '@lib/crypto-worker-proxy';
-import { asUserId } from '@nyx/shared';
-import type { MinimalProfile } from '@nyx/shared';
 import useDynamicIslandStore from '@store/dynamicIsland';
 import ModalBase from './ui/ModalBase';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
@@ -19,10 +17,8 @@ const AddParticipantModal = ({ conversationId, onClose }: {
 }) => {
   const { t } = useTranslation(['modals', 'common']);
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<MinimalProfile[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
   const me = useAuthStore(s => s.user);
 
   const { conversation } = useConversationStore(useShallow(state => ({
@@ -31,42 +27,24 @@ const AddParticipantModal = ({ conversationId, onClose }: {
 
   const existingParticipantIds = conversation?.participants.map(p => p.id) || [];
 
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      const rawQuery = searchTerm.trim();
-      if (rawQuery.length > 2) {
-        setIsSearching(true);
-        try {
-          const hashedQuery = await hashUsername(rawQuery);
-          const safeQuery = encodeURIComponent(hashedQuery);
-          const users = await api<MinimalProfile[]>(`/api/users/search?q=${safeQuery}`);
-          
-          // Inject optimistic query as username/name since it was an exact hash match
-          // Guard: Check known users
-          const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
-
-          const optimisticUsers = users.map(u => {
-              const known = knownUsers.find(k => k.id === u.id);
-              if (known?.name && known.name !== 'Unknown') {
-                  return { ...u, name: known.name, username: known.username || rawQuery };
-              }
-              return { ...u, username: rawQuery, name: rawQuery };
-          });
-          
-          setSearchResults(optimisticUsers.filter(u => !existingParticipantIds.includes(asUserId(u.id))));
-        } catch (error) {
-          console.error("Failed to search users:", error);
-          setSearchResults([]);
-        } finally {
-          setIsSearching(false);
-        }
-      } else {
-        setSearchResults([]);
+  // [T4 UX] Pencarian ter-debounce + stale-guard via hook (dulu: debounce 500ms
+  // lebih pendek dari hashUsername ~1.1s → hasil bisa kosong karena resolve
+  // out-of-order menimpa state dengan hasil lama).
+  const { results: rawResults, isSearching } = useUserSearch(searchTerm, {
+    excludeIds: existingParticipantIds,
+  });
+  const searchResults = useMemo(() => {
+    const rawQuery = searchTerm.trim();
+    // Optimistic name/username: respons server tidak membawa nama plaintext.
+    const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
+    return rawResults.map(u => {
+      const known = knownUsers.find(k => k.id === u.id);
+      if (known?.name && known.name !== 'Unknown') {
+        return { ...u, name: known.name, username: known.username || rawQuery };
       }
-    }, 500);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, existingParticipantIds]);
+      return { ...u, username: rawQuery, name: rawQuery };
+    });
+  }, [rawResults, searchTerm]);
 
   const handleSelectUser = (userId: string) => {
     if (!selectedUserIds.includes(userId)) {
@@ -168,6 +146,9 @@ const AddParticipantModal = ({ conversationId, onClose }: {
             className="w-full p-2 rounded-md bg-background border border-border text-text-primary"
           />
           {isSearching && <p className="text-sm text-text-secondary mt-2">{t('modals:add_participant.searching')}</p>}
+          {!isSearching && searchTerm.trim().length > 0 && searchTerm.trim().length < 3 && (
+            <p className="text-sm text-text-secondary mt-2">{t('modals:add_participant.min_query')}</p>
+          )}
         </div>
 
         <div className="max-h-60 overflow-y-auto mb-4 border border-border rounded-md">
@@ -195,7 +176,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
                 )}
               </div>
             ))
-          ) : ( searchTerm.trim().length > 2 && !isSearching &&
+          ) : ( searchTerm.trim().length >= 3 && !isSearching &&
             <p className="p-2 text-text-secondary">{t('modals:add_participant.no_users')}</p>
           )}
         </div>

@@ -3,6 +3,7 @@
     "title": "Add Participants",
     "search_placeholder": "Search users...",
     "searching": "Searching...",
+    "min_query": "Keep typing (min. 3 characters) — search runs after you stop typing.",
     "no_users": "No users found.",
     "add_selected": "Add Selected",
     "adding": "Adding...",

@@ -3,6 +3,7 @@
     "title": "Tambah Peserta",
     "search_placeholder": "Cari pengguna...",
     "searching": "Mencari...",
+    "min_query": "Lanjut mengetik (min. 3 karakter) — pencarian jalan setelah berhenti mengetik.",
     "no_users": "Pengguna tidak ditemukan.",
     "add_selected": "Tambah Terpilih",
     "adding": "Menambahkan...",

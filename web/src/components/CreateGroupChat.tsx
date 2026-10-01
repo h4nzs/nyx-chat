@@ -1,12 +1,11 @@
 import DefaultAvatar from "@/components/ui/DefaultAvatar";
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useConversationStore, type Conversation } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
-import { authFetch } from '@lib/api';
 import { toAbsoluteUrl } from '@utils/url';
 import { transportClient, } from '@lib/transportClient';
-import { hashUsername } from '@lib/crypto-worker-proxy';
+import { useUserSearch } from '@hooks/useUserSearch';
 import toast from 'react-hot-toast';
 import useDynamicIslandStore from '@store/dynamicIsland';
 import ModalBase from './ui/ModalBase';
@@ -19,7 +18,6 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<MinimalProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [userList, setUserList] = useState<MinimalProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const me = useAuthStore(s => s.user);
   const { createGroup, openConversation } = useConversationStore(useShallow(state => ({
@@ -27,38 +25,23 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
     openConversation: state.openConversation,
   })));
 
-  useEffect(() => {
+  // [T4 UX] Pencarian ter-debounce + stale-guard via hook (dulu: debounce 300ms
+  // lebih pendek dari hashUsername ~1.1s → hasil bisa kosong/out-of-order).
+  const selectedIds = selectedUsers.map(u => u.id);
+  const { results: rawResults, isSearching } = useUserSearch(searchQuery, {
+    excludeIds: [...(me?.id ? [me.id] : []), ...selectedIds] as UserId[],
+  });
+  const userList = useMemo(() => {
     const rawQuery = searchQuery.trim();
-    if (rawQuery === '') {
-      setUserList([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      try {
-        const hashedQuery = await hashUsername(rawQuery);
-        const safeQuery = encodeURIComponent(hashedQuery);
-        const results = await authFetch<MinimalProfile[]>(`/api/users/search?q=${safeQuery}`);
-        
-        // Inject optimistic query as username/name since it was an exact hash match
-        // Guard: Check known users
-        const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
-
-        const optimisticResults = results.map(u => {
-            const known = knownUsers.find(k => k.id === u.id);
-            if (known?.name && known.name !== 'Unknown') {
-                return { ...u, name: known.name, username: known.username || rawQuery };
-            }
-            return { ...u, username: rawQuery, name: rawQuery };
-        });
-        
-        const selectedIds = selectedUsers.map(u => u.id);
-        setUserList(optimisticResults.filter(u => u.id !== me?.id && !selectedIds.includes(u.id)));
-    } catch (e) {
-      console.warn('[CreateGroup] Failed to load participants:', e);
-    }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, me?.id, selectedUsers]);
+    const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
+    return rawResults.map(u => {
+      const known = knownUsers.find(k => k.id === u.id);
+      if (known?.name && known.name !== 'Unknown') {
+        return { ...u, name: known.name, username: known.username || rawQuery };
+      }
+      return { ...u, username: rawQuery, name: rawQuery };
+    });
+  }, [rawResults, searchQuery]);
 
   const handleSelectUser = (user: MinimalProfile) => {
     const maxMembers = me?.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
@@ -141,6 +124,9 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
             placeholder={t('modals:add_participant.search_placeholder')}
             className="w-full input-neumorphic"
           />
+          {isSearching && (
+            <p className="text-sm text-text-secondary mt-2">{t('modals:add_participant.searching')}</p>
+          )}
           {userList.length > 0 && (
             <div className="absolute top-full left-0 right-0 max-h-60 overflow-y-auto z-10 rounded-xl p-2 space-y-2 bg-bg-main/50 backdrop-blur-md shadow-neu-flat dark:shadow-neu-flat-dark border border-text-secondary/10 mt-2">
               {userList.map(user => {

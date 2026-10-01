@@ -3,6 +3,7 @@
     "title": "Adicionar Participante",
     "search_placeholder": "Buscar usuários...",
     "searching": "Buscando...",
+    "min_query": "Continue digitando (mín. 3 caracteres) — a busca roda após você parar de digitar.",
     "no_users": "Nenhum usuário encontrado.",
     "add_selected": "Adicionar Selecionados",
     "adding": "Adicionando...",
