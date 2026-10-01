@@ -84,6 +84,11 @@
     "member_count": "{{count}} Anggota",
     "add_participants": "Tambah Peserta",
     "leave_group": "Keluar Grup",
+    "leave_solo_title": "Keluar dan hapus grup?",
+    "leave_solo_desc": "Kamu adalah satu-satunya anggota grup ini. Jika keluar, grup akan dihapus permanen untuk semua orang dan tidak dapat dipulihkan.",
+    "leave_solo_confirm": "Keluar & Hapus",
+    "leave_owner_title": "Keluar grup?",
+    "leave_owner_desc": "Kamu adalah pemilik grup ini. Kepemilikan akan otomatis dipindahkan ke {{name}} saat kamu keluar.",
     "toasts": {
       "processing_avatar": "Memproses avatar...",
       "uploading": "Mengunggah ke cloud...",

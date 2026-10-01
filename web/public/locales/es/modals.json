@@ -84,6 +84,11 @@
     "member_count": "{{count}} miembros",
     "add_participants": "Añadir participantes",
     "leave_group": "Salir del grupo",
+    "leave_solo_title": "¿Salir y eliminar el grupo?",
+    "leave_solo_desc": "Eres el único miembro de este grupo. Si sales, el grupo se eliminará permanentemente para todos y no se podrá restaurar.",
+    "leave_solo_confirm": "Salir y eliminar",
+    "leave_owner_title": "¿Salir del grupo?",
+    "leave_owner_desc": "Eres el propietario de este grupo. La propiedad se transferirá automáticamente a {{name}} cuando salgas.",
     "toasts": {
       "processing_avatar": "Procesando avatar...",
       "uploading": "Subiendo a la nube...",

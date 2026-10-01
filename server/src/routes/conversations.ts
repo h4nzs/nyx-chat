@@ -485,6 +485,41 @@ router.delete('/:id/leave', async (req, res, next) => {
   res.status(204).end();
 });
 
+// [26.9 SOLO-LEAVE] DELETE grup PERMANEN — hanya diizinkan bila TIDAK ADA
+// anggota tersisa (guard: nol delivery token). Client memanggil ini SETELAH
+// /leave sukses (leave menghapus row token milik sendiri). Anggota lain yang
+// masih punya delivery token membuat endpoint ini menolak (409) — grup tidak
+// bisa dihancurkan di belakang punggung anggota aktif. Purge: GroupCredential
+// dihapus manual (tanpa FK), sisanya cascade (messages, sessionKeys, hiddenBy).
+router.delete('/:id/group', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { id } = req.params
+    const groupToken = req.headers['x-group-token']
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id },
+      select: { authSecret: true, isGroup: true },
+    }) as { authSecret: string | null; isGroup: boolean } | null
+    if (!conversation) return res.status(404).json({ error: 'Not found' })
+    if (!conversation.isGroup) return res.status(400).json({ error: 'Not a group' })
+    if (!safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
+      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' })
+    }
+
+    const remainingMembers = await prisma.userHiddenConversation.count({ where: { conversationId: id } })
+    if (remainingMembers > 0) {
+      return res.status(409).json({ error: 'MEMBERS_REMAIN: group still has active members' })
+    }
+
+    await prisma.groupCredential.deleteMany({ where: { conversationId: id } })
+    await prisma.conversation.delete({ where: { id } })
+    res.status(204).end()
+  } catch (error) {
+    next(error)
+  }
+})
+
 // DELETE a conversation (Hidden locally)
 router.delete('/:id', async (req, res, next) => {
   try {

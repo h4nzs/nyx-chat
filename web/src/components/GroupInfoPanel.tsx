@@ -11,14 +11,16 @@ import toast from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
 import { FiEdit2, FiLogOut, FiPlus, FiX, FiLock } from 'react-icons/fi';
 import { useGlobalEscape } from '../hooks/useGlobalEscape';
-import { amIGroupAdmin } from '@lib/groupPseudonyms';
+import { amIGroupAdmin, getGroupMembers } from '@lib/groupPseudonyms';
+import { useModalStore } from '@store/modal';
 import MediaGallery from './MediaGallery';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { uploadToR2 } from '@lib/r2';
 import { compressImage } from '@lib/fileUtils';
 import ImageCropperModal from './ImageCropperModal';
-import type { ConversationId } from '@nyx/shared';
+import type { ConversationId, GroupMemberEntry } from '@nyx/shared';
+import { parseGroupMembers } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '@store/settings';
 import { estimateDailyCoverBytes } from '@lib/coverTraffic';
@@ -106,6 +108,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     conversation: state.conversations.find(c => c.id === conversationId),
   })));
   const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
+  const showConfirm = useModalStore(s => s.showConfirm);
 
   const [isEditing, setIsEditing] = useState(false);
   const [isAddParticipantModalOpen, setIsAddParticipantModalOpen] = useState(false);
@@ -239,7 +242,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     }
   };
 
-  const handleLeaveGroup = async () => {
+  // [26.9] Pilih penerus ownership: anggota paling awal gabung
+  // (joinedAtGeneration terkecil; tie-break userId deterministik).
+  const pickOwnershipSuccessor = (excludeId: string): GroupMemberEntry | undefined => {
+    return (getGroupMembers(conversation.id) || [])
+      .filter(m => m.userId !== excludeId)
+      .sort((a, b) => (a.joinedAtGeneration - b.joinedAtGeneration) || a.userId.localeCompare(b.userId))[0];
+  };
+
+  const performLeave = async (deleteGroup: boolean) => {
     const toastId = toast.loading(t('modals:group_info.toasts.leaving'));
     try {
       // [26.8.1] Blind auth: leave = mutasi grup, wajib bukti tau authSecret
@@ -248,13 +259,83 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       const groupToken = (conversation.decryptedMetadata as { authSecret?: string } | undefined)?.authSecret;
       if (!groupToken) throw new Error('Group token unavailable (metadata not decrypted)');
       const leaveRecipients = conversation.participants?.filter(p => p.id !== user?.id)?.map(p => p.id) || [];
+
+      // [26.9 OWNER TRANSFER] Owner keluar saat masih ada anggota lain →
+      // promote penerus (paling awal gabung) jadi OWNER DI METADATA v3 sebelum
+      // leave: re-encrypt roster (generation+1, peta pseudonym baru tanpa saya)
+      // + PUT details. Grup tidak pernah tanpa owner.
+      const meta = conversation.decryptedMetadata as { v?: number; members?: unknown } | undefined;
+      const myId = user?.id;
+      if (!deleteGroup && myId && meta?.v === 3
+          && getGroupMembers(conversation.id)?.find(m => m.userId === myId)?.role === 'OWNER'
+          && leaveRecipients.length > 0) {
+        const remaining = parseGroupMembers(meta.members).filter(m => m.userId !== myId);
+        const successor = pickOwnershipSuccessor(myId);
+        const newMembers = remaining.map(m =>
+          m.userId === successor?.userId ? { ...m, role: 'OWNER' as const } : m
+        );
+        const { encryptGroupMetadata } = await import('@utils/crypto');
+        const encryptedMetadata = await encryptGroupMetadata({
+          ...(meta as object),
+          participants: leaveRecipients,
+          members: newMembers,
+        } as Parameters<typeof encryptGroupMetadata>[0], conversation.id);
+        await api(`/api/conversations/${conversation.id}/details`, {
+          method: 'PUT',
+          headers: { 'X-Group-Token': groupToken },
+          body: JSON.stringify({ encryptedMetadata, targetRecipients: leaveRecipients }),
+        });
+      }
+
       await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE', headers: { 'X-Group-Token': groupToken }, body: JSON.stringify({ targetRecipients: leaveRecipients }) });
+
+      // [26.9 SOLO-LEAVE] Anggota terakhir keluar → grup dihapus permanen di
+      // server (guard server: nol delivery token tersisa → purge cascade).
+      if (deleteGroup) {
+        await api(`/api/conversations/${conversation.id}/group`, { method: 'DELETE', headers: { 'X-Group-Token': groupToken } });
+        useConversationStore.getState().removeConversation(conversation.id);
+      }
+
       toast.success(t('modals:group_info.toasts.left_success'), { id: toastId });
-      handleClose(); 
+      handleClose();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');
       toast.error(t('modals:group_info.toasts.leave_failed', { error: msg }), { id: toastId });
     }
+  };
+
+  const handleLeaveGroup = () => {
+    const others = conversation.participants?.filter(p => p.id !== user?.id) || [];
+
+    // [26.9 SOLO-LEAVE] Satu-satunya anggota → tidak ada yang bisa melanjutkan
+    // grup. Konfirmasi eksplisit: keluar = grup DIHAPUS PERMANEN.
+    if (others.length === 0) {
+      showConfirm(
+        t('modals:group_info.leave_solo_title'),
+        t('modals:group_info.leave_solo_desc'),
+        () => { void performLeave(true); },
+        undefined,
+        t('modals:group_info.leave_solo_confirm')
+      );
+      return;
+    }
+
+    // [26.9 OWNER TRANSFER] Info transfer otomatis di dialog konfirmasi —
+    // tidak ada langkah tambahan untuk owner.
+    const myRole = getGroupMembers(conversation.id)?.find(m => m.userId === user?.id)?.role;
+    if (myRole === 'OWNER') {
+      const successor = pickOwnershipSuccessor(user?.id || '');
+      const successorName = others.find(p => p.id === successor?.userId)?.name
+        || t('common:defaults.user');
+      showConfirm(
+        t('modals:group_info.leave_owner_title'),
+        t('modals:group_info.leave_owner_desc', { name: successorName }),
+        () => { void performLeave(false); }
+      );
+      return;
+    }
+
+    void performLeave(false);
   };
 
   const title = conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group');

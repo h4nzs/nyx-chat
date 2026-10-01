@@ -84,6 +84,11 @@
     "member_count": "{{count}} Members",
     "add_participants": "Add Participants",
     "leave_group": "Leave Group",
+    "leave_solo_title": "Leave and delete group?",
+    "leave_solo_desc": "You are the only member of this group. If you leave, the group will be permanently deleted for everyone and cannot be restored.",
+    "leave_solo_confirm": "Leave & Delete",
+    "leave_owner_title": "Leave group?",
+    "leave_owner_desc": "You are the owner of this group. Ownership will be automatically transferred to {{name}} when you leave.",
     "toasts": {
       "processing_avatar": "Processing avatar...",
       "uploading": "Uploading to cloud...",
