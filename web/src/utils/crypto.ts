@@ -1669,6 +1669,17 @@ async function doDecryptMessage(
         return { status: 'pending', reason: 'waiting_for_key' };
     }
 
+    // [BUGFIX 2026-10-02 — NORMALISASI SENDER ID] State menyimpan senderId
+    // KANONIK (pseudonym dari envelope distribusi). Wrapper METADATA memakai
+    // userId MENTAH sementara wrapper PESAN memakai pseudonym — tanpa
+    // normalisasi, lookup skipped-key metadata memakai userId dan komposit key
+    // (`${conv}_${senderId}_${device}_${keyId}_${n}`) tidak pernah cocok dengan
+    // entri yang ditulis jalur pesan (pseudonym) → metadata selamanya gagal
+    // walau MK-nya ada (log 3-browser 2026-10-02).
+    if (receiverState.senderId && receiverState.senderId !== senderId) {
+        senderId = receiverState.senderId;
+    }
+
     try {
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
@@ -1801,19 +1812,66 @@ async function doDecryptMessage(
         
         // 2. NORMAL RATCHET DECRYPTION (Handles out-of-order internally now)
         const { groupRatchetDecrypt } = await getWorkerProxy();
-        const result = await groupRatchetDecrypt(
-            { CK: receiverState.CK, N: receiverState.N },
-            header,
-            ciphertextBytes,
-            signature,
-            senderSigningKey
-        );
+        let result: Awaited<ReturnType<typeof groupRatchetDecrypt>>;
+        try {
+            result = await groupRatchetDecrypt(
+                { CK: receiverState.CK, N: receiverState.N },
+                header,
+                ciphertextBytes,
+                signature,
+                senderSigningKey
+            );
+        } catch (err) {
+            // [SELF-HEAL 2026-10-02 — REWIND KE ANCHOR ERA] Metadata dan pesan
+            // nyata pertama adalah KEMBAR di posisi rantai yang sama (encrypt
+            // metadata me-restore sender state). Bila pesan didekripsi lebih
+            // dulu, state maju TANPA skipped-key di posisi itu → metadata di
+            // posisi sama gagal permanen "Ratchet Advanced (header.n=0,
+            // state.N=1)" (log 3-browser 2026-10-02). KDF chain satu arah tidak
+            // bisa di-rollback, TAPI state memanggu anchor era (eraCK = kunci
+            // awal era yang dipersist): derivasi ulang dari anchor deterministik
+            // — jump ke posisi n menyimpan ulang semua skipped key di antaranya,
+            // jadi TIDAK ADA yang hilang (invarian idempotent-receive tetap
+            // terjaga: pesan sudah didekripsi diambil dari MK cache per
+            // messageId). Bila MAC tetap gagal (pesan era lebih lama), error
+            // asli dilempar dan state TIDAK disentuh.
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const eraAnchor = receiverState.eraCK;
+            const isRatchetAdvanced = errMsg.includes('Ratchet Advanced') ||
+                errMsg.includes('older than current state');
+            if (!isRatchetAdvanced || !eraAnchor || eraAnchor === receiverState.CK || header.n >= receiverState.N) {
+                throw err;
+            }
+            result = await groupRatchetDecrypt(
+                { CK: eraAnchor, N: 0 },
+                header,
+                ciphertextBytes,
+                signature,
+                senderSigningKey
+            );
+        }
         
         // [BUGFIX 2026-10-02] Simpan dengan anchor era (stabil sepanjang rantai),
         // bukan CK pre-jump — lihat komentar lookup di atas.
         const keyIdForSkip = receiverState.eraCK?.substring(0, 8) ?? (receiverState.CK ? receiverState.CK.substring(0, 8) : undefined);
         for (const sk of result.skippedKeys) {
             await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk, keyIdForSkip);
+        }
+
+        // [BUGFIX 2026-10-02 — MK KEMBAR METADATA] Metadata terenkripsi DIBUNG
+        // sebagai pesan rantai di posisi N, lalu sender state di-restore — pesan
+        // nyata berikutnya meng-encrypt di posisi yang SAMA (MK & keyId identik).
+        // Simpan MK pesan yang baru dikonsumsi agar dekripsi kembarannya
+        // (metadata, replay pesan yang sama) selalu menemukan MK-nya — urutan
+        // kedatangan pesan-vs-metadata tidak lagi menentukan keberhasilan
+        // (persis invarian replay-duplikat libsignal: duplikat = sukses).
+        if (result.mk) {
+            await storeGroupSkippedKey(
+                conversationId, senderId, senderDeviceKey,
+                header.n,
+                sodium.to_base64(result.mk, sodium.base64_variants.URLSAFE_NO_PADDING),
+                keyId ?? keyIdForSkip
+            );
         }
 
         // [FIX 2026-10-02] persistState:false (dekripsi metadata) = JANGAN

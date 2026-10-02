@@ -440,14 +440,32 @@ export async function handleKeySync(
          // mengirim event ini mendapat ACK error eksplisit, bukan hening.
          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'distribute_keys removed — use pairwise GROUP_KEY delivery' });
          break;
-       }
-
-       case 'group:request_key': {
+       }        case 'group:request_key': {
          const { conversationId, targetSenderId, targetDeviceKey } = data as GroupKeyRequestPayload;
          if (!conversationId) return;
          if (!await ctx.checkRateLimit(userId, 'group_request_key', 60, 60)) return;
 
+         // [BUGFIX 2026-10-02 — ROUTING VIA DEVICE KEY] Peminta yang belum punya
+         // metadata grup tidak bisa me-resolve pseudonym → targetSenderId =
+         // PSEUDONYM (bukan userId) → emitEventToUser ke id tak dikenal →
+         // fulfillment TIDAK PERNAH sampai (gejala: anggota baru hanya bisa
+         // dekripsi pesan pembuat grup, karena wrapper metadata memakai userId
+         // mentah sedangkan wrapper pesan memakai pseudonym — log 3-browser
+         // 2026-10-02). senderDeviceKey = identity key device pengirim yang
+         // SUDAH tersimpan di tabel Device → server map sendiri ke userId.
+         // Server tidak membocorkan apa pun yang belum dia ketahui.
          let fulfillerId = targetSenderId;
+         if (targetDeviceKey) {
+             try {
+                 const dev = await ctx.prisma.device.findFirst({
+                     where: { publicKey: Buffer.from(targetDeviceKey, 'base64url') },
+                     select: { userId: true }
+                 });
+                 if (dev?.userId) fulfillerId = dev.userId;
+             } catch {
+                 // fallback ke targetSenderId apa adanya
+             }
+         }
          if (!fulfillerId) {
              // Opaque Mailbox requires targetSenderId to be provided by client
              return;

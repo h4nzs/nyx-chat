@@ -130,6 +130,37 @@ Also (MK persistence): group **skipped keys are no longer deleted after use** �
 capped at 200/conversation (LRU) in `storeGroupSkippedKey` — so repeated reloads
 can still decrypt messages whose message keys the ratchet already passed.
 
+### 16.7.2 Metadata is a twin chain message (2026-10-02)
+
+`encryptGroupMetadata` encrypts the metadata **as a chain message at the current
+position N** and then restores the sender state, so the next real message is
+encrypted at the **same position** with the **same MK and keyId**. Two invariants
+follow, otherwise a new member can never read metadata:
+
+1. **A consumed MK stays retrievable at its own position.** After a successful
+   group ratchet decrypt, the MK is stored via `storeGroupSkippedKey(n, mk,
+   keyId)` as well, so whichever of the twins arrives second still finds its key
+   (the old `persistState:false` fix only covered the metadata-first order; the
+   message-first order left a permanent `Ratchet Advanced (header.n=0,
+   state.N=1)`).
+2. **Rewind to the era anchor is a safe self-heal.** When the group ratchet
+   throws `Ratchet Advanced` for `header.n < state.N` and the state carries
+   `eraCK`, `doDecryptMessage` re-derives from `(eraCK, 0)` and retries once. The
+   chain is deterministic and the jump re-stores every intermediate skipped key,
+   so nothing is lost (per-message MKs are cached by messageId). If the MAC still
+   fails (older era) the original error is rethrown and the state is untouched.
+
+Sender identity is also **normalised to the state's canonical `senderId`**
+(the pseudonym from the distribution envelope) before any skipped-key read/write:
+metadata wrappers carry the raw userId while message wrappers carry the
+pseudonym, and the skipped-key composite includes `senderId`.
+
+Finally, `group:request_key` is routed server-side by **`targetDeviceKey`**
+(`Device.publicKey` → userId) when `targetSenderId` is an unresolvable
+pseudonym — without it a member whose metadata is still undecrypted could never
+reach the sender of the messages it cannot read (it only ever got the group
+creator's chain, because the metadata wrapper carries a raw userId).
+
 ## 16.8 Files to know
 
 | File | Role |
