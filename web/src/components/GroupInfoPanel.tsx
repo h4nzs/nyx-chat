@@ -258,8 +258,12 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       // [26.8.1] Blind auth: leave = mutasi grup, wajib bukti tau authSecret
       // (X-Group-Token dari metadata ter-dekripsi) — bukti keanggotaan tanpa
       // membocorkan roster ke server.
+      // [BUGFIX 2026-10-02] Metadata belum ter-decrypt TIDAK lagi memblokir
+      // leave: server kini menerima leave via baris delivery-token milik sendiri
+      // (bukti keanggotaan yang sudah ada di server, tidak bocor apa pun baru).
+      // Token tetap dikirim bila tersedia; owner-transfer butuh metadata —
+      // dilewati bila tidak ada (penerus dipromosikan oleh admin lain / creator).
       const groupToken = (conversation.decryptedMetadata as { authSecret?: string } | undefined)?.authSecret;
-      if (!groupToken) throw new Error('Group token unavailable (metadata not decrypted)');
       const leaveRecipients = conversation.participants?.filter(p => p.id !== user?.id)?.map(p => p.id) || [];
 
       // [26.9 OWNER TRANSFER] Owner keluar saat masih ada anggota lain →
@@ -268,7 +272,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       // + PUT details. Grup tidak pernah tanpa owner.
       const meta = conversation.decryptedMetadata as { v?: number; members?: unknown } | undefined;
       const myId = user?.id;
-      if (!deleteGroup && myId && meta?.v === 3
+      if (!deleteGroup && myId && meta?.v === 3 && groupToken
           && getGroupMembers(conversation.id)?.find(m => m.userId === myId)?.role === 'OWNER'
           && leaveRecipients.length > 0) {
         const remaining = parseGroupMembers(meta.members).filter(m => m.userId !== myId);
@@ -301,7 +305,13 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
         }
       }
 
-      await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE', headers: { 'X-Group-Token': groupToken }, body: JSON.stringify({ targetRecipients: leaveRecipients }) });
+      await api(`/api/conversations/${conversation.id}/leave`, {
+        method: 'DELETE',
+        // [BUGFIX 2026-10-02] X-Group-Token opsional — tanpa metadata, server
+        // menerima via delivery-token proof (lihat routes/conversations.ts).
+        headers: groupToken ? { 'X-Group-Token': groupToken } : undefined,
+        body: JSON.stringify({ targetRecipients: leaveRecipients }),
+      });
 
       // [26.9 SOLO-LEAVE] Anggota terakhir keluar → grup dihapus permanen di
       // server (guard server: nol delivery token tersisa → purge cascade).
@@ -310,7 +320,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
         await api(`/api/conversations/${conversation.id}/group`, {
           method: 'DELETE',
           headers: {
-            'X-Group-Token': groupToken,
+            ...(groupToken ? { 'X-Group-Token': groupToken } : {}),
             // [26.9 RBAC] Purge = operasi admin (guard server-side).
             'X-Admin-Token': getMyAdminToken(conversation.id) ?? '',
           },

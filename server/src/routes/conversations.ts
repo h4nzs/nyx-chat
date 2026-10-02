@@ -502,8 +502,23 @@ router.delete('/:id/leave', async (req, res, next) => {
 
   const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
   if (!conversation) return res.status(404).json({ error: 'Not found' });
-  if (!safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
+  const tokenOk = safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '');
+  if (!tokenOk) {
+    // [BUGFIX 2026-10-02 — LEAVE TANPA METADATA] Anggota yang metadata-nya
+    // belum ter-decrypt tidak punya authSecret (authSecret hidup di dalam
+    // metadata) → sebelumnya leave SELALU 403 ("Group token unavailable").
+    // Cukup aman menerima leave via baris delivery-token milik user sendiri:
+    // requireAuth sudah mengaitkan akun, dan row UserHiddenConversation
+    // (userId↔conversationId) SUDAH ada di server — mengizinkan user
+    // menghapus row-nya sendiri tidak membocorkan apa pun yang baru. Ini
+    // juga semantik Signal: leave = pencabutan keanggotaan, bukan akses konten.
+    const ownsDeliveryToken = await prisma.userHiddenConversation.findUnique({
+      where: { userId_conversationId: { userId, conversationId } },
+      select: { id: true }
+    });
+    if (!ownsDeliveryToken) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
+    }
   }
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client

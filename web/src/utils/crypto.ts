@@ -1696,8 +1696,11 @@ async function doDecryptMessage(
         if (senderDeviceKey) {
              try {
                  // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
-                 const bundlesMap = await fetchPreKeyBundles([senderUserId]);
-                 const bundles = bundlesMap[senderUserId] || [];
+                 // [BUGFIX 2026-10-02] senderUserId bisa string kosong (pseudonym
+                 // gagal resolve + participant kosong) → API menolak dengan 400
+                 // "userIds.0: Too small" (log 2026-10-02). Guard dulu.
+                 const bundlesMap = senderUserId ? await fetchPreKeyBundles([senderUserId]) : {};
+                 const bundles = (senderUserId ? bundlesMap[senderUserId] : undefined) || [];
                  
                  // Temukan perangkat yang public key-nya cocok dengan senderDeviceKey
                  const deviceBundle = bundles.find(b => b.identityKey === senderDeviceKey);
@@ -1756,9 +1759,22 @@ async function doDecryptMessage(
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
+        // [BUGFIX 2026-10-02 — KEYId MISMATCH] Entri skipped-key di-store dengan
+        // prefix chain key PRE-JUMP (CK_N), tapi lookup memakai keyId PESAN
+        // (= CK posisi pesan). Untuk jump ≥2, hanya skipped pertama yang cocok;
+        // pesan di posisi N+1..n-1 tersimpan di bawah CK_N tapi dicari dengan
+        // CK_{n} → tidak pernah ketemu → "Ratchet Advanced" permanen (gejala:
+        // pesan ke-2/ke-3 pengirim sama tidak pernah terdekripsi bila datang
+        // out-of-order). Solusi ala libsignal (key skipped by CHAIN identity,
+        // bukan per-posisi): store dengan anchor ERA (eraCK prefix — stabil per
+        // rantai), lookup coba keyId pesan dulu lalu anchor era.
         const { getGroupSkippedKey, deleteGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
         const keyId = payloadObj.keyId;
-        const skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, keyId);
+        const eraKeyPrefix = receiverState.eraCK?.substring(0, 8);
+        let skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, keyId);
+        if (!skippedMkB64 && eraKeyPrefix && eraKeyPrefix !== keyId) {
+            skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, eraKeyPrefix);
+        }
         
         if (skippedMkB64) {
             const { groupDecryptSkipped } = await getWorkerProxy();
@@ -1791,7 +1807,9 @@ async function doDecryptMessage(
             senderSigningKey
         );
         
-        const keyIdForSkip = receiverState.CK ? receiverState.CK.substring(0, 8) : undefined;
+        // [BUGFIX 2026-10-02] Simpan dengan anchor era (stabil sepanjang rantai),
+        // bukan CK pre-jump — lihat komentar lookup di atas.
+        const keyIdForSkip = receiverState.eraCK?.substring(0, 8) ?? (receiverState.CK ? receiverState.CK.substring(0, 8) : undefined);
         for (const sk of result.skippedKeys) {
             await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk, keyIdForSkip);
         }

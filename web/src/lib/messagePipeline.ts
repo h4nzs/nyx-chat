@@ -587,11 +587,22 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                                const distributionKeys: Record<string, unknown>[] = [];
                                
                                // Convert existing CK string back to bytes
-                               const ckBytes = sodium.from_base64(existingSenderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               // [BUGFIX 2026-10-02 — PARALLEL DARI fulfillGroupKeyRequest]
+                               // WAJIB seal chain key AWAL era (initialCK, N=0), BUKAN
+                               // posisi ratchet saat ini. Versi lama menyegel (CK_n, N=n)
+                               // → penerima yang telat menyimpan state di N=n dan SEMUA
+                               // pesan < n gagal "Ratchet Advanced! (header.n=0, state.N=1)"
+                               // permanen — persis gejala "dekripsi sukses hanya setelah
+                               // pengirim kirim pesan berikutnya" (log 3-browser
+                               // 2026-10-02). Jalur fulfillGroupKeyRequest (crypto.ts)
+                               // sudah diperbaiki 2026-10-01; jalur duplikat ini terlewat.
+                               const ckToSeal = existingSenderState.initialCK ?? existingSenderState.CK;
+                               const nToSeal = existingSenderState.initialCK ? 0 : (existingSenderState.N || 0);
+                               const ckBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
 
                                // Construct the payload as: N (4 bytes) + CK (32 bytes)
                                const senderKeyPayload = new Uint8Array(36);
-                               new DataView(senderKeyPayload.buffer).setUint32(0, existingSenderState.N, false);
+                               new DataView(senderKeyPayload.buffer).setUint32(0, nToSeal, false);
                                senderKeyPayload.set(ckBytes, 4);
 
                                for (const bundle of bundles) {
