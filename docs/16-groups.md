@@ -130,36 +130,44 @@ Also (MK persistence): group **skipped keys are no longer deleted after use** �
 capped at 200/conversation (LRU) in `storeGroupSkippedKey` — so repeated reloads
 can still decrypt messages whose message keys the ratchet already passed.
 
-### 16.7.2 Metadata is a twin chain message (2026-10-02)
+### 16.7.2 Sender-key rewrite: true libsignal model (2026-10-02)
 
-`encryptGroupMetadata` encrypts the metadata **as a chain message at the current
-position N** and then restores the sender state, so the next real message is
-encrypted at the **same position** with the **same MK and keyId**. Two invariants
-follow, otherwise a new member can never read metadata:
+After 30+ incremental fixes kept hitting the same layer, the group sender-key
+pipeline was rewritten in place to follow `sender_keys.rs` exactly. The
+invariants below replace all earlier patches (§16.7.1 stays valid):
 
-1. **A consumed MK stays retrievable at its own position.** After a successful
-   group ratchet decrypt, the MK is stored via `storeGroupSkippedKey(n, mk,
-   keyId)` as well, so whichever of the twins arrives second still finds its key
-   (the old `persistState:false` fix only covered the metadata-first order; the
-   message-first order left a permanent `Ratchet Advanced (header.n=0,
-   state.N=1)`).
-2. **Rewind to the era anchor is a safe self-heal.** When the group ratchet
-   throws `Ratchet Advanced` for `header.n < state.N` and the state carries
-   `eraCK`, `doDecryptMessage` re-derives from `(eraCK, 0)` and retries once. The
-   chain is deterministic and the jump re-stores every intermediate skipped key,
-   so nothing is lost (per-message MKs are cached by messageId). If the MAC still
-   fails (older era) the original error is rethrown and the state is untouched.
-
-Sender identity is also **normalised to the state's canonical `senderId`**
-(the pseudonym from the distribution envelope) before any skipped-key read/write:
-metadata wrappers carry the raw userId while message wrappers carry the
-pseudonym, and the skipped-key composite includes `senderId`.
-
-Finally, `group:request_key` is routed server-side by **`targetDeviceKey`**
-(`Device.publicKey` → userId) when `targetSenderId` is an unresolvable
-pseudonym — without it a member whose metadata is still undecrypted could never
-reach the sender of the messages it cannot read (it only ever got the group
-creator's chain, because the metadata wrapper carries a raw userId).
+1. **Metadata is a real chain message — no position reuse.** The old
+   `encryptGroupMetadata` restored the sender state after encrypting, so the
+   next real message reused the metadata's position AND message key (the
+   "twin"). Arrival order then decided success: the loser failed permanently
+   with `Ratchet Advanced (header.n=0, state.N=1)`. Now metadata consumes a
+   position like any message; `persistState:false` and the restore hack are
+   gone.
+2. **`chainId` is the era identity (libsignal `chain_id`).** Every new wrapper
+   (messages + metadata) carries `chainId = initialCK[0:8]` — stable for the
+   whole era, unlike `keyId` (= CK at the message's own position). Receiver
+   routing goes through the pure helper `pickChainState` (`web/src/lib/groupEra.ts`,
+   unit-tested): match `chainId`/`keyId` against current + archived states
+   (newest first, max 5 — `MAX_SENDER_KEY_STATES`), never guess. Legacy
+   wrappers without `chainId` fall back to keyId matching.
+3. **Skipped message keys live in the state record** (`sender_message_keys`).
+   The record's map is passed into `group_ratchet_decrypt`, which consumes the
+   used key and appends gap keys to the returned state; the record is persisted
+   including the map. The `groupSkippedKeys` table remains a mirror keyed by
+   the **stable** chainId alias. The old unfiltered array-scan fallback in
+   `getGroupSkippedKey` (matched `(conv, sender, n)` ignoring chain AND device)
+   is removed — it handed back wrong-era MKs once same-position entries from
+   multiple eras existed (MAC failures for established members, log 17:06).
+4. **Migration heal, bounded.** Legacy records that advanced past a position
+   without a stored skipped key re-derive from `(eraCK, 0)` once on
+   `Ratchet Advanced` (the anchor is persisted anyway and the KDF chain is
+   deterministic — nothing is lost). New-format traffic no longer creates such
+   states.
+5. **`group:request_key` routing via device key.** The server resolves the
+   fulfiller by `targetDeviceKey` (`Device.publicKey` → userId) when
+   `targetSenderId` is an unresolvable pseudonym — a member whose metadata is
+   still undecrypted can reach every sender, not only the creator (whose
+   metadata wrapper is the only one carrying a raw userId).
 
 ## 16.8 Files to know
 

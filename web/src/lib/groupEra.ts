@@ -52,3 +52,60 @@ export function isSameEraDistribution(
   return existing.N >= incomingN &&
     (!existing.eraCK || !incomingEraCK || existing.eraCK === incomingEraCK);
 }
+
+// ---------------------------------------------------------------------------
+// [REWRITE 2026-10-02 — ROUTING CHAIN ala libsignal]
+// `sender_key_state_for_chain_id` (sender_keys.rs): pesan membawa identitas
+// rantai eksplisit; penerima memilih state dari kumpulan record (aktif +
+// arsip, maks MAX_SENDER_KEY_STATES). Helper PURE — di-unit-test langsung.
+// ---------------------------------------------------------------------------
+
+/** Referensi rantai yang dibawa wrapper pesan/metadata. */
+export interface ChainRef {
+  /** chainId era (wrapper baru) — 8-char prefix chain key awal era. */
+  chainId?: string;
+  /** keyId legacy (wrapper lama) — 8-char prefix CK pada posisi pesan. */
+  keyId?: string;
+}
+
+export interface ChainStateRef {
+  /** Identitas era eksplisit (state baru). */
+  chainId?: string;
+  /** Anchor era (state lama). */
+  eraCK?: string;
+  /** Chain key posisi terkini. */
+  CK: string;
+  /** Snapshot arsip era lama (archivedAt terisi). */
+  archivedAt?: number;
+}
+
+/**
+ * Pilih state rantai untuk sebuah pesan: cocokkan chainId (baru) lalu keyId
+ * (legacy, domain sama — prefix CK) terhadap chainId/eraCK/CK tiap state.
+ * State aktif diprioritaskan di atas arsip (libsignal: push_front + pop_back).
+ * Return null bila tidak ada yang cocok — penebakan dilarang (sumber bug
+ * "MK lintas era tertukar" 2026-10-02).
+ */
+export function pickChainState<T extends ChainStateRef>(
+  states: T[],
+  ref: ChainRef
+): T | null {
+  const ids = [ref.chainId, ref.keyId].filter(
+    (v): v is string => typeof v === 'string' && v.length > 0
+  );
+  if (ids.length === 0) return null;
+
+  const live = states.filter(s => !s.archivedAt);
+  const archived = states.filter(s => !!s.archivedAt);
+
+  for (const pool of [live, archived]) {
+    for (const id of ids) {
+      const hit =
+        pool.find(s => s.chainId === id) ??
+        pool.find(s => (s.eraCK ?? '').substring(0, 8) === id) ??
+        pool.find(s => (s.CK ?? '').substring(0, 8) === id);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}

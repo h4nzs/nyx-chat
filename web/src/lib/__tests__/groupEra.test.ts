@@ -6,7 +6,7 @@
 // libsignal process_sender_key_distribution_message (sender_keys.rs).
 
 import { describe, it, expect } from 'vitest';
-import { isSameEraDistribution } from '../groupEra';
+import { isSameEraDistribution, pickChainState } from '../groupEra';
 
 describe('isSameEraDistribution', () => {
   const ERA_A_INITIAL = 'eraA-initial-key';
@@ -47,5 +47,43 @@ describe('isSameEraDistribution', () => {
   it('anchor cocok pada N>0 identik = replay', () => {
     const state = { CK: ERA_A_CURRENT, N: 5, eraCK: ERA_A_INITIAL };
     expect(isSameEraDistribution(state, ERA_A_INITIAL, 5)).toBe(true);
+  });
+});
+
+describe('pickChainState (routing ala libsignal sender_key_state_for_chain_id)', () => {
+  const live = {
+    chainId: 'chainB__',
+    eraCK: 'chainB__initialCK…',
+    CK: 'chainB__currentCK…',
+    N: 3
+  };
+  const archived = {
+    chainId: 'chainA__',
+    eraCK: 'chainA__initialCK…',
+    CK: 'chainA__currentCK…',
+    N: 9,
+    archivedAt: 12345
+  };
+
+  it('wrapper baru: chainId eksplisit → state aktif cocok', () => {
+    expect(pickChainState([archived, live], { chainId: 'chainB__' })).toBe(live);
+  });
+
+  it('era lama: chainId → state arsip (bukan menebak ke state aktif)', () => {
+    expect(pickChainState([live, archived], { chainId: 'chainA__' })).toBe(archived);
+  });
+
+  it('wrapper lama: keyId = CK posisi terkini → state aktif', () => {
+    expect(pickChainState([archived, live], { keyId: 'chainB__' })).toBe(live);
+  });
+
+  it('keyId tak dikenal → null (TIDAK menebak — sumber bug MK lintas era)', () => {
+    expect(pickChainState([live, archived], { keyId: 'chainX__' })).toBeNull();
+    expect(pickChainState([live, archived], {})).toBeNull();
+  });
+
+  it('tanpa chainId eksplisit (state lama): keyId cocok via eraCK prefix', () => {
+    const legacy = { eraCK: 'chainA__initialCK…', CK: 'chainA__currentCK…', N: 2 };
+    expect(pickChainState([legacy], { keyId: 'chainA__' })).toBe(legacy);
   });
 });
