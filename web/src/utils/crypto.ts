@@ -258,6 +258,22 @@ export async function retrieveRatchetStateSecurely(conversationId: string): Prom
   }
 }
 
+/**
+ * [INVARIANT 1:1 — 2026-10-02] Decrypt bytes sesi arsip → state JSON.
+ * Dipakai fallback era-lookup di jalur DR decrypt.
+ */
+async function retrieveRatchetStateFromBytes(encryptedState: Uint8Array): Promise<DoubleRatchetState | null> {
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    const stateBytes = await worker_decrypt_session_key(encryptedState, masterSeed);
+    return JSON.parse(new TextDecoder().decode(stateBytes));
+  } catch (error) {
+    console.error('Failed to decrypt archived ratchet state:', error);
+    return null;
+  }
+}
+
 export async function storeSkippedMessageKeySecurely(headerKey: string, mkString: string) {
   const masterSeed = await getMasterSeedOrThrow();
   const { worker_encrypt_session_key } = await getWorkerProxy();
@@ -1864,6 +1880,23 @@ async function doDecryptMessage(
       const kemPk = drHeader.kemPk;
       const headerKey = `${conversationId}_${kemPk}_${drHeader.n}`;
 
+      // [FIX 4 — DUPLIKAT = SUCCESS 2026-10-02] MK cache per messageId dicek
+      // DI AWAL (semua jalur): pesan yang sudah pernah didekripsi ulang dari
+      // sync/server tidak menabrak "Ratchet Advanced" — persis perilaku
+      // DuplicatedMessage yang terkontrol di libsignal.
+      if (messageId) {
+          const cachedMk = await retrieveMessageKeySecurely(messageId);
+          if (cachedMk) {
+              const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+              const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+              const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+              try {
+                  const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, cachedMk);
+                  return { status: 'success', value: sodium.to_string(decrypted) };
+              } catch (_e) { /* cache basi — lanjut jalur normal */ }
+          }
+      }
+
       const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
       if (skippedMkStr) {
           const mk = sodium.from_base64(skippedMkStr, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1872,7 +1905,8 @@ async function doDecryptMessage(
           const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
           const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
           
-          await deleteSkippedKey(headerKey);
+          // [FIX 2 — 2026-10-02] JANGAN hapus — MK persist ala libsignal
+          // (deleteSkippedKey kini no-op; cap LRU di storeSkippedKey).
           return { status: 'success', value: sodium.to_string(decrypted) };
       }
 
@@ -1884,11 +1918,48 @@ async function doDecryptMessage(
       const { worker_dr_ratchet_decrypt } = await getWorkerProxy();
       const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
       
-      const result = await worker_dr_ratchet_decrypt({
-          serializedState: state,
-          header: drHeader,
-          ciphertext: combined
-      });
+      let result: Awaited<ReturnType<typeof worker_dr_ratchet_decrypt>> | null = null;
+      try {
+          result = await worker_dr_ratchet_decrypt({
+              serializedState: state,
+              header: drHeader,
+              ciphertext: combined
+          });
+      } catch (err) {
+          // [FIX 1 — FALLBACK ERA ARSIP 2026-10-02] Ala libsignal
+          // previous_session_states: pesan dari DH-step/X3DH lama yang datang
+          // belakangan dicoba dengan state arsip `#archived` SEBELUM gagal.
+          const errMsg = (err instanceof Error ? err.message : String(err)) || '';
+          const isEraMiss = errMsg.includes('Ratchet Advanced') ||
+              errMsg.includes('older than current state') ||
+              errMsg.includes('Decryption failed');
+          if (!isEraMiss) throw err;
+
+          const { getArchivedRatchetSession } = await import('@lib/keychainDb');
+          const archivedState = await getArchivedRatchetSession(conversationId);
+          if (!archivedState) throw err;
+
+          const archivedPlain = await retrieveRatchetStateFromBytes(archivedState);
+          if (!archivedPlain) throw err;
+
+          console.warn(`[DR] Current state miss (${errMsg.slice(0, 60)}…) — mencoba sesi arsip era lama`);
+          result = await worker_dr_ratchet_decrypt({
+              serializedState: archivedPlain,
+              header: drHeader,
+              ciphertext: combined
+          });
+          // Pesan dari arsip JANGAN menggeser state current (alam libsignal:
+          // arsip dipromosikan hanya bila mengalahkan current — di sini cukup
+          // MK disimpan; arsip tetap arsip).
+          for (const sk of result.skippedKeys) {
+              const hKey = `${conversationId}_${sk.kemPk}_${sk.n}`;
+              await storeSkippedMessageKeySecurely(hKey, sk.mk);
+          }
+          if (messageId && result.mk) {
+              await storeMessageKeySecurely(messageId, result.mk);
+          }
+          return { status: 'success', value: sodium.to_string(result.plaintext) };
+      }
 
       // [FIX] ATOMIC ORDER: Store intermediate keys (gaps) FIRST
       for (const sk of result.skippedKeys) {

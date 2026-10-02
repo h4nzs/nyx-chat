@@ -760,6 +760,11 @@ export async function handleKeySync(
 // aman di sisi penerima (sync ulang / kunci datang belakangan); menghapus segera
 // saat READ membuat pesan itu mustahil dipulihkan. Dengan grace period, pesan tetap
 // bisa di-fetch catch-up (GET /api/messages) selama 24 jam setelah dibaca.
+// Grace 24 jam juga berfungsi sebagai HEAL WINDOW (invariant 4, 2026-10-02):
+// selama grace, ciphertext 1:1 yang gagal dekripsi di klien masih bisa
+// di-fetch ulang untuk re-decrypt setelah kunci diperbaiki — kombinasi dengan
+// client-side fix offline-loss (receipt READ hanya untuk pesan yang sukses
+// didekripsi) menutup kelas kehilangan ciphertext permanen.
 const READ_DELETE_GRACE_MS = 24 * 60 * 60 * 1000; // 24 jam
 
 async function handleMessageStatusUpdate(

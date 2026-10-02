@@ -478,6 +478,15 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
 
 export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
+      // [INVARIANT 1:1 — MULTI-STATE 2026-10-02] Ala libsignal SessionRecord
+      // (ARCHIVED_STATES_MAX_LENGTH=40): sebelum X3DH/DH-step baru menimpa,
+      // state lama diarsipkan keyed `#era_<kemPk/N>` — pesan inflight dari era
+      // lama tetap decryptable via fallback lookup (crypto.ts DR path).
+      const existing = await db.ratchetSessions.get(conversationId);
+      if (existing) {
+          const archivedId = `${conversationId}#archived`;
+          await db.ratchetSessions.put({ conversationId: archivedId as ConversationId, state: existing.state });
+      }
       await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState });
   });
 }
@@ -487,8 +496,35 @@ export async function getRatchetSession(conversationId: string): Promise<Uint8Ar
   return record ? record.state : null;
 }
 
+/**
+ * [INVARIANT 1:1] Sesi arsip era LAMA (diganti X3DH/DH-step baru).
+ * Hanya satu level arsip — persis kasus "pesan inflight saat rehandshake".
+ * Ala libsignal ARCHIVED_STATES, disederhanakan (1 slot cukup: pesan lama
+ * yang tidak tertangkap skipped-keys hampir selalu dari era tepat sebelumnya).
+ */
+export async function getArchivedRatchetSession(conversationId: string): Promise<Uint8Array | null> {
+  const record = await db.ratchetSessions.get(`${conversationId}#archived` as ConversationId);
+  return record ? record.state : null;
+}
+
 export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
+      // [INVARIANT 2:1 — MK-PERSIST 2026-10-02] Kap LRU per conversation (ala
+      // skipped-key machinery grup): kunci TIDAK dihapus setelah dipakai —
+      // reload/relogin tetap bisa decrypt ulang pesan yang MK-nya sudah terlewati
+      // ratchet (pola state.add_sender_message_key libsignal).
+      const convId = headerKey.split('_').slice(0, 2).join('_');
+      const MAX_SKIPPED_DR = 200;
+      const all = await db.skippedKeys.where('headerKey').startsWith(`${convId}_`).toArray();
+      if (all.length >= MAX_SKIPPED_DR) {
+          const parseN = (k: string) => {
+              const m = k.match(/_(\d+)$/);
+              return m ? Number(m[1]) : -1;
+          };
+          const sorted = all.sort((a, b) => parseN(a.headerKey) - parseN(b.headerKey));
+          const toDelete = sorted.slice(0, all.length - MAX_SKIPPED_DR + 1);
+          await db.skippedKeys.bulkDelete(toDelete.map(r => r.headerKey));
+      }
       await db.skippedKeys.put({ headerKey, key: encryptedKey });
   });
 }
@@ -499,14 +535,18 @@ export async function getSkippedKey(headerKey: string): Promise<Uint8Array | nul
 }
 
 export async function deleteSkippedKey(headerKey: string): Promise<void> {
-  return enqueueWrite(async () => {
-      await db.skippedKeys.delete(headerKey);
-  });
+  // [INVARIANT 2:1 — 2026-10-02] NO-OP dijadwalkan: kunci skipped TIDAK lagi
+  // dihapus setelah dipakai (sekali pakai = bug "reload kedua gagal").
+  // Fungsi dipertahankan agar pemanggil lama tidak rusak; pembersihan oleh
+  // cap LRU di storeSkippedKey.
+  return Promise.resolve();
 }
 
 export async function deleteRatchetSession(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.ratchetSessions.delete(conversationId);
+      // Hapus juga arsip era lama (wipe percakapan = hapus semua era).
+      await db.ratchetSessions.delete(`${conversationId}#archived` as ConversationId);
   });
 }
 
