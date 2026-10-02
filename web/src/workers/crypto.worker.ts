@@ -1984,11 +1984,21 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
 
       case 'group_init_sender_key': {
+        // [V2 2026-10-02 — RENCANA #1/#2] Era baru = (chainKey, chainId RANDOM
+        // 64-bit, metadataKey 256-bit). chainId BUKAN turunan CK — identitas
+        // era eksplisit ala libsignal chain_id; metadataKey memisahkan metadata
+        // dari chain sender-key (tanpa "kembaran" posisi, selamanya).
         const senderKey = sodium.randombytes_buf(32);
+        const chainId = sodium.randombytes_buf(8);
+        const metadataKey = sodium.randombytes_buf(32);
         result = {
-          senderKeyB64: sodium.to_base64(senderKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+          senderKeyB64: sodium.to_base64(senderKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+          chainIdB64: sodium.to_base64(chainId, sodium.base64_variants.URLSAFE_NO_PADDING),
+          metadataKeyB64: sodium.to_base64(metadataKey, sodium.base64_variants.URLSAFE_NO_PADDING)
         };
         sodium.memzero(senderKey);
+        sodium.memzero(chainId);
+        sodium.memzero(metadataKey);
         break;
       }
       case 'group_ratchet_encrypt': {

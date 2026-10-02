@@ -445,7 +445,7 @@ export function worker_dr_ratchet_decrypt(payload: {
 
 // --- GROUP RATCHET PROXY FUNCTIONS ---
 
-export async function groupInitSenderKey(): Promise<{ senderKeyB64: string }> {
+export async function groupInitSenderKey(): Promise<{ senderKeyB64: string; chainIdB64: string; metadataKeyB64: string }> {
   return sendToWorker('group_init_sender_key', {});
 }
 

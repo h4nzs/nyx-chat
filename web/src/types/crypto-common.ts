@@ -33,6 +33,9 @@ export interface GroupRatchetState {
   // eksplisit di wrapper pesan/metadata baru agar routing penerima deterministik
   // (sender_key_state_for_chain_id) tanpa menebak dari prefix.
   chainId?: string;
+  // [V2 2026-10-02 — RENCANA #2] Kunci metadata era (keluar dari chain sender-
+  // key). Dienkripsi at-rest; receiver menerima lewat envelope distribusi v2.
+  metadataKey?: string;
   // [BUGFIX 2026-10-02] Identitas pengirim (pseudonym/userId) di dalam state —
   // id record kini device-keyed (`${conv}_${deviceKey}`) sehingga parts[1]
   // bukan lagi senderId; getGroupReceiverStateByKeyId membaca dari sini.

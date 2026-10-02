@@ -117,33 +117,48 @@ export async function encryptGroupMetadata(
   // Ensure we have a valid session before encrypting metadata
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (conversation) {
-    const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, false, opts);
-    if (distributionKeys && distributionKeys.length > 0) {
-      await emitGroupKeyDistribution(
-        conversationId,
-        distributionKeys as { userId: string; key: string }[]
-      );
-      // Brief delay to allow key distribution to process if it's the first time
-      await new Promise(r => setTimeout(r, 100));
-    }
+    // [V2 — RENCANA #4] ensureGroupSession KINI yang mengirim distribusi via
+    // satu jalur; emitGroupKeyDistribution ganda di sini dihapus.
+    await ensureGroupSession(conversationId, conversation.participants, false, opts);
   }
 
   const payload = JSON.stringify(metadata);
-  // Encrypt as a group message, saving the Message Key locally using a pseudo-messageId
-  // [REWRITE 2026-10-02 — TANPA HACK RESTORE] Metadata adalah PESAN RANTAI yang
-  // sesungguhnya: mengonsumsi satu posisi (persis libsignal — TIDAK ADA reuse
-  // posisi). Hack lama (restore sender state setelah encrypt metadata) membuat
-  // pesan nyata berikutnya meng-encrypt di posisi/MK yang SAMA dengan metadata
-  // — urutan kedatangan menentukan keberhasilan dekripsi dan menjadi akar bug
-  // "Ratchet Advanced (header.n=0, state.N=1)" pada metadata anggota baru.
-  const result = await encryptMessage(payload, conversationId, true, undefined, `meta_${conversationId}`);
-  
   const myId = useAuthStore.getState().user?.id;
   if (!myId) throw new Error("Cannot encrypt metadata: User not authenticated");
 
   const { publicKey } = await getMyEncryptionKeyPair();
   const sodium = await getSodiumLib();
   const myDeviceKey = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
+
+  // [V2 — RENCANA #2] METADATA KELUAR DARI CHAIN: dienkripsi XChaCha dengan
+  // kunci metadata era (dibawa SenderKeyDistributionMessage v2 per member) dan
+  // ditandatangani dengan signing key pengirim. TIDAK menyentuh ratchet —
+  // tidak ada posisi, tidak ada "kembaran", hack restore mustahil kembali.
+  const senderState = await getGroupSenderState(conversationId);
+  const metaKey = senderState?.metadataKey;
+  if (senderState?.chainId && metaKey) {
+      const { workerXChaChaSeal } = await import('@lib/crypto-worker-proxy');
+      const ct = await workerXChaChaSeal(metaKey, payload);
+      const ctBytes = sodium.from_base64(ct, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const signature = sodium.to_base64(
+          sodium.crypto_sign_detached(ctBytes, new Uint8Array(signingPriv as unknown as ArrayLike<number>)),
+          sodium.base64_variants.URLSAFE_NO_PADDING
+      );
+      return JSON.stringify({
+          v: 2,
+          kind: 'group_metadata',
+          chainId: senderState.chainId,
+          ct,
+          signature,
+          senderId: myId,
+          senderDeviceKey: myDeviceKey
+      });
+  }
+
+  // Jalur legacy (state lama tanpa metadataKey — grup pra-v2): metadata tetap
+  // pesan rantai. Reader v1 dipertahankan (rencana #5).
+  const result = await encryptMessage(payload, conversationId, true, undefined, `meta_${conversationId}`);
 
   const wrapper = {
     ...JSON.parse(result.ciphertext), // { header, ciphertext, signature }
@@ -160,8 +175,43 @@ export async function decryptGroupMetadata(
 ): Promise<{ title?: string; description?: string; avatarUrl?: string; participants?: string[] } | null> {
   try {
     const wrapper = JSON.parse(encryptedMetadataStr);
-    
-    // ✅ Ekstrak senderDeviceKey
+
+    // [V2 — RENCANA #2/#5] Metadata v2 KELUAR DARI CHAIN: dekripsi XChaCha
+    // dengan metadataKey era (receiver state di-route via chainId) + verifikasi
+    // tanda tangan pengirim. Reader v1 (metadata sebagai pesan rantai) tetap ada
+    // di bawah untuk blob lama di prod.
+    if (wrapper?.v === 2 && wrapper?.kind === 'group_metadata') {
+        const { workerXChaChaOpen } = await import('@lib/crypto-worker-proxy');
+        const { findGroupReceiverState } = await import('@lib/keychainDb');
+        const sodium = await getSodiumLib();
+        const record = await findGroupReceiverState(
+            conversationId,
+            { chainId: wrapper.chainId },
+            undefined,
+            wrapper.senderDeviceKey
+        );
+        const metaKey = record?.metadataKey;
+        if (!metaKey) {
+            console.warn('Group metadata v2: metadataKey era belum tersedia (menunggu distribusi)', wrapper.chainId);
+            return null;
+        }
+        if (!record?.signingKey) {
+            console.warn('Group metadata v2: signing key pengirim belum terikat ke state', wrapper.chainId);
+            return null;
+        }
+        const ctBytes = sodium.from_base64(wrapper.ct, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const signatureBytes = sodium.from_base64(wrapper.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const signingPubBytes = sodium.from_base64(record.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const valid = sodium.crypto_sign_verify_detached(signatureBytes, ctBytes, signingPubBytes);
+        if (!valid) {
+            console.error('Group metadata v2: signature TIDAK valid — blob ditolak');
+            return null;
+        }
+        const plaintext = await workerXChaChaOpen(metaKey, wrapper.ct);
+        return JSON.parse(plaintext);
+    }
+
+    // ✅ Ekstrak senderDeviceKey (jalur v1)
     const { senderId, senderDeviceKey, ...rest } = wrapper;
 
     if (!senderId) {
@@ -709,16 +759,16 @@ export async function ensureGroupSession(
       const { groupInitSenderKey, worker_pq_box_seal, worker_pq_box_seal_open } = await getWorkerProxy();
       const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
       const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      // [T2 FIX #9 2026-09-28] Public signing key dibawa dalam distribusi kunci
-      // (lihat komentar di distributionKeys.push di bawah).
       const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
       const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
 
-      const { senderKeyB64 } = await groupInitSenderKey();
+      // [V2 — RENCANA #1/#2] Era baru = chainKey + chainId RANDOM 64-bit +
+      // metadataKey 256-bit (metadata keluar dari chain).
+      const { senderKeyB64, chainIdB64, metadataKeyB64 } = await groupInitSenderKey();
 
       const myId = useAuthStore.getState().user?.id;
-      const distributionKeys: Record<string, unknown>[] = [];
       const missingKeys: string[] = [];
+      const targetsForDistribution: Array<{ userId: string; deviceId?: string; identityKey: string; pqIdentityKey: string }> = [];
 
       const userIdsToFetch: string[] = [];
       for (const p of participants) {
@@ -790,49 +840,11 @@ export async function ensureGroupSession(
                   console.error(`Invalid PQ public key length for device ${bundle.deviceId}: expected ${sodium.crypto_kem_xwing_PUBLICKEYBYTES}, got ${theirPqPublicKey.length}`);
                   continue;
               }
-
-              let finalEncryptedKeyStr = '';
-
-              try {
-                  const ckBytes = sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  const packed = new Uint8Array(4 + ckBytes.length);
-                  new DataView(packed.buffer).setUint32(0, 0, false);
-                  packed.set(ckBytes, 4);
-
-                  const encryptedKey = await worker_pq_box_seal(
-                      packed, 
-                      theirPqPublicKey,
-                      theirPublicKey
-                  );
-                  finalEncryptedKeyStr = sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-              } catch (e) {
-                  console.error(`[Crypto] Gagal mengenkripsi Sender Key untuk user ${uId} device ${bundle.deviceId}:`, e);
-                  continue;
-              }
-              
-              distributionKeys.push({
+              targetsForDistribution.push({
                   userId: uId,
-                  targetDeviceId: bundle.deviceId, 
-                  targetDeviceKey: bundle.identityKey,
-                  key: finalEncryptedKeyStr,
-                  type: 'GROUP_KEY',
-                  // [T1] senderId di sini = identitas routing distribusi kunci.
-                  // Pakai pseudonym bila peta v2 tersedia agar server tidak bisa
-                  // menghubungkan "siapa mendistribusikan kunci ke siapa" dengan
-                  // akun. Penerima resolve ke userId via metadata untuk
-                  // receiver-state store (handleGroupKeyDistribution).
-                  // [T1 FIX 2026-09-28] Prioritas: pseudonym eksplisit dari caller
-                  // (createGroup — peta belum ada di store) → store → fallback.
-                  senderId: opts?.pseudonym
-                      ?? (await getMyPseudonym(conversationId))
-                      ?? myId,
-                  senderDeviceKey: myIdentityKeyB64,
-                  // [T2 FIX #9 2026-09-28] Pola libsignal SenderKeyState: public
-                  // signing key pengirim dibawa dalam distribusi (yang dienkripsi
-                  // E2E pq_box_seal → server tak lihat) dan diikat ke receiver
-                  // state penerima. Verifikasi signature pesan selanjutnya tidak
-                  // butuh lookup metadata/bundle lagi.
-                  senderSigningKey: mySigningKeyB64
+                  deviceId: bundle.deviceId,
+                  identityKey: bundle.identityKey,
+                  pqIdentityKey: bundle.pqIdentityKey!
               });
           }
       }
@@ -853,25 +865,42 @@ export async function ensureGroupSession(
       // participants may not be synced yet, key request/fulfillment handles delivery).
       // [T2 FIX 2026-10-01] initialCK disimpan agar fulfillment key request selalu
       // menyegel chain key AWAL era (N=0) — bukan posisi ratchet saat ini.
+      // [V2] chainId random + metadataKey era ikut tersimpan (at-rest).
       await saveGroupSenderState({
           conversationId: conversationId as ConversationId,
           CK: senderKeyB64,
           N: 0,
           initialCK: senderKeyB64,
+          chainId: chainIdB64,
+          metadataKey: metadataKeyB64,
           messageCount: 0,
           requiresImmediateRotation: false
       });
 
-      // Save self-receiver state so sealed sender group messages from self can be routed by keyId
+      // [V2 — RENCANA #4] Distribusi lewat SATU jalur sendGroupSenderKeyDistribution.
+      const distributionKeys = await sendGroupSenderKeyDistribution(conversationId, {
+          CK: senderKeyB64,
+          N: 0,
+          initialCK: senderKeyB64,
+          chainId: chainIdB64,
+          metadataKey: metadataKeyB64
+      }, targetsForDistribution, { senderIdOverride: opts?.pseudonym });
+
+      // Save self-receiver state so sealed sender group messages from self can
+      // be routed by chainId — [REWRITE] id device-keyed (konsisten dengan
+      // getGroupReceiverState; format senderId-keyed adalah legacy).
       await saveGroupReceiverState({
-          id: `${conversationId}_${myId}_${myIdentityKeyB64}`,
+          id: `${conversationId}_${myIdentityKeyB64}`,
           conversationId: conversationId as ConversationId,
           senderId: myId as UserId,
           CK: senderKeyB64,
-          N: 0
+          N: 0,
+          eraCK: senderKeyB64,
+          chainId: chainIdB64,
+          metadataKey: metadataKeyB64
       });
 
-      return distributionKeys.length > 0 ? distributionKeys.filter(Boolean) : [];
+      return distributionKeys.length > 0 ? distributionKeys : [];
     } finally {
       groupSessionLocks.delete(conversationId);
     }
@@ -895,6 +924,100 @@ export type PairwiseKeyDistributionResult = {
   pairwise: number;
   legacy: Array<Record<string, unknown>>;
 };
+
+// --- [V2 2026-10-02 — RENCANA #4: SATU JALUR DISTRIBUSI] ====================
+// SenderKeyDistributionMessage ala libsignal: (chainId, iter=0, chainKey,
+// metadataKey, signingKey) — dipakai create/rotate/redistribute/fulfill/reply.
+// Tidak ada format kedua; parsing di handleGroupKeyDistribution.
+const GROUP_DISTRIBUTION_VERSION = 2;
+// v2: [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)] = 77 byte
+const GROUP_DISTRIBUTION_V2_LEN = 1 + 8 + 4 + 32 + 32;
+
+function packGroupDistributionEnvelopeV2(
+  sodium: Awaited<ReturnType<typeof getSodiumLib>>,
+  chainIdB64: string,
+  iter: number,
+  ckB64: string,
+  metaKeyB64: string
+): Uint8Array {
+  const b64 = (s: string) => sodium.from_base64(s, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const chainId = b64(chainIdB64);
+  const ck = b64(ckB64);
+  const mk = b64(metaKeyB64);
+  const out = new Uint8Array(GROUP_DISTRIBUTION_V2_LEN);
+  out[0] = GROUP_DISTRIBUTION_VERSION;
+  out.set(chainId, 1);
+  new DataView(out.buffer).setUint32(9, iter, false);
+  out.set(ck, 13);
+  out.set(mk, 13 + ck.length);
+  return out;
+}
+
+/**
+ * [V2 — SATU JALUR] Seal + kirim distribusi sender key era saat ini ke semua
+ * device target. `senderState` wajib punya initialCK (iter 0), chainId, dan
+ * metadataKey (era baru). State legacy tanpa metadataKey memakai pack v1
+ * (36-byte) — receiver lama maupun baru tetap bisa memprosesnya.
+ */
+export async function sendGroupSenderKeyDistribution(
+  conversationId: string,
+  senderState: { CK: string; N: number; initialCK?: string; chainId?: string; metadataKey?: string },
+  targets: Array<{ userId: string; deviceId?: string; identityKey: string; pqIdentityKey: string }>,
+  // [T1] override pseudonym untuk createGroup (peta belum ada di store).
+  opts: { senderIdOverride?: string } = {}
+): Promise<Array<Record<string, unknown>>> {
+  if (!targets.length) return [];
+  const sodium = await getSodiumLib();
+  const { worker_pq_box_seal } = await getWorkerProxy();
+  const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+  const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
+  const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
+  const myId = useAuthStore.getState().user?.id;
+
+  const useV2 = !!(senderState.metadataKey && senderState.chainId);
+  const ckToSeal = senderState.initialCK ?? senderState.CK;
+  const iterToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
+
+  let packed: Uint8Array;
+  if (useV2) {
+    packed = packGroupDistributionEnvelopeV2(sodium, senderState.chainId!, iterToSeal, ckToSeal, senderState.metadataKey!);
+  } else {
+    // Legacy v1: [u32 iter][CK]
+    const ckBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
+    packed = new Uint8Array(4 + ckBytes.length);
+    new DataView(packed.buffer).setUint32(0, iterToSeal, false);
+    packed.set(ckBytes, 4);
+  }
+
+  const distributionKeys: Array<Record<string, unknown>> = [];
+  for (const t of targets) {
+    if (t.identityKey === myIdentityKeyB64) continue;
+    try {
+      const encryptedKey = await worker_pq_box_seal(
+        packed,
+        sodium.from_base64(t.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+        sodium.from_base64(t.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+      );
+      distributionKeys.push({
+        userId: t.userId,
+        targetDeviceId: t.deviceId,
+        targetDeviceKey: t.identityKey,
+        key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+        type: 'GROUP_KEY',
+        senderId: opts.senderIdOverride ?? (await getMyPseudonym(conversationId)) ?? myId,
+        senderDeviceKey: myIdentityKeyB64,
+        senderSigningKey: mySigningKeyB64
+      });
+    } catch (e) {
+      console.warn(`[Distribution] Seal gagal untuk ${t.userId} device ${t.deviceId}:`, e);
+    }
+  }
+  if (distributionKeys.length > 0) {
+    await sendGroupKeyDistributionPairwise(conversationId, distributionKeys);
+  }
+  return distributionKeys;
+}
 
 /**
  * Kirim kunci grup ke setiap target via event `group:fulfilled_key` (jalur
@@ -990,10 +1113,21 @@ export async function handleGroupKeyDistribution(
       throw new Error('DECRYPTION_FAILED');
   }
 
+  // [V2 — RENCANA #4/#5] Parse envelope distribusi:
+  //   v2 (77B): [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
+  //   v1 (36B): [u32 iter][CK]      — reader dipertahankan (prod punya data)
+  //   v0 (32B): CK @ iter 0         — reader dipertahankan
   let currentN = 0;
   let finalCKBytes = senderKeyBytes;
+  let envelopeChainIdB64: string | undefined;
+  let metadataKeyB64: string | undefined;
 
-  if (senderKeyBytes.length === 36) {
+  if (senderKeyBytes.length === GROUP_DISTRIBUTION_V2_LEN && senderKeyBytes[0] === GROUP_DISTRIBUTION_VERSION) {
+      envelopeChainIdB64 = sodium.to_base64(senderKeyBytes.slice(1, 9), sodium.base64_variants.URLSAFE_NO_PADDING);
+      currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset + 9, 4).getUint32(0, false);
+      finalCKBytes = senderKeyBytes.slice(13, 45);
+      metadataKeyB64 = sodium.to_base64(senderKeyBytes.slice(45, 77), sodium.base64_variants.URLSAFE_NO_PADDING);
+  } else if (senderKeyBytes.length === 36) {
       currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset, senderKeyBytes.byteLength).getUint32(0, false);
       finalCKBytes = senderKeyBytes.slice(4);
   }
@@ -1047,8 +1181,11 @@ export async function handleGroupKeyDistribution(
           // fulfillment selalu seal (initialCK, N=0) → anchor terisi konsisten.
           eraCK,
           // [REWRITE 2026-10-02] chainId eksplisit ala libsignal chain_id —
-          // routing pesan penerima deterministik (pickChainState).
-          chainId: eraCK?.substring(0, 8),
+          // routing pesan penerima deterministik (pickChainState). Envelope v2
+          // membawa chainId RANDOM 64-bit dari pengirim; v1 fallback prefix.
+          chainId: envelopeChainIdB64 ?? eraCK?.substring(0, 8),
+          // [V2 — RENCANA #2] Kunci metadata era ikut terdistribusi.
+          metadataKey: metadataKeyB64 ?? existingReceiverState?.metadataKey,
           // [T2 FIX #9 2026-09-28] Ikat signing key pengirim sejak distribusi.
           signingKey: senderSigningKey ?? existingReceiverState?.signingKey
       });
@@ -1149,11 +1286,10 @@ export async function rotateGroupKey(
       let sent = await redistributeCurrentGroupKey(conversationId);
       if (sent === 0) {
         // Fallback: era belum ada sama sekali (metadata bukan v2/v3) — buat baru.
+        // [V2 — RENCANA #4] ensureGroupSession kini MENGIRIM distribusi sendiri
+        // (satu jalur) — tidak ada emit ganda.
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
-        if (distributionKeys && distributionKeys.length > 0) {
-          await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
-          sent = distributionKeys.length;
-        }
+        sent = distributionKeys?.length ?? 0;
       }
       useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
     } catch (e) {
@@ -1193,17 +1329,7 @@ export async function redistributeCurrentGroupKey(conversationId: string): Promi
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation) return 0;
 
-  const sodium = await getSodiumLib();
-  const { worker_pq_box_seal } = await getWorkerProxy();
-  const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
-  const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
-  const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
-
-  const ckToSeal = senderState.initialCK ?? senderState.CK;
-  const nToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
-  const ckBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
-
+  // [V2 — RENCANA #4] Distribusi lewat SATU jalur — tidak ada seal manual lagi.
   const userIds: string[] = [];
   for (const p of conversation.participants) {
     const uId = (p.userId || p.user?.id || p.id) as string;
@@ -1220,37 +1346,19 @@ export async function redistributeCurrentGroupKey(conversationId: string): Promi
     return 0;
   }
 
-  const distributionKeys: Record<string, unknown>[] = [];
+  const targets: Array<{ userId: string; deviceId?: string; identityKey: string; pqIdentityKey: string }> = [];
   for (const uId of userIds) {
     for (const bundle of (bundlesMap[uId] || [])) {
-      if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
-      try {
-        const packed = new Uint8Array(4 + ckBytes.length);
-        new DataView(packed.buffer).setUint32(0, nToSeal, false);
-        packed.set(ckBytes, 4);
-        const encryptedKey = await worker_pq_box_seal(
-          packed,
-          sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-          sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING)
-        );
-        distributionKeys.push({
-          userId: uId,
-          targetDeviceId: bundle.deviceId,
-          targetDeviceKey: bundle.identityKey,
-          key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-          type: 'GROUP_KEY',
-          senderId: await getMyPseudonym(conversationId) ?? myId,
-          senderDeviceKey: myIdentityKeyB64,
-          senderSigningKey: mySigningKeyB64
-        });
-      } catch (e) {
-        console.warn(`[redistribute] Seal failed for ${uId} device ${bundle.deviceId}:`, e);
-      }
+      targets.push({
+        userId: uId,
+        deviceId: bundle.deviceId,
+        identityKey: bundle.identityKey,
+        pqIdentityKey: bundle.pqIdentityKey!
+      });
     }
   }
-  if (distributionKeys.length === 0) return 0;
-  await sendGroupKeyDistributionPairwise(conversationId, distributionKeys);
-  return distributionKeys.length;
+  const sent = await sendGroupSenderKeyDistribution(conversationId, senderState, targets);
+  return sent.length;
 }
 
 const periodicGroupKeyRotationTimers = new Map<string, NodeJS.Timeout>();
@@ -1471,7 +1579,8 @@ async function doEncryptMessage(
           if (conversation) {
              const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
              if (distributionKeys) {
-               await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+               // [V2 — RENCANA #4] Distribusi sudah dikirim di dalam
+               // ensureGroupSession (satu jalur).
                // [T1 ROTATION] Periodic/PCS rotation (25 msgs / 1 jam) memicu
                // rotasi peta pseudonym juga — fire-and-forget: re-encrypt metadata
                // v2 dengan peta baru (generation+1) + push ke server. TIDAK di-await
@@ -1531,11 +1640,10 @@ async function doEncryptMessage(
       await storeMessageKeySecurely(messageId, result.mk);
   }
 
-  const keyId = senderState.CK.substring(0, 8);
-  // [REWRITE 2026-10-02] chainId era = prefix chain key AWAL era — stabil
-  // sepanjang rantai (keyId berubah tiap posisi). Penerima memakainya untuk
-  // memilih receiver state (pickChainState) tanpa menebak dari prefix.
-  const chainId = (senderState.initialCK ?? senderState.CK).substring(0, 8);
+  // [V2 — RENCANA #1] chainId = RANDOM 64-bit per era (bukan turunan CK).
+  // keyId legacy (prefix CK posisi) DIHAPUS dari wrapper v2 — penerima routing
+  // via chainId + header.n (iteration). State lama pra-v2: fallback prefix.
+  const chainId = senderState.chainId ?? (senderState.initialCK ?? senderState.CK).substring(0, 8);
 
   // [T1] Wrapper yang diteruskan server memakai PSEUDONYM (bukan userId) bila
   // peta metadata v2 tersedia. Server menyimpan nilai ini apa adanya di
@@ -1547,11 +1655,13 @@ async function doEncryptMessage(
   const senderIdForServer = myPseudo ?? myId;
 
   const payload = JSON.stringify({
+      // [V2 — RENCANA #5] Byte versi eksplisit: reader v1 dipertahankan untuk
+      // pesan lama di prod; wrapper v1 (keyId, tanpa v/chainId) tetap terbaca.
+      v: 2,
       header: result.header,
+      chainId: chainId,
       ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
       signature: result.signature,
-      keyId: keyId,
-      chainId: chainId,
       senderId: senderIdForServer,
       senderDeviceKey: myPublicKeyB64
   });
@@ -1566,6 +1676,9 @@ async function doEncryptMessage(
       // fulfillment key request berikutnya kembali seal state terkini
       // (Ratchet Advanced di penerima yang telat).
       initialCK: senderState.initialCK,
+      // [V2] chainId random + metadataKey era wajib ikut ter-preserve.
+      chainId: senderState.chainId,
+      metadataKey: senderState.metadataKey,
       createdAt: senderState.createdAt || Date.now(),
       messageCount: (senderState.messageCount || 0) + 1,
       lastActivityTime: Date.now(),
@@ -2297,7 +2410,10 @@ export async function deriveSessionKeyAsRecipient(
 interface GroupFulfillRequestPayload {
   conversationId: string;
   requesterId: string;
-  requesterPublicKey: string;
+  // [V2 — RENCANA #4] Opsional: fulfillment kini mengambil kunci device peminta
+  // sendiri dari server (fetchPublicKeys) — pemanggil internal (reply
+  // SYSTEM_KEY_REQUEST) tak perlu lagi menyertakan kunci.
+  requesterPublicKey?: string;
   requesterPqPublicKey?: string;
   requesterDeviceId?: string;
 }
@@ -2333,7 +2449,7 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const bundlesMap = await fetchPublicKeys([requesterId]);
   const targetDevices = bundlesMap[requesterId] || [];
 
-  const isMatched = targetDevices.some(d => d.identityKey === requesterPublicKeyB64 || d.identityKey === payload.requesterDeviceId);
+  const isMatched = !requesterPublicKeyB64 || targetDevices.some(d => d.identityKey === requesterPublicKeyB64 || d.identityKey === payload.requesterDeviceId);
   if (!isMatched && targetDevices.length > 0) {
       console.warn("Group key fulfillment: Provided keys do not perfectly match registered device keys. Bypassing strict validation as requester is a valid participant.");
   }
@@ -2341,56 +2457,18 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const senderState = await getGroupSenderState(conversationId);
   if (!senderState) return;
 
-  const sodium = await getSodiumLib();
-
-  // [T2 FIX 2026-10-01] WAJIB seal chain key AWAL era (N=0), bukan state ratchet
-  // saat ini. Jika pengirim sudah kirim beberapa pesan (N maju) lalu fulfill
-  // request dengan (CK_n, N=n), penerima yang telat tidak punya cara menurunkan
-  // message key pesan < n (KDF chain satu arah — forward secrecy) → SEMUA pesan
-  // lama gagal "Ratchet Advanced! Cannot decrypt old message (header.n=0,
-  // state.N=1)" (log 2-browser 2026-10-01). Pola libsignal Sender Key
-  // Distribution Message: distribusi era selalu memuat sender key awal; semua
-  // anggota menurunkan sendiri message key dari situ. Fallback ke perilaku lama
-  // untuk state legacy yang belum punya initialCK.
-  const ckToSeal = senderState.initialCK ?? senderState.CK;
-  const nToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
-
-  const senderKeyBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-  const payloadToEncrypt = new Uint8Array(4 + senderKeyBytes.length);
-  new DataView(payloadToEncrypt.buffer).setUint32(0, nToSeal, false);
-  payloadToEncrypt.set(senderKeyBytes, 4);
-
-  // Encrypt sender key with PQ box seal
-  try {
-    const { worker_pq_box_seal } = await getWorkerProxy();
-    const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const requesterPqPublicKey = requesterPqPublicKeyB64 ? sodium.from_base64(requesterPqPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
-    if (!requesterPqPublicKey || requesterPqPublicKey.length !== sodium.crypto_kem_xwing_PUBLICKEYBYTES) {
-        console.warn('[Group Key] Fulfillment: Requester missing or invalid PQ public key');
-        return;
-    }
-    const encryptedKeyForRequester = await worker_pq_box_seal(payloadToEncrypt, requesterPqPublicKey, requesterPublicKey);
-    const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
-    const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    // [T2 FIX #11 2026-09-29] Signing key WAJIB ikut di fulfillment — tanpa ini
-    // envelope offline catch-up tanpa senderSigningKey → penerima gagal
-    // verifikasi signature ("Missing sender signing key") walau kunci ter-unseal.
-    const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
-    const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
-    // [T1] Fulfillment = replay distribusi kunci → sertakan pseudonym agar
-    // requester mengenali sender via peta metadata (bukan via userId).
-    emitGroupKeyFulfillment({
-        requesterId, conversationId,
-        encryptedKey: sodium.to_base64(encryptedKeyForRequester, sodium.base64_variants.URLSAFE_NO_PADDING),
-        targetDeviceId: payload.requesterDeviceId,
-        senderDeviceKey: myIdentityKeyB64,
-        senderSigningKey: mySigningKeyB64,
-        senderPseudonym: await getMyPseudonym(conversationId)
-    });
-  } catch (e) {
-    console.error('[Group Key] Failed to encrypt sender key for fulfillment:', e);
-  }
+  // [V2 — RENCANA #4] Fulfillment = replay SenderKeyDistributionMessage era
+  // saat ini lewat jalur yang SAMA dengan create/rotate (envelope v2 memuat
+  // chainId, iter=0, chainKey, metadataKey). Tidak ada seal manual/format kedua.
+  const targets = targetDevices
+      .filter(d => !!d.pqIdentityKey)
+      .map(d => ({
+          userId: requesterId,
+          deviceId: d.deviceId,
+          identityKey: d.identityKey,
+          pqIdentityKey: d.pqIdentityKey!
+      }));
+  await sendGroupSenderKeyDistribution(conversationId, senderState, targets);
 }
 
 export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise<void> {

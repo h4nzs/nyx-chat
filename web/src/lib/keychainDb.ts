@@ -91,6 +91,11 @@ export interface GroupSenderState {
   // Sender Key Distribution Message libsignal: distribusi era selalu memuat
   // sender key awal; semua anggota menurunkan message key sendiri dari sana.
   initialCK?: string;
+  // [V2 2026-10-02 — RENCANA AWAL #1/#2] chainId RANDOM 64-bit per era (bukan
+  // turunan CK) + kunci metadata era (keluar dari chain — rencana #2).
+  // Keduanya dienkripsi at-rest bersama CK.
+  chainId?: string;
+  metadataKey?: string;
   createdAt?: number;
   messageCount?: number;
   lastActivityTime?: number;
@@ -111,6 +116,8 @@ export interface GroupReceiverState {
   // [REWRITE 2026-10-02] Identitas era eksplisit ala libsignal chain_id —
   // stabil sepanjang rantai (= 8-char prefix eraCK). Lihat groupEra.ts.
   chainId?: string;
+  // [V2 2026-10-02 — RENCANA #2] Kunci metadata era (at-rest terenkripsi).
+  metadataKey?: string;
   skippedKeys?: Record<string, string>;
   // [T2 FIX #9 2026-09-28] Public signing key pengirim, diikat SEJAK distribusi
   // kunci (pola libsignal SenderKeyState: sender_signing_key tersimpan di state
@@ -168,6 +175,10 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
         initialCK: record.state.initialCK
             ? (await decryptValueAtRest(record.state.initialCK)) ?? undefined
             : undefined,
+        chainId: record.state.chainId,
+        metadataKey: record.state.metadataKey
+            ? (await decryptValueAtRest(record.state.metadataKey)) ?? undefined
+            : undefined,
         createdAt: record.state.createdAt,
         messageCount: record.state.messageCount,
         lastActivityTime: record.state.lastActivityTime,
@@ -186,6 +197,8 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
             CK: await encryptValueAtRest(state.CK),
             N: state.N,
             initialCK: state.initialCK ? await encryptValueAtRest(state.initialCK) : undefined,
+            chainId: state.chainId,
+            metadataKey: state.metadataKey ? await encryptValueAtRest(state.metadataKey) : undefined,
             createdAt: state.createdAt,
             messageCount: state.messageCount,
             lastActivityTime: state.lastActivityTime,
@@ -232,6 +245,9 @@ export async function getGroupReceiverState(conversationId: string, senderId: st
         N: record.state.N,
         eraCK: record.state.eraCK,
         chainId: record.state.chainId,
+        metadataKey: record.state.metadataKey
+            ? (await decryptValueAtRest(record.state.metadataKey)) ?? undefined
+            : undefined,
         skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys),
         signingKey: record.state.signingKey
     } : null;
@@ -247,6 +263,7 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
             N: state.N,
             eraCK: state.eraCK,
             chainId: state.chainId,
+            metadataKey: state.metadataKey ? await encryptValueAtRest(state.metadataKey) : undefined,
             // senderId ikut disimpan agar getGroupReceiverStateByKeyId bisa
             // mengembalikan identitas pengirim yang benar (id record kini
             // device-keyed — parts[1] bukan lagi senderId).
@@ -292,6 +309,7 @@ export async function archiveGroupReceiverState(state: GroupReceiverState): Prom
           N: state.N,
           eraCK: state.eraCK ?? state.CK,
           chainId,
+          metadataKey: state.metadataKey ? await encryptValueAtRest(state.metadataKey) : undefined,
           senderId: state.senderId,
           skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
           signingKey: state.signingKey,
