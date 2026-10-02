@@ -91,17 +91,57 @@ The server never learns roles (Opaque Mailbox), so authorization = possession of
 - **Member sends before metadata decrypt:** non-creator members reconstruct the participant list from `getCachedGroupParticipants` (opaque-mailbox fallback) so they can send immediately.
 - **Key rotation pending:** `requiresKeyRotation` flag + `fireGhostSync` reconcile state after a metadata/participant mismatch.
 
+### 16.7.1 The four era invariants (2026-10, libsignal-derived)
+
+Adopted after comparing the group pipeline against libsignal's `SenderKeyRecord` /
+`process_sender_key_distribution_message` (`~/signal/libsignal/.../sender_keys.rs`,
+`group_cipher.rs`). These invariants eliminate the whole class of
+"decrypted-then-failed-again" bugs (reload / relogin / kick+re-add):
+
+1. **Multi-era receiver state.** Receiver states carry an **era anchor**
+   (`GroupReceiverState.eraCK` = chain key at the start of the era, N=0). Before a
+   new era overwrites the current state, the old state is **archived**
+   (`archiveGroupReceiverState`, id `` `${id}#era_${CK8}` ``, max 5 — mirrors
+   `MAX_SENDER_KEY_STATES=5`) and stays routable via the keyId scan in
+   `getGroupReceiverStateByKeyId`. **Never overwrite a live era.**
+2. **Idempotent receive.** A re-delivered distribution for the **same** era is a
+   no-op — it must never rewind a receiver that already advanced (the 2026-10-02
+   rewind bug: persistent `fulfilled_key` envelopes replay on every offline sync,
+   comparing raw CK made each replay look like a new era). Detection logic is the
+   pure helper `isSameEraDistribution` (`web/src/lib/groupEra.ts`, unit-tested in
+   `groupEra.test.ts`); legacy anchor-less states are handled safely.
+3. **Persist-before-render.** Successful `reDecryptPendingMessages` results are
+   written to the Shadow Vault (previously Zustand-only — bubbles looked fine but
+   the vault still held the failure, so a reload lost them). `upsertMessages`
+   **rejects every failure bubble** (`m.error` or any failure string — the old
+   Indonesian failure strings slipped the hasContent filter and got poisoned
+   permanently, with the "prevent overwriting valid message" shield protecting
+   the *failure*). The `isLocalValid` blacklist in both load paths is widened so
+   poisoned tombstones are re-decryptable when keys arrive.
+4. **Targeted heal.** Key requests go **to the sender of the failed message**
+   (pseudonym → userId resolve), not broadcast to the group — mirrors Signal's
+   `DecryptionErrorMessage` flow (`Signal-Desktop ts/util/handleRetry.preload.ts`,
+   5-retry / 14-day limits there). The first-message-of-a-new-group bug is closed
+   by hooking `reDecryptPendingMessages` to the moment metadata **newly** decrypts
+   in `addOrUpdateConversation` (previously `storeReceivedSessionKey` skipped the
+   re-decrypt while metadata was pending and nothing followed up).
+
+Also (MK persistence): group **skipped keys are no longer deleted after use** —
+capped at 200/conversation (LRU) in `storeGroupSkippedKey` — so repeated reloads
+can still decrypt messages whose message keys the ratchet already passed.
+
 ## 16.8 Files to know
 
 | File | Role |
 |---|---|
 | `web/src/store/conversation.ts` | `createGroup`, `addOrUpdateConversation`, `updateConversation`, participant ops |
 | `web/src/utils/crypto.ts` | `ensureGroupSession`, `encryptGroupMetadata`, `decryptGroupMetadata`, `forceRotateGroupSenderKey` |
-| `web/src/lib/keychainDb.ts` | sender/receiver ratchet state, cached participants, at-rest encryption |
+| `web/src/lib/keychainDb.ts` | sender/receiver ratchet state, era archives (`archiveGroupReceiverState`), skipped keys (LRU-capped), cached participants, at-rest encryption |
 | `web/src/lib/messagePipeline.ts` | `GROUP_KEY_DISTRIBUTION` control handling |
 | `server/src/routes/conversations.ts` | group endpoints + blind auth (`X-Group-Token`) + admin capability guard (`X-Admin-Token`) |
 | `server/src/utils/adminCapability.ts` | `extractHeader`, `hashAdminToken`, `isAdminTokenValid` (+ 12 unit tests in `server/tests/adminCapability.test.ts`) |
 | `web/src/lib/groupPseudonyms.ts` | `generateAdminCapabilityToken` / `storeMyAdminToken` / `hydrateMyAdminTokens` (kvStore `nyx_group_admin_tokens`) |
+| `web/src/lib/groupEra.ts` | `isSameEraDistribution` — pure replay/era detection (invariant 2, unit-tested) |
 | `server/src/network/redisBridge.ts` | `messages:distribute_keys`, `group:*` events |
 
 **[Blueprint 26 additions]** `web/src/lib/groupPseudonyms.ts` (pseudonym + delivery-token maps), `web/src/lib/coverTraffic.ts` (Poisson cover scheduler), `web/src/utils/typeGuards.ts` (`GROUP_KEY` / `COVER` silent types), `server/tests/deliveryTokens.test.ts` (T3b contract).

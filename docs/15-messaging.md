@@ -46,7 +46,7 @@ sequenceDiagram
 ## 15.3 Message statuses & read receipts
 
 - Statuses: `SENT` → `DELIVERED` → `READ`. The server stores `MessageStatus` rows and relays `message:status_updated`.
-- **1:1 read = delete:** when a 1:1 message is READ, the server deletes it immediately (`handleMessageStatusUpdate`) — the recipient's device already has the ciphertext and key, so nothing is lost.
+- **1:1 read = TTL grace, not immediate delete:** a READ receipt arms a 24-hour grace window (`READ_DELETE_GRACE_MS`) on the server row; the `messageSweeper` deletes after expiry. Receipts are one-shot — repeat READs never extend retention. The grace doubles as the **heal window** (§15.7.1): ciphertext that failed to decrypt client-side can be re-fetched for re-decryption once keys are repaired. Client-side, READ receipts are only sent for messages that **successfully decrypted** (`isLiveReadSafe` / `isUndecryptable` guards) — a premature receipt used to destroy the only server copy.
 - `ChatWindow` batches mark-as-read events and only fires them when the Virtuoso row is actually visible (IntersectionObserver).
 
 ## 15.4 Reactions, edits, unsend
@@ -76,6 +76,37 @@ All three are **E2EE tombstone control messages** carried through the normal mes
 - **Offline queue** (`offlineQueueDb.ts`): messages composed while disconnected are persisted and re-sent on reconnect (`processOfflineQueue`).
 - **Pending mail:** the server keeps messages for 14 days (`GET /api/messages/:conversationId?limit=250`). On (re)connect, `socketListeners.doSyncMessages` fetches each conversation's pending messages; `loadMessagesForConversation` sorts chronologically and processes control messages (group keys, metadata) first so keys arrive before encrypted content.
 - Messages are deduplicated by id against the Shadow Vault.
+
+### 15.7.1 DR session resilience — the 1:1 era invariants (2026-10, libsignal-derived)
+
+The 1:1 Double Ratchet state follows the same discipline as the group pipeline
+(§16.7.1), modelled on libsignal's `SessionRecord` /
+`session_cipher_legacy.rs`. Previously `ratchetSessions` held a **single mutable
+row** — a new X3DH/DH step destroyed the old state, and skipped keys were
+one-shot, so out-of-order or late-arriving messages failed permanently with
+`Ratchet Advanced!`:
+
+1. **Archived session (fallback era lookup).** Before a state is overwritten,
+   `storeRatchetSession` archives the old one under `` `${conversationId}#archived` ``
+   (one slot — mirrors `ARCHIVED_STATES_MAX_LENGTH`, simplified). When the current
+   state misses (`Ratchet Advanced` / `older than current state` / MAC failure),
+   `doDecryptMessage` retries with the archive **before** declaring failure — the
+   `promote_old_session` pattern. Archive misses never advance the current state.
+2. **Skipped keys persist (MK-persist).** `deleteSkippedKey` is now a no-op; keys
+   accumulate in `skippedKeys` with an LRU cap of 200/conversation in
+   `storeSkippedKey` (mirrors `state.set_message_keys`). Repeated reloads can
+   still decrypt messages whose message keys the ratchet already passed.
+3. **Duplicate = success.** The per-`messageId` MK cache is checked at the top of
+   the DR path; an already-decrypted message decrypts from cache instead of
+   colliding with the advanced ratchet (controlled `DuplicatedMessage` semantics).
+4. **Erase-path audit.** Soft logout only clears the auto-unlock slot — the
+   at-rest keychain (ratchet sessions, skipped keys, MK cache) survives relogin;
+   `clearAllKeys()` runs only in the nuke path. `deleteConversationKeychain`
+   also removes the archive.
+
+Not adopted deliberately: Signal's `MAX_FORWARD_JUMPS=25_000` (too loose for NYX's
+threat model — `MAX_SKIP=1000` stands) and the manual identity-key approval
+prompt (NYX warns automatically, consistent with its opaque/blind-index posture).
 
 ## 15.8 Ghost sync & link preview
 
