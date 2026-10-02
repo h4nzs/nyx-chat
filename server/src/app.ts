@@ -226,6 +226,7 @@ const corsMiddleware = cors({
     // anggota baru gagal decrypt metadata & gagal kirim).
     "x-admin-token",
     "x-delivery-tokens",
+    "x-group-credentials",
     "x-delete-token"
   ],
 });
