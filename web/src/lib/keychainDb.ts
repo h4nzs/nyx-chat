@@ -192,9 +192,20 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
 
 export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
   return enqueueWrite(async () => {
-    const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
-    const record = await db.groupReceiverStates.get(id);
-    
+    // [BUGFIX 2026-10-02 — STATE KEY BY DEVICE] Sender identity TIDAK STABIL:
+    // wrapper metadata memakai userId mentah, envelope kunci memakai pseudonym
+    // (yang berubah tiap rotasi metadata generation+1) — state yang di-store
+    // di bawah kunci (pseudonym, device) tidak pernah ditemukan oleh lookup
+    // metadata (rawId, device) → anggota baru selamanya "pending waiting_for_key"
+    // untuk metadata. Solusi ala libsignal (state keyed by alamat pengirim yang
+    // STABIL): kunci utama = (conversationId, senderDeviceKey) — identity key
+    // device pengirim, unik & ada di SEMUA wrapper (metadata, pesan, envelope).
+    // Fallback ke id legacy (senderId-keyed) untuk state lama.
+    const record = senderDeviceKey
+        ? (await db.groupReceiverStates.get(`${conversationId}_${senderDeviceKey}`))
+          ?? (await db.groupReceiverStates.get(`${conversationId}_${senderId}_${senderDeviceKey}`))
+        : await db.groupReceiverStates.get(`${conversationId}_${senderId}`);
+
     let ckString = '';
     if (record) {
         const rawCk: unknown = record.state.CK;
@@ -212,7 +223,7 @@ export async function getGroupReceiverState(conversationId: string, senderId: st
     return record ? {
         id: record.id,
         conversationId: asConversationId(conversationId),
-        senderId: asUserId(senderId),
+        senderId: asUserId(record.state.senderId || senderId),
         CK: ckPlain,
         N: record.state.N,
         eraCK: record.state.eraCK,
@@ -230,6 +241,10 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
             CK: await encryptValueAtRest(state.CK),
             N: state.N,
             eraCK: state.eraCK,
+            // senderId ikut disimpan agar getGroupReceiverStateByKeyId bisa
+            // mengembalikan identitas pengirim yang benar (id record kini
+            // device-keyed — parts[1] bukan lagi senderId).
+            senderId: state.senderId,
             skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
             // Public key — tidak sensitif (bukan private), simpan plaintext.
             signingKey: state.signingKey
@@ -882,8 +897,9 @@ export async function getGroupReceiverStateByKeyId(conversationId: string, keyId
         if (ckPlain === null) continue;
 
         if (ckPlain.substring(0, 8) === keyId) {
-            const parts = record.id.split('_');
-            const senderId = parts[1] ?? '';
+            // [BUGFIX 2026-10-02] id record kini device-keyed (`${conv}_${deviceKey}`)
+            // — parts[1] BUKAN lagi senderId. senderId asli disimpan di state.
+            const senderId = record.state.senderId || record.id.split('_')[1] || '';
             
             return {
                 id: record.id,

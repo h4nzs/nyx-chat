@@ -177,25 +177,14 @@ export async function decryptGroupMetadata(
        senderDeviceKey 
     });
     
-    // Save receiver state before metadata decryption so it doesn't get ratcheted
-    // by a non-user message (which would break subsequent user message keyId matching).
-    const { getGroupReceiverState, saveGroupReceiverState } = await import('@lib/keychainDb');
-    const rsBefore = senderDeviceKey
-        ? await getGroupReceiverState(conversationId, senderId, senderDeviceKey)
-        : await getGroupReceiverState(conversationId, senderId);
-
+    // [FIX 2026-10-02] Dekripsi metadata TIDAK lagi mem-persist ratchet state
+    // (persistState:false) — metadata hanyalah pesan di posisi N=0 rantai;
+    // penerima menutup gap-nya via skipped keys saat pesan nyata datang. Hack
+    // lama advance→restore (rsBefore/rsAfter) racy saat dua dekripsi metadata
+    // paralel: restore bisa menimpa state yang sudah maju sehingga pesan
+    // pertama pengirim gagal "Ratchet Advanced (header.n=0, state.N=1)".
     // Pass the pseudo-messageId so the creator can decrypt it from their local MK cache
-    const result = await decryptMessage(cipherPayload, conversationId, true, senderId, `meta_${conversationId}`);
-
-    // Restore receiver state if it was ratcheted by this metadata decrypt
-    if (rsBefore) {
-        const rsAfter = senderDeviceKey
-            ? await getGroupReceiverState(conversationId, senderId, senderDeviceKey)
-            : await getGroupReceiverState(conversationId, senderId);
-        if (rsAfter && rsAfter.N !== rsBefore.N) {
-            await saveGroupReceiverState(rsBefore).catch(e => console.warn("Failed to restore receiver state after metadata decrypt", e));
-        }
-    }
+    const result = await decryptMessage(cipherPayload, conversationId, true, senderId, `meta_${conversationId}`, { persistState: false });
     
     if (result.status === 'success') {
       try {
@@ -1014,7 +1003,12 @@ export async function handleGroupKeyDistribution(
 
   const senderKeyB64 = sodium.to_base64(finalCKBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+  // [BUGFIX 2026-10-02 — STATE KEY BY DEVICE] State dikunci per DEVICE pengirim
+  // (identity key stabil lintas pseudonym/userId — wrapper metadata memakai
+  // userId mentah, envelope memakai pseudonym; keying by senderId membuat dua
+  // state terpisah untuk rantai yang sama → anggota baru selamanya "pending"
+  // untuk metadata). Lengkap dengan senderId di dalam state untuk lookup byKeyId.
+  const stateId = senderDeviceKey ? `${conversationId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
 
   const existingReceiverState = await getGroupReceiverState(conversationId, senderId, senderDeviceKey || undefined);
   // [INVARIANT 2 — IDEMPOTENT RECEIVE 2026-10-02] Pola libsignal
@@ -1580,10 +1574,17 @@ export async function decryptMessage(
   conversationId: string,
   isGroup: boolean,
   sessionId: string | null | undefined, // In group, this might be senderId
-  messageId?: string
+  messageId?: string,
+  // [FIX 2026-10-02] `persistState: false` = decrypt atas SNAPSHOT state tanpa
+  // mem-persist hasil advance-nya (dipakai dekripsi METADATA: metadata hanyalah
+  // pesan di posisi N=0 rantai — penerima menutup gap-nya lewat skipped keys,
+  // persis model libsignal; hack advance→restore lama racy saat dua dekripsi
+  // metadata berjalan paralel dan menyisakan state N=1 tanpa skipped key →
+  // pesan pertama pengirim gagal "Ratchet Advanced").
+  options: { persistState?: boolean } = {}
 ): Promise<DecryptResult> {
   return navigator.locks.request(`ratchet_${conversationId}`, async () => {
-    return await doDecryptMessage(cipher, conversationId, isGroup, sessionId, messageId);
+    return await doDecryptMessage(cipher, conversationId, isGroup, sessionId, messageId, options);
   });
 }
 
@@ -1592,7 +1593,8 @@ async function doDecryptMessage(
   conversationId: string,
   isGroup: boolean,
   sessionId: string | null | undefined,
-  messageId?: string
+  messageId?: string,
+  options: { persistState?: boolean } = {}
 ): Promise<DecryptResult> {
   if (!cipher) return { status: 'success', value: '' };
 
@@ -1814,14 +1816,19 @@ async function doDecryptMessage(
             await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk, keyIdForSkip);
         }
 
-        await saveGroupReceiverState({
-            ...receiverState,
-            id: receiverState.id, 
-            conversationId: conversationId as ConversationId,
-            senderId: senderId as UserId,
-            CK: result.state.CK,
-            N: result.state.N
-        });
+        // [FIX 2026-10-02] persistState:false (dekripsi metadata) = JANGAN
+        // persist state hasil advance. MK pesan & skipped keys tetap disimpan
+        // — pesan nyata di posisi berikutnya menutup gap via skipped keys.
+        if (options.persistState !== false) {
+            await saveGroupReceiverState({
+                ...receiverState,
+                id: receiverState.id, 
+                conversationId: conversationId as ConversationId,
+                senderId: senderId as UserId,
+                CK: result.state.CK,
+                N: result.state.N
+            });
+        }
         
         if (messageId && result.mk) {
             await storeMessageKeySecurely(messageId, result.mk);

@@ -27,6 +27,10 @@ export interface GroupRatchetState {
   // state) — identitas era untuk deteksi replay distribusi (idempotent receive,
   // tanpa rewind). Juga dipakai arsip era lama (archiveGroupReceiverState).
   eraCK?: string;
+  // [BUGFIX 2026-10-02] Identitas pengirim (pseudonym/userId) di dalam state —
+  // id record kini device-keyed (`${conv}_${deviceKey}`) sehingga parts[1]
+  // bukan lagi senderId; getGroupReceiverStateByKeyId membaca dari sini.
+  senderId?: string;
   // Tanggal arsip (arsip era lama saja).
   archivedAt?: number;
 }
