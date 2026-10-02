@@ -218,7 +218,15 @@ const corsMiddleware = cors({
     "x-csrf-token",
     "x-nyx-fingerprint",
     "x-nyx-installation-id",
-    "x-group-token"
+    "x-group-token",
+    // [BUGFIX CORS 2026-10-02] Header capability/ blind-auth WAJIB di-whitelist
+    // — tanpa ini preflight OPTIONS gagal dan SEMUA request ber-header ini
+    // diblokir browser (terlihat di log: add-participant → key-rotation & PUT
+    // details NetworkError → metadata era baru tak pernah sampai ke server →
+    // anggota baru gagal decrypt metadata & gagal kirim).
+    "x-admin-token",
+    "x-delivery-tokens",
+    "x-delete-token"
   ],
 });
 
