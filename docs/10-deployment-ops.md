@@ -12,7 +12,9 @@
 | Redis | `127.0.0.1:6379` | pub/sub bridge + caches |
 | Storage | Cloudflare R2 | Encrypted blobs |
 
-VPS: Debian 13, **1 core / 1GB RAM / 2GB swap**, `vm.swappiness=10`, PostgreSQL tuned for low memory. Keep this in mind before adding workers/queues.
+VPS: Debian 13, **4 core / 8GB RAM / 4GB swap** (upgraded 2026-10 from 1 core / 1GB RAM), `vm.swappiness=10`, PostgreSQL re-tuned for the larger box (see §10.11). The principle from docs/26 §26.9 still applies: the upgrade buys margin for privacy features, not bloat.
+
+> ℹ️ The pre-upgrade sizing notes ("low-memory Postgres", replica caps, `password.ts` Argon2 "sweet spot") were written for the 1 GB box — treat them as historical context, not current constraints.
 
 ## 10.2 CI (`.github/workflows/ci.yml`)
 
@@ -21,7 +23,7 @@ On PR and push to `main`:
 | Job | Content |
 |---|---|
 | `build` | frozen-lockfile install → prisma generate → `pnpm run build` |
-| `unit` | `pnpm run test` (33 server + 29 web tests) |
+| `unit` | `pnpm run test` (102 server + 164 web tests) |
 | `lint` | non-blocking (`continue-on-error`) — typescript-eslint ≠ TS 7 |
 | `audit` | `pnpm audit --prod` |
 | `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip |
@@ -254,12 +256,46 @@ Node process today can become N replicas later without protocol changes:
 3. **Redis & Postgres stay shared singletons** — they are already the coordination
    layer; nothing else to change.
 4. **Memory budget**: each extra Node replica adds roughly the current RSS of
-   `nyx-api`. On the 1 GB + 1 GB swap VPS this caps practical replicas at ~2–3;
-   beyond that, move to a bigger box first.
+   `nyx-api`. On the upgraded 4 core / 8 GB RAM / 4 GB swap VPS, ~4–6 replicas fit
+   comfortably; beyond that, vertical scaling is still the cheapest first step.
 5. The Rust WebTransport sidecar keeps its own session map per replica — if you ever
    run multiple sidecars, device targeting already tolerates unknown device IDs
    (continue-on-nonmatch), but presence fan-out assumes one sidecar; treat multi-sidecar
    as unsupported until it needs to exist.
+
+## 10.11 Post-upgrade tuning (4 core / 8 GB RAM / 4 GB swap)
+
+Recommended settings for the new box (owner ops on the VPS; `deploy.yml` does not manage sysctl/Postgres/Redis config):
+
+**Sysctl / kernel**
+
+- Keep `vm.swappiness=10` (RAM is plentiful now, swap stays an emergency buffer).
+- Optional: `vm.vfs_cache_pressure=50` — retains more inode/dentry cache now that RAM is not scarce.
+
+**PostgreSQL (replaces the old low-memory tuning)**
+
+```ini
+shared_buffers = 2GB            # 25% of RAM
+effective_cache_size = 6GB      # OS cache estimate (75%)
+work_mem = 16MB                 # per sort/hash node — 16MB is plenty at this scale
+maintenance_work_mem = 512MB    # autovacuum / index builds
+max_connections = 100
+max_wal_size = 2GB
+checkpoint_completion_target = 0.9
+random_page_cost = 1.1          # SSD-backed volume
+```
+
+Restart Postgres after the change and confirm with `SHOW shared_buffers;`.
+
+**Redis**
+
+- `maxmemory 768mb` + `maxmemory-policy allkeys-lru` for the cache keyspace; rate-limit keys rely on `noeviction` semantics — keep them in a separate logical DB or ensure the LRU pool never contains them (docs/27 §27.1).
+- Enable AOF persistence (`appendonly yes`, `appendfsync everysec`) — the bridge state is rebuildable but restarts are faster and pub/sub counter state survives.
+
+**PM2 / Node**
+
+- `deploy.yml` starts `nyx-api` with `-i max` (cluster = 1 worker per core) and `--max-old-space-size=1024`. On 4 cores that is a ~4 GB worst case — still fine under 8 GB alongside Postgres (2 GB) + Redis (< 1 GB). Raise `--max-old-space-size` to `1536` only if RSS actually climbs; don't preemptively.
+- The Rust sidecar's tokio runtime now gets real parallelism — leave `nyx-sidecar` as a single fork instance; it no longer competes with the API cluster for the one core.
 
 
 

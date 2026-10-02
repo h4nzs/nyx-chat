@@ -16,7 +16,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 |---|---|---|
 | `auth.ts` | `/api/auth` | `transport-ticket`, `register`, `login`, `burner`, `refresh`, `recover`(+challenge), `logout`/`logout-all`, `pow/challenge`+`verify`, `webauthn/register/*`, `webauthn/login/*` |
 | `users.ts` | `/api/users` | `me`, `me/devices`, `me/blocked`, `:id/block`, `me/keys`, `me/complete-onboarding`, `me` (DELETE account), `search`, `:id` |
-| `conversations.ts` | `/api/conversations` | `sync`, create, `:id`, `:id/details`, `:id/participants`, `:id/leave`, `:id` (DELETE), `:id/pin`, `:id/key-rotation` |
+| `conversations.ts` | `/api/conversations` | `sync`, create, `:id`, `:id/details`, `:id/participants`, `:id/leave`, `:id/group` (DELETE — admin purge), `:id` (DELETE), `:id/pin`, `:id/key-rotation` |
 | `messages.ts` | `/api/messages` | `:conversationId` (pending fetch), `POST /` (blind send), `:id` (DELETE blind) |
 | `keys.ts` | `/api/keys` | `prekey-bundle`, `upload-otpk`, `count-otpk`, `otpk` (DELETE), `prekey-bundle/:userId`, `public-keys`, `prekey-bundles`, `initial-session/...`, `turn` |
 | `sessionKeys.ts` | `/api/session-keys` | `:conversationId/devices/:deviceId`, `:conversationId/ratchet` |

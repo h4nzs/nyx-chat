@@ -134,7 +134,7 @@ Because we don't sync history to the cloud, YOU own your data. To ensure maximum
 NYX is an open-source fortress, and we welcome operatives to inspect the walls.
 
   * **Strict Rule:** Do NOT update or touch `libsodium-wrappers` unless upgrading specifically for newer PQC primitives. Cryptographic backward compatibility is our highest priority.
-  * **Linting:** We strictly enforce ESLint v10 (Flat Config). Ensure `pnpm run build` passes with zero warnings before opening a PR (except unused-var can be ignored).
+  * **Linting:** ESLint is currently **non-blocking** repo-wide (typescript-eslint does not yet support TypeScript 7 — the CI lint job runs with `continue-on-error` on purpose). Ensure `pnpm run build` and `npx tsc --noEmit` pass cleanly before opening a PR.
 
 Please check the `CONTRIBUTING.md` and use the provided PR templates.
 

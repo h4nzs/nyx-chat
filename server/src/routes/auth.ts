@@ -743,8 +743,8 @@ router.post('/pow/verify',
       const { nonce } = req.body;
       const userId = req.user!.id;
 
-      // Throttle verify per-user SEBELUM kerja Argon2 (16 MB per percobaan
-      // di VPS 1 core). INCR+EXPIRE atomik (Lua), jendela 1 jam.
+      // Throttle verify per-user SEBELUM kerja Argon2 (16 MB per percobaan).
+      // INCR+EXPIRE atomik (Lua), jendela 1 jam.
       const vCount = Number(await redisClient.eval(`
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then

@@ -58,7 +58,7 @@ flowchart TB
         TW <-->|QUIC / WebTransport| WT
     end
 
-    subgraph VPS["VPS (Debian, 1 core / 1GB RAM / 2GB swap)"]
+    subgraph VPS["VPS (Debian, 4 core / 8GB RAM / 4GB swap)"]
         NG[Nginx + Cloudflare Tunnel]
         subgraph PM2["PM2"]
             API2[nyx-api<br/>Express cluster]

@@ -10,7 +10,7 @@
 
 Server tests are listed explicitly in `server/package.json` (`tsx --test tests/…`). They must **not** require Postgres/Redis — Prisma clients are faked (see `tests/sessionKeys.test.ts`).
 
-Web test files: `src/lib/__tests__/{burnerFileData,refreshLock}.test.ts` and `src/utils/__tests__/{date,sanitize,typeGuards,url}.test.ts`.
+Web test files live in `src/lib/__tests__/` (biometric/auto-unlock, cover traffic, group metadata/roster/pseudonyms, pairwise key delivery, refresh lock/retry, shadow-vault delete, socket sync/listeners, transport mode/queue, burner file data), `src/store/__tests__/` (connection, send watchdog, silent refresh, participant sync, unread count), `src/utils/__tests__/` (date, sanitize, tempId, typeGuards, url), and `src/components/__tests__/passwordPromptBiometric.test.tsx`.
 
 Covered areas: password hashing, `safeEqualStrings`, JWT, `toRawServerMessage` (incl. a regression guard that `ciphertext` is never emitted), session-key blind relay, type guards, sanitize (XSS + secret redaction), URL helpers, date formatting.
 

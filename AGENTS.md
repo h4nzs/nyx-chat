@@ -34,6 +34,7 @@ NYX: zero-knowledge post-quantum messenger. pnpm monorepo: `web` (React 19 + Vit
 - Rate limiting uses atomic Lua INCR+EXPIRE (`redisBridge.ts` RATE_LIMIT_LUA, auth pow, sandbox newchat) — do not reintroduce incr-then-expire races.
 - Single-active-device check runs per-opcode in `redisBridge.ts` (`isActiveDeviceAllowed`, 60s cache). CSRF server state is keyed per client via `x-nyx-installation-id` header (app.ts) — client `web/src/lib/api.ts` must send that header consistently (same value as `getPersistentInstallationId()`), or login/register break with 403.
 - Redis pub/sub: `nyx:upstream:<opCode>` / `nyx:downstream`. Relay payloads must NOT duplicate `content` into a `ciphertext` field (`mappers.ts`).
+- Group admin capability (RBAC): the server stores only `Conversation.adminSecretHash` (SHA-256 of the 256-bit `X-Admin-Token` header); guard = `requireAdminCapability` (`server/src/utils/adminCapability.ts`) on `PUT /:id/details`, `POST /:id/key-rotation`, `DELETE /:id/group`. **NULL hash = legacy bypass** (pre-RBAC groups keep working). `DELETE /:id/group` purges the group and answers 409 `MEMBERS_REMAIN` while delivery tokens still exist. New columns REQUIRE the `prisma db push` on the VPS to have run before new clients are rolled out.
 
 ## Frontend gotchas
 
@@ -45,10 +46,10 @@ NYX: zero-knowledge post-quantum messenger. pnpm monorepo: `web` (React 19 + Vit
 
 ## Deploy / ops
 
-- Push to `main` triggers `deploy.yml`: CI builds everything + Rust sidecar, zips, SCP to VPS, pm2 restarts `nyx-api` / `nyx-sidecar`, and **overwrites `/root/nyx-app/server/.env` with `/root/nyx-app/.env`** — prod secrets live only on the VPS (`.env` files are gitignored; `.env.example` at root and `server/` are the templates).
+- Push to `main` triggers `deploy.yml`: CI builds everything + Rust sidecar, zips, SCP to VPS, on-VPS `pnpm install` + `prisma db push` (consent env, `|| true` — schema changes ship with every deploy, still verify the push didn't fail), pm2 restarts `nyx-api` / `nyx-sidecar`, and **overwrites `/root/nyx-app/server/.env` with `/root/nyx-app/.env`** — prod secrets live only on the VPS (`.env` files are gitignored; `.env.example` at root and `server/` are the templates).
 - Prod DB is LOCAL Postgres on the VPS (`postgres://nyx:…@127.0.0.1:5432/nyx_app`); old Aiven host is dead. DB password is in `/root/.nyx_db_pass` (0600); daily backup cron dumps to `/root/backups/`.
 - CI: `ci.yml` (build, unit, lint-nonblocking, `pnpm audit --prod`, e2e with Postgres/Redis services, `e2e-chrome` for WebTransport specs). Install always uses `--frozen-lockfile`; pnpm pinned via `packageManager: pnpm@11.4.0`.
-- VPS is small (1 core, ~1GB RAM, 2GB swap, `vm.swappiness=10`, Postgres tuned for low memory) — keep memory usage in mind when changing workers/queues.
+- VPS (upgraded 2026-10): **4 core / 8GB RAM / 4GB swap**, `vm.swappiness=10`, Postgres re-tuned for the larger box (`shared_buffers=2GB`, `effective_cache_size=6GB`). Keep memory usage in mind when changing workers/queues — the upgrade buys margin for privacy features, not bloat (docs/26 §26.9).
 
 ## Testing notes
 

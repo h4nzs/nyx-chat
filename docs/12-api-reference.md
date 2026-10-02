@@ -45,15 +45,20 @@ Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. R
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/` | Create (1:1 or group). Sandbox: 3/day for unverified → `SANDBOX_LIMIT` |
-| GET | `/sync?ids=…` | Fetch conversations (Opaque Mailbox) |
+| POST | `/` | Create (1:1 or group). Group create may carry `adminSecretHash` (SHA-256 hex of the admin capability token). Sandbox: 3/day for unverified → `SANDBOX_LIMIT` |
+| GET | `/sync?ids=…` | Fetch conversations (Opaque Mailbox). Token-first discovery: client sends `X-Delivery-Tokens` (base64url, cap 500) — no userId join |
+| GET | `/credential-issuer-key` | Blind-RSA credential issuer public JWK + `keyVersion` (Blueprint 26.8.1) |
+| POST | `/credential-issuance` | `{conversationId, blindedMsg}` (base64url, ≤512B) → `{blindSig, keyVersion}`; server sees only the blinded message; quota 3/(user,conv)/day (429 `CREDENTIAL_QUOTA`) |
+| POST | `/credential-commit` | `{conversationId, keyVersion, serial}` after client finalize — binds serial↔conversation for verification/revocation |
+| POST | `/:id/credential-revoke` | `{serials[]}` (≤500) + `X-Group-Token` — revokes group credentials on kick/leave |
 | GET | `/:id` | Single conversation |
-| PUT | `/:id/details` | Update `{encryptedMetadata}` — requires `X-Group-Token` (blind auth) |
+| PUT | `/:id/details` | Update `{encryptedMetadata}` — requires `X-Group-Token` (member blind auth); group admin ops also accept `X-Admin-Token` (checked against `adminSecretHash` via `requireAdminCapability`) |
 | POST | `/:id/participants` | Broadcast participant add intent (blind) |
 | DELETE | `/:id/participants/:userId` | Broadcast participant remove intent |
 | DELETE | `/:id/leave` | Leave group (blind token) |
 | POST | `/:id/pin` | Pin/unpin conversation |
-| POST | `/:id/key-rotation` | Request sender-key rotation |
+| POST | `/:id/key-rotation` | Request sender-key rotation — requires `X-Admin-Token` when `adminSecretHash` is set |
+| DELETE | `/:id/group` | **Admin-only purge** (`X-Admin-Token`): deletes the conversation + messages + delivery tokens, emits `conversation:deleted`; 409 `MEMBERS_REMAIN` while non-owner delivery tokens still exist |
 | DELETE | `/:id` | Delete/hide conversation |
 
 ## messages — `/api/messages`

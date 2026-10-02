@@ -22,7 +22,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 |---|---|
 | [14-auth-identity.md](14-auth-identity.md) | Registration, password & biometric login, refresh, recovery, devices, ghost profiles, safety numbers, vault export/migration |
 | [15-messaging.md](15-messaging.md) | Send/receive pipeline, statuses, reactions/edit/unsend, view-once, silent, expiry, voice, offline/reconnect |
-| [16-groups.md](16-groups.md) | Group creation, metadata E2EE, sender-key distribution, membership, key rotation — **blueprint 26 (T1–T4) implemented, see banner** |
+| [16-groups.md](16-groups.md) | Group creation, metadata E2EE, sender-key distribution, membership, key rotation, admin capability token (RBAC) — **blueprint 26 (T1–T4) implemented, see banner** |
 | [17-burner.md](17-burner.md) | Burner chats: link, anonymous guest, PQ-DR, file sharing, destroy |
 | [18-realtime-transport.md](18-realtime-transport.md) | WebTransport worker, Rust sidecar, Redis bridge, presence/typing, calls, push, reconnect |
 | [19-media-stories.md](19-media-stories.md) | Attachment encryption/upload/cache, stories, media tools |

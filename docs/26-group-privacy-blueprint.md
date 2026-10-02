@@ -389,8 +389,9 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 
-Written under the assumption that the VPS constraint (1 core / ~1GB RAM) will be
-lifted. Principle: **a resource upgrade buys margin for privacy features, not bloat** —
+Written under the assumption that the VPS constraint (1 core / ~1GB RAM) would be
+lifted — **the upgrade landed 2026-10 (4 core / 8GB RAM / 4GB swap, tuning in
+docs/10 §10.11)**. Principle: **a resource upgrade buys margin for privacy features, not bloat** —
 rate limits, validation strictness, and consistent load patterns stay (predictable
 load is itself a privacy property; relaxing it amplifies traffic signatures).
 

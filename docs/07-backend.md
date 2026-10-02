@@ -25,7 +25,7 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 |---|---|
 | `auth.ts` | Register, login, refresh (family reuse detection), logout/logout-all, recover (+challenge), WebAuthn register/login, transport-ticket, PoW challenge/verify, burner guest |
 | `users.ts` | Profile (me), key upload, onboarding, devices, block, search (blind-index), account deletion — profile edits broadcast `user:updated` to conversation peers |
-| `conversations.ts` | Create (sandbox limit), sync, details, participants (opaque broadcasts), pin, key-rotation, leave, delete || `messages.ts` | Store-and-forward send, pending fetch (14d window, 250 cap), blind delete (R2 file cleanup) |
+| `conversations.ts` | Create (sandbox limit), sync, details, participants (opaque broadcasts), pin, key-rotation, leave, group purge (`DELETE /:id/group`, admin capability guard), delete || `messages.ts` | Store-and-forward send, pending fetch (14d window, 250 cap), blind delete (R2 file cleanup) |
 | `keys.ts` | Prekey bundle upload/fetch (Redis-cached), OTPK lifecycle, initial session, TURN creds |
 | `sessionKeys.ts` | Blind relay of session keys + ratchet distribution |
 | `sessions.ts` | Session list + revoke by JTI (family revoke + Redis blacklist) |

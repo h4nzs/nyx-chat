@@ -1,6 +1,8 @@
 import argon2, { HashOptions } from 'argon2'
 
-// Konfigurasi "Sweet Spot" buat VPS 1GB RAM / 1 vCPU
+// Konfigurasi buat VPS 4 core / 8GB RAM (sebelumnya "sweet spot" VPS 1GB RAM / 1 vCPU).
+// Params TIDAK diubah saat upgrade — hash lama tetap tervalidasi karena argon2
+// menyimpan params di dalam hash string-nya sendiri.
 const ARGON_CONFIG: HashOptions = {
   type: argon2.argon2id,
   memoryCost: 2 ** 15, // 32 MB (32 * 1024 kb)
