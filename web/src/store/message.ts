@@ -1803,7 +1803,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const localMessage = await shadowVault.getMessage(message.id);
             
             // Gunakan Plaintext Lokal jika sudah terdekripsi dengan baik
-            const isLocalValid = localMessage && localMessage.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>'].includes(localMessage.content || '');
+            // [INVARIANT 3 — 2026-10-02] Failure lama yang pernah ter-poison ke
+            // vault TIDAK dianggap plaintext valid — izinkan dekripsi ulang agar
+            // tombstone gagal tertimpa hasil sukses (kunci datang belakangan).
+            const isLocalValid = localMessage && localMessage.content && !localMessage.error &&
+              !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>', '[Message too old to decrypt]'].includes(localMessage.content || '') &&
+              !(typeof localMessage.content === 'string' && localMessage.content.includes('Pesan gagal didekripsi'));
             
             if (isLocalValid) {
               processedMessages.push({ ...message, ...localMessage });
@@ -1872,8 +1877,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const lastRepair = window[repairKey as keyof Window] as number | undefined || 0;
             if (now - lastRepair > 15000) {
                 window[repairKey as keyof Window] = now as never;
-                console.warn(`[Offline Sync] Meminta pengiriman ulang kunci yang hilang secara diam-diam untuk ${id}...`);
-                import('@lib/transportClient').then(m => m.emitGroupKeyRequest(id));
+                // [INVARIANT 4 — HEAL TARGETED 2026-10-02] Request per-pengirim
+                // (unik) alih-alih satu broadcast — tiap pengirim yang pesannya
+                // gagal menerima fulfilled_key dari state-nya sendiri.
+                const failedSenderIds = Array.from(new Set(
+                    processedMessages
+                        .filter(m => m.type !== 'SYSTEM' && String(m.type) !== 'SYSTEM_KEY_REQUEST' && (m.error || m.content === 'waiting_for_key' || m.content?.startsWith('[')) && m.senderId)
+                        .map(m => m.senderId as string)
+                ));
+                import('@lib/transportClient').then(async (m) => {
+                    const { resolvePseudonymToUserId } = await import('@utils/crypto');
+                    const targets = new Set<string>();
+                    for (const sid of failedSenderIds) {
+                        targets.add(resolvePseudonymToUserId(id, sid) ?? sid);
+                    }
+                    if (targets.size === 0) {
+                        m.emitGroupKeyRequest(id);
+                    } else {
+                        for (const t of targets) {
+                            m.emitGroupKeyRequest(id, t);
+                        }
+                    }
+                });
             }
         }
 
@@ -2059,7 +2084,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             // Cek vault lokal dulu (pesan mungkin sudah pernah didekripsi).
             const localMessage = await shadowVault.getMessage(message.id);
-            const isLocalValid = localMessage && localMessage.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>'].includes(localMessage.content || '');
+            // [INVARIANT 3 — 2026-10-02] Failure lama yang pernah ter-poison ke
+            // vault TIDAK dianggap plaintext valid — izinkan dekripsi ulang agar
+            // tombstone gagal tertimpa hasil sukses (kunci datang belakangan).
+            const isLocalValid = localMessage && localMessage.content && !localMessage.error &&
+              !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>', '[Message too old to decrypt]'].includes(localMessage.content || '') &&
+              !(typeof localMessage.content === 'string' && localMessage.content.includes('Pesan gagal didekripsi'));
             if (isLocalValid) {
               processed.push({ ...message, ...localMessage });
               continue;
@@ -2351,10 +2381,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                       isSilent: true
                   });
               } else {
-                  console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId} (Gagal ${newFailCount}x). Meminta kunci ulang secara diam-diam...`);
-                  // Minta pengirim mem-broadcast ulang kunci distribusinya
+                  // [INVARIANT 4 — HEAL TARGETED 2026-10-02] Pola libsignal
+                  // DecryptionErrorMessage: minta ulang HANYA ke pengirim pesan
+                  // yang gagal (bukan broadcast ke seluruh grup). Mitigasi
+                  // senderId = pseudonym → resolve via metadata; resolusi gagal
+                  // → fallback broadcast terakhir (grup v1).
+                  const failedSenderId = decrypted.senderId;
                   const { emitGroupKeyRequest } = await import('@lib/transportClient');
-                  emitGroupKeyRequest(conversationId);
+                  if (failedSenderId) {
+                      const { resolvePseudonymToUserId } = await import('@utils/crypto');
+                      const targetUserId = resolvePseudonymToUserId(conversationId, failedSenderId) ?? failedSenderId;
+                      console.warn(`[Auto-Heal] Kunci tidak sinkron (Gagal ${newFailCount}x). Request ter-target ke pengirim ${targetUserId.slice(0, 8)}…`);
+                      emitGroupKeyRequest(conversationId, targetUserId);
+                  } else {
+                      console.warn(`[Auto-Heal] Kunci tidak sinkron (Gagal ${newFailCount}x). Pengirim tak dikenal — fallback broadcast.`);
+                      emitGroupKeyRequest(conversationId);
+                  }
               }
           }
           } else {
@@ -3027,6 +3069,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         [conversationId]: newMessagesForConvo,
       },
     });
+
+    // [INVARIANT 3 — PERSIST-BEFORE-RENDER 2026-10-02] Hasil re-decrypt yang
+    // SUKSES wajib masuk Shadow Vault — dulu hanya update Zustand, sehingga
+    // bubble yang terlihat "sudah berhasil" hilang dekripsinya setelah reload
+    // (vault masih menyimpan plaintext gagal/lama).
+    const persisted = reDecryptedMessages.filter(m =>
+      m.content !== 'waiting_for_key' &&
+      m.content !== '[Requesting key to decrypt...]' &&
+      m.content !== '<Decryption Failed>' &&
+      !(m.content && m.content.includes('[Decryption Failed')) &&
+      !m.error
+    );
+    if (persisted.length > 0) {
+      shadowVault.upsertMessages(persisted).catch(captureAndLog);
+    }
   },
 
   failPendingMessages: (conversationId: string, reason: string) => {

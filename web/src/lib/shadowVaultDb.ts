@@ -164,6 +164,15 @@ class NyxShadowVaultProxy {
       const isFile = !!(m.fileUrl || m.isBlindAttachment);
       const isTombstone = !!m.isDeletedLocal;
 
+      // [INVARIANT 3 — 2026-10-02] Bubble FAILURE JANGAN pernah masuk vault.
+      // Dulu string gagal berbahasa Indonesia ("🔒 Pesan gagal didekripsi…",
+      // "[Message too old to decrypt]") lolos filter hasContent → ter-poison
+      // permanen, dan Shield "Prevented overwriting valid local message"
+      // melindungi content GAGAL itu dari perbaikan. m.error adalah sumber
+      // kebenaran (string gagal bervariasi per i18n/kasus).
+      if (m.error) return false;
+      if (hasContent && typeof m.content === 'string' && m.content.includes('Pesan gagal didekripsi')) return false;
+
       return hasContent || isFile || isTombstone;
     });
 

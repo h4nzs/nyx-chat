@@ -23,6 +23,12 @@ export interface GroupRatchetState {
   // [T2 FIX #9 2026-09-28] Public signing key pengirim (receiver state saja).
   // Pola libsignal SenderKeyState: diikat sejak distribusi kunci.
   signingKey?: string;
+  // [INVARIANT 1 — multi-era 2026-10-02] Anchor chain key awal era (receiver
+  // state) — identitas era untuk deteksi replay distribusi (idempotent receive,
+  // tanpa rewind). Juga dipakai arsip era lama (archiveGroupReceiverState).
+  eraCK?: string;
+  // Tanggal arsip (arsip era lama saja).
+  archivedAt?: number;
 }
 
 export interface GroupRatchetHeader {

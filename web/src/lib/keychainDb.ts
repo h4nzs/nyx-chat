@@ -102,6 +102,11 @@ export interface GroupReceiverState {
   senderId: UserId;
   CK: string;
   N: number;
+  // [INVARIANT 1 — multi-era 2026-10-02] Anchor era: chain key posisi AWAL era
+  // (initialCK). Dipakai untuk membedakan "replay distribusi era yang sama"
+  // (no-op, JANGAN rewind) vs "era baru" (arsipkan state lama, simpan baru).
+  // Pola libsignal SenderKeyState: state disimpan per (distributionId, chainId).
+  eraCK?: string;
   skippedKeys?: Record<string, string>;
   // [T2 FIX #9 2026-09-28] Public signing key pengirim, diikat SEJAK distribusi
   // kunci (pola libsignal SenderKeyState: sender_signing_key tersimpan di state
@@ -210,6 +215,7 @@ export async function getGroupReceiverState(conversationId: string, senderId: st
         senderId: asUserId(senderId),
         CK: ckPlain,
         N: record.state.N,
+        eraCK: record.state.eraCK,
         skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys),
         signingKey: record.state.signingKey
     } : null;
@@ -223,11 +229,51 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
           state: {
             CK: await encryptValueAtRest(state.CK),
             N: state.N,
+            eraCK: state.eraCK,
             skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
             // Public key — tidak sensitif (bukan private), simpan plaintext.
             signingKey: state.signingKey
           }
       });
+  });
+}
+
+// [INVARIANT 1 — multi-era 2026-10-02] Arsipkan receiver state era LAMA saat era
+// baru tiba, ala libsignal SenderKeyRecord (MAX_SENDER_KEY_STATES=5): pesan era
+// lama yang datang belakangan masih bisa di-route via keyId lookup, dan yang
+// terpenting state era lama TIDAK DITIMPA — menghilangkan seluruh kelas bug
+// "rewind saat offline sync". Id arsip: `${id}#era_${CK8}` — TIDAK akan
+// dikembalikan oleh getGroupReceiverState (exact-id get) tapi TETAP ditemukan
+// oleh getGroupReceiverStateByKeyId (startsWith scan).
+const MAX_ARCHIVED_RECEIVER_STATES = 5;
+
+export async function archiveGroupReceiverState(state: GroupReceiverState): Promise<void> {
+  return enqueueWrite(async () => {
+    const archivedId = `${state.id}#era_${state.CK.substring(0, 8)}`;
+    const existing = await db.groupReceiverStates.get(archivedId);
+    if (existing) return; // era ini sudah terarsip — jangan timpa snapshot lebih maju
+
+    // Cap per (conversation, sender): buang arsip tertua bila melebihi batas.
+    const prefix = `${state.id.split('#')[0]}#era_`;
+    const archived = (await db.groupReceiverStates.where('id').startsWith(prefix).toArray())
+      .map(r => ({ id: r.id, archivedAt: (r.state as { archivedAt?: number }).archivedAt ?? 0 }))
+      .sort((a, b) => a.archivedAt - b.archivedAt);
+    while (archived.length >= MAX_ARCHIVED_RECEIVER_STATES) {
+      const oldest = archived.shift();
+      if (oldest) await db.groupReceiverStates.delete(oldest.id);
+    }
+
+    await db.groupReceiverStates.put({
+        id: archivedId,
+        state: {
+          CK: await encryptValueAtRest(state.CK),
+          N: state.N,
+          eraCK: state.eraCK ?? state.CK,
+          skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
+          signingKey: state.signingKey,
+          archivedAt: Date.now()
+        }
+    });
   });
 }
 
@@ -237,6 +283,22 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
 export async function storeGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number, mk: string, keyId?: string): Promise<void> {
     return enqueueWrite(async () => {
         const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+        // [INVARIANT 2 — MK-persist ala Signal 2026-10-02] Kap total skipped keys
+        // per conversation: yang terlama dihapus saat melebihi batas. Kunci TIDAK
+        // lagi dihapus setelah dipakai — reload/kick+re-add tetap bisa decrypt
+        // pesan lama yang message key-nya sudah terlewati ratchet (pola
+        // add_sender_message_key libsignal: skipped keys hidup di state record).
+        const MAX_SKIPPED_KEYS = 200;
+        const all = await db.groupSkippedKeys.where('key').startsWith(`${conversationId}_`).toArray();
+        if (all.length >= MAX_SKIPPED_KEYS) {
+            const parse = (k: string) => {
+                const m = k.match(/_(\d+)$/);
+                return m ? Number(m[1]) : -1;
+            };
+            const sorted = all.sort((a, b) => parse(a.key) - parse(b.key));
+            const toDelete = sorted.slice(0, all.length - MAX_SKIPPED_KEYS + 1);
+            await db.groupSkippedKeys.bulkDelete(toDelete.map(r => r.key));
+        }
         await db.groupSkippedKeys.put({ key, mk: await encryptValueAtRest(mk) });
     });
 }
@@ -789,6 +851,7 @@ export async function getGroupReceiverStateByKeyId(conversationId: string, keyId
                 senderId: asUserId(senderId),
                 CK: ckPlain,
                 N: record.state.N,
+                eraCK: record.state.eraCK,
                 skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys ?? {}),
                 // [T2 FIX #13 2026-09-29] signingKey WAJIB ikut di jalur byId —
                 // semua pesan grup (dan metadata) lookup receiver state via keyId,

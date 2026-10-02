@@ -640,6 +640,15 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                         // Persist to IndexedDB so non-creator members can send messages even before metadata is re-decrypted
                         import('@lib/keychainDb').then(m => m.saveCachedGroupParticipants(conversation.id, metaParticipants));
                     }
+                    // [BUGFIX PESAN PERTAMA 2026-10-02] Metadata BARU SAJA berhasil
+                    // didecrypt (sebelumnya pending/gagal karena chain key belum
+                    // tiba). Re-decrypt pesan yang tertahan waiting_for_key — dulu
+                    // jalur ini cuma skip diam-diam, dan storeReceivedSessionKey
+                    // menunggu "metadataDecrypted" yang tidak pernah di-follow-up
+                    // → pesan pertama grup baru stuck gagal sampai pesan kedua.
+                    import('@store/message').then(({ useMessageStore }) => {
+                        useMessageStore.getState().reDecryptPendingMessages(conversation.id);
+                    });
                 }
             } catch (e) {
                 console.warn("Failed to decrypt metadata for conversation", e);

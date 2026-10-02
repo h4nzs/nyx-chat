@@ -27,6 +27,7 @@ export {
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
+import { isSameEraDistribution } from '@lib/groupEra';
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
@@ -1000,12 +1001,32 @@ export async function handleGroupKeyDistribution(
   const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
 
   const existingReceiverState = await getGroupReceiverState(conversationId, senderId, senderDeviceKey || undefined);
+  // [INVARIANT 2 — IDEMPOTENT RECEIVE 2026-10-02] Pola libsignal
+  // process_sender_key_distribution_message: state era yang SAMA tidak boleh
+  // ditimpa — penerima yang sudah maju (N tinggi) TIDAK di-rewind ke N=0 oleh
+  // replay envelope offline (fulfilled_key tersisten 14 hari, diproses ulang
+  // setiap reload). Logika deteksi di-extract ke lib/groupEra.ts (pure, tested).
+  const sameEra = isSameEraDistribution(existingReceiverState, senderKeyB64, currentN);
+  if (existingReceiverState && sameEra) {
+      // Replay/duplikat distribusi era sama — no-op. Hanya lengkapi metadata
+      // yang belum ada (signingKey) tanpa menyentuh CK/N.
+      if (senderSigningKey && !existingReceiverState.signingKey) {
+          await saveGroupReceiverState({ ...existingReceiverState, signingKey: senderSigningKey });
+      }
+      return;
+  }
+
+  // Era BARU: arsipkan snapshot state lama (multi-era ala libsignal
+  // MAX_SENDER_KEY_STATES) sebelum menimpa — pesan era lama yang datang
+  // belakangan tetap bisa di-route via keyId lookup ke arsip.
+  if (existingReceiverState && !sameEra) {
+      const { archiveGroupReceiverState } = await import('@lib/keychainDb');
+      await archiveGroupReceiverState(existingReceiverState);
+  }
+
   // [T2 FIX #13 2026-09-29] Deteksi GANTI-ERA: setelah rotasi, kunci baru selalu
-  // mulai di N=0 — kondisi lama (existing.N < currentN) MENOLAK kunci era baru
-  // (0 < 0 false) sehingga penerima terjebak di era lama dan SEMUA pesan pasca-
-  // rotasi gagal "ciphertext cannot be decrypted using that key" (log 2-browser
-  // 2026-09-29). Kunci diterima bila: state belum ada, N benar-benar maju,
-  // atau CK BERBEDA (rantai/era baru — duplikat delivery era sama tetap di-skip).
+  // mulai di N=0. Kunci diterima bila: state belum ada, N benar-benar maju,
+  // atau rantai/era benar-benar baru (bukan replay era sama — sudah di-return di atas).
   const isNewChain = !existingReceiverState || existingReceiverState.CK !== senderKeyB64;
   if (!existingReceiverState || existingReceiverState.N < currentN || (isNewChain && currentN <= existingReceiverState.N)) {
       await saveGroupReceiverState({
@@ -1014,6 +1035,9 @@ export async function handleGroupKeyDistribution(
           senderId: senderId as UserId,
           CK: senderKeyB64,
           N: currentN,
+          // [INVARIANT 1] Anchor era: kunci awal era (N=0) = eraCK. Envelope
+          // fulfillment selalu seal (initialCK, N=0) → anchor terisi konsisten.
+          eraCK: (currentN === 0 ? senderKeyB64 : undefined) ?? existingReceiverState?.eraCK,
           // [T2 FIX #9 2026-09-28] Ikat signing key pengirim sejak distribusi.
           signingKey: senderSigningKey ?? existingReceiverState?.signingKey
       });
