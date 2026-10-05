@@ -280,6 +280,23 @@ describe('pushContactBundle / restore', () => {
         expect(authFetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it('version selalu hash 31-bit (aman Zod safe-int + kolom Postgres Int)', async () => {
+        // Regresi: dulu mask 63-bit → version > Number.MAX_SAFE_INTEGER ditolak
+        // Zod server ("Too big: expected int to be <=9007199254740991") dan
+        // versi >2^31-1 akan meledak di kolom Prisma Int (Postgres INTEGER).
+        const MAX_DB_INT = 0x7fffffff; // 2^31-1
+        for (let i = 0; i < 5; i++) {
+            await upsertContact({ userId: `peer-bound-${i}`, conversationId: `conv-bound-${i}`, alias: `n${i}` });
+            await flushPush();
+            const [url, init] = authFetchMock.mock.calls.at(-1) as unknown as [string, { method: string; body: string }];
+            expect(url).toBe('/api/users/me/contact-bundle');
+            const body = JSON.parse(init.body) as { version: number };
+            expect(Number.isSafeInteger(body.version)).toBe(true);
+            expect(body.version).toBeGreaterThanOrEqual(0);
+            expect(body.version).toBeLessThanOrEqual(MAX_DB_INT);
+        }
+    });
+
     it('restore menambahkan HANYA kontak yang belum ada lokal; lokal menang', async () => {
         await upsertContact({ userId: 'peer-local', conversationId: 'conv-lokal', encryptedProfile: 'lokal' });
         await flushPush();

@@ -133,7 +133,10 @@ const CONTACT_BUNDLE_PUT_PER_HOUR = 30;
 router.put('/me/contact-bundle', zodValidate({
   body: z.object({
     encryptedBundle: z.string().min(1).max(CONTACT_BUNDLE_MAX_CHARS),
-    version: z.number().int().min(0)
+    // Version = hash 31-bit dari klien — cap eksplisit ke rentang Postgres Int
+    // (2^31-1) agar klien lama/ liar ditolak bersih di sini (400), bukan
+    // meledak sebagai error Prisma di kolom `Int?` (Postgres INTEGER).
+    version: z.number().int().min(0).max(0x7fffffff)
   })
 }), async (req, res, next) => {
   try {

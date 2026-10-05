@@ -228,7 +228,10 @@ export async function pushContactBundle(): Promise<void> {
             const contacts = await getAllContacts();
             if (contacts.length === 0) return;
             const bundleJson = serializeContactBundle(contacts);
-            const version = await computeBundleVersion(bundleJson);
+            let version = await computeBundleVersion(bundleJson);
+            // Belt & suspenders: versi harus aman untuk Zod (safe int) DAN
+            // kolom Postgres Int (2^31-1) — jangan pernah kirim nilai liar.
+            if (!Number.isSafeInteger(version) || version < 0) version = hashFallback(bundleJson);
             if (version === lastPushedVersion) return;
 
             const { authFetch } = await import('@lib/api');
@@ -257,9 +260,19 @@ export async function pushContactBundle(): Promise<void> {
 async function computeBundleVersion(bundleJson: string): Promise<number> {
     const sodium = await (await import('@lib/sodiumInitializer')).getSodium();
     if (!sodium) return hashFallback(bundleJson);
+    // VERSI = HASH 31-BIT (bukan counter, bukan 63/64-bit):
+    //   • Server memvalidasi `version` via Zod int (JS safe int) dan menyimpan
+    //     ke kolom Prisma `Int?` (Postgres INTEGER, max 2^31-1) — versi 63-bit
+    //     lolos Zod pun tetap meledak saat prisma.user.update.
+    //   • Anti-echo (version-hash guard) tak butuh ruang besar: collision dua
+    //     isi berbeda per-user nyaris mustahil, dan efeknya hanya skip satu
+    //     push (perubahan berikutnya memicu push lagi).
+    //   • Rentang harus SAMA dengan hashFallback (FNV-1a 32-bit unsigned →
+    //     dipotong 31-bit) agar jalur sodium↔fallback tidak mengubah nilai
+    //     version untuk isi bundle yang sama.
     const bytes = sodium.crypto_generichash(8, sodium.from_string(bundleJson));
     const view = new DataView(bytes.buffer);
-    return Number(view.getBigUint64(0) & 0x7fffffffffffffffn);
+    return Number(view.getBigUint64(0) & 0x7fffffffn); // 31 bit
 }
 
 function hashFallback(s: string): number {
@@ -268,7 +281,7 @@ function hashFallback(s: string): number {
         h ^= s.charCodeAt(i);
         h = Math.imul(h, 0x01000193) >>> 0;
     }
-    return h >>> 0;
+    return h & 0x7fffffff; // potong ke 31 bit — sejalan jalur sodium
 }
 
 /**

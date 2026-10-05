@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## 👥 Contact Store + Story Hardening (2026-10-05)
 
+**Fix — version bundle 31-bit (PUT /contact-bundle 400):** `computeBundleVersion`
+sebelumnya memakai mask 63-bit (`0x7fffffffffffffff`) sehingga `version` bisa
+melewati `Number.MAX_SAFE_INTEGER` — Zod 4 di server menolak PUT dengan
+`"Too big: expected int to be <=9007199254740991"`. Sekarang version = hash
+**31-bit** (jalur sodium maupun fallback FNV-1a dipotong identik) yang aman
+untuk Zod safe-int DAN kolom Postgres `Int` (2^31-1); guard belt-&-suspenders
+menormalkan nilai liar via hashFallback sebelum kirim, dan schema Zod server
+cap eksplisit `max(0x7fffffff)` agar klien lama ditolak bersih (400), bukan
+meledak sebagai error Prisma (500).
+
 Sebelumnya "user yang pernah bertukar pesan" adalah derivasi runtime dari
 `conversations.participants` (Opaque Mailbox) — hilang saat reinstall/device
 baru/pesan TTL habis, dengan tiga rumusan derive Participant berbeda di UI.
