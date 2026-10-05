@@ -29,7 +29,7 @@
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
     "dexie": "^4.4.6",
-    "dompurify": "^3.4.15",
+    "dompurify": "^3.4.16",
     "emoji-picker-react": "^4.22.2",
     "eventemitter3": "^5.0.4",
     "framer-motion": "^13.4.1",
