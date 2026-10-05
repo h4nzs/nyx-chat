@@ -907,7 +907,13 @@ export async function ensureGroupSession(
           N: 0,
           eraCK: senderKeyB64,
           chainId: chainIdB64,
-          metadataKey: metadataKeyB64
+          metadataKey: metadataKeyB64,
+          // [AUDIT FIX 2026-10-05] signingKey WAJIB di self state juga —
+          // decryptGroupMetadata v2 menuntut record.signingKey untuk verifikasi
+          // blob; tanpa ini dekripsi metadata SENDIRI selalu gagal "signing key
+          // pengirim belum terikat ke state" (log 12:02:21, chainId 8BSwIoS9M_8
+          // = blob era-2 milik A dibaca ulang oleh A).
+          signingKey: mySigningKeyB64
       });
 
       return distributionKeys.length > 0 ? distributionKeys : [];
@@ -1283,6 +1289,18 @@ export async function rotateGroupKey(
           body: JSON.stringify({ encryptedMetadata: newEncrypted }),
         });
         useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
+        // [AUDIT FIX 2026-10-05] EMIT metadata:updated — dulu hanya PUT details:
+        // member lain (B) tidak pernah menerima blob era baru + roster baru
+        // (C tidak terlihat!) sampai reload. createGroup sudah memakai jalur
+        // ini (conversation.ts) — rotasi wajib sama agar realtime konsisten.
+        const { emitMetadataUpdated } = await import('@lib/transportClient');
+        const myPseudoForMeta = await getMyPseudonym(conversationId);
+        emitMetadataUpdated(
+          conversationId,
+          newEncrypted,
+          participantIds.filter(uid => uid !== useAuthStore.getState().user?.id),
+          myPseudoForMeta ?? useAuthStore.getState().user?.id
+        );
       }
     } catch (e) {
       console.error('[T1] Metadata re-encryption on rotation failed:', e);
@@ -1841,7 +1859,14 @@ async function doDecryptMessage(
         // fetchPreKeyBundles([pseudonym]) kosong. senderDeviceKey adalah identity
         // key device pengirim — unik global & tidak butuh resolve pseudonym:
         // fetch bundles SEMUA participant + self, lalu match identityKey.
-        if (senderDeviceKey) {
+        // [AUDIT FIX 2026-10-05 — KUOTA OTPK] Fallback WAJIB di-guard `!keyToUse`:
+        // dulu fetch jalan DI SETIAP pesan grup masuk walau signing key sudah
+        // terikat di receiver state — membakar kuota harian fetch bundle
+        // (30/pasangan/24 jam, fail-closed 429 di server). Begitu satu pasangan
+        // kena limit, SEMUA bulk fetch user itu gagal (ensureGroupSession,
+        // redistribute, fulfillment) → distribusi kunci kosong → anggota lain
+        // waiting_for_key permanen. Inilah sumber instability distribusi kunci.
+        if (!keyToUse && senderDeviceKey) {
              try {
                  // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
                  // [BUGFIX 2026-10-02] senderUserId bisa string kosong (pseudonym

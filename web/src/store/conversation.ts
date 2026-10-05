@@ -762,16 +762,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     }
 
     set((state) => {
-        const oldConv = state.conversations.find((c) => c.id === id);
-        
-        if (oldConv && oldConv.isGroup && data.participants) {
-          const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
-          const newIds = data.participants.map(p => p.id).sort().join(',');
-          if (oldIds !== newIds) {
-            forceRotateGroupSenderKey(id).catch(() => { console.warn('Key rotation deferred'); });
-          }
-        }
-
+        // [AUDIT FIX 2026-10-05] forceRotateGroupSenderKey saat roster berubah
+        // DIHAPUS: keanggotaan berubah ditangani rotasi eksplisit ADMIN
+        // (rotateGroupKey) — anggota lain yang menghapus sender state-nya
+        // sendiri hanya menciptakan churn era (bukti log: B membuat 2 era
+        // dalam 13 detik saat C ditambahkan) dan deviasi dari model libsignal
+        // (rantai sender tiap anggota independen dari roster).
         return {
           conversations: state.conversations.map((c) =>
             c.id === id ? { 
