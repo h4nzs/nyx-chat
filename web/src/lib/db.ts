@@ -130,6 +130,17 @@ export interface ConversationRecord {
   isArchived?: boolean;
 }
 
+// [CONTACT STORE 2026-10-05] Record kontak per peer — satu-satunya daftar
+// "user yang pernah bertukar pesan" yang persisten. Kolom `data` berisi JSON
+// ContactRecord TERENKRIPSI (encryptVaultText — kunci deterministik dari
+// identity private key, jadi bisa di-restore lintas device via bundle).
+// Lihat lib/contactStore.ts untuk CRUD + sinkronisasi.
+export interface ContactRow {
+  userId: UserId; // PK
+  data: string; // ENCRYPTED JSON ContactRecord (base64 envelope)
+  updatedAt: number;
+}
+
 export class NyxDatabase extends Dexie {
   // ShadowVault
   messages!: Table<DecryptedMessageRecord, string>;
@@ -160,6 +171,9 @@ export class NyxDatabase extends Dexie {
   pqDrSessions!: Table<Record<string, unknown>, string>; // Legacy
   pqDrSessionsV2!: Table<PqDrSessionRecord, string>;
   groupCachedParticipants!: Table<{ conversationId: string; userIds: string[] }, string>;
+
+  // Contact Store (P1 2026-10-05)
+  contacts!: Table<ContactRow, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -222,6 +236,10 @@ export class NyxDatabase extends Dexie {
 
     this.version(7).stores({
       groupCachedParticipants: 'conversationId'
+    });
+
+    this.version(8).stores({
+      contacts: 'userId'
     });
   }
 }

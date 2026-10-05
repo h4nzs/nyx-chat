@@ -216,5 +216,6 @@
   "story_distributing_keys": "Distribuyendo claves de forma segura...",
   "user_unblocked_plain": "Usuario desbloqueado",
   "posting_error": "No se pudo publicar la historia: {{message}}",
-  "posting_success": "¡Historia publicada!"
+  "posting_success": "¡Historia publicada!",
+  "story_keys_partial_fail": "{{count}} destinatario(s) no recibieron la historia. Vuelve a publicarla si es necesario."
 }

@@ -43,6 +43,7 @@ erDiagram
 | `MessageStatus` | delivery/read receipts |
 | `UserHiddenConversation` | per-user conversation visibility (Opaque Mailbox discovery) |
 | `Story` | encrypted story blobs with expiry |
+| `User.encryptedContactBundle` | satu blob opaque per user — backup daftar kenalan terenkripsi klien (server tidak bisa membaca); versi = hash isi untuk fetch kondisional |
 | `Authenticator` | WebAuthn credentials |
 | `BlockedUser` | block lists |
 | `Tenant` | B2B multi-tenancy (apiKey, allowed domains) |

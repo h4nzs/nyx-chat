@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## 👥 Contact Store + Story Hardening (2026-10-05)
+
+Sebelumnya "user yang pernah bertukar pesan" adalah derivasi runtime dari
+`conversations.participants` (Opaque Mailbox) — hilang saat reinstall/device
+baru/pesan TTL habis, dengan tiga rumusan derive Participant berbeda di UI.
+
+**P1 — Contact store persisten + backup opaque:**
+- `ContactRecord` + `getParticipantUserId` + `ContactBundle` v1 di `@nyx/shared`
+  (serializer deterministik, parser fail-open).
+- Tabel Dexie `contacts` (NyxUnifiedDB v8) — per-peer terenkripsi at-rest via
+  `encryptVaultText` (kunci deterministik dari identity key → restoreable).
+- `web/src/lib/contactStore.ts`: CRUD merge non-destruktif, seed dari
+  conversations, heal participants kosong (device baru tidak menunggu pesan
+  pertama lagi), push debounced 10s + version-hash guard, pull kondisional.
+- Server: `User.encryptedContactBundle` (+version) — SATU blob opaque per
+  user; `GET/PUT/DELETE /api/users/me/contact-bundle` (rate limit Lua 30/jam,
+  cap 512KB). Server TIDAK bisa membaca isi. Schema push di-deploy otomatis
+  (deploy.yml db push).
+
+**P2 — Normalisasi identitas:** semua derive participant (story store,
+CreateStoryModal, StoryTray) kini via `getParticipantUserId` (semantik `||`
+legacy: userId kosong-string jatuh ke kandidat berikutnya).
+
+**P3 — Story reliability & privacy:**
+- Fan-out story MENGHORMATI BLOCKLIST (dulu user diblokir masih menerima
+  STORY_KEY di mode ALL) + retry 1x per-target + toast jumlah kegagalan.
+- Picker story membaca contact store + filter blocklist; StoryTray tidak lagi
+  fetch story peer yang diblokir.
+- Server `GET /stories/user/:userId` & `GET /stories/:id`: cek blocklist
+  pengirim (403 STORY_BLOCKED) + rate limit per (requester,target) 120/jam
+  (Lua atomik; redis down = fail-open).
+- Sweeper harian menghapus story expired dari DB (dulu menumpuk selamanya).
+- i18n key baru `story_keys_partial_fail` (en/id/es/pt-BR).
+
+Verifikasi: tsc web+server exit 0; vitest web **215/215** (30 file, +20 test
+contact store); node:test server 102/102. Primitives/protokol kripto tidak
+berubah.
+
+## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 
 Implements the full group-privacy blueprint: per-group sender pseudonyms,

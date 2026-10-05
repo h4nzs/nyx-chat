@@ -309,6 +309,109 @@ export interface DoubleRatchetState {
   peerAckedKem?: string;
 }
 
+// ============================================================================
+// [CONTACT STORE — P1 2026-10-05] Daftar "user yang pernah bertukar pesan"
+// ============================================================================
+// Sumber daftar kontak yang persisten (sebelumnya murni derivasi
+// conversations.participants di runtime — hilang saat reinstall / device baru
+// / pesan TTL habis). Disimpan: (a) lokal IndexedDB per-peer terenkripsi
+// (ENC1: at-rest), (b) backup lintas device sebagai SATU blob opaque per user
+// di server (encryptedContactBundle, server tidak bisa membaca isinya).
+
+/**
+ * Sumber kebenaran sebuah kontak. Data profil (encryptedProfile) tetap
+ * ciphertext — dekripsi profil tetap jalur profileStore seperti biasa.
+ */
+export type ContactRecord = {
+  userId: string;
+  /** Percakapan 1:1 utama (null = kontak tanpa conv aktif, mis. hasil restore). */
+  conversationId: string | null;
+  /** Ciphertext profile peer (dipakai ulang tanpa harus fetch /users/:id). */
+  encryptedProfile?: string | null;
+  /** Device identity key peer (publik, untuk pencocokan). */
+  publicKey?: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  /** Alias lokal (mis. profile cache) — pilihan UX, bukan data kripto. */
+  alias?: string;
+  /** true bila user ini diblokir lokal. */
+  blocked?: boolean;
+};
+
+/**
+ * Ambil userId kanonik dari Participant. Tipe Participant sengaja polimorfik
+ * (id | userId | user.id — semua opsional kecuali id), tapi banyak call-site
+ * lama membaca field berbeda-beda → sumber bug silent. SATU normalisasi di sini
+ * dipakai semua pemakai daftar kontak/story/grup.
+ */
+export function getParticipantUserId(p: Participant | { id?: unknown; userId?: unknown; user?: { id?: unknown } | null }): string {
+  // Rantai || (bukan ??) sengaja: userId kosong-string harus jatuh ke kandidat
+  // berikutnya — persis semantik call-site legacy (`extP.userId || extP.user?.id || extP.id`).
+  const uid = (p.userId || p.user?.id || p.id) as unknown;
+  return typeof uid === 'string' ? uid : String(uid ?? '');
+}
+
+/**
+ * Serializer bundle backup: urutan deterministik + daftar userId eksplisit.
+ * Format dibekukan (v1) — jangan ubah struktur tanpa versi baru.
+ */
+export type ContactBundle = {
+  v: 1;
+  contacts: ContactRecord[];
+  /** Gampang filter server-side TANPA decrypt (userId bukan rahasia). */
+  userIds: string[];
+};
+
+export function serializeContactBundle(contacts: ContactRecord[]): string {
+  const unique = new Map<string, ContactRecord>();
+  for (const c of contacts) {
+    const prev = unique.get(c.userId);
+    // Baris dengan lastSeenAt terbaru menang (deterministik bila duplikat).
+    if (!prev || c.lastSeenAt >= prev.lastSeenAt) unique.set(c.userId, c);
+  }
+  const sorted = Array.from(unique.values()).sort((a, b) =>
+    a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0
+  );
+  const bundle: ContactBundle = {
+    v: 1,
+    contacts: sorted,
+    userIds: sorted.map(c => c.userId)
+  };
+  return JSON.stringify(bundle);
+}
+
+/**
+ * Parser bundle yang TAHAN CORRUPT: bundle tidak valid tidak boleh menghapus
+ * kontak lokal (fail-open ke data lokal, bukan wipe).
+ */
+export function parseContactBundle(raw: string): ContactBundle | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const obj = parsed as { v?: unknown; contacts?: unknown; userIds?: unknown };
+    if (obj.v !== 1 || !Array.isArray(obj.contacts)) return null;
+    const contacts: ContactRecord[] = [];
+    for (const c of obj.contacts) {
+      if (!c || typeof c !== 'object') continue;
+      const rec = c as Partial<ContactRecord>;
+      if (typeof rec.userId !== 'string' || rec.userId.length === 0) continue;
+      contacts.push({
+        userId: rec.userId,
+        conversationId: typeof rec.conversationId === 'string' ? rec.conversationId : null,
+        encryptedProfile: typeof rec.encryptedProfile === 'string' ? rec.encryptedProfile : null,
+        publicKey: typeof rec.publicKey === 'string' ? rec.publicKey : undefined,
+        firstSeenAt: typeof rec.firstSeenAt === 'number' ? rec.firstSeenAt : Date.now(),
+        lastSeenAt: typeof rec.lastSeenAt === 'number' ? rec.lastSeenAt : Date.now(),
+        alias: typeof rec.alias === 'string' ? rec.alias : undefined,
+        blocked: rec.blocked === true
+      });
+    }
+    return { v: 1, contacts, userIds: contacts.map(c => c.userId) };
+  } catch {
+    return null;
+  }
+}
+
 export interface ISignedPreKey {
   key: string;
   pqKey: string | null;

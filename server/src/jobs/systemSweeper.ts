@@ -85,6 +85,17 @@ export const startSystemSweeper = () => {
         console.log(`[Cron] 📉 Downgraded ${expiredSubs.count} expired SUBSCRIBER accounts to FREE tier.`);
       }
 
+      // 5. [P3 2026-10-05] Story expired: hapus fisik dari DB (dulu menumpuk
+      // selamanya — expired hanya difilter saat baca; audit temuan #9). Media
+      // R2 dibiarkan di-handle fileRetention presigned (24 jam, sama dengan
+      // umur story).
+      const deletedStories = await prisma.story.deleteMany({
+        where: { expiresAt: { lte: now } }
+      });
+      if (deletedStories.count > 0) {
+        console.log(`[Cron] 🧹 Dihapus ${deletedStories.count} story kadaluarsa.`);
+      }
+
     } catch (error) {
       console.error('[Cron] Gagal melakukan pembersihan database:', error);
     }

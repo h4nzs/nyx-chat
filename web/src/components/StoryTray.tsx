@@ -10,6 +10,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
 import type { UserId } from '@nyx/shared';
+import { asUserId, getParticipantUserId } from '@nyx/shared';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
 
@@ -76,10 +77,17 @@ export default function StoryTray() {
     fetchActiveStories(me.id);
     
     const userIds = new Set<UserId>();
+    // [P3 2026-10-05] Normalisasi via getParticipantUserId (bukan p.id buta)
+    // + JANGAN fetch story peer yang diblokir — dulu blocked user tetap
+    // muncul di tray (audit temuan #6 sisi tampilan).
+    const blocked = new Set(useAuthStore.getState().blockedUserIds);
     conversations.forEach(c => {
       if (!c.isGroup) {
-        const other = c.participants.find(p => p.id !== me.id);
-        if (other) userIds.add(other.id);
+        const other = c.participants.find(p => getParticipantUserId(p) !== me.id);
+        if (other) {
+          const uid = getParticipantUserId(other);
+          if (uid && !blocked.has(uid)) userIds.add(asUserId(uid));
+        }
       }
     });
 

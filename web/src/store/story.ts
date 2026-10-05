@@ -164,7 +164,11 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
         }
       });
 
-      const allContacts = Array.from(userToConvMap.keys());
+      // [P3 CONTACT STORE 2026-10-05] Hormati blocklist: user yang diblokir
+      // TIDAK PERNAH jadi target fan-out — dulu mode 'ALL' masih mengirim
+      // STORY_KEY ke peer yang diblokir (audit temuan #6).
+      const blockedSet = new Set(useAuthStore.getState().blockedUserIds);
+      const allContacts = Array.from(userToConvMap.keys()).filter(id => !blockedSet.has(String(id)));
       let targets: UserId[] = [];
       
       if (privacy === 'ALL') {
@@ -174,26 +178,41 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
         targets = allContacts.filter(id => !selectedUserIds.includes(id));
       } else if (privacy === 'ONLY') {
         // Only include the user IDs checked in the UI
-        targets = selectedUserIds.filter(id => userToConvMap.has(id));
+        targets = selectedUserIds.filter(id => userToConvMap.has(id) && !blockedSet.has(String(id)));
       }
 
       // SEND SILENT KEYS
       const messageStore = useMessageStore.getState();
       toast.loading(i18n.t('common:story_distributing_keys', 'Distributing keys securely...'), { id: toastId });
       
+      // [P3 2026-10-05] Retry kecil per-target + laporan kegagalan: STORY_KEY
+      // yang hilang = penerima tak bisa melihat story 24 jam (tidak ada jalur
+      // re-request). Dulu fire-and-forget (console.error saja).
+      const failedTargets: UserId[] = [];
       for (const targetId of targets) {
         const convId = userToConvMap.get(targetId);
-        if (convId) {
+        if (!convId) continue;
+        let delivered = false;
+        for (let attempt = 0; attempt < 2 && !delivered; attempt++) {
           try {
             await messageStore.sendMessage(convId, {
               type: 'SYSTEM',
               content: `STORY_KEY:${JSON.stringify({ type: 'STORY_KEY', storyId: response.id, key: storyKey })}`,
               isSilent: true
             }, undefined, true);
+            delivered = true;
           } catch (e) {
-            console.error(`[Stories] Failed to send story key to user ${targetId}`, e);
+            if (attempt === 0) {
+              await new Promise(r => setTimeout(r, 800));
+            } else {
+              failedTargets.push(targetId);
+              console.error(`[Stories] Failed to send story key to user ${targetId}`, e);
+            }
           }
         }
+      }
+      if (failedTargets.length > 0) {
+        toast.error(i18n.t('common:story_keys_partial_fail', `${failedTargets.length} penerima gagal menerima story (coba posting ulang bila perlu)`), { id: toastId });
       }
 
       // Add optimistic story locally

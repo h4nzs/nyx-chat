@@ -213,6 +213,7 @@
   "user_unblocked_plain": "User dibuka blokirnya",
   "posting_error": "Gagal memposting story: {{message}}",
   "posting_success": "Story diposting!",
+  "story_keys_partial_fail": "{{count}} penerima gagal menerima story. Coba posting ulang bila perlu.",
   "device_revoked_successfully": "Perangkat berhasil dicabut",
   "history_sync_payload_broadcasted_success": "Sinkronisasi riwayat berhasil disiarkan.",
   "preparing_history_sync_for_your_linked_d": "Menyiapkan sinkronisasi riwayat untuk perangkat terhubungmu...",

@@ -9,7 +9,7 @@ import AttachmentCropperModal from './AttachmentCropperModal';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useProfileStore } from '@store/profile';
-import { asUserId } from '@nyx/shared';
+import { asUserId, getParticipantUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 
 // --- Sub Component for E2EE Profile Rendering ---
@@ -63,17 +63,43 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
 
   const conversations = useConversationStore(state => state.conversations);
   const me = useAuthStore(state => state.user);
-  
+  const blockedUserIds = useAuthStore(state => state.blockedUserIds);
+  const [vaultContacts, setVaultContacts] = useState<Array<{ id: string; encryptedProfile?: string | null }>>([]);
+
+  // [P3 CONTACT STORE 2026-10-05] Sumber daftar kontak: contact store (persisten,
+  // survive reinstall/restore) digabung derivasi conversations (realtime).
+  // Blocklist difilter di sini SEKALIGUS di fan-out store — UI tidak lagi
+  // menampilkan user yang diblokir sebagai pilihan story.
+  useEffect(() => {
+    let cancelled = false;
+    import('@lib/contactStore').then(({ getActiveContacts }) => getActiveContacts()).then(contacts => {
+      if (!cancelled) setVaultContacts(contacts.map(c => ({ id: c.userId, encryptedProfile: c.encryptedProfile })));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const contacts = useMemo(() => {
     const map = new Map();
+    // 1) Contact store dulu (baseline persisten).
+    vaultContacts.forEach(vc => {
+      map.set(vc.id, { id: vc.id, encryptedProfile: vc.encryptedProfile });
+    });
+    // 2) Derivasi conversations menimpa dengan objek lebih kaya (nama/avatar).
+    // [P2] Normalisasi via getParticipantUserId — dulu p.id buta terhadap
+    // bentuk userId/user.id (sumber picker kosong di sebagian bentuk data).
     conversations.forEach(c => {
       if (!c.isGroup) {
-        const other = c.participants.find(p => p.id !== me?.id);
-        if (other) map.set(other.id, other);
+        const other = c.participants.find(p => getParticipantUserId(p) !== me?.id);
+        if (other) {
+          const uid = getParticipantUserId(other);
+          map.set(uid, { ...map.get(uid), ...other, id: uid });
+        }
       }
     });
-    return Array.from(map.values());
-  }, [conversations, me]);
+    // 3) Filter blocklist + diri sendiri.
+    const blocked = new Set(blockedUserIds);
+    return Array.from(map.values()).filter((u: { id: string }) => !blocked.has(u.id) && u.id !== me?.id);
+  }, [conversations, me, vaultContacts, blockedUserIds]);
 
   const toggleUser = (id: string) => {
     setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);

@@ -20,6 +20,13 @@ model User {
   subscriptionTier       SubscriptionTier @default(FREE) // NYX Plus subscription status
   subscriptionExpiresAt  DateTime? // NYX Plus subscription expiry date
 
+  // [CONTACT STORE P1 2026-10-05] SATU blob opaque per user — JSON ContactBundle
+  // terenkripsi klien (XChaCha, kunci dari identity key; server TIDAK bisa
+  // membaca). Kolom plain hanya version (hash isi, untuk fetch kondisional)
+  // dan updatedAt. Backup "user yang pernah bertukar pesan" lintas device.
+  encryptedContactBundle String? @db.Text
+  contactBundleVersion   Int?
+
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   role             String    @default("USER")

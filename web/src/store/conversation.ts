@@ -352,6 +352,28 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
 
+      // [CONTACT STORE P1 2026-10-05] Warm contact store + restore backup
+      // (device baru/reinstall) + heal participants kosong dari kontak.
+      // Semua best-effort — kegagalan tidak boleh menggagalkan sync.
+      void (async () => {
+        try {
+          const { seedContactsFromConversations, restoreContactsFromBundle, buildPeerParticipantsFromContacts } = await import('@lib/contactStore');
+          const restored = await restoreContactsFromBundle();
+          if (restored > 0) console.info(`[ContactStore] ${restored} kontak dipulihkan dari backup server`);
+          await seedContactsFromConversations(reconciledConversations);
+          for (const c of reconciledConversations) {
+            if (c.isGroup || (c.participants && c.participants.length > 0)) continue;
+            const peers = await buildPeerParticipantsFromContacts(c.id);
+            if (peers.length > 0) {
+              // Persist juga ke vault → load berikutnya tidak kosong lagi.
+              useConversationStore.getState().updateConversation(c.id, { participants: peers as unknown as Participant[] });
+            }
+          }
+        } catch (e) {
+          console.warn('[ContactStore] Warm/restore kontak gagal (non-fatal):', e);
+        }
+      })();
+
       // [26.8.1] Fire-and-forget issuance: grup v2 yang belum punya credential
       // mendapatkannya di latar belakang (blind RSA — server tak tahu isinya).
       // Gagal bersifat non-fatal; sync tetap berjalan via delivery-token.

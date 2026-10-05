@@ -99,6 +99,77 @@ router.get('/me/blocked', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
+// ============================================================================
+// [CONTACT STORE P1 2026-10-05] Backup daftar kenalan — SATU blob opaque per
+// user. Isi = ContactBundle (shared) terenkripsi klien (XChaCha, kunci dari
+// identity key). Server menyimpan ciphertext + version (hash isi untuk fetch
+// kondisional); TIDAK bisa membaca isi — zero-knowledge tetap utuh.
+// ============================================================================
+
+// GET bundle milik sendiri (null bila belum ada). Fetch kondisional:
+// ?version=<n> sama dengan tersimpan → { encryptedBundle: null, unchanged: true }
+// (hemat transfer blob saat device lain sudah sinkron).
+router.get('/me/contact-bundle', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { encryptedContactBundle: true, contactBundleVersion: true }
+    });
+    if (!user?.encryptedContactBundle) return res.json({ encryptedBundle: null });
+    const requested = req.query.version !== undefined ? Number(req.query.version) : null;
+    if (requested !== null && Number.isFinite(requested) && user.contactBundleVersion === requested) {
+      return res.json({ encryptedBundle: null, unchanged: true });
+    }
+    res.json({ encryptedBundle: user.encryptedContactBundle, version: user.contactBundleVersion })
+  } catch (error) { next(error) }
+})
+
+// PUT bundle (upsert). Rate limit atomik (Lua INCR+EXPIRE — pola redisBridge;
+// jangan incr-then-expire). Debounce klien 10 detik + version-hash guard
+// membuat push realistis jauh di bawah batas ini; batas menahan flood blob.
+const CONTACT_BUNDLE_MAX_CHARS = 512 * 1024; // ~ribuan kontak (JSON ~200B/kontak)
+const CONTACT_BUNDLE_PUT_PER_HOUR = 30;
+router.put('/me/contact-bundle', zodValidate({
+  body: z.object({
+    encryptedBundle: z.string().min(1).max(CONTACT_BUNDLE_MAX_CHARS),
+    version: z.number().int().min(0)
+  })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { encryptedBundle, version } = req.body as { encryptedBundle: string; version: number };
+    const windowKey = `rl:contact-bundle:${req.user.id}:${Math.floor(Date.now() / 3_600_000)}`;
+    const count = Number(await redisClient.eval(`
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`, { keys: [windowKey], arguments: ['3600'] }));
+    if (count > CONTACT_BUNDLE_PUT_PER_HOUR) {
+      return res.status(429).json({ error: 'CONTACT_BUNDLE_RATE_LIMIT' });
+    }
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { encryptedContactBundle: encryptedBundle, contactBundleVersion: version }
+    });
+    res.json({ success: true })
+  } catch (error) { next(error) }
+})
+
+// DELETE bundle (jalur nuke/wipe — bukan penghapusan biasa)
+router.delete('/me/contact-bundle', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { encryptedContactBundle: null, contactBundleVersion: null }
+    });
+    res.json({ success: true })
+  } catch (error) { next(error) }
+})
+
 // --- MUTATION ROUTES (Me) ---
 
 // UPDATE user profile (Me)
