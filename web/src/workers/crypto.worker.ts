@@ -1868,7 +1868,16 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         try {
           if (!state.KEMr || sodium.compare(headerKemPk, state.KEMr) !== 0) {
-            
+
+            // [DR PROTOCOL 2026-10-05 — OMIT-CT] Chain BARU tanpa `ct` = tidak
+            // ada material ratchet. Dulu jalur ini melanjutkan "step" parsial
+            // (RK/CKr tidak diperbarui, KEMr/Nr di-reset) → state kacau. Kini
+            // gagal SEBELUM mutasi apa pun; pengirim yang sudah menerima ack
+            // omit-ct hanya menghilangkan ct untuk chain yang sudah di-ack.
+            if (!headerCt) {
+                throw new Error("Missing ratchet key material (ct absent for new chain)");
+            }
+
             // PRE-RATCHET SKIP LOOP
             const MAX_SKIP = 1000;
             if (header.pn - state.Nr > MAX_SKIP) {

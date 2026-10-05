@@ -196,6 +196,42 @@ manual test (web vitest 176 / server node:test 102 green throughout).
   sweep. Stale persisted `METADATA_UPDATED` replays can no longer regress a
   newer, already-decrypted metadata blob in the store.
 
+### 🔁 1:1 DR protocol — self-heal handshake + header slimming (2026-10-05)
+
+Follow-up to the 1:1 audit against libsignal: two structural gaps closed,
+decisions signed off by the maintainer (breaking changes allowed — all clients
+must be ≥ 2.7.0).
+
+* **x3dh-until-confirmed:** the initiator re-attaches the X3DH handshake to
+  every outgoing message until the first incoming reply decrypts under the
+  current session (`peerSessionConfirmed` client-side flag on the DR state).
+  A lost/expired first message — the only carrier of the handshake — no longer
+  wedges the conversation in permanent `waiting_for_ratchet_state`: the peer
+  derives from any later message. Re-derivation is deterministic, so it
+  re-syncs to the same chain safely. Salinan handshake disimpan di state
+  (`pendingHandshake`) dan ditempel ulang tiap persist
+  (`attachClientProtocolFields` — serializeState worker me-strip field luar).
+* **Ratchet ack + omit-ct:** the sealed payload now carries `ackKem` (the
+  sender's current `KEMr`), authenticated by the AEAD. Once the peer's ack
+  matches the current chain, the sender **omits the 1120-byte KEM `ct`** from
+  the DR header (~1.5 KB saved per message on the wire). Receivers that have
+  not stepped still receive `ct`. A new chain whose header lacks `ct` is
+  rejected **before any state mutation** (`Missing ratchet key material`) and
+  enters the archived-session fallback — the previous partial-step path (which
+  corrupted `KEMr`/`Nr` without new chain material) is gone.
+* **DR session archive: 1 slot → 3-slot FIFO** (`#archived_0..2`, legacy
+  `#archived` auto-migrated) — messages arriving 2+ DH-steps late survive even
+  when the skipped-key LRU (200/conv) has evicted them; the decrypt fallback
+  tries every archived slot in order.
+* **Pure helpers + tests:** protocol decisions extracted to
+  `web/src/lib/drProtocol.ts` (handshake inclusion, omit-ct rule, ack
+  extraction, client-field re-attachment) with 14 vitest cases — total web
+  suite 190. `dr_init_bob` now serializes an explicit empty `skippedKeys` map
+  (shape symmetry with `dr_init_alice`).
+* **Deliberately unchanged:** used skipped keys are never deleted (MK-persist,
+  reload/kick+re-add decryptability) and `MAX_SKIP` stays 1000 (libsignal's
+  25 000 considered too loose for NYX's threat model).
+
 ### 🌫️ T4 — Cover Traffic (doc 26.10)
 * **Application-Level Filler:** Opt-in per group. Cover messages traverse the
   FULL pipeline (sendMessage → sidecar → redisBridge → Postgres → recipient

@@ -296,6 +296,17 @@ export interface DoubleRatchetState {
   skippedKeys?: Record<string, string>;
   messageCount?: number;
   lastActivityTime?: number;
+  // [DR PROTOCOL 2026-10-05] Bidang klien-side (dipelihara crypto.ts, tidak
+  // dibaca worker):
+  //  - peerSessionConfirmed: balasan peer pertama sudah berhasil didekripsi →
+  //    pengirim berhenti menyertakan x3dh di wrapper (self-heal msg1 hilang).
+  //  - pendingHandshake: salinan x3dh awal sesi — dikirim ulang sampai
+  //    terkonfirmasi; derivation deterministik membuat re-derive aman.
+  //  - peerAckedKem: KEMr peer yang di-ack via payload terenkripsi → pengirim
+  //    boleh menghilangkan `ct` (1120B) dari header saat ack = chain saat ini.
+  peerSessionConfirmed?: boolean;
+  pendingHandshake?: { initiatorSigningKey: string; initiatorCiphertexts: string; otpkId?: number };
+  peerAckedKem?: string;
 }
 
 export interface ISignedPreKey {

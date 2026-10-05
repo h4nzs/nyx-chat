@@ -28,6 +28,13 @@ export {
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { isSameEraDistribution } from '@lib/groupEra';
+// [DR PROTOCOL 2026-10-05] Keputusan protokol 1:1 — pure & unit-tested.
+import {
+  attachClientProtocolFields,
+  extractPeerAck,
+  getHandshakePayload,
+  shouldOmitRatchetCt,
+} from '@lib/drProtocol';
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
@@ -1554,10 +1561,14 @@ async function doEncryptMessage(
 
       const { publicKey } = await getMyEncryptionKeyPair();
       const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      // [DR PROTOCOL 2026-10-05 — ACK RATCHET] ackKem = KEMr kita (chain peer
+      // yang sudah kita step) — diterima peer lewat payload TERENKRIPSI (AEAD
+      // otentik); dipakai peer untuk memutuskan omit-ct di header berikutnya.
       const sealedPayload = JSON.stringify({
           content: text,
           senderId: myId,
-          senderDeviceKey: myPublicKeyB64
+          senderDeviceKey: myPublicKeyB64,
+          ...(state?.KEMr ? { ackKem: state.KEMr } : {})
       });
 
       const result = await worker_dr_ratchet_encrypt({
@@ -1570,12 +1581,36 @@ async function doEncryptMessage(
           await storeMessageKeySecurely(messageId, mkBytes);
       }
 
-      await storeRatchetStateSecurely(conversationId, result.state);
+      // [DR PROTOCOL 2026-10-05] Bidang klien (pendingHandshake /
+      // peerSessionConfirmed / peerAckedKem) ditempel ulang — serializeState
+      // worker me-strip field di luar daftarnya.
+      const persistedState = attachClientProtocolFields(
+          result.state,
+          state ?? {},
+          x3dhData
+              ? { pendingHandshake: x3dhData, peerSessionConfirmed: false }
+              : {}
+      );
+      await storeRatchetStateSecurely(conversationId, persistedState);
+
+      // [DR PROTOCOL 2026-10-05 — X3DH-UNTIL-CONFIRMED] Handshake awal sesi
+      // dikirim ulang di setiap pesan sampai balasan peer pertama berhasil
+      // didekripsi — pesan pertama (satu-satunya pembawa x3dh) yang hilang/
+      // expired tidak lagi melumpuhkan percakapan.
+      const handshakeForWire = getHandshakePayload(persistedState);
+      // [DR PROTOCOL 2026-10-05 — OMIT-CT] ct KEM (1120B) dihilangkan hanya
+      // bila peer sudah meng-ack chain kita saat ini (ack via payload
+      // terenkripsi); receiver yang belum step tetap menerima ct.
+      const omitCt = shouldOmitRatchetCt(
+          persistedState.peerAckedKem,
+          persistedState.KEMs?.publicKey ?? null
+      );
+      const wireHeader = omitCt ? { ...result.header, ct: '' } : result.header;
 
       const payload = JSON.stringify({
-          dr: result.header,
+          dr: wireHeader,
           ciphertext: sodium.to_base64(new Uint8Array(result.ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING),
-          ...(x3dhData ? { x3dh: x3dhData } : {})
+          ...(handshakeForWire ? { x3dh: handshakeForWire } : {})
       });
 
       return { ciphertext: payload, mk: new Uint8Array(result.mk), drHeader: result.header };
@@ -2194,7 +2229,11 @@ async function doDecryptMessage(
           const errMsg = (err instanceof Error ? err.message : String(err)) || '';
           const isEraMiss = errMsg.includes('Ratchet Advanced') ||
               errMsg.includes('older than current state') ||
-              errMsg.includes('Decryption failed');
+              errMsg.includes('Decryption failed') ||
+              // [DR PROTOCOL 2026-10-05] Header omit-ct untuk chain yang belum
+              // dipegang receiver — coba slot arsip (bisa jadi era arsip = era
+              // header).
+              errMsg.includes('Missing ratchet key material');
           if (!isEraMiss) throw err;
 
           const { getArchivedRatchetSessions } = await import('@lib/keychainDb');
@@ -2243,8 +2282,19 @@ async function doDecryptMessage(
           await storeMessageKeySecurely(messageId, result.mk);
       }
 
+      // [DR PROTOCOL 2026-10-05] Dekripsi SUKSES atas state current = bukti
+      // peer memegang sesi ini: (1) hentikan re-kiriman x3dh (x3dh-until-
+      // confirmed), (2) simpan ackKem peer (pengirim berikutnya boleh omit-ct).
+      // Bidang klien ditempel ulang — serializeState worker me-strip-nya.
+      const peerAck = extractPeerAck(sodium.to_string(new Uint8Array(result.plaintext)));
+      const persistedState = attachClientProtocolFields(
+          result.state,
+          state ?? {},
+          { peerSessionConfirmed: true, ...(peerAck ? { peerAckedKem: peerAck } : {}) }
+      );
+
       // FINALLY, update the ratchet state to advance the chain
-      await storeRatchetStateSecurely(conversationId, result.state);
+      await storeRatchetStateSecurely(conversationId, persistedState);
 
       return { status: 'success', value: sodium.to_string(result.plaintext) };
 
