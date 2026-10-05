@@ -68,6 +68,7 @@ import {
     getContact,
     getAllContacts,
     getActiveContacts,
+    subscribeToContacts,
     deleteContact,
     seedContactsFromConversations,
     buildPeerParticipantsFromContacts,
@@ -159,7 +160,12 @@ beforeEach(() => {
     vi.useFakeTimers();
 });
 
-afterEach(() => {
+afterEach(async () => {
+    // Drain timer yang masih pending SEBELUM fake timers dibuang: notify
+    // kontak ber-debounce 50ms bisa tertinggal di akhir test → `notifyTimer`
+    // (state module) ter-orphan non-null saat useRealTimers → semua
+    // notifyContactsChanged() berikutnya no-op (test subscribe gagal).
+    await vi.advanceTimersByTimeAsync(100);
     vi.useRealTimers();
 });
 
@@ -257,6 +263,50 @@ describe('buildPeerParticipantsFromContacts', () => {
         expect(String(peers[0]!.id)).toBe('peer-a');
         expect(peers[0]!.encryptedProfile).toBe('ep-a');
         expect(peers[0]!.role).toBe('MEMBER');
+    });
+});
+
+// ─── Subscribe (UI live-refresh) ──────────────────────────────────
+
+describe('subscribeToContacts', () => {
+    it('mutasi memicu listener (debounced per-burst)', async () => {
+        const listener = vi.fn();
+        const unsub = subscribeToContacts(listener);
+        await upsertContact({ userId: 'peer-sub', conversationId: 'conv-sub' });
+        await vi.advanceTimersByTimeAsync(60);
+        expect(listener).toHaveBeenCalledTimes(1);
+        // Burst: 3 upsert berurutan → hanya SATU notif
+        await Promise.all([
+            upsertContact({ userId: 'b1', conversationId: 'c1' }),
+            upsertContact({ userId: 'b2', conversationId: 'c1' }),
+            upsertContact({ userId: 'b3', conversationId: 'c1' }),
+        ]);
+        await vi.advanceTimersByTimeAsync(60);
+        expect(listener).toHaveBeenCalledTimes(2);
+        unsub();
+        await upsertContact({ userId: 'b4', conversationId: 'c1' });
+        await vi.advanceTimersByTimeAsync(60);
+        expect(listener).toHaveBeenCalledTimes(2); // tidak naik setelah unsub
+    });
+
+    it('restore yang menambah kontak memicu listener', async () => {
+        const listener = vi.fn();
+        const unsub = subscribeToContacts(listener);
+        const bundleJson = JSON.stringify({
+            v: 1,
+            contacts: [
+                { userId: 'peer-remote-x', conversationId: 'conv-x', firstSeenAt: 1, lastSeenAt: 2 },
+            ],
+            userIds: ['peer-remote-x'],
+        });
+        authFetchMock.mockImplementation(async () => ({
+            encryptedBundle: 'ENC1:' + Buffer.from(bundleJson, 'utf8').toString('base64'),
+        }));
+        const { restoreContactsFromBundle } = await import('../contactStore');
+        await restoreContactsFromBundle();
+        await vi.advanceTimersByTimeAsync(60);
+        expect(listener).toHaveBeenCalledTimes(1);
+        unsub();
     });
 });
 

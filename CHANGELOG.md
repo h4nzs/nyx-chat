@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## 👥 Contact Store + Story Hardening (2026-10-05)
 
+**Fix — daftar kontak modal create grup basi sampai reload:** daftar hanya
+di-load sekali saat mount komponen (modal lazy render-on-demand → mount =
+open pertama), sementara seeding/restore contact store jalan fire-and-forget
+di `loadConversations` — burst yang selesai SETELAH mount tak pernah masuk
+daftar. Sekarang contact store punya `subscribeToContacts()` (notifikasi
+debounced per-burst 50ms dari upsert/delete/wipe/restore) dan modal create
+grup berlangganan + reload — daftar terisi live tanpa reload aplikasi.
+
 **Fitur — distributed profile key di roster metadata v3 (anggota pasif
 terlihat):** kunci profil anggota sebelumnya hanya terdistribusi lewat payload
 PESAN dari anggota itu sendiri → anggota pasif (belum pernah kirim pesan) tak

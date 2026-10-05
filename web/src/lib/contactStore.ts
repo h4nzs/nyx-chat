@@ -79,6 +79,38 @@ function nowMs(): number {
 
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
+// ─── Subscribe (UI live-refresh, [CONTACT STORE LIVE 2026-10-05]) ─────────
+
+/**
+ * Notifikasi perubahan contact store untuk UI (picker kontak modal create
+ * grup, dst.). Debounced per-burst: seeding `seedContactsFromConversations`
+ * bisa memicu puluhan upsert berurutan — tanpa debounce UI akan re-read Dexie
+ * puluhan kali per burst. (Bug UX: modal create grup menampilkan daftar basi
+ * sampai reload karena daftar hanya di-load sekali saat mount, sebelum
+ * seeding fire-and-forget dari loadConversations selesai.)
+ */
+const contactListeners = new Set<() => void>();
+let notifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function notifyContactsChanged(): void {
+    if (notifyTimer) return; // satu notif per burst
+    notifyTimer = setTimeout(() => {
+        notifyTimer = null;
+        for (const l of contactListeners) {
+            try { l(); } catch { /* listener UI tidak boleh menggagalkan store */ }
+        }
+    }, 50);
+}
+
+/**
+ * Langganan perubahan kontak (debounced per-burst). Return unsubscribe.
+ * UI memanggil sekali saat mount — bukan mereload store manual.
+ */
+export function subscribeToContacts(listener: () => void): () => void {
+    contactListeners.add(listener);
+    return () => { contactListeners.delete(listener); };
+}
+
 /** Upsert satu kontak. Merge non-destruktif: field lama dipertahankan bila baru kosong. */
 export async function upsertContact(input: {
     userId: string;
@@ -114,6 +146,7 @@ export async function upsertContact(input: {
     });
 
     void scheduleContactBundlePush();
+    notifyContactsChanged();
 }
 
 /** Tandai block/unblock tanpa menyentuh field lain. */
@@ -126,6 +159,7 @@ export async function setContactBlocked(userId: string, blocked: boolean): Promi
 export async function deleteContact(userId: string): Promise<void> {
     await db.contacts.delete(asUserId(userId));
     void scheduleContactBundlePush();
+    notifyContactsChanged();
 }
 
 /** Semua kontak terdekripsi (terbaru lastSeenAt dulu). */
@@ -314,6 +348,7 @@ export async function restoreContactsFromBundle(): Promise<number> {
             });
             added++;
         }
+        if (added > 0) notifyContactsChanged(); // UI (picker modal) ikut segar
         return added;
     } catch (e) {
         console.warn('[ContactStore] Bundle restore gagal:', e);
@@ -329,6 +364,7 @@ export async function wipeContactBackup(): Promise<void> {
     } catch (_e) { /* best-effort */ }
     await db.contacts.clear();
     lastPushedVersion = 0;
+    notifyContactsChanged();
 }
 
 /** Versi bundle terakhir yang diketahui (diagnostik). */

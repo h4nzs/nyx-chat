@@ -15,6 +15,7 @@ import { FiCheck, FiShield, FiUserCheck } from 'react-icons/fi';
 import type { UserId, MinimalProfile } from '@nyx/shared';
 import { getParticipantUserId } from '@nyx/shared';
 import { computeContactTrust, compareByTrustDescThenRecency, type ContactTrustLevel } from '@lib/contactTrust';
+import { subscribeToContacts, getAllContacts } from '@lib/contactStore';
 import type { ContactRecord } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 
@@ -118,11 +119,16 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   const [vaultContacts, setVaultContacts] = useState<Array<ContactRecord & { trust: ContactTrustLevel }>>([]);
   const [showContactList, setShowContactList] = useState(true);
 
+  // [CONTACT STORE LIVE 2026-10-05] Daftar kontak di-load: (1) SETIAP modal
+  // dibuka — dulu sekali saat mount komponen (modal on-demand lazy → mount =
+  // open pertama saja) sehingga burst seeding/restore fire-and-forget dari
+  // loadConversations yang selesai SETELAH mount tidak pernah masuk daftar;
+  // (2) live via subscribeToContacts — mutasi store (seed/restore/upsert dari
+  // pesan baru) memicu reload ter-debounce tanpa reload aplikasi.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const reload = async () => {
       try {
-        const { getAllContacts } = await import('@lib/contactStore');
         const contacts = await getAllContacts();
         // verifiedStatus keyed conversationId — resolve peer dari participants 1:1.
         const { verifiedStatus } = useVerificationStore.getState();
@@ -145,8 +151,10 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
           .sort(compareByTrustDescThenRecency);
         if (!cancelled) setVaultContacts(withTrust);
       } catch (_e) { /* non-fatal — picker search tetap jalan */ }
-    })();
-    return () => { cancelled = true; };
+    };
+    void reload();
+    const unsubscribe = subscribeToContacts(() => void reload());
+    return () => { cancelled = true; unsubscribe(); };
   }, [me?.id]);
   const userList = useMemo(() => {
     const rawQuery = searchQuery.trim();
