@@ -946,6 +946,13 @@ export async function listGroupReceiverStates(
         N: record.state.N,
         eraCK: record.state.eraCK,
         chainId: record.state.chainId,
+        // [AUDIT FIX 2026-10-05] metadataKey WAJIB ikut — decryptGroupMetadata
+        // v2 mengambil metadataKey era via findGroupReceiverState (yang baca
+        // lewat sini). Tanpa ini metadata v2 selamanya gagal
+        // "metadataKey era belum tersedia" walau state-nya ada.
+        metadataKey: record.state.metadataKey
+            ? (await decryptValueAtRest(record.state.metadataKey)) ?? undefined
+            : undefined,
         skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys ?? {}),
         signingKey: record.state.signingKey,
         archivedAt: (record.state as { archivedAt?: number }).archivedAt

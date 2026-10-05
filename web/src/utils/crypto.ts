@@ -54,7 +54,9 @@ import {
   getGroupReceiverStateByKeyId,
   findGroupReceiverState,
   saveGroupReceiverState,
-  deleteGroupStates,
+  // [AUDIT FIX 2026-10-05] deleteGroupStates TIDAK lagi dipakai — rotasi kini
+  // hanya mengganti sender state (receiver states diarsip, bukan dihapus).
+  deleteGroupSenderState,
   deleteConversationKeychain,
   deleteRatchetSession,
   deleteSessionKeys
@@ -889,6 +891,14 @@ export async function ensureGroupSession(
       // Save self-receiver state so sealed sender group messages from self can
       // be routed by chainId — [REWRITE] id device-keyed (konsisten dengan
       // getGroupReceiverState; format senderId-keyed adalah legacy).
+      // [AUDIT FIX 2026-10-05] Arsipkan self state era LAMA dulu (INVARIANT 1,
+      // pola libsignal): pesan era lama dari device lain milik kita tetap
+      // ter-route via arsip, tidak langsung ditimpa.
+      const prevSelfState = await getGroupReceiverState(conversationId, myId as string, myIdentityKeyB64);
+      if (prevSelfState && prevSelfState.chainId && prevSelfState.chainId !== chainIdB64) {
+          const { archiveGroupReceiverState } = await import('@lib/keychainDb');
+          await archiveGroupReceiverState(prevSelfState);
+      }
       await saveGroupReceiverState({
           id: `${conversationId}_${myIdentityKeyB64}`,
           conversationId: conversationId as ConversationId,
@@ -1204,8 +1214,14 @@ export async function rotateGroupKey(
   // bukan menunggu kirim pesan berikutnya). 'false' = periodic (lazy).
   isActive: boolean = false
 ): Promise<void> {
-  // Clear OLD states
-  await deleteGroupStates(conversationId);
+  // [AUDIT FIX 2026-10-05 — MULTI-ERA ALA LIBSIGNAL] JANGAN hapus receiver
+  // states/arsip/skipped keys (dulu deleteGroupStates — hapus SEMUA):
+  // pesan era lama yang sync belakangan + metadata lama jadi tak terbaca
+  // selamanya di device ini. Pola libsignal: state lawas TIDAK dihapus —
+  // handleGroupKeyDistribution mengarsipkan era lama otomatis saat era baru
+  // tiba (INVARIANT 1). Yang perlu diganti hanya SENDER state sendiri agar
+  // ensureGroupSession membuat era baru.
+  await deleteGroupSenderState(conversationId);
   
   try {
     const { getMyAdminToken } = await import('@lib/groupPseudonyms');
@@ -1583,15 +1599,18 @@ async function doEncryptMessage(
                // ensureGroupSession (satu jalur).
                // [T1 ROTATION] Periodic/PCS rotation (25 msgs / 1 jam) memicu
                // rotasi peta pseudonym juga — fire-and-forget: re-encrypt metadata
-               // v2 dengan peta baru (generation+1) + push ke server. TIDAK di-await
+               // dengan peta baru (generation+1) + push ke server. TIDAK di-await
                // agar hot path encrypt tetap cepat; kegagalan hanya menunda
                // unlinkability antar-era, tidak merusak konsistensi pesan.
+               // [AUDIT FIX 2026-10-05] Dulu hanya v2: grup v3 (roster) tidak
+               // pernah di-rotate pseudonym-nya di jalur PCS. v juga DIWARISKAN
+               // (dulu dipaksa v:2 → roster members v3 bisa hilang).
                const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
-               if (existingMeta?.v === 2 && existingMeta.authSecret) {
+               if ((existingMeta?.v === 2 || existingMeta?.v === 3) && existingMeta.authSecret) {
                    void encryptGroupMetadata({
                        ...existingMeta,
                        participants: conversation.participants.map(p => (p.userId || p.id) as string),
-                       v: 2,
+                       v: existingMeta.v,
                    }, conversationId)
                        .then(newEncrypted => authFetch(`/api/conversations/${conversationId}/details`, {
                            method: 'PUT',
@@ -2525,10 +2544,23 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
     
     // Skip our own key distribution — we already have the sender state.
-    // [T1] senderId bisa pseudonym (metadata v2) atau userId (legacy) — cek keduanya.
+    // [AUDIT FIX 2026-10-05 — CROSS-DEVICE] Skip HANYA bila envelope benar-benar
+    // dari DEVICE KITA SENDIRI (senderDeviceKey === identity key device ini).
+    // Dulu cek userId/pseudonym: distribusi dari DEVICE LAIN milik kita
+    // (senderId = pseudonym → resolve ke userId sama) ikut ter-skip → device-2
+    // tidak pernah punya sender key device-1 → pesan grup lintas device gagal
+    // selamanya. Jalur legacy tanpa senderDeviceKey tetap pakai cek userId.
     const myId = useAuthStore.getState().user?.id;
     const senderUserId = resolvePseudonymToUserId(conversationId, senderId) ?? senderId;
-    if (senderUserId === myId) {
+    if (senderDeviceKey) {
+        const { publicKey: myDevicePub } = await getMyEncryptionKeyPair();
+        const sodiumForSkip = await getSodiumLib();
+        const myDeviceKeyB64 = sodiumForSkip.to_base64(myDevicePub, sodiumForSkip.base64_variants.URLSAFE_NO_PADDING);
+        if (senderDeviceKey === myDeviceKeyB64) {
+            console.debug(`[storeReceivedSessionKey] Skipping own-device GROUP_KEY distribution for conv=${conversationId}`);
+            return;
+        }
+    } else if (senderUserId === myId) {
         console.debug(`[storeReceivedSessionKey] Skipping own GROUP_KEY distribution for conv=${conversationId}`);
         return;
     }

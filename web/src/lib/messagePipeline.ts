@@ -586,8 +586,17 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                   if (senderId) {
                       try {
                           const { db } = await import('@lib/db');
-                          // Delete the specific group receiver states and 1-on-1 ratchet sessions
-                          await db.groupReceiverStates.where('[conversationId+senderId]').equals([conversationId, senderId]).delete();
+                          // [AUDIT FIX 2026-10-05] Index komposit [conversationId+senderId]
+                          // TIDAK ADA di schema (hanya 'id') → Dexie SchemaError tiap
+                          // PROTOCOL_RESET. Scan via id-prefix + filter senderId di
+                          // state (id kini device-keyed — senderId ada DI DALAM state).
+                          const { listGroupReceiverStates } = await import('@lib/keychainDb');
+                          const staleStates = (await listGroupReceiverStates(conversationId))
+                              .filter(s => s.senderId === senderId)
+                              .map(s => s.id);
+                          if (staleStates.length > 0) {
+                              await db.groupReceiverStates.bulkDelete(staleStates);
+                          }
                           await db.ratchetSessions.delete(conversationId);
                           
                           const { getSodiumLib, fetchPreKeyBundle, establishSessionFromPreKeyBundle } = await import('@utils/crypto');
@@ -688,7 +697,13 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                                       encryptedKey: extractedKey,
                                       type: 'GROUP_KEY',
                                       senderId: decrypted.senderId || data.senderId || "",
-                                      senderDeviceKey: dist.senderDeviceKey || data.senderDeviceKey
+                                      senderDeviceKey: dist.senderDeviceKey || data.senderDeviceKey,
+                                      // [AUDIT FIX 2026-10-05] senderSigningKey WAJIB
+                                      // diteruskan — tanpa ini receiver state tersimpan
+                                      // tanpa signing key → decryptGroupMetadata v2
+                                      // selamanya gagal "signing key pengirim belum
+                                      // terikat" di jalur offline sync.
+                                      senderSigningKey: (dist as { senderSigningKey?: string }).senderSigningKey || (data as { senderSigningKey?: string }).senderSigningKey
                                   });
                                   success = true;
                                   break;
@@ -702,7 +717,10 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                               encryptedKey: (data.encryptedKey || data.key || ""),
                               type: 'GROUP_KEY',
                               senderId: decrypted.senderId || data.senderId || "",
-                              senderDeviceKey: data.senderDeviceKey
+                              senderDeviceKey: data.senderDeviceKey,
+                              // [AUDIT FIX 2026-10-05] Forward signing key pengirim
+                              // (dipersist server di content GROUP_KEY SYSTEM).
+                              senderSigningKey: (data as { senderSigningKey?: string }).senderSigningKey
                            });
                            success = true;
                       }
