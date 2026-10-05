@@ -217,5 +217,10 @@
   "user_unblocked_plain": "Usuario desbloqueado",
   "posting_error": "No se pudo publicar la historia: {{message}}",
   "posting_success": "¡Historia publicada!",
-  "story_keys_partial_fail": "{{count}} destinatario(s) no recibieron la historia. Vuelve a publicarla si es necesario."
+  "story_keys_partial_fail": "{{count}} destinatario(s) no recibieron la historia. Vuelve a publicarla si es necesario.",
+  "contact_picker_title": "Contactos ({{count}})",
+  "contact_picker_all_selected": "Todos los contactos seleccionados.",
+  "contact_trust_verified": "Verificado",
+  "contact_trust_known": "Conocido",
+  "contact_trust_stranger": "Desconocido"
 }

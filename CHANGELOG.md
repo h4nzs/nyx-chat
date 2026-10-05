@@ -40,6 +40,20 @@ Verifikasi: tsc web+server exit 0; vitest web **215/215** (30 file, +20 test
 contact store); node:test server 102/102. Primitives/protokol kripto tidak
 berubah.
 
+**P4 — Picker grup dari contact store + trust level (2026-10-05):**
+- `web/src/lib/contactTrust.ts` (pure): `ContactTrustLevel` = verified
+  (safety-number 1:1 cocok via verification store) > known (tercatat di
+  contact store) > stranger; `computeContactTrust` (blocked selalu stranger,
+  defensif) + `compareByTrustDescThenRecency` (trust desc → rekansi → id).
+- `CreateGroupChat`: bagian "Kontak" dari contact store di atas search —
+  sorted verified dulu, profil didekripsi via profileStore per baris (pola
+  ContactItem), badge trust, collapsible, blocked disembunyikan. Search
+  blind-index tetap untuk menemukan stranger.
+- i18n: `contact_picker_title` / `contact_picker_all_selected` /
+  `contact_trust_*` (en/id/es/pt-BR).
+- +7 unit test pure (hierarki, blocked-defensif, determinisme komparator).
+  Verifikasi: vitest web **222/222** (31 file); tsc web exit 0.
+
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 
