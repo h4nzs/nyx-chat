@@ -8,7 +8,7 @@ import { transportClient, } from '@lib/transportClient';
 import { useUserSearch } from '@hooks/useUserSearch';
 import toast from 'react-hot-toast';
 import useDynamicIslandStore from '@store/dynamicIsland';
-import { useProfileStore } from '@store/profile';
+import { useProfileStore, hydrateProfileForPlainId } from '@store/profile';
 import { useVerificationStore } from '@store/verification';
 import ModalBase from './ui/ModalBase';
 import { FiCheck, FiShield, FiUserCheck } from 'react-icons/fi';
@@ -27,14 +27,23 @@ const ContactRow = ({ contact, isSelected, onSelect }: {
   onSelect: (profile: MinimalProfile) => void;
 }) => {
   const { t } = useTranslation(['common']);
+  const uid = String(contact.userId);
+  // [FIX UI ANONYMOUS 2026-10-05] Baca key komposit DULU alias plain-id —
+  // profil yang didekripsi jalur mana pun (pesan/prefetch/kontak lain) selalu
+  // dual-write ke alias, jadi baris kontak tanpa encryptedProfile pun
+  // mendapatkan nama/avatar. Dulu: satu key saja → "Anonymous" senyap.
   const profile = useProfileStore(state => {
-    const cacheKey = contact.encryptedProfile ? `${contact.userId}_${contact.encryptedProfile.substring(0, 32)}` : contact.userId;
-    return state.profiles[cacheKey];
+    const composite = contact.encryptedProfile ? `${uid}_${contact.encryptedProfile.substring(0, 32)}` : uid;
+    return state.profiles[composite] ?? state.profiles[uid];
   });
 
   useEffect(() => {
-    if (!profile && contact.encryptedProfile) {
-      useProfileStore.getState().decryptAndCache(contact.userId, contact.encryptedProfile);
+    if (profile) return;
+    if (contact.encryptedProfile) {
+      void useProfileStore.getState().decryptAndCache(contact.userId, contact.encryptedProfile);
+    } else {
+      // ep kosong di record kontak → hidrasi dari RAM/IDB (bukan "Anonymous")
+      void hydrateProfileForPlainId(contact.userId);
     }
   }, [contact.userId, contact.encryptedProfile, profile]);
 

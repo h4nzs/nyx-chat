@@ -13,8 +13,13 @@ import type { ConversationId, GroupRole } from '@nyx/shared';
 import { parseGroupMembers } from '@nyx/shared';
 import { getGroupMembers } from '@lib/groupPseudonyms';
 import { useEffect } from 'react';
-import { useProfileStore } from '@store/profile';
+import { useProfileStore, hydrateProfileForPlainId } from '@store/profile';
 import { useTranslation } from 'react-i18next';
+
+// [FIX UI ANONYMOUS 2026-10-05] Anggota yang gagal di-resolve (tanpa
+// profileKey + remote tak membantu) ditandai sekali per sesi — jangan boros
+// GET /api/users/:id tiap kali panel grup dibuka.
+const prefetchFailed = new Set<string>();
 
 const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, myRole }: { conversationId: ConversationId, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean, myRole?: GroupRole }) => {
   const { t } = useTranslation(['modals', 'common']);
@@ -208,21 +213,35 @@ const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversat
   const myRole = getGroupMembers(conversationId)?.find(m => m.userId === myId)?.role;
 
   // [T4] Prefetch profil anggota (GET /api/users/:id → encryptedProfile,
-  // didekripsi dengan profileKey dari pesan bila tersedia). Mengurangi
-  // "Anonymous" di panel untuk anggota yang belum kirim pesan.
+  // didekripsi dengan profileKey dari pesan bila tersedia).
+  // [FIX UI ANONYMOUS 2026-10-05] Rantai hidrasi per anggota: RAM/IDB keyed
+  // polos → dekripsi ep lokal (bila ada) → remote → dekripsi ep remote →
+  // tandai gagal sekali per sesi. Dulu: hasil dekripsi TIDAK PERNAH terlihat
+  // oleh useUserProfile (mismatch key komposit vs polos) dan remote diulang
+  // tiap mount → "Anonymous" permanen tanpa error console.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       for (const p of participants) {
         if (cancelled) break;
-        const cached = await useProfileStore.getState().getCacheOnly(p.id, p.encryptedProfile ?? null);
+        const uid = String(p.id);
+        const ep = p.encryptedProfile ?? null;
+        const cached = await useProfileStore.getState().getCacheOnly(p.id, ep);
         if (cached) continue;
+        const hydrated = await hydrateProfileForPlainId(p.id, ep);
+        if (hydrated?.name && hydrated.name !== 'Encrypted User') continue;
+        if (prefetchFailed.has(uid)) continue;
         try {
-          const remote = await api<{ encryptedProfile?: string | null }>(`/api/users/${p.id}`);
-          if (remote?.encryptedProfile && !cancelled) {
-            await useProfileStore.getState().decryptAndCache(p.id, remote.encryptedProfile);
+          const remote = await api<{ encryptedProfile?: string | null }>(`/api/users/${uid}`);
+          if (cancelled) return;
+          if (remote?.encryptedProfile) {
+            const dec = await useProfileStore.getState().decryptAndCache(p.id, remote.encryptedProfile);
+            if (dec?.name && dec.name !== 'Encrypted User') continue;
           }
-        } catch { /* offline / 404 — biarkan fallback nama */ }
+          prefetchFailed.add(uid); // remote tak membantu (profil terkunci kunci)
+        } catch {
+          prefetchFailed.add(uid); // offline / 404 — jangan diulang sesi ini
+        }
       }
     })();
     return () => { cancelled = true; };

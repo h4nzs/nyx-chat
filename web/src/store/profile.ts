@@ -18,15 +18,25 @@ type ProfileState = {
   getCacheOnly: (userId: string | UserId, encryptedProfile: string | null) => Promise<DecryptedProfile | null>;
 };
 
+/**
+ * [FIX UI ANONYMOUS 2026-10-05] Selain key komposit `${id}_${epHash}` (kontrak
+ * lama semua pemanggil), dekripsi yang SUKSES juga ditulis ke ALIAS plain-id.
+ * Alasan: banyak UI (useUserProfile untuk participant tanpa encryptedProfile,
+ * ContactRow untuk kontak tanpa ep) hanya bisa membaca key polos — dulu
+ * mereka tak pernah melihat hasil dekripsi → nama/avatar jatuh ke
+ * "Anonymous"/"Encrypted User" TANPA error console sama sekali.
+ * Alias adalah derived cache: tidak menambah permukaan privasi (isi RAM sama,
+ * hidup-hidupnya mengikuti proses/tab yang sama).
+ */
 export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => ({
   profiles: {},
 
   getCacheOnly: async (userId, encryptedProfile): Promise<DecryptedProfile | null> => {
     if (!encryptedProfile) return null;
     const cacheKey = `${userId}_${encryptedProfile.substring(0, 32)}`;
-    
-    // 1. Check RAM
-    const cached = get().profiles[cacheKey];
+
+    // 1. Check RAM (key komposit, lalu alias plain-id — sama-sama valid)
+    const cached = get().profiles[cacheKey] ?? get().profiles[String(userId)];
     if (cached) return cached;
 
     // 2. Check IndexedDB
@@ -37,8 +47,8 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
         avatarUrl: idbCache.avatarUrl,
         description: idbCache.description
       };
-      // Populate RAM
-      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed } }));
+      // Populate RAM (komposit + alias plain-id)
+      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed, [String(userId)]: parsed } }));
       return parsed;
     }
     return null;
@@ -47,11 +57,12 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
   decryptAndCache: async (userId, encryptedProfile) => {
     // 1. Generate composite cache key
     const cacheKey = encryptedProfile ? `${userId}_${encryptedProfile.substring(0, 32)}` : userId;
+    const idKey = String(userId);
 
-    // 2. Return RAM cache if exists
-    const cached = get().profiles[cacheKey];
+    // 2. Return RAM cache if exists (komposit ATAU alias plain-id)
+    const cached = get().profiles[cacheKey] ?? get().profiles[idKey];
     if (cached) return cached;
-    
+
     // 3. Default fallback
     const fallback: DecryptedProfile = { name: "Encrypted User" };
     if (!encryptedProfile) return fallback;
@@ -64,7 +75,7 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
         avatarUrl: idbCache.avatarUrl,
         description: idbCache.description
       };
-      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed } }));
+      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed, [idKey]: parsed } }));
       return parsed;
     }
 
@@ -76,9 +87,9 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
       // 6. Decrypt via Worker
       const jsonString = await decryptProfile(encryptedProfile, profileKey);
       const parsed = JSON.parse(jsonString) as DecryptedProfile;
-      
-      // 7. Save to RAM
-      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed } }));
+
+      // 7. Save to RAM — key komposit + alias plain-id (UI keyed polos ikut kebagian)
+      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed, [idKey]: parsed } }));
 
       // 8. Save to IndexedDB
       await db.profileCache.put({
@@ -97,3 +108,37 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     }
   }
 }), Object.is);
+
+/**
+ * [FIX UI ANONYMOUS 2026-10-05] Hydrator untuk UI yang TIDAK punya
+ * encryptedProfile (participant panel grup, kontak tanpa ep):
+ *   1. RAM alias plain-id sudah dijamin oleh decryptAndCache/getCacheOnly;
+ *   2. Kalau kosong → cek profileCache IndexedDB (enkripsi tak perlu — IDB
+ *      profil dianggap cache aman oleh arsitektur profile store);
+ *   3. Kalau ada ep dari pemanggil → coba dekripsi penuh (satu kali).
+ * Memanggil set() hanya bila memang menemukan profil (tidak spam re-render).
+ */
+export async function hydrateProfileForPlainId(userId: string | UserId, encryptedProfile?: string | null): Promise<DecryptedProfile | null> {
+  const store = useProfileStore.getState();
+  const idKey = String(userId);
+  const direct = store.profiles[idKey];
+  if (direct) return direct;
+
+  const idbCache = await db.profileCache.get(userId).catch(() => undefined);
+  if (idbCache) {
+    const parsed: DecryptedProfile = {
+      name: idbCache.name,
+      avatarUrl: idbCache.avatarUrl,
+      description: idbCache.description
+    };
+    useProfileStore.setState((state) => ({
+      profiles: state.profiles[idKey] ? state.profiles : { ...state.profiles, [idKey]: parsed },
+    }));
+    return parsed;
+  }
+
+  if (encryptedProfile) {
+    return store.decryptAndCache(userId, encryptedProfile);
+  }
+  return null;
+}

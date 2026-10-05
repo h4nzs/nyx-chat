@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useProfileStore, DecryptedProfile } from '@store/profile';
+import { useProfileStore, DecryptedProfile, hydrateProfileForPlainId } from '@store/profile';
 import type { UserId } from '@nyx/shared';
 import i18n from '../i18n';
 
@@ -10,14 +10,34 @@ export function useUserProfile(userInput?: { id: string | UserId; encryptedProfi
 
   const cacheKey = user?.encryptedProfile ? `${user.id}_${user.encryptedProfile.substring(0, 32)}` : user?.id;
 
-  const cachedProfile = useProfileStore(s => cacheKey ? s.profiles[cacheKey] : undefined);
+  // [FIX UI ANONYMOUS 2026-10-05] Baca key komposit DARI alias plain-id —
+  // decryptAndCache/getCacheOnly sekarang dual-write kedua key, jadi profil
+  // yang didekripsi lewat jalur mana pun terlihat di sini walau objek user
+  // tak membawa encryptedProfile (participant panel grup, dst.).
+  const cachedProfile = useProfileStore(s => {
+    if (!cacheKey) return undefined;
+    return s.profiles[cacheKey] ?? (user?.id ? s.profiles[String(user.id)] : undefined);
+  });
   const decryptAndCache = useProfileStore(s => s.decryptAndCache);
   const getCacheOnly = useProfileStore(s => s.getCacheOnly);
 
   const [localProfile, setLocalProfile] = useState<DecryptedProfile | null>(null);
 
   useEffect(() => {
-    if (!user || !user.id || !user.encryptedProfile) return;
+    if (!user || !user.id) return;
+
+    // [FIX UI ANONYMOUS 2026-10-05] Tanpa encryptedProfile pun tetap coba
+    // hidrasi (RAM alias → profileCache IndexedDB) — dulu efek langsung return
+    // dan UI terjebak "Anonymous" walau profil sudah ada di cache IDB.
+    if (!user.encryptedProfile) {
+      let mounted = true;
+      hydrateProfileForPlainId(user.id)
+        .then((p) => {
+          if (mounted && p) setLocalProfile(p);
+        })
+        .catch(() => {});
+      return () => { mounted = false; };
+    }
 
     let isMounted = true;
 

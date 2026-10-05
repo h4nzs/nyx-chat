@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## 👥 Contact Store + Story Hardening (2026-10-05)
 
+**Fix — UI grup semua "Anonymous" (senyap, tanpa error console):** dua
+patahan sekaligus di rantai profil.
+1. **Mismatch cache key:** `decryptAndCache`/`getCacheOnly` menulis/membaca
+   key komposit `${id}_${ep.slice(0,32)}` saja, sedangkan `useUserProfile`
+   (participant panel grup tanpa `encryptedProfile`) dan `ContactRow`
+   (kontak tanpa ep) membaca key polos `${id}` → profil yang sukses
+   didekripsi TETAP tak terlihat oleh UI. Sekarang store **dual-write**
+   komposit + alias plain-id (dan fallback baca alias), plus
+   `hydrateProfileForPlainId()` (RAM → profileCache IDB → dekripsi) untuk
+   UI tanpa ep. Fallback nama palsu tidak pernah masuk alias.
+2. **Prefetch panel grup buntu:** efek prefetch `ParticipantList` hanya
+   menjalankan `getCacheOnly` (tanpa ep → selalu null) lalu fetch remote dan
+   mendekripsi — hasilnya tidak pernah sampai ke UI keyed polos, dan fetch
+   diulang tiap mount. Rantai baru: RAM/IDB polos → dekripsi ep lokal →
+   remote → dekripsi ep remote → tandai gagal sekali per sesi (tidak boros
+   GET /api/users/:id).
+
 **Fix — version bundle 31-bit (PUT /contact-bundle 400):** `computeBundleVersion`
 sebelumnya memakai mask 63-bit (`0x7fffffffffffffff`) sehingga `version` bisa
 melewati `Number.MAX_SAFE_INTEGER` — Zod 4 di server menolak PUT dengan
