@@ -228,6 +228,24 @@ must be ≥ 2.7.0).
   extraction, client-field re-attachment) with 14 vitest cases — total web
   suite 190. `dr_init_bob` now serializes an explicit empty `skippedKeys` map
   (shape symmetry with `dr_init_alice`).
+* **Own-echo self-decrypt fixed (2026-10-05):** every outgoing 1:1 message
+  logged `Self-decrypt failed with stored key` and fell through to the DR
+  path (own-chain mismatch → `[Decrypt] Failed`; UI survived only via the
+  Shield local copy). Root cause: DR/group ciphertexts carry **padded**
+  plaintext (8KB + `0x80` marker + zero-fill) and the raw
+  `secretbox_open_easy` call sites (messagePipeline self-decrypt + the
+  MK-cache/skipped-key paths in `crypto.ts`) decoded the buffer directly —
+  `sodium.to_string`'s fatal TextDecoder throws on the `0x80` byte. New pure
+  helper `trimPaddedPlaintext` (mirror of the worker's `unpadBuffer`, 5 unit
+  tests) trims the padding before decode; passthrough for non-padded legacy
+  payloads.
+* **Omit-ct scope (measured, 2026-10-05):** in a strictly alternating
+  conversation the ack always references the peer's **previous** chain (every
+  incoming message carries a fresh `kemPk`, forcing a ratchet step), so `ct`
+  is omitted only on **burst sends** (2+ messages in one chain before the
+  peer's next message). Verified in the 3-browser log: all alternating
+  messages correctly carried `ct`; the mechanism stays for bursts and its
+  guard fixed the latent partial-step corruption path.
 * **Deliberately unchanged:** used skipped keys are never deleted (MK-persist,
   reload/kick+re-add decryptability) and `MAX_SKIP` stays 1000 (libsignal's
   25 000 considered too loose for NYX's threat model).

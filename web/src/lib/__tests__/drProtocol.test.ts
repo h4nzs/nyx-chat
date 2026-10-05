@@ -11,7 +11,38 @@ import {
   shouldOmitRatchetCt,
   extractPeerAck,
   attachClientProtocolFields,
+  trimPaddedPlaintext,
 } from '../drProtocol';
+
+describe('drProtocol — trimPaddedPlaintext (echo fix)', () => {
+  const encode = (s: string) => Array.from(new TextEncoder().encode(s));
+
+  it('memangkas marker 0x80 + zero-fill (padded plaintext)', () => {
+    const json = encode('{"content":"halo"}');
+    const padded = new Uint8Array([...json, 0x80, 0, 0, 0, 0]);
+    const trimmed = trimPaddedPlaintext(padded);
+    expect(new TextDecoder().decode(trimmed)).toBe('{"content":"halo"}');
+  });
+
+  it('passthrough bila buffer tidak ber-padded (tanpa marker)', () => {
+    const raw = new Uint8Array(encode('plain'));
+    expect(Array.from(trimPaddedPlaintext(raw))).toEqual(Array.from(raw));
+  });
+
+  it('passthrough bila semua byte nol (marker tidak ditemukan)', () => {
+    expect(trimPaddedPlaintext(new Uint8Array(8))).toEqual(new Uint8Array(8));
+  });
+
+  it('buffer kosong → kosong', () => {
+    expect(trimPaddedPlaintext(new Uint8Array(0)).length).toBe(0);
+  });
+
+  it('plaintext yang berakhiran byte data ≠ marker tidak terpangkas salah', () => {
+    // konten valid UTF-8 berakhir byte != 0/0x80 → passthrough
+    const raw = new Uint8Array(encode('ok{}}'));
+    expect(Array.from(trimPaddedPlaintext(raw))).toEqual(Array.from(raw));
+  });
+});
 
 const HS = {
   initiatorSigningKey: 'sig-key-b64',

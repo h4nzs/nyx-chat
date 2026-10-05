@@ -98,6 +98,24 @@ export function extractPeerAck(decryptedPlaintext: string): string | null {
 }
 
 /**
+ * [ECHO FIX 2026-10-05] Pangkas padding traffic-cover dari plaintext hasil
+ * `secretbox_open_easy` mentah. Ciphertext DR/group berisi plaintext PADDED
+ * (mirror `padBuffer`/`unpadBuffer` di crypto.worker.ts — payload + marker
+ * `0x80` + zero-fill); op worker (dr_ratchet_decrypt, group_ratchet_decrypt)
+ * memangkas internal, tapi jalur MK-cache / self-decrypt yang memakai op
+ * `secretbox_open_easy` MENTAH mendapat buffer ber-padded — `to_string`
+ * (TextDecoder fatal) melempar "The encoded data is not valid" pada byte
+ * `0x80` → semua echo pesan sendiri gagal self-decrypt (log 15:34).
+ * Sama persis dengan `unpadBuffer` worker; passthrough bila marker tidak ada.
+ */
+export function trimPaddedPlaintext(buf: Uint8Array): Uint8Array {
+  let i = buf.length - 1;
+  while (i >= 0 && buf[i] === 0) i--;
+  if (i < 0 || buf[i] !== 0x80) return buf;
+  return buf.slice(0, i);
+}
+
+/**
  * Gabungkan bidang protokol klien ke state hasil worker sebelum dipersist.
  * Worker meng-serialize ulang state dengan field eksplisit, sehingga bidang
  * klien-side HARUS ditempel ulang di sini (jika tidak akan ter-strip).

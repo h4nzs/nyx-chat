@@ -133,7 +133,14 @@ export async function decryptMessageObject(
                     const nonce = combined.slice(0, 24);
                     const encrypted = combined.slice(24);
                     const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-                    let plainText = sodium.to_string(decryptedBytes);
+                    // [ECHO FIX 2026-10-05] Ciphertext DR = plaintext PADDED
+                    // (marker 0x80 + zero-fill, lihat padBuffer worker).
+                    // sodium.to_string (TextDecoder fatal) melempar pada byte
+                    // 0x80 → SEMUA echo pesan sendiri gagal self-decrypt dan
+                    // jatuh ke jalur DR (own-chain mismatch → [Decrypt]
+                    // Failed; log 15:34). Pangkas padding sebelum decode.
+                    const { trimPaddedPlaintext } = await import('@lib/drProtocol');
+                    let plainText = sodium.to_string(trimPaddedPlaintext(decryptedBytes));
                     
                     if (plainText && plainText.trim().startsWith('{')) {
                         try {

@@ -34,6 +34,7 @@ import {
   extractPeerAck,
   getHandshakePayload,
   shouldOmitRatchetCt,
+  trimPaddedPlaintext,
 } from '@lib/drProtocol';
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
@@ -1819,7 +1820,9 @@ async function doDecryptMessage(
               const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
               const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
               const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-              return { status: 'success', value: sodium.to_string(decrypted) };
+              // [ECHO FIX 2026-10-05] Plaintext DR/group ber-padded — pangkas
+              // sebelum decode (to_string fatal melempar pada marker 0x80).
+              return { status: 'success', value: sodium.to_string(trimPaddedPlaintext(decrypted)) };
           } catch (_e) {
               // Fail silently and try fallback
           }
@@ -2186,7 +2189,8 @@ async function doDecryptMessage(
               const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
               try {
                   const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, cachedMk);
-                  return { status: 'success', value: sodium.to_string(decrypted) };
+                  // [ECHO FIX 2026-10-05] Pangkas padding sebelum decode.
+                  return { status: 'success', value: sodium.to_string(trimPaddedPlaintext(decrypted)) };
               } catch (_e) { /* cache basi — lanjut jalur normal */ }
           }
       }
@@ -2201,7 +2205,8 @@ async function doDecryptMessage(
           
           // [FIX 2 — 2026-10-02] JANGAN hapus — MK persist ala libsignal
           // (deleteSkippedKey kini no-op; cap LRU di storeSkippedKey).
-          return { status: 'success', value: sodium.to_string(decrypted) };
+          // [ECHO FIX 2026-10-05] Pangkas padding sebelum decode.
+          return { status: 'success', value: sodium.to_string(trimPaddedPlaintext(decrypted)) };
       }
 
       const state = await retrieveRatchetStateSecurely(conversationId);
