@@ -660,9 +660,21 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const existing = state.conversations.find(c => c.id === conversation.id);
       let updatedConv: Conversation;
       if (existing) {
+        // [AUDIT FIX 2026-10-05 — ANTI-REGRESI ERA] Replay METADATA_UPDATED era
+        // LAMA (SYSTEM persist 7 hari) tidak boleh menimpa blob BARU yang sudah
+        // berhasil terdekripsi: dulu blob di-store apa adanya → pasangan
+        // (blob era-1, decryptedMetadata era-2) inkonsisten → decryptGroupMetadata
+        // gagal berulang "metadataKey era belum tersedia" (log C 13:21:23).
+        const keepExistingBlob =
+          !decryptedMetadata &&
+          !!existing.decryptedMetadata &&
+          !!conversation.encryptedMetadata &&
+          conversation.encryptedMetadata !== existing.encryptedMetadata;
         updatedConv = {
           ...existing,
-          encryptedMetadata: conversation.encryptedMetadata,
+          encryptedMetadata: keepExistingBlob
+            ? existing.encryptedMetadata
+            : conversation.encryptedMetadata,
           decryptedMetadata: decryptedMetadata || existing.decryptedMetadata,
           isGroup: conversation.isGroup,
           participants: conversation.participants,
@@ -768,11 +780,21 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // sendiri hanya menciptakan churn era (bukti log: B membuat 2 era
         // dalam 13 detik saat C ditambahkan) dan deviasi dari model libsignal
         // (rantai sender tiap anggota independen dari roster).
+        // [AUDIT FIX 2026-10-05 — ANTI-REGRESI ERA] Sama seperti addOrUpdate:
+        // blob lama yang gagal didekripsi tidak boleh menimpa blob baru yang
+        // sudah terdekripsi di store.
+        const oldConvForBlob = state.conversations.find((c) => c.id === id);
+        const keepBlob =
+          !decryptedMetadata &&
+          !!oldConvForBlob?.decryptedMetadata &&
+          !!data.encryptedMetadata &&
+          data.encryptedMetadata !== oldConvForBlob.encryptedMetadata;
+        const patch = keepBlob ? { ...data, encryptedMetadata: oldConvForBlob.encryptedMetadata } : data;
         return {
           conversations: state.conversations.map((c) =>
             c.id === id ? { 
                 ...c, 
-                ...data,
+                ...patch,
                 decryptedMetadata: decryptedMetadata || c.decryptedMetadata 
             } : c
           ),

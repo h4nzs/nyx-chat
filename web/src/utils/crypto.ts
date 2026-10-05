@@ -582,6 +582,10 @@ export type DecryptResult =
 
 // --- Module-level state for managing key requests ---
 const pendingGroupKeyRequests = new Map<string, { attempt: number, timerId: number }>();
+// [AUDIT FIX 2026-10-05] Era tak dikenal yang sudah pernah di-request kunci —
+// mencegah siklus request berulang untuk pesan era pra-gabung (lihat
+// doDecryptMessage group branch).
+const unknownEraKeyRequested = new Set<string>();
 const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
 const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 
@@ -1816,8 +1820,20 @@ async function doDecryptMessage(
         if (!senderId) {
             return { status: 'error', error: new Error('Missing senderId and keyId for group decryption (Sealed Sender failed to resolve)') };
         }
-        if (senderId && senderDeviceKey) {
-            requestGroupKeyWithTimeout(conversationId, 0, senderId, senderDeviceKey);
+        // [AUDIT FIX 2026-10-05 — ERA PRA-GABUNG] chainId yang tidak cocok dengan
+        // state manapun (aktif + arsip) = era SEBELUM kita bergabung / era yang
+        // kuncinya sudah lewat — kunci TIDAK akan pernah datang (forward secrecy
+        // by design; pola libsignal: anggota baru tak bisa baca sejarah era lama).
+        // Minta kunci SEKALI per era saja — tanpa dedupe ini, setiap sweep
+        // re-decrypt memicu siklus request→timeout baru berulang-ulang
+        // (log C: "Ratchet Advanced / chainId tak dikenal" berulang 13:21–13:25).
+        const unknownEraRef = `${conversationId}_${payloadObj?.chainId || keyId || senderDeviceKey || ''}`;
+        const alreadyRequestedUnknownEra = unknownEraKeyRequested.has(unknownEraRef);
+        if (!alreadyRequestedUnknownEra) {
+            unknownEraKeyRequested.add(unknownEraRef);
+            if (senderId && senderDeviceKey) {
+                requestGroupKeyWithTimeout(conversationId, 0, senderId, senderDeviceKey);
+            }
         }
         return { status: 'pending', reason: 'waiting_for_key' };
     }
