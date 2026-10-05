@@ -124,6 +124,15 @@ export async function encryptGroupMetadata(
     const prevTokens = getDeliveryTokenMap(conversationId);
     if (prevTokens) metadata = { ...metadata, deliveryTokenMap: prevTokens };
   }
+  // [PROFILE KEY DISTRIBUTION 2026-10-05] Roster v3: suntikkan profileKey
+  // MILIK PENULIS ke entri roster-nya sebelum enkripsi — kanal distribusi
+  // kunci profil untuk anggota pasif (pola Signal sender-keys: tiap penulis
+  // metadata menyebarkan kuncinya sendiri; server tetap opaque).
+  if ((metadata.v === 3) && Array.isArray(metadata.members) && metadata.members.length > 0) {
+    // merge mutasi in-place — inject SEBELUM JSON.stringify payload metadata.
+    const { mergeMyProfileKeyIntoRoster } = await import('@lib/groupProfileKeys');
+    await mergeMyProfileKeyIntoRoster(metadata.members, conversationId).catch(() => {});
+  }
   // Ensure we have a valid session before encrypting metadata
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (conversation) {

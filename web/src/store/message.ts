@@ -2463,6 +2463,30 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return decrypted; 
           }
 
+          // [PROFILE KEY DISTRIBUTION 2026-10-05] Fallback distribusi kunci
+          // profil (kanal utama = roster metadata v3): simpan kunci pengirim
+          // keyed userId kanonik (bukan pseudonym wire) — UI grup membaca key
+          // polos ini. Kanal utama unggul; sini hanya menutup yang bolong.
+          if (silentPayload.type === 'PROFILE_SYNC' && silentPayload.profileKey) {
+              cleanUpOptimisticBubble();
+              try {
+                  const { resolveCanonicalProfileIdentity } = await import('@lib/messagePipeline');
+                  const canonicalId = await resolveCanonicalProfileIdentity(
+                      String(conversationId),
+                      String(decrypted.senderId || '')
+                  );
+                  const { saveProfileKey } = await import('@lib/keychainDb');
+                  const existing = await import('@lib/keychainDb').then(m => m.getProfileKey(canonicalId));
+                  if (!existing) {
+                      await saveProfileKey(canonicalId, String(silentPayload.profileKey));
+                      console.debug(`[ProfileSync] Kunci profil ${canonicalId} tersimpan (fallback silent)`);
+                  }
+              } catch (e) {
+                  console.warn('[ProfileSync] Gagal menyimpan kunci profil:', e);
+              }
+              return decrypted;
+          }
+
           // [T4] COVER traffic (doc 26.10): drop setelah dekripsi — tidak ada
           // bubble, tidak persist ke vault, tidak update preview. Pesan ini
           // sengaja MENGITUNG sender-key chain (N tak lagi = jumlah pesan

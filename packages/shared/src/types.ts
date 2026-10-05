@@ -195,6 +195,15 @@ export interface GroupMemberEntry {
   role: GroupRole;
   /** generation metadata saat anggota bergabung (audit + ordering). */
   joinedAtGeneration: number;
+  /**
+   * [PROFILE KEY DISTRIBUTION 2026-10-05] Kunci dekripsi profil anggota
+   * (base64), opsi — di-inject penulis metadata dari keychainDb masing-masing
+   * (kunci milik sendiri, bukan koleksi orang lain). Kanal distribusi kunci
+   * profil untuk anggota pasif (belum pernah kirim pesan). Metadata v2/v3
+   * terenkripsi + ditandatangani (XChaCha era key + Ed25519) — server tetap
+   * opaque; regenerasi peta pseudonym per rotasi tidak terpengaruh.
+   */
+  profileKey?: string;
 }
 
 export interface GroupMetadataV3 extends GroupMetadataBase {
@@ -239,6 +248,9 @@ export function parseGroupMembers(input: unknown): GroupMemberEntry[] {
       role: isGroupRole(rec.role) ? rec.role : 'MEMBER',
       joinedAtGeneration:
         typeof rec.joinedAtGeneration === 'number' ? rec.joinedAtGeneration : 0,
+      // [PROFILE KEY DISTRIBUTION] Whitelist eksplisit — field asing di luar
+      // kontrak metadata tidak pernah lolos parser (sama seperti kontrak v3).
+      profileKey: typeof rec.profileKey === 'string' && rec.profileKey.length > 0 ? rec.profileKey : undefined,
     });
   }
   return out;

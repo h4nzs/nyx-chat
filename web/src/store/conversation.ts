@@ -661,9 +661,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                         conversation.participants = metaParticipants.map((id: string) => ({
                             id, name: id === currentUser?.id ? currentUser.name || '' : '', role: 'MEMBER' as const
                         })) as Participant[];
-                        // Persist to IndexedDB so non-creator members can send messages even before metadata is re-decrypted
-                        import('@lib/keychainDb').then(m => m.saveCachedGroupParticipants(conversation.id, metaParticipants));
-                    }
+                    // Persist to IndexedDB so non-creator members can send messages even before metadata is re-decrypted
+                    import('@lib/keychainDb').then(m => m.saveCachedGroupParticipants(conversation.id, metaParticipants));
+                }
+                // [PROFILE KEY DISTRIBUTION 2026-10-05] Kunci profil anggota dari
+                // roster v3 → keychain (kanal utama; anggota pasif ikut kebagian).
+                void import('@lib/groupProfileKeys').then(({ applyGroupProfileKeys }) =>
+                    applyGroupProfileKeys(conversation.id, (dec as { members?: unknown }).members)
+                ).catch(() => {});
                     // [BUGFIX PESAN PERTAMA 2026-10-02] Metadata BARU SAJA berhasil
                     // didecrypt (sebelumnya pending/gagal karena chain key belum
                     // tiba). Re-decrypt pesan yang tertahan waiting_for_key — dulu
@@ -724,6 +729,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         };
       }
     });
+
+    // [PROFILE KEY DISTRIBUTION 2026-10-05] Titik reaksi tunggal SETELAH store
+    // terisi — mencakup SEMUA jalur masuk metadata (sync awal, replay SYSTEM
+    // METADATA_UPDATED, addParticipant, dsb.). applyGroupProfileKeys:
+    //   • simpan kunci profil anggota dari roster v3 (first-wins);
+    //   • bila entri SAYA belum membawa kunci → trigger silent PROFILE_SYNC
+    //     sekali per (device, conversation) — fallback anggota pasif.
+    if (conversation.isGroup && decryptedMetadata) {
+      void import('@lib/groupProfileKeys').then(({ applyGroupProfileKeys }) =>
+        applyGroupProfileKeys(conversation.id, (decryptedMetadata as { members?: unknown }).members)
+      ).catch(() => {});
+    }
   },
 
   removeConversation: (conversationId) => {
@@ -788,6 +805,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                      // Persist to IndexedDB cache for offline/early message sending
                      import('@lib/keychainDb').then(m => m.saveCachedGroupParticipants(id, metaParticipants));
                  }
+                 // [PROFILE KEY DISTRIBUTION 2026-10-05] Kanal utama (metadata era
+                 // baru) — simpan kunci profil anggota dari roster v3.
+                 void import('@lib/groupProfileKeys').then(({ applyGroupProfileKeys }) =>
+                     applyGroupProfileKeys(id, (dec as { members?: unknown }).members)
+                 ).catch(() => {});
              } else {
                  console.warn("Failed to decrypt metadata");
              }

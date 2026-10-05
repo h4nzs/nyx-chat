@@ -161,6 +161,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     useConversationStore.getState().syncParticipantsFromMetadata(conversationId, metaV3Members);
   }, [conversationId, metaV3Members]);
 
+  // [PROFILE KEY DISTRIBUTION 2026-10-05] Panel dibuka → kalau entri SAYA di
+  // roster metadata v3 belum membawa profileKey (atau metadata belum terdekripsi
+  // saat panel dibuka pertama), kirim silent PROFILE_SYNC sekali per
+  // (device, conversation) — fallback kanal utama (injeksi penulis metadata).
+  useEffect(() => {
+    if (!conversation?.isGroup) return;
+    import('@lib/transportClient').then(({ fireProfileSync }) => fireProfileSync(conversation.id)).catch(() => {});
+  }, [conversation?.id, conversation?.isGroup]);
+
   if (!conversation || !conversation.isGroup) {
     return null;
   }

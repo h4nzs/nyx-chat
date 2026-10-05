@@ -53,7 +53,10 @@ export type SilentType =
   | 'GROUP_KEY'
   // [T4] Application-level cover traffic (doc 26.10): pesan pengisi yang
   // melewati pipeline penuh lalu di-drop klien setelah dekripsi.
-  | 'COVER';
+  | 'COVER'
+  // [PROFILE KEY DISTRIBUTION 2026-10-05] Fallback distribusi kunci profil
+  // (roster metadata v3 adalah kanal utama) — sekali per (device, conversation).
+  | 'PROFILE_SYNC';
 
 export interface SilentPayload {
   type: SilentType;
@@ -63,6 +66,8 @@ export interface SilentPayload {
   targetMessageId?: string;
   emoji?: string;
   url?: string;
+  /** [PROFILE KEY DISTRIBUTION] Kunci dekripsi profil PENGIRIM (base64). */
+  profileKey?: string;
   /** [T2] GROUP_KEY distribution payload — sealed sender key + routing metadata. */
   groupKey?: {
     /** Sealed sender-key envelope (inner pq_box_seal, dipertahankan dari jalur lama). */
@@ -79,6 +84,7 @@ export interface SilentPayload {
 const SILENT_TYPES: ReadonlySet<string> = new Set<SilentType>([
   'silent', 'CALL_INIT', 'GHOST_SYNC', 'STORY_KEY',
   'UNSEND', 'reaction_remove', 'SYSTEM_KEY_REQUEST', 'GROUP_KEY', 'COVER',
+  'PROFILE_SYNC',
 ]);
 
 export function isSilentPayload(data: unknown): data is SilentPayload {
@@ -230,6 +236,20 @@ export function isGhostSyncPayload(data: unknown): data is GhostSyncPayload {
   if (!isPlainObject(data)) return false;
   const d = data;
   return d.type === 'GHOST_SYNC';
+}
+
+// ─── PROFILE_SYNC Payload ────────────────────────────────────────
+/** [PROFILE KEY DISTRIBUTION] Silent fallback distribusi kunci profil. */
+export interface ProfileSyncPayload {
+  type: 'PROFILE_SYNC';
+  /** Kunci dekripsi profil PENGIRIM (base64) — kunci milik pengirim sendiri. */
+  profileKey?: string;
+}
+
+export function isProfileSyncPayload(data: unknown): data is ProfileSyncPayload {
+  if (!isPlainObject(data)) return false;
+  const d = data;
+  return d.type === 'PROFILE_SYNC';
 }
 
 // ─── Upgraded Account Payload ──────────────────────────────────────

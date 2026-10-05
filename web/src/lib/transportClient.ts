@@ -703,3 +703,25 @@ export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) 
         }
     }, randomDelay);
 };
+
+/**
+ * [PROFILE KEY DISTRIBUTION 2026-10-05] Trigger silent PROFILE_SYNC dengan
+ * dedupe per (conversation) di module groupProfileKeys + jitter acak — pola
+ * fireGhostSync. Roster-aware: hanya kirim bila entri SAYA di roster metadata
+ * v3 memang belum membawa profileKey (kanal utama) — tanpa roster v3 kirim
+ * saja (fallback kanal utama belum tersedia).
+ */
+export const fireProfileSync = (conversationId: string, baseDelay: number = 1000): void => {
+    void (async () => {
+        try {
+            const { shouldFireProfileSync } = await import('@lib/groupProfileKeys');
+            if (!(await shouldFireProfileSync(conversationId))) return;
+        } catch { /* roster tak terbaca — lanjut kirim (fail-open) */ }
+        const randomDelay = Math.floor(Math.random() * 2500) + baseDelay;
+        setTimeout(() => {
+            import('@lib/groupProfileKeys').then(({ maybeFireProfileSync }) =>
+                maybeFireProfileSync(conversationId)
+            ).catch(() => {});
+        }, randomDelay);
+    })();
+};

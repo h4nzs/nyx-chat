@@ -24,7 +24,7 @@ import { isPlainObject, isFileMetadata, isStoryReplyPayload, isSystemMessagePayl
 // nama/avatar pengirim grup v2 jatuh ke "Encrypted User"/Anonymous.
 // senderId WIRE pesan TIDAK diubah (receipt server keyed pseudonym);
 // hanya `sender.id` + penyimpanan kunci profil yang diarahkan ke real userId.
-async function resolveCanonicalProfileIdentity(conversationId: string, rawId: string): Promise<string> {
+export async function resolveCanonicalProfileIdentity(conversationId: string, rawId: string): Promise<string> {
     try {
         const { resolvePseudonymToUserId } = await import('@lib/groupPseudonyms');
         const real = resolvePseudonymToUserId(conversationId, rawId);

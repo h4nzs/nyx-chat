@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## 👥 Contact Store + Story Hardening (2026-10-05)
 
+**Fitur — distributed profile key di roster metadata v3 (anggota pasif
+terlihat):** kunci profil anggota sebelumnya hanya terdistribusi lewat payload
+PESAN dari anggota itu sendiri → anggota pasif (belum pernah kirim pesan) tak
+pernah menyebarkan kuncinya dan tetap "Anonymous" bagi anggota lain. Dua kanal
+baru (server tetap opaque — metadata terenkripsi+ditandatangani, silent message
+biasa; tidak ada perubahan server):
+1. **Kanal utama (roster):** `GroupMemberEntry.profileKey?` — penulis metadata
+   (creator/admin, pola Signal sender-keys) menyuntikkan kunci MILIKNYA ke
+   entri roster-nya di `encryptGroupMetadata`; pembaca menyimpan kunci peer
+   (first-wins, kunci yang sudah dikenal tidak ditimpa) via
+   `applyGroupProfileKeys` di semua jalur masuk metadata. `parseGroupMembers`
+   mem-whitelist field baru (field asing tetap dibuang).
+2. **Fallback (silent PROFILE_SYNC):** anggota yang entri roster-nya belum
+   membawa kunci (kunci lahir setelah metadata, atau client lawas) mengirim
+   SATU silent `PROFILE_SYNC` (tanpa bubble/push, pola GHOST_SYNC) sekali per
+   (device, conversation) — dipicu saat metadata terdekripsi tanpa kunci
+   sendiri, dan saat GroupInfoPanel dibuka. Penerima menyimpan kunci keyed
+   userId kanonik (bukan pseudonym wire).
+
 **Fix — UI grup semua "Anonymous" (senyap, tanpa error console):** dua
 patahan sekaligus di rantai profil.
 1. **Mismatch cache key:** `decryptAndCache`/`getCacheOnly` menulis/membaca
