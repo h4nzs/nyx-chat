@@ -142,6 +142,60 @@ schema push**, `prisma db push`, at deploy time).
   metadata and mark rotation needed). Manual "Force rotate keys" in
   Group Info uses the same active-rotation path.
 
+### 🔐 Sender-Key v2 — libsignal-model rewrite + stabilization (2026-10-05)
+
+After 30+ incremental fixes on the group layer, the sender-key pipeline was
+rewritten in place to follow libsignal `sender_keys.rs` exactly, then audited
+gainst `sender_keys.rs` / `group_cipher.rs` and stabilized with a 3-browser
+manual test (web vitest 176 / server node:test 102 green throughout).
+
+* **Era identity & header v2:** every era mints a RANDOM 64-bit `chainId` (not
+  derived from the chain key) plus a dedicated 256-bit `metadataKey`. Message
+  wrappers are versioned `{v:2, chainId, header.n}` — the legacy `keyId =
+  CK[0:8]` is gone from v2 wrappers; v1/v0 readers kept for prod data.
+* **Metadata out of the chain:** metadata v2 =
+  `{v:2, kind:'group_metadata', chainId, ct (XChaCha), signature, senderId,
+  senderDeviceKey}` — encrypted with the era `metadataKey` carried inside the
+  distribution envelope `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]`
+  (77 bytes, `pq_box_seal` per device). The position-twinning / sender-state
+  restore hacks are impossible by construction.
+* **One distribution path:** create/rotate/redistribute/fulfill/request-reply
+  all funnel through `sendGroupSenderKeyDistribution` → `group:fulfilled_key`
+  → `session:new_key` → `storeReceivedSessionKey`; duplicated seal loops
+  deleted.
+* **Receiver states ala `SenderKeyRecord`:** one per
+  `(conversation, senderDeviceKey)` (device-keyed — stable across pseudonym
+  rotations), states carry `chainId`/`eraCK`/`metadataKey`/`signingKey`,
+  skipped message keys live inside the record, old eras are archived (max 5,
+  `MAX_SENDER_KEY_STATES`); routing goes through the pure `pickChainState`
+  helper — no cross-era guessing. Replay of a same-era distribution is a
+  no-op (`isSameEraDistribution`); key request routing resolves the fulfiller
+  by `targetDeviceKey` server-side so members without metadata can reach
+  every sender.
+* **Audit fixes (2026-10-05):** `listGroupReceiverStates` now returns
+  `metadataKey` (metadata v2 failed with the state present — critical);
+  skip-own GROUP_KEY compares the device identity key (cross-device group
+  sync fixed); offline GROUP_KEY paths forward `senderSigningKey`;
+  `PROTOCOL_RESET` no longer queries a nonexistent Dexie compound index; PCS
+  metadata re-encryption supports roster v3 without downgrading it.
+* **Distribution stability:** the signing-key fallback in group decryption
+  fetched prekey bundles **per incoming message**, burning the OTPK fetch
+  quota (30/pair/day, fail-closed 429) — one tripped pair disabled ALL bulk
+  bundle fetches for that account, so key distributions came out empty and
+  recipients sat in `waiting_for_key`. The fetch is now guarded by
+  `!keyToUse` (zero API calls on the hot path).
+* **Era hygiene on rotation:** `rotateGroupKey` replaces only the local
+  sender state (receiver states, era archives and skipped keys survive —
+  old-era messages stay readable); the self-receiver state carries
+  `signingKey` (a writer can re-read its own metadata blob); rotation emits
+  `metadata:updated` so members receive the new blob + roster in real time;
+  roster changes no longer force-rotate the sender key (era churn).
+* **Forward secrecy of pre-join eras (by design):** messages from eras a
+  member never possessed stay undecryptable; the unknown-era key request runs
+  once per chainId instead of looping request→timeout on every re-decrypt
+  sweep. Stale persisted `METADATA_UPDATED` replays can no longer regress a
+  newer, already-decrypted metadata blob in the store.
+
 ### 🌫️ T4 — Cover Traffic (doc 26.10)
 * **Application-Level Filler:** Opt-in per group. Cover messages traverse the
   FULL pipeline (sendMessage → sidecar → redisBridge → Postgres → recipient

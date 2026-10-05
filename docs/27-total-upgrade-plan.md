@@ -21,6 +21,12 @@
 > closes **26.8.1 trigger condition #1** (token-only endpoints). 27.2.4 rate
 > limits recalibrated (chat_message 120/min etc.), client cover soft cap
 > 28 → 118/min.
+>
+> **Update 2026-10-05:** the "pairwise GROUP_KEY route" itself was superseded
+> by the sender-key v2 rewrite — one distribution path
+> (`sendGroupSenderKeyDistribution` → `group:fulfilled_key`), random per-era
+> `chainId`, metadata carried by a dedicated per-era `metadataKey` outside the
+> chain. See docs/16 §16.7.2–16.7.3 and the CHANGELOG 2026-10-05 entry.
 
 ## 27.0 Audit summary — what the 1-core era constrained
 

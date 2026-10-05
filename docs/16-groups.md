@@ -49,12 +49,12 @@ sequenceDiagram
 
 ## 16.4 Sender-key distribution & rotation
 
-- Each sender maintains its own chain key `{CK, N, skippedKeys}` per conversation (`groupSenderStates`); each recipient maintains a per-sender receiver state (`groupReceiverStates`) — all encrypted at rest with the `ENC1:` envelope.
-- **[T2 — implemented]** Distribution rides the pairwise DR session per peer as a silent `GROUP_KEY` control message (virtual `<group>:pw:<peer>` conversation id); the legacy `GROUP_KEY_DISTRIBUTION` / `messages:distribute_keys` path below is the fallback for devices without a pairwise session.
-- Control message `GROUP_KEY_DISTRIBUTION` carries per-recipient `encryptedKey` + `senderDeviceKey` (and optionally a DR header) — delivered in-band and processed first by the offline sync path.
-- **[T1 — implemented]** Group senders sign/route with a per-group pseudonym (metadata v2); receiver states key off the resolved sender.
+- Each sender maintains its own chain `{CK, N, initialCK, chainId, metadataKey}` per conversation (`groupSenderStates`); each recipient maintains **one receiver state per `(conversation, senderDeviceKey)`** carrying `{CK, N, eraCK, chainId, metadataKey, skippedKeys, signingKey}` (`groupReceiverStates`) — all encrypted at rest with the `ENC1:` envelope.
+- **[T2 — implemented]** Distribution runs through the single `sendGroupSenderKeyDistribution` path → `group:fulfilled_key` → `session:new_key` → `storeReceivedSessionKey` (realtime **and** persisted as a SYSTEM `GROUP_KEY` row, 7-day TTL, for offline catch-up). The old pairwise-DR control-message transport and `messages:distribute_keys` are removed.
+- **[V2 — 2026-10-02]** The distribution envelope is a libsignal `SenderKeyDistributionMessage` v2: `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]` (77 bytes), sealed per device (`pq_box_seal`). See §16.7.2.
+- **[T1 — implemented]** Group senders sign/route with a per-group pseudonym (metadata v2); receiver states key off the sender **device identity key** (stable across pseudonym rotations).
 - **Rotation invariants (fixed 2026-10):** `fulfillGroupKeyRequest` always seals the chain key at its **initial state `(initialCK, N=0)`** (`GroupSenderState.initialCK` is persisted at rest) so late joiners decrypt metadata again; metadata mutations redistribute the **same** era via `redistributeCurrentGroupKey` instead of minting a second era per change (the old double-era bug left new members in `waiting_for_key` forever). A fresh era is only created when the sender state is empty.
-- **Rotation** (`forceRotateGroupSenderKey`): triggered on participant add/remove, crypto change, or manual "repair secure session". Rotation also re-encrypts metadata v2 with a fresh pseudonym map (generation+1) — delivery-token maps are inherited, never rotated.
+- **Rotation** (`rotateGroupKey`, admin-only active path): replaces **only the local sender state** (era sources of other senders and their archives are preserved — multi-era, see §16.7.1), re-encrypts metadata v2/v3 with a fresh pseudonym map (generation+1), `PUT /details` **and emits `metadata:updated`** so every member receives the new blob + roster in real time (2026-10-05 — previously only the PUT happened and other members kept the old roster until reload). Delivery-token maps are inherited, never rotated.
 
 ## 16.5 Membership operations
 
@@ -178,6 +178,57 @@ Also: `group:request_key` is routed server-side by **`targetDeviceKey`**
 pseudonym — a member whose metadata is still undecrypted can reach every
 sender, not only the creator.
 
+### 16.7.3 Audit vs libsignal + stabilization pass (2026-10-05)
+
+A full audit of the v2 pipeline against `sender_keys.rs` / `group_cipher.rs`
+found and fixed the remaining holes. All verified with the full unit suite
+(web vitest 176, server node:test 102) and a 3-browser manual test.
+
+**Distribution correctness:**
+
+- `listGroupReceiverStates` now returns `metadataKey` (decrypted at rest).
+  It is the data source for `findGroupReceiverState` — the single routing
+  door used by both message and metadata decryption — so metadata v2 was
+  failing with "metadataKey era belum tersedia" even with the state present.
+- `storeReceivedSessionKey` skip-own now compares **`senderDeviceKey` with
+  the local device identity key**, not the userId/pseudonym — distributions
+  from another device of the same account were being skipped, breaking
+  cross-device group sync.
+- Offline GROUP_KEY paths (`messagePipeline`) forward `senderSigningKey`;
+  without it, states built from offline sync had no bound signing key and
+  metadata v2 decryption failed there only.
+- `decryptMessage`'s signing-key fallback fetches are guarded by
+  `!keyToUse`: the fetch ran **per incoming message** even when the state
+  already carried the signing key, burning the OTPK fetch quota
+  (30 per pair per day, fail-closed 429) — once one pair tripped the limit,
+  every bulk bundle fetch by that account failed and distributions came out
+  empty (recipients stuck `waiting_for_key`).
+
+**Era & state hygiene:**
+
+- `rotateGroupKey` replaces **only the local sender state** — it no longer
+  wipes receiver states, era archives, or skipped keys (`deleteGroupStates`
+  removed from the flow); old-era messages stay readable and
+  `handleGroupKeyDistribution` archives eras on arrival (invariant 1).
+- The self-receiver state minted in `ensureGroupSession` carries
+  `signingKey` — metadata v2 decryption demands `record.signingKey`, so a
+  writer re-reading its own blob failed otherwise.
+- `updateConversation` no longer force-rotates the sender key on roster
+  change (era churn: two eras minted within seconds); membership rotation
+  stays an explicit admin operation.
+- `rotateGroupKey` emits `metadata:updated` after `PUT /details` so every
+  member receives the new blob + roster in real time.
+- Stale `METADATA_UPDATED` replays (7-day persisted SYSTEM rows) can no
+  longer overwrite a **newer, already-decrypted** blob in the conversation
+  store (anti-regression guard in `addOrUpdateConversation` /
+  `updateConversation`).
+
+**Forward secrecy of pre-join eras (by design):** messages from eras a
+member never possessed (e.g. sent before they were added) are permanently
+undecryptable. The unknown-era key request now runs **once per chainId**
+(`unknownEraKeyRequested`) instead of re-looping request→timeout on every
+re-decrypt sweep; the bubble rests as a placeholder.
+
 ## 16.8 Files to know
 
 | File | Role |
@@ -189,7 +240,7 @@ sender, not only the creator.
 | `server/src/routes/conversations.ts` | group endpoints + blind auth (`X-Group-Token`) + admin capability guard (`X-Admin-Token`) |
 | `server/src/utils/adminCapability.ts` | `extractHeader`, `hashAdminToken`, `isAdminTokenValid` (+ 12 unit tests in `server/tests/adminCapability.test.ts`) |
 | `web/src/lib/groupPseudonyms.ts` | `generateAdminCapabilityToken` / `storeMyAdminToken` / `hydrateMyAdminTokens` (kvStore `nyx_group_admin_tokens`) |
-| `web/src/lib/groupEra.ts` | `isSameEraDistribution` — pure replay/era detection (invariant 2, unit-tested) |
+| `web/src/lib/groupEra.ts` | `isSameEraDistribution` (invariant 2) + `pickChainState` — pure era/replay detection & chain routing (unit-tested) |
 | `server/src/network/redisBridge.ts` | `messages:distribute_keys`, `group:*` events |
 
 **[Blueprint 26 additions]** `web/src/lib/groupPseudonyms.ts` (pseudonym + delivery-token maps), `web/src/lib/coverTraffic.ts` (Poisson cover scheduler), `web/src/utils/typeGuards.ts` (`GROUP_KEY` / `COVER` silent types), `server/tests/deliveryTokens.test.ts` (T3b contract).

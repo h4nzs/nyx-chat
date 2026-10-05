@@ -55,6 +55,24 @@ Own-message decrypt failures are converted to `waiting_for_key` (retryable) in `
 ### `TextDecoder.decode: Decoding failed` during self-decrypt
 The stored message key (`mk`) or the envelope does not match the ciphertext — typically a temp-id → server-id key migration issue after ack, or an old cached bundle. The DR fallback then runs; if it also fails, the message lands in `waiting_for_key`.
 
+### Group: new member sees `waiting_for_key` → `[Key request timed out]` on old messages
+Messages from eras **before the member joined** are permanently undecryptable —
+that is forward secrecy working as designed (the member never possessed those
+era keys; libsignal behaves the same). Since 2026-10-05 the unknown-era key
+request runs once per chainId (`unknownEraKeyRequested` in
+`web/src/utils/crypto.ts`), so the bubble rests after a single request cycle
+instead of looping. If a message from the **current** era also fails, check
+whether the era distribution actually reached the device (`GROUP_KEY` SYSTEM
+rows in the message list / `storeReceivedSessionKey` logs) and whether the
+prekey-bundle fetch quota (30/pair/day, fail-closed 429) was burned.
+
+### Group metadata fails with `metadataKey era belum tersedia`
+The metadata blob's `chainId` matched no receiver state (live or archived).
+Usual causes: the era distribution never reached the device (see above), or a
+stale persisted `METADATA_UPDATED` row regressed the store blob (fixed
+2026-10-05 — stale blobs that fail to decrypt can no longer overwrite a
+decrypted newer blob).
+
 ### Blank screen / "nf" when serving `dist/` locally
 The SPA needs a fallback to `index.html` for unknown routes (nginx `try_files` in prod; a plain static server locally).
 

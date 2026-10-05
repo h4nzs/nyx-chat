@@ -50,10 +50,11 @@ Stored encrypted private-key bundle (IndexedDB `kvStore.nyx_encrypted_keys`):
 - Out-of-order messages: skipped keys are stored in state (`skippedKeys` map) encrypted at rest.
 - **Own-message decryption:** self messages first try the stored `mk` with `crypto_secretbox_xchacha20poly1305_open_easy`; failure falls back to the DR path (multi-device). If an own message ultimately fails, it is marked `waiting_for_key` (retryable) — never an error bubble.
 
-## 4.6 Group sender-key ratchet
+## 4.6 Group sender-key ratchet (v2, libsignal model)
 
-- State `{ CK, N, skippedKeys }` per (conversation, sender) — sender state and receiver states live in IndexedDB `groupSenderStates` / `groupReceiverStates`, **encrypted at rest** (`ENC1:` prefix in `keychainDb.ts`).
-- `group_ratchet_encrypt` / `group_ratchet_decrypt` / `group_decrypt_skipped` handle the ratchet; keys are distributed via GROUP_KEY_DISTRIBUTION control messages (the fan-out is client-side; server is blind).
+- **Sender state** `{ CK, N, initialCK, chainId, metadataKey, ... }` per conversation; **receiver state** one per `(conversation, senderDeviceKey)` carrying `{CK, N, eraCK, chainId, metadataKey, skippedKeys, signingKey}` — both live in IndexedDB `groupSenderStates` / `groupReceiverStates`, **encrypted at rest** (`ENC1:` prefix in `keychainDb.ts`). Era changes archive the old receiver state (max 5, `#era_<chainId>` ids).
+- **Era identity:** `chainId` is a RANDOM 64-bit value minted with each era (`group_init_sender_key` returns `{senderKeyB64, chainIdB64, metadataKeyB64}`) — not derived from the chain key. The `metadataKey` (256-bit) takes group metadata **out of the chain**: metadata v2 = `{v:2, kind:'group_metadata', chainId, ct (XChaCha), signature, senderId, senderDeviceKey}`.
+- `group_ratchet_encrypt` / `group_ratchet_decrypt` / `group_decrypt_skipped` handle the ratchet (skipped message keys live **inside the receiver record**, `sender_message_keys` style). Distribution goes through the single `sendGroupSenderKeyDistribution` path: envelope v2 `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]` sealed per device via `pq_box_seal`, relayed by `group:fulfilled_key` (client-side fan-out; server is blind). v1/v0 envelopes and wrappers remain readable (version byte / shape detection).
 
 ## 4.7 Burner protocol (PQ-DR)
 
