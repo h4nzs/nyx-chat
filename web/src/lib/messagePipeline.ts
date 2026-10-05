@@ -16,6 +16,23 @@ import { captureAndLog } from '@utils/feedback';
 import { getSodium } from '@lib/sodiumInitializer';
 import { shadowVault } from '@lib/shadowVaultDb';
 import { isPlainObject, isFileMetadata, isStoryReplyPayload, isSystemMessagePayload } from '@utils/typeGuards';
+
+// [UI AUDIT 2026-10-05] Identitas PROFIL harus userId kanonik: profileKey di
+// keychain & profileCache keyed by REAL userId. Di grup v2 `parsed.senderId`
+// pada payload terenkripsi = PSEUDONYM — dulu langsung dipakai menyimpan
+// profileKey & decryptAndCache → getProfileKey(pseudonym) selalu kosong →
+// nama/avatar pengirim grup v2 jatuh ke "Encrypted User"/Anonymous.
+// senderId WIRE pesan TIDAK diubah (receipt server keyed pseudonym);
+// hanya `sender.id` + penyimpanan kunci profil yang diarahkan ke real userId.
+async function resolveCanonicalProfileIdentity(conversationId: string, rawId: string): Promise<string> {
+    try {
+        const { resolvePseudonymToUserId } = await import('@lib/groupPseudonyms');
+        const real = resolvePseudonymToUserId(conversationId, rawId);
+        return real || rawId;
+    } catch {
+        return rawId;
+    }
+}
 import {
   decryptMessage,
   getMyEncryptionKeyPair,
@@ -151,12 +168,15 @@ export async function decryptMessageObject(
                                 if (!finalMessage.sender) finalMessage.sender = { id: asUserId(String(parsed.senderId)) };
                                 else finalMessage.sender.id = asUserId(String(parsed.senderId));
                             }
-                            if (parsed.profileKey) {
-                                const { saveProfileKey } = await import('@lib/keychainDb');
-                                const profileKeyToSave = String(parsed.profileKey);
-                                await saveProfileKey(finalMessage.senderId || '', profileKeyToSave).catch(() => {});
-                                delete parsed.profileKey;
-                            }
+                if (parsed.profileKey) {
+                    const { saveProfileKey } = await import('@lib/keychainDb');
+                    const profileKeyToSave = String(parsed.profileKey);
+                    // [UI AUDIT 2026-10-05] Keyed REAL userId (dulu pseudonym di
+                    // grup v2 → profileKey tak pernah ketemu saat dekripsi profil).
+                    const canonicalId = await resolveCanonicalProfileIdentity(String(finalMessage.conversationId), String(finalMessage.senderId || ''));
+                    await saveProfileKey(canonicalId, profileKeyToSave).catch(() => {});
+                    delete parsed.profileKey;
+                }
                             delete parsed.senderId;
                             delete parsed.senderDeviceKey;
                             const innerValue = parsed.content !== undefined ? String(parsed.content) : (parsed.text !== undefined ? String(parsed.text) : null);
@@ -396,18 +416,25 @@ export async function decryptMessageObject(
 
                 if (parsed.senderId) {
                     finalMessage.senderId = asUserId(String(parsed.senderId));
-                    if (!finalMessage.sender) finalMessage.sender = { id: asUserId(String(parsed.senderId)) };
-                    else finalMessage.sender.id = asUserId(String(parsed.senderId));
+                    // [UI AUDIT 2026-10-05] sender.id = userId kanonik (bisa
+                    // pseudonym di grup v2); senderId wire tetap.
+                    const canonicalId = await resolveCanonicalProfileIdentity(String(finalMessage.conversationId), String(parsed.senderId));
+                    if (!finalMessage.sender) finalMessage.sender = { id: asUserId(canonicalId) };
+                    else finalMessage.sender.id = asUserId(canonicalId);
                 }
 
                 if (parsed.profileKey) {
                     const { saveProfileKey } = await import('@lib/keychainDb');
                     const { useProfileStore } = await import('@store/profile');
-                    await saveProfileKey(finalMessage.senderId, String(parsed.profileKey));
+                    // [UI AUDIT 2026-10-05] Keyed REAL userId + dekripsi profil
+                    // dengan id kanonik (dulu pseudonym → fallback "Encrypted User").
+                    const canonicalId = await resolveCanonicalProfileIdentity(String(finalMessage.conversationId), String(finalMessage.senderId));
+                    await saveProfileKey(canonicalId, String(parsed.profileKey));
                     const ep = typeof parsed.encryptedProfile === 'string' ? parsed.encryptedProfile : rawMsg.sender?.encryptedProfile || null;
-                    useProfileStore.getState().decryptAndCache(finalMessage.senderId, ep);
+                    useProfileStore.getState().decryptAndCache(canonicalId, ep);
                     if (ep && finalMessage.sender) {
                         finalMessage.sender.encryptedProfile = ep;
+                        finalMessage.sender.id = asUserId(canonicalId);
                     }
                     delete parsed.profileKey;
                     delete parsed.encryptedProfile;

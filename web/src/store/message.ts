@@ -95,7 +95,10 @@ const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMes
             return {
                 ...m,
                 sender: { 
-                    id: m.senderId, 
+                    // [UI AUDIT 2026-10-05] sender.id = userId KANONIK (resolved
+                    // dari pseudonym) — bukan senderId wire yang berbentuk
+                    // pseudonym di grup v2. Profil/hooks keyed by real userId.
+                    id: asUserId(resolvedUserId), 
                     name: resolvedName, 
                     username: resolvedUsername, 
                     avatarUrl: resolvedAvatar,
@@ -109,7 +112,7 @@ const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMes
             return {
                 ...m,
                 sender: {
-                    ...(m.sender || { id: m.senderId }),
+                    ...(m.sender || { id: asUserId(resolvedUserId) }),
                     encryptedProfile
                 }
             };

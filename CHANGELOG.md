@@ -65,6 +65,21 @@ fallback profile dari contact store), story fan-out. Yang sengaja dipertahankan:
 jalur 1:1 (bentuk selalu id), groupPseudonyms legacy, fallback UI. Verifikasi:
 vitest web 222/222; tsc web exit 0.
 
+**Audit UI nama/avatar utk bentuk pseudonym (2026-10-05):** AKAR — di grup v2
+`senderId` payload terenkripsi = pseudonym, dulu dipakai langsung untuk
+`saveProfileKey(pseudonym)` + `decryptAndCache(pseudonym)` padahal profileKey
+& profileCache keyed by REAL userId → nama/avatar pengirim grup v2 selalu
+"Encrypted User"/Anonymous. Fix di `messagePipeline.ts`: helper
+`resolveCanonicalProfileIdentity` (resolvePseudonymToUserId) — `sender.id` +
+penyimpanan kunci profil + dekripsi profil kini pakai userId kanonik;
+`senderId` WIRE tetap pseudonym (receipt server keyed pseudonym). Enrich
+`enrichMessagesWithSenderProfile` kini set `sender.id = resolvedUserId`
+(kanonik). Konsumen downstream (MessageItem/MessageBubble/DynamicIsland via
+`useUserProfile(message.sender)`) otomatis membaik tanpa perubahan.
+ChatWindow/ChatList peer lookup dinormalisasi (1:1). ParticipantList aman
+(participants metadata = real userId). Verifikasi: vitest web 222/222; tsc
+web exit 0.
+
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 

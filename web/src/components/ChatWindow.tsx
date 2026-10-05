@@ -27,6 +27,7 @@ import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { useSettingsStore } from '@store/settings';
+import { getParticipantUserId } from '@nyx/shared';
 import type { MinimalProfile } from '@store/callStore';
 import { asConversationId } from '@nyx/shared';
 
@@ -78,7 +79,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   
   const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
-  const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
+  // [UI AUDIT 2026-10-05] getParticipantUserId (dulu p.id buta — 1:1 aman, tapi
+  // konsisten dengan sisa codebase).
+  const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => getParticipantUserId(p) !== meId) : null;
   const peerProfile = useUserProfile(peerUser as { id: string; encryptedProfile?: string | null });
   const title = conversation.isGroup 
     ? (conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group'))

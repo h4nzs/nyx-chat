@@ -194,7 +194,8 @@ const ConversationItem = memo(function ConversationItem({
   privacyCloak: boolean;
 }) {
   const { t, i18n } = useTranslation(['chat', 'common']);
-  const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
+  // [UI AUDIT 2026-10-05] getParticipantUserId (dulu p.id buta).
+  const peerUser = !conversation.isGroup ? conversation.participants?.find(p => getParticipantUserId(p) !== meId) : null;
   const peerProfile = useUserProfile(peerUser as { id: string; encryptedProfile?: string | null });
   const title = conversation.isGroup 
     ? (conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group')) 
