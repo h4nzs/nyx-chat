@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { authFetch } from '@lib/api';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import i18n from '../i18n';
+import { getParticipantUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 
 // Debounce minimal (pengganti lodash-es): panggilan terakhir yang menang
@@ -113,7 +114,7 @@ export function useChatList() {
     const filteredConversations = conversations.filter(c => {
       const title = c.isGroup 
           ? (c.decryptedMetadata?.title || i18n.t('common:defaults.unknown_group', 'Unknown Group')) 
-          : (c.participants.find(p => p.id !== meId)?.name || i18n.t('common:defaults.unknown_user', 'Unknown User'));
+          : (c.participants.find(p => getParticipantUserId(p) !== meId)?.name || i18n.t('common:defaults.unknown_user', 'Unknown User'));
       return title.toLowerCase().includes(searchQuery.toLowerCase());
     });  
     const showSearchResults = searchQuery.trim().length > 0;

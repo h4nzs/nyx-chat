@@ -4,6 +4,7 @@ import ChatWindow from '@components/ChatWindow';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
+import { getParticipantUserId } from '@nyx/shared';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrientation } from '@hooks/useOrientation';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -52,9 +53,10 @@ export default function Chat() {
   const { isLandscape } = useOrientation();
   const [isTourOpen, setIsTourOpen] = useState(false);
 
+  // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta).
   const peerUser =
     user && activeConversation && !activeConversation.isGroup
-      ? activeConversation.participants.find(p => p.id !== user.id)
+      ? activeConversation.participants.find(p => getParticipantUserId(p) !== user.id)
       : null;
 
   // Load initial conversations

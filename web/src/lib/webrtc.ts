@@ -3,7 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { useCallStore } from '../store/callStore';
 import { api } from './api';
-import { asUserId } from '@nyx/shared';
+import { asUserId, getParticipantUserId } from '@nyx/shared';
 import { WebRTCSignalingSchema } from '@nyx/shared';
 import i18n from '../i18n';
 import { transportClient } from './transportClient';
@@ -207,7 +207,8 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
         // For groups, we might broadcast 'request' or wait? 
         // Simple Mesh: Send 'request' to all other participants.
         conversation.participants.forEach(p => {
-            const pid = (p as { userId?: string; id: string }).userId || p.id;
+            // [P2 NORMALISASI] getParticipantUserId (dulu userId||p.id).
+            const pid = getParticipantUserId(p);
             if (pid !== currentUser?.id) {
                  const pc = createPeerConnection(pid, iceServers);
                  // We create offer immediately? Or send 'request' first?

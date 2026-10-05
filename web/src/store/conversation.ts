@@ -10,12 +10,12 @@ import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import { asConversationId, asMessageId } from '@nyx/shared';
 import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation, GroupMemberEntry } from '@nyx/shared';
-import { asUserId, parseGroupMembers } from '@nyx/shared';
+import { asUserId, parseGroupMembers, getParticipantUserId } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 import { captureAndLog } from '@utils/feedback';
 
-import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, generatePseudonymMap } from "@utils/crypto";
+import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, generatePseudonymMap, getPseudonymMap } from "@utils/crypto";
 import { generateDeliveryToken, findPseudonymInMap } from '@lib/groupPseudonyms';
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
@@ -283,7 +283,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         let finalLastMessage = localMsgTime > serverMsgTime ? localLastMessage : lastMessage;
 
         if (finalLastMessage) {
-            const pInfo = participants.find(p => p.id === finalLastMessage!.senderId);
+            // [P2 NORMALISASI] getParticipantUserId (dulu p.id — bentuk userId
+            // terlewat untuk enrich nama pengirim lastMessage).
+            const pInfo = participants.find(p => getParticipantUserId(p) === finalLastMessage!.senderId);
             if (pInfo) {
                 finalLastMessage.sender = {
                     ...(finalLastMessage.sender || { id: finalLastMessage.senderId }),
@@ -831,7 +833,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const affectedConvoIds: string[] = [];
       
       state.conversations.forEach(c => {
-        const existingParticipant = c.participants.find(p => p.id === user.id);
+        // [P2 NORMALISASI] user:updated membawa userId ASLI — participant grup
+        // v2 ber-bentuk pseudonym harus di-resolve via pseudoMap agar update
+        // profil tetap sampai (dulu hanya p.id === user.id → no-op di grup v2).
+        const pseudoMap = getPseudonymMap(c.id);
+        const existingParticipant = c.participants.find(p =>
+            getParticipantUserId(p) === user.id ||
+            (pseudoMap && String(p.id) !== user.id && pseudoMap[String(p.id)] === user.id)
+        );
         if (!existingParticipant) return;
 
         // Check for cryptographic or membership changes
@@ -1056,7 +1065,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         const { shadowVault } = await import('@lib/shadowVaultDb');
         const { useAuthStore } = await import('./auth');
         
-        const peerId = conv.participants.find(p => p.id !== useAuthStore.getState().user?.id)?.id;
+        // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta).
+        const myId = useAuthStore.getState().user?.id;
+        const peer = conv.participants.find(p => getParticipantUserId(p) !== myId);
+        const peerId = peer ? getParticipantUserId(peer) : undefined;
         if (!peerId) throw new Error("Peer not found");
 
         const bundle = await getPreKeyBundle(peerId);
@@ -1077,7 +1089,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         if (identityChanged) {
             const { useMessageStore } = await import('@store/message');
             const { t } = await import('i18next');
-            const peer = conv.participants.find(p => p.id === peerId);
+            // [P2] pakai `peer` hasil pencarian ternormalisasi di atas (dulu
+            // re-find p.id === peerId yang membentuk duplikasi logika).
             const peerName = peer?.name || peer?.user?.name || t('common:defaults.unknown_user');
             const warningText = t('common:security_key_changed', { name: peerName });
             useMessageStore.getState().addSystemMessage(conversationId, warningText);

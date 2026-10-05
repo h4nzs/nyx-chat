@@ -10,6 +10,7 @@ import { decryptFile } from '@utils/crypto';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import type { UserId } from '@nyx/shared';
+import { getParticipantUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 
@@ -32,11 +33,12 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
   const { user: me } = useAuthStore(state => ({ user: state.user }));
   
   // Find the actual user object from conversations to get encryptedProfile
+  // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta — bentuk userId terlewat).
   const targetUser = useConversationStore(state => {
     if (userId === me?.id) return me;
     for (const c of state.conversations) {
       if (!c.isGroup) {
-        const p = c.participants.find(p => p.id === userId);
+        const p = c.participants.find(p => getParticipantUserId(p) === String(userId));
         if (p) return p;
       }
     }

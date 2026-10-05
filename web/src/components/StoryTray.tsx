@@ -9,7 +9,7 @@ import StoryViewer from './StoryViewer';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
-import type { UserId } from '@nyx/shared';
+import type { Participant, UserId } from '@nyx/shared';
 import { asUserId, getParticipantUserId } from '@nyx/shared';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
@@ -17,17 +17,31 @@ import { useTranslation } from 'react-i18next';
 const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: UserId; onClick: () => void }) {
   const { t } = useTranslation(['common']);
   // Find the actual user object from conversations to get encryptedProfile
+  // [P2 NORMALISASI + CONTACT FALLBACK] getParticipantUserId (dulu p.id buta —
+  // bentuk userId terlewat) + fallback ContactRecord dari contact store bila
+  // conversation cache sudah tidak memuat participant ini.
   const user = useConversationStore(state => {
     for (const c of state.conversations) {
       if (!c.isGroup) {
-        const p = c.participants.find(p => p.id === userId);
+        const p = c.participants.find(p => getParticipantUserId(p) === String(userId));
         if (p) return p;
       }
     }
-    return { id: userId };
+    return { id: userId, encryptedProfile: null } as Participant;
   });
 
-  const profile = useUserProfile(user as { id: string; encryptedProfile?: string | null });
+  const [contactFallback, setContactFallback] = useState<{ id: string; encryptedProfile?: string | null } | null>(null);
+  useEffect(() => {
+    if (user.encryptedProfile) return; // conversation cache cukup
+    let cancelled = false;
+    import('@lib/contactStore').then(({ getContact }) => getContact(String(userId))).then(rec => {
+      if (!cancelled && rec?.encryptedProfile) setContactFallback({ id: rec.userId, encryptedProfile: rec.encryptedProfile });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [userId, user.encryptedProfile]);
+  const profile = useUserProfile(
+    (user.encryptedProfile ? user : (contactFallback ?? user)) as { id: string; encryptedProfile?: string | null }
+  );
   const stories = useStoryStore(state => state.stories[userId] || []);
   
   if (stories.length === 0) return null;
@@ -91,8 +105,20 @@ export default function StoryTray() {
       }
     });
 
-    userIds.forEach(id => {
-      fetchActiveStories(id);
+    // [CONTACT STORE 2026-10-05] Peer 1:1 yang kontaknya masih ada tapi
+    // conversation cache hilang/terhapus → story-nya tetap ditampilkan.
+    import('@lib/contactStore').then(({ getActiveContacts }) => getActiveContacts()).then(contacts => {
+      for (const c of contacts) {
+        if (c.conversationId && c.userId !== String(me.id)) userIds.add(asUserId(c.userId));
+        else if (!c.conversationId) userIds.add(asUserId(c.userId));
+      }
+      userIds.forEach(id => {
+        fetchActiveStories(id);
+      });
+    }).catch(() => {
+      userIds.forEach(id => {
+        fetchActiveStories(id);
+      });
     });
   }, [conversations, me, fetchActiveStories]);
 

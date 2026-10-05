@@ -8,10 +8,8 @@ import { encryptFile } from '@utils/crypto';
 import { compressImage } from '@lib/fileUtils';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
-import type { StoryId, UserId, ConversationId } from '@nyx/shared';
-import { asStoryId, asUserId, asConversationId } from '@nyx/shared';
-
-import type { Story } from '@nyx/shared';
+import type { StoryId, UserId, ConversationId } from '@nyx/shared';import { asStoryId, asUserId, asConversationId, getParticipantUserId } from '@nyx/shared';
+import type { Story, Participant } from '@nyx/shared';
 import i18n from '../i18n';
 
 type StoryState = {
@@ -148,15 +146,14 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       // Map actual userId to conversationId for O(1) lookups
       const userToConvMap = new Map<UserId, ConversationId>(); 
       
+      // [P2 NORMALISASI] getParticipantUserId menggantikan rantai cast manual
+      // (satu semantik || dengan sisa codebase).
       conversations.forEach(c => {
         if (!c.isGroup && c.participants) {
-          const otherParticipant = c.participants.find((p: Record<string, unknown>) => {
-            const uId = p.userId || (p.user as Record<string, unknown>)?.id || p.id;
-            return uId !== me?.id;
-          });
+          const otherParticipant = c.participants.find((p: Participant) => getParticipantUserId(p) !== me?.id);
           
           if (otherParticipant) {
-            const actualUserId = (otherParticipant as Record<string, unknown>).userId || ((otherParticipant as Record<string, unknown>).user as Record<string, unknown>)?.id || (otherParticipant as Record<string, unknown>).id;
+            const actualUserId = getParticipantUserId(otherParticipant);
             if (actualUserId) {
               userToConvMap.set(asUserId(String(actualUserId)), c.id);
             }

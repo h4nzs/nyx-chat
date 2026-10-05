@@ -2,7 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import type { UserId, ConversationId, MessageId, MessageSendPayload, SystemMessagePayload, GroupKeyDistributionPayload, SystemKeyRequestPayload } from '@nyx/shared';
-import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
+import { asUserId, asConversationId, asMessageId, getParticipantUserId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 const uuidv4 = () => crypto.randomUUID();
 import { api, authFetch } from "@lib/api"; 
@@ -67,7 +67,9 @@ const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMes
     const pseudoMap = getPseudonymMap(conversationId);
     const resolveSender = (senderId: string): string =>
       (pseudoMap && pseudoMap[senderId]) ? pseudoMap[senderId] : senderId;
-    const participantsMap = new Map(conv.participants.map(p => [('userId' in p ? (p.userId || p.id) : p.id) as string, p]));
+    // [P2 NORMALISASI] getParticipantUserId (dulu 'userId' in p ? userId||id : id —
+    // cabangnya menyimpang dari rantai legacy, kini SATU rantai || penuh).
+    const participantsMap = new Map(conv.participants.map(p => [getParticipantUserId(p), p]));
     const cachedProfiles = useProfileStore.getState().profiles;
     
     // O(profiles) sekali: petakan profile cache by userId (format key: `<userId>_<hash32>`).
@@ -968,6 +970,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 id: string, 
                 userId?: string, 
                 user?: { 
+                    id?: string, // [P2] agar kompatibel dgn getParticipantUserId (weak-type)
                     devices?: {id: string, publicKey: PublicKeyInput}[], 
                     publicKey?: PublicKeyInput 
                 }, 
@@ -980,7 +983,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const sealTargets: { deviceId: string; pubBytes: Uint8Array }[] = [];
 
             for (const p of conversation.participants as ParticipantData[]) {
-               const targetUserId = p.userId || p.id;
+               // [P2 NORMALISASI] (dulu p.userId||p.id).
+               const targetUserId = getParticipantUserId(p);
                const userObj = p.user || p;
 
                if (targetUserId !== user.id) {
@@ -1064,7 +1068,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         pushPayloads: payload.pushPayloads ?? undefined,
         repliedToId: payload.repliedToId ?? undefined,
         isViewOnce: payload.isViewOnce ?? false,
-        targetRecipients: conversation.participants.map(p => p.userId || p.id),
+        // [P2 NORMALISASI] (dulu p.userId||p.id).
+        targetRecipients: conversation.participants.map(getParticipantUserId),
         deleteSecret,
         // [T1] Grup metadata v2: pseudonym pengirim (server simpan verbatim).
         senderPseudonym: conversation.isGroup ? await getMyPseudonym(conversationId) : undefined,
@@ -1297,7 +1302,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       let targetRecipients: string[] | undefined;
       const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
       if (conv?.participants && conv.participants.length > 0) {
-          targetRecipients = conv.participants.map(p => p.userId || p.id);
+          // [P2 NORMALISASI] (dulu p.userId||p.id).
+          targetRecipients = conv.participants.map(getParticipantUserId);
       } else if (conv?.isGroup) {
           // Group with empty participants: fallback to cache (Opaque Mailbox)
           const { getCachedGroupParticipants } = await import('@lib/keychainDb');

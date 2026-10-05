@@ -54,6 +54,17 @@ berubah.
 - +7 unit test pure (hierarki, blocked-defensif, determinisme komparator).
   Verifikasi: vitest web **222/222** (31 file); tsc web exit 0.
 
+**P2 lanjutan — pembersihan total poke identitas lama (2026-10-05):** semua
+pemakaian menyimpang `p.userId||p.id` / lookup `p.id` buta dinormalisasi via
+`getParticipantUserId` di jalur KRITIKAL: relay targetRecipients & receipt
+(message.ts), roster/pseudonym-map & fulfillKeyRequest & inisiasi DR 1:1
+(crypto.ts), mesh call (webrtc.ts), user:updated propagation (kini resolve
+pseudonym map — update profil kembali sampai di grup v2), typing indicator,
+chat list header, peer page, verification set, StoryTray/StoryViewer (plus
+fallback profile dari contact store), story fan-out. Yang sengaja dipertahankan:
+jalur 1:1 (bentuk selalu id), groupPseudonyms legacy, fallback UI. Verifikasi:
+vitest web 222/222; tsc web exit 0.
+
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 ## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 

@@ -3,6 +3,7 @@ import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
 import type { ConversationId } from '@nyx/shared';
+import { getParticipantUserId } from '@nyx/shared';
 
 export default function TypingIndicator({ conversationId }: { conversationId: ConversationId }) {
   const { typingIndicators } = usePresenceStore(useShallow(s => ({ typingIndicators: s.typingIndicators })));
@@ -22,7 +23,9 @@ export default function TypingIndicator({ conversationId }: { conversationId: Co
 
   // Map typing user IDs to their names
   const typingUserNames = typingUsers.map(typingUser => {
-    const participant = activeConversation?.participants.find(p => p.id === typingUser.id);
+    // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta — indikator typing
+    // grup membawa userId/pseudonym asli, bukan participant.id).
+    const participant = activeConversation?.participants.find(p => getParticipantUserId(p) === String(typingUser.id));
     return 'Someone'; // Since we can't easily hook in a map here without a subcomponent, fallback.
   });
 

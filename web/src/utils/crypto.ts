@@ -1,5 +1,5 @@
 import type { DoubleRatchetState, ConversationId, UserId, Pseudonym, GroupMemberEntry } from '@nyx/shared';
-import { asPseudonym, parseGroupMembers } from '@nyx/shared';
+import { asPseudonym, parseGroupMembers, getParticipantUserId } from '@nyx/shared';
 // [T1] Helper pseudonym ada di module ringan (testable tanpa graph worker);
 // di-import + di-re-export agar pemakaian lama tetap jalan.
 import {
@@ -1270,7 +1270,9 @@ export async function rotateGroupKey(
   const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string; generation?: number; members?: GroupMemberEntry[] } | undefined;
   if (existingMeta && (existingMeta.v === 2 || existingMeta.v === 3)) {
     try {
-      const participantIds = conversation.participants.map(p => (p.userId || p.id) as string);
+      // [P2 NORMALISASI] getParticipantUserId (dulu p.userId||p.id — kandidat
+      // user.id terlewat; bentuk Participant memang polimorfik).
+      const participantIds = conversation.participants.map(getParticipantUserId);
       // [T4 ROSTER v3] Roster di-reconcile dengan participants store saat
       // rotasi: anggota baru masuk sebagai MEMBER, yang keluar dibuang; role
       // lain dipertahankan. Roster v2 lama dimigrasi ke v3 otomatis.
@@ -1499,10 +1501,12 @@ async function doEncryptMessage(
           const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
           if (!conversation) throw new Error("Conversation not found");
 
-          const peer = conversation.participants.find(p => p.id !== myId);
+          // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta) — dan
+          // bundle di-fetch pakai userId kanonik, bukan field id mentah.
+          const peer = conversation.participants.find(p => getParticipantUserId(p) !== myId);
           if (!peer) throw new Error("Peer not found");
 
-          const bundle = await fetchPreKeyBundle(peer.id);
+          const bundle = await fetchPreKeyBundle(getParticipantUserId(peer));
           
           const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
           if (!signingPrivateKey) throw new Error("My signing key missing");
@@ -1667,7 +1671,8 @@ async function doEncryptMessage(
                if ((existingMeta?.v === 2 || existingMeta?.v === 3) && existingMeta.authSecret) {
                    void encryptGroupMetadata({
                        ...existingMeta,
-                       participants: conversation.participants.map(p => (p.userId || p.id) as string),
+                       // [P2 NORMALISASI] getParticipantUserId (dulu p.userId||p.id).
+                       participants: conversation.participants.map(getParticipantUserId),
                        v: existingMeta.v,
                    }, conversationId)
                        .then(newEncrypted => authFetch(`/api/conversations/${conversationId}/details`, {
@@ -1972,8 +1977,7 @@ async function doDecryptMessage(
             if (senderUserId === myId) {
                 console.warn("Cannot fallback to current device signing key for a message sent from our other device.");
             } else {
-                const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                const sender = conversation?.participants.find(p => p.id === senderUserId || ('userId' in p && p.userId === senderUserId)) as Participant | undefined;
+                const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);                 const sender = conversation?.participants.find(p => getParticipantUserId(p) === senderUserId) as Participant | undefined;
                 keyToUse = sender?.signingKey || sender?.user?.signingKey;
             }
         }
@@ -2605,7 +2609,8 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation) return;
-  const requester = conversation.participants.find(p => (p.userId || p.id) === requesterId);
+  // [P2 NORMALISASI] getParticipantUserId (dulu p.userId||p.id).
+  const requester = conversation.participants.find(p => getParticipantUserId(p) === requesterId);
   if (!requester) return;
 
   const userObj = requester.user || requester;

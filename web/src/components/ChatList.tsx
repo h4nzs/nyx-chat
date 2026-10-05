@@ -9,6 +9,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useModalStore } from '@store/modal';
 import { useCommandPaletteStore } from '@store/commandPalette';
 import { useAuthStore } from '@store/auth';
+import { getParticipantUserId } from '@nyx/shared';
 import { useShallow } from 'zustand/react/shallow';
 
 import type { User } from '@store/auth';
@@ -256,8 +257,8 @@ const ConversationItem = memo(function ConversationItem({
     openMenu(e, [
       ...(peerUser ? [{ label: t('chat:actions.view_profile', 'View Profile'), icon: <FiUser />, onClick: () => onUserClick(peerUser.id) }] : []),
       { label: isPinnedByMe ? t('chat:actions.unpin_chat', 'Unpin Chat') : t('chat:actions.pin_chat', 'Pin Chat'), icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
-      ...(!conversation.isGroup ? [{ label: isBlocked ? t('chat:actions.unblock_user', 'Unblock User') : t('chat:actions.block_user', 'Block User'), icon: <FiSlash />, onClick: () => {
-         const other = conversation.participants.find(p => p.id !== meId);
+      ...(!conversation.isGroup ? [{ label: isBlocked ? t('chat:actions.unblock_user', 'Unblock User') : t('chat:actions.block_user', 'Block User'), icon: <FiSlash />, onClick: () => {          // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta).
+          const other = conversation.participants.find(p => getParticipantUserId(p) !== meId);
          if (other) {
            if (isBlocked) unblockUser(other.id);
            else blockUser(other.id);

@@ -13,6 +13,7 @@ import { useVerificationStore } from '@store/verification';
 import ModalBase from './ui/ModalBase';
 import { FiCheck, FiShield, FiUserCheck } from 'react-icons/fi';
 import type { UserId, MinimalProfile } from '@nyx/shared';
+import { getParticipantUserId } from '@nyx/shared';
 import { computeContactTrust, compareByTrustDescThenRecency, type ContactTrustLevel } from '@lib/contactTrust';
 import type { ContactRecord } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
@@ -121,7 +122,8 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
         const verifiedPeers = new Set<string>();
         for (const c of convs) {
           if (c.isGroup || !verifiedStatus[c.id]) continue;
-          const peer = c.participants.find(p => p.id !== myId);
+          // [P2 NORMALISASI] getParticipantUserId (dulu p.id buta).
+          const peer = c.participants.find(p => getParticipantUserId(p) !== myId);
           if (peer) verifiedPeers.add(String(peer.id));
         }
         const blocked = new Set(useAuthStore.getState().blockedUserIds);

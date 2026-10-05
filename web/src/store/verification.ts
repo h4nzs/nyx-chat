@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { Conversation } from './conversation';
 import { useAuthStore } from './auth';
 import { computeSafetyNumberParts, PeerSecurityInfo } from '@utils/safetyNumber';
+import { getParticipantUserId } from '@nyx/shared';
 
 const VERIFIED_PREFIX = 'verified_conversation_';
 
@@ -46,7 +47,9 @@ export const useVerificationStore = create<VerificationState>((set, _get) => ({
     const initialStatus: Record<string, boolean> = {};
     const myId = useAuthStore.getState().user?.id;
     for (const convo of conversations) {
-      const participant = convo.participants.find(p => p.id !== myId && p.userId !== myId);
+      // [P2 NORMALISASI] getParticipantUserId (dulu p.id && p.userId ganda —
+      // bentuk pseudonym terlewat).
+      const participant = convo.participants.find(p => getParticipantUserId(p) !== myId);
       const peer = participant?.user;
       if (peer && peer.publicKey) {
         const storedKey = localStorage.getItem(`${VERIFIED_PREFIX}${convo.id}`);
