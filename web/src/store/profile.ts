@@ -35,7 +35,9 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     if (!encryptedProfile) return null;
     const cacheKey = `${userId}_${encryptedProfile.substring(0, 32)}`;
 
-    // 1. Check RAM (key komposit, lalu alias plain-id — sama-sama valid)
+    // 1. Check RAM (key komposit, lalu alias plain-id — sama-sama valid):
+    // alias aman di sini karena pemanggil getCacheOnly TIDAK akan mendekripsi
+    // (tanpa ep → null balik), jadi tidak ada risiko menyematkan profil basa.
     const cached = get().profiles[cacheKey] ?? get().profiles[String(userId)];
     if (cached) return cached;
 
@@ -59,8 +61,11 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     const cacheKey = encryptedProfile ? `${userId}_${encryptedProfile.substring(0, 32)}` : userId;
     const idKey = String(userId);
 
-    // 2. Return RAM cache if exists (komposit ATAU alias plain-id)
-    const cached = get().profiles[cacheKey] ?? get().profiles[idKey];
+    // 2. Return RAM cache if exists. PEMANGGIL DENGAN ep: HANYA komposit yang
+    // boleh short-circuit — alias bisa basa (ep peer sudah berganti), dan
+    // pemanggil ber-ep justru membawa versi TERBARU yang wajib di-decrypt.
+    // Alias hanya untuk pemanggil TANPA ep (cacheKey === idKey).
+    const cached = get().profiles[cacheKey] ?? (encryptedProfile ? undefined : get().profiles[idKey]);
     if (cached) return cached;
 
     // 3. Default fallback

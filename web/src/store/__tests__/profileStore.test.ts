@@ -67,11 +67,24 @@ describe('profileStore dual-write alias plain-id', () => {
         expect(res?.name).toBe('Alias Only');
     });
 
-    it('decryptAndCache mengembalikan cache RAM alias tanpa dekripsi ulang', async () => {
+    it('decryptAndCache TANPA ep mengembalikan cache RAM alias tanpa dekripsi', async () => {
         useProfileStore.setState({ profiles: { peer3: { name: 'Cached', avatarUrl: null, description: null } } });
-        const res = await useProfileStore.getState().decryptAndCache('peer3', EP);
+        const res = await useProfileStore.getState().decryptAndCache('peer3', null);
         expect(res?.name).toBe('Cached');
         expect(decryptProfileMock).not.toHaveBeenCalled();
+    });
+
+    it('decryptAndCache DENGAN ep TIDAK short-circuit di alias — profil basi diperbarui', async () => {
+        // Alias lama ada, tapi pemanggil membawa ep TERBARU → wajib decrypt,
+        // bukan menyematkan nama basi dari alias (dulu: alias selalu menang).
+        useProfileStore.setState({ profiles: { peer3: { name: 'Old Name', avatarUrl: null, description: null } } });
+        profileKeys.set('peer3', 'k3');
+        const res = await useProfileStore.getState().decryptAndCache('peer3', EP);
+        expect(res?.name).toBe('Peer Name'); // hasil dekripsi ep baru
+        expect(decryptProfileMock).toHaveBeenCalledTimes(1);
+        const profiles = useProfileStore.getState().profiles;
+        expect(profiles['peer3']!.name).toBe('Peer Name'); // alias ikut segar
+        expect(profiles[`peer3_${EP.substring(0, 32)}`]).toBeDefined();
     });
 
     it('tanpa profileKey → fallback "Encrypted User" (tanpa alias — jangan cache nama palsu)', async () => {
