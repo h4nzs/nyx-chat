@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 🕵️ [Unreleased] - Group Privacy Blueprint (docs 26, tiers T1–T4)
+## 🕵️ 2.7.0 - Group Privacy Blueprint (docs 26, tiers T1–T4)
 
 Implements the full group-privacy blueprint: per-group sender pseudonyms,
 pseudonym-scoped receipts, blinded membership via delivery tokens, sender-key
