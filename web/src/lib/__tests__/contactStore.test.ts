@@ -11,7 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { rows, authFetchMock } = vi.hoisted(() => ({
     rows: new Map<string, { userId: string; data: string; updatedAt: number }>(),
-    authFetchMock: vi.fn(async () => ({ success: true })),
+    // Tidak diberi tipe ketat — implementasi berbeda per test (sukses/restore/korup).
+    authFetchMock: vi.fn(),
 }));
 
 vi.mock('../db', () => ({
@@ -142,7 +143,7 @@ describe('parseContactBundle', () => {
             ],
         }))!;
         expect(parsed.contacts.length).toBe(1);
-        const c = parsed.contacts[0];
+        const c = parsed.contacts[0]!;
         expect(c.userId).toBe('ok');
         expect(c.encryptedProfile).toBeNull();
         expect(typeof c.lastSeenAt).toBe('number');
@@ -242,8 +243,8 @@ describe('seedContactsFromConversations', () => {
         ]);
         const all = await getAllContacts();
         expect(all.map(c => c.userId)).toEqual(['peer-a']);
-        expect(all[0].encryptedProfile).toBe('ep-a');
-        expect(all[0].conversationId).toBe('conv1');
+        expect(all[0]!.encryptedProfile).toBe('ep-a');
+        expect(all[0]!.conversationId).toBe('conv1');
     });
 });
 
@@ -253,9 +254,9 @@ describe('buildPeerParticipantsFromContacts', () => {
         await upsertContact({ userId: 'peer-other', conversationId: 'conv2' });
         const peers = await buildPeerParticipantsFromContacts('conv1');
         expect(peers.length).toBe(1);
-        expect(String(peers[0].id)).toBe('peer-a');
-        expect(peers[0].encryptedProfile).toBe('ep-a');
-        expect(peers[0].role).toBe('MEMBER');
+        expect(String(peers[0]!.id)).toBe('peer-a');
+        expect(peers[0]!.encryptedProfile).toBe('ep-a');
+        expect(peers[0]!.role).toBe('MEMBER');
     });
 });
 
