@@ -2187,26 +2187,38 @@ async function doDecryptMessage(
       } catch (err) {
           // [FIX 1 — FALLBACK ERA ARSIP 2026-10-02] Ala libsignal
           // previous_session_states: pesan dari DH-step/X3DH lama yang datang
-          // belakangan dicoba dengan state arsip `#archived` SEBELUM gagal.
+          // belakangan dicoba dengan state arsip SEBELUM gagal.
+          // [AUDIT FIX 2026-10-05] Arsip kini 3 slot FIFO (ala prior-states
+          // libsignal) — pesan yang datang 2+ DH-step terlambat (device offline
+          // beberapa step, skipped-key ter-evict LRU) tetap terselamatkan.
           const errMsg = (err instanceof Error ? err.message : String(err)) || '';
           const isEraMiss = errMsg.includes('Ratchet Advanced') ||
               errMsg.includes('older than current state') ||
               errMsg.includes('Decryption failed');
           if (!isEraMiss) throw err;
 
-          const { getArchivedRatchetSession } = await import('@lib/keychainDb');
-          const archivedState = await getArchivedRatchetSession(conversationId);
-          if (!archivedState) throw err;
+          const { getArchivedRatchetSessions } = await import('@lib/keychainDb');
+          const archivedStates = await getArchivedRatchetSessions(conversationId);
+          if (archivedStates.length === 0) throw err;
 
-          const archivedPlain = await retrieveRatchetStateFromBytes(archivedState);
-          if (!archivedPlain) throw err;
+          let archivedResult: Awaited<ReturnType<typeof worker_dr_ratchet_decrypt>> | null = null;
+          for (const archivedState of archivedStates) {
+              const archivedPlain = await retrieveRatchetStateFromBytes(archivedState);
+              if (!archivedPlain) continue;
+              try {
+                  archivedResult = await worker_dr_ratchet_decrypt({
+                      serializedState: archivedPlain,
+                      header: drHeader,
+                      ciphertext: combined
+                  });
+                  break;
+              } catch {
+                  // Slot ini bukan eranya — coba slot arsip berikutnya.
+              }
+          }
+          if (!archivedResult) throw err;
+          result = archivedResult;
 
-          console.warn(`[DR] Current state miss (${errMsg.slice(0, 60)}…) — mencoba sesi arsip era lama`);
-          result = await worker_dr_ratchet_decrypt({
-              serializedState: archivedPlain,
-              header: drHeader,
-              ciphertext: combined
-          });
           // Pesan dari arsip JANGAN menggeser state current (alam libsignal:
           // arsip dipromosikan hanya bila mengalahkan current — di sini cukup
           // MK disimpan; arsip tetap arsip).

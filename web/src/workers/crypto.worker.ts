@@ -1775,7 +1775,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             CKr: null,
             Ns: 0,
             Nr: 0,
-            PN: 0
+            PN: 0,
+            // [AUDIT FIX 2026-10-05] Simetri dengan dr_init_alice — peta kosong
+            // eksplisit (deserializeState sudah toleran `undefined`, tapi shape
+            // konsisten memudahkan inspeksi at-rest & serializeState).
+            skippedKeys: {}
           };
           result = serializeState(state);
         } finally {

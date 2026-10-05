@@ -528,16 +528,40 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
   });
 }
 
+// [INVARIANT 1:1 — 2026-10-05] Jumlah slot arsip sesi DR. Ala libsignal
+// SessionRecord prior-states (Signal-Desktop memakai beberapa state arsip):
+// pesan yang datang 2+ DH-step terlambat (device offline selama beberapa step,
+// skipped-key ter-evict LRU) hanya bisa diselamatkan oleh arsip era lama.
+export const RATCHET_ARCHIVE_SLOTS = 3;
+
+export function ratchetArchiveIds(conversationId: string): string[] {
+  return Array.from(
+    { length: RATCHET_ARCHIVE_SLOTS },
+    (_, i) => `${conversationId}#archived_${i}`
+  );
+}
+
 export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
       // [INVARIANT 1:1 — MULTI-STATE 2026-10-02] Ala libsignal SessionRecord
-      // (ARCHIVED_STATES_MAX_LENGTH=40): sebelum X3DH/DH-step baru menimpa,
-      // state lama diarsipkan keyed `#era_<kemPk/N>` — pesan inflight dari era
+      // (ARCHIVED_STATES_MAX_LENGTH): sebelum X3DH/DH-step baru menimpa, state
+      // lama digeser ke arsip FIFO `#archived_0..2` — pesan inflight dari era
       // lama tetap decryptable via fallback lookup (crypto.ts DR path).
+      // Legacy `#archived` (1 slot, pra-2026-10-05) dibaca di getter dan
+      // dimigrasi otomatis ke slot baru saat penulisan berikutnya.
       const existing = await db.ratchetSessions.get(conversationId);
       if (existing) {
-          const archivedId = `${conversationId}#archived`;
-          await db.ratchetSessions.put({ conversationId: archivedId as ConversationId, state: existing.state });
+          const ids = ratchetArchiveIds(conversationId);
+          // Geser FIFO: slot terakhir dibuang, sisanya turun satu posisi.
+          for (let i = RATCHET_ARCHIVE_SLOTS - 1; i > 0; i--) {
+              const older = await db.ratchetSessions.get(ids[i - 1] as ConversationId);
+              if (older) {
+                  await db.ratchetSessions.put({ conversationId: ids[i] as ConversationId, state: older.state });
+              }
+          }
+          const legacy = await db.ratchetSessions.get(`${conversationId}#archived` as ConversationId);
+          await db.ratchetSessions.put({ conversationId: ids[0] as ConversationId, state: existing.state });
+          if (legacy) await db.ratchetSessions.delete(`${conversationId}#archived` as ConversationId);
       }
       await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState });
   });
@@ -549,14 +573,18 @@ export async function getRatchetSession(conversationId: string): Promise<Uint8Ar
 }
 
 /**
- * [INVARIANT 1:1] Sesi arsip era LAMA (diganti X3DH/DH-step baru).
- * Hanya satu level arsip — persis kasus "pesan inflight saat rehandshake".
- * Ala libsignal ARCHIVED_STATES, disederhanakan (1 slot cukup: pesan lama
- * yang tidak tertangkap skipped-keys hampir selalu dari era tepat sebelumnya).
+ * [INVARIANT 1:1] Sesi arsip era LAMA (diganti X3DH/DH-step baru), terbaru
+ * dulu (slot 0 = era tepat sebelumnya) — fallback decrypt mencoba berurutan.
+ * Legacy `#archived` (1 slot, pra-2026-10-05) disertakan di posisi terakhir
+ * agar data lama tetap terjangkau.
  */
-export async function getArchivedRatchetSession(conversationId: string): Promise<Uint8Array | null> {
-  const record = await db.ratchetSessions.get(`${conversationId}#archived` as ConversationId);
-  return record ? record.state : null;
+export async function getArchivedRatchetSessions(conversationId: string): Promise<Uint8Array[]> {
+  const ids = ratchetArchiveIds(conversationId);
+  const records = await db.ratchetSessions.bulkGet([
+    ...ids.map(id => id as ConversationId),
+    `${conversationId}#archived` as ConversationId
+  ]);
+  return records.filter((r): r is NonNullable<typeof r> => !!r).map(r => r.state);
 }
 
 export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
@@ -597,8 +625,10 @@ export async function deleteSkippedKey(headerKey: string): Promise<void> {
 export async function deleteRatchetSession(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.ratchetSessions.delete(conversationId);
-      // Hapus juga arsip era lama (wipe percakapan = hapus semua era).
-      await db.ratchetSessions.delete(`${conversationId}#archived` as ConversationId);
+      // Hapus juga arsip era lama (wipe percakapan = hapus semua era),
+      // termasuk slot FIFO baru dan id legacy `#archived`.
+      const ids = [...ratchetArchiveIds(conversationId), `${conversationId}#archived` as ConversationId];
+      await db.ratchetSessions.bulkDelete(ids);
   });
 }
 
