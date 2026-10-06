@@ -57,7 +57,16 @@ function buildTargetDeliveryTokens(conv: { isGroup?: boolean }): Record<string, 
   return getDeliveryTokenMap(String((conv as { id?: string }).id ?? ''));
 }
 
-const incomingMessageLocks = new Map<string, Promise<void>>();function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
+const incomingMessageLocks = new Map<string, Promise<void>>();
+
+// [ROBUSTNESS] Guard re-entrancy untuk processOfflineQueue. Tanpa ini, dua
+// pemanggil yang overlap (reconnect cepat, caller baru di masa depan) bisa
+// memproses item queue yang SAMA → pesan terkirim dobel. Pemanggil kedua saat
+// drain berjalan hanya menandai rerun; loop aktif meng-drain ulang setelah
+// selesai, sehingga item yang baru masuk tetap terkirim.
+let offlineQueueBusy = false;
+let offlineQueueRerunNeeded = false;
+function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conv) return messages;
     // [T1] Metadata v2 membawa peta pseudonym→userId. Resolusi dilakukan SEKALI
@@ -1257,6 +1266,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   processOfflineQueue: async () => {
+    // [ROBUSTNESS] Satu loop drain pada satu waktu (lihat komentar di atas).
+    if (offlineQueueBusy) {
+      offlineQueueRerunNeeded = true;
+      return;
+    }
+    offlineQueueBusy = true;
+    try {
     const queue = await getQueueItems();
     if (queue.length === 0) return;
 
@@ -1462,6 +1478,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       });
 
       await new Promise(r => setTimeout(r, 100));
+    }
+    } finally {
+      offlineQueueBusy = false;
+      // Item yang masuk selama drain berjalan diproses segera setelahnya.
+      // Fire-and-forget + catch: rejection rerun tidak boleh menggantung.
+      if (offlineQueueRerunNeeded) {
+        offlineQueueRerunNeeded = false;
+        get().processOfflineQueue().catch(captureAndLog);
+      }
     }
   },
 
