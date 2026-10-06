@@ -12,6 +12,50 @@ const API_URL = envUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
 
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;
+
+// [ROBUSTNESS] Timeout default request REST. Tanpa ini, request yang menggantung
+// (server tak merespons, jaringan setengah mati) menunggu tanpa batas — UI
+// nyangkut tanpa pesan error dan offline queue terasa mati.
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000; // upload lampiran bisa besar → lebih longgar
+const CSRF_TIMEOUT_MS = 10_000;
+
+export interface ApiRequestOptions extends RequestInit {
+  /** Override timeout per-call (ms). 0 → tanpa timeout (jalur streaming panjang). */
+  timeoutMs?: number;
+}
+
+/**
+ * Gabungkan AbortSignal eksternal pemanggil dengan timeout internal menjadi satu
+ * sinyal. Dipakai manual (bukan AbortSignal.any) agar bekerja di semua browser
+ * target dan bisa diuji dengan timeout kecil di unit test.
+ */
+function combineWithTimeout(
+  timeoutMs: number,
+  external: AbortSignal | null | undefined
+): { signal: AbortSignal | undefined; cancel: () => void } {
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort(external?.reason);
+  if (external) {
+    if (external.aborted) onExternalAbort();
+    else external.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  if (timeoutMs > 0) {
+    timer = setTimeout(
+      () => controller.abort(new DOMException(`Request timeout setelah ${timeoutMs}ms`, 'TimeoutError')),
+      timeoutMs
+    );
+  }
+  return {
+    signal: controller.signal,
+    cancel: () => {
+      if (timer) clearTimeout(timer);
+      if (external) external.removeEventListener('abort', onExternalAbort);
+    },
+  };
+}
+
 // Handler for auth failure (Logout)
 let onAuthFailure: (() => Promise<void>) | null = null;
 
@@ -58,11 +102,13 @@ export class ApiError extends Error {
  */
 export async function getCsrfToken(): Promise<string> {
   if (csrfTokenCache) return csrfTokenCache;
-  
+  const { signal, cancel } = combineWithTimeout(CSRF_TIMEOUT_MS, null);
+
   try {
     const res = await fetch(`${API_URL}/api/csrf-token`, {
       credentials: "include",
-      headers: { 'x-nyx-installation-id': await getClientInstallationId() }
+      headers: { 'x-nyx-installation-id': await getClientInstallationId() },
+      signal,
     });
     if (!res.ok) throw new Error(`Failed to fetch CSRF token: ${res.status}`);
     
@@ -73,12 +119,14 @@ export async function getCsrfToken(): Promise<string> {
     console.error("Error fetching CSRF token:", error);
     // Jangan throw error di sini agar request GET biasa tetap jalan meski tanpa CSRF
     return ""; 
+  } finally {
+    cancel();
   }
 }
 
 export async function api<T = unknown>(
   path: string,
-  options: RequestInit = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   const userHeaders = (options.headers as Record<string, string> | undefined) || {};
   const hasInstallationId = Object.keys(userHeaders).some(k => k.toLowerCase() === 'x-nyx-installation-id');
@@ -97,56 +145,74 @@ export async function api<T = unknown>(
     if (token) headers['CSRF-Token'] = token;
   }
 
-  const res = await fetch(API_URL + path, {
-    cache: 'no-store', // Disable browser caching
-    ...options,
-    credentials: "include", // Penting untuk kirim Cookie (RefreshToken/Session)
-    headers,
-  });
+  // Timeout mencakup SELURUH siklus request (fetch + pembacaan body) — cancel()
+  // baru dipanggil di finally setelah body selesai dikonsumsi.
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const { signal: combinedSignal, cancel } = combineWithTimeout(timeoutMs, options.signal);
 
-  // --- ERROR HANDLING BLOCK ---
-  if (!res.ok) {
-    const text = await res.text();
-    
-    // 1. Handle CSRF Invalid -> Clear Cache
-    if (res.status === 403 && text.toLowerCase().includes('csrf')) {
-        csrfTokenCache = null;
+  try {
+    const res = await fetch(API_URL + path, {
+      cache: 'no-store', // Disable browser caching
+      ...options,
+      credentials: "include", // Penting untuk kirim Cookie (RefreshToken/Session)
+      headers,
+      // SETELAH spread options: selalu pakai sinyal gabungan (timeout + eksternal)
+      signal: combinedSignal,
+    });
+
+    // --- ERROR HANDLING BLOCK ---
+    if (!res.ok) {
+      const text = await res.text();
+      
+      // 1. Handle CSRF Invalid -> Clear Cache
+      if (res.status === 403 && text.toLowerCase().includes('csrf')) {
+          csrfTokenCache = null;
+      }
+
+      // 2. Parse Error Details (JSON vs HTML/Text)
+      let details;
+      let errorMessage = res.statusText;
+      try {
+        details = JSON.parse(text);
+        if (details.error) errorMessage = details.error;
+        if (details.message) errorMessage = details.message;
+      } catch (e) {
+        errorMessage = text || `Request failed with status ${res.status}`;
+        details = { raw: text };
+      }
+
+      // 3. Handle Rate Limit (429) dengan Toast
+      if (res.status === 429) {
+        toast.error(errorMessage, {
+          id: 'rate-limit-error', // ID biar gak muncul duplikat toast
+          duration: 5000,
+          icon: '⏳',
+          style: {
+            background: '#fee2e2',
+            color: '#b91c1c',
+            fontWeight: '600',
+          }
+        });
+      }
+
+      throw new ApiError(res.status, errorMessage, details);
     }
 
-    // 2. Parse Error Details (JSON vs HTML/Text)
-    let details;
-    let errorMessage = res.statusText;
-    try {
-      details = JSON.parse(text);
-      if (details.error) errorMessage = details.error;
-      if (details.message) errorMessage = details.message;
-    } catch (e) {
-      errorMessage = text || `Request failed with status ${res.status}`;
-      details = { raw: text };
+    if (res.status === 204) {
+      return {} as T;
     }
 
-    // 3. Handle Rate Limit (429) dengan Toast
-    if (res.status === 429) {
-      toast.error(errorMessage, {
-        id: 'rate-limit-error', // ID biar gak muncul duplikat toast
-        duration: 5000,
-        icon: '⏳',
-        style: {
-          background: '#fee2e2',
-          color: '#b91c1c',
-          fontWeight: '600',
-        }
-      });
+    return await res.json();
+  } catch (err) {
+    // Timeout → ApiError(0) agar konsisten dengan jalur error jaringan lain;
+    // abort dari PEMANGGIL (AbortError) diteruskan apa adanya.
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new ApiError(0, `Request timeout setelah ${timeoutMs}ms`);
     }
-
-    throw new ApiError(res.status, errorMessage, details);
+    throw err;
+  } finally {
+    cancel();
   }
-
-  if (res.status === 204) {
-    return {} as T;
-  }
-
-  return res.json();
 }
 
 /**
@@ -255,12 +321,14 @@ export async function apiUpload<T = unknown>({
       const xhr = new XMLHttpRequest();
       xhr.open('POST', API_URL + path);
       xhr.withCredentials = true; // Kirim Cookie
+      xhr.timeout = UPLOAD_TIMEOUT_MS; // [ROBUSTNESS] upload tak boleh menggantung selamanya
       xhr.setRequestHeader('CSRF-Token', csrfToken);
       xhr.setRequestHeader('x-nyx-installation-id', installationId);
       xhr.upload.onprogress = (e) => {
         const progress = Math.round((e.loaded * 100) / (e.total || 1));
         onUploadProgress(progress);
       };
+      xhr.ontimeout = () => reject(new ApiError(0, `Upload timeout setelah ${UPLOAD_TIMEOUT_MS / 1000}s`));
       xhr.onload = () => {
         let parsed: unknown = null;
         try {
