@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛡️ Robustness Hardening — Web Layer (2026-10-06)
+
+**API timeout:** semua request REST via `api()` kini punya timeout default
+30s (AbortController manual — kompatibel semua browser; `timeoutMs` bisa
+di-override per-call, `0` menonaktifkan) dan mencakup fetch + pembacaan body.
+Timeout melempar `ApiError(0, "Request timeout…")` agar konsisten dengan jalur
+error jaringan; abort dari pemanggil diteruskan apa adanya. Upload
+(`apiUpload`) dapat `xhr.timeout` 120s, fetch CSRF 10s. Sebelumnya request
+yang menggantung (server tak merespons / jaringan setengah mati) menunggu
+selamanya — UI nyangkut tanpa pesan error.
+
+**Guard re-entrancy `processOfflineQueue`:** dua pemanggil yang overlap
+(reconnect cepat, caller baru) sebelumnya bisa memproses item queue yang SAMA
+→ pesan terkirim dobel. Kini hanya satu loop drain pada satu waktu; pemanggil
+kedua menandai rerun, dan item yang masuk selama drain diproses segera
+setelah loop selesai.
+
+**silentRefresh probe-first + refreshLock fallback best-effort:** mutex
+localStorage (jalur tanpa Web Locks) tidak bisa dijadikan mutual exclusion
+sejati (localStorage tanpa test-and-set atomik) — kini didokumentasikan
+best-effort dengan verifikasi ganda. Kebenaran dipindah ke `silentRefresh()`
+yang kini SELALU probe `GET /api/users/me` dulu (dulu hanya di cabang Web
+Locks): tab yang me-refresh > 5s setelah tab lain (di luar grace server)
+tidak lagi menembak POST /refresh dengan `rt` basi → tidak memicu
+reuse-detection → revoke family. Grace 5s server (`FRESH_ROTATION_GRACE_MS`)
+menutup kasus near-simultaneous yang tersisa.
+
+**Socket cleanup:** poll chain offline sync dari koneksi lama dimatikan saat
+disconnect (generation guard `syncPollGeneration` — dulu bisa bertabrakan
+dengan chain koneksi baru); loop failure-retry 5s kini berbatas 3× per siklus
+koneksi (`MAX_SYNC_FAILURE_RETRIES`, dulu TANPA batas saat server unreachable
+dengan conversations termuat — spam request + console selamanya, berlawanan
+dengan komentarnya sendiri). `burner:receive` tanpa roomId hanya fallback ke
+sesi pertama bila tepat satu sesi aktif — bila 0 atau >1, routing ambigu
+(pesan bisa masuk ke room yang salah) → di-drop dengan warning.
+`setCookie` non-secure dihapus dari `tokenStorage` (dead code; kontrak
+HttpOnly yang dihapus server-side didokumentasikan).
+
 ## 👥 Contact Store + Story Hardening (2026-10-05)
 
 **Fix — daftar kontak modal create grup basi sampai reload:** daftar hanya

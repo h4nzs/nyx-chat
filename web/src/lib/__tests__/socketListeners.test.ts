@@ -9,13 +9,30 @@ const processOfflineQueue = vi.fn()
 let conversations: unknown[] = []
 
 const connectHandlers: Array<() => void> = []
-const transportClientOn = vi.fn((event: string, cb: () => void) => {
-  if (event === 'connect') connectHandlers.push(cb)
+const disconnectHandlers: Array<(reason?: string) => void> = []
+const burnerHandlers: Array<(payload: { roomId?: string; ciphertext: string }) => Promise<void> | void> = []
+const transportClientOn = vi.fn((event: string, cb: (arg?: unknown) => void) => {
+  if (event === 'connect') connectHandlers.push(cb as () => void)
+  else if (event === 'disconnect') disconnectHandlers.push(cb as (reason?: string) => void)
+  else if (event === 'burner:receive')
+    burnerHandlers.push(cb as (payload: { roomId?: string; ciphertext: string }) => Promise<void> | void)
 })
 
 vi.mock('../transportClient', () => ({
   transportClient: { on: transportClientOn, sendEvent: vi.fn() },
   emitSessionKeyRequest: vi.fn(),
+}))
+
+// Burner store di-mock agar test routing burner:receive tidak memuat modul asli.
+// CATATAN PATH: file test ini ada di src/lib/__tests__/, jadi path mock relatif
+// di-resolve DARI FOLDER INI — '../../store/burner' → src/store/burner (target
+// yang benar; '../store/burner' menunjuk src/lib/store/burner yang tidak ada).
+let burnerActiveSessions: Record<string, unknown> = {}
+const burnerReceiveMessage = vi.fn()
+vi.mock('../../store/burner', () => ({
+  useBurnerStore: {
+    getState: () => ({ activeSessions: burnerActiveSessions, receiveMessage: burnerReceiveMessage }),
+  },
 }))
 vi.mock('@store/message', () => ({
   useMessageStore: { getState: () => ({ loadMessagesForConversation, processOfflineQueue }) },
@@ -36,6 +53,10 @@ beforeEach(() => {
   processOfflineQueue.mockReset()
   conversations = []
   connectHandlers.length = 0
+  disconnectHandlers.length = 0
+  burnerHandlers.length = 0
+  burnerActiveSessions = {}
+  burnerReceiveMessage.mockReset()
   vi.useFakeTimers()
 })
 
@@ -186,5 +207,91 @@ describe('doSyncMessages failure retry (FIX 3)', () => {
     releaseFirst()
     await first
     expect(loadMessagesForConversation).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('socketListeners robustness (ROBUSTNESS 2026-10-06)', () => {
+  it('mematikan poll chain koneksi lama saat disconnect, dan sync jalan lagi saat reconnect', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    connectHandlers.forEach((h) => h())
+
+    // Disconnect di tengah polling (chain 300ms + 8×500ms masih hidup).
+    disconnectHandlers.forEach((h) => h())
+    conversations = [{ id: 'c1', isGroup: false }]
+    await vi.advanceTimersByTimeAsync(60000)
+    // Chain lama harus mati — tidak ada sync yang bocor dari koneksi sebelumnya.
+    expect(loadMessagesForConversation).not.toHaveBeenCalled()
+
+    // Reconnect → poll 300ms menemukan conversations → sync jalan.
+    connectHandlers.forEach((h) => h())
+    await vi.advanceTimersByTimeAsync(300)
+    expect(loadMessagesForConversation).toHaveBeenCalledWith('c1')
+  })
+
+  it('membatasi failure retry 5s maksimal 3× per siklus koneksi (tidak loop selamanya)', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    connectHandlers.forEach((h) => h())
+    conversations = [{ id: 'c1', isGroup: false }, { id: 'c2', isGroup: false }]
+    loadMessagesForConversation.mockRejectedValue(new Error('server unreachable'))
+
+    // Poll 300ms → sync gagal (2 calls) → retry 5s terjadwal.
+    await vi.advanceTimersByTimeAsync(300)
+    expect(loadMessagesForConversation).toHaveBeenCalledTimes(2)
+    expect(socketListeners.syncCompleted).toBe(false)
+
+    // Tiga retry berturut-turut: 5300, 10300, 15300.
+    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(loadMessagesForConversation).toHaveBeenCalledTimes(8)
+
+    // Setelah batas 3 retry: tidak ada percobaan lagi walau waktu terus berjalan.
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(loadMessagesForConversation).toHaveBeenCalledTimes(8)
+  })
+})
+
+describe('burner:receive routing (ROBUSTNESS 2026-10-06)', () => {
+  async function initAndGetHandler() {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    return burnerHandlers[0]!
+  }
+
+  it('memakai roomId dari payload kapan pun tersedia', async () => {
+    const handler = await initAndGetHandler()
+    burnerActiveSessions = { a: {}, b: {} }
+
+    await handler({ roomId: 'b', ciphertext: 'x' })
+
+    expect(burnerReceiveMessage).toHaveBeenCalledWith('b', 'x')
+  })
+
+  it('fallback ke sesi pertama hanya bila tepat satu sesi aktif', async () => {
+    const handler = await initAndGetHandler()
+    burnerActiveSessions = { only: {} }
+
+    await handler({ ciphertext: 'x' })
+
+    expect(burnerReceiveMessage).toHaveBeenCalledWith('only', 'x')
+  })
+
+  it('drop pesan tanpa roomId saat routing ambigu (>1 sesi)', async () => {
+    const handler = await initAndGetHandler()
+    burnerActiveSessions = { a: {}, b: {} }
+
+    await handler({ ciphertext: 'x' })
+
+    expect(burnerReceiveMessage).not.toHaveBeenCalled()
+  })
+
+  it('drop pesan tanpa roomId saat tidak ada sesi aktif', async () => {
+    const handler = await initAndGetHandler()
+
+    await handler({ ciphertext: 'x' })
+
+    expect(burnerReceiveMessage).not.toHaveBeenCalled()
   })
 })

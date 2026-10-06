@@ -49,10 +49,26 @@ function clearSyncRetryTimer() {
 // (one established before the current login) is ignored as stale.
 let connectionLoginGeneration = 0;
 
+// [ROBUSTNESS] Generasi koneksi: setiap connect menaikkan counter. Poll chain
+// dari koneksi lama yang masih menggantung (disconnect di tengah polling)
+// otomatis mati karena generasinya tidak cocok lagi — dulu chain lama bisa
+// bertabrakan dengan chain koneksi baru (tidak fatal karena guard
+// syncInProgress, tapi tetap noise).
+let syncPollGeneration = 0;
+// [ROBUSTNESS] Bound untuk failure retry: dulu setiap kegagalan sync
+// menjadwalkan retry 5s berikutnya TANPA BATAS — saat server unreachable
+// dengan conversations sudah termuat, loop gagal→5s→gagal berjalan terus
+// selamanya (spam request + console). Sekarang maksimal 3 retry per siklus
+// koneksi; connect berikutnya me-reset hitungan.
+let syncFailureAttempts = 0;
+const MAX_SYNC_FAILURE_RETRIES = 3;
+
 // Unit-test hook: reset the module-level sync flag between tests.
 export function resetSocketSyncForTests() {
   syncCompleted = false;
   syncInProgress = false;
+  syncFailureAttempts = 0;
+  syncPollGeneration = 0;
 }
 
 // Shared sync function — accessible from both connect handler and subscription
@@ -99,13 +115,18 @@ export async function doSyncMessages() {
       // di-sync — sebelumnya flag di-set SEBELUM loop, sehingga kegagalan apa pun
       // (jaringan putus di tengah, dekripsi error, dll.) membuat sync dianggap
       // selesai dan pesan yang tertinggal tidak pernah diambil sampai reconnect.
-      // Jadwalkan SATU retry (bounded, tanpa loop tak terbatas).
+      // Jadwalkan retry (bounded — lihat MAX_SYNC_FAILURE_RETRIES di atas).
       console.warn(`[Offline Sync] ${failed.length} conversation(s) failed to sync, scheduling one retry.`);
-      if (!syncFailureRetryTimer) {
-        syncFailureRetryTimer = setTimeout(() => {
-          syncFailureRetryTimer = null;
-          if (!syncCompleted && !syncInProgress) void doSyncMessages();
-        }, 5000);
+      if (syncFailureAttempts < MAX_SYNC_FAILURE_RETRIES) {
+        syncFailureAttempts++;
+        if (!syncFailureRetryTimer) {
+          syncFailureRetryTimer = setTimeout(() => {
+            syncFailureRetryTimer = null;
+            if (!syncCompleted && !syncInProgress) void doSyncMessages();
+          }, 5000);
+        }
+      } else {
+        console.warn(`[Offline Sync] Batas ${MAX_SYNC_FAILURE_RETRIES} retry gagal tercapai — menunggu reconnect berikutnya.`);
       }
     } else {
       // Semua conversation tersync — baru tandai selesai.
@@ -141,6 +162,9 @@ export function initSocketListeners() {
     // Reset the one-shot retry state for this connection cycle.
     clearSyncRetryTimer();
     finalRetryAttempts = 0;
+    syncFailureAttempts = 0;
+    // Generasi baru mematikan poll chain dari koneksi sebelumnya.
+    const pollGeneration = ++syncPollGeneration;
     // Capture the login generation so stale force_logout events from a prior
     // session can be ignored.
     connectionLoginGeneration = useAuthStore.getState().loginGeneration ?? 0;
@@ -149,6 +173,8 @@ export function initSocketListeners() {
     let syncAttempts = 0;
     const maxSyncAttempts = 8;
     const pollSyncMessages = async () => {
+      // [ROBUSTNESS] Koneksi ini sudah digantikan → jangan lanjutkan chain.
+      if (pollGeneration !== syncPollGeneration) return;
       if (syncCompleted) return;
       const conversations = useConversationStore.getState().conversations;
       if (conversations.length === 0) {
@@ -176,6 +202,12 @@ export function initSocketListeners() {
 
   transportClient.on('disconnect', (reason) => {
     useConnectionStore.getState().setStatus('disconnected');
+
+    // [ROBUSTNESS] Matikan poll chain + retry timer milik siklus koneksi ini:
+    // mencoba sync saat diskonek hanya menghasilkan request gagal berulang.
+    // Connect berikutnya menyalakan semuanya lagi dari nol.
+    syncPollGeneration++;
+    clearSyncRetryTimer();
 
     if (reason === 'Logged in on another device') {
       const { logout } = useAuthStore.getState();
@@ -368,10 +400,22 @@ export function initSocketListeners() {
   // 7. BURNER CHATS
   transportClient.on("burner:receive", async (payload: { roomId?: string, ciphertext: string }) => {
     const { useBurnerStore } = await import('../store/burner');
-    const roomId = payload.roomId || Object.keys(useBurnerStore.getState().activeSessions)[0];
-    if (roomId) {
-      await useBurnerStore.getState().receiveMessage(roomId, payload.ciphertext);
+    // [ROBUSTNESS] Routing roomId: kalau payload membawa roomId, pakai itu
+    // (receiveMessage sudah aman untuk room yang belum ter-restore). Tanpa
+    // roomId, fallback ke sesi pertama HANYA bila tepat ada satu sesi aktif —
+    // bila 0 atau >1, routing ambigu (pesan bisa masuk ke room yang salah dan
+    // menggugurkan DR state-nya) → drop dengan warning.
+    const sessionIds = Object.keys(useBurnerStore.getState().activeSessions);
+    let roomId = payload.roomId;
+    if (!roomId) {
+      const onlySession = sessionIds.length === 1 ? sessionIds[0] : undefined;
+      if (onlySession === undefined) {
+        console.warn(`[Burner] Pesan tanpa roomId & ${sessionIds.length} sesi aktif — di-drop (routing ambigu).`);
+        return;
+      }
+      roomId = onlySession;
     }
+    await useBurnerStore.getState().receiveMessage(roomId, payload.ciphertext);
   });
 
   transportClient.on("burner:terminated", async (payload: { roomId: string }) => {
