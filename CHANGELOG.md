@@ -19,15 +19,20 @@ selamanya — UI nyangkut tanpa pesan error.
 kedua menandai rerun, dan item yang masuk selama drain diproses segera
 setelah loop selesai.
 
-**silentRefresh probe-first + refreshLock fallback best-effort:** mutex
-localStorage (jalur tanpa Web Locks) tidak bisa dijadikan mutual exclusion
-sejati (localStorage tanpa test-and-set atomik) — kini didokumentasikan
-best-effort dengan verifikasi ganda. Kebenaran dipindah ke `silentRefresh()`
-yang kini SELALU probe `GET /api/users/me` dulu (dulu hanya di cabang Web
-Locks): tab yang me-refresh > 5s setelah tab lain (di luar grace server)
-tidak lagi menembak POST /refresh dengan `rt` basi → tidak memicu
-reuse-detection → revoke family. Grace 5s server (`FRESH_ROTATION_GRACE_MS`)
-menutup kasus near-simultaneous yang tersisa.
+**silentRefresh probe-first + mutex lintas-tab 3 tier:** `silentRefresh()`
+kini SELALU probe `GET /api/users/me` dulu (dulu hanya di cabang Web Locks),
+dan doRefresh RE-PROBE sekali lagi DI DALAM lock tepat sebelum POST —
+menunggu mutex bisa makan waktu; tab lain mungkin sudah menyelesaikan refresh
+selama kita antre. `runExclusive` kini punya tiga tier: **(1) Web Locks API**
+(exclusion sejati), **(2) mutex via Service Worker** — registry tunggal
+per-origin di `sw.ts` (`swMutexCore.ts` logika murni sync + heartbeat 1s +
+sweep stale 4s → tab crash otomatis kehilangan lock; klien
+`swMutexClient.ts` pakai MessageChannel dengan request-id anti-clobber),
+dipakai bila SW mengendalikan halaman tapi `navigator.locks` tidak ada
+(browser lawas 2021–2022); **(3) localStorage mutex** — best-effort (tanpa
+test-and-set atomik), hanya dijalankan bila dua tier di atas tak tersedia.
+Grace 5s server (`FRESH_ROTATION_GRACE_MS`) tetap menutup kasus
+near-simultaneous yang tersisa.
 
 **Socket cleanup:** poll chain offline sync dari koneksi lama dimatikan saat
 disconnect (generation guard `syncPollGeneration` — dulu bisa bertabrakan

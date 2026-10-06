@@ -896,12 +896,23 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             // rotasi konkuren dari tab lain, dsb.) tidak boleh memaksa logout.
             // Berkat grace di server, menyajikan ulang rt yang baru dirotasi dalam
             // beberapa detik justru menghasilkan token baru (bukan revoke family).
+            //
+            // [ROBUSTNESS] RE-PROBE di dalam lock: menunggu mutex bisa makan
+            // waktu; kalau tab lain menyelesaikan refresh selama kita antre
+            // (>5s = di luar grace), POST kita membawa rt basi. Probe murah
+            // tepat sebelum POST menutup celah itu.
             const data = await refreshWithRetry(async () =>
-              runExclusive(async () =>
-                api<Record<string, unknown>>('/api/auth/refresh', {
+              runExclusive(async () => {
+                try {
+                  await api('/api/users/me');
+                  return { accessToken: get().accessToken ?? undefined }; // tab lain sudah refresh → jangan POST
+                } catch {
+                  // Probe gagal → rt masih sah untuk kita → POST /refresh.
+                }
+                return await api<Record<string, unknown>>('/api/auth/refresh', {
                   method: 'POST',
-                })
-              )
+                });
+              })
             );
             if (data && typeof data.accessToken === 'string') {
               set({ accessToken: data.accessToken });

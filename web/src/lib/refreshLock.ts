@@ -6,21 +6,29 @@
 // server rotates it once; the second request looks like a "reuse attack" and
 // revokes the whole session family — bricking the user's session with 401s.
 //
-// Web Locks API is origin-wide across tabs, so a single lock name serializes
-// refreshes; the second tab then uses the freshly-rotated cookie. Falls back to
-// a localStorage mutex for browsers without navigator.locks.
-//
-// CATATAN JUJUR TENTANG FALLBACK: localStorage tidak punya operasi test-and-set
-// atomik, jadi mutual exclusion lintas tab di jalur ini BEST-EFFORT — jendela
-// TOCTOU kecil tetap ada (tab lain bisa menimpa lock tepat setelah verifikasi
-// kita). Kebenaran TIDAK bergantung pada mutex ini. Lapisan kebenaran:
-//   1. silentRefresh() SELALU probe GET /api/users/me dulu — kalau tab lain
-//      sudah selesai refresh, cookie `at` valid → tidak ada POST kedua.
+// TIGA TIER, dari yang paling kuat:
+//   1. Web Locks API — mutual exclusion lintas-tab sejati (origin-wide).
+//   2. Mutex via Service Worker (swMutexClient/swMutexCore) — exclusion sejati
+//      juga: registry di SW TUNGGAL per-origin. Dipakai bila SW mengendalikan
+//      halaman tapi navigator.locks tidak ada (browser lawas 2021–2022).
+//   3. localStorage mutex — BEST-EFFORT (localStorage tanpa test-and-set
+//      atomik; jendela TOCTOU kecil tetap ada). Hanya dijalankan bila dua tier
+//      di atas tak tersedia.
+// Lapisan kebenaran di luar mutex (selalu aktif):
+//   1. silentRefresh() SELALU probe GET /api/users/me dulu, dan doRefresh
+//      RE-PROBE SEKALI LAGI di dalam lock tepat sebelum POST — menunggu mutex
+//      bisa makan waktu; tab lain mungkin sudah menyelesaikan refresh selama
+//      kita menunggu → jangan POST rt basi.
 //   2. Server punya grace window 5 detik (FRESH_ROTATION_GRACE_MS): POST
 //      near-simultaneous dengan rt yang sama dianggap refresh benign, bukan
 //      reuse attack.
-// Mutex ini murni optimasi: mengurangi jumlah POST /refresh yang berlomba.
+import { isSwMutexAvailable, withSwMutex } from './swMutexClient';
+
 const LOCK_NAME = 'nyx:auth-refresh';
+// Batas menunggu acquire di tier SW: cukup longgar untuk refresh pemegang
+// lain yang berjalan normal (retry 3× + backoff ≈ ≤10s). Setelah itu jatuh ke
+// localStorage — re-probe doRefresh menutup celah rt basi yang tersisa.
+const SW_MUTEX_ACQUIRE_TIMEOUT_MS = 20_000;
 const FALLBACK_KEY = 'nyx_refresh_lock';
 const FALLBACK_STALE_MS = 10000;
 const FALLBACK_POLL_MS = 30;
@@ -33,7 +41,18 @@ export async function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
     return locks.request(LOCK_NAME, async () => fn());
   }
 
-  // Fallback: localStorage mutex with stale-lock takeover.
+  // Tier 2: mutex via Service Worker — exclusion sejati (registry tunggal di
+  // SW; semua tab satu-origin berbagi instance yang sama). {ok:false} berarti
+  // SW tidak tersedia / acquire timeout → jatuh ke tier 3.
+  if (isSwMutexAvailable()) {
+    const result = await withSwMutex(LOCK_NAME, fn, {
+      timeoutMs: SW_MUTEX_ACQUIRE_TIMEOUT_MS,
+    });
+    if (result.ok) return result.value;
+    console.warn('[refreshLock] Mutex SW gagal/timeout — jatuh ke fallback localStorage.');
+  }
+
+  // Tier 3 (terakhir): localStorage mutex with stale-lock takeover.
   const token = crypto.randomUUID();
   const now = Date.now();
   const ownedValue = `${token}|${now}`;

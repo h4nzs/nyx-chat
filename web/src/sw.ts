@@ -3,6 +3,7 @@ declare let self: ServiceWorkerGlobalScope;
 
 import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 import { clientsClaim } from 'workbox-core';
+import { createMutexRegistry, handleMutexRequest, type MutexRequest } from './lib/swMutexCore';
 
 // 1. Lifecycle Management
 self.skipWaiting();
@@ -15,6 +16,21 @@ cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
 // 4. API Caching Strategy - REMOVED FOR PRIVACY (No caching of sensitive data)
+
+// --- 4b. Mutex lintas-tab (mutual exclusion sejati untuk browser tanpa Web
+// Locks) — registry di sini TUNGGAL per-origin: semua tab berbicara dengan
+// instance SW yang sama. Semantik registry: lib/swMutexCore.ts (heartbeat +
+// sweep stale → tab crash otomatis kehilangan lock dalam LOCK_STALE_MS).
+const mutexRegistry = createMutexRegistry();
+
+self.addEventListener('message', (event: ExtendableMessageEvent) => {
+  const data = event.data as { __nyxMutex?: boolean; id?: number; req?: MutexRequest } | undefined;
+  if (!data || data.__nyxMutex !== true || !data.req || typeof data.id !== 'number') return;
+  const response = handleMutexRequest(mutexRegistry, data.req);
+  // Balas via port MessageChannel yang dibawa event (dibuka klien di
+  // swMutexClient.ts). Echo id agar klien bisa mencocokkan balasan.
+  event.source?.postMessage({ ...response, id: data.id });
+});
 
 // --- 5. Push Notification Logic ---
 
