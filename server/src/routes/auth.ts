@@ -15,6 +15,7 @@ import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
 import { authLimiter } from '../middleware/rateLimiter.js'
 import { getSodium } from '../lib/sodium.js'
+import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
 import { nanoid } from 'nanoid'
 import argon2 from 'argon2'
 import crypto from 'crypto'
@@ -108,8 +109,18 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
     })
 
     // Store active device in Redis for instant WebTransport validation (Lapis 1 Security)
+    // [ROBUSTNESS] Bila deviceId BERUBAH (login di perangkat baru / setelah
+    // logout), kirim sinyal invalidasi agar cache lokal 60s di SEMUA instance
+    // dibuang — tanpa itu device baru yang sah diblokir ≤60s oleh cache yang
+    // masih menyimpan deviceId lama. Device sama (refresh) tidak perlu sinyal.
     try {
-      await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, deviceId); // 30 days
+      const prevDevice = await redisClient.get(`active_device:${user.id}`);
+      if (prevDevice !== deviceId) {
+        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, deviceId); // 30 days
+        await invalidateActiveDeviceCache(user.id, redisClient);
+      } else {
+        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, deviceId); // 30 days
+      }
     } catch (redisErr) {
       console.error('[Redis] Failed to set active device cache:', redisErr);
     }
@@ -516,8 +527,15 @@ router.post('/refresh', async (req, res, next) => {
     });
 
     // Update Redis active device
+    // [ROBUSTNESS] Paritas dengan issueTokens: invalidate bila device berubah.
     try {
-      await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, basis.deviceId);
+      const prevDevice = await redisClient.get(`active_device:${user.id}`);
+      if (prevDevice !== basis.deviceId) {
+        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, basis.deviceId);
+        await invalidateActiveDeviceCache(user.id, redisClient);
+      } else {
+        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, basis.deviceId);
+      }
     } catch (_e) {}
 
     setAuthCookies(res, { access, refresh });
@@ -649,8 +667,10 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
     clearAuthCookies(res)
 
     // Clear active device cache from Redis
+    // [ROBUSTNESS] Buang juga cache lokal 60s di semua instance.
     try {
       await redisClient.del(`active_device:${req.user.id}`);
+      await invalidateActiveDeviceCache(req.user.id, redisClient);
     } catch (_re) {}
 
     res.json({ message: `All ${updated.count} sessions terminated.` });
@@ -677,8 +697,12 @@ router.post('/logout', async (req, res) => {
       }
       
       // Clear active device cache if we have the user ID
+      // [ROBUSTNESS] Buang juga cache lokal 60s di semua instance.
       if (payload.sub) {
-        try { await redisClient.del(`active_device:${payload.sub}`); } catch (_re) {}
+        try {
+          await redisClient.del(`active_device:${payload.sub}`);
+          await invalidateActiveDeviceCache(payload.sub, redisClient);
+        } catch (_re) {}
       }
     }
   } catch (_e) {}

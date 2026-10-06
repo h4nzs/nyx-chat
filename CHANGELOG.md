@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛡️ Robustness Hardening — Server Realtime (2026-10-06)
+
+**Guard handler socket WSS (anti crash proses):** semua handler async
+gateway socket.io (`message:send`, ACK, presence, 27 event KEY_SYNC) kini
+di-bungkus `guardedOn` — rejection yang lepas dari handler (error Redis/DB
+di checkRateLimit / isActiveDeviceAllowed / handle*) dulu menjadi
+unhandledRejection → node ≥15 membunuh PROSES untuk satu klien yang
+mem-trigger error infra. Kini: error di-log, callback (bila ada) menerima
+INTERNAL_ERROR, koneksi bermasalah diputus — proses & user lain tetap hidup.
+Jalur WT sudah ter-cover try/catch pSubscribe sejak awal; test parity
+kini juga mem-assert guard (regresi guard = crash proses).
+
+**checkRateLimit fail-open + Lua terpusat:** pola Lua atomic INCR+EXPIRE
+pindah ke `utils/redisResilience.ts` (satu sumber kebenaran); saat Redis
+down, rate limit socket kini FAIL-OPEN (trafik realtime jalan tanpa limit
+socket; limit HTTP di app.ts berdiri sendiri) — dulu eval melempar →
+rejection lepas → skenario crash di atas, plus seluruh realtime mati.
+Balasan NaN/negatif dianggap tak terukur (fail-open juga).
+
+**Invalidasi cache active-device lintas-proses:** cache lokal 60s di
+`isActiveDeviceAllowed` tidak tahu kalau `active_device:<userId>` baru saja
+di-overwrite login di perangkat lain → device BARU yang sah diblokir ≤60s.
+Login (issueTokens + refresh) kini mengirim sinyal invalidasi via channel
+pub/sub khusus `nyx:device-cache-invalidate` (publish best-effort dari
+`redisResilience.ts`) saat deviceId BERUBAH; logout/logout-all juga.
+Subscriber di `initializeRedisBridge` menghapus cache lokal di SEMUA
+instance — tanpa efek samping presence (sengaja bukan opcode 99, yang akan
+memicu broadcast `leave` palsu ke kontak).
+
 ## 🛡️ Robustness Hardening — Web Layer (2026-10-06)
 
 **API timeout:** semua request REST via `api()` kini punya timeout default

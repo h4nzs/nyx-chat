@@ -7,10 +7,20 @@ import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { TransportOpCode, MessageSendPayloadSchema } from '@nyx/shared';
+import { createCheckRateLimit, DEVICE_CACHE_INVALIDATE_CHANNEL } from '../utils/redisResilience.js';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 import { handleChatMessage, handleKeySync, handlePresence, type RealtimeContext } from './realtimeHandlers.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+
+// Lua atomic: INCR + EXPIRE dalam satu perintah — mencegah key hidup selamanya
+// bila proses mati di antara dua perintah (race condition rate limit permanen).
+// [ROBUSTNESS] FAIL-OPEN: Redis down → trafik realtime jalan tanpa limit
+// socket (limit HTTP di app.ts berdiri sendiri), BUKAN seluruh realtime mati.
+// Rejection yang dulu lepas dari handler socket kini tertangkap di sini.
+// (Deklarasi SEBELUM realtimeCtx — shorthand property dievaluasi saat init.)
+const checkRateLimit = createCheckRateLimit(redisClient);
+export { checkRateLimit };
 
 // Unified connection management
 export const pubClient: RedisClientType = createClient({ url: redisUrl });
@@ -35,6 +45,19 @@ export const realtimeCtx: RealtimeContext = {
 export async function initializeRedisBridge() {
   await Promise.all([pubClient.connect(), subClient.connect()]);
   console.log('🌐 Redis Bridge initialized and connected.');
+
+  // [ROBUSTNESS] Channel invalidasi cache active-device (login/logout di satu
+  // instance → cache lokal 60s dibuang di SEMUA instance).
+  await subClient.subscribe(DEVICE_CACHE_INVALIDATE_CHANNEL, (message) => {
+    try {
+      const data = JSON.parse(message) as { userId?: string };
+      if (typeof data.userId === 'string' && data.userId) {
+        invalidateLocalActiveDeviceCache(data.userId);
+      }
+    } catch (e) {
+      console.error('[RedisBridge] Invalid invalidation payload:', e);
+    }
+  });
 
   // Subscribe to all upstream messages from Rust Sidecar
   await subClient.pSubscribe('nyx:upstream:*', async (message, channel) => {
@@ -99,6 +122,17 @@ export async function broadcastToUsers(userIds: string[], opCode: TransportOpCod
 // 🔒 Single active device check (per-opcode) dengan cache lokal 60 detik.
 // Migration mode membolehkan device lama & baru bersamaan (sama seperti AUTH).
 const activeDeviceCache = new Map<string, { deviceId: string; expiresAt: number }>();
+
+/** [ROBUSTNESS] Hapus entri cache user (dipanggil oleh sinyal lintas-proses
+ *  saat login/logout mengubah `active_device` di Redis). */
+export function invalidateLocalActiveDeviceCache(userId: string): void {
+  activeDeviceCache.delete(userId);
+}
+
+/** [ROBUSTNESS] Hapus seluruh cache (hook test). */
+export function clearLocalActiveDeviceCache(): void {
+  activeDeviceCache.clear();
+}
 
 export async function isActiveDeviceAllowed(userId: string, deviceId: string): Promise<boolean> {
   const now = Date.now();
@@ -269,21 +303,4 @@ async function handleWebRtcRelay(fromUserId: string, payload: { to: string, type
   await sendJsonToUser(payload.to, opCode, relayPayload, opCode === TransportOpCode.WEBRTC_ICE);
 }
 
-// Lua atomic: INCR + EXPIRE dalam satu perintah — mencegah key hidup selamanya
-// bila proses mati di antara dua perintah (race condition rate limit permanen).
-const RATE_LIMIT_LUA = `
-local current = redis.call('INCR', KEYS[1])
-if current == 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[1])
-end
-return current
-`;
 
-export async function checkRateLimit(userId: string, event: string, limit: number, windowSeconds: number) {
-    const key = `rate_limit:socket:${event}:${userId}`;
-    const current = await redisClient.eval(RATE_LIMIT_LUA, {
-      keys: [key],
-      arguments: [String(windowSeconds)]
-    });
-    return Number(current) <= limit;
-}

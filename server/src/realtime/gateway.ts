@@ -256,8 +256,28 @@ export function attachWssGateway(httpServer: HttpServer): void {
       removeSocketFromRegistry(sockets, key, socket);
     });
 
+    // [ROBUSTNESS] Pembungkus handler async socket.io: rejection yang lepas
+    // dari handler (error Redis/DB di checkRateLimit / isActiveDeviceAllowed /
+    // handle*) tidak lagi menjadi unhandledRejection → node ≥15 membunuh
+    // PROSES untuk satu klien yang men-trigger error infra. Error di-log +
+    // koneksi klien bermasalah diputus — sisanya user & instance tetap hidup.
+    const guardedOn = (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+      socket.on(event, (...args: unknown[]) => {
+        const maybeCb = args[args.length - 1];
+        void (async () => {
+          await handler(...args);
+        })().catch((err) => {
+          console.error(`[WS-Gateway] Handler ${event} gagal untuk user ${userId}:`, err);
+          if (typeof maybeCb === 'function') {
+            try { maybeCb({ ok: false, error: 'INTERNAL_ERROR' }); } catch { /* klien mungkin sudah pergi */ }
+          }
+          socket.disconnect(true); // sesi bermasalah direset; proses tetap hidup
+        });
+      });
+    };
+
     // --- Inbound: CHAT_MESSAGE ---
-    socket.on('message:send', async (payload: unknown) => {
+    guardedOn('message:send', async (payload: unknown) => {
       if (!await checkRateLimit(userId, 'chat_message', 120, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       // Paritas dengan jalur WT: client menempelkan msgId (UUID) pada payload
@@ -278,14 +298,14 @@ export function attachWssGateway(httpServer: HttpServer): void {
     });
 
     // --- Inbound: ACK (delivery receipt) ---
-    socket.on('message:ack_delivered', async (payload: unknown) => {
+    guardedOn('message:ack_delivered', async (payload: unknown) => {
       if (!await checkRateLimit(userId, 'message_ack_delivered', 240, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handleAck(wsCtx, userId, deviceId, payload as { conversationId: string; messageId: string; targetRecipient?: string });
     });
 
     // --- Inbound: PRESENCE ---
-    socket.on('presence:update', async (payload: unknown) => {
+    guardedOn('presence:update', async (payload: unknown) => {
       if (!await checkRateLimit(userId, 'presence_update', 30, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handlePresence(wsCtx, userId, payload as { event: string; conversationId?: string });
@@ -307,11 +327,12 @@ export function attachWssGateway(httpServer: HttpServer): void {
         await handleKeySync(wsCtx, userId, deviceId, { event, msgId: typeof msgId === 'string' ? msgId : '', data });
       };
 
-    // [PARITY] Satu loop, satu sumber kebenaran (WSS_KEYS_SYNC_EVENTS).
-    // Nama event socket.io === nama `event` di payload handleKeySync, dan msgId
-    // (arg ke-2, opsional dari client) diteruskan untuk korelasi ACK.
+    // [ROBUSTNESS] Semua event KEY_SYNC lewat guard yang sama — satu loop,
+    // satu sumber kebenaran (WSS_KEYS_SYNC_EVENTS). Nama event socket.io ===
+    // nama `event` di payload handleKeySync, dan msgId (arg ke-2, opsional
+    // dari client) diteruskan untuk korelasi ACK.
     for (const event of WSS_KEYS_SYNC_EVENTS) {
-      socket.on(event, keySyncHandler(event));
+      guardedOn(event, keySyncHandler(event));
     }
   });
 

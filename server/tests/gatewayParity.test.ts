@@ -56,10 +56,11 @@ function extractHandledKeySyncEvents(source: string): string[] {
   return [...cases].sort();
 }
 
-/** Event yang didaftarkan socket.on(...) di gateway (semua inbound). */
+/** Event yang didaftarkan di gateway (semua inbound) — termasuk via wrapper
+ *  guardedOn (robustness: rejection handler async tak boleh crash proses). */
 function extractGatewaySocketEvents(source: string): string[] {
   const events = new Set<string>();
-  const re = /socket\.on\('([^']+)'/g;
+  const re = /(?:socket\.on|guardedOn)\('([^']+)'/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source)) !== null) events.add(m[1]!);
   return [...events].sort();
@@ -108,12 +109,13 @@ test('setiap case handleKeySync bisa dicapai dari WSS ATAU di-dokumentasikan seb
 });
 
 test('gateway mendaftarkan event KEY_SYNC via loop atas WSS_KEYS_SYNC_EVENTS (sumber kebenaran tunggal)', () => {
-  // Setelah refactor, KEY_SYNC didaftarkan dalam satu loop `for (const event of
-  // WSS_KEYS_SYNC_EVENTS) socket.on(event, keySyncHandler(event))` — tidak ada
-  // lagi registrasi literal satu per satu yang bisa menyimpang dari daftar.
+  // KEY_SYNC didaftarkan dalam satu loop `for (const event of
+  // WSS_KEYS_SYNC_EVENTS)` — registrasi bisa socket.on langsung atau wrapper
+  // guardedOn (robustness), tapi TETAP satu loop dengan variabel event — tidak
+  // ada registrasi literal satu per satu yang bisa menyimpang dari daftar.
   assert.match(
     gatewaySource,
-    /for \(const event of WSS_KEYS_SYNC_EVENTS\)\s*\{?\s*socket\.on\(event, keySyncHandler\(event\)\)/,
+    /for \(const event of WSS_KEYS_SYNC_EVENTS\)\s*\{?\s*(?:socket\.on|guardedOn)\(event, keySyncHandler\(event\)\)/,
     'gateway harus mendaftarkan KEY_SYNC via loop WSS_KEYS_SYNC_EVENTS (bukan manual)'
   );
 
@@ -125,6 +127,15 @@ test('gateway mendaftarkan event KEY_SYNC via loop atas WSS_KEYS_SYNC_EVENTS (su
   // Tidak boleh ada registrasi literal KEY_SYNC tersisa (double-listen dengan loop).
   const duplicateLiteral = socketEvents.filter((e) => (WSS_KEYS_SYNC_EVENTS as readonly string[]).includes(e));
   assert.deepEqual(duplicateLiteral, [], 'registrasi literal KEY_SYNC ganda terdeteksi — hapus, gunakan loop');
+  // [ROBUSTNESS] Jalur fixed & loop KEY_SYNC harus terdaftar via guardedOn
+  // (guard rejection), bukan socket.on telanjang — regrese guard = crash proses.
+  for (const guarded of ['message:send', 'message:ack_delivered', 'presence:update']) {
+    assert.match(
+      gatewaySource,
+      new RegExp(`guardedOn\\('${guarded}'`),
+      `'${guarded}' harus terdaftar via guardedOn (guard unhandledRejection)`
+    );
+  }
 });
 
 test('gateway meneruskan msgId ke handleKeySync (paritas ACK dengan jalur WT)', () => {
