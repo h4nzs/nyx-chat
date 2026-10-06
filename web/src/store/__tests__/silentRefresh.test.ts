@@ -143,4 +143,23 @@ describe('silentRefresh cross-tab single-flight (FIX)', () => {
     )
     expect(refreshPosts).toHaveLength(1)
   })
+
+  it('probe-first juga berlaku TANPA navigator.locks: sesi sudah valid → tanpa POST /refresh', async () => {
+    const { useAuthStore } = await loadStore()
+    ;(navigator as unknown as { locks: unknown }).locks = undefined
+
+    // Probe sukses (cookie `at` sudah dirotasi tab lain) → tidak perlu refresh.
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/users/me') return { id: 'u1' }
+      throw new Error('unexpected')
+    })
+
+    const r = await useAuthStore.getState().silentRefresh()
+
+    expect(r).toBe(true)
+    const refreshPosts = apiMock.mock.calls.filter(
+      (c) => c[0] === '/api/auth/refresh'
+    )
+    expect(refreshPosts).toHaveLength(0)
+  })
 })

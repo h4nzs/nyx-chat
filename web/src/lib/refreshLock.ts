@@ -9,6 +9,17 @@
 // Web Locks API is origin-wide across tabs, so a single lock name serializes
 // refreshes; the second tab then uses the freshly-rotated cookie. Falls back to
 // a localStorage mutex for browsers without navigator.locks.
+//
+// CATATAN JUJUR TENTANG FALLBACK: localStorage tidak punya operasi test-and-set
+// atomik, jadi mutual exclusion lintas tab di jalur ini BEST-EFFORT — jendela
+// TOCTOU kecil tetap ada (tab lain bisa menimpa lock tepat setelah verifikasi
+// kita). Kebenaran TIDAK bergantung pada mutex ini. Lapisan kebenaran:
+//   1. silentRefresh() SELALU probe GET /api/users/me dulu — kalau tab lain
+//      sudah selesai refresh, cookie `at` valid → tidak ada POST kedua.
+//   2. Server punya grace window 5 detik (FRESH_ROTATION_GRACE_MS): POST
+//      near-simultaneous dengan rt yang sama dianggap refresh benign, bukan
+//      reuse attack.
+// Mutex ini murni optimasi: mengurangi jumlah POST /refresh yang berlomba.
 const LOCK_NAME = 'nyx:auth-refresh';
 const FALLBACK_KEY = 'nyx_refresh_lock';
 const FALLBACK_STALE_MS = 10000;
@@ -41,7 +52,13 @@ export async function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
 
     localStorage.setItem(FALLBACK_KEY, ownedValue);
     await sleep(0);
-    if (localStorage.getItem(FALLBACK_KEY) === ownedValue) break;
+    // Verifikasi pertama + re-verify setelah satu macrotask lagi: menutup
+    // sebagian jendela TOCTOU (tab lain yang menimpa di antara dua verifikasi
+    // membuat kita mengalah dan mengantre ulang, bukan ikut masuk).
+    if (localStorage.getItem(FALLBACK_KEY) === ownedValue) {
+      await sleep(0);
+      if (localStorage.getItem(FALLBACK_KEY) === ownedValue) break;
+    }
   }
 
   try {

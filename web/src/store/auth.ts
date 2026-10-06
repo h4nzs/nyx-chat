@@ -920,20 +920,33 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           // afterwards — by then its refresh token is stale and would re-trigger
           // reuse detection.
           //
-          // So, inside the lock we FIRST probe whether the session was already
-          // refreshed by the previous holder: a cheap authenticated GET. If it
-          // succeeds (the cookie was already rotated by the other tab) we skip our
-          // own POST /refresh entirely and report success. Only on failure do we
-          // proceed with the actual refresh.
+          // So, we FIRST probe whether the session is already valid: a cheap
+          // authenticated GET. If it succeeds (the cookie was rotated by another
+          // tab — including a tab that refreshed > 5s ago, outside the server's
+          // grace window) we skip our own POST /refresh entirely and report
+          // success. Only on failure do we proceed with the actual refresh.
+          //
+          // [ROBUSTNESS] Probe sekarang TANPA SYARAT (dulu hanya di dalam cabang
+          // Web Locks). Di browser tanpa Web Locks, dulu langsung POST /refresh:
+          // kalau tab lain selesai me-refresh > 5s yang lalu (di luar grace),
+          // POST kedua membawa rt basi → reuse-detection → revoke family. Probe
+          // murah menutup kasus itu; grace 5s server menutup kasus
+          // near-simultaneous yang tersisa.
           //
           // NOTE: we use the non-refreshing `api` (not `authFetch`) for the probe.
           // `authFetch` auto-invokes silentRefresh() on 401, which would recurse
           // into this same refreshPromise and deadlock inside the lock.
+          try {
+            await api('/api/users/me');
+            return true; // session already valid → skip our own refresh
+          } catch {
+            // Probe gagal (at expired / network) → lanjut refresh di bawah.
+          }
           if (typeof navigator !== 'undefined' && navigator.locks?.request) {
             return await navigator.locks.request('nyx-silent-refresh', async () => {
               try {
                 await api('/api/users/me');
-                return true; // session already valid → skip our own refresh
+                return true; // pemegang lock sebelumnya sudah refresh → skip
               } catch {
                 return await doRefresh();
               }
