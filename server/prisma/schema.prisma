@@ -40,11 +40,12 @@ model User {
   devices Device[]
 
   // --- RELASI PENGGUNA ---
-  stories             Story[]
+  // [docs/28 D8/D9] Story & BlockedUser TIDAK lagi punya relasi FK ke User:
+  // keduanya memakai identity ter-seal (authorTag / blockerTag+blockedTag)
+  // supaya dump DB tidak merekonstruksi graph sosial. Pembersihan saat akun
+  // dihapus dilakukan eksplisit lewat purgeSealedUserRows (bukan cascade).
   hiddenConversations UserHiddenConversation[]
   authenticators      Authenticator[]
-  blockedUsers        BlockedUser[]            @relation("Blocker")
-  blockedBy           BlockedUser[]            @relation("Blocked")
 
   // --- MULTI-TENANCY (B2B BaaS) ---
   tenantId   String?
@@ -338,29 +339,35 @@ model Authenticator {
   @@index([userId])
 }
 
+// [docs/28 Tier 1.3 — D9] Bukan FK ke User lagi: pasangan (blocker, blocked)
+// kini memakai identity TER-SEAL (sealAtRest, kunci dari NYX_AT_REST_PEPPER).
+// Server tetap bisa menurunkan "siapa diblokir siapa" untuk fungsionalitas
+// (list blocked, story gating, unblock), tetapi dump DB tidak lagi memuat graph
+// permusuhan dalam bentuk identitas. Nullable supaya `prisma db push` tetap
+// jalan di tabel yang sudah berisi baris lama (NULL = baris legacy, diabaikan).
 model BlockedUser {
-  id        String   @id @default(cuid())
-  blockerId String
-  blockedId String
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  blockerTag String?
+  blockedTag String?
+  createdAt  DateTime @default(now())
 
-  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
-  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
-
-  @@unique([blockerId, blockedId])
-  @@index([blockerId])
-  @@index([blockedId])
+  @@unique([blockerTag, blockedTag])
+  @@index([blockerTag])
+  @@index([blockedTag])
 }
 
+// [docs/28 Tier 1.3 — D8] Bukan FK ke User lagi: penulis disimpan sebagai
+// `authorTag` TER-SEAL (sealAtRest). Dulu `senderId` adalah FK asli → dump DB
+// memberi "siapa membuat story kapan" tanpa perlu membukanya. Endpoint tetap
+// mengembalikan `senderId` asli (di-resolve server saat request) supaya kontrak
+// klien tidak berubah. Nullable untuk alasan migrasi yang sama dengan BlockedUser.
 model Story {
   id               String   @id @default(uuid())
-  senderId         String
+  authorTag        String?
   encryptedPayload String   @db.Text
   createdAt        DateTime @default(now())
   expiresAt        DateTime
 
-  sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
-
-  @@index([senderId])
+  @@index([authorTag])
   @@index([expiresAt])
 }

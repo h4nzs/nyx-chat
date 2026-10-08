@@ -108,6 +108,34 @@ export async function findMembership(
   return row !== null
 }
 
+/**
+ * [docs/28 D8] Tag penulis `Story` — aliasi yang sama dengan routingIdentity
+ * supaya niatnya terbaca di call site (seal deterministik, bisa dibalik server).
+ */
+export const storyAuthorTag = routingIdentity
+
+/** [docs/28 D9] Tag identitas untuk kolom `blockerTag`/`blockedTag`. */
+export const blockedUserTag = routingIdentity
+
+/**
+ * [docs/28 D8/D9] Pembersihan eksplisit milik user pada tabel yang TIDAK lagi
+ * punya FK ke User (Story, BlockedUser). Dipakai saat akun dihapus / dead man's
+ * switch — dulu bergantung pada `onDelete: Cascade`, yang kini tidak ada.
+ */
+export interface SealedOwnedRowsPrisma {
+  story: { deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }> };
+  blockedUser: { deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }> };
+}
+
+export async function purgeSealedUserRows(
+  prisma: SealedOwnedRowsPrisma,
+  userId: string
+): Promise<void> {
+  const tag = await routingIdentity(userId)
+  await prisma.story.deleteMany({ where: { authorTag: tag } })
+  await prisma.blockedUser.deleteMany({ where: { OR: [{ blockerTag: tag }, { blockedTag: tag }] } })
+}
+
 /** Revocation (kick/leave): hapus baris keanggotaan user pada conversation. */
 export async function deleteMembership(
   prisma: MembershipPrisma,

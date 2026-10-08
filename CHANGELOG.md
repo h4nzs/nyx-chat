@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🖼️ Story & Block Ter-seal — Tier 1.3/1.4 / D8+D9 (2026-10-08)
+
+**D8:** `Story.senderId` dulu FK asli → dump DB memberi "siapa membuat story
+kapan" tanpa perlu membukanya. Kini penulis disimpan sebagai `authorTag`
+(seal deterministik, kunci dari `NYX_AT_REST_PEPPER`); kolom & relasi `sender`
+dihapus. Create/list lookup by tag, `GET /:id` membuka tag untuk cek blocklist,
+delete memverifikasi kepemilikan lewat tag (baris legacy tetap bisa dihapus).
+
+**D9:** `BlockedUser(blockerId, blockedId)` dulu graph permusuhan eksplisit →
+kini `blockerTag`/`blockedTag` ter-seal dengan unique pair (idempoten) + index
+per sisi; block/unblock, gating story, dan `GET /me/blocked` memakai pasangan
+tag.
+
+Kontrak klien **tidak berubah** (nol perubahan web): respons story dikirim lewat
+mapper whitelist `toClientStory` yang menyertakan `senderId` asli hasil resolve
+server, dan `/me/blocked` tetap mengembalikan `{id, ...}[]`. Penting: `authorTag`
+**tidak pernah** dikirim ke klien — nilai ter-seal yang sama dipakai kolom lain
+(UHC routing, block), jadi bocornya ke klien akan memungkinkan penyerang
+dengan dump memetakan tag → user.
+
+Karena FK cascade hilang, penghapusan akun (`users.ts`) dan dead man's switch
+(`systemSweeper`) membersihkan Story & BlockedUser eksplisit lewat
+`purgeSealedUserRows`. Kolom tag sengaja nullable supaya `prisma db push` tetap
+jalan di tabel berisi (catatan + SQL pembersihan baris legacy ada di docs/28
+§28.8). Test baru `tests/storyBlockPrivacy.test.ts` (9 test). Server 152/152.
+
 ## 🧪 Guardrail Privasi At-Rest — Tier 3.1 (2026-10-08)
 
 `server/tests/schemaPrivacy.test.ts`: satu suite yang mengunci janji privasi

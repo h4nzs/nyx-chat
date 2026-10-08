@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
+import { purgeSealedUserRows } from '../utils/routingIdentity.js';
 
 // Jadwalkan untuk jalan setiap jam 00:00 (server time) tiap hari
 export const startSystemSweeper = () => {
@@ -56,6 +57,9 @@ export const startSystemSweeper = () => {
         if (now > deadline) {
            console.log(`[Cron] 💀 DEAD MAN'S SWITCH TRIGGERED for User ${u.id}. Erasing all traces...`);
            try {
+             // [docs/28 D8/D9] Story & BlockedUser tidak lagi punya FK cascade →
+             // bersihkan eksplisit sebelum user dihapus (erasing all traces).
+             await purgeSealedUserRows(prisma, u.id);
              await prisma.user.deleteMany({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
              nukedCount++;
            } catch (err) {

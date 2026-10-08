@@ -2,6 +2,7 @@ import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
 import { redisClient } from '../lib/redis.js';
+import { storyAuthorTag, blockedUserTag, resolveRoutingUser } from '../utils/routingIdentity.js';
 
 const router = express.Router();
 
@@ -26,9 +27,11 @@ return current
 
 async function isStoryViewAllowed(requesterId: string, targetId: string): Promise<'ok' | 'blocked' | 'rate_limited'> {
   // Pengirim yang memblokir requester → tolak.
-  const block = await prisma.blockedUser.findUnique({
-    where: { blockerId_blockedId: { blockerId: targetId, blockedId: requesterId } },
-    select: { blockerId: true }
+  // [docs/28 Tier 1.3 — D9] relasi block kini disimpan sebagai pasangan tag
+  // ter-seal (deterministik), jadi pengecekannya tetap satu lookup.
+  const block = await prisma.blockedUser.findFirst({
+    where: { blockerTag: await blockedUserTag(targetId), blockedTag: await blockedUserTag(requesterId) },
+    select: { id: true }
   });
   if (block) return 'blocked';
   const hourBucket = Math.floor(Date.now() / 3_600_000);
@@ -40,6 +43,28 @@ async function isStoryViewAllowed(requesterId: string, targetId: string): Promis
     // Redis down → fail-open (ketersediaan > pembatasan metadata)
   }
   return 'ok';
+}
+
+/**
+ * Whitelist field yang boleh keluar ke klien.
+ *
+ * [docs/28 D8 — JANGAN dihapus] `authorTag` TIDAK boleh dikirim: nilai ter-seal
+ * yang sama juga dipakai di kolom lain (`UHC.userId`, `blockerTag/blockedTag`).
+ * Kalau ia bocor ke klien, penyerang yang punya dump bisa memetakan tag → user
+ * (dump + observasi API) dan seluruh proteksi ter-seal itu runtuh. Klien cukup
+ * menerima `senderId` asli yang di-resolve server saat request.
+ */
+function toClientStory(
+  story: { id: string; encryptedPayload: string; createdAt: Date; expiresAt: Date },
+  senderId: string
+) {
+  return {
+    id: story.id,
+    encryptedPayload: story.encryptedPayload,
+    createdAt: story.createdAt,
+    expiresAt: story.expiresAt,
+    senderId,
+  };
 }
 
 // Create a new story
@@ -56,13 +81,15 @@ router.post('/', requireAuth, async (req, res) => {
 
     const story = await prisma.story.create({
       data: {
-        senderId: userId,
+        // [docs/28 D8] penulis disimpan ter-seal, bukan FK userId.
+        authorTag: await storyAuthorTag(userId),
         encryptedPayload,
         expiresAt,
       },
     });
 
-    res.status(201).json(story);
+    // Kontrak klien TIDAK berubah: `senderId` tetap dikirim (di-resolve server).
+    res.status(201).json(toClientStory(story, userId));
   } catch (error) {
     console.error('[Stories] Create error:', error);
     res.status(500).json({ error: 'Failed to create story' });
@@ -86,13 +113,15 @@ router.get('/user/:userId', requireAuth, async (req, res) => {
     }
     const stories = await prisma.story.findMany({
       where: {
-        senderId: userId,
+        // [docs/28 D8] lookup by tag ter-seal (deterministik) — bukan kolom identitas.
+        authorTag: await storyAuthorTag(userId),
         expiresAt: { gt: new Date() }, // Only active stories
       },
       orderBy: { createdAt: 'asc' },
     });
 
-    res.json(stories);
+    // `senderId` = userId yang diminta (server tahu dari request) → kontrak lama.
+    res.json(stories.map(s => toClientStory(s, userId)));
   } catch (error) {
     console.error('[Stories] Get active error:', error);
     res.status(500).json({ error: 'Failed to fetch active stories' });
@@ -117,13 +146,17 @@ router.get('/:id', requireAuth, async (req, res) => {
     // [P3] Konsistensi blocklist juga di jalur by-id (pemegang kunci story
     // dari percakapan lama tetap tidak boleh memantau story pengirim yang
     // memblokirnya).
-    if (story.senderId !== req.user.id) {
-      const verdict = await isStoryViewAllowed(req.user.id, story.senderId);
+    // [docs/28 D8] penulis dibuka dari tag ter-seal (baris legacy = plaintext).
+    const authorId = await resolveRoutingUser(story.authorTag);
+    if (!authorId) return res.status(404).json({ error: 'Story not found' });
+
+    if (authorId !== req.user.id) {
+      const verdict = await isStoryViewAllowed(req.user.id, authorId);
       if (verdict === 'blocked') return res.status(403).json({ error: 'STORY_BLOCKED' });
       if (verdict === 'rate_limited') return res.status(429).json({ error: 'STORY_VIEW_RATE_LIMIT' });
     }
 
-    res.json(story);
+    res.json(toClientStory(story, authorId));
   } catch (error) {
     console.error('[Stories] Get error:', error);
     res.status(500).json({ error: 'Failed to fetch story' });
@@ -142,7 +175,11 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Story not found' });
     }
 
-    if (story.senderId !== userId) {
+    // [docs/28 D8] kepemilikan = tag cocok; baris legacy (tag = userId) tetap
+    // bisa dihapus oleh pemiliknya lewat resolveRoutingUser.
+    const myTag = await storyAuthorTag(userId);
+    const isOwner = story.authorTag === myTag || (await resolveRoutingUser(story.authorTag)) === userId;
+    if (!isOwner) {
       return res.status(403).json({ error: 'Unauthorized to delete this story' });
     }
 

@@ -17,7 +17,10 @@ import { ApiError } from '../utils/errors.js'
 import { asUserId, type UserId } from '@nyx/shared'
 import { AuthJwtPayload } from '../types/auth.js';
 import { identifierLookupCandidates, pepperedIdentifier } from '../utils/atRestSecrets.js';
-import { routingCandidates, resolveRoutingUser } from '../utils/routingIdentity.js';
+import {
+  blockedUserTag, purgeSealedUserRows, resolveRoutingUser, routingCandidates,
+  type SealedOwnedRowsPrisma
+} from '../utils/routingIdentity.js';
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -88,16 +91,25 @@ router.get('/me/blocked', async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const userId = req.user.id
 
-    const blocked = await prisma.blockedUser.findMany({
-      where: { blockerId: userId },
-      include: {
-        blocked: {
-          select: { id: true, encryptedProfile: true, isVerified: true }
-        }
-      }
+    // [docs/28 Tier 1.3 — D9] baris block menyimpan tag TER-SEAL. Server membuka
+    // tag di sini supaya kontrak klien (`{id}[]`) tidak berubah, sementara dump DB
+    // tidak memuat pasangan identitas.
+    const rows = await prisma.blockedUser.findMany({
+      where: { blockerTag: await blockedUserTag(userId) },
+      select: { blockedTag: true }
     })
 
-    res.json(blocked.map(b => b.blocked))
+    const blockedIds = (await Promise.all(rows.map(r => resolveRoutingUser(r.blockedTag))))
+      .filter((id): id is string => !!id)
+
+    if (blockedIds.length === 0) return res.json([])
+
+    const blockedUsers = await prisma.user.findMany({
+      where: { id: { in: blockedIds } },
+      select: { id: true, encryptedProfile: true, isVerified: true }
+    })
+
+    res.json(blockedUsers)
   } catch (error) { next(error) }
 })
 
@@ -255,9 +267,11 @@ router.post('/:id/block', async (req, res, next) => {
     const targetUser = await prisma.user.findUnique({ where: { id: blockedId } });
     if (!targetUser) throw new ApiError(404, 'User not found.');
 
+    // [docs/28 D9] pasangan disimpan sebagai tag ter-seal (deterministik).
+    const [blockerTag, blockedTag] = [await blockedUserTag(blockerId), await blockedUserTag(blockedId)];
     await prisma.blockedUser.upsert({
-      where: { blockerId_blockedId: { blockerId, blockedId } },
-      create: { blockerId, blockedId },
+      where: { blockerTag_blockedTag: { blockerTag, blockedTag } },
+      create: { blockerTag, blockedTag },
       update: {}
     });
 
@@ -274,8 +288,9 @@ router.delete('/:id/block', async (req, res, next) => {
     const blockerId = req.user.id;
     const blockedId = req.params.id;
 
+    // [docs/28 D9] unblock = hapus baris berdasarkan pasangan tag.
     await prisma.blockedUser.deleteMany({
-      where: { blockerId, blockedId }
+      where: { blockerTag: await blockedUserTag(blockerId), blockedTag: await blockedUserTag(blockedId) }
     });
 
     res.json({ message: 'User unblocked successfully', blockedId });
@@ -426,13 +441,17 @@ router.delete('/me', zodValidate({
       }
     }
 
-    // 2. Delete user
+    // 2. Bersihkan tabel milik user yang TIDAK lagi punya FK cascade
+    // [docs/28 D8/D9]: Story (authorTag) & BlockedUser (blockerTag/blockedTag).
+    await purgeSealedUserRows(prisma as unknown as SealedOwnedRowsPrisma, userId)
+
+    // 3. Delete user
     await prisma.user.delete({ where: { id: userId } })
 
-    // 3. Clear cookies (opsi konsisten dengan setAuthCookies)
+    // 4. Clear cookies (opsi konsisten dengan setAuthCookies)
     clearAuthCookies(res)
 
-    // 4. KICK WebTransport connections
+    // 5. KICK WebTransport connections
     try {
       await emitEventToUser(userId, 'auth:banned', { reason: 'Account deleted' });
       await sendJsonToUser(userId, TransportOpCode.KICK, { reason: 'Account deleted' });
