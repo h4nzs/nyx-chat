@@ -293,6 +293,14 @@ Risiko Tier 0: rendah — semua perubahan **server-side**, klien tidak berubah
 - 2.4 Pastikan OTPK dihapus tepat saat dipakai (row habis = tidak ada riwayat).
 
 ### Tier 3 — guardrail & pembuktian
+
+**3.1 ✅ Mendarat:** `server/tests/schemaPrivacy.test.ts` — satu suite yang
+mengunci temuan D1/D2/D3/D4/D5/D6/D7/D14 di level schema + format penyimpanan +
+dokumentasi env (5 test). Diverifikasi dengan **negative control**: menambahkan
+kolom `ipAddress` kembali ke `RefreshToken` membuat suite GAGAL (exit 1), dan
+setelah dikembalikan ia LULUS (exit 0) — jadi guardrail-nya benar-benar menangkap
+regresi, bukan sekadar hijau. **3.2 (dump simulator) belum**: butuh Postgres
+nyata/seeded yang tidak tersedia di mesin pengembangan ini.
 - 3.1 `server/tests/schemaPrivacy.test.ts`: assertion daftar-kolom-terlarang di
   `schema.prisma` (ipAddress, userAgent, senderId FK, apiKey plaintext, …) → CI
   gagal bila ada regresi.

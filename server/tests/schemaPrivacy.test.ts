@@ -1,0 +1,118 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
+
+/**
+ * [docs/28 — GUARDRAIL PRIVASI AT-REST]
+ *
+ * Satu suite yang mengunci janji privasi terhadap dump DB (adversary A1) supaya
+ * perbaikan Tier 0/1.x tidak bisa regresi diam-diam. Setiap assertion di sini
+ * mewakili satu temuan di docs/28-db-dump-threat-model.md:
+ *
+ *   D1  kunci privat issuer grup TIDAK di DB        (server/api/config)
+ *   D2  identitas tidak persist di MessageStatus / UserHiddenConversation
+ *   D3  authSecret & deleteSecret disimpan sebagai hash
+ *   D4  Tenant.apiKey disimpan sealed
+ *   D5  tidak ada ipAddress/userAgent per sesi
+ *   D6  blind index username ter-pepper
+ *   D7  fingerprint perangkat ter-index
+ *   D14 presence tidak broadcast roster global
+ *
+ * Kalau test ini gagal: BUKAN "test-nya usang" — periksa dulu apakah perubahan
+ * itu benar-benar diinginkan, karena artinya janji privasi di docs/28 dibatalkan.
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const read = (p: string) => readFileSync(path.join(here, p), 'utf8');
+
+/** Ambil body satu model Prisma (dari `model X {` sampai `}` penutup). */
+function modelBody(schema: string, model: string): string {
+  const match = schema.match(new RegExp(`model ${model} \\{([\\s\\S]*?)\\n\\}`));
+  assert.ok(match, `model ${model} harus ada di schema.prisma`);
+  return match[1]!;
+}
+
+test('D1: kunci privat issuer grup tidak boleh kembali ke DB', () => {
+  const schema = read('../prisma/schema.prisma');
+  const issuer = modelBody(schema, 'CredentialIssuerKey');
+
+  assert.doesNotMatch(schema, /privateKeyPkcs8/, 'private key TIDAK boleh jadi kolom DB (dump = bisa memalsukan keanggotaan grup)');
+  assert.match(issuer, /publicKeyJwk\s+String/, 'DB hanya menyimpan material publik');
+  assert.match(schema, /publicKeyJwk/, 'row publik tetap ada untuk verifikasi & distribusi klien');
+
+  // Private key hidup di env / file dev 0600 (gitignored).
+  const lib = read('../src/lib/groupCredentials.ts');
+  assert.match(lib, /GROUP_ISSUER_KEY_PKCS8/, 'private key dibaca dari env');
+  assert.match(read('../.gitignore'), /\.nyx-issuer-key/, 'file dev 0600 tidak boleh bisa di-commit');
+});
+
+test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConversation', () => {
+  const handlers = read('../src/network/realtimeHandlers.ts');
+  const schema = read('../prisma/schema.prisma');
+
+  // Receipt: tag opaque turunan server untuk 1:1/grup v1, pseudonym untuk grup v2.
+  assert.equal(
+    (handlers.match(/conversationScopedTag\(conversationId, userId\)/g) || []).length,
+    2,
+    'kedua jalur receipt (per-pesan + batch) memakai tag opaque'
+  );
+  assert.doesNotMatch(handlers, /persistedReaderId\s*=\s*[^;]*:\s*userId\b/, 'tidak ada fallback userId asli');
+
+  // Keanggotaan: routing identity ter-seal, bukan userId.
+  assert.match(modelBody(schema, 'UserHiddenConversation'), /userId\s+String\?/, 'userId tetap nullable (baris token-only)');
+  const routing = read('../src/utils/routingIdentity.ts');
+  assert.match(routing, /sealAtRest\(userId\)/, 'nilai kolom = seal deterministik');
+  for (const file of ['../src/network/realtimeHandlers.ts', '../src/routes/messages.ts', '../src/routes/conversations.ts']) {
+    assert.doesNotMatch(read(file), /userHiddenConversation\.upsert\(/, `${file}: penulisan keanggotaan harus lewat upsertMembership`);
+  }
+});
+
+test('D3/D4: secret otoritas disimpan sebagai hash (token) atau sealed (nilai yang perlu dibaca)', () => {
+  const conversations = read('../src/routes/conversations.ts');
+  const handlers = read('../src/network/realtimeHandlers.ts');
+
+  assert.match(conversations, /authSecret: hashCredentialToken\(authSecret\)/, 'authSecret grup = hash SHA-256');
+  assert.match(handlers, /deleteSecret: deleteSecret \? hashCredentialToken\(deleteSecret\) : null/, 'deleteSecret pesan = hash SHA-256');
+  assert.doesNotMatch(conversations, /safeEqualStrings\(conversation\.authSecret/, 'perbandingan token lewat helper dual-mode timing-safe');
+  assert.match(conversations, /credentialTokenMatches\(conversation\.authSecret/, 'authSecret dibandingkan via credentialTokenMatches');
+  assert.doesNotMatch(read('../src/routes/messages.ts'), /safeEqualStrings\(message\.deleteSecret/, 'deleteSecret lewat helper dual-mode');
+
+  const tenantAuth = read('../src/middleware/tenantAuth.ts');
+  assert.match(tenantAuth, /sealedLookupCandidates\(apiKey\)/, 'Tenant.apiKey di-lookup dalam bentuk sealed');
+  assert.match(read('../src/routes/admin.ts'), /apiKey: await sealAtRest\(apiKey\)/, 'Tenant.apiKey disimpan sealed');
+});
+
+test('D5: sesi tidak lagi menyimpan IP atau userAgent', () => {
+  const schema = read('../prisma/schema.prisma');
+  const refreshToken = modelBody(schema, 'RefreshToken');
+
+  // Regex kolom (baris `nama  Tipe`), bukan sekadar kemunculan kata — komentar
+  // dokumentasi di schema boleh menyebut penjelasan penghapusannya.
+  assert.doesNotMatch(refreshToken, /^\s*ipAddress\s+\S/m, 'kolom ipAddress dihapus (hash tanpa kunci = enumerable)');
+  assert.doesNotMatch(refreshToken, /^\s*userAgent\s+\S/m, 'kolom userAgent dihapus (sidik jari perangkat/browser)');
+  assert.doesNotMatch(refreshToken, /crypto_generichash\(32, Buffer\.from\(rawIp\)/, 'tidak ada lagi hash IP tanpa kunci');
+
+  for (const file of ['../src/routes/auth.ts', '../src/routes/engine.ts']) {
+    assert.doesNotMatch(read(file), /data:\s*\{[^}]*ipAddress/, `${file}: tidak menulis ipAddress ke RefreshToken`);
+  }
+});
+
+test('D6/D7: identifier ber-entropi rendah di-index dengan pepper env', () => {
+  const secrets = read('../src/utils/atRestSecrets.ts');
+  assert.match(secrets, /NYX_AT_REST_PEPPER/, 'pepper dari env, bukan dari DB');
+  assert.doesNotMatch(secrets, /prisma/i, 'helper tidak boleh menyentuh DB (kalau tidak, pepper bocor lewat dump)');
+
+  assert.match(read('../src/routes/auth.ts'), /usernameHash: pepperedIdentifier\(usernameHash\)/, 'blind index username ter-pepper');
+  assert.match(read('../src/routes/users.ts'), /pepperedIdentifier\(_fp\)/, 'fingerprint device ter-index');
+
+  const envExample = read('../.env.example');
+  assert.match(envExample, /NYX_AT_REST_PEPPER=/, 'root .env.example mendokumentasikan pepper');
+  assert.match(read('../.env.example'), /GROUP_ISSUER_KEY_PKCS8=/, 'dan private key issuer');
+  assert.match(read('../.env.example'), /GROUP_ISSUER_KEY_PKCS8=/, 'server/.env.example juga');
+});

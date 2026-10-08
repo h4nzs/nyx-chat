@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧪 Guardrail Privasi At-Rest — Tier 3.1 (2026-10-08)
+
+`server/tests/schemaPrivacy.test.ts`: satu suite yang mengunci janji privasi
+docs/28 di level schema + format penyimpanan + dokumentasi env, supaya
+perbaikan Tier 0/1.x tidak bisa regresi diam-diam. Yang dijaga: kunci privat
+issuer tidak kembali ke DB (D1), identitas asli tidak dipersist di
+MessageStatus/UserHiddenConversation (D2), secret otoritas jadi hash/sealed
+(D3/D4), tidak ada ipAddress/userAgent per sesi (D5), identifier ber-entropi
+rendah ter-pepper (D6/D7), presence peer-scoped (D14).
+
+Diverifikasi dengan **negative control**: menambahkan kolom `ipAddress` kembali
+ke `RefreshToken` membuat suite ini GAGAL (exit 1); setelah dikembalikan, LULUS
+(exit 0). Server 144/144.
+
 ## 🗂️ Routing Identity Ter-seal — Tier 1.2 / D2 (2026-10-08)
 
 `UserHiddenConversation.userId` dulu menyimpan **userId asli** tiap anggota
