@@ -326,8 +326,12 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
          const visibleMessageIds = visibleMessageIdsRef.current;
          const isMine = (senderId: string) =>
              senderId === meId || (myPseudonym !== undefined && senderId === myPseudonym);
+         // [docs/28 Tier 1.1 — D2] 1:1: receipt saya = tag opaque per-percakapan
+         // (server tidak menyimpan userId), dan hanya saya yang bisa menandai
+         // pesan yang saya terima sebagai READ → cukup cek statusnya.
          const isMyRead = (s: { userId: string; status: string }) =>
-             (s.userId === meId || (myPseudonym !== undefined && s.userId === myPseudonym)) && s.status === 'READ';
+             s.status === 'READ' &&
+             (!isGroup || s.userId === meId || (myPseudonym !== undefined && s.userId === myPseudonym));
          const unreadVisible = messages.filter(m =>
              !isMine(m.senderId) &&
              visibleMessageIds.has(m.id) &&

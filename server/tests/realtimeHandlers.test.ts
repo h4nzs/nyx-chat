@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TransportOpCode } from '@nyx/shared';
 import { handleChatMessage, handlePresence, handleKeySync, type RealtimeContext } from '../src/network/realtimeHandlers.js';
+import { conversationScopedTag } from '../src/utils/atRestSecrets.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const readSrc = (p: string) => readFileSync(path.join(here, p), 'utf8');
 
 // --- Fake dependency-injection context ---
 // Semua helper dicatat ke `calls` agar kita bisa membuktikan bahwa handler
@@ -572,7 +579,7 @@ test('T3a: receipt READ grup v2 tersimpan dengan readerPseudonym, broadcast memb
   }
 });
 
-test('T3a: receipt 1:1 TIDAK terpengaruh — tanpa readerPseudonym tetap pakai userId auth', async () => {
+test('D2: receipt 1:1 tersimpan sebagai TAG opaque per-percakapan (bukan userId)', async () => {
   const messages = [
     { id: 'm1', senderId: 'u2', conversation: { isGroup: false } },
   ];
@@ -590,11 +597,23 @@ test('T3a: receipt 1:1 TIDAK terpengaruh — tanpa readerPseudonym tetap pakai u
   );
   assert.equal(statusEvents.length, 1);
   const data = (statusEvents[0]![2] as { data: { userId: string } }).data;
-  assert.equal(data.userId, 'u1', '1:1: identity tetap userId auth');
+  // [docs/28 Tier 1.1 — D2] identitas asli TIDAK boleh tersimpan di MessageStatus.
+  assert.notEqual(data.userId, 'u1', '1:1 tidak menyimpan userId asli (regresi D2)');
+  assert.equal(data.userId, upserts[0]!.userId, 'broadcast membawa tag yang sama dengan baris DB');
+  assert.equal(
+    data.userId,
+    conversationScopedTag('c1', 'u1'),
+    'tag = HMAC(pepper) deterministik per (conversation, user) → upsert tetap idempoten'
+  );
+  assert.notEqual(
+    conversationScopedTag('c1', 'u1'),
+    conversationScopedTag('c2', 'u1'),
+    'tag berbeda antar percakapan → tidak bisa mengkorelasikan pembaca lintas chat'
+  );
   assert.equal(ttlUpdates.length, 1, 'grace TTL 1:1 tetap berjalan');
 });
 
-test('T3a: readerPseudonym DIABAIKAN untuk 1:1 meski klien mengirimnya', async () => {
+test('D2: readerPseudonym klien DIABAIKAN untuk 1:1 (server memakai tag sendiri)', async () => {
   const messages = [
     { id: 'm1', senderId: 'u2', conversation: { isGroup: false } },
   ];
@@ -611,7 +630,26 @@ test('T3a: readerPseudonym DIABAIKAN untuk 1:1 meski klien mengirimnya', async (
     (c) => c[1] === TransportOpCode.KEY_SYNC && (c[2] as { event?: string }).event === 'message:status_updated'
   );
   const data = (statusEvents[0]![2] as { data: { userId: string } }).data;
-  assert.equal(data.userId, 'u1', 'pseudonym tidak boleh bocor ke jalur 1:1');
+  assert.notEqual(data.userId, 'FAKELEAKATTEMPT000001', 'nilai dari klien tidak boleh dipakai di jalur 1:1');
+  assert.equal(
+    data.userId,
+    conversationScopedTag('c1', 'u1'),
+    'identitas pembaca 1:1 selalu diturunkan server (anti-pemalsuan receipt atas nama user lain)'
+  );
+});
+
+test('D2 guard: kedua jalur receipt memakai tag opaque, tidak ada fallback userId', () => {
+  const src = readSrc('../src/network/realtimeHandlers.ts');
+  assert.equal(
+    (src.match(/conversationScopedTag\(conversationId, userId\)/g) || []).length,
+    2,
+    'jalur per-pesan + batch sama-sama memakai tag opaque per-percakapan'
+  );
+  assert.doesNotMatch(
+    src,
+    /persistedReaderId\s*=\s*[^;]*:\s*userId\b/,
+    'regresi D2: fallback ke userId asli di MessageStatus'
+  );
 });
 
 test('T3a singular: pengirim tidak me-receipt pesannya sendiri (senderId === pseudonym)', async () => {

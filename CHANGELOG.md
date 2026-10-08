@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🎭 Blind Receipt 1:1 — Tier 1.1 / D2 (2026-10-08)
+
+**Edge 1:1 di dump DB ditutup.** Sebelumnya, meski `Message.senderId` sudah
+NULL (sealed sender), `MessageStatus.userId` tetap menyimpan **userId asli**
+di jalur 1:1 & grup v1 — jadi dump DB masih merekonstruksi pasangan "A↔B"
+plus siapa membaca apa, kapan. Sekarang kolom itu diisi **tag opaque turunan
+server**: `HMAC(NYX_AT_REST_PEPPER, "receipt:<conversationId>:<userId>")`.
+
+- deterministik per (percakapan, user) → `upsert` + guard "sudah pernah READ"
+  tetap idempoten; berbeda antar percakapan → pembaca tidak bisa dikorelasikan
+  lintas chat; tak bisa dibalik tanpa pepper (dump saja tidak bisa menyebut siapa).
+- jalur grup v2 tidak berubah (tetap pseudonym klien — sudah bagian protokol),
+  dan nilai pseudonym dari klien **tidak dipakai** di jalur 1:1 supaya klien
+  tidak bisa memalsukan receipt atas nama user lain.
+- "skip pesan sendiri" kini membandingkan identitas PENGIRIM (userId/pseudonym),
+  bukan tag pembaca.
+- klien: di 1:1 status tidak lagi bisa dicocokkan ke identitas (server tidak
+  menyimpannya) → tick `MessageItem`, guard receipt, dan `unreadVisible`
+  `ChatWindow` memperlakukan status di 1:1 sebagai milik satu-satunya peer;
+  logika pseudonym grup tidak berubah.
+
+Dua kontrak test lama yang mengunci perilaku "1:1 menyimpan userId" diperbarui
+(perilaku memang berubah sesuai docs/28 D2) + guard regresi baru. Server
+131/131, web 267/267, tsc keduanya 0.
+
 ## 👥 Presence Per-Kontak — Tier 0.7 (2026-10-08)
 
 **D14: roster online global dihapus.** Dulu setiap klien yang connect menerima

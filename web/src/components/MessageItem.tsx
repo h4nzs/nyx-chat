@@ -22,7 +22,7 @@ import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from "react-i18next";
 import { resolvePseudonymToUserId } from '@lib/groupPseudonyms';
 
-const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
+const MessageStatusIcon = ({ message, participants, isGroup }: { message: Message; participants: Participant[]; isGroup: boolean }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const retrySendMessage = useMessageInputStore(s => s.retrySendMessage);
   const { t } = useTranslation('chat');
@@ -51,12 +51,16 @@ const MessageStatusIcon = ({ message, participants }: { message: Message; partic
   
   const statuses = message.statuses || [];
   // [T3a] Status pembaca grup v2 tersimpan dengan pseudonym — samakan dengan
-  // participant via peta metadata (resolvePseudonymToUserId). Grup v1/1:1:
-  // status.userId langsung = participant id (jalur lama tetap jalan).
+  // participant via peta metadata (resolvePseudonymToUserId).
+  // [docs/28 Tier 1.1 — D2] Di 1:1, server tidak lagi menyimpan identitas
+  // pembaca (tag opaque per-percakapan) — pembacanya pasti satu-satunya peer,
+  // jadi cukup cocokkan status-nya (tanpa mencoba menyamakan id).
   const statusMatches = (p: Participant, st: 'READ' | 'DELIVERED') =>
-    statuses.some((s: MessageStatus) =>
-      (s.userId === p.id || resolvePseudonymToUserId(message.conversationId, s.userId) === p.id) && s.status === st
-    );
+    isGroup
+      ? statuses.some((s: MessageStatus) =>
+          (s.userId === p.id || resolvePseudonymToUserId(message.conversationId, s.userId) === p.id) && s.status === st
+        )
+      : statuses.some((s: MessageStatus) => s.status === st);
   const isReadAll = otherParticipants.every((p: Participant) => statusMatches(p, 'READ'));
   if (isReadAll) return <FaCheckDouble size={14} className="text-blue-500" />;
   
@@ -139,8 +143,12 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
             maxJitter: RECEIPT_JITTER_MAX_MS,
           })),
         ]).then(([readerPseudonym, receiptCfg]) => {
+          // [docs/28 Tier 1.1 — D2] 1:1: receipt saya tersimpan sebagai tag
+          // opaque (bukan userId), dan pembacanya hanya bisa saya — jadi status
+          // READ apa pun di sini adalah milik saya.
           const isMyRead = (s: MessageStatus) =>
-            (s.userId === meId || (meId && resolvePseudonymToUserId(message.conversationId, s.userId) === meId)) && s.status === 'READ';
+            s.status === 'READ' &&
+            (!isGroup || s.userId === meId || (!!meId && resolvePseudonymToUserId(message.conversationId, s.userId) === meId));
           const alreadyRead = message.statuses?.some(isMyRead);
           if (!alreadyRead) {
             const sendRead = () => transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId, targetRecipient: message.senderId, readerPseudonym });
@@ -384,7 +392,7 @@ if (socket?.connected) {
                 isLastInSequence={isLastInSequence}
               />
               <div className="flex-shrink-0 mb-1">
-                  <MessageStatusIcon message={message} participants={participants} />
+                  <MessageStatusIcon message={message} participants={participants} isGroup={isGroup} />
               </div>
             </div>
             

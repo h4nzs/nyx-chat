@@ -35,6 +35,7 @@ import { safeEqualStrings } from '../utils/validate.js';
 import { getSodium } from '../lib/sodium.js';
 import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js';
 import { collectPresencePeers, intersectOnline, type PresenceMembershipClient } from '../utils/presencePeers.js';
+import { conversationScopedTag } from '../utils/atRestSecrets.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -816,14 +817,23 @@ async function handleMessageStatusUpdate(
     });
     if (!msg) return;
 
-    // [T3a] Identitas pembaca yang DIPERSIST: grup metadata v2 → pseudonym
-    // (opaque, unlinkable); 1:1 / grup v1 → userId seperti sebelumnya.
-    const persistedReaderId = msg.conversation.isGroup && readerPseudonym ? readerPseudonym : userId;
+    // [T3a + docs/28 Tier 1.1 — D2] Identitas pembaca yang DIPERSIST:
+    //  - grup (metadata v2) → pseudonym klien (opaque, sudah bagian protokol grup),
+    //  - 1:1 & grup v1 → TAG opaque turunan SERVER (HMAC pepper atas
+    //    conversationId+userId), BUKAN userId asli dan BUKAN nilai dari klien
+    //    (kalau klien bisa memilih, ia bisa memalsukan receipt atas nama user lain).
+    // Sebelumnya jalur ini menyimpan userId asli sehingga dump DB masih
+    // merekonstruksi edge 1:1 walau Message.senderId sudah NULL.
+    const persistedReaderId = msg.conversation.isGroup && readerPseudonym
+      ? readerPseudonym
+      : conversationScopedTag(conversationId, userId);
 
     // Jangan update status jika pengirim sedang membaca pesan sendiri
     // (bandingkan dengan identitas PERSISTED — pseudonym adalah milik pengirim
     // di peta; userId auth adalah milik pembaca. Keduanya ≠ → bukan self-read).
-    if (msg.senderId === persistedReaderId) return;
+    // Skip pesan sendiri: senderId bisa userId (grup v1), pseudonym (grup v2),
+    // atau NULL (1:1 sealed sender — bukan pesan sendiri, jadi tetap direceipt).
+    if (msg.senderId !== null && (msg.senderId === userId || msg.senderId === readerPseudonym)) return;
 
     // [FIX OFFLINE-LOSS] Deteksi apakah pesan sudah pernah di-READ sebelumnya,
     // agar receipt READ berulang tidak memperpanjang masa retensi (arm TTL hanya sekali).
@@ -919,10 +929,12 @@ async function handleMessageStatusBatchUpdate(
     });
     if (messages.length === 0) return;
 
-    // [T3a] Semua pesan dalam satu batch berasal dari satu conversation;
-    // cukup cek isGroup dari pesan pertama untuk memilih identitas persist.
+    // [T3a + docs/28 Tier 1.1 — D2] Paritas dengan jalur per-pesan: pseudonym
+    // klien hanya untuk grup; 1:1/grup v1 memakai tag opaque turunan server.
     const isGroupBatch = messages[0]!.conversation.isGroup;
-    const persistedReaderId = isGroupBatch && readerPseudonym ? readerPseudonym : userId;
+    const persistedReaderId = isGroupBatch && readerPseudonym
+      ? readerPseudonym
+      : conversationScopedTag(conversationId, userId);
 
     const msgById = new Map(messages.map((m) => [m.id, m]));
 
@@ -937,7 +949,9 @@ async function handleMessageStatusBatchUpdate(
 
     // 3. Upsert paralel — skip pesan sendiri (pengirim tidak me-receipt dirinya)
     await Promise.all(messages
-      .filter((m) => m.senderId !== persistedReaderId)
+      // Paritas dengan jalur per-pesan: skip berdasarkan identitas PENGIRIM
+      // (userId/pseudonym), bukan tag pembaca.
+      .filter((m) => m.senderId === null || (m.senderId !== userId && m.senderId !== readerPseudonym))
       .map((m) => ctx.prisma.messageStatus.upsert({
         where: { messageId_userId: { messageId: m.id, userId: persistedReaderId } },
         update: { status },

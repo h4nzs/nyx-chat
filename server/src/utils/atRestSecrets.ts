@@ -180,6 +180,21 @@ export async function sealedLookupCandidates(value: string): Promise<string[]> {
   return [await sealAtRest(value), value]
 }
 
+/**
+ * [docs/28 Tier 1.1 — D2] Tag pembaca receipt (READ/DELIVERED) untuk percakapan
+ * yang tidak punya pseudonym klien (1:1 & grup v1).
+ *
+ * Sebelumnya `MessageStatus.userId` menyimpan **userId asli** di jalur ini —
+ * jadi dump DB masih merekonstruksi edge "A↔B" meski `Message.senderId` sudah
+ * di-NULL-kan (sealed sender). Sekarang kolom itu diisi tag opaque:
+ *   - deterministik per (conversation, user) → upsert/guard idempoten,
+ *   - berbeda antar percakapan → tidak bisa mengkorelasikan user lintas chat,
+ *   - tak bisa dibalik tanpa pepper → dump saja tidak bisa menyebut "siapa".
+ */
+export function conversationScopedTag(conversationId: string, userId: string): string {
+  return pepperedIdentifier(`receipt:${conversationId}:${userId}`)
+}
+
 /** Hanya untuk test: buang cache pepper/key supaya env baru terbaca. */
 export function clearAtRestSecretCacheForTests(): void {
   cachedPepper = null
