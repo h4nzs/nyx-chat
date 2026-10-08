@@ -521,6 +521,16 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         conv = createRes;
         const authSecret = createRes.authSecret;
 
+        // [docs/28 Tier 0.7 — D14] Presence di server kini peer-scoped (snapshot
+        // hanya berisi lawan bicara yang berbagi conversation, bukan roster
+        // online global). Anggota yang baru diundang belum ada di snapshot
+        // sebelumnya → minta refresh supaya badge online langsung terisi tanpa
+        // menunggu reconnect. Best-effort: presence bukan jalur kritis.
+        try {
+          const { transportClient } = await import('@lib/transportClient');
+          transportClient.sendEvent('user:active');
+        } catch { /* abaikan */ }
+
         // Opaque Mailbox: server returns empty participants, reconstruct from userIds
         const constructedParticipants = userIds.map(id => ({ id, name: '', role: 'MEMBER' as const })) as Participant[];
         // [T2 FIX #10 2026-09-29] ensureGroupSession TIDAK dipanggil di sini lagi —

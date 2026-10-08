@@ -34,6 +34,7 @@ import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { getSodium } from '../lib/sodium.js';
 import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js';
+import { collectPresencePeers, intersectOnline, type PresenceMembershipClient } from '../utils/presencePeers.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -328,21 +329,28 @@ export async function handlePresence(
   userId: string,
   payload: { event: string, conversationId?: string }
 ): Promise<void> {
+  // [docs/28 Tier 0.7 — D14] Presence per-kontak: dulu snapshot 'bulk' dan
+  // broadcast join/leave memakai SELURUH isi `online_users` → setiap klien bisa
+  // memanen roster online seluruh platform. Sekarang hanya peer (user yang
+  // berbagi conversation, diturunkan server dari UserHiddenConversation).
   if (payload.event === 'active' || payload.event === 'user:active') {
     const added = await ctx.pubClient.sAdd('online_users', userId);
-    const onlineUsers = await ctx.pubClient.sMembers('online_users');
+    const onlineUsers = new Set(await ctx.pubClient.sMembers('online_users'));
+    const peers = await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId);
+    const peersOnline = intersectOnline(peers, onlineUsers);
 
-    // Send the current list of online users to this user
-    await ctx.sendJsonToUser(userId, TransportOpCode.PRESENCE, { type: 'bulk', userIds: onlineUsers });
+    // Snapshot hanya untuk peer yang sedang online.
+    await ctx.sendJsonToUser(userId, TransportOpCode.PRESENCE, { type: 'bulk', userIds: peersOnline });
 
     if (added === 1) {
-      await ctx.broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'join', userId });
+      await ctx.broadcastToUsers(peersOnline, TransportOpCode.PRESENCE, { type: 'join', userId });
     }
   } else if (payload.event === 'away' || payload.event === 'user:away') {
     const removed = await ctx.pubClient.sRem('online_users', userId);
     if (removed === 1) {
-      const onlineUsers = await ctx.pubClient.sMembers('online_users');
-      await ctx.broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'leave', userId });
+      const onlineUsers = new Set(await ctx.pubClient.sMembers('online_users'));
+      const peers = await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId);
+      await ctx.broadcastToUsers(intersectOnline(peers, onlineUsers), TransportOpCode.PRESENCE, { type: 'leave', userId });
     }
   }
 

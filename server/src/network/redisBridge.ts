@@ -9,6 +9,7 @@ import { safeEqualStrings } from '../utils/validate.js';
 import { TransportOpCode, MessageSendPayloadSchema } from '@nyx/shared';
 import { createCheckRateLimit, DEVICE_CACHE_INVALIDATE_CHANNEL } from '../utils/redisResilience.js';
 import { pepperedIdentifier } from '../utils/atRestSecrets.js';
+import { collectPresencePeers, intersectOnline, type PresenceMembershipClient } from '../utils/presencePeers.js';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 import { handleChatMessage, handleKeySync, handlePresence, type RealtimeContext } from './realtimeHandlers.js';
 
@@ -270,11 +271,21 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   }
 
   async function handleDisconnect(userId: string) {
-  await pubClient.sRem('online_users', userId);
+  const wasOnline = await pubClient.sRem('online_users', userId);
 
-  // Cleanup presence and rooms
-  const onlineUsers = await pubClient.sMembers('online_users');
-  await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { event: 'leave', userId });
+  // [docs/28 Tier 0.7 — D14] Cleanup presence: sinyal 'leave' hanya ke PEER yang
+  // sedang online (dulu broadcast ke seluruh roster online_users). Query peer
+  // dibungkus try/catch — kegagalan DB tidak boleh menggagalkan penanganan
+  // disconnect (koneksi tetap dibersihkan).
+  try {
+    if (wasOnline === 1) {
+      const onlineUsers = new Set(await pubClient.sMembers('online_users'));
+      const peers = await collectPresencePeers(prisma as unknown as PresenceMembershipClient, userId);
+      await broadcastToUsers(intersectOnline(peers, onlineUsers), TransportOpCode.PRESENCE, { event: 'leave', userId });
+    }
+  } catch (e) {
+    console.warn('[Presence] Gagal mengirim sinyal leave ke peer:', e);
+  }
 
   // Optional: Best-effort cleanup for burner/migration rooms
   try {

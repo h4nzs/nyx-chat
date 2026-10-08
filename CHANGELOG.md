@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 👥 Presence Per-Kontak — Tier 0.7 (2026-10-08)
+
+**D14: roster online global dihapus.** Dulu setiap klien yang connect menerima
+`{ type: 'bulk', userIds }` berisi SELURUH `online_users`, dan join/leave
+di-broadcast ke seluruh roster — artinya setiap pengguna NYX bisa memanen graph
+presensi platform tanpa perlu dump. Sekarang:
+
+- snapshot & broadcast hanya memuat **peer** (user yang berbagi conversation),
+  diturunkan server dari `UserHiddenConversation` — TIDAK dari deklarasi klien,
+  supaya tidak menukar satu kebocoran dengan kebocoran lain (daftar kontak).
+- helper baru `utils/presencePeers.ts` (murni, teruji) + dipakai di
+  `handlePresence` (active/away) dan `handleDisconnect`; disconnect dibungkus
+  `try/catch` agar kegagalan DB tidak menggagalkan pembersihan koneksi.
+- klien: setelah membuat grup, store conversation meminta refresh presence
+  (`user:active`) supaya badge anggota baru langsung terisi. Batasan yang
+  disadari: perubahan keanggotaan dari jalur lain baru terlihat pada refresh
+  presence/connect berikutnya (bukan push real-time per anggota).
+
 ## 🧩 Privasi At-Rest — Tier 0.2 Blind Index Username (2026-10-08)
 
 **D6: `User.usernameHash` kini ter-pepper.** Sebelumnya nilai Argon2id klien
