@@ -66,14 +66,21 @@ test('collectPresencePeers: dua query, dedupe userId, filter null', async () => 
   };
 
   const peers = await collectPresencePeers(fake, 'me');
-  assert.deepEqual(peers.sort(), ['u-bob', 'u-carol']);
+  assert.deepEqual(peers.sort(), ['u-bob', 'u-carol'], 'baris legacy (plaintext) tetap diresolusi');
   assert.equal(calls.length, 2, 'dua query (conversation saya → anggota lain), bukan N+1');
   assert.deepEqual(calls[0].select, { conversationId: true });
   assert.deepEqual(calls[1].distinct, ['userId'], 'dedupe userId di DB');
-  assert.deepEqual(calls[1].where, {
-    conversationId: { in: ['c1', 'c2'] },
-    userId: { not: null, notIn: ['me'] },
-  });
+
+  // [docs/28 Tier 1.2] kolom userId kini routing identity ter-seal → lookup
+  // memakai kandidat dan nilai baris dibuka kembali sebelum jadi target push.
+  const mineWhere = calls[0].where as { userId: { in: string[] } };
+  const peerWhere = calls[1].where as { conversationId: unknown; userId: { not: null; notIn: string[] } };
+  assert.equal(mineWhere.userId.in.length, 2, 'kandidat [sealed, apa adanya]');
+  assert.equal(mineWhere.userId.in[1], 'me', 'kandidat kedua = nilai apa adanya (baris legacy)');
+  assert.notEqual(mineWhere.userId.in[0], 'me', 'nilai tersimpan bukan userId asli (D2)');
+  assert.deepEqual(peerWhere.conversationId, { in: ['c1', 'c2'] });
+  assert.deepEqual(peerWhere.userId.notIn, mineWhere.userId.in, 'peer tidak termasuk diri sendiri (sealed/legacy)');
+  assert.equal(peerWhere.userId.not, null);
 });
 
 test('collectPresencePeers: tanpa conversation → berhenti sebelum query kedua', async () => {

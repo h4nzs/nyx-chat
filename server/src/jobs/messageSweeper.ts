@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { emitEventToUsers } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
+import { resolveRoutingUser } from '../utils/routingIdentity.js';
 
 // Job: MESSAGE SWEEPER (Setiap menit)
 // Fokus: Menghapus pesan kadaluarsa dan memberitahu klien agar langsung hilang dari UI.
@@ -48,9 +49,12 @@ export const startMessageSweeper = () => {
         for (const uc of userConvs) {
             // [T3b TOKEN-FIRST] userId nullable (routing-only) — baris tanpa
             // userId dilewati (membership murni token tidak punya jalur push).
-            if (!uc.userId) continue;
+            // [docs/28 Tier 1.2] nilai kolom = routing identity ter-seal →
+            // dibuka di sini supaya notifikasi tetap sampai ke user asli.
+            const routingUser = await resolveRoutingUser(uc.userId);
+            if (!routingUser) continue;
             const arr = recipientsByConversation.get(uc.conversationId) || [];
-            arr.push(uc.userId);
+            arr.push(routingUser);
             recipientsByConversation.set(uc.conversationId, arr);
         }
 

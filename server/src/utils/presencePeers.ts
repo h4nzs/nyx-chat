@@ -20,6 +20,8 @@
  * orang yang online.
  */
 
+import { routingCandidates, resolveRoutingUser } from './routingIdentity.js'
+
 /** Bentuk minimal klien Prisma yang dibutuhkan (memudahkan injeksi fake di test). */
 export interface PresenceMembershipClient {
   userHiddenConversation: {
@@ -67,8 +69,13 @@ export async function collectPresencePeers(
   prisma: PresenceMembershipClient,
   userId: string
 ): Promise<string[]> {
+  // [docs/28 Tier 1.2] kolom userId kini routing identity TER-SEAL → lookup
+  // memakai kandidat (baris legacy), dan nilai baris dibuka kembali sebelum
+  // dipakai sebagai target broadcast.
+  const candidates = await routingCandidates(userId)
+
   const mine = await prisma.userHiddenConversation.findMany({
-    where: { userId },
+    where: { userId: { in: candidates } },
     select: { conversationId: true },
   });
 
@@ -80,14 +87,16 @@ export async function collectPresencePeers(
   if (conversationIds.length === 0) return [];
 
   const peers = await prisma.userHiddenConversation.findMany({
-    where: { conversationId: { in: conversationIds }, userId: { not: null, notIn: [userId] } },
+    where: { conversationId: { in: conversationIds }, userId: { not: null, notIn: candidates } },
     select: { userId: true },
     distinct: ['userId'],
   });
 
+  const resolved = await Promise.all(peers.map((p) => resolveRoutingUser(p.userId)));
+
   return dedupePeers(
     conversationIds.map((conversationId) => ({ conversationId })),
-    peers,
+    resolved.map((peerId) => ({ userId: peerId })),
     userId
   );
 }

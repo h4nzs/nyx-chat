@@ -78,9 +78,15 @@ test('T3b TOKEN-FIRST: token-keyed rows di semua titik invite (create, invite RE
 });
 
 test('T3b: revocation — kick/leave menghapus row token', () => {
+  // [docs/28 Tier 1.2] revocation kini lewat deleteMembership() (deleteMany +
+  // kandidat lookup) karena kolom userId berisi routing identity ter-seal dan
+  // baris legacy plaintext harus ikut terhapus.
   const src = read('../src/routes/conversations.ts');
-  const matches = src.match(/userHiddenConversation\.delete\(/g) ?? [];
+  const matches = src.match(/deleteMembership\(/g) ?? [];
   assert.ok(matches.length >= 2, 'kick (DELETE participants) dan leave (/leave) keduanya menghapus row');
+
+  const util = read('../src/utils/routingIdentity.ts');
+  assert.match(util, /deleteMany\(\{[\s\S]{0,120}userId: \{ in: candidates \}/, 'deleteMembership: hapus kandidat sealed + legacy');
 });
 
 test('T3b: token maps HIDUP di encrypted metadata v2 — tidak ada plaintext delivery di payload publik', () => {

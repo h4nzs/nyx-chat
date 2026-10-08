@@ -17,6 +17,7 @@ import { ApiError } from '../utils/errors.js'
 import { asUserId, type UserId } from '@nyx/shared'
 import { AuthJwtPayload } from '../types/auth.js';
 import { identifierLookupCandidates, pepperedIdentifier } from '../utils/atRestSecrets.js';
+import { routingCandidates, resolveRoutingUser } from '../utils/routingIdentity.js';
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -211,20 +212,25 @@ router.put('/me',
         // [T3b TOKEN-FIRST] userId bersifat routing-only & nullable — baris tanpa
         // userId (membership murni token) dilewati (tidak ada jalur push ke sana).
         try {
+          // [docs/28 Tier 1.2] kolom userId = routing identity ter-seal:
+          // lookup pakai kandidat (baris legacy), hasil dibaca balik via
+          // resolveRoutingUser sebelum dipakai sebagai target push.
+          const myCandidates = await routingCandidates(userId)
           const memberships = await prisma.userHiddenConversation.findMany({
-            where: { userId },
+            where: { userId: { in: myCandidates } },
             select: { conversationId: true }
           })
           const convIds = memberships.map(m => m.conversationId)
           if (convIds.length > 0) {
             const peers = await prisma.userHiddenConversation.findMany({
-              where: { conversationId: { in: convIds }, userId: { not: null, notIn: [userId] } },
+              where: { conversationId: { in: convIds }, userId: { not: null, notIn: myCandidates } },
               select: { userId: true },
               distinct: ['userId']
             })
             const peerPayload = { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile }
             for (const p of peers) {
-              if (p.userId) await emitEventToUser(p.userId, 'user:updated', peerPayload)
+              const peerId = await resolveRoutingUser(p.userId)
+              if (peerId) await emitEventToUser(peerId, 'user:updated', peerPayload)
             }
           }
         } catch (broadcastErr) {

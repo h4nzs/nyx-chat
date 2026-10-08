@@ -36,6 +36,7 @@ import { getSodium } from '../lib/sodium.js';
 import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js';
 import { collectPresencePeers, intersectOnline, type PresenceMembershipClient } from '../utils/presencePeers.js';
 import { conversationScopedTag } from '../utils/atRestSecrets.js';
+import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -303,10 +304,9 @@ export async function handleChatMessage(
                 // token untuk target tidak membuat baris — discovery = possession.
                 const targetToken = targetDeliveryTokens?.[targetId];
                 if (targetToken) {
-                    ctx.prisma.userHiddenConversation.upsert({
-                        where: { userId_conversationId: { userId: targetId, conversationId } },
-                        create: { userId: targetId, conversationId, deliveryToken: targetToken },
-                        update: { deliveryToken: targetToken }
+                    // [docs/28 Tier 1.2] routing identity ter-seal (lihat util-nya).
+                    upsertMembership(ctx.prisma as unknown as MembershipPrisma, {
+                        userId: targetId, conversationId, deliveryToken: targetToken
                     }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
                 }
             }

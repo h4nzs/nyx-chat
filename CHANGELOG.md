@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🗂️ Routing Identity Ter-seal — Tier 1.2 / D2 (2026-10-08)
+
+`UserHiddenConversation.userId` dulu menyimpan **userId asli** tiap anggota
+(routing-only, tapi di dalam dump ia = daftar keanggotaan: siapa di grup mana).
+Sekarang nilainya di-**seal** (AEAD deterministik, kunci dari
+`NYX_AT_REST_PEPPER`): server tetap bisa membukanya untuk push/sweeper/broadcast
+profil/presence, tapi dump DB saja tidak lagi membaca keanggotaan.
+
+- util baru `utils/routingIdentity.ts`: `routingIdentity`, `routingCandidates`
+  `[sealed, apa adanya]`, `resolveRoutingUser` (sealed & legacy), dan helper
+  `upsertMembership` / `findMembership` / `deleteMembership`.
+- keempat jalur penulisan keanggotaan kini lewat `upsertMembership` (sealing +
+  single source of truth); revocation memakai `deleteMany` + kandidat supaya
+  baris legacy ikut terhapus tanpa duplikat (`deliveryToken` unik).
+- pembaca disesuaikan: `messageSweeper` (buka routing identity sebelum notifikasi),
+  broadcast profil `users.ts`, `presencePeers`, kick/leave `conversations.ts`.
+- baris lama (plaintext) tetap berfungsi lewat kandidat lookup dan ter-upgrade
+  saat ditulis ulang. Test baru `tests/routingIdentity.test.ts` (7 test, termasuk
+  fake in-memory untuk alur upsert/delete) + 2 kontrak lama diperbarui.
+
+Server 139/139, tsc 0.
+
 ## 🎭 Blind Receipt 1:1 — Tier 1.1 / D2 (2026-10-08)
 
 **Edge 1:1 di dump DB ditutup.** Sebelumnya, meski `Message.senderId` sudah

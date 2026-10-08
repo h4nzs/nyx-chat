@@ -14,6 +14,9 @@ import {
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
 import { isAdminTokenValid, extractHeader } from '../utils/adminCapability.js'
 import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js'
+import {
+  upsertMembership, findMembership, deleteMembership, type MembershipPrisma
+} from '../utils/routingIdentity.js'
 import type { Conversation } from '@nyx/shared'
 
 const ConversationSchema = z.object({
@@ -367,10 +370,9 @@ return current
     for (const uid of allUserIds.filter(uid => uid !== creatorId)) {
         const token = deliveryTokens?.[uid];
         if (!token) continue;
-        prisma.userHiddenConversation.upsert({
-            where: { userId_conversationId: { userId: uid, conversationId: newConversation.id } },
-            create: { userId: uid, conversationId: newConversation.id, deliveryToken: token },
-            update: { deliveryToken: token }
+        // [docs/28 Tier 1.2] kolom userId berisi routing identity ter-seal.
+        upsertMembership(prisma as unknown as MembershipPrisma, {
+            userId: uid, conversationId: newConversation.id, deliveryToken: token
         }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
     
@@ -455,10 +457,9 @@ router.post('/:id/participants', async (req, res, next) => {
     for (const uid of userIds) {
       const token = deliveryTokens?.[uid];
       if (!token) continue;
-      prisma.userHiddenConversation.upsert({
-        where: { userId_conversationId: { userId: uid, conversationId } },
-        create: { userId: uid, conversationId, deliveryToken: token },
-        update: { deliveryToken: token }
+      // [docs/28 Tier 1.2] kolom userId berisi routing identity ter-seal.
+      upsertMembership(prisma as unknown as MembershipPrisma, {
+        userId: uid, conversationId, deliveryToken: token
       }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
   }
@@ -493,9 +494,8 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
   }
   // [T3b] Token revocation = delete row (doc 26.2): kicked member's delivery
   // token dies — they can no longer discover the conversation via sync.
-  prisma.userHiddenConversation.delete({
-    where: { userId_conversationId: { userId, conversationId } }
-  }).catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
+  deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId })
+    .catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
   await emitEventToUser(userId, 'conversation:deleted', { id: asConversationId(conversationId) });
   res.status(204).end();
 });
@@ -517,10 +517,7 @@ router.delete('/:id/leave', async (req, res, next) => {
     // (userId↔conversationId) SUDAH ada di server — mengizinkan user
     // menghapus row-nya sendiri tidak membocorkan apa pun yang baru. Ini
     // juga semantik Signal: leave = pencabutan keanggotaan, bukan akses konten.
-    const ownsDeliveryToken = await prisma.userHiddenConversation.findUnique({
-      where: { userId_conversationId: { userId, conversationId } },
-      select: { id: true }
-    });
+    const ownsDeliveryToken = await findMembership(prisma as unknown as MembershipPrisma, { userId, conversationId });
     if (!ownsDeliveryToken) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
     }
@@ -533,9 +530,8 @@ router.delete('/:id/leave', async (req, res, next) => {
     await emitEventToUsers(leaveRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
   // [T3b] Leave = revoke own delivery token.
-  prisma.userHiddenConversation.delete({
-    where: { userId_conversationId: { userId, conversationId } }
-  }).catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
+  deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId })
+    .catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
   res.status(204).end();
 });
 
