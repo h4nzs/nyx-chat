@@ -16,6 +16,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { authLimiter } from '../middleware/rateLimiter.js'
 import { getSodium } from '../lib/sodium.js'
 import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
+import { pepperedIdentifier } from '../utils/atRestSecrets.js'
 import { nanoid } from 'nanoid'
 import argon2 from 'argon2'
 import crypto from 'crypto'
@@ -30,6 +31,19 @@ import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // ✅ FIX: Import tipe JWT Payload dari shared
 import type { AuthJwtPayload } from '@nyx/shared'
+
+/**
+ * [docs/28 Tier 0 — D7] Fingerprint perangkat = identifier ber-entropi rendah
+ * (UA + language + timezone + screen + hardware), jadi hash mentahnya bisa
+ * dienumerasi dari dump. Index dengan HMAC(pepper): nilai tetap deterministik
+ * untuk binding percobaan login, tapi dump DB tidak memuat sidik jari mentah.
+ * Catatan: baris lama (raw) tidak akan cocok lagi sekali — user cukup login
+ * sekali untuk me-rebind nilai ter-index.
+ */
+function indexDeviceFingerprint(raw?: string | string[]): string | undefined {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  return value ? pepperedIdentifier(value) : undefined;
+}
 
 function getGenericDeviceName(userAgent?: string | string[]): string {
   if (!userAgent) return 'Unknown Device';
@@ -77,10 +91,9 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   const refreshJti = newJti()
   const refresh = signAccessToken({ sub: user.id, jti: refreshJti, deviceId }, { expiresIn: '30d' })
 
-  const rawIp = req.ip || '';
-  const sodium = await getSodium();
-  const ipAddress = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
-  const userAgent = req.headers['user-agent']
+  // [docs/28 Tier 0 — D5] ipAddress & userAgent TIDAK lagi dipersist: hash IP
+  // tanpa kunci (8 byte) = enumerable (IPv4 2^32) dan userAgent plaintext = sidik
+  // jari perangkat/browser. Daftar sesi memakai Device.name + flag isCurrent.
 
   // GUEST users (Burner Chat) are ephemeral and don't exist in the User/Device tables.
   // We skip DB persistence for their refresh tokens to avoid FK constraint violations.
@@ -105,7 +118,7 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
     const tokenFamilyId = familyId || crypto.randomUUID();
 
     await prisma.refreshToken.create({
-      data: { jti: refreshJti, deviceId, familyId: tokenFamilyId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
+      data: { jti: refreshJti, deviceId, familyId: tokenFamilyId, expiresAt: refreshExpiryDate() }
     })
 
     // Store active device in Redis for instant WebTransport validation (Lapis 1 Security)
@@ -202,8 +215,7 @@ async (req, res, next) => {
 
     const passwordHash = await hashPassword(password)
     
-    const _fp = req.headers['x-nyx-fingerprint'];
-    const fingerprint = typeof _fp === 'string' ? _fp : undefined;
+    const fingerprint = indexDeviceFingerprint(req.headers['x-nyx-fingerprint']);
     const _iid = req.headers['x-nyx-installation-id'];
     const installationId = typeof _iid === 'string' ? _iid : undefined;
 
@@ -267,8 +279,7 @@ router.post('/login', authLimiter, zodValidate({
   try {
     const { usernameHash, password, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
     const explicitDeviceId = req.body.deviceId;
-    const _fp = req.headers['x-nyx-fingerprint'];
-    const fingerprint = typeof _fp === 'string' ? _fp : undefined;
+    const fingerprint = indexDeviceFingerprint(req.headers['x-nyx-fingerprint']);
     const _iid = req.headers['x-nyx-installation-id'];
     const installationId = typeof _iid === 'string' ? _iid : undefined;
 
@@ -505,11 +516,6 @@ router.post('/refresh', async (req, res, next) => {
       data: { revokedAt: new Date() }
     });
 
-    const rawIp = req.ip || '';
-    const sodium = await getSodium();
-    const ipAddress = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
-    const userAgent = req.headers['user-agent'];
-
     // 2. Create new token linked to the old one via replacedById chain
     const access = signAccessToken({ id: user.id, role: user.role, deviceId: basis.deviceId, jti: newJti() });
     const refresh = signAccessToken({ sub: user.id, jti: newJtiValue, deviceId: basis.deviceId }, { expiresIn: '30d' });
@@ -520,8 +526,6 @@ router.post('/refresh', async (req, res, next) => {
         familyId: basis.familyId,
         deviceId: basis.deviceId,
         expiresAt: refreshExpiryDate(),
-        ipAddress,
-        userAgent,
         replacedById: basis.id // Link to the previous token in the chain
       }
     });
@@ -608,8 +612,7 @@ router.post('/recover', authLimiter, zodValidate({
 
     const passwordHash = await hashPassword(newPassword);
 
-    const _fp = req.headers['x-nyx-fingerprint'];
-    const fingerprint = typeof _fp === 'string' ? _fp : undefined;
+    const fingerprint = indexDeviceFingerprint(req.headers['x-nyx-fingerprint']);
     const _iid = req.headers['x-nyx-installation-id'];
     const installationId = typeof _iid === 'string' ? _iid : undefined;
 
@@ -986,8 +989,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
       if (!safeUser) throw new ApiError(404, 'User not found')
       if (safeUser.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
 
-      const _fp = req.headers['x-nyx-fingerprint'];
-      const fingerprint = typeof _fp === 'string' ? _fp : undefined;
+      const fingerprint = indexDeviceFingerprint(req.headers['x-nyx-fingerprint']);
       const _iid = req.headers['x-nyx-installation-id'];
       const installationId = typeof _iid === 'string' ? _iid : undefined;
 

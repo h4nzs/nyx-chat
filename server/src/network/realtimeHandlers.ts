@@ -33,6 +33,7 @@ import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { getSodium } from '../lib/sodium.js';
+import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -251,7 +252,10 @@ export async function handleChatMessage(
             // selamanya (ditemukan saat inspeksi DB lokal: 1 dari 10 pesan).
             expiresAt: expiresAt ? new Date(expiresAt) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
             isViewOnce: isViewOnce === true,
-            deleteSecret
+            // [docs/28 Tier 0 — D3] blind-delete token disimpan sebagai HASH
+            // (SHA-256 hex): dump DB tidak memberi kemampuan unsend pesan orang
+            // lain. Verifikasi dual-mode via credentialTokenMatches.
+            deleteSecret: deleteSecret ? hashCredentialToken(deleteSecret) : null
         },
         include: {}
       }),
@@ -578,7 +582,7 @@ export async function handleKeySync(
           // [T1] Grup: senderId sekarang pseudonym (bukan userId auth) — cabang
           // isSender tidak bisa dipakai untuk grup; deleteSecret-only (keputusan 26.7.2).
           const isSender = msg.senderId !== null && msg.senderId === userId;
-          const hasValidSecret = typeof deleteSecret === 'string' && !!msg.deleteSecret && safeEqualStrings(deleteSecret, msg.deleteSecret);
+          const hasValidSecret = typeof deleteSecret === 'string' && !!msg.deleteSecret && credentialTokenMatches(msg.deleteSecret, deleteSecret);
           if (!isSender && !hasValidSecret) {
             console.warn('[Security] Unauthorized unsend attempt by', sanitizeForLog(userId), 'for message', sanitizeForLog(messageId));
             return;

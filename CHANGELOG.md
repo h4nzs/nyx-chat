@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔐 Privasi At-Rest — Tier 0 "Rahasia & Identifier" (2026-10-08)
+
+Lanjutan audit docs/28 (dump DB). Keputusan maintainer: Tier 0 penuh +
+Tier 1.1/1.2, presence jadi per-kontak. Batch ini menutup temuan KRITIS D1 dan
+semua TINGGI yang bisa dikerjakan **tanpa perubahan protokol klien**:
+
+- **D1 KRITIS — private key issuer grup keluar dari DB.** Kolom
+  `CredentialIssuerKey.privateKeyPkcs8` dihapus dari schema; key dibaca dari env
+  `GROUP_ISSUER_KEY_PKCS8` (dev: file `server/.nyx-issuer-key` 0600, dibuat
+otomatis & gitignored). DB hanya menyimpan `publicKeyJwk` + `keyVersion`;
+mismatch env↔DB = fail fast, production tanpa env = fail-closed. Script baru
+`issuer-key:generate` (buat key) & `issuer-key:export` (ekspor kolom legacy
+SEBELUM db push — raw SQL). Sebelumnya: dump DB = bisa menandatangani credential
+untuk grup mana pun.
+- **D5 — IP & userAgent dihapus** dari `RefreshToken` (hash tanpa kunci atas
+  IPv4 = enumerable dalam 2^32; UA = sidik jari perangkat). `GET /api/sessions`
+  memakai `Device.name` + flag `isCurrent`; UI manajer sesi ikut disesuaikan
+  (dedupe per `deviceId`, label dari nama perangkat, bukan parse UA).
+- **D7 — `Device.fingerprint` ter-index** (`HMAC(pepper, fingerprint)`) di
+  register/login/recovery, `PUT /api/users/keys`, dan hardware-binding
+  `redisBridge` (nilai tetap deterministik untuk membandingkan, tapi dump DB
+  tidak memuat sidik jari mentah).
+- **D4 — `Tenant.apiKey` disimpan sealed** (AEAD deterministik, nonce turunan
+  plaintext) → lookup tetap; admin tetap bisa menampilkan/menyalin key (key asli
+dikembalikan sekali saat create). Dump DB tidak lagi memberi akses API B2B.
+- **D3 — `authSecret` grup & `deleteSecret` pesan di-hash** (SHA-256 hex, pola
+  `adminSecretHash`) dengan perbandingan dual-mode, jadi dump DB tidak bisa
+  dipakai untuk ikut bicara di grup atau unsend pesan orang lain; baris legacy
+  plaintext tetap berfungsi.
+- **Baru:** `server/src/utils/atRestSecrets.ts` (pepper env `NYX_AT_REST_PEPPER`,
+  `pepperedIdentifier`, `hashCredentialToken`, `credentialTokenMatches`,
+  `sealAtRest`/`openAtRest`) + `tests/atRestSecrets.test.ts` (9 test).
+  `.env.example` root & server diperbarui.
+- Sisa rencana ada di docs/28 §28.8: 0.2 (pepper blind index username — menyentuh
+  kontrak identitas), 0.7 (presence per-kontak), 1.1 (blind receipt 1:1),
+  1.2 (`UserHiddenConversation.userId` → routing ter-seal).
+
+## 🔍 Audit: DB-Dump Threat Model (2026-10-08)
+
+Dokumen baru `docs/28-db-dump-threat-model.md`: pemetaan 17 tabel + graph
+relasi, lalu analisis "apa bahaya terburuk bila DB di-dump" per tabel
+(temuan D1–D14 ber-severity, dengan bukti file:line). Temuan utama:
+(1) **D1 KRITIS** — kunci privat `CredentialIssuerKey.privateKeyPkcs8`
+disimpan plaintext di DB = akar kepercayaan keanggotaan grup ikut ter-dump;
+(2) **D2 KRITIS** — penonimaan `Message.senderId` belum menghapus edge 1:1,
+karena `MessageStatus.userId` dan `UserHiddenConversation.userId` masih diisi
+userId asli; (3) **D3/D4** — `Conversation.authSecret`, `Message.deleteSecret`,
+dan `Tenant.apiKey` plaintext (padahal `adminSecretHash` sudah pola benar);
+(4) **D5/D6/D7 TINGGI** — hash **tanpa kunci** atas input rendah-entropi (IP
+8-byte, `Device.fingerprint`), dan `usernameHash` Argon2id dengan salt statis
++ parameter publik (Signal menyimpan 32-byte hash + ZK proof, dicek di
+`~/signal`); (5) **D14** — Redis `online_users` di-broadcast utuh ke setiap
+klien (roster presensi global). Rencana bertingkat: Tier 0 (rahasia & operasi,
+tanpa perubahan protokol klien), Tier 1 (linkability struktural), Tier 2
+(metadata temporal), Tier 3 (guardrail test + dump simulator).
+**Belum ada kode yang diubah** — menunggu keputusan maintainer di §28.6.
+
 ## 🛡️ Robustness Hardening — Server Realtime (2026-10-06)
 
 **Guard handler socket WSS (anti crash proses):** semua handler async

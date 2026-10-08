@@ -13,6 +13,7 @@ import {
 } from '../lib/groupCredentials.js'
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
 import { isAdminTokenValid, extractHeader } from '../utils/adminCapability.js'
+import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js'
 import type { Conversation } from '@nyx/shared'
 
 const ConversationSchema = z.object({
@@ -143,7 +144,7 @@ router.post('/:id/credential-revoke', zodValidate({
     const gt = req.headers['x-group-token'];
     const groupToken = typeof gt === 'string' ? gt : Array.isArray(gt) ? (gt[0] ?? '') : '';
     const conversation = await prisma.conversation.findUnique({ where: { id: String(id) }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-    if (!conversation || !safeEqualStrings(conversation.authSecret, groupToken)) {
+    if (!conversation || !credentialTokenMatches(conversation.authSecret, groupToken)) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
     }
     await revokeCredentialsFor(String(id), serials)
@@ -296,6 +297,10 @@ return current
 
     const allUserIds = Array.from(new Set([...userIds, creatorId]))
     
+    // [docs/28 Tier 0 — D3] Token grup tetap dibuat & dikirim ke pembuat (dia
+    // menyimpannya di encryptedMetadata), tapi server HANYA menyimpan hash-nya
+    // (pola adminSecretHash) — dump DB tidak bisa lagi dipakai untuk ikut bicara
+    // di grup. Bandingkan lewat credentialTokenMatches (dual-mode legacy).
     const authSecret = crypto.randomBytes(32).toString('hex');
     // [26.9 RBAC] Creator-generated admin capability token dikirim sebagai HASH
     // (SHA-256 hex) — token asli tidak pernah menyentuh server; ia di-seal
@@ -314,7 +319,7 @@ return current
           data: {
             isGroup: isGroup === true,
             encryptedMetadata: isGroup ? encryptedMetadata : null,
-            authSecret,
+            authSecret: hashCredentialToken(authSecret),
             adminSecretHash
           }
         });
@@ -401,7 +406,7 @@ router.put('/:id/details', async (req, res, next) => {
     const groupToken = req.headers['x-group-token']
 
     const conversation = await prisma.conversation.findUnique({ where: { id }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-    if (!conversation || !safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
+    if (!conversation || !credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
         return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
     }
     // [26.9 RBAC] Menulis ulang metadata = mutasi roster/role — ADMIN ONLY.
@@ -430,7 +435,7 @@ router.post('/:id/participants', async (req, res, next) => {
 
   const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
   if (!conversation) return res.status(404).json({ error: 'Not found' });
-  if (!safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
+  if (!credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
   }
   // [BUGFIX 2026-10-01] JANGAN pass record parsial (select: authSecret saja) ke
@@ -476,7 +481,7 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
 
   const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
   if (!conversation) return res.status(404).json({ error: 'Not found' });
-  if (!safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
+  if (!credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
   }
 
@@ -502,7 +507,7 @@ router.delete('/:id/leave', async (req, res, next) => {
 
   const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
   if (!conversation) return res.status(404).json({ error: 'Not found' });
-  const tokenOk = safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '');
+  const tokenOk = credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '');
   if (!tokenOk) {
     // [BUGFIX 2026-10-02 — LEAVE TANPA METADATA] Anggota yang metadata-nya
     // belum ter-decrypt tidak punya authSecret (authSecret hidup di dalam
@@ -552,7 +557,7 @@ router.delete('/:id/group', async (req, res, next) => {
     }) as { authSecret: string | null; isGroup: boolean } | null
     if (!conversation) return res.status(404).json({ error: 'Not found' })
     if (!conversation.isGroup) return res.status(400).json({ error: 'Not a group' })
-    if (!safeEqualStrings(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
+    if (!credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
       return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' })
     }
     // [26.9 RBAC] Purge grup permanen = operasi admin.

@@ -39,13 +39,10 @@ async function issueIframeTokens(user: { id: string; role?: string }, req: Reque
   const access = signAccessToken({ id: user.id, role: user.role, deviceId: device.id, jti: accessJti });
   const refreshJti = newJti();
   
-  const rawIp = req.ip || '';
-  const sodium = await getSodium();
-  const ipAddress = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
-  const userAgent = req.headers['user-agent'] || 'B2B Iframe';
-
+  // [docs/28 Tier 0 — D5] ipAddress & userAgent tidak lagi disimpan (hash IP
+  // tanpa kunci = enumerable, UA = sidik jari perangkat). Paritas dengan auth.ts.
   await prisma.refreshToken.create({
-    data: { jti: refreshJti, deviceId: device.id, familyId: randomUUID(), expiresAt: refreshExpiryDate(), ipAddress, userAgent }
+    data: { jti: refreshJti, deviceId: device.id, familyId: randomUUID(), expiresAt: refreshExpiryDate() }
   });
 
   return access;

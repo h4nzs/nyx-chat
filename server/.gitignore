@@ -9,6 +9,10 @@ web/dist
 .env
 *.log
 
+# [docs/28 Tier 0.1] Private key issuer blind RSA grup (dev only) —
+# JANGAN pernah masuk repo; production memakai env GROUP_ISSUER_KEY_PKCS8.
+.nyx-issuer-key
+
 /generated/prisma
 *.sql
 

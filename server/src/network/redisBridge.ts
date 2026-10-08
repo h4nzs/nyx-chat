@@ -8,6 +8,7 @@ import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { TransportOpCode, MessageSendPayloadSchema } from '@nyx/shared';
 import { createCheckRateLimit, DEVICE_CACHE_INVALIDATE_CHANNEL } from '../utils/redisResilience.js';
+import { pepperedIdentifier } from '../utils/atRestSecrets.js';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 import { handleChatMessage, handleKeySync, handlePresence, type RealtimeContext } from './realtimeHandlers.js';
 
@@ -242,7 +243,9 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
               return;
            }
 
-           const isFingerprintMatch = device.fingerprint === authData.identity.fingerprint;
+           // [docs/28 Tier 0 — D7] fingerprint tersimpan dalam bentuk ter-index
+           // (HMAC pepper), jadi bandingkan dengan nilai ter-index juga.
+           const isFingerprintMatch = device.fingerprint === pepperedIdentifier(authData.identity.fingerprint);
            // Kita beri toleransi: Jika installationId (Anchor) cocok, kita izinkan meskipun fingerprint browser berubah sedikit
            const isAnchorMatch = device.installationId && device.installationId === authData.identity.installationId;
 

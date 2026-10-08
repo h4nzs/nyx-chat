@@ -16,6 +16,7 @@ import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { asUserId, type UserId } from '@nyx/shared'
 import { AuthJwtPayload } from '../types/auth.js';
+import { pepperedIdentifier } from '../utils/atRestSecrets.js';
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -346,8 +347,9 @@ router.put('/me/keys',
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
       const { publicKey, pqPublicKey, signingKey, encryptedPrivateKeys } = req.body
+      // [docs/28 Tier 0 — D7] index fingerprint mentah sebelum disimpan.
       const _fp = req.headers['x-nyx-fingerprint'];
-      const fingerprint = typeof _fp === 'string' ? _fp : undefined;
+      const fingerprint = typeof _fp === 'string' ? pepperedIdentifier(_fp) : undefined;
       const _iid = req.headers['x-nyx-installation-id'];
       const installationId = typeof _iid === 'string' ? _iid : undefined;
 

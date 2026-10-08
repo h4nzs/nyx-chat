@@ -138,8 +138,10 @@ model RefreshToken {
   familyId      String        @default("legacy") // Groups tokens from the same original session (rotation chain). Default for legacy tokens pre-migration.
   deviceId      String // Sesi login diikat ke Perangkat
   device        Device        @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  userAgent     String?
-  ipAddress     String?
+  // [docs/28 Tier 0 — D5] ipAddress & userAgent DIHAPUS: IP di-hash tanpa kunci
+  // (enumerable: IPv4 hanya 2^32) dan userAgent tersimpan plaintext — keduanya
+  // metadata perangkat/sesi yang tak dibutuhkan fungsional. Daftar sesi kini
+  // memakai `Device.name` + flag `isCurrent` (lihat routes/sessions.ts).
   revokedAt     DateTime?
   replacedById  String?       @unique // Points to the previous token in this family chain
   replacedBy    RefreshToken? @relation("TokenReplacement", fields: [replacedById], references: [id])
@@ -309,13 +311,16 @@ model GroupCredential {
   @@index([conversationId])
 }
 
-// State issuer key blind RSA. Satu row aktif (keyVersion tertinggi); private
-// key JNGAN di-commit — disimpan di DB (prod: backup terenkripsi) agar
-// multi-instance pm2 cluster memakai key yang sama.
+// State issuer key blind RSA. Satu row aktif (keyVersion tertinggi).
+// [docs/28 Tier 0 — D1 KRITIS] PRIVATE key TIDAK BOLEH ada di DB: dump DB =
+// akar kepercayaan keanggotaan grup ikut bocor (siapa pun bisa menandatangani
+// credential → masuk grup mana pun). Private key hidup di env
+// `GROUP_ISSUER_KEY_PKCS8` (opsional: file dev 0600 di server/.nyx-issuer-key),
+// lihat lib/groupCredentials.ts + scripts/issuer-key.ts. Row ini hanya memuat
+// material PUBLIK (untuk verifikasi presentasi & distribusi ke klien).
 model CredentialIssuerKey {
   keyVersion      Int      @id
   publicKeyJwk    String // JSON Web Key (public) — dibagikan ke klien
-  privateKeyPkcs8 String // PKCS#8 base64 (PRIVATE — tetap di server)
   createdAt       DateTime @default(now())
 }
 

@@ -7,9 +7,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { emitEventToUser, sendJsonToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
 import { ApiError } from '../utils/errors.js'
-import { UAParser } from 'ua-parser-js'
 import { verifyJwt } from '../utils/jwt.js'
-import { getSodium } from '../lib/sodium.js'
 import { redisClient } from '../lib/redis.js'
 import { revokeFamily } from '../utils/sessionUtils.js'
 
@@ -48,27 +46,22 @@ router.get('/', requireAuth, async (req, res, next) => {
       }
     })
 
-    const rawIp = req.ip || '';
-    const sodium = await getSodium();
-    const currentIpHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
-
+    // [docs/28 Tier 0 — D5] ipAddress & userAgent tidak lagi disimpan di
+    // RefreshToken (hash IP tanpa kunci = enumerable; UA = fingerprint perangkat).
+    // Label sesi diambil dari Device.name (di-set klien saat login) + flag isCurrent
+    // dari JTI cookie — jadi server tidak perlu tahu IP/UA untuk menampilkan sesi.
     const parsedSessions = sessions.map(s => {
       const dbDevice = userDevices.find(d => d.id === s.deviceId);
-      const ua = new UAParser(s.userAgent || '').getResult()
-      const deviceInfo = `${ua.browser.name || 'Unknown'} on ${ua.os.name || 'Unknown'}`
-      
-      // Masking IP (hanya tampilkan jika hash IP cocok dengan session atau jika admin)
-      const sessionIpHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(s.ipAddress || ''), null)).substring(0, 16);
-      const displayIp = (sessionIpHash === currentIpHash) ? s.ipAddress : 'Hidden for privacy';
+      const deviceName = dbDevice?.name || 'Unknown Device';
 
       return {
         id: s.id, // Pastikan mengirim ID untuk keperluan key/revocation di frontend
         jti: s.jti,
         deviceId: s.deviceId,
-        deviceName: dbDevice?.name || 'Unknown Device', // Tambahkan nama device
-        ipAddress: displayIp,
+        deviceName,
+        ipAddress: 'Hidden for privacy',
         isCurrent: s.jti === currentJti,
-        deviceInfo,
+        deviceInfo: deviceName,
         lastUsedAt: s.lastUsedAt,
         createdAt: s.createdAt
       }

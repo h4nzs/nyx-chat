@@ -9,6 +9,7 @@ import { env } from '../config.js';
 import { redisClient } from '../lib/redis.js';
 import { emitEventToUser, sendJsonToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
+import { sealAtRest, openAtRest } from '../utils/atRestSecrets.js';
 
 const router = Router();
 
@@ -125,9 +126,16 @@ router.post('/unban', requireAuth, requireAdmin, async (req, res) => {
 // 4. Get All Tenants
 router.get('/tenants', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const tenants = await prisma.tenant.findMany({
+    // [docs/28 Tier 0 — D4] apiKey tersimpan sealed (AEAD deterministik) → dump
+    // DB tidak memberi akses API B2B. Admin tetap melihat key aslinya (di-unseal
+    // di sini, endpoint admin-only).
+    const tenantsRaw = await prisma.tenant.findMany({
       orderBy: { createdAt: 'desc' }
     });
+    const tenants = await Promise.all(tenantsRaw.map(async (t) => ({
+      ...t,
+      apiKey: (await openAtRest(t.apiKey)) ?? t.apiKey,
+    })));
     res.json(tenants);
   } catch (error) {
     console.error("Failed to fetch tenants:", error);
@@ -155,11 +163,13 @@ router.post('/tenants', requireAuth, requireAdmin, async (req, res) => {
     const tenant = await prisma.tenant.create({
       data: {
         name,
-        apiKey,
+        apiKey: await sealAtRest(apiKey),
         allowedDomains: domains
       }
     });
-    res.json(tenant);
+    // Key asli dikembalikan SEKALI ke admin yang membuatnya; DB hanya menyimpan
+    // bentuk sealed-nya (docs/28 Tier 0 — D4).
+    res.json({ ...tenant, apiKey });
   } catch (error) {
     console.error("Failed to create tenant:", error);
     res.status(500).json({ error: 'Failed to create tenant' });
@@ -179,7 +189,8 @@ router.patch('/tenants/:id/toggle', requireAuth, requireAdmin, async (req, res) 
       where: { id },
       data: { isActive: !tenant.isActive }
     });
-    res.json(updatedTenant);
+    // [docs/28 Tier 0 — D4] apiKey DB = sealed; unseal untuk respons admin.
+    res.json({ ...updatedTenant, apiKey: (await openAtRest(updatedTenant.apiKey)) ?? updatedTenant.apiKey });
   } catch (error) {
     console.error("Failed to toggle tenant:", error);
     res.status(500).json({ error: 'Failed to toggle tenant status' });

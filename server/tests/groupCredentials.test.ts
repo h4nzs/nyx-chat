@@ -44,12 +44,33 @@ test('26.8.1: serial client == serial server (SHA-384 dari prepared message)', (
 
 const SERIAL_LEN = 96;
 
-test('26.8.1: schema — GroupCredential serial unique + conversationId index; issuer key disimpan', () => {
+test('26.8.1: schema — GroupCredential serial unique + conversationId index; issuer key HANYA material publik', () => {
   const schema = read('../prisma/schema.prisma');
   assert.match(schema, /model GroupCredential \{[\s\S]*serial\s+String\s+@unique[\s\S]*@@index\(\[conversationId\]\)/,
     'GroupCredential: serial unique (dedupe/presentasi) + index conversation');
-  assert.match(schema, /model CredentialIssuerKey \{[\s\S]*keyVersion\s+Int\s+@id[\s\S]*privateKeyPkcs8\s+String/,
-    'Issuer key: keyVersion PK, private key PKCS#8 di server');
+  // [docs/28 Tier 0 — D1 KRITIS] private key TIDAK boleh ada di DB: dump DB
+  // = akar kepercayaan keanggotaan grup ikut bocor.
+  assert.match(schema, /model CredentialIssuerKey \{[\s\S]*keyVersion\s+Int\s+@id[\s\S]*publicKeyJwk\s+String/,
+    'Issuer key: keyVersion PK + publicKeyJwk (material publik)');
+  assert.doesNotMatch(schema, /privateKeyPkcs8/,
+    'privateKeyPkcs8 TIDAK boleh kembali ke schema (regresi D1)');
+});
+
+test('28 T0.1: private key issuer dibaca dari env/file, bukan dari DB', () => {
+  const lib = read('../src/lib/groupCredentials.ts');
+  assert.match(lib, /GROUP_ISSUER_KEY_PKCS8/, 'nama env private key terkunci');
+  assert.match(lib, /loadIssuerPrivateKeyPkcs8/, 'load private key dari env/file');
+  assert.match(lib, /env\.nodeEnv === 'production'[\s\S]*throw new Error/, 'production tanpa env key = fail-closed');
+  assert.doesNotMatch(lib, /prisma\.credentialIssuerKey\.create\(\{[\s\S]{0,200}privateKeyPkcs8/,
+    'tidak ada jalur yang menulis private key ke DB');
+  // Row publik tetap di-update dari private key → pastikan mismatch terdeteksi.
+  assert.match(lib, /stored\.n !== publicJwk\.n \|\| stored\.e !== publicJwk\.e/, 'deteksi key env vs publicKeyJwk DB');
+});
+
+test('28 T0.1: script operasi issuer key tersedia (generate + export legacy)', () => {
+  const script = read('../scripts/issuer-key.ts');
+  assert.match(script, /GROUP_ISSUER_KEY_PKCS8/, 'cetak baris .env');
+  assert.match(script, /SELECT "keyVersion", "privateKeyPkcs8" FROM "CredentialIssuerKey"/, 'export kolom legacy via raw SQL');
 });
 
 test('26.8.1: issuance endpoint — server hanya melihat blinded message, tidak ada identitas di payload', () => {

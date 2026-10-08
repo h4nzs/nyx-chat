@@ -14,6 +14,7 @@ import { deleteR2File } from '../utils/r2.js'
 import { z } from 'zod'
 import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { sanitizeForLog } from '../utils/logger.js'
+import { credentialTokenMatches } from '../utils/atRestSecrets.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -275,7 +276,9 @@ router.delete('/:id', async (req, res, next) => {
     if (!message.deleteSecret) {
         return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Message cannot be deleted (no delete secret)' });
     }
-    if (!safeEqualStrings(message.deleteSecret, typeof deleteToken === 'string' ? deleteToken : '')) {
+    // [docs/28 Tier 0 — D3] deleteSecret tersimpan sebagai hash; dual-mode agar
+    // pesan lama (plaintext) tetap bisa dihapus.
+    if (!credentialTokenMatches(message.deleteSecret, typeof deleteToken === 'string' ? deleteToken : '')) {
         return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid X-Delete-Token' });
     }
 

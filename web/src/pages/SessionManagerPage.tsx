@@ -6,18 +6,27 @@ import { Link } from 'react-router-dom';
 import { FiMonitor, FiSmartphone, FiLogOut, FiChevronLeft, FiServer } from 'react-icons/fi';
 import { useTranslation } from 'react-i18next';
 
-const parseUserAgent = (ua: string) => {
-  if (!ua) return { browser: 'Unknown', os: 'Device' };
-  if (ua.includes('Firefox')) return { browser: 'Firefox', os: 'Desktop' };
-  if (ua.includes('Chrome')) return { browser: 'Chrome', os: 'Desktop' };
-  if (ua.includes('Safari')) return { browser: 'Safari', os: 'Desktop' };
-  if (ua.includes('Android')) return { browser: 'Android', os: 'Mobile' };
-  if (ua.includes('iPhone')) return { browser: 'iPhone', os: 'Mobile' };
-  return { browser: 'Unknown', os: 'Device' };
+type Session = {
+  deviceId?: string;
+  deviceName?: string;
+  deviceInfo?: string;
+  ipAddress?: string;
+  lastUsedAt: string | number | Date;
+  jti: string;
+  isCurrent?: boolean;
+  [key: string]: unknown;
 };
 
-const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }, onLogout: (jti: string) => void, isCurrent: boolean }) => {
-  const { browser, os } = parseUserAgent(session.userAgent);
+/**
+ * [docs/28 Tier 0 — D5] Server tidak lagi menyimpan userAgent/IP per sesi.
+ * Label sesi = nama perangkat yang di-set klien (Device.name); hanya bentuk
+ * ikon (mobile/desktop) yang diturunkan dari label itu.
+ */
+const isMobileLabel = (label: string) => /android|iphone|ipad|ios|mobile/i.test(label);
+
+const SessionBlade = ({ session, onLogout, isCurrent }: { session: Session, onLogout: (jti: string) => void, isCurrent: boolean }) => {
+  const label = String(session.deviceName || session.deviceInfo || 'Unknown Device');
+  const os = isMobileLabel(label) ? 'Mobile' : 'Desktop';
   const { t } = useTranslation(['settings', 'common']);
   const Icon = os === 'Mobile' ? FiSmartphone : FiMonitor;
 
@@ -45,7 +54,7 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
         
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="font-bold text-text-primary uppercase tracking-wide text-sm">{os} / {browser}</h3>
+            <h3 className="font-bold text-text-primary uppercase tracking-wide text-sm">{label}</h3>
             {isCurrent && (
                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500 text-white shadow-sm">{t('settings:sessions_page.current')}</span>
             )}
@@ -79,18 +88,21 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
 
 export default function SessionManagerPage() {
   const { t } = useTranslation(['settings', 'common']);
-  const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const data = await api<{ sessions: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }[] }>('/api/sessions');
+        const data = await api<{ sessions: Session[] }>('/api/sessions');
 
-        const uniqueSessions = new Map<string, { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }>();        for (const session of data.sessions) {
-          const existing = uniqueSessions.get(session.userAgent);
+        // Dedupe per perangkat (dulu per userAgent — kolom itu sudah tidak ada).
+        const uniqueSessions = new Map<string, Session>();
+        for (const session of data.sessions) {
+          const key = session.deviceId || session.jti;
+          const existing = uniqueSessions.get(key);
           if (!existing || new Date(session.lastUsedAt) > new Date(existing.lastUsedAt)) {
-            uniqueSessions.set(session.userAgent, session);
+            uniqueSessions.set(key, session);
           }
         }
         
@@ -155,7 +167,7 @@ export default function SessionManagerPage() {
              <div className="hidden md:block fixed right-4 top-0 bottom-0 w-2 bg-[repeating-linear-gradient(0deg,transparent,transparent_20px,rgba(0,0,0,0.1)_20px,rgba(0,0,0,0.1)_21px)]"></div>
 
             {sessions.map(session => {
-              const sessionProps = session as { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean };
+              const sessionProps = session as Session;
               return (
               <SessionBlade
                 key={sessionProps.jti}

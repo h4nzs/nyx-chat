@@ -16,16 +16,37 @@
  *     server mengetahui pemiliknya.
  *
  * Suite: RSABSSA-SHA384-PSS-Randomized (RFC 9474 §5, rekomendasi utama).
+ *
+ * [docs/28 Tier 0 — D1 KRITIS] Private key issuer TIDAK disimpan di DB lagi.
+ * Akar kepercayaan keanggotaan grup dulu ada di kolom DB: siapa pun yang
+ * memegang dump bisa menandatangani credential untuk grup mana pun. Sekarang:
+ *   - private key: env `GROUP_ISSUER_KEY_PKCS8` (base64 PKCS#8), atau file dev
+ *     0600 `server/.nyx-issuer-key` (hanya non-production, dibuat otomatis),
+ *   - DB row `CredentialIssuerKey` menyimpan HANYA material publik
+ *     (`publicKeyJwk`) per `keyVersion` — dipakai verifikasi presentasi &
+ *     dibagikan ke klien. Rotasi = naikkan `GROUP_ISSUER_KEY_VERSION`.
+ *   - production tanpa env key = fail-closed (biar tidak diam-diam memakai key
+ *     ephemeral yang berbeda antar instance pm2).
  */
 
 import { RSABSSA } from '@cloudflare/blindrsa-ts'
-import { createHash } from 'node:crypto'
+import { createHash, createPrivateKey, createPublicKey } from 'node:crypto'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
 import { prisma } from './prisma.js'
+import { env } from '../config.js'
 
 export const CREDENTIAL_SUITE = 'RSABSSA-SHA384-PSS-Randomized'
 export const ISSUER_KEY_MODULUS = 2048
 /** Serial = SHA-384 hex dari prepared message (48 byte → 96 hex). */
 export const SERIAL_HEX_LENGTH = 96
+/** Nama env yang memuat private key issuer (base64 PKCS#8). */
+export const ISSUER_KEY_ENV = 'GROUP_ISSUER_KEY_PKCS8'
+/** Nama env versi key yang aktif (default 1). */
+export const ISSUER_KEY_VERSION_ENV = 'GROUP_ISSUER_KEY_VERSION'
+const DEFAULT_KEY_VERSION = 1
+/** File dev (gitignored) — JANGAN dipakai di production. */
+const DEV_KEY_FILE = path.resolve(process.cwd(), '.nyx-issuer-key')
 
 type Suite = ReturnType<typeof RSABSSA.SHA384.PSS.Randomized>
 type GeneratedKeyPair = Awaited<ReturnType<Suite['generateKey']>>
@@ -48,40 +69,125 @@ function publicJwkToCryptoKey(jwk: JsonWebKey): Promise<CryptoKey> {
   return crypto.subtle.importKey('jwk', jwk, { name: 'RSA-PSS', hash: 'SHA-384' }, false, ['verify'])
 }
 
+/** Versi key aktif: env bila ada, kalau tidak → tertinggi di DB, kalau tidak → 1. */
+async function resolveKeyVersion(): Promise<number> {
+  const raw = (process.env[ISSUER_KEY_VERSION_ENV] || '').trim()
+  const parsed = Number.parseInt(raw, 10)
+  if (Number.isFinite(parsed) && parsed > 0) return parsed
+
+  const latest = await prisma.credentialIssuerKey.findFirst({
+    orderBy: { keyVersion: 'desc' },
+    select: { keyVersion: true },
+  })
+  return latest?.keyVersion ?? DEFAULT_KEY_VERSION
+}
+
+/** Private key dari env, atau file dev. Tidak pernah dari DB. */
+function loadIssuerPrivateKeyPkcs8(): string | null {
+  const fromEnv = (process.env[ISSUER_KEY_ENV] || '').trim()
+  if (fromEnv) return fromEnv
+
+  try {
+    if (existsSync(DEV_KEY_FILE)) {
+      const raw = readFileSync(DEV_KEY_FILE, 'utf8').trim()
+      if (raw.length > 0) return raw
+    }
+  } catch (e) {
+    console.warn(`[Credentials] Gagal membaca ${DEV_KEY_FILE}:`, e)
+  }
+  return null
+}
+
+/** DEV ONLY: buat key sekali lalu simpan 0600 di file — DB tetap bersih. */
+async function generateDevIssuerKey(): Promise<string> {
+  const kp = await getSuite().generateKey({
+    publicExponent: Uint8Array.from([1, 0, 1]),
+    modulusLength: ISSUER_KEY_MODULUS,
+  })
+  const pkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', kp.privateKey)).toString('base64')
+  writeFileSync(DEV_KEY_FILE, `${pkcs8}\n`, { mode: 0o600 })
+  console.warn(
+    `[Credentials] ${ISSUER_KEY_ENV} tidak diset → issuer key DEV baru dibuat di ${DEV_KEY_FILE} (0600). ` +
+    'Production: set env, jangan pakai file. Lihat docs/28 Tier 0.1.'
+  )
+  return pkcs8
+}
+
+/** Turunkan public JWK dari PKCS#8 — server hanya butuh privat di memori. */
+export function publicJwkFromPkcs8(pkcs8Base64: string): JsonWebKey {
+  const privateKey = createPrivateKey({
+    key: Buffer.from(pkcs8Base64, 'base64'),
+    format: 'der',
+    type: 'pkcs8',
+  })
+  const publicKey = createPublicKey(privateKey)
+  return publicKey.export({ format: 'jwk' }) as JsonWebKey
+}
+
 /**
- * Muat (atau buat) issuer key aktif. Key disimpan di DB agar semua instance
- * pm2 cluster menandatangani dengan key yang sama. keyVersion = urutan
- * rotasi; klien membawa keyVersion saat mempresentasikan.
+ * Pastikan row PUBLIK ada untuk keyVersion ini dan memang pasangan dari private
+ * key yang dipakai (kalau tidak, signature tidak akan pernah bisa diverifikasi
+ * klien → fail fast, jangan diam-diam salah tanda tangan).
+ */
+async function ensurePublicKeyRow(keyVersion: number, publicJwk: JsonWebKey): Promise<void> {
+  const existing = await prisma.credentialIssuerKey.findUnique({ where: { keyVersion } })
+  if (!existing) {
+    await prisma.credentialIssuerKey.create({
+      data: { keyVersion, publicKeyJwk: JSON.stringify(publicJwk) },
+    })
+    return
+  }
+
+  let stored: JsonWebKey
+  try {
+    stored = JSON.parse(existing.publicKeyJwk) as JsonWebKey
+  } catch {
+    throw new Error(`[Credentials] publicKeyJwk untuk keyVersion ${keyVersion} rusak (bukan JSON).`)
+  }
+  if (stored.n !== publicJwk.n || stored.e !== publicJwk.e) {
+    throw new Error(
+      `[Credentials] ${ISSUER_KEY_ENV} (keyVersion ${keyVersion}) TIDAK cocok dengan publicKeyJwk di DB. ` +
+      'Naikkan GROUP_ISSUER_KEY_VERSION untuk rotasi, atau perbaiki env-nya.'
+    )
+  }
+}
+
+/**
+ * Muat issuer key aktif. Private key dari env/file; DB hanya jadi sumber
+ * material publik. Production tanpa env key → error (fail-closed).
  */
 export async function getActiveIssuerKey(): Promise<IssuerKey> {
   if (cachedKeyPair) return cachedKeyPair
 
-  const rows = await prisma.credentialIssuerKey.findMany({ orderBy: { keyVersion: 'desc' }, take: 1 })
-  let row = rows[0]
+  const keyVersion = await resolveKeyVersion()
 
-  if (!row) {
-    const kp = await getSuite().generateKey({
-      publicExponent: Uint8Array.from([1, 0, 1]),
-      modulusLength: ISSUER_KEY_MODULUS,
-    })
-    const publicJwk = await crypto.subtle.exportKey('jwk', kp.publicKey)
-    const privateKeyPkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', kp.privateKey)).toString('base64')
-    row = await prisma.credentialIssuerKey.create({
-      data: { keyVersion: 1, publicKeyJwk: JSON.stringify(publicJwk), privateKeyPkcs8 },
-    })
+  let pkcs8 = loadIssuerPrivateKeyPkcs8()
+  if (!pkcs8) {
+    if (env.nodeEnv === 'production') {
+      throw new Error(
+        `[Credentials] ${ISSUER_KEY_ENV} wajib diset di production (private key issuer ` +
+        'tidak boleh disimpan di DB — docs/28 D1).'
+      )
+    }
+    pkcs8 = await generateDevIssuerKey()
   }
 
-  const publicJwk = JSON.parse(row.publicKeyJwk) as JsonWebKey
+  const publicJwk = publicJwkFromPkcs8(pkcs8)
   const privateKey = await crypto.subtle.importKey(
     'pkcs8',
-    Buffer.from(row.privateKeyPkcs8, 'base64'),
+    Buffer.from(pkcs8, 'base64'),
     { name: 'RSA-PSS', hash: 'SHA-384' },
     false,
     ['sign']
   )
-  const publicKey = await publicJwkToCryptoKey(publicJwk)
+  await ensurePublicKeyRow(keyVersion, publicJwk)
 
-  cachedKeyPair = { keyVersion: row.keyVersion, privateKey, publicKey, publicJwk }
+  cachedKeyPair = {
+    keyVersion,
+    privateKey,
+    publicKey: await publicJwkToCryptoKey(publicJwk),
+    publicJwk,
+  }
   return cachedKeyPair
 }
 
@@ -128,6 +234,22 @@ export async function isSerialIssued(serial: string): Promise<boolean> {
 }
 
 /**
+ * Public JWK untuk keyVersion tertentu: dari cache bila aktif, kalau tidak dari
+ * DB (rotasi lama). Tidak pernah membaca private material dari DB.
+ */
+async function getPublicJwkForVersion(keyVersion: number): Promise<JsonWebKey | null> {
+  if (cachedKeyPair && cachedKeyPair.keyVersion === keyVersion) return cachedKeyPair.publicJwk
+
+  const row = await prisma.credentialIssuerKey.findUnique({ where: { keyVersion } })
+  if (!row) return null
+  try {
+    return JSON.parse(row.publicKeyJwk) as JsonWebKey
+  } catch {
+    return null
+  }
+}
+
+/**
  * Verifikasi presentasi credential: tanda tangan valid (issuer key versi
  * `keyVersion`) DAN serial terdaftar untuk conversationId. Tidak ada lookup
  * identitas — kepemilikan (msg, sig) = bukti keanggotaan.
@@ -146,11 +268,9 @@ export async function verifyPresentation(
   if (!registered || registered.conversationId !== conversationId) return false
   if (registered.keyVersion !== keyVersion) return false
 
-  const rows = await prisma.credentialIssuerKey.findMany({ where: { keyVersion }, take: 1 })
-  const keyRow = rows[0]
-  if (!keyRow) return false
+  const publicJwk = await getPublicJwkForVersion(keyVersion)
+  if (!publicJwk) return false
 
-  const publicJwk = JSON.parse(keyRow.publicKeyJwk) as JsonWebKey
   const publicKey = await publicJwkToCryptoKey(publicJwk)
   try {
     return await getSuite().verify(publicKey, signature, preparedMsg)
@@ -163,4 +283,9 @@ export async function verifyPresentation(
 export async function revokeCredentialsFor(conversationId: string, serials: string[]): Promise<void> {
   if (serials.length === 0) return
   await prisma.groupCredential.deleteMany({ where: { conversationId, serial: { in: serials } } })
+}
+
+/** Hanya untuk test: buang cache issuer key. */
+export function clearIssuerKeyCacheForTests(): void {
+  cachedKeyPair = null
 }

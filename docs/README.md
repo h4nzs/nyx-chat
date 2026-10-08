@@ -51,6 +51,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 | [13-troubleshooting.md](13-troubleshooting.md) | Known errors and their fixes |
 | [26-group-privacy-blueprint.md](26-group-privacy-blueprint.md) | Group metadata hardening blueprint: sender pseudonyms, pairwise key distribution, blinded membership & receipts — **T1–T4 fully implemented (2026-09-26)** | Design record & residual leaks |
 | [27-total-upgrade-plan.md](27-total-upgrade-plan.md) | Master plan post-VPS-closure: infra rebuild, server/client lifting, privacy tiers, calls, media, observability | Run the rebuild-and-relaunch cycle |
+| [28-db-dump-threat-model.md](28-db-dump-threat-model.md) | DB-dump threat model: 17 tabel, graph yang bisa direkonstruksi, temuan D1–D14 ber-severity, rencana bertingkat (Tier 0 tanpa perubahan klien → Tier 2 metadata) — **audit + rencana, belum ada kode** | Harden privasi at-rest server |
 | [25-repo-infra-agents.md](25-repo-infra-agents.md) | Root repo files, CI/agent workflows, Docker Compose, agent-skills content, ambient type declarations |
 
 ## Quick facts
