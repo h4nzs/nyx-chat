@@ -340,7 +340,7 @@ Semua pepper/key berasal dari env `NYX_AT_REST_PEPPER` (production: wajib).
 
 | # | Item | Catatan |
 |---|---|---|
-| 0.2 | Pepper blind index `usernameHash` | Perlu resolver lookup ganda (pepper → apa adanya) di register/login/recovery/`/api/users/search` + `isExactHash` menerima bentuk 64-hex (link undangan kini memuat nilai ter-index). Menyentuh kontrak identitas, jadi dipisah sebagai commit sendiri |
+| 0.2 ✅ | Pepper blind index `usernameHash` | **Mendarat.** Register menyimpan `HMAC(pepper, argonKlien)`; login/recovery-verify/register-check/pencarian user memakai kandidat `[ter-pepper, apa adanya]` (`findFirst` + `in`), jadi klien & baris legacy tidak berubah. Nonce recovery di-key oleh identifier ter-pepper (Redis juga tidak memuat identifier mentah) dengan fallback kandidat. `isExactHash` menerima 43-char base64url (Argon2id klien) **dan** 64-hex (nilai ter-index yang di-echo server) sehingga link undangan hasil-echo tetap bisa dipakai mencari kontak. `engine.ts` (user B2B) ikut ter-pepper. Test: `tests/usernameBlindIndex.test.ts` (5 test: properti privasi + wiring). |
 | 0.7 | Presence per-kontak | Hentikan broadcast `online_users` penuh; langganan per kontak (Redis + realtime + klien) |
 | 1.1 | Blind receipt 1:1 | `MessageStatus.userId` diisi token pembaca (bukan userId) di jalur 1:1 |
 | 1.2 | `UserHiddenConversation.userId` | Ganti dengan routing identity ter-seal (`sealAtRest`) atau tag opaque; audit ulang pembaca (push, sweeper, `users.ts` broadcast profil) |
@@ -349,6 +349,13 @@ Semua pepper/key berasal dari env `NYX_AT_REST_PEPPER` (production: wajib).
 (random, tak bisa dibalik, tapi bisa dikorelasikan *di dalam* dump),
 `Device.name` (label platform yang di-set klien), `User.externalId` (identitas
 B2B dari tenant), dan `MessageStatus.userId` untuk 1:1 (→ ditutup oleh 1.1).
+
+Catatan 0.2: nilai `usernameHash` yang dikirim server ke klien kini bentuk
+ter-index — ia ikut di link undangan (`?u=`) dan di-echo pada flow recovery.
+Efek privasi: link tidak lagi bisa dibalik ke username tanpa pepper (yang perlu
+dibandingkan dengan sebelum: Argon2id salt statis = rainbow table global).
+Efek yang tersisa: nilai itu tetap **identifier stabil** antar penerima link
+(pseudonim publik), sama seperti sebelumnya — bukan penurunan privasi baru.
 
 **Urutan operasi produksi (0.1):** (1) `issuer-key:export` → simpan ke
 `/root/nyx-app/.env`; (2) restart `nyx-api`; (3) verifikasi issuance credential

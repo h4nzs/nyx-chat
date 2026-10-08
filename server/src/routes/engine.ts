@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import { env } from '../config.js';
 import { getSodium } from '../lib/sodium.js';
 import { Buffer } from 'buffer';
+import { pepperedIdentifier } from '../utils/atRestSecrets.js';
 
 const router = Router();
 
@@ -58,7 +59,12 @@ router.post('/rooms', requireTenantAuth, async (req: Request, res: Response) => 
     }
 
     const processUser = async (u: { externalId: string, displayName?: string }) => {
-      const usernameHash = crypto.createHash('sha256').update(`${tenant.id}:${u.externalId}`).digest('hex');
+      // [docs/28 Tier 0 — D6] Paritas dengan auth.ts: blind index disimpan
+      // ter-pepper (deterministik per tenant+externalId, tapi tak bisa dibalik
+      // dari dump DB).
+      const usernameHash = pepperedIdentifier(
+        crypto.createHash('sha256').update(`${tenant.id}:${u.externalId}`).digest('hex')
+      );
       
       let user = await prisma.user.findUnique({
         where: { tenantId_externalId: { tenantId: tenant.id, externalId: u.externalId } }

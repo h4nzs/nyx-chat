@@ -16,7 +16,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { authLimiter } from '../middleware/rateLimiter.js'
 import { getSodium } from '../lib/sodium.js'
 import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
-import { pepperedIdentifier } from '../utils/atRestSecrets.js'
+import { identifierLookupCandidates, pepperedIdentifier } from '../utils/atRestSecrets.js'
 import { nanoid } from 'nanoid'
 import argon2 from 'argon2'
 import crypto from 'crypto'
@@ -210,7 +210,15 @@ async (req, res, next) => {
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again or reload page.')
 
-    const existingUser = await prisma.user.findUnique({ where: { usernameHash } })
+    // [docs/28 Tier 0 — D6] Blind index disimpan TER-PEPPER (HMAC dari nilai
+    // Argon2id klien): parameternya publik & salt-nya statis, jadi hash mentah
+    // bisa dibangunkan rainbow table global. Dalam dump, tanpa pepper tidak ada
+    // yang bisa dibalik. Kandidat lookup = [ter-pepper, apa adanya] supaya baris
+    // legacy (dan nilai yang di-echo klien) tetap bekerja.
+    const existingUser = await prisma.user.findFirst({
+      where: { usernameHash: { in: identifierLookupCandidates(usernameHash) } },
+      select: { id: true }
+    })
     if (existingUser) throw new ApiError(409, 'Username already taken (Hash Collision).')
 
     const passwordHash = await hashPassword(password)
@@ -221,7 +229,7 @@ async (req, res, next) => {
 
     const user = await prisma.user.create({
       data: {
-        usernameHash,
+        usernameHash: pepperedIdentifier(usernameHash),
         passwordHash,
         encryptedProfile,
         isVerified: false,
@@ -283,8 +291,8 @@ router.post('/login', authLimiter, zodValidate({
     const _iid = req.headers['x-nyx-installation-id'];
     const installationId = typeof _iid === 'string' ? _iid : undefined;
 
-    const user = await prisma.user.findUnique({
-      where: { usernameHash },
+    const user = await prisma.user.findFirst({
+      where: { usernameHash: { in: identifierLookupCandidates(usernameHash) } },
       include: {
         devices: { orderBy: { lastActiveAt: 'desc' } }
       }
@@ -555,7 +563,9 @@ router.get('/recover/challenge', authLimiter, async (req, res, next) => {
     if (!identifier || typeof identifier !== 'string') throw new ApiError(400, "Identifier is required.");
     const sodium = await getSodium();
     const nonce = sodium.to_hex(sodium.randombytes_buf(32));
-    await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce);
+    // [docs/28 Tier 0 — D6/D14] Nonce di-key oleh identifier TER-PEPPER — Redis
+    // juga termasuk artefak yang harus tahan dump (tidak memuat identifier mentah).
+    await redisClient.setEx(`recover_nonce:${pepperedIdentifier(identifier)}`, 300, nonce);
     res.json({ nonce });
   } catch (e) { next(e); }
 });
@@ -579,11 +589,24 @@ router.post('/recover', authLimiter, zodValidate({
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
 
-    const cachedNonce = await redisClient.get(`recover_nonce:${usernameHash}`);
+    // Kandidat kunci: [ter-pepper, apa adanya] — tahan terhadap klien yang
+    // mengirim bentuk berbeda antara /recover/challenge dan /recover/verify.
+    let cachedNonce: string | null = null;
+    for (const candidate of identifierLookupCandidates(usernameHash)) {
+      const key = `recover_nonce:${candidate}`;
+      const value = await redisClient.get(key);
+      if (value) {
+        cachedNonce = value;
+        await redisClient.del(key);
+        break;
+      }
+    }
     if (!cachedNonce || cachedNonce !== nonce) throw new ApiError(401, "Invalid or expired recovery challenge.");
-    await redisClient.del(`recover_nonce:${usernameHash}`);
 
-    const user = await prisma.user.findUnique({ where: { usernameHash }, include: { devices: true } });
+    const user = await prisma.user.findFirst({
+      where: { usernameHash: { in: identifierLookupCandidates(usernameHash) } },
+      include: { devices: true }
+    });
     if (!user || user.devices.length === 0) throw new ApiError(404, "User not found or invalid keys.");
 
     const { getSodium } = await import('../lib/sodium.js');

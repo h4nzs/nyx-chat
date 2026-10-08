@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧩 Privasi At-Rest — Tier 0.2 Blind Index Username (2026-10-08)
+
+**D6: `User.usernameHash` kini ter-pepper.** Sebelumnya nilai Argon2id klien
+disimpan apa adanya; salt-nya statis (`NYX_BLIND_IDX_V1`) dan parameternya ada
+di bundel klien (publik) → dump DB + kamus username = deanonymisasi, dan satu
+rainbow table berlaku global. Sekarang yang disimpan adalah
+`HMAC(NYX_AT_REST_PEPPER, argonKlien)`: deterministik untuk lookup, tapi tidak
+bisa dibalik dari dump tanpa pepper.
+
+Tanpa perubahan protokol klien: register menyimpan nilai ter-index;
+login / recovery-verify / cek-duplikat register / pencarian user memakai
+kandidat `[ter-pepper, apa adanya]` sehingga baris legacy dan nilai yang
+di-echo klien tetap bekerja. Nonce recovery di-key oleh index ter-pepper
+(Redis ikut bersih) dengan fallback kandidat. `isExactHash` di pencarian user
+kini menerima 43-char base64url maupun 64-hex, jadi link undangan yang memuat
+nilai ter-index tetap bisa menemukan kontak. User B2B (`engine.ts`) ikut
+ter-pepper. Test baru: `tests/usernameBlindIndex.test.ts` (properti privasi +
+lokasi wiring).
+
 ## 🔐 Privasi At-Rest — Tier 0 "Rahasia & Identifier" (2026-10-08)
 
 Lanjutan audit docs/28 (dump DB). Keputusan maintainer: Tier 0 penuh +

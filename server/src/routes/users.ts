@@ -16,7 +16,7 @@ import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { asUserId, type UserId } from '@nyx/shared'
 import { AuthJwtPayload } from '../types/auth.js';
-import { pepperedIdentifier } from '../utils/atRestSecrets.js';
+import { identifierLookupCandidates, pepperedIdentifier } from '../utils/atRestSecrets.js';
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -471,15 +471,19 @@ router.get('/search', async (req, res, next) => {
     // RESTORE: Sandbox Search Restriction
     const requester = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isVerified: true } });
     
-    // Check if query is an exact Hash ID (43 chars base64url)
-    const isExactHash = typeof q === 'string' && q.length === 43 && /^[A-Za-z0-9_-]+$/.test(q);
+    // Check if query is an exact Hash ID — 43 char base64url (Argon2id klien)
+    // atau 64 hex (blind index ter-pepper yang dikirim balik server, mis. dari
+    // link undangan/documentation docs/28 Tier 0.2).
+    const isExactHash = typeof q === 'string'
+      ? (q.length === 43 && /^[A-Za-z0-9_-]+$/.test(q)) || (q.length === 64 && /^[a-f0-9]{64}$/.test(q))
+      : false;
 
     if (!requester?.isVerified && !isExactHash) {
         throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users can only find contacts by providing the exact Hash ID.');
     }
 
     const users = await prisma.user.findMany({
-      where: { usernameHash: q },
+      where: { usernameHash: { in: identifierLookupCandidates(q) } },
       take: 20,
       select: { 
         id: true, 
