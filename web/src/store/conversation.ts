@@ -17,6 +17,10 @@ import { captureAndLog } from '@utils/feedback';
 
 import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, generatePseudonymMap, getPseudonymMap } from "@utils/crypto";
 import { generateDeliveryToken, findPseudonymInMap } from '@lib/groupPseudonyms';
+// [docs/28 Tier 2 — B1/B3] perbandingan "pesan mana yang terbaru" harus
+// sejalan dengan urutan tampilan (seq; pending = paling baru) — createdAt server
+// kini kasar sehingga perbandingan waktu bisa salah nilai.
+import { compareMessagesByOrder } from '@utils/messageOrder';
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
@@ -56,7 +60,19 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
     if (!aIsPinned && bIsPinned) return 1;
 
     // Then, sort by latest activity
-    return new Date(b.lastMessage?.createdAt || b.updatedAt || 0).getTime() - new Date(a.lastMessage?.createdAt || a.updatedAt || 0).getTime();
+    // [docs/28 Tier 2 — B3] `Message.createdAt` server kini kasar (bucket 15 mnt)
+    // → pakai `sentAt` presisi bila ada; `createdAt` hanya fallback. Tie-break
+    // deterministik per-conversation supaya urutan tidak flip saat seri bucket.
+    const activity = (c: Conversation) => {
+      const last = c.lastMessage;
+      const precise = typeof last?.sentAt === 'number'
+        ? last.sentAt
+        : new Date(last?.createdAt || c.updatedAt || 0).getTime();
+      return Number.isFinite(precise) ? precise : 0;
+    };
+    const diff = activity(b) - activity(a);
+    if (diff !== 0) return diff;
+    return String(a.id).localeCompare(String(b.id));
   });
 
 const withPreview = (msg: Message): Message => {
@@ -277,10 +293,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             }
         }
 
-        const serverMsgTime = lastMessage ? new Date(lastMessage.createdAt).getTime() : 0;
-        const localMsgTime = localLastMessage ? new Date(localLastMessage.createdAt).getTime() : 0;
-
-        let finalLastMessage = localMsgTime > serverMsgTime ? localLastMessage : lastMessage;
+        // [docs/28 Tier 2 — B1/B3] pilih yang lebih baru dengan aturan urutan yang
+        // sama dengan daftar pesan (bukan sekadar createdAt presisi vs kasar).
+        let finalLastMessage = lastMessage;
+        if (localLastMessage && (!lastMessage || compareMessagesByOrder(localLastMessage, lastMessage) > 0)) {
+            finalLastMessage = localLastMessage;
+        }
 
         if (finalLastMessage) {
             // [P2 NORMALISASI] getParticipantUserId (dulu p.id — bentuk userId
@@ -1032,8 +1050,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const meId = useAuthStore.getState().user?.id;
       const isMine = message.senderId === meId;
 
-      const newMsgTime = new Date(message.createdAt).getTime();
-      const currentLastMsgTime = conversation.lastMessage ? new Date(conversation.lastMessage.createdAt).getTime() : 0;
+      // [docs/28 Tier 2 — B1/B3] `createdAt` server kini kasar (bucket 15 mnt)
+      // sementara lastMessage lokal bisa presisi (sentAt) — membandingkan waktu
+      // mentah bisa menilai pesan BARU sebagai "lebih lama" sehingga preview chat
+      // tak ikut ter-update. Pakai aturan urutan yang sama dengan daftar pesan.
+      const isNewerOrSame = !conversation.lastMessage ||
+        compareMessagesByOrder(message, conversation.lastMessage) >= 0;
       
       const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`) && document.visibilityState === 'visible';
 
@@ -1044,7 +1066,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (incrementsUnread && unreadCountedMessageIds.has(message.id)) {
         // Pesan ini sudah pernah dihitung — jangan sentuh unreadCount lagi.
         // (Preview tetap boleh diperbarui.)
-        if (newMsgTime >= currentLastMsgTime) {
+        if (isNewerOrSame) {
           const updatedConversation = { ...conversation, lastMessage: withPreview(message) };
           const otherConversations = state.conversations.filter(c => c.id !== conversationId);
           return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
@@ -1052,7 +1074,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         return state;
       }
 
-      if (newMsgTime < currentLastMsgTime) {
+      if (!isNewerOrSame) {
           // FIX: Pastikan kita tetap mengembalikan hasil array yang di-sort!
           if (incrementsUnread) {
               markUnreadCounted(message.id);

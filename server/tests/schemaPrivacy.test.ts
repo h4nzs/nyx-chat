@@ -16,7 +16,13 @@
  *   D5  tidak ada ipAddress/userAgent per sesi
  *   D6  blind index username ter-pepper
  *   D7  fingerprint perangkat ter-index
- *   D14 presence tidak broadcast roster global
+ *   D10 endpoint push ter-seal
+ *   D11 metadata bebas tenant & PK time-ordered hilang
+ *   D4/D9 residual: identitas B2B, label device, anchor instalasi ter-seal
+ *
+ * D14 (Redis tanpa userId asli + presence tanpa broadcast roster global) TIDAK
+ * diuji di sini — ia dikunci oleh `tests/redisIdentity.test.ts` &
+ * `tests/presencePeers.test.ts` (perilaku runtime, bukan bentuk schema).
  *
  * Kalau test ini gagal: BUKAN "test-nya usang" — periksa dulu apakah perubahan
  * itu benar-benar diinginkan, karena artinya janji privasi di docs/28 dibatalkan.
@@ -116,3 +122,49 @@ test('D6/D7: identifier ber-entropi rendah di-index dengan pepper env', () => {
   assert.match(read('../.env.example'), /GROUP_ISSUER_KEY_PKCS8=/, 'dan private key issuer');
   assert.match(read('../.env.example'), /GROUP_ISSUER_KEY_PKCS8=/, 'server/.env.example juga');
 });
+
+test('D4/D9/D10 residual: identitas B2B, label device, anchor instalasi & endpoint push ter-seal', () => {
+  const schema = read('../prisma/schema.prisma');
+
+  // D4: identitas pelanggan B2B (dari tenant) tidak lagi plaintext.
+  const user = modelBody(schema, 'User');
+  assert.doesNotMatch(user, /^\s*externalId\s+\S/m, 'kolom externalId plaintext dihapus');
+  assert.match(user, /^\s*externalIdSealed\s+String\?/m, 'externalId disimpan ter-seal');
+  assert.match(user, /@@unique\(\[tenantId, externalIdSealed\]\)/, 'uniqueness tetap (tenant, identity)');
+
+  // D9 residual: label platform yang di-set klien ("Chrome on macOS").
+  const device = modelBody(schema, 'Device');
+  assert.doesNotMatch(device, /^\s*name\s+\S/m, 'kolom Device.name plaintext dihapus');
+  assert.match(device, /^\s*nameSealed\s+String\?/m, 'Device.name disimpan ter-seal');
+
+  // D9 residual: anchor instalasi persisten dari IndexedDB.
+  assert.doesNotMatch(device, /^\s*installationId\s+\S/m, 'installationId mentah dihapus');
+  assert.match(device, /^\s*installationTag\s+String\?/m, 'anchor instalasi jadi tag HMAC');
+  assert.match(read('../src/utils/atRestSecrets.ts'), /function deviceInstallationTag/, 'tag instalasi terpusat');
+
+  // D10: endpoint FCM/APNs = identifier perangkat + korelasi lintas akun.
+  const push = modelBody(schema, 'PushSubscription');
+  assert.doesNotMatch(push, /^\s*endpoint\s+\S/m, 'kolom endpoint plaintext dihapus');
+  assert.match(push, /^\s*endpointSealed\s+String\s+@unique/m, 'endpoint ter-seal + tetap unik');
+  assert.match(read('../src/routes/auth.ts'), /endpointSealed: await sealAtRest\(endpoint\)/, 'logout menghapus push via nilai ter-seal');
+  assert.match(read('../src/network/realtimeHandlers.ts'), /sealAtRest\(endpoint\)/, 'subscribe menyimpan endpoint ter-seal');
+  assert.match(read('../src/utils/sendPushNotification.ts'), /openAtRest\(sub\.endpointSealed\)/, 'endpoint dibuka HANYA saat mengirim push');
+
+  // Jalur B2B menulis identitas ter-seal (bukan plaintext).
+  assert.match(read('../src/routes/engine.ts'), /externalIdSealed/, 'engine menyimpan identitas B2B ter-seal');
+});
+
+test('D11 residual: metadata bebas tenant tidak lagi dipersist', () => {
+  const schema = read('../prisma/schema.prisma');
+  const conversation = modelBody(schema, 'Conversation');
+
+  // `Conversation.metadata` dulu JSON bebas dari tenant (write-only: tak pernah
+  // dibaca server) → apa pun yang dititipkan tenant tersimpan apa adanya.
+  assert.doesNotMatch(conversation, /^\s*metadata\s+Json/m, 'kolom metadata Json dihapus');
+  const engine = read('../src/routes/engine.ts');
+  assert.doesNotMatch(engine, /metadata:\s*[^,\n]*req\.body/, 'engine tidak lagi menulis metadata tenant ke DB');
+
+  // D11: tak ada PK ber-default `cuid()` (time-ordered → membocorkan waktu buat).
+  assert.doesNotMatch(schema, /@default\(cuid\(\)\)/, 'semua PK ber-default memakai uuid()');
+});
+

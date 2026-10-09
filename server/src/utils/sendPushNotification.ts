@@ -1,6 +1,8 @@
 import webpush from 'web-push'
 import { prisma } from '../lib/prisma.js'
 import { env } from '../config.js'
+// [docs/28 Tier 1.5 / D10] endpoint push tersimpan ter-seal.
+import { openAtRest } from './atRestSecrets.js'
 
 export interface PushNotificationPayload {
   type?: string;
@@ -19,12 +21,17 @@ export async function sendPushNotification(userId: string, payload: PushNotifica
 
   try {
     const subscriptions = await prisma.pushSubscription.findMany({
-      where: { device: { userId } }
+      where: { device: { userId } },
+      // [docs/28 Tier 1.5 / D10] endpoint tersimpan ter-seal.
+      select: { id: true, deviceId: true, p256dh: true, auth: true, endpointSealed: true }
     });
     
     if (subscriptions.length === 0) return;
 
     const notifications = subscriptions.map(async (sub) => {
+      // Endpoint asli hanya dibutuhkan di sini (mengirim push) — dibuka saat itu.
+      const endpoint = await openAtRest(sub.endpointSealed);
+      if (!endpoint) return;
       let devicePayload = payload.data?.pushPayloadMap?.[sub.deviceId] || payload.data?.encryptedPushPayload;
 
       if (devicePayload && Buffer.byteLength(devicePayload, 'utf8') > 3000) {
@@ -45,7 +52,7 @@ export async function sendPushNotification(userId: string, payload: PushNotifica
       try {
         await webpush.sendNotification(
           {
-            endpoint: sub.endpoint,
+            endpoint,
             keys: { p256dh: sub.p256dh, auth: sub.auth }
           },
           JSON.stringify(safePayload)

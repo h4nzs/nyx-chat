@@ -21,6 +21,12 @@ export interface DecryptedMessageRecord {
   isDeletedLocal?: boolean;
   fileMeta?: string;
   expiresAt?: string | null;
+  // [docs/28 Tier 2 — B2] waktu kirim presisi (dari ciphertext).
+  sentAt?: number;
+  // [docs/28 Tier 2 — B1] seq per-conversation (urutan & kursor paginasi SERVER).
+  // Tanpa ini, setelah reload `oldestMessage.seq` hilang → fetch-older jatuh ke
+  // kursor ISO-date legacy yang bisa mengulang sebagian halaman.
+  seq?: number;
 }
 
 export interface PqDrSessionRecord {

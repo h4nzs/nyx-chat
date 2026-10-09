@@ -13,6 +13,8 @@ import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
 import { useAuthStore } from '@store/auth';
 import { usePresenceStore } from '@store/presence';
+// [docs/28 Tier 1.5 / D14] presence lazy (langganan per-kontak).
+import { usePresenceSubscription } from '@hooks/usePresenceSubscription';
 import { useShallow } from 'zustand/react/shallow';
 import { captureAndLog } from '@utils/feedback';
 import ModalBase from './ui/ModalBase';
@@ -39,6 +41,8 @@ export default function UserInfoModal() {
   const onlineUsers = usePresenceStore(s => s.onlineUsers);
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);
+  // [docs/28 Tier 1.5 / D14] presence lazy: modal profil meminta status user ini.
+  usePresenceSubscription(user ? [String(user.id)] : []);
   const profile = useUserProfile(user);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

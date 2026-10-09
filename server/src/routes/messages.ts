@@ -7,7 +7,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { sendJsonToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
 import { asConversationId, asMessageId } from '@nyx/shared'
-import { toRawServerMessage } from '../utils/mappers.js'
+import { toRawServerMessage, resolveRepliedToId } from '../utils/mappers.js'
 import { ApiError } from '../utils/errors.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js'
@@ -16,6 +16,10 @@ import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { sanitizeForLog } from '../utils/logger.js'
 import { credentialTokenMatches } from '../utils/atRestSecrets.js'
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js'
+// [docs/28 Tier 2 — B1] seq atomik per-conversation + parser kursor.
+import { reserveMessageSeq, parseMessageCursor, type SeqPrismaClient } from '../utils/messageSequence.js'
+// [docs/28 Tier 2 — B3] bucket waktu pesan (createdAt/expiresAt kasar).
+import { messageTimeBucket } from '../utils/temporalBucket.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -48,26 +52,34 @@ router.get('/:conversationId', async (req, res, next) => {
     const now = new Date();
     const fourteenDaysAgo = new Date(now.getTime() - CATCH_UP_MAX_CURSOR_AGE_MS);
 
-    // Validasi & clamp cursor: harus ISO date yang masih dalam window retensi.
-    // Cursor lebih tua dari 14 hari di-clamp — pesan lebih tua dari itu sudah
-    // dihapus sweeper, jadi meng-query lebih jauh hanya membuang index scan.
+    // [docs/28 Tier 2 — B1] Kursor: `seq` (klien baru) atau ISO date (legacy).
+    // Kursor seq mengurutkan berdasarkan `Message.seq`; date tetap didukung
+    // supaya klien/baris lama tidak rusak sebelum backfill dijalankan.
+    const cursor = parseMessageCursor(req.query.before);
     let beforeDate: Date | null = null;
-    const beforeRaw = typeof req.query.before === 'string' ? req.query.before : '';
-    if (beforeRaw) {
-      const parsed = new Date(beforeRaw);
-      if (!isNaN(parsed.getTime())) {
-        beforeDate = parsed.getTime() < fourteenDaysAgo.getTime() ? fourteenDaysAgo : parsed;
-      }
+    let beforeSeq: number | null = null;
+    if (cursor.kind === 'date') {
+      // Cursor lebih tua dari 14 hari di-clamp — pesan lebih tua dari itu sudah
+      // dihapus sweeper, jadi meng-query lebih jauh hanya membuang index scan.
+      beforeDate = cursor.date.getTime() < fourteenDaysAgo.getTime() ? fourteenDaysAgo : cursor.date;
+    } else if (cursor.kind === 'seq') {
+      beforeSeq = cursor.seq;
     }
     // Clamp jumlah juga (limit param legacy dari client lama, di-cap ke ukuran halaman).
     const limitRaw = parseInt(String(req.query.limit ?? ''), 10);
     const take = Math.min(!isNaN(limitRaw) && limitRaw > 0 ? limitRaw : CATCH_UP_PAGE_SIZE, CATCH_UP_PAGE_SIZE);
 
+    // Window retensi (createdAt) tetap membatasi umur; kursor seq menambah
+    // filter `seq < beforeSeq`. Baris legacy (seq=0) otomatis urut di bawah.
+    const retentionWindow = beforeDate
+      ? { gt: fourteenDaysAgo, lt: beforeDate }
+      : { gt: fourteenDaysAgo };
+    const seqWindow = beforeSeq !== null ? { lt: beforeSeq } : undefined;
+
     const messageWhere = {
       conversationId,
-      createdAt: beforeDate
-        ? { gt: fourteenDaysAgo, lt: beforeDate }
-        : { gt: fourteenDaysAgo },
+      createdAt: retentionWindow,
+      ...(seqWindow ? { seq: seqWindow } : {}),
       OR: [
         { expiresAt: null },
         { expiresAt: { gt: now } }
@@ -79,7 +91,9 @@ router.get('/:conversationId', async (req, res, next) => {
     const messages = await prisma.message.findMany({
       where: messageWhere,
       take: take + 1,
-      orderBy: { createdAt: 'desc' }, 
+      // [docs/28 Tier 2 — B1] urutan utama = seq (createdAt hanya tie-break
+      // untuk baris legacy yang semuanya seq=0).
+      orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
       include: {
         statuses: true // Biarkan untuk kompatibilitas tipe balikan (meskipun isinya mungkin kosong)
       }
@@ -94,15 +108,14 @@ router.get('/:conversationId', async (req, res, next) => {
       where: {
         conversationId,
         type: 'SYSTEM',
-        createdAt: beforeDate
-          ? { gt: fourteenDaysAgo, lt: beforeDate }
-          : { gt: fourteenDaysAgo },
+        createdAt: retentionWindow,
+        ...(seqWindow ? { seq: seqWindow } : {}),
         OR: [
           { expiresAt: null },
           { expiresAt: { gt: now } }
         ]
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
       take: 50,
       include: {
         statuses: true
@@ -114,15 +127,14 @@ router.get('/:conversationId', async (req, res, next) => {
       where: {
         conversationId,
         type: 'SYSTEM',
-        createdAt: beforeDate
-          ? { gt: fourteenDaysAgo, lt: beforeDate }
-          : { gt: fourteenDaysAgo },
+        createdAt: retentionWindow,
+        ...(seqWindow ? { seq: seqWindow } : {}),
         OR: [
           { expiresAt: null },
           { expiresAt: { gt: now } }
         ]
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
       include: {
         statuses: true
       }
@@ -133,21 +145,38 @@ router.get('/:conversationId', async (req, res, next) => {
     [...page, ...systemMessagesDesc].forEach(msg => allMessagesMap.set(msg.id, msg));
     if (firstSystemMessage) allMessagesMap.set(firstSystemMessage.id, firstSystemMessage);
     
-    const mergedMessages = Array.from(allMessagesMap.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    // [docs/28 Tier 2 — B1] urut utama seq desc; createdAt tie-break legacy.
+    const mergedMessages = Array.from(allMessagesMap.values()).sort((a, b) => {
+      const sa = a.seq ?? 0;
+      const sb = b.seq ?? 0;
+      if (sa !== sb) return sb - sa;
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
 
     // FIX 1: Suntikkan null untuk repliedToId agar TS tidak error
-    const safeMessages = mergedMessages.map(msg => toRawServerMessage(ensureLegacyMessageFields(msg)));
+    // [docs/28 Tier 2 — 2.2] kolom repliedToId TER-SEAL → buka per-pesan sebelum
+    // dikirim (mapper sengaja mengosongkannya agar nilai ter-seal tak bocor).
+    const safeMessages = await Promise.all(mergedMessages.map(async (msg) => {
+      const mapped = toRawServerMessage(ensureLegacyMessageFields(msg));
+      const realReply = await resolveRepliedToId(msg.repliedToId);
+      if (realReply) mapped.repliedToId = realReply;
+      return mapped;
+    }));
     
     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
     const items = safeMessages.reverse();
 
-    // Cursor berikutnya = createdAt pesan USER tertua di halaman ini (bukan
-    // system, yang di-include penuh tiap halaman agar tidak pernah bolong).
+    // Cursor berikutnya = pesan USER tertua di halaman ini (bukan system, yang
+    // di-include penuh tiap halaman agar tidak pernah bolong).
+    // [docs/28 Tier 2 — B1] Kursor = seq bila tersedia (baris baru); baris
+    // legacy (seq=0) → fallback ISO createdAt agar klien lama tetap jalan.
     const oldestUserMessage = page.length > 0 ? page[page.length - 1] : null;
     const nextCursor = hasMore && oldestUserMessage
-      ? (oldestUserMessage.createdAt instanceof Date
-          ? oldestUserMessage.createdAt.toISOString()
-          : new Date(oldestUserMessage.createdAt).toISOString())
+      ? ((oldestUserMessage.seq && oldestUserMessage.seq > 0)
+          ? String(oldestUserMessage.seq)
+          : (oldestUserMessage.createdAt instanceof Date
+              ? oldestUserMessage.createdAt.toISOString()
+              : new Date(oldestUserMessage.createdAt).toISOString()))
       : null;
 
     res.json({ items, hasMore, nextCursor })
@@ -181,32 +210,42 @@ router.post('/', zodValidate({
     const { conversationId, content, sessionId, tempId, expiresIn, isViewOnce } = req.body
 
     // HITUNG TTL (Umur Pesan di Server)
-    // Jika tidak ada expiresIn, set otomatis dihancurkan dalam 14 Hari (Store-and-Forward rules)
-    const defaultTTL = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); 
-    const finalExpiresAt = (expiresIn && typeof expiresIn === 'number' && expiresIn > 0)
-        ? new Date(Date.now() + expiresIn * 1000)
-        : defaultTTL;
+    // Jika tidak ada expiresIn, set otomatis dihancurkan dalam 14 Hari (Store-and-Forward rules).
+    // [docs/28 Tier 2 — B3] createdAt dikasar (15 mnt); expiresAt diturunkan dari
+    // waktu kasar yang SAMA supaya presisi tidak bocor lewat expiresAt − TTL.
+    const messageAt = messageTimeBucket();
+    const ttlMs = (expiresIn && typeof expiresIn === 'number' && expiresIn > 0)
+        ? expiresIn * 1000
+        : 14 * 24 * 60 * 60 * 1000;
+    const finalExpiresAt = new Date(messageAt.getTime() + ttlMs);
 
     // SIMPAN KE "KANTOR POS" SEMENTARA
-    const [newMessageRaw] = await prisma.$transaction([
-      prisma.message.create({
+    // [docs/28 Tier 2 — B1] seq atomik per-conversation (urutan tak lagi dari
+    // createdAt). Ambil seq + create dalam satu transaksi.
+    const newMessageRaw = await prisma.$transaction(async (tx) => {
+      const seq = await reserveMessageSeq(tx as unknown as SeqPrismaClient, conversationId);
+      const created = await tx.message.create({
         data: {
           conversationId,
           senderId: null,
           content,
           sessionId: sessionId || null,
+          seq,
+          createdAt: messageAt,
           expiresAt: finalExpiresAt,
           isViewOnce: isViewOnce === true
         },
         include: {
           statuses: true
         }
-      }),
-      prisma.conversation.update({
+      });
+      await tx.conversation.update({
         where: { id: conversationId },
-        data: { lastMessageAt: new Date() }
-      })
-    ])
+        // [docs/28 Tier 2 — B3] lastMessageAt dari waktu kasar yang sama.
+        data: { lastMessageAt: messageAt }
+      });
+      return created;
+    })
 
     // FIX 2: Suntikkan null untuk repliedToId
     const safeMessage = toRawServerMessage(ensureLegacyMessageFields(newMessageRaw));

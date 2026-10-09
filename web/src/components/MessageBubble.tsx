@@ -236,7 +236,8 @@ function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true }
             <FiClock size={10} /> {timeLeft}
           </span>
         )}
-        <span className="text-[10px] font-medium tracking-wide opacity-90">{formatTime(message.createdAt)}</span>
+        <span className="text-[10px] font-medium tracking-wide opacity-90">{/* [docs/28 Tier 2 — B2] utamakan waktu presisi dari ciphertext (sentAt). */}
+        {formatTime(message.sentAt ? new Date(message.sentAt).toISOString() : message.createdAt)}</span>
         {message.isEdited && <span className="opacity-70 italic text-[10px]">{t('messages.edited', '(edited)')}</span>}
       </div>
     </div>

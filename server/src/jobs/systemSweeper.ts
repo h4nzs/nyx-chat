@@ -45,13 +45,14 @@ export const startSystemSweeper = () => {
       // 3. 💀 DEAD MAN'S SWITCH (Auto-Destruct Accounts)
       const usersWithSwitch = await prisma.user.findMany({
         where: { autoDestructDays: { not: null } },
-        select: { id: true, lastActiveAt: true, autoDestructDays: true }
+        // [docs/28 Tier 2 — B4] kolom diganti `lastActiveDay` (bucket harian).
+        select: { id: true, lastActiveDay: true, autoDestructDays: true }
       });
 
       let nukedCount = 0;
       for (const u of usersWithSwitch) {
         if (!u.autoDestructDays) continue;
-        const deadline = new Date(u.lastActiveAt);
+        const deadline = new Date(u.lastActiveDay);
         deadline.setDate(deadline.getDate() + u.autoDestructDays);
         
         if (now > deadline) {

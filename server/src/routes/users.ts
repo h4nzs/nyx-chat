@@ -2,6 +2,8 @@ import { sendJsonToUser, broadcastToUsers, emitEventToUser, emitEventToUsers } f
 import { clearAuthCookies } from '../utils/sessionUtils.js';
 import { redisClient } from '../lib/redis.js';
 import { TransportOpCode } from '@nyx/shared';
+// [docs/28 Tier 1.5 / D14] key cache Redis memakai tag, bukan userId asli.
+import { identityKey } from '../utils/redisIdentity.js';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -16,7 +18,12 @@ import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { asUserId, type UserId } from '@nyx/shared'
 import { AuthJwtPayload } from '../types/auth.js';
-import { identifierLookupCandidates, pepperedIdentifier } from '../utils/atRestSecrets.js';
+import {
+  deviceInstallationTag,
+  identifierLookupCandidates,
+  openAtRest,
+  pepperedIdentifier,
+} from '../utils/atRestSecrets.js';
 import {
   blockedUserTag, purgeSealedUserRows, resolveRoutingUser, routingCandidates,
   type SealedOwnedRowsPrisma
@@ -74,14 +81,20 @@ router.get('/me/devices', async (req, res, next) => {
 
     const devices = await prisma.device.findMany({
       where: { userId },
-      orderBy: { lastActiveAt: 'desc' },
-      select: { id: true, name: true, lastActiveAt: true, createdAt: true }
+      // [docs/28 Tier 2 — B4] lastActiveAt kini di-bucket (15 menit) → tie-break
+      // deterministik dengan createdAt supaya pemilihan device stabil.
+      orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }],
+      // [docs/28 Tier 1.5] label perangkat tersimpan ter-seal → dibuka saat read.
+      select: { id: true, nameSealed: true, lastActiveAt: true, createdAt: true }
     })
 
-    res.json(devices.map(d => ({
-      ...d,
+    res.json(await Promise.all(devices.map(async (d) => ({
+      id: d.id,
+      name: (await openAtRest(d.nameSealed)) ?? 'Unknown Device',
+      lastActiveAt: d.lastActiveAt,
+      createdAt: d.createdAt,
       isCurrent: d.id === authUser.deviceId
-    })))
+    }))))
   } catch (error) { next(error) }
 })
 
@@ -383,14 +396,16 @@ router.put('/me/keys',
             signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : undefined,
             fingerprint: fingerprint || undefined,
-            installationId: installationId || undefined
+            // [docs/28 Tier 1.5] anchor disimpan sebagai TAG (bukan nilai mentah).
+            installationTag: installationId ? deviceInstallationTag(installationId) : undefined
         }
       })
 
       // Invalidate cached identity/prekey bundles agar recipient tidak menerima key lama (stale up to 1h)
+      // [docs/28 Tier 1.5 / D14] sufiks key = tag (Redis tak memuat userId asli).
       await Promise.all([
-        redisClient.del(`cache:keys:bundle:${userId}`),
-        redisClient.del(`cache:keys:public:${userId}`)
+        redisClient.del(identityKey('cache:keys:bundle', userId)),
+        redisClient.del(identityKey('cache:keys:public', userId))
       ]).catch((e: unknown) => console.warn('[Keys] Failed to invalidate key cache:', e))
 
       res.status(200).json({ message: 'Keys updated successfully.' })
@@ -516,7 +531,9 @@ router.get('/search', async (req, res, next) => {
         isVerified: true, 
         hasCompletedOnboarding: true, 
         devices: { 
-          orderBy: { lastActiveAt: 'desc' }, 
+          // [docs/28 Tier 2 — B4] lastActiveAt kini di-bucket (15 menit) → tie-break
+      // deterministik dengan createdAt supaya pemilihan device stabil.
+      orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }], 
           take: 1, 
           select: { publicKey: true, pqPublicKey: true, signingKey: true } 
         } 
@@ -554,7 +571,9 @@ router.get('/:id', async (req, res, next) => {
         // verify encryption handshake di modal profil. Tanpa ini modal selalu
         // menampilkan "user belum menyiapkan kunci".
         devices: {
-          orderBy: { lastActiveAt: 'desc' },
+          // [docs/28 Tier 2 — B4] lastActiveAt kini di-bucket (15 menit) → tie-break
+      // deterministik dengan createdAt supaya pemilihan device stabil.
+      orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }],
           take: 1,
           select: { publicKey: true, pqPublicKey: true, signingKey: true }
         }

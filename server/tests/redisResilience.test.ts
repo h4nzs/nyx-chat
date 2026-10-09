@@ -9,6 +9,8 @@ import {
   type EvalLikeClient,
   type PublishLikeClient,
 } from '../src/utils/redisResilience.js';
+// [docs/28 Tier 1.5 / D14] key rate-limit memakai tag identitas, bukan userId asli.
+import { identityTag } from '../src/utils/redisIdentity.js';
 
 describe('checkRateLimit (fail-open saat Redis bermasalah)', () => {
   test('mengizinkan ketika hitungan <= limit', async () => {
@@ -46,7 +48,13 @@ describe('checkRateLimit (fail-open saat Redis bermasalah)', () => {
     };
     await createCheckRateLimit(client)('u4', 'presence_update', 30, 45);
     assert.ok(captured);
-    assert.deepEqual(captured!.keys, ['rate_limit:socket:presence_update:u4']);
+    // [docs/28 Tier 1.5 / D14] sufiks key adalah HMAC(pepper, 'redis:v1:u4'),
+    // BUKAN userId asli — dump Redis tidak bisa memetakan key ke user.
+    assert.deepEqual(captured!.keys, [`rate_limit:socket:${identityTag('u4')}:presence_update`]);
+    assert.ok(
+      !captured!.keys[0]!.includes('u4'),
+      'regresi D14: userId asli muncul di nama key Redis'
+    );
     assert.deepEqual(captured!.arguments, ['45']);
   });
 

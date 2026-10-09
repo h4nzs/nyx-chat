@@ -317,7 +317,8 @@ if (socket?.connected) {
     (window as { currentReactionHandler?: (emoji: string) => void }).currentReactionHandler = reactToMessage;
 
     // Limit edit window to 5 minutes (300,000 ms)
-    const isWithinEditWindow = (Date.now() - new Date(message.createdAt).getTime()) < 5 * 60 * 1000;
+    // [docs/28 Tier 2 — B2] pakai waktu presisi (sentAt) bila ada.
+    const isWithinEditWindow = (Date.now() - new Date(message.sentAt ?? message.createdAt).getTime()) < 5 * 60 * 1000;
     
     const isEditable = mine && 
                        !message.optimistic && 

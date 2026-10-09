@@ -10,7 +10,7 @@ datasource db {
 }
 
 model User {
-  id               String  @id @default(cuid())
+  id               String  @id @default(uuid())
   usernameHash     String  @unique
   passwordHash     String
   encryptedProfile String? @db.Text
@@ -32,7 +32,10 @@ model User {
   role             String    @default("USER")
   bannedAt         DateTime?
   banReason        String?
-  lastActiveAt     DateTime  @default(now())
+  // [docs/28 Tier 2 — B4] Hari aktivitas terakhir (dipotong ke hari, UTC) —
+  // dipakai dead man's switch. Presisi detik tak diperlukan & hanya menambah
+  // pola temporal pada dump. Lihat utils/temporalBucket.ts.
+  lastActiveDay    DateTime  @default(now())
   autoDestructDays Int?
   currentChallenge String?
 
@@ -48,20 +51,24 @@ model User {
   authenticators      Authenticator[]
 
   // --- MULTI-TENANCY (B2B BaaS) ---
-  tenantId   String?
-  tenant     Tenant? @relation(fields: [tenantId], references: [id])
-  externalId String?
+  // [docs/28 Tier 1.5 / D4] `externalId` adalah identitas ASLI pelanggan B2B
+  // (dari tenant) — disimpan TER-SEAL (AEAD deterministik) supaya dump tidak
+  // memuat daftar identitas pelanggan, tetapi lookup `tenantId+externalId` dan
+  // pengembalian nilai ke tenant tetap bekerja (unseal saat read).
+  tenantId         String?
+  tenant           Tenant? @relation(fields: [tenantId], references: [id])
+  externalIdSealed String? @db.Text
 
-  @@unique([tenantId, externalId])
+  @@unique([tenantId, externalIdSealed])
   @@index([createdAt])
-  @@index([autoDestructDays, lastActiveAt])
+  @@index([autoDestructDays, lastActiveDay])
 }
 
 // ==========================================
 // 🏢 TABEL BARU: TENANT (B2B BaaS)
 // ==========================================
 model Tenant {
-  id             String   @id @default(cuid())
+  id             String   @id @default(uuid())
   name           String
   apiKey         String   @unique
   allowedDomains String[]
@@ -78,11 +85,18 @@ model Tenant {
 // 📱 TABEL BARU: DEVICE (PERANGKAT)
 // ==========================================
 model Device {
-  id             String  @id @default(cuid())
-  userId         String
-  name           String? // e.g., "Chrome on MacOS", "iPhone 15"
-  fingerprint    String? // Browser/Hardware fingerprint for security verification
-  installationId String? // Persistent installation anchor from IndexedDB
+  id     String @id @default(uuid())
+  userId String
+  // [docs/28 Tier 1.5] Label perangkat di-set KLIEN ("Chrome on MacOS") —
+  // menyimpan plaintext = sidik jari platform presisi di dump. Disimpan
+  // ter-seal; dibuka saat daftar sesi ditampilkan (routes/sessions.ts).
+  nameSealed  String? @db.Text
+  fingerprint String? // HMAC(pepper) — lihat utils/atRestSecrets.ts
+  // [docs/28 Tier 1.5] Anchor instalasi persisten dari IndexedDB. Nilai mentah
+  // (stabil lintas akun di browser yang sama) tidak pernah persist: yang
+  // disimpan tag HMAC(pepper, "install:"+nilai) — perbandingan binding tetap
+  // bekerja karena klien selalu mengirim nilai mentahnya.
+  installationTag String?
 
   // Identitas Kriptografi (Pindahan dari tabel User)
   publicKey           Bytes // Encryption/Identity Key
@@ -91,6 +105,9 @@ model Device {
   encryptedPrivateKey Bytes?
 
   createdAt    DateTime @default(now())
+  // [docs/28 Tier 2 — B4] Dipotong ke 15 menit (deviceActivityBucket()) supaya
+  // dump tidak memuat jam aktivitas perangkat yang presisi; pembaca "device
+  // terbaru" memakai tie-break createdAt.
   lastActiveAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -107,12 +124,15 @@ model Device {
 }
 
 model OneTimePreKey {
-  id          String   @id @default(cuid())
+  id          String   @id @default(uuid())
   keyId       Int
   deviceId    String // Diubah dari userId
   publicKey   Bytes // Classical
   pqPublicKey Bytes? // NEW: Post-Quantum
-  createdAt   DateTime @default(now())
+  // [docs/28 Tier 2 — 2.4] `createdAt` DIHAPUS: baris OTPK sudah dihapus atomik
+  // tepat saat dipakai (keys.ts: DELETE ... RETURNING), jadi tak ada riwayat
+  // waktu. Urutan "paling tua dulu" kini memakai `keyId` (monotonik per batch)
+  // — tanpa kolom timestamp yang bisa bocor ke dump.
 
   device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
@@ -134,7 +154,7 @@ model PreKeyBundle {
 }
 
 model RefreshToken {
-  id            String        @id @default(cuid())
+  id            String        @id @default(uuid())
   jti           String        @unique
   familyId      String        @default("legacy") // Groups tokens from the same original session (rotation chain). Default for legacy tokens pre-migration.
   deviceId      String // Sesi login diikat ke Perangkat
@@ -159,7 +179,7 @@ model RefreshToken {
 }
 
 model SessionKey {
-  id                   String       @id @default(cuid())
+  id                   String       @id @default(uuid())
   conversationId       String
   conversation         Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade) // INI YANG DITAMBAHKAN
   sessionId            String
@@ -177,12 +197,17 @@ model SessionKey {
 }
 
 model PushSubscription {
-  id        String   @id @default(cuid())
-  endpoint  String   @unique
-  p256dh    String
-  auth      String
-  deviceId  String // Push Token Notifikasi diikat per-Perangkat
-  createdAt DateTime @default(now())
+  id String @id @default(uuid())
+  // [docs/28 Tier 1.5 / D10] `endpoint` FCM/APNs adalah identifier perangkat
+  // (dan korelasinya lintas akun). Disimpan TER-SEAL (AEAD deterministik) supaya
+  // dump tidak memuatnya, tetapi uniqueness + lookup `where endpoint` tetap
+  // bekerja (seal nilai yang datang dari klien); endpoint asli dibuka hanya saat
+  // mengirim push (utils/sendPushNotification.ts).
+  endpointSealed String @unique @db.Text
+  p256dh         String
+  auth           String
+  deviceId       String // Push Token Notifikasi diikat per-Perangkat
+  createdAt      DateTime @default(now())
 
   device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
@@ -190,7 +215,7 @@ model PushSubscription {
 }
 
 model Conversation {
-  id                String  @id @default(cuid())
+  id                String  @id @default(uuid())
   isGroup           Boolean @default(false)
   encryptedMetadata String?
   authSecret        String? // Secret token for blind authorization (Opaque Mailbox)
@@ -199,10 +224,19 @@ model Conversation {
   // server tahu roster/role. Hash boleh plaintext-kolom (input 256-bit random).
   adminSecretHash   String?
 
+  // [docs/28 Tier 2 — B1] Counter monotonik per-conversation untuk `Message.seq`.
+  // Di-increment atomik (Prisma `increment`) setiap pesan dibuat; urutan pesan
+  // TIDAK lagi bergantung pada jam dinding (`Message.createdAt`), sehingga
+  // createdAt boleh dikasar (B3) tanpa merusak urutan/scroll-history.
+  messageSeq        Int     @default(0)
+
   // --- MULTI-TENANCY (B2B BaaS) ---
   tenantId String?
   tenant   Tenant? @relation(fields: [tenantId], references: [id])
-  metadata Json?
+  // [docs/28 Tier 1.5 / D4] `metadata Json?` (JSON bebas dari tenant) DIHAPUS:
+  // server tidak pernah membacanya (write-only di engine.ts) tetapi dump bisa
+  // memuat plaintext apa pun yang ditulis tenant. Tidak ada konsumen → kolom
+  // dibuang, bukan di-seal.
 
   lastMessageAt DateTime?                @db.Timestamptz(6)
   createdAt     DateTime                 @default(now())
@@ -227,7 +261,10 @@ enum SubscriptionTier {
 }
 
 model Message {
-  id             String       @id @default(cuid())
+  // [docs/28 Tier 2 — B5] id NON-time-ordered (uuid v4). `cuid()` menyematkan
+  // waktu (monotonik) sehingga dump DB bisa mengurutkan/menebak waktu walau
+  // createdAt dikasar. Klien memperlakukan id sebagai opaque string.
+  id             String       @id @default(uuid())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
   // [T1 GROUP PSEUDONYMS] Bukan FK ke User: pesan grup v2 mem-persist
@@ -239,15 +276,22 @@ model Message {
 
   sessionId           String?
   encryptedSessionKey String?
+  // [docs/28 Tier 2 — B1] Urutan monotonik per-conversation (dari
+  // `Conversation.messageSeq`). 0 = baris legacy/backfill belum jalan.
+  seq                 Int             @default(0)
   createdAt           DateTime        @default(now())
   statuses            MessageStatus[]
   expiresAt           DateTime?
   isViewOnce          Boolean         @default(false)
   isViewed            Boolean         @default(false)
 
+  // [docs/28 Tier 2 — 2.2] TER-SEAL (sealAtRest): dump DB tidak memuat edge
+  // balasan. Mapper mengosongkan field ini dan pemanggil read membukanya via
+  // resolveRepliedToId(); baris legacy plaintext tetap terbaca.
   repliedToId String? @map("replied_to_id")
 
   @@index([conversationId, createdAt(sort: Desc)])
+  @@index([conversationId, seq(sort: Desc)])
   @@index([senderId])
   @@index([sessionId])
   @@index([createdAt])
@@ -262,14 +306,20 @@ enum DeliveryStatus {
 }
 
 model MessageStatus {
-  id        String         @id @default(cuid())
+  id        String         @id @default(uuid())
   message   Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
   messageId String
-  // [T3a] Bukan FK ke User: grup metadata v2 mem-persist PSEUDONYM di kolom
-  // ini (opaque, unlinkable); 1:1 / grup v1 tetap menyimpan userId asli.
+  // [T3a + docs/28 Tier 1.1 — D2] Bukan FK ke User. Grup v2 menyimpan
+  // PSEUDONYM dari klien (opaque, unlinkable). 1:1 & grup v1 menyimpan
+  // `conversationScopedTag` (HMAC per-conversation, lihat utils/atRestSecrets.ts)
+  // — userId asli TIDAK pernah persist, sehingga dump DB tidak bisa
+  // merekonstruksi "siapa membaca pesan apa".
   userId    String
   status    DeliveryStatus @default(SENT)
-  updatedAt DateTime       @updatedAt
+  // [docs/28 Tier 2 — B3] coarse (dipotong 15 mnt). `@updatedAt` dihapus karena
+  // Prisma akan menimpa dengan waktu presisi; nilai ditulis EKSPLISIT oleh kedua
+  // jalur receipt (realtimeHandlers) via messageTimeBucket().
+  updatedAt DateTime
 
   @@unique([messageId, userId])
   @@index([userId, status])
@@ -279,11 +329,15 @@ model MessageStatus {
 }
 
 model UserHiddenConversation {
-  id             String       @id @default(cuid())
+  id             String       @id @default(uuid())
   // [T3b TOKEN-FIRST — doc 26.2/26.8.1] Membership/discovery bar = POSES
   // TOKEN, bukan join userId. `userId` nullable & HANYA untuk routing internal
   // (relay pesan, push, sweeper) — tidak pernah dipakai untuk discovery.
   // Trigger #1 upgrade 26.8.1 (token-only endpoints) kini tertutup.
+  // [docs/28 Tier 1.2 — D2] Nilai kolom = routing identity TER-SEAL
+  // (sealAtRest, kunci dari NYX_AT_REST_PEPPER), bukan userId asli. Server tetap
+  // membukanya untuk routing internal (utils/routingIdentity.ts), tetapi dump DB
+  // sendirian tidak memuat daftar keanggotaan.
   userId         String?
   conversationId String
   // Opaque per-(group, member) delivery token. Wajib: setiap baris keanggotaan
@@ -303,7 +357,7 @@ model UserHiddenConversation {
 // Serial tidak membawa identitas — klien yang membawa (msg, sig) valid dianggap
 // anggota. Baris dihapus saat revocation (kick/leave) → credential mati.
 model GroupCredential {
-  id             String   @id @default(cuid())
+  id             String   @id @default(uuid())
   serial         String   @unique // 64-hex = SHA-384 dari prepared message
   conversationId String
   keyVersion     Int // versi issuer key yang menandatangani
@@ -346,7 +400,7 @@ model Authenticator {
 // permusuhan dalam bentuk identitas. Nullable supaya `prisma db push` tetap
 // jalan di tabel yang sudah berisi baris lama (NULL = baris legacy, diabaikan).
 model BlockedUser {
-  id         String   @id @default(cuid())
+  id         String   @id @default(uuid())
   blockerTag String?
   blockedTag String?
   createdAt  DateTime @default(now())

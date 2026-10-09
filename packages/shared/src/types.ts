@@ -104,6 +104,11 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
   fileType?: string;
   fileSize?: number;
   sessionId?: string | null;
+  // [docs/28 Tier 2 — B1] urutan per-conversation; 0/undefined = legacy.
+  seq?: number;
+  // [docs/28 Tier 2 — B2] waktu kirim PRESISI (ms) — dikirim di dalam ciphertext,
+  // bukan kolom server. UI memakai ini bila ada, fallback `createdAt`.
+  sentAt?: number;
   createdAt: string;
   error?: boolean;
   preview?: string;

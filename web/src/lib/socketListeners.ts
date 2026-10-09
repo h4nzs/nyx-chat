@@ -8,6 +8,8 @@ import { useAuthStore } from '../store/auth';
 import { captureAndLog } from '@utils/feedback';
 import { useConnectionStore } from '../store/connection';
 import { usePresenceStore } from '../store/presence';
+// [docs/28 Tier 1.5 / D14] presence lazy: minta ulang langganan tiap koneksi baru.
+import { resetPresenceSubscriptionCache } from './presenceSubscribe';
 import { RawServerMessageSchema, type RawServerMessage, type Message, type Participant, type User, type BinaryPayload, type Conversation, asMessageId, asConversationId, asUserId } from '@nyx/shared';
 
 let isInitialized = false;
@@ -154,6 +156,10 @@ export function initSocketListeners() {
     useConnectionStore.getState().setStatus('connected');
     
     // User is active by default on connect
+    // [docs/28 Tier 1.5 / D14] Koneksi baru = langganan presence lama sudah
+    // dibuang server (registry in-memory) → lupakan cache lokal supaya hook
+    // presence mengirim ulang `presence:subscribe`.
+    resetPresenceSubscriptionCache();
     transportClient.sendEvent('user:active');
 
     // Offline Sync: fetch pending messages for all active conversations
@@ -329,7 +335,18 @@ export function initSocketListeners() {
       const parsed = JSON.parse(new TextDecoder().decode(payload)) as unknown;
       const data = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {};
       if (data.type === 'bulk' && Array.isArray(data.userIds)) {
+        // Warisan server lama (roster penuh) — tetap dikenali agar klien baru
+        // tidak buta saat server belum di-upgrade.
         usePresenceStore.getState().setOnlineUsers(Array.from(data.userIds as unknown[], id => String(id)));
+      } else if (data.type === 'sync' && Array.isArray(data.statuses)) {
+        // [docs/28 Tier 1.5 / D14] balasan langganan presence per-kontak.
+        const statuses = (data.statuses as unknown[])
+          .map((raw) => {
+            const s = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+            return { userId: typeof s.userId === 'string' ? s.userId : '', online: s.online === true };
+          })
+          .filter((s) => s.userId.length > 0);
+        usePresenceStore.getState().applyStatuses(statuses);
       } else if (data.type === 'join' && typeof data.userId === 'string') {
         usePresenceStore.getState().userJoined(data.userId);
       } else if (data.type === 'leave' && typeof data.userId === 'string') {

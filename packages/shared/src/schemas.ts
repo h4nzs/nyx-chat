@@ -175,6 +175,9 @@ const RawServerMessageBaseSchema = z.object({
   isBlindAttachment: z.boolean().optional(),
   sessionId: z.string().nullable().optional(),
   encryptedSessionKey: PayloadStringSchema.optional().nullable(),
+  // [docs/28 Tier 2 — B1] Sequence per-conversation (urutan tak lagi bergantung
+  // pada jam dinding). Optional agar baris/klien legacy tetap valid.
+  seq: z.number().optional(),
   createdAt: z.string(),
   repliedToId: z.string().optional(),
   linkPreview: z.unknown().optional(),
@@ -227,6 +230,9 @@ export const ShadowVaultMessageSchema = z.object({
   isDeletedLocal: z.boolean().optional(),
   fileMeta: z.string().optional(),
   expiresAt: z.string().nullable().optional(),
+  // [docs/28 Tier 2 — B2] waktu kirim presisi (dari ciphertext) — dipersist lokal
+  // agar tampilan tetap presisi setelah reload (server hanya punya createdAt kasar).
+  sentAt: z.number().optional(),
 }).passthrough();
 
 // --- Transport Payload Schemas ---

@@ -26,6 +26,8 @@ import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
+// [docs/28 Tier 1.5 / D14] presence lazy (langganan per-kontak).
+import { usePresenceSubscription } from '@hooks/usePresenceSubscription';
 import { useSettingsStore } from '@store/settings';
 import { getParticipantUserId } from '@nyx/shared';
 import type { MinimalProfile } from '@store/callStore';
@@ -89,6 +91,10 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const avatarUrl = conversation.isGroup 
     ? conversation.decryptedMetadata?.avatarUrl 
     : peerProfile.avatarUrl;
+  // [docs/28 Tier 1.5 / D14] presence lazy: header chat meminta status peer-nya
+  // sendiri (1:1) alih-alih mengandalkan snapshot saat connect.
+  usePresenceSubscription(peerUser ? [peerUser.id] : []);
+
   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
   const isConvVerified = verifiedStatus[conversation.id] || false;
 

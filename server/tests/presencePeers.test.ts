@@ -107,18 +107,26 @@ test('D14 wiring: roster global tidak lagi dikirim ke klien / di-broadcast', () 
       /broadcastToUsers\(onlineUsers,/,
       `${name}: broadcast tidak boleh memakai seluruh roster online_users`
     );
-    assert.match(src, /collectPresencePeers\(/, `${name}: presence memakai daftar peer`);
-    assert.match(src, /intersectOnline\(peers, onlineUsers\)/, `${name}: join/leave hanya ke peer yang online`);
+    // Presence kini lazy (opt-in): join/leave hanya di-fan-out ke klien yang
+    // BENAR-BENAR berlangganan user tersebut — bukan ke seluruh peer online.
+    assert.match(src, /notifyPresenceWatchers\(/, `${name}: join/leave hanya ke watcher`);
   }
 
-  assert.match(
-    handlers,
-    /type: 'bulk', userIds: peersOnline/,
-    'snapshot presence berisi peer, bukan seluruh user online'
-  );
+  // Server menurunkan daftar peer sendiri, memvalidasi langganan terhadapnya,
+  // dan membalas status peer yang benar-benar disimpan.
+  assert.match(handlers, /collectPresencePeers\(/, 'presence memakai daftar peer');
+  assert.match(handlers, /subscribePresence\(/, 'presence memakai registry langganan');
+  assert.match(handlers, /peerSet\.has\(id\)/, 'langganan hanya boleh untuk peer yang dikenal');
+  assert.match(handlers, /type: 'sync', statuses/, 'balasan presence berisi status peer yang disimpan');
   assert.doesNotMatch(
     handlers,
     /sendJsonToUser\(userId, TransportOpCode\.PRESENCE, \{ type: 'bulk', userIds: onlineUsers \}\)/,
     'regresi D14: snapshot roster global'
   );
+
+  // Redis tidak lagi memuat userId asli di `online_users`.
+  assert.match(handlers, /sAdd\('online_users', identityTag\(userId\)\)/, 'keanggotaan online_users memakai tag');
+  assert.match(bridge, /sRem\('online_users', identityTag\(userId\)\)/, 'keluar online_users memakai tag');
+  assert.doesNotMatch(handlers, /sAdd\('online_users', userId\)/, 'regresi D14: userId asli di SET online_users');
+  assert.doesNotMatch(bridge, /sRem\('online_users', userId\)/, 'regresi D14: userId asli di SET online_users');
 });

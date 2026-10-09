@@ -25,7 +25,13 @@ function makeCtx() {
 
   const fakePrisma = new Proxy({}, {
     get(_t, prop: string) {
-      if (prop === '$transaction') return async (fns: unknown[]) => Promise.all(fns as Promise<unknown>[]);
+      if (prop === '$transaction') return async (arg: unknown) => {
+        // [docs/28 Tier 2 — B1] dukung transaksi INTERAKTIF (callback) + array.
+        // tx = ctx.prisma yang SEDANG aktif, supaya override test (message.create
+        // counter/throw) ikut terpakai di dalam transaksi.
+        if (typeof arg === 'function') return (arg as (tx: unknown) => unknown)(ctx.prisma);
+        return Promise.all(arg as Promise<unknown>[]);
+      };
       return new Proxy({}, {
         get(_m, method: string) {
           if (method === 'findUnique') {
@@ -49,7 +55,12 @@ function makeCtx() {
               sender: { id: 'u1', encryptedProfile: null },
             });
           }
-          if (method === 'update' || method === 'delete' || method === 'upsert' || method === 'deleteMany') {
+          if (method === 'update') {
+            // conversation.update dipakai reserveMessageSeq (B1) → beri counter.
+            if (prop === 'conversation') return async () => ({ messageSeq: 1 });
+            return async () => ({});
+          }
+          if (method === 'delete' || method === 'upsert' || method === 'deleteMany') {
             return async () => ({});
           }
           return async () => ({});
@@ -286,10 +297,13 @@ test('T1: chat_message grup dengan senderPseudonym tersimpan dengan pseudonym, b
       if (prop === 'conversation') {
         return {
           findUnique: async () => ({ id: 'c1', isGroup: true }),
-          update: async () => ({}),
+          update: async () => ({ messageSeq: 1 }),
         };
       }
-      if (prop === '$transaction') return async (fns: unknown[]) => Promise.all(fns as Promise<unknown>[]);
+      if (prop === '$transaction') return async (arg: unknown) => {
+        if (typeof arg === 'function') return (arg as (tx: unknown) => unknown)(ctx.prisma);
+        return Promise.all(arg as Promise<unknown>[]);
+      };
       return (target as Record<string, unknown>)[prop];
     },
   }) as unknown as RealtimeContext['prisma'];

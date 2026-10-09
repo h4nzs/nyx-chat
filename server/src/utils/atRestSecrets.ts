@@ -195,6 +195,20 @@ export function conversationScopedTag(conversationId: string, userId: string): s
   return pepperedIdentifier(`receipt:${conversationId}:${userId}`)
 }
 
+/**
+ * [docs/28 Tier 1.5] Tag anchor instalasi perangkat (`Device.installationTag`).
+ *
+ * Nilai mentahnya random & persisten di IndexedDB — jadi ia mengidentifikasi
+ * browser yang sama lintas akun/sesi (dan ikut di-hash di TS di klien sebagai
+ * query param). Yang dibutuhkan server hanya *perbandingan* (binding perangkat),
+ * sehingga tag satu arah sudah cukup: dump tanpa pepper tidak bisa memakainya
+ * untuk mengorelasikan perangkat. Domain-separated (`install:`) supaya tag tidak
+ * pernah sama dengan blind index lain.
+ */
+export function deviceInstallationTag(raw: string): string {
+  return pepperedIdentifier(`install:${raw}`)
+}
+
 /** Hanya untuk test: buang cache pepper/key supaya env baru terbaca. */
 export function clearAtRestSecretCacheForTests(): void {
   cachedPepper = null

@@ -74,6 +74,14 @@ export interface KeyFulfillmentPayload {
   drHeader?: any;
 }
 
+/**
+ * [docs/28 Tier 1.5 / D14] Status presence balasan langganan (`type: 'sync'`
+ * pada wire opcode PRESENCE). Hanya memuat peer yang benar-benar disubscribe.
+ */
+export interface PresenceSyncPayload {
+    statuses: Array<{ userId: string; online: boolean }>;
+}
+
 export interface ServerToClientEvents {
     connect: () => void;
     disconnect: (reason: string) => void;
@@ -102,6 +110,12 @@ export interface ServerToClientEvents {
     "presence:init": (onlineUserIds: string[]) => void;
     "presence:user_joined": (userId: string) => void;
     "presence:user_left": (userId: string) => void;
+    /**
+     * [docs/28 Tier 1.5 / D14] Balasan langganan presence per-kontak. Di wire
+     * (opcode PRESENCE) bentuknya `{ type: 'sync', statuses }`; event bertipe ini
+     * adalah padanan untuk jalur socket.io.
+     */
+    "presence:sync": (payload: PresenceSyncPayload) => void;
     "typing:update": (payload: { userId: string; conversationId: string; isTyping: boolean }) => void;
     "session:new_key": (payload: {
         conversationId: string;
@@ -163,6 +177,13 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
     "presence:update": (payload: { userId: string; online: boolean }) => void;
+    /**
+     * [docs/28 Tier 1.5 / D14] Presence lazy/opt-in: klien meminta status untuk
+     * kontak yang sedang ia tampilkan. Server hanya menerima id yang benar-benar
+     * peer (diturunkan dari membership), jadi endpoint ini tidak bisa dipakai
+     * untuk memetakan pengguna lain.
+     */
+    "presence:subscribe": (payload: { userIds: string[] }) => void;
     "user:active": () => void;
     "user:away": () => void;
     "message:send": (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => void;

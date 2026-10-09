@@ -200,6 +200,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         senderId: asUserId(me!.id),
         sender: me!,
         createdAt: new Date().toISOString(),
+        // [docs/28 Tier 2 — B2] waktu kirim presisi (server menyimpan createdAt kasar).
+        sentAt: Date.now(),
         optimistic: true,
         fileUrl: URL.createObjectURL(file), 
         fileName: file.name,
@@ -342,6 +344,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         senderId: asUserId(me!.id),
         sender: me!,
         createdAt: new Date().toISOString(),
+        // [docs/28 Tier 2 — B2] waktu kirim presisi (server menyimpan createdAt kasar).
+        sentAt: Date.now(),
         optimistic: true,
         fileUrl: URL.createObjectURL(blob),
         fileName: "voice-message.webm",

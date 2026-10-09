@@ -557,7 +557,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private routeAndSend(event: string, data: unknown, msgId?: string): void {
     if (event === 'message:send') {
         this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...(data as Record<string, unknown> || {}), msgId });
-        } else if (event.startsWith('user:') || event.startsWith('typing:')) {
+        } else if (event.startsWith('user:') || event.startsWith('typing:') || event === 'presence:subscribe') {
+        // [docs/28 Tier 1.5 / D14] `presence:subscribe` ikut opcode PRESENCE
+        // (langganan per-kontak menggantikan snapshot otomatis).
         this.sendJsonStream(TransportOpCode.PRESENCE, { event, ...(data as Record<string, unknown> || {}) });
     } else {
         this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });

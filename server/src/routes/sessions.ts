@@ -10,6 +10,8 @@ import { ApiError } from '../utils/errors.js'
 import { verifyJwt } from '../utils/jwt.js'
 import { redisClient } from '../lib/redis.js'
 import { revokeFamily } from '../utils/sessionUtils.js'
+// [docs/28 Tier 1.5] label perangkat tersimpan ter-seal.
+import { openAtRest } from '../utils/atRestSecrets.js'
 
 const router: Router = Router()
 
@@ -29,9 +31,10 @@ router.get('/', requireAuth, async (req, res, next) => {
     }
 
     // FIX 1: Cari device milik user dulu, karena RefreshToken sekarang terikat ke Device, bukan User
+    // [docs/28 Tier 1.5] label perangkat ter-seal → dibuka untuk daftar sesi.
     const userDevices = await prisma.device.findMany({
       where: { userId: req.user.id },
-      select: { id: true, name: true }
+      select: { id: true, nameSealed: true }
     });
 
     const deviceIds = userDevices.map(d => d.id);
@@ -50,9 +53,9 @@ router.get('/', requireAuth, async (req, res, next) => {
     // RefreshToken (hash IP tanpa kunci = enumerable; UA = fingerprint perangkat).
     // Label sesi diambil dari Device.name (di-set klien saat login) + flag isCurrent
     // dari JTI cookie — jadi server tidak perlu tahu IP/UA untuk menampilkan sesi.
-    const parsedSessions = sessions.map(s => {
+    const parsedSessions = await Promise.all(sessions.map(async s => {
       const dbDevice = userDevices.find(d => d.id === s.deviceId);
-      const deviceName = dbDevice?.name || 'Unknown Device';
+      const deviceName = (await openAtRest(dbDevice?.nameSealed)) || 'Unknown Device';
 
       return {
         id: s.id, // Pastikan mengirim ID untuk keperluan key/revocation di frontend
@@ -65,7 +68,7 @@ router.get('/', requireAuth, async (req, res, next) => {
         lastUsedAt: s.lastUsedAt,
         createdAt: s.createdAt
       }
-    })
+    }))
 
     res.json({ sessions: parsedSessions })
   } catch (e) {

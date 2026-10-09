@@ -354,7 +354,7 @@ const ConversationItem = memo(function ConversationItem({
               </div>
               {conversation.lastMessage && (
                 <p className="text-[10px] font-medium text-text-secondary flex-shrink-0 opacity-80">
-                  {formatConversationTime(conversation.lastMessage.createdAt)}
+                  {formatConversationTime(conversation.lastMessage.sentAt ? new Date(conversation.lastMessage.sentAt).toISOString() : conversation.lastMessage.createdAt)}
                 </p>
               )}
             </div>

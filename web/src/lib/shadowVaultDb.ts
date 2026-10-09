@@ -238,7 +238,9 @@ class NyxShadowVaultProxy {
           content: encryptedContent, 
           repliedToId: m.repliedToId || existing?.repliedToId,
           repliedTo: encryptedRepliedTo,
-          createdAt: m.createdAt,
+          // [docs/28 Tier 2 — B3] indeks vault pakai waktu PRESISI (sentAt) bila ada,
+          // supaya paginasi/urutan lokal tidak terganggu createdAt server yang kasar.
+          createdAt: m.sentAt ? new Date(m.sentAt).toISOString() : m.createdAt,
           senderId: m.senderId,
           senderName: encryptedSenderName,
           senderUsername: encryptedSenderUsername,
@@ -246,7 +248,13 @@ class NyxShadowVaultProxy {
           isViewOnce: m.isViewOnce,
           isDeletedLocal: m.isDeletedLocal,
           fileMeta: encryptedFileMeta || existing?.fileMeta,
-          expiresAt: m.expiresAt || existing?.expiresAt
+          expiresAt: m.expiresAt || existing?.expiresAt,
+          // [docs/28 Tier 2 — B2] waktu presisi dari ciphertext (bukan milik server).
+          sentAt: m.sentAt ?? existing?.sentAt,
+          // [docs/28 Tier 2 — B1] seq disimpan agar kursor paginasi SERVER tetap
+          // presisi setelah reload (bukan jatuh ke ISO-date legacy). Baris yang
+          // belum pernah di-ACK (pending) belum punya seq → undefined.
+          seq: (typeof m.seq === 'number' && m.seq > 0) ? m.seq : existing?.seq
         });
       }
       await db.messages.bulkPut(records);
@@ -357,6 +365,11 @@ class NyxShadowVaultProxy {
           isViewOnce: r.isViewOnce,
           isDeletedLocal: r.isDeletedLocal,
           expiresAt: r.expiresAt ?? undefined,
+          // [docs/28 Tier 2 — B2] pulihkan waktu presisi untuk tampilan.
+          sentAt: typeof r.sentAt === 'number' ? r.sentAt : undefined,
+          // [docs/28 Tier 2 — B1] pulihkan seq → kursor paginasi server tetap
+          // presisi setelah reload (fetch-older tidak mengulang halaman).
+          seq: (typeof r.seq === 'number' && r.seq > 0) ? r.seq : undefined,
           // Merge file properties cleanly
           fileUrl: decryptedFileMeta?.fileUrl,
           fileKey: decryptedFileMeta?.fileKey,

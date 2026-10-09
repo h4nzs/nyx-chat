@@ -42,6 +42,7 @@ export { decryptMessageObject } from '../lib/messagePipeline';
 
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
+import { compareMessagesByOrder } from '@utils/messageOrder';
 import { isBurnerConversation } from '@lib/coverTraffic';
 import { isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS, getDeliveryTokenMap } from '@lib/groupPseudonyms';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
@@ -238,19 +239,25 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const editPayload = parseEdit(msg.content);
     const silentPayload = parseSilent(msg.content);
 
+    // [docs/28 Tier 2 — B3] `createdAt` server kini kasar → resolusi konflik
+    // (reaksi/edit/unsend) memakai waktu presisi dari ciphertext bila ada.
+    const preciseSentAt = typeof msg.sentAt === 'number'
+      ? new Date(msg.sentAt).toISOString()
+      : msg.createdAt;
+
     if (reactionPayload) {
         reactions.push({
           id: msg.id,
           messageId: reactionPayload.targetMessageId,
           emoji: reactionPayload.emoji,
           userId: msg.senderId,
-          createdAt: msg.createdAt,
+          createdAt: preciseSentAt,
           user: msg.sender,
           isMessage: true
         });
     } else if (editPayload) {
         edits.push({
-           targetMessageId: editPayload.targetMessageId, text: editPayload.text, timestamp: new Date(msg.createdAt).getTime()
+           targetMessageId: editPayload.targetMessageId, text: editPayload.text, timestamp: new Date(preciseSentAt).getTime()
         });
     } else {
       if (silentPayload) {
@@ -275,7 +282,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
              unsends.push({
                  targetMessageId: silentPayload.targetMessageId,
                  senderId: msg.senderId,
-                 createdAt: msg.createdAt,
+                 createdAt: preciseSentAt,
                  conversationId: msg.conversationId
              });
              continue;
@@ -405,7 +412,10 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
       }
   }
 
-  return Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  // [docs/28 Tier 2 — B1] seq (deterministik) jadi penentu utama; pesan
+  // pending/optimistik (belum punya seq) selalu dianggap paling baru — lihat
+  // utils/messageOrder.ts. createdAt hanya tie-break baris legacy.
+  return Array.from(messageMap.values()).sort(compareMessagesByOrder);
 }
 
 type State = {
@@ -799,6 +809,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             sender: user,
             senderId: asUserId(user.id),
             createdAt: new Date().toISOString(),
+            // [docs/28 Tier 2 — B2] waktu kirim presisi bubble sendiri. Server
+            // hanya menyimpan createdAt kasar (bucket 15 mnt); sentAt ini yang
+            // dipakai tampilan & ikut dikirim di dalam ciphertext.
+            sentAt: Date.now(),
             conversationId: asConversationId(conversationId),
             reactions: [],
             statuses: [{ userId: asUserId(user.id), status: 'READ', messageId: asMessageId(`temp_${actualTempId}`), id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
@@ -871,25 +885,33 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       if (contentToEncrypt) {
         try {
             const profileKey = await import('@lib/keychainDb').then(m => m.getProfileKey(user.id));
-            if (profileKey) {
-                let parsedObj: Record<string, unknown> | null = null;
-                if (contentToEncrypt.trim().startsWith('{')) {
-                    try { const _parsedObj = JSON.parse(contentToEncrypt); parsedObj = isPlainObject(_parsedObj) ? _parsedObj : null; } catch (e) {}
-                }
-                
-                const myUser = useAuthStore.getState().user;
-                const myEncryptedProfile = myUser?.encryptedProfile;
-                
-                if (parsedObj && typeof parsedObj === 'object') {
-                    parsedObj.profileKey = profileKey;
-                    if (myEncryptedProfile) parsedObj.encryptedProfile = myEncryptedProfile;
-                    contentToEncrypt = JSON.stringify(parsedObj);
-                } else {
-                    const obj: Record<string, unknown> = { text: contentToEncrypt, profileKey };
-                    if (myEncryptedProfile) obj.encryptedProfile = myEncryptedProfile;
-                    contentToEncrypt = JSON.stringify(obj);
-                }
+            let parsedObj: Record<string, unknown> | null = null;
+            if (contentToEncrypt.trim().startsWith('{')) {
+                try { const _parsedObj = JSON.parse(contentToEncrypt); parsedObj = isPlainObject(_parsedObj) ? _parsedObj : null; } catch (e) {}
             }
+
+            const myUser = useAuthStore.getState().user;
+            const myEncryptedProfile = myUser?.encryptedProfile;
+            // [docs/28 Tier 2 — B2] Waktu kirim PRESISI hanya boleh hidup di dalam
+            // ciphertext — server menyimpan `createdAt` kasar. `sentAt` dibuang lagi
+            // oleh captureSentAt() saat dekripsi dan TIDAK pernah sampai server.
+            // Ambil dari bubble optimistik (jalur unggah file/voice membuat bubble
+            // lebih dulu) supaya waktu di layar == waktu di ciphertext; fallback now.
+            const pendingBubble = get().messages[conversationId]?.find(m => String(m.tempId) === String(actualTempId));
+            const sentAt = typeof pendingBubble?.sentAt === 'number' ? pendingBubble.sentAt : Date.now();
+
+            if (parsedObj && typeof parsedObj === 'object') {
+                if (profileKey) parsedObj.profileKey = profileKey;
+                if (myEncryptedProfile) parsedObj.encryptedProfile = myEncryptedProfile;
+                parsedObj.sentAt = sentAt;
+                contentToEncrypt = JSON.stringify(parsedObj);
+            } else if (profileKey) {
+                const obj: Record<string, unknown> = { text: contentToEncrypt, profileKey, sentAt };
+                if (myEncryptedProfile) obj.encryptedProfile = myEncryptedProfile;
+                contentToEncrypt = JSON.stringify(obj);
+            }
+            // Tanpa profileKey & bukan JSON → biarkan apa adanya; tampilan memakai
+            // fallback `createdAt` server.
         } catch (e) {
             console.error("Failed to inject profile key", e);
         }
@@ -1221,6 +1243,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 content: finalContent,
                 repliedTo: existingMsg?.repliedTo,
                 isBlindAttachment: existingMsg?.isBlindAttachment,
+                // [docs/28 Tier 2 — B2] jangan hilangkan waktu presisi bubble sendiri
+                // (balikan server tidak memuat sentAt; ia hidup di ciphertext).
+                sentAt: existingMsg?.sentAt,
                 fileUrl: realFileUrl,
                 fileKey: realFileKey,
                 fileName: existingMsg?.fileName,
@@ -1458,6 +1483,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 content: finalContent,
                 repliedTo: existingMsg?.repliedTo,
                 isBlindAttachment: existingMsg?.isBlindAttachment,
+                // [docs/28 Tier 2 — B2] pertahankan waktu kirim presisi bubble ini.
+                sentAt: existingMsg?.sentAt,
                 fileUrl: realFileUrl,
                 fileKey: realFileKey,
                 fileName: existingMsg?.fileName,
@@ -1517,6 +1544,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       sender: user,
       senderId: asUserId(user.id),
       createdAt: new Date().toISOString(),
+      // [docs/28 Tier 2 — B2] presisi waktu kirim bubble unggahan.
+      sentAt: Date.now(),
       conversationId: asConversationId(conversationId),
       reactions: [],
       statuses: [{ userId: asUserId(user.id), status: 'READ', messageId: asMessageId(`temp_${tempId}`), id: `temp_status_${tempId}`, updatedAt: new Date().toISOString() }],
@@ -1669,9 +1698,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         // ✅ FIX: URUTKAN KRONOLOGIS SEBELUM DEKRIPSI (Gunakan ID sebagai tie-breaker untuk stabilitas)
         fetchedMessages.sort((a, b) => {
-            const timeA = new Date(a.createdAt).getTime();
-            const timeB = new Date(b.createdAt).getTime();
-            if (timeA !== timeB) return timeA - timeB;
+            // [docs/28 Tier 2 — B1] urutan utama = seq (baris legacy seq=0 →
+            // jatuh ke tie-break waktu di bawah).
+            const orderDiff = compareMessagesByOrder(a, b);
+            if (orderDiff !== 0) return orderDiff;
             
             // Jika di detik yang sama, proses Control Message DULUAN agar kunci terdistribusi sebelum mendekripsi normal message
             const aIsMeta = a.type === 'SYSTEM' && (typeof a.content === 'string' && a.content.includes('"type":"METADATA_UPDATED"'));
@@ -2046,7 +2076,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // device — pesan lebih lama ada di server tapi belum pernah tersimpan
       // lokal. Tanpa fallback ini, scroll-to-top macet selamanya.
       if (localMessages.length === 0 && get().serverHasMore[conversationId]) {
-        const before = oldestMessage.createdAt;
+        // [docs/28 Tier 2 — B1] kursor = seq bila tersedia; fallback createdAt
+        // (baris legacy) supaya klien lama tetap kompatibel.
+        const before = (oldestMessage.seq && oldestMessage.seq > 0)
+          ? String(oldestMessage.seq)
+          : oldestMessage.createdAt;
         const res = await api<{ items: Message[]; hasMore?: boolean; nextCursor?: string | null }>(
           `/api/messages/${conversationId}?limit=50&before=${encodeURIComponent(before)}`
         );
@@ -2057,7 +2091,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         if (fetched.length > 0) {
           // Oldest→newest sebelum dekripsi (alasan urutan: control message/key
           // distribution harus terproses sebelum pesan yang bergantung padanya).
-          fetched.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          // [docs/28 Tier 2 — B1] urut utama = seq, fallback createdAt.
+          fetched.sort(compareMessagesByOrder);
           const processed: Message[] = [];
           for (const message of fetched) {
             // Pesan kontrol diserap (kunci/metadata), tidak masuk UI.
@@ -2824,7 +2859,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       shadowVault.upsertMessages([finalMessage]); 
 
       const newMessages = [...filteredMessages, finalMessage]
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          // [docs/28 Tier 2 — B1] urutan sama dengan daftar pesan (seq-aware).
+          .sort(compareMessagesByOrder)
           .filter(m => m.type !== 'SYSTEM' && String(m.type) !== 'SYSTEM_KEY_REQUEST');
 
       return {
@@ -3119,7 +3155,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         }
     });
     
-    const newMessagesForConvo = Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    // [docs/28 Tier 2 — B1] urutan seq-aware (pending di akhir, legacy di bawah).
+    const newMessagesForConvo = Array.from(messageMap.values()).sort(compareMessagesByOrder);
 
     set({
       messages: {

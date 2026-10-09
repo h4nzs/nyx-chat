@@ -10,6 +10,8 @@ type State = {
   onlineUsers: Set<string>;
   typingIndicators: TypingIndicator[];
   setOnlineUsers: (userIds: string[]) => void;
+  // [docs/28 Tier 1.5 / D14] balasan `sync` untuk langganan presence per-kontak.
+  applyStatuses: (statuses: Array<{ userId: string; online: boolean }>) => void;
   userJoined: (userId: string) => void;
   userLeft: (userId: string) => void;
   addOrUpdate: (indicator: TypingIndicator) => void;
@@ -21,6 +23,16 @@ export const usePresenceStore = create<State>((set) => ({
   typingIndicators: [],
 
   setOnlineUsers: (userIds) => set({ onlineUsers: new Set(userIds) }),
+
+  applyStatuses: (statuses) => set(state => {
+    const next = new Set(state.onlineUsers);
+    for (const s of statuses) {
+      if (!s || typeof s.userId !== 'string') continue;
+      if (s.online) next.add(s.userId);
+      else next.delete(s.userId);
+    }
+    return { onlineUsers: next };
+  }),
 
   userJoined: (userId) => {
     // FIX: Offline Sync Trigger

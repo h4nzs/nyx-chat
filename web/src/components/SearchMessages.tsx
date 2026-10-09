@@ -84,7 +84,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
                   className="p-3 hover:bg-secondary cursor-pointer border-b border-border last:border-b-0"
                 >
                   <p className="text-sm text-text-primary truncate">{msg.content}</p>
-                  <p className="text-xs text-text-secondary mt-1">{new Date(msg.createdAt).toLocaleString()}</p>
+                  <p className="text-xs text-text-secondary mt-1">{new Date(msg.sentAt ?? msg.createdAt).toLocaleString()}</p>
                 </div>
               ))
             ) : (

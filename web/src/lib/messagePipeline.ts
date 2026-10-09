@@ -60,6 +60,25 @@ export function createRepliedToForStoryReply(
 }
 
 /**
+ * [docs/28 Tier 2 — B2] Ambil waktu kirim PRESISI (`sentAt`) dari plaintext
+ * hasil dekripsi, lalu HAPUS dari objek.
+ *
+ * Waktu presisi sengaja dikirim di dalam ciphertext supaya server tak pernah
+ * melihatnya (DB hanya menyimpan `createdAt` kasar). Penghapusan field WAJIB:
+ * logika lanjutan memakai `Object.keys(parsed).length === 1` untuk "collapse"
+ * payload teks menjadi string; field yang tersisa membuat pesan tampil sebagai
+ * JSON mentah. Helper ini menormalkan (number | string numerik) → number.
+ */
+export function captureSentAt(parsed: Record<string, unknown>, target: { sentAt?: number }): void {
+  const raw = parsed.sentAt;
+  const value = typeof raw === 'number'
+    ? raw
+    : (typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN);
+  if (Number.isFinite(value) && value > 0) target.sentAt = value;
+  delete parsed.sentAt;
+}
+
+/**
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
  */
@@ -91,6 +110,8 @@ export async function decryptMessageObject(
         ...rawMsg.sender,
         id: asUserId(rawMsg.sender.id) // Lindungi ID di dalam objek sender
     } : undefined,
+    // [docs/28 Tier 2 — B1] continue seq (urutan berbasis sequence).
+    seq: rawMsg.seq,
     createdAt: rawMsg.createdAt,
     content: rawMsg.content,
     fileUrl: rawMsg.fileUrl,
@@ -163,6 +184,8 @@ export async function decryptMessageObject(
                         try {
                             const parsed = JSON.parse(plainText);
                             if (!isPlainObject(parsed)) return finalMessage;
+                            // [docs/28 Tier 2 — B2] ambil waktu presisi lalu buang.
+                            captureSentAt(parsed as Record<string, unknown>, finalMessage);
                             if (parsed.senderId) {
                                 finalMessage.senderId = asUserId(String(parsed.senderId));
                                 if (!finalMessage.sender) finalMessage.sender = { id: asUserId(String(parsed.senderId)) };
@@ -413,6 +436,10 @@ export async function decryptMessageObject(
             try {
                 const parsed = JSON.parse(text);
             if (!isPlainObject(parsed)) return text;
+
+                // [docs/28 Tier 2 — B2] ambil waktu presisi lalu buang (wajib —
+                // lihat catatan captureSentAt soal collapse payload teks).
+                captureSentAt(parsed as Record<string, unknown>, finalMessage);
 
                 if (parsed.senderId) {
                     finalMessage.senderId = asUserId(String(parsed.senderId));

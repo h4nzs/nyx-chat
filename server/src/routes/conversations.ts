@@ -242,7 +242,9 @@ router.get('/sync', async (req, res, next) => {
       where: {
         id: { in: allIds }
       },
-      orderBy: { lastMessageAt: 'desc' }
+      // [docs/28 Tier 2 — B3] `lastMessageAt` kini di-bucket (15 menit) → tie-break
+      // deterministik supaya urutan daftar chat tidak flip saat seri bucket.
+      orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }]
     })
 
     const safeConversations = conversations.map(c => {

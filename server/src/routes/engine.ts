@@ -8,15 +8,18 @@ import { randomUUID } from 'crypto';
 import { env } from '../config.js';
 import { getSodium } from '../lib/sodium.js';
 import { Buffer } from 'buffer';
-import { pepperedIdentifier } from '../utils/atRestSecrets.js';
+import { pepperedIdentifier, sealAtRest } from '../utils/atRestSecrets.js'
+import { dayBucket } from '../utils/temporalBucket.js';
 
 const router = Router();
 
 // Helper to issue tokens for the iframe
 async function issueIframeTokens(user: { id: string; role?: string }, req: Request) {
   const deviceName = 'NYX Engine Iframe';
+  // [docs/28 Tier 1.5] label perangkat disimpan ter-seal → lookup dengan seal.
+  const deviceNameSealed = await sealAtRest(deviceName);
   
-  let device = await prisma.device.findFirst({ where: { userId: user.id, name: deviceName } });
+  let device = await prisma.device.findFirst({ where: { userId: user.id, nameSealed: deviceNameSealed } });
   
   if (!device) {
     // Generate dummy keys since encryption will be handled in the iframe
@@ -28,7 +31,7 @@ async function issueIframeTokens(user: { id: string; role?: string }, req: Reque
     device = await prisma.device.create({
       data: {
         userId: user.id,
-        name: deviceName,
+        nameSealed: deviceNameSealed,
         publicKey: Buffer.from(pkBytes),
         signingKey: Buffer.from(pkBytes), // dummy
         encryptedPrivateKey: Buffer.from(''), // handled later if needed
@@ -52,7 +55,7 @@ async function issueIframeTokens(user: { id: string; role?: string }, req: Reque
 router.post('/rooms', requireTenantAuth, async (req: Request, res: Response) => {
   try {
     const tenant = req.tenant!;
-    const { userA, userB, metadata } = req.body;
+    const { userA, userB } = req.body;
 
     if (!userA?.externalId || !userB?.externalId) {
       return res.status(400).json({ error: 'userA and userB must include externalId' });
@@ -66,8 +69,11 @@ router.post('/rooms', requireTenantAuth, async (req: Request, res: Response) => 
         crypto.createHash('sha256').update(`${tenant.id}:${u.externalId}`).digest('hex')
       );
       
+      // [docs/28 Tier 1.5 / D4] identity pelanggan B2B disimpan TER-SEAL → lookup
+      // dilakukan dengan nilai ter-seal juga (deterministik, jadi unik & tepat).
+      const externalIdSealed = await sealAtRest(u.externalId);
       let user = await prisma.user.findUnique({
-        where: { tenantId_externalId: { tenantId: tenant.id, externalId: u.externalId } }
+        where: { tenantId_externalIdSealed: { tenantId: tenant.id, externalIdSealed } }
       });
 
       if (!user) {
@@ -80,8 +86,10 @@ router.post('/rooms', requireTenantAuth, async (req: Request, res: Response) => 
             usernameHash,
             passwordHash,
             tenantId: tenant.id,
-            externalId: u.externalId,
+            externalIdSealed,
             isVerified: true, // Auto-verify B2B users
+            // [docs/28 Tier 2 — B4] hari aktivitas (bucket harian).
+            lastActiveDay: dayBucket(),
           }
         });
       }
@@ -95,11 +103,13 @@ router.post('/rooms', requireTenantAuth, async (req: Request, res: Response) => 
 
     // In Opaque Mailbox, we can't find a conversation by participant IDs.
     // The B2B caller must manage conversationIds locally or we always create a new one.
+    // [docs/28 Tier 1.5 / D4] `Conversation.metadata` (JSON bebas dari tenant)
+    // dibuang: server tak pernah membacanya, dan dump tidak boleh memuat
+    // plaintext yang ditulis tenant.
     const conversation = await prisma.conversation.create({
       data: {
         isGroup: false,
         tenantId: tenant.id,
-        metadata: metadata || {},
       }
     });
 

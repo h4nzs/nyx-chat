@@ -11,6 +11,8 @@ import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
+// [docs/28 Tier 1.5 / D14] key cache Redis memakai tag, bukan userId asli.
+import { identityKey } from '../utils/redisIdentity.js'
 // ✅ Menggunakan AuthJwtPayload dari paket shared
 import type { AuthJwtPayload, IDeviceTemplate, IPreKeyBundle } from '@nyx/shared'
 import { makeOtpkQuotaGate } from '../utils/otpkQuota.js'
@@ -122,8 +124,9 @@ router.post(
       // Invalidate Redis cache
       try {
         const userId = authUser.id;
-        await redisClient.del(`cache:keys:bundle:${userId}`);
-        await redisClient.del(`cache:keys:public:${userId}`);
+        // [docs/28 Tier 1.5 / D14] sufiks key = tag (Redis tak memuat userId asli).
+        await redisClient.del(identityKey('cache:keys:bundle', userId));
+        await redisClient.del(identityKey('cache:keys:public', userId));
       } catch (cacheError) {
         console.error('[Cache] Failed to invalidate bundle cache:', cacheError);
       }
@@ -200,7 +203,10 @@ router.delete('/otpk', requireAuth, async (req, res, next) => {
 router.get(
   '/prekey-bundle/:userId',
   requireAuth,
-  zodValidate({ params: z.object({ userId: z.string().cuid() }) }),
+  // [docs/28 Tier 2 — B5] id user kini UUID (non-time-ordered), bukan cuid.
+  // Validator menerima keduanya (baris lama tetap cuid) — bentuk aman, bukan
+  // `.cuid()` yang akan menolak user baru.
+  zodValidate({ params: z.object({ userId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/) }) }),
   async (req, res, next) => {
     try {
       const { userId } = req.params
@@ -210,7 +216,7 @@ router.get(
 
       // 1. Try to get device template from Redis
       let deviceTemplate: IDeviceTemplate | null = null;
-      const cacheKey = `cache:keys:bundle:${userId}`;
+      const cacheKey = identityKey('cache:keys:bundle', String(userId));
 
       try {
         const cached = await redisClient.get(cacheKey);
@@ -226,7 +232,8 @@ router.get(
         const devices = await prisma.device.findMany({
           where: { userId: String(userId) },
           include: { preKeyBundle: true },
-          orderBy: { lastActiveAt: 'desc' },
+          // [docs/28 Tier 2 — B4] bucket 15 menit → tie-break deterministik.
+          orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }],
           take: 1
         })
 
@@ -268,7 +275,7 @@ router.get(
           WHERE id = (
             SELECT id FROM "OneTimePreKey"
             WHERE "deviceId" = ${deviceTemplate.id}
-            ORDER BY "createdAt" ASC
+            ORDER BY "keyId" ASC
             FOR UPDATE SKIP LOCKED
             LIMIT 1
           )
@@ -322,7 +329,7 @@ router.post(
       // 1. Try to get from Redis first
       try {
         const cacheResults = await Promise.all(
-          userIds.map((uid: string) => redisClient.get(`cache:keys:public:${uid}`))
+          userIds.map((uid: string) => redisClient.get(identityKey('cache:keys:public', uid)))
         );
 
         for (let i = 0; i < userIds.length; i++) {
@@ -370,7 +377,7 @@ router.post(
         try {
           await Promise.all(
             Array.from(dbResults.entries()).map(([uid, data]) => 
-              redisClient.set(`cache:keys:public:${uid}`, JSON.stringify(data), { EX: 3600 }) // Cache for 1 hour
+              redisClient.set(identityKey('cache:keys:public', uid), JSON.stringify(data), { EX: 3600 }) // Cache for 1 hour
             )
           );
         } catch (cacheError) {
@@ -416,7 +423,7 @@ router.post(
       const missingUserIds: string[] = [];
       try {
         const cacheResults = await Promise.all(
-          userIds.map((uid: string) => redisClient.get(`cache:keys:bundle:${uid}`))
+          userIds.map((uid: string) => redisClient.get(identityKey('cache:keys:bundle', uid)))
         );
 
         for (let i = 0; i < userIds.length; i++) {
@@ -459,7 +466,7 @@ router.post(
           };
 
           // Cache individually
-          await redisClient.set(`cache:keys:bundle:${device.userId}`, JSON.stringify(template), { EX: 3600 });
+          await redisClient.set(identityKey('cache:keys:bundle', device.userId), JSON.stringify(template), { EX: 3600 });
           
           const arr = responseMap.get(device.userId) || [];
           arr.push(template);
@@ -480,7 +487,7 @@ router.post(
                 WHERE id = (
                   SELECT id FROM "OneTimePreKey"
                   WHERE "deviceId" = ${template.id}
-                  ORDER BY "createdAt" ASC
+                  ORDER BY "keyId" ASC
                   FOR UPDATE SKIP LOCKED
                   LIMIT 1
                 )

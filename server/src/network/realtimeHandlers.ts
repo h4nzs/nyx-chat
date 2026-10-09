@@ -28,13 +28,33 @@ import type {
   DistributeKeysPayload,
   PushSubscribePayload,
 } from '@nyx/shared';
-import { toRawServerMessage } from '../utils/mappers.js';
+import crypto from 'crypto';
+import { toRawServerMessage, resolveRepliedToId } from '../utils/mappers.js';
+// [docs/28 Tier 2 — B1] seq atomik per-conversation.
+import { reserveMessageSeq, type SeqPrismaClient } from '../utils/messageSequence.js';
+// [docs/28 Tier 2 — B3] bucket waktu pesan (createdAt/expiresAt kasar).
+import { messageTimeBucket } from '../utils/temporalBucket.js';
 import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { getSodium } from '../lib/sodium.js';
-import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js';
-import { collectPresencePeers, intersectOnline, type PresenceMembershipClient } from '../utils/presencePeers.js';
+import { credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js';
+import { collectPresencePeers, type PresenceMembershipClient } from '../utils/presencePeers.js';
+// [docs/28 Tier 1.5 / D14] presence lazy (langganan in-memory) + identitas Redis
+// yang tidak lagi memuat userId asli.
+import {
+  MAX_PRESENCE_SUBSCRIPTIONS,
+  notifyPresenceWatchers,
+  subscribePresence,
+} from '../utils/presenceSubscriptions.js';
+import {
+  identityKey,
+  identityMatches,
+  identityTag,
+  openIdentityMembers,
+  openIdentityOrRaw,
+  sealIdentity,
+} from '../utils/redisIdentity.js';
 import { conversationScopedTag } from '../utils/atRestSecrets.js';
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js';
 
@@ -218,6 +238,8 @@ export async function handleChatMessage(
         });
         if (existing) {
           const safeMessage = toRawServerMessage(existing) as RawServerMessage;
+          // [docs/28 Tier 2 — 2.2] buka reply edge ter-seal sebelum dikirim.
+          safeMessage.repliedToId = (await resolveRepliedToId(existing.repliedToId)) ?? undefined;
           safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
           if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, msg: safeMessage });
           return;
@@ -237,8 +259,18 @@ export async function handleChatMessage(
       return;
     }
 
-    const [newMessageRaw] = await ctx.prisma.$transaction([
-      ctx.prisma.message.create({
+    // [docs/28 Tier 2 — B1] Urutan pesan ditetapkan server lewat seq atomik
+    // per-conversation. `reserveMessageSeq` + `create` berada dalam SATU
+    // transaksi supaya pesan tidak pernah tersimpan tanpa seq yang benar.
+    const newMessageRaw = await ctx.prisma.$transaction(async (tx) => {
+      const seq = await reserveMessageSeq(tx as unknown as SeqPrismaClient, conversationId);
+      // [docs/28 Tier 2 — B3] createdAt dikasar (15 mnt); expiresAt diturunkan dari
+      // waktu kasar yang SAMA supaya presisi tidak bocor lewat expiresAt − TTL.
+      const messageAt = messageTimeBucket();
+      const ttlMs = expiresAt
+        ? Math.max(0, new Date(expiresAt).getTime() - Date.now())
+        : 14 * 24 * 60 * 60 * 1000;
+      const created = await tx.message.create({
         data: {
             conversationId,
             // [T1 GROUP PSEUDONYMS — doc 26.2] Group messages: store the client-
@@ -248,12 +280,16 @@ export async function handleChatMessage(
             // previous behavior (userId) so old groups keep working.
             senderId: conversation.isGroup ? (senderPseudonym ?? userId) : null,
             content, sessionId: sessionId || null,
-            repliedToId: repliedToId || null,
+            // [docs/28 Tier 2 — 2.2] edge balasan disimpan TER-SEAL (dump tidak
+            // memuat "siapa membalas siapa"); dibuka lagi saat read.
+            repliedToId: repliedToId ? await sealAtRest(repliedToId) : null,
+            seq,
+            createdAt: messageAt,
             // [PARITY TTL] Jalur REST (routes/messages.ts) memakai default 14 hari
             // (store-and-forward). Tanpa default yang sama di sini, payload WT
             // tanpa `expiresAt` tersimpan TANPA TTL — pesan jadi persisten
             // selamanya (ditemukan saat inspeksi DB lokal: 1 dari 10 pesan).
-            expiresAt: expiresAt ? new Date(expiresAt) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+            expiresAt: new Date(messageAt.getTime() + ttlMs),
             isViewOnce: isViewOnce === true,
             // [docs/28 Tier 0 — D3] blind-delete token disimpan sebagai HASH
             // (SHA-256 hex): dump DB tidak memberi kemampuan unsend pesan orang
@@ -261,12 +297,14 @@ export async function handleChatMessage(
             deleteSecret: deleteSecret ? hashCredentialToken(deleteSecret) : null
         },
         include: {}
-      }),
-      ctx.prisma.conversation.update({
+      });
+      await tx.conversation.update({
         where: { id: conversationId },
-        data: { lastMessageAt: new Date() }
-      })
-    ]);
+        // [docs/28 Tier 2 — B3] lastMessageAt diturunkan dari waktu kasar yang sama.
+        data: { lastMessageAt: messageAt }
+      });
+      return created;
+    });
 
     // Finalisasi slot dedupe dengan id pesan hasil insert.
     if (tempId !== undefined && deviceId) {
@@ -274,6 +312,8 @@ export async function handleChatMessage(
     }
 
     const safeMessage = toRawServerMessage(newMessageRaw) as RawServerMessage;
+    // [docs/28 Tier 2 — 2.2] kirim id balasan ASLI (bukan nilai ter-seal).
+    if (repliedToId) safeMessage.repliedToId = repliedToId;
     if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
 
     // Acknowledge the sender
@@ -328,31 +368,51 @@ export async function handleChatMessage(
 export async function handlePresence(
   ctx: RealtimeContext,
   userId: string,
-  payload: { event: string, conversationId?: string }
+  payload: { event: string, conversationId?: string, userIds?: string[] }
 ): Promise<void> {
-  // [docs/28 Tier 0.7 — D14] Presence per-kontak: dulu snapshot 'bulk' dan
-  // broadcast join/leave memakai SELURUH isi `online_users` → setiap klien bisa
-  // memanen roster online seluruh platform. Sekarang hanya peer (user yang
-  // berbagi conversation, diturunkan server dari UserHiddenConversation).
-  if (payload.event === 'active' || payload.event === 'user:active') {
-    const added = await ctx.pubClient.sAdd('online_users', userId);
-    const onlineUsers = new Set(await ctx.pubClient.sMembers('online_users'));
+  // [docs/28 Tier 1.5 / D14] Presence lazy/opt-in: klien MEMINTA status untuk
+  // kontak yang sedang ia tampilkan (`subscribe`), tidak ada snapshot otomatis,
+  // dan join/leave hanya dikirim ke klien yang berlangganan user tersebut.
+  // Daftar peer tetap diturunkan server (`UserHiddenConversation`) — klien tidak
+  // bisa memakai endpoint ini untuk memetakan pengguna yang tidak ia kenal.
+  if (payload.event === 'subscribe' || payload.event === 'presence:subscribe') {
+    if (!await ctx.checkRateLimit(userId, 'presence_subscribe', 60, 60)) return;
+
+    const requested = Array.isArray(payload.userIds)
+      ? payload.userIds.filter((id): id is string => typeof id === 'string').slice(0, MAX_PRESENCE_SUBSCRIPTIONS)
+      : [];
+
     const peers = await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId);
-    const peersOnline = intersectOnline(peers, onlineUsers);
+    const peerSet = new Set(peers);
+    const allowed = requested.filter((id) => peerSet.has(id));
+    const stored = subscribePresence(userId, allowed);
 
-    // Snapshot hanya untuk peer yang sedang online.
-    await ctx.sendJsonToUser(userId, TransportOpCode.PRESENCE, { type: 'bulk', userIds: peersOnline });
+    // Balas status terkini HANYA untuk peer yang benar-benar disimpan.
+    const onlineTags = new Set(await ctx.pubClient.sMembers('online_users'));
+    const statuses = stored.map((id) => ({ userId: id, online: onlineTags.has(identityTag(id)) }));
+    await ctx.sendJsonToUser(userId, TransportOpCode.PRESENCE, { type: 'sync', statuses });
+    return;
+  }
 
+  if (payload.event === 'active' || payload.event === 'user:active') {
+    // [docs/28 Tier 1.5 / D14] `online_users` menyimpan TAG (bukan userId asli).
+    const added = await ctx.pubClient.sAdd('online_users', identityTag(userId));
     if (added === 1) {
-      await ctx.broadcastToUsers(peersOnline, TransportOpCode.PRESENCE, { type: 'join', userId });
+      await notifyPresenceWatchers(userId, (target) =>
+        ctx.sendJsonToUser(target, TransportOpCode.PRESENCE, { type: 'join', userId })
+      );
     }
-  } else if (payload.event === 'away' || payload.event === 'user:away') {
-    const removed = await ctx.pubClient.sRem('online_users', userId);
+    return;
+  }
+
+  if (payload.event === 'away' || payload.event === 'user:away') {
+    const removed = await ctx.pubClient.sRem('online_users', identityTag(userId));
     if (removed === 1) {
-      const onlineUsers = new Set(await ctx.pubClient.sMembers('online_users'));
-      const peers = await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId);
-      await ctx.broadcastToUsers(intersectOnline(peers, onlineUsers), TransportOpCode.PRESENCE, { type: 'leave', userId });
+      await notifyPresenceWatchers(userId, (target) =>
+        ctx.sendJsonToUser(target, TransportOpCode.PRESENCE, { type: 'leave', userId })
+      );
     }
+    return;
   }
 
   if (payload.conversationId && (payload.event === 'typing:start' || payload.event === 'typing:stop' || payload.event === 'typing')) {
@@ -524,13 +584,19 @@ export async function handleKeySync(
            // datang saat requester OFFLINE tidak boleh hilang, kalau tidak dia
            // terjebak waiting_for_key sampai pengirim online lagi. Offline catch-up
            // mengenali content '"type":"GROUP_KEY"' dan meng-unseal envelope-nya.
+           // [docs/28 Tier 2 — B1] pesan SYSTEM juga partisipan urutan → ikut seq.
+           const groupKeySeq = await reserveMessageSeq(ctx.prisma as unknown as SeqPrismaClient, conversationId).catch(() => 0);
+           // [docs/28 Tier 2 — B3] waktu kasar + expiresAt diturunkan darinya.
+           const groupKeyAt = messageTimeBucket();
            await ctx.prisma.message.create({
                data: {
                    conversationId,
                    senderId: senderPseudonym ?? userId,
                    type: 'SYSTEM',
+                   seq: groupKeySeq,
+                   createdAt: groupKeyAt,
                    content: JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) }),
-                   expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                   expiresAt: new Date(groupKeyAt.getTime() + 7 * 24 * 60 * 60 * 1000)
                }
            }).catch((e: unknown) => console.warn('[KeySync] Failed to persist group key envelope:', e));
 
@@ -548,15 +614,23 @@ export async function handleKeySync(
            if (!await ctx.checkRateLimit(userId, 'metadata_updated', 60, 60)) return;
 
            // Persist to DB for offline delivery (like messages:distribute_keys)
+           // [docs/28 Tier 2 — B1] pesan SYSTEM juga ikut urutan seq.
+           const metaSeq = await reserveMessageSeq(ctx.prisma as unknown as SeqPrismaClient, conversationId).catch(() => 0);
+           // [docs/28 Tier 2 — B3] waktu kasar + expiresAt diturunkan darinya.
+           // [docs/28 Tier 2 — B5] id eksplisit TIDAK lagi time-ordered
+           // (`msg_sys_meta_<Date.now()>_…` membocorkan waktu) — pakai UUID acak.
+           const metaAt = messageTimeBucket();
            await ctx.prisma.message.create({
                data: {
-                   id: `msg_sys_meta_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                   id: `sys_meta_${crypto.randomUUID()}`,
                    conversationId,
                    senderId: senderPseudonym ?? userId,
                    type: 'SYSTEM',
+                   seq: metaSeq,
+                   createdAt: metaAt,
                    content: JSON.stringify({ type: 'METADATA_UPDATED', encryptedMetadata }),
                    isViewOnce: false,
-                   expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                   expiresAt: new Date(metaAt.getTime() + 7 * 24 * 60 * 60 * 1000)
                }
            });
 
@@ -573,8 +647,15 @@ export async function handleKeySync(
          const sodium = await getSodium();
          const linkingToken = sodium.to_hex(sodium.randombytes_buf(32));
 
-         // Simpan di Redis: linkingToken -> { userId, deviceId }
-         await ctx.redisClient.setEx(`linking_token:${linkingToken}`, 300, JSON.stringify({ userId, deviceId }));
+         // Simpan di Redis: linkingToken -> { userId, deviceId } TER-SEAL.
+         // [docs/28 Tier 1.5 / D14] Redis = artefak setara dump; tokennya acak,
+         // tetapi nilainya memuat identitas → simpan ciphertext (bisa dibuka
+         // saat redeem, tak terbaca dari dump).
+         await ctx.redisClient.setEx(
+           `linking_token:${linkingToken}`,
+           300,
+           await sealAtRest(JSON.stringify({ userId, deviceId }))
+         );
 
          await emitEventToUser(ctx, userId, 'auth:linking_qr_ready', { linkingToken }, deviceId);
          break;
@@ -633,10 +714,14 @@ export async function handleKeySync(
        case 'push:subscribe': {
          const { endpoint, keys } = data as PushSubscribePayload;
          if (!endpoint || !keys?.p256dh || !keys?.auth) return;
+         // [docs/28 Tier 1.5 / D10] endpoint FCM/APNs = identifier perangkat →
+         // disimpan TER-SEAL (deterministik) supaya uniqueness & upsert tetap
+         // bekerja, tetapi dump tidak memuat endpoint aslinya.
+         const endpointSealed = await sealAtRest(endpoint);
          await ctx.prisma.pushSubscription.upsert({
-           where: { endpoint },
+           where: { endpointSealed },
            update: { p256dh: keys.p256dh, auth: keys.auth, deviceId },
-           create: { endpoint, p256dh: keys.p256dh, auth: keys.auth, deviceId }
+           create: { endpointSealed, p256dh: keys.p256dh, auth: keys.auth, deviceId }
          });
          break;
        }
@@ -649,7 +734,9 @@ export async function handleKeySync(
        // --- BURNER CHAT EVENTS ---
        case 'burner:join': {
          const { roomId } = data as { roomId?: string };
-         if (roomId) await ctx.pubClient.sAdd(`burner:room:${roomId}`, userId);
+         // [docs/28 Tier 1.5 / D14] member = userId TER-SEAL (harus bisa dipulihkan
+         // untuk routing, tapi tidak boleh terbaca dari dump Redis).
+         if (roomId) await ctx.pubClient.sAdd(`burner:room:${roomId}`, await sealIdentity(userId));
          break;
        }
        case 'burner:send': {
@@ -665,7 +752,7 @@ export async function handleKeySync(
        case 'burner:reply': {
          const { roomId, ciphertext } = data as { roomId: string, ciphertext: string };
          if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) return;
-         const members = await ctx.pubClient.sMembers(`burner:room:${roomId}`);
+         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`burner:room:${roomId}`));
          for (const memberId of members) {
             if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } });
          }
@@ -674,7 +761,7 @@ export async function handleKeySync(
        case 'burner:destroy': {
          const { roomId } = data as { roomId: string };
          await ctx.redisClient.set(`burner:terminated:${roomId}`, "1", { EX: 86400 });
-         const members = await ctx.pubClient.sMembers(`burner:room:${roomId}`);
+         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`burner:room:${roomId}`));
          for (const memberId of members) {
             await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:terminated', data: { roomId } });
          }
@@ -684,22 +771,23 @@ export async function handleKeySync(
 
        // --- MIGRATION EVENTS ---
        case 'migration:prepare': {
-         await ctx.redisClient.set(`is_migrating:${userId}`, "1", { EX: 900 }); // 15 mins grace period
+         await ctx.redisClient.set(identityKey('is_migrating', userId), "1", { EX: 900 }); // 15 mins grace period
          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true });
          break;
        }
        case 'migration:cancel': {
-         await ctx.redisClient.del(`is_migrating:${userId}`);
+         await ctx.redisClient.del(identityKey('is_migrating', userId));
          break;
        }
        case 'migration:join': {
-         if (data) await ctx.pubClient.sAdd(`migration:room:${data}`, userId);
+         if (data) await ctx.pubClient.sAdd(`migration:room:${data}`, await sealIdentity(userId));
          break;
        }
        case 'migration:start': {
          const { roomId } = data as { roomId: string };
-         await ctx.redisClient.set(`migration_owner:${roomId}`, userId, { EX: 3600 });
-         const members = await ctx.pubClient.sMembers(`migration:room:${roomId}`);
+         // [docs/28 Tier 1.5 / D14] owner & member = nilai ter-seal.
+         await ctx.redisClient.set(`migration_owner:${roomId}`, await sealIdentity(userId), { EX: 3600 });
+         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`migration:room:${roomId}`));
          for (const memberId of members) {
             if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'migration:start', data });
          }
@@ -708,8 +796,8 @@ export async function handleKeySync(
        case 'migration:chunk': {
          const { roomId } = data as { roomId: string };
          const ownerId = await ctx.redisClient.get(`migration_owner:${roomId}`);
-         if (ownerId !== userId) return;
-         const members = await ctx.pubClient.sMembers(`migration:room:${roomId}`);
+         if (!await identityMatches(ownerId, userId)) return;
+         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`migration:room:${roomId}`));
          for (const memberId of members) {
             if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'migration:chunk', data });
          }
@@ -720,9 +808,11 @@ export async function handleKeySync(
          const ownerId = await ctx.redisClient.get(`migration_owner:${roomId}`);
 
          // Clear migration grace period flag as it's finished
-         await ctx.redisClient.del(`is_migrating:${userId}`);
+         await ctx.redisClient.del(identityKey('is_migrating', userId));
 
-         if (ownerId) await ctx.sendJsonToUser(ownerId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
+         // [docs/28 Tier 1.5 / D14] nilai tersimpan = ter-seal → dipetakan balik.
+         const ownerUserId = ownerId ? await openIdentityOrRaw(ownerId) : null;
+         if (ownerUserId) await ctx.sendJsonToUser(ownerUserId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
          break;
        }
 
@@ -845,8 +935,10 @@ async function handleMessageStatusUpdate(
 
     await ctx.prisma.messageStatus.upsert({
       where: { messageId_userId: { messageId, userId: persistedReaderId } },
-      update: { status },
-      create: { messageId, userId: persistedReaderId, status }
+      // [docs/28 Tier 2 — B3] updatedAt di-set EKSPLISIT ke bucket kasar karena
+      // `@updatedAt` dihapus (Prisma akan menimpa dengan waktu presisi).
+      update: { status, updatedAt: messageTimeBucket() },
+      create: { messageId, userId: persistedReaderId, status, updatedAt: messageTimeBucket() }
     });
 
     // Notify the original message sender about the status update
@@ -954,8 +1046,9 @@ async function handleMessageStatusBatchUpdate(
       .filter((m) => m.senderId === null || (m.senderId !== userId && m.senderId !== readerPseudonym))
       .map((m) => ctx.prisma.messageStatus.upsert({
         where: { messageId_userId: { messageId: m.id, userId: persistedReaderId } },
-        update: { status },
-        create: { messageId: m.id, userId: persistedReaderId, status }
+        // [docs/28 Tier 2 — B3] updatedAt coarse (bucket) — eksplisit.
+        update: { status, updatedAt: messageTimeBucket() },
+        create: { messageId: m.id, userId: persistedReaderId, status, updatedAt: messageTimeBucket() }
       }).catch(() => {}) // P2003: pesan dihapus race — abaikan per-item
       ));
 

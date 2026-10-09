@@ -16,6 +16,8 @@
 // (konvensi repo: test server tidak boleh butuh Postgres/Redis nyata).
 
 import { sanitizeForLog } from './logger.js';
+// [docs/28 Tier 1.5 / D14] key rate-limit memakai tag, bukan userId asli.
+import { identityKey } from './redisIdentity.js';
 
 /** Lua atomic: INCR + EXPIRE dalam satu perintah — mencegah key hidup
  *  selamanya bila proses mati di antara dua perintah (rate limit permanen). */
@@ -50,7 +52,7 @@ export type CheckRateLimit = (
  */
 export function createCheckRateLimit(client: EvalLikeClient): CheckRateLimit {
   return async function checkRateLimit(userId, event, limit, windowSeconds) {
-    const key = `rate_limit:socket:${event}:${userId}`;
+    const key = `${identityKey('rate_limit:socket', userId)}:${event}`;
     try {
       const result = await client.eval(RATE_LIMIT_LUA, {
         keys: [key],

@@ -16,7 +16,16 @@ import { requireAuth } from '../middleware/auth.js'
 import { authLimiter } from '../middleware/rateLimiter.js'
 import { getSodium } from '../lib/sodium.js'
 import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
-import { identifierLookupCandidates, pepperedIdentifier } from '../utils/atRestSecrets.js'
+import {
+  deviceInstallationTag,
+  identifierLookupCandidates,
+  pepperedIdentifier,
+  sealAtRest,
+} from '../utils/atRestSecrets.js'
+// [docs/28 Tier 1.5 / D14] key Redis memakai tag, bukan userId asli (Redis = artefak setara dump).
+import { identityKey } from '../utils/redisIdentity.js'
+// [docs/28 Tier 2 — B4] bucket metadata temporal (hari/15 menit).
+import { dayBucket, deviceActivityBucket } from '../utils/temporalBucket.js'
 import { nanoid } from 'nanoid'
 import argon2 from 'argon2'
 import crypto from 'crypto'
@@ -101,7 +110,7 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   // tidak dipersist karena tidak ada device yang valid (FK RefreshToken_deviceId_fkey).
   if (user.role !== 'GUEST' && deviceId) {
     // Check if user is in Migration Mode
-    const isMigrating = await redisClient.exists(`is_migrating:${user.id}`);
+    const isMigrating = await redisClient.exists(identityKey('is_migrating', user.id));
 
     if (!isMigrating) {
         // Enforce "One User, One Active Device": Revoke all existing sessions for this user
@@ -127,15 +136,28 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
     // dibuang — tanpa itu device baru yang sah diblokir ≤60s oleh cache yang
     // masih menyimpan deviceId lama. Device sama (refresh) tidak perlu sinyal.
     try {
-      const prevDevice = await redisClient.get(`active_device:${user.id}`);
+      const activeDeviceKey = identityKey('active_device', user.id);
+      const prevDevice = await redisClient.get(activeDeviceKey);
       if (prevDevice !== deviceId) {
-        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, deviceId); // 30 days
+        await redisClient.setEx(activeDeviceKey, 86400 * 30, deviceId); // 30 days
         await invalidateActiveDeviceCache(user.id, redisClient);
       } else {
-        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, deviceId); // 30 days
+        await redisClient.setEx(activeDeviceKey, 86400 * 30, deviceId); // 30 days
       }
     } catch (redisErr) {
       console.error('[Redis] Failed to set active device cache:', redisErr);
+    }
+
+    // [docs/28 Tier 2 — B4] Aktivitas user dipotong ke HARI; tulis hanya saat
+    // hari berganti (updateMany = no-op bila sudah hari ini) supaya tidak ada
+    // write tiap refresh. `lastActiveDay` menggantikan presisi `lastActiveAt`.
+    try {
+      await prisma.user.updateMany({
+        where: { id: user.id, lastActiveDay: { lt: dayBucket() } },
+        data: { lastActiveDay: dayBucket() },
+      });
+    } catch (activeErr) {
+      console.warn('[Auth] Failed to update lastActiveDay:', activeErr);
     }
   }
   
@@ -231,6 +253,8 @@ async (req, res, next) => {
       data: {
         usernameHash: pepperedIdentifier(usernameHash),
         passwordHash,
+        // [docs/28 Tier 2 — B4] hari pendaftaran (bucket harian), bukan detik.
+        lastActiveDay: dayBucket(),
         encryptedProfile,
         isVerified: false,
         devices: {
@@ -240,9 +264,10 @@ async (req, res, next) => {
             pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
             signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
-            name: deviceName || 'Primary Device',
+            // [docs/28 Tier 1.5] label & anchor perangkat tidak pernah plaintext.
+            nameSealed: await sealAtRest(deviceName || 'Primary Device'),
             fingerprint: fingerprint || null,
-            installationId: installationId || null
+            installationTag: installationId ? deviceInstallationTag(installationId) : null
           }
         }
       },
@@ -294,7 +319,7 @@ router.post('/login', authLimiter, zodValidate({
     const user = await prisma.user.findFirst({
       where: { usernameHash: { in: identifierLookupCandidates(usernameHash) } },
       include: {
-        devices: { orderBy: { lastActiveAt: 'desc' } }
+        devices: { orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }] }
       }
     })
 
@@ -329,16 +354,16 @@ router.post('/login', authLimiter, zodValidate({
           device = await prisma.device.update({
               where: { id: device.id },
               data: { 
-                lastActiveAt: new Date(), 
+                lastActiveAt: deviceActivityBucket(), 
                 // Update hardware binding
                 fingerprint: fingerprint || device.fingerprint,
-                installationId: installationId || device.installationId,
+                installationTag: installationId ? deviceInstallationTag(installationId) : device.installationTag,
                 // Update keys in case they were regenerated locally
                 publicKey: Buffer.from(publicKey, 'base64url'),
                 pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : device.pqPublicKey,
                 signingKey: Buffer.from(signingKey, 'base64url'), 
                 encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'), 
-                name: deviceName || getGenericDeviceName(req.headers['user-agent']) 
+                nameSealed: await sealAtRest(deviceName || getGenericDeviceName(req.headers['user-agent']))
               }
           });
       } else {
@@ -349,9 +374,9 @@ router.post('/login', authLimiter, zodValidate({
               pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
               signingKey: Buffer.from(signingKey, 'base64url'),
               encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'),
-              name: deviceName || getGenericDeviceName(req.headers['user-agent']),
+              nameSealed: await sealAtRest(deviceName || getGenericDeviceName(req.headers['user-agent'])),
               fingerprint: fingerprint || null,
-              installationId: installationId || null
+              installationTag: installationId ? deviceInstallationTag(installationId) : null
             }
           });
       }
@@ -365,11 +390,12 @@ router.post('/login', authLimiter, zodValidate({
           // SECURITY CHECK: If device exists but fingerprint MISMATCHES, 
           // it means the browser data (LocalStorage) was cloned to a different hardware.
           if (device && device.fingerprint && fingerprint && device.fingerprint !== fingerprint) {
-              // Toleransi: Jika installationId (Anchor) masih cocok, kita izinkan update fingerprint
-              if (device.installationId && device.installationId === installationId) {
+              // Toleransi: Jika anchor instalasi masih cocok, kita izinkan update fingerprint
+              // [docs/28 Tier 1.5] kolom menyimpan TAG → bandingkan nilai ter-tag.
+              if (device.installationTag && installationId && device.installationTag === deviceInstallationTag(installationId)) {
                   await prisma.device.update({
                       where: { id: device.id },
-                      data: { fingerprint, lastActiveAt: new Date() }
+                      data: { fingerprint, lastActiveAt: deviceActivityBucket() }
                   });
                   activeDeviceId = device.id;
               } else {
@@ -385,9 +411,9 @@ router.post('/login', authLimiter, zodValidate({
               await prisma.device.update({ 
                 where: { id: device.id }, 
                 data: { 
-                  lastActiveAt: new Date(),
+                  lastActiveAt: deviceActivityBucket(),
                   fingerprint: fingerprint || device.fingerprint,
-                  installationId: installationId || device.installationId
+                  installationTag: installationId ? deviceInstallationTag(installationId) : device.installationTag
                 } 
               });
           }
@@ -541,12 +567,13 @@ router.post('/refresh', async (req, res, next) => {
     // Update Redis active device
     // [ROBUSTNESS] Paritas dengan issueTokens: invalidate bila device berubah.
     try {
-      const prevDevice = await redisClient.get(`active_device:${user.id}`);
+      const activeDeviceKey = identityKey('active_device', user.id);
+      const prevDevice = await redisClient.get(activeDeviceKey);
       if (prevDevice !== basis.deviceId) {
-        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, basis.deviceId);
+        await redisClient.setEx(activeDeviceKey, 86400 * 30, basis.deviceId);
         await invalidateActiveDeviceCache(user.id, redisClient);
       } else {
-        await redisClient.setEx(`active_device:${user.id}`, 86400 * 30, basis.deviceId);
+        await redisClient.setEx(activeDeviceKey, 86400 * 30, basis.deviceId);
       }
     } catch (_e) {}
 
@@ -639,6 +666,10 @@ router.post('/recover', authLimiter, zodValidate({
     const _iid = req.headers['x-nyx-installation-id'];
     const installationId = typeof _iid === 'string' ? _iid : undefined;
 
+    // [docs/28 Tier 1.5] seal/tag dihitung SEBELUM transaksi array (nilainya statis).
+    const recoveredDeviceNameSealed = await sealAtRest('Recovered Device');
+    const recoveredInstallationTag = installationId ? deviceInstallationTag(installationId) : null;
+
     const [updatedUser, _, __, newDevice] = await prisma.$transaction([
         prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
         prisma.device.deleteMany({ where: { userId: user.id } }), 
@@ -651,9 +682,9 @@ router.post('/recover', authLimiter, zodValidate({
             pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
             signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: newEncryptedKeys ? Buffer.from(newEncryptedKeys, 'utf8') : null,
-            name: 'Recovered Device',
+            nameSealed: recoveredDeviceNameSealed,
             fingerprint: fingerprint || null,
-            installationId: installationId || null
+            installationTag: recoveredInstallationTag
           }
         })
     ]);
@@ -695,7 +726,7 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
     // Clear active device cache from Redis
     // [ROBUSTNESS] Buang juga cache lokal 60s di semua instance.
     try {
-      await redisClient.del(`active_device:${req.user.id}`);
+      await redisClient.del(identityKey('active_device', req.user.id));
       await invalidateActiveDeviceCache(req.user.id, redisClient);
     } catch (_re) {}
 
@@ -706,7 +737,8 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
 router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
   if (endpoint) {
-    try { await prisma.pushSubscription.deleteMany({ where: { endpoint } }) } catch (_e) {}
+    // [docs/28 Tier 1.5 / D10] endpoint tersimpan TER-SEAL → lookup dengan seal.
+    try { await prisma.pushSubscription.deleteMany({ where: { endpointSealed: await sealAtRest(endpoint) } }) } catch (_e) {}
   }
   try {
     const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string; sub?: string };
@@ -726,7 +758,7 @@ router.post('/logout', async (req, res) => {
       // [ROBUSTNESS] Buang juga cache lokal 60s di semua instance.
       if (payload.sub) {
         try {
-          await redisClient.del(`active_device:${payload.sub}`);
+          await redisClient.del(identityKey('active_device', payload.sub));
           await invalidateActiveDeviceCache(payload.sub, redisClient);
         } catch (_re) {}
       }
@@ -1005,7 +1037,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
           subscriptionTier: true,
           bannedAt: true,
           banReason: true,
-          devices: { orderBy: { lastActiveAt: 'desc' }, take: 1 }
+          devices: { orderBy: [{ lastActiveAt: 'desc' }, { createdAt: 'desc' }], take: 1 }
         }
       })
 
@@ -1022,10 +1054,11 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
 
       if (latestDevice) {
          if (latestDevice.fingerprint && fingerprint && latestDevice.fingerprint !== fingerprint) {
-             if (latestDevice.installationId && latestDevice.installationId === installationId) {
+             // [docs/28 Tier 1.5] kolom menyimpan TAG → bandingkan nilai ter-tag.
+             if (latestDevice.installationTag && installationId && latestDevice.installationTag === deviceInstallationTag(installationId)) {
                  await prisma.device.update({
                      where: { id: latestDevice.id },
-                     data: { fingerprint, lastActiveAt: new Date() }
+                     data: { fingerprint, lastActiveAt: deviceActivityBucket() }
                  });
              } else {
                  console.warn(`[Security] Hardware/Anchor mismatch for device ${latestDevice.id} via WebAuthn. Forcing recovery flow.`);
@@ -1035,9 +1068,9 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
              await prisma.device.update({
                  where: { id: latestDevice.id },
                  data: { 
-                     lastActiveAt: new Date(), 
+                     lastActiveAt: deviceActivityBucket(), 
                      fingerprint: fingerprint || latestDevice.fingerprint, 
-                     installationId: installationId || latestDevice.installationId 
+                     installationTag: installationId ? deviceInstallationTag(installationId) : latestDevice.installationTag 
                  }
              });
          }

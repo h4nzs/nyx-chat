@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useConversationStore } from '@store/conversation';
 import { usePresenceStore } from '@store/presence';
@@ -9,6 +9,9 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
 import i18n from '../i18n';
 import { getParticipantUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+// [docs/28 Tier 1.5 / D14] presence lazy: daftar chat yang meminta status kontak
+// yang sedang ditampilkan.
+import { usePresenceSubscription } from './usePresenceSubscription';
 
 // Debounce minimal (pengganti lodash-es): panggilan terakhir yang menang
 function debounce<A extends unknown[]>(fn: (...args: A) => void, wait: number) {
@@ -118,6 +121,18 @@ export function useChatList() {
       return title.toLowerCase().includes(searchQuery.toLowerCase());
     });  
     const showSearchResults = searchQuery.trim().length > 0;
+
+    // [docs/28 Tier 1.5 / D14] Langganan presence untuk semua lawan bicara yang
+    // terlihat di daftar chat (burner tidak punya presence).
+    const presenceTargets = useMemo(
+      () =>
+        conversations
+          .filter((c) => !c.id.startsWith('burner_'))
+          .flatMap((c) => c.participants.map((p) => getParticipantUserId(p)))
+          .filter((id): id is string => typeof id === 'string' && id.length > 0 && id !== meId),
+      [conversations, meId]
+    );
+    usePresenceSubscription(presenceTargets);
   
     return {
       // State

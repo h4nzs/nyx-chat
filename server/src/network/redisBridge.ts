@@ -8,8 +8,11 @@ import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { TransportOpCode, MessageSendPayloadSchema } from '@nyx/shared';
 import { createCheckRateLimit, DEVICE_CACHE_INVALIDATE_CHANNEL } from '../utils/redisResilience.js';
-import { pepperedIdentifier } from '../utils/atRestSecrets.js';
-import { collectPresencePeers, intersectOnline, type PresenceMembershipClient } from '../utils/presencePeers.js';
+import { deviceInstallationTag, pepperedIdentifier } from '../utils/atRestSecrets.js';
+// [docs/28 Tier 1.5 / D14] Redis tidak lagi memuat userId asli: key memakai tag,
+// member SET yang perlu di-routing memakai nilai ter-seal.
+import { identityKey, identityTag, sealIdentity } from '../utils/redisIdentity.js';
+import { notifyPresenceWatchers, clearPresenceSubscriptions } from '../utils/presenceSubscriptions.js';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 import { handleChatMessage, handleKeySync, handlePresence, type RealtimeContext } from './realtimeHandlers.js';
 
@@ -142,12 +145,12 @@ export async function isActiveDeviceAllowed(userId: string, deviceId: string): P
   if (cached && cached.expiresAt > now) {
     return cached.deviceId === '' || cached.deviceId === deviceId;
   }
-  const isMigrating = await redisClient.exists(`is_migrating:${userId}`).catch(() => 0);
+  const isMigrating = await redisClient.exists(identityKey('is_migrating', userId)).catch(() => 0);
   if (isMigrating) {
     activeDeviceCache.set(userId, { deviceId: '', expiresAt: now + 30000 });
     return true;
   }
-  const active = await redisClient.get(`active_device:${userId}`).catch(() => null);
+  const active = await redisClient.get(identityKey('active_device', userId)).catch(() => null);
   activeDeviceCache.set(userId, { deviceId: active ?? '', expiresAt: now + 60000 });
   return !active || active === deviceId;
 }
@@ -211,8 +214,8 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         }
 
         // 🛡️ LAPIS 1: SINGLE ACTIVE DEVICE CHECK
-        const activeDeviceId = await redisClient.get(`active_device:${userId}`);
-        const isMigrating = await redisClient.exists(`is_migrating:${userId}`);
+        const activeDeviceId = await redisClient.get(identityKey('active_device', userId));
+        const isMigrating = await redisClient.exists(identityKey('is_migrating', userId));
 
         if (activeDeviceId && activeDeviceId !== deviceId && !isMigrating) {
           console.warn(`[Security-L1] Revoked device ${deviceId} (User ${userId}) tried to connect. Kicking...`);
@@ -228,7 +231,8 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         // 🛡️ LAPIS 2: HARDWARE BINDING (FINGERPRINT CHECK)
         const device = await prisma.device.findUnique({
           where: { id: deviceId },
-          select: { fingerprint: true, installationId: true }
+          // [docs/28 Tier 1.5] anchor perangkat tersimpan sebagai TAG.
+          select: { fingerprint: true, installationTag: true }
         });
 
         if (device && device.fingerprint) {
@@ -247,8 +251,11 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
            // [docs/28 Tier 0 — D7] fingerprint tersimpan dalam bentuk ter-index
            // (HMAC pepper), jadi bandingkan dengan nilai ter-index juga.
            const isFingerprintMatch = device.fingerprint === pepperedIdentifier(authData.identity.fingerprint);
-           // Kita beri toleransi: Jika installationId (Anchor) cocok, kita izinkan meskipun fingerprint browser berubah sedikit
-           const isAnchorMatch = device.installationId && device.installationId === authData.identity.installationId;
+           // Kita beri toleransi: Jika anchor instalasi cocok, kita izinkan meskipun fingerprint browser berubah sedikit
+           // [docs/28 Tier 1.5] kolom = TAG → bandingkan nilai ter-tag.
+           const isAnchorMatch = !!device.installationTag
+             && !!authData.identity.installationId
+             && device.installationTag === deviceInstallationTag(authData.identity.installationId);
 
            if (!isFingerprintMatch && !isAnchorMatch) {
               console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${userId}). Possible session cloning. Kicking...`);
@@ -271,30 +278,32 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   }
 
   async function handleDisconnect(userId: string) {
-  const wasOnline = await pubClient.sRem('online_users', userId);
+  // [docs/28 Tier 1.5 / D14] `online_users` menyimpan TAG (bukan userId asli).
+  const wasOnline = await pubClient.sRem('online_users', identityTag(userId));
 
-  // [docs/28 Tier 0.7 — D14] Cleanup presence: sinyal 'leave' hanya ke PEER yang
-  // sedang online (dulu broadcast ke seluruh roster online_users). Query peer
-  // dibungkus try/catch — kegagalan DB tidak boleh menggagalkan penanganan
-  // disconnect (koneksi tetap dibersihkan).
+  // [docs/28 Tier 1.5] Presence lazy: sinyal 'leave' hanya dikirim ke klien yang
+  // BENAR-BENAR berlangganan user ini (in-memory registry, tidak persist).
   try {
     if (wasOnline === 1) {
-      const onlineUsers = new Set(await pubClient.sMembers('online_users'));
-      const peers = await collectPresencePeers(prisma as unknown as PresenceMembershipClient, userId);
-      await broadcastToUsers(intersectOnline(peers, onlineUsers), TransportOpCode.PRESENCE, { event: 'leave', userId });
+      await notifyPresenceWatchers(userId, (target) =>
+        sendJsonToUser(target, TransportOpCode.PRESENCE, { type: 'leave', userId })
+      );
     }
+    clearPresenceSubscriptions(userId);
   } catch (e) {
-    console.warn('[Presence] Gagal mengirim sinyal leave ke peer:', e);
+    console.warn('[Presence] Gagal mengirim sinyal leave ke watcher:', e);
   }
 
   // Optional: Best-effort cleanup for burner/migration rooms
   try {
+    // [docs/28 Tier 1.5 / D14] member SET = nilai ter-seal (dulu userId plaintext).
+    const sealedMember = await sealIdentity(userId);
     let cursor = '0';
     do {
       const result = await pubClient.scan(cursor, { MATCH: 'burner:room:*', COUNT: 100 });
       cursor = result.cursor;
       for (const key of result.keys) {
-        await pubClient.sRem(key, userId);
+        await pubClient.sRem(key, sealedMember);
       }
     } while (cursor !== '0');
 
@@ -303,7 +312,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       const result = await pubClient.scan(cursor, { MATCH: 'migration:room:*', COUNT: 100 });
       cursor = result.cursor;
       for (const key of result.keys) {
-        await pubClient.sRem(key, userId);
+        await pubClient.sRem(key, sealedMember);
       }
     } while (cursor !== '0');
   } catch (e) {
