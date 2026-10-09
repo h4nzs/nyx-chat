@@ -2,6 +2,130 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 Penutupan Residual DB-Dump (Tier 1.5 + D14 + 3.2) (2026-10-08)
+
+Menutup sisa item traceability audit `docs/28-db-dump-threat-model.md`: residual
+Tier 1.5 (identitas yang masih plaintext), temuan **D14** (Redis + presence), dan
+**Tier 3.2** (dump simulator sebagai pembuktian).
+
+**Presence lazy/opt-in + Redis tanpa userId asli (D14, Tier 0.7/1.5).** Redis
+persisten kini tidak lagi memuat userId asli: `utils/redisIdentity.ts` menyediakan
+`identityTag` (HMAC → keanggotaan SET `online_users` & sufiks key `active_device:*`,
+`is_migrating:*`, `cache:keys:*`, `rate_limit:*`) dan `sealIdentity` (seal
+deterministik → member SET routing `burner:room:*`, `migration:room:*`,
+`migration_owner:*`, nilai `linking_token:*`), dengan toleransi baris legacy
+`[ter-seal, apa adanya]`. Di sisi produk, presence berhenti membroadcast roster
+global: klien meminta `presence:subscribe` hanya untuk kontak yang sedang
+ditampilkan, server memvalidasi lewat daftar peer yang **diturunkan sendiri** dari
+`UserHiddenConversation` (`collectPresencePeers`), dan join/leave hanya dikirim ke
+klien yang berlangganan (`utils/presenceSubscriptions.ts`, registry in-memory).
+Event klien baru: `presence:subscribe` / `presence:sync`.
+
+**Residual Tier 1.5 ter-seal.** `User.externalId` → `externalIdSealed`
+(uniqueness tetap `[tenantId, externalIdSealed]`), `Device.name` → `nameSealed`,
+`Device.installationId` → `installationTag` (HMAC), `PushSubscription.endpoint` →
+`endpointSealed` (dibuka hanya saat mengirim push), dan `Conversation.metadata`
+**dihapus** (write-only; dump tak bisa lagi memuat plaintext titipan tenant).
+Semua baca/tulis lewat helper `atRestSecrets`/`sealAtRest`/`openAtRest`.
+
+**Tier 3.2 — dump simulator.** `utils/dumpAudit.ts` (logika murni, tanpa DB)
+mem-parsing section `COPY` dari `pg_dump` plain dan memeriksa 11 kolom identitas +
+2 rahasia otoritas + artefak Redis. Pembungkus: `scripts/privacy-dump-audit.ts`
+(mode live seed→`pg_dump`→audit→cleanup, dan mode offline `--dump <file>`).
+`npm run privacy:dump-audit` menjalankan jalur live.
+
+**`seq` dipersist ke ShadowVault.** `DecryptedMessageRecord.seq` ditulis & dibaca
+kembali, sehingga kursor paginasi server (`oldestMessage.seq`) tetap presisi
+setelah reload — tidak lagi jatuh ke jalur ISO-date legacy yang bisa mengulang
+sebagian halaman.
+
+**Guard test baru/diperbarui:** `schemaPrivacy.test.ts` (7 — termasuk D4/D9/D10 &
+D11 residual), `redisIdentity.test.ts` (7), `presencePeers.test.ts` (6, wiring
+presence lazy), `dumpAudit.test.ts` (9 — kontrol negatif: dump bocor GAGAL),
+`vaultSeqPersistence.test.ts` (4). Referensi desain (Signal) didokumentasikan di
+docs/28 §28.10.
+
+Verifikasi: server `tsc` 0, `npm test` **191/191**; web `tsc -b` 0, `vitest`
+**282/282**, `pnpm build` 0. **Belum dijalankan:** E2E Playwright & jalur live
+dump simulator (butuh Postgres ter-seed + `prisma db push`, yang tidak dijalankan
+atas permintaan maintainer).
+
+## ⏱️ Urutan & Metadata Temporal — Tier 2 B1–B5 (2026-10-08)
+
+**B1 — urutan pesan berbasis sequence.** Urutan pesan (dan kursor keyset
+pagination) tidak lagi bergantung pada jam dinding `Message.createdAt`.
+`Conversation.messageSeq` di-increment atomik (Prisma `increment` dalam satu
+transaksi; util `utils/messageSequence.ts`) dan `Message.seq` menyimpan hasilnya.
+Dipakai di 4 titik create (REST, WT `chat_message`, SYSTEM fulfilled_key &
+metadata_updated). Paginasi menerima kursor `seq` **atau** ISO date legacy
+(`parseMessageCursor`), urutan utama `seq` dengan `createdAt` sebagai tie-break
+baris lama, dan mapper mengirim `seq` hanya bila >0. Klien ikut mengurutkan via
+`seq` (fallback `createdAt`). Efeknya: `Message.createdAt` boleh dikasar (B3)
+tanpa merusak urutan. Test `tests/messageSequence.test.ts`.
+
+**B4 — bucket metadata aktivitas.** `User.lastActiveAt` → `lastActiveDay`
+(bucket **hari**, UTC); ditulis saat user dibuat dan di `issueTokens` (updateMany
+no-op bila hari sama) — sekaligus memperbaiki bug dead man's switch yang dulu
+memakai nilai basi sejak registrasi. `Device.lastActiveAt` di-bucket **15 menit**
+(`deviceActivityBucket`) di semua jalur write, dengan tie-break deterministik
+`[{lastActiveAt desc},{createdAt desc}]` di semua pembaca. Util baru:
+`utils/temporalBucket.ts`. Test `tests/temporalBucket.test.ts`.
+
+**B2 — waktu presisi pindah ke ciphertext.** Klien menyuntik `sentAt`
+(`Date.now()`) ke objek JSON yang dienkripsi; saat dekripsi `captureSentAt()`
+menyalin ke `Message.sentAt` lalu **menghapus field** (wajib, karena logika
+"collapse" memakai `Object.keys(parsed).length === 1`). Tampilan (bubble,
+jendela edit 5 menit, daftar chat, pencarian) memakai `sentAt` dengan fallback
+`createdAt`; `sentAt` dipersist lokal (shadowVault). Server tak pernah melihat
+waktu presisi.
+
+**B3 — createdAt & metadata receipt kasar.** `Message.createdAt` dipotong ke 15
+menit di semua jalur create, `expiresAt` diturunkan dari waktu kasar yang sama
+(kalau tidak, `expiresAt − TTL` membocorkan createdAt), dan
+`Conversation.lastMessageAt` ikut waktu kasar yang sama. `MessageStatus.updatedAt`
+juga dikasar: `@updatedAt` dihapus (Prisma akan menimpanya) dan nilainya ditulis
+eksplisit di kedua jalur receipt. Vault lokal memakai `sentAt` presisi sebagai
+indeks.
+
+**B5 — id non-time-ordered (tuntas).** Semua model ber-default PK kini
+`@default(uuid())` (User, Conversation, Device, Tenant, MessageStatus, SessionKey,
+RefreshToken, PushSubscription, OneTimePreKey, UserHiddenConversation,
+BlockedUser) — tak ada `cuid()` time-ordered tersisa; id lama tetap valid (opaque
+bagi klien). Id SYSTEM metadata tak lagi memakai `Date.now()`; validator
+`keys.ts` (dulu `.cuid()`) menerima id lama maupun baru.
+
+**Tier 2 residual (2.2/2.3/2.4).** `Message.repliedToId` kini **ter-seal**
+(`sealAtRest`) — dump DB tak memuat edge balasan; server membukanya saat read
+(`resolveRepliedToId`) dan mapper sengaja mengosongkan kolomnya agar nilai
+ter-seal tak bocor ke klien. `OneTimePreKey.createdAt` **dihapus** (baris OTPK
+sudah dihapus atomik saat dipakai; urutan pakai `keyId`). `Authenticator.counter`
+**sengaja dipertahankan** — dibutuhkan deteksi kloning WebAuthn (keputusan sadar).
+
+Verifikasi: server `tsc` 0, `npm test` **173/173**; web `tsc -b` 0, `vitest`
+**278/278**, `pnpm build` 0. **Backfill `seq`** untuk baris lama (SQL di docs/28
+§28.9) dan `prisma db push` belum dijalankan — B2/B3 **butuh verifikasi E2E** di
+lingkungan nyata (jalur dekripsi & tampilan).
+
+**Tinjauan efek domino (lanjutan).** Menutup tiga regresi yang muncul dari
+B1–B3 di klien:
+- **Pesan pending (optimistik/antrean offline) tanpa `seq`** dulu ikut `seq = 0`
+  sehingga setiap sort ulang (pesan masuk/sync) melempar bubble "SENDING" ke
+  ATAS riwayat — kini pending selalu dianggap **paling baru**
+  (`utils/messageOrder.ts`, dipakai 3 jalur sort; test `messageOrder.test.ts`).
+- **Waktu kirim pesan sendiri** jatuh ke `createdAt` server yang kasar (tampil
+  membulat 15 menit) karena balikan server tak memuat `sentAt` — bubble
+  optimistik kini menyimpan `sentAt`, nilai itu dipakai untuk plaintext
+  ciphertext, dan dipertahankan saat ACK (2 jalur) mengganti bubble.
+- **Urutan daftar chat** berpotensi flip saat `lastMessageAt` seri dalam satu
+  bucket — server kini `orderBy [{lastMessageAt desc},{id desc}]`, klien
+  mengurutkan dengan `sentAt` presisi + tie-break id.
+
+Sisa yang **belum** ditutup (dicatat, bukan bug baru): `seq` tidak ikut
+dipersist ke ShadowVault lokal, jadi setelah reload kursor paginasi jatuh ke
+jalur ISO-date legacy (bisa memberi duplikat yang di-dedupe klien) — **ditutup
+menyusul** di entri *Penutupan Residual DB-Dump (Tier 1.5 + D14 + 3.2)* di atas;
+`expiresAt`/sweeper toleran ≤1 bucket (15 menit).
+
 ## 🖼️ Story & Block Ter-seal — Tier 1.3/1.4 / D8+D9 (2026-10-08)
 
 **D8:** `Story.senderId` dulu FK asli → dump DB memberi "siapa membuat story
