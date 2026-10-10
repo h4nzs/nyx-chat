@@ -7,8 +7,15 @@ import {
   makeOtpkQuotaGate
 } from '../src/utils/otpkQuota.js';
 
-test('format kunci kuota OTPK adalah otpkq:<requester>:<target>', () => {
-  assert.equal(otpkQuotaKey('user-1', 'user-2'), 'otpkq:user-1:user-2');
+// [docs/28 Tier 4] Kedua sisi key adalah TAG (HMAC pepper), bukan userId asli:
+// snapshot Redis/AOF tidak boleh memetakan "siapa meminta pre-key siapa".
+test('format kunci kuota OTPK memakai tag, bukan userId asli', () => {
+  const key = otpkQuotaKey('user-1', 'user-2');
+  assert.match(key, /^otpkq:[a-f0-9]{64}:[a-f0-9]{64}$/);
+  assert.ok(!key.includes('user-1') && !key.includes('user-2'), 'userId asli tidak boleh tersemat');
+  assert.equal(key, otpkQuotaKey('user-1', 'user-2'), 'deterministik per pasangan (counter idempoten)');
+  assert.notEqual(key, otpkQuotaKey('user-1', 'user-3'), 'pasangan berbeda → key berbeda');
+  assert.notEqual(key, otpkQuotaKey('user-2', 'user-1'), 'arah tidak tertukar');
 });
 
 test('batas harian dan TTL ter-ekspor dengan nilai yang benar', () => {

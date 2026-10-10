@@ -80,14 +80,20 @@ export function pepperedIdentifier(value: string): string {
 }
 
 /**
- * Kandidat nilai untuk lookup kolom yang sedang dimigrasi:
- * `[ter-pepper, apa adanya]`. Cabang "apa adanya" melayani (a) baris legacy
- * yang masih plaintext/hash-lama, dan (b) klien yang meng-echo nilai yang
- * pernah ia terima dari server (mis. `user.usernameHash` di flow recovery).
+ * Nilai lookup kanonik untuk kolom identifier.
+ *
+ * Selalu `[ter-pepper, nilai yang dikirim klien]`.
+ *
+ * Kandidat kedua BUKAN toleransi baris legacy (baris pra-pepper sudah tidak ada)
+ * melainkan **nilai ter-pepper yang di-echo klien**: server mengembalikan
+ * `usernameHash` ter-pepper pada respons register/login/`/me`, dan link berbagi
+ * profil (`connect?u=<usernameHash>`) mengirim balik nilai itu ke pencarian
+ * kontak. Kolom DB menyimpan nilai ter-pepper, jadi lookup `where { in }` harus
+ * memuat nilai kiriman apa adanya agar tautan itu tetap menemukan user.
+ * (Meniadakan kandidat ini = pencarian hash-ID 64-hex berhenti bekerja.)
  */
 export function identifierLookupCandidates(value: string): string[] {
-  const peppered = pepperedIdentifier(value)
-  return value === peppered ? [peppered] : [peppered, value]
+  return [pepperedIdentifier(value), value]
 }
 
 /** SHA-256 hex dari token yang dipegang klien (`adminSecretHash` pattern). */
@@ -105,18 +111,15 @@ function timingSafeEqualStr(a: string, b: string): boolean {
 /**
  * Cocokkan token yang dipresentasikan klien dengan nilai tersimpan.
  *
- * Dua mode diterima sekaligus (tanpa sniffing format, karena `authSecret`
- * legacy juga 64 hex = sama dengan bentuk hash):
- *  - tersimpan = hash → bandingkan dengan hash(token yang dipresentasikan);
- *  - tersimpan = plaintext legacy → bandingkan langsung.
+ * [2026-10 legacy purge] Nilai tersimpan WAJIB hash SHA-256; cabang plaintext
+ * (baris pra-hash) dibuang — tidak ada lagi baris seperti itu di DB.
  */
 export function credentialTokenMatches(stored: string | null | undefined, presented: string): boolean {
   if (!stored || !presented) return false
-  if (timingSafeEqualStr(stored, hashCredentialToken(presented))) return true
-  return timingSafeEqualStr(stored, presented)
+  return timingSafeEqualStr(stored, hashCredentialToken(presented))
 }
 
-/** Apakah nilai tersimpan berbentuk hash SHA-256 hex (bukan plaintext legacy)? */
+/** Apakah nilai tersimpan berbentuk hash SHA-256 hex? */
 export function isHashedToken(stored: string | null | undefined): boolean {
   return typeof stored === 'string' && HEX64_RE.test(stored)
 }
@@ -158,7 +161,7 @@ export async function sealAtRest(plaintext: string): Promise<string> {
   return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING)
 }
 
-/** Buka hasil `sealAtRest`. Mengembalikan null untuk nilai kosong/rusak/legacy. */
+/** Buka hasil `sealAtRest`. Mengembalikan null untuk nilai kosong/rusak. */
 export async function openAtRest(sealed: string | null | undefined): Promise<string | null> {
   if (!sealed) return null
   try {
@@ -175,14 +178,18 @@ export async function openAtRest(sealed: string | null | undefined): Promise<str
   }
 }
 
-/** Kandidat lookup kolom sealed: `[sealed, nilai apa adanya (legacy)]`. */
+/**
+ * Nilai lookup kanonik kolom sealed: SELALU hasil seal deterministik.
+ * [2026-10 legacy purge] Cabang "nilai apa adanya" dibuang — tak ada baris
+ * plaintext tersisa, jadi lookup tidak perlu lagi mencocokkan dua bentuk.
+ */
 export async function sealedLookupCandidates(value: string): Promise<string[]> {
-  return [await sealAtRest(value), value]
+  return [await sealAtRest(value)]
 }
 
 /**
  * [docs/28 Tier 1.1 — D2] Tag pembaca receipt (READ/DELIVERED) untuk percakapan
- * yang tidak punya pseudonym klien (1:1 & grup v1).
+ * 1:1 yang tidak punya pseudonym klien.
  *
  * Sebelumnya `MessageStatus.userId` menyimpan **userId asli** di jalur ini —
  * jadi dump DB masih merekonstruksi edge "A↔B" meski `Message.senderId` sudah

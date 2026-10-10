@@ -174,8 +174,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     return null;
   }
 
-  // [T4] Admin check dari roster metadata v3 (fallback legacy v1/v2 via
-  // participants). OWNER dan ADMIN sama-sama boleh mengelola grup.
+  // [T4] Admin check dari roster metadata v3. OWNER dan ADMIN sama-sama boleh
+  // mengelola grup; tanpa roster v3 → bukan admin (fail-closed).
   const amIAdmin = amIGroupAdmin(conversation.id);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,8 +221,17 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       const encryptedMetadata = await encryptGroupMetadata(newMetadata, conversation.id);
 
       const avatarRecipients = conversation.participants?.filter(p => p.id !== user?.id)?.map(p => p.id) || [];
+      // [BUGFIX 2026-10-10] PUT /:id/details butuh blind auth (X-Group-Token) DAN
+      // admin capability (X-Admin-Token). Sebelumnya header kosong → 403, avatar
+      // hanya berubah lokal dan anggota lain tidak pernah menerimanya.
+      const { getMyAdminToken } = await import('@lib/groupPseudonyms');
+      const groupToken = (currentMetadata as { authSecret?: string }).authSecret;
       await api(`/api/conversations/${conversation.id}/details`, {
         method: 'PUT',
+        headers: {
+          ...(groupToken ? { 'X-Group-Token': groupToken } : {}),
+          'X-Admin-Token': getMyAdminToken(conversation.id) ?? '',
+        },
         body: JSON.stringify({ encryptedMetadata, targetRecipients: avatarRecipients }),
       });
 

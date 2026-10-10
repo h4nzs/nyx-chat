@@ -14,6 +14,10 @@ import {
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
 import { isAdminTokenValid, extractHeader } from '../utils/adminCapability.js'
 import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js'
+// [docs/28 Tier 4] identitas at-rest: key Redis ber-tag + metadata grup tanpa userId penulis.
+import { identityTag } from '../utils/redisIdentity.js'
+import { sanitizeGroupMetadataBlob } from '../utils/groupMetadataBlob.js'
+import { messageTimeBucket } from '../utils/temporalBucket.js'
 import {
   upsertMembership, findMembership, deleteMembership, type MembershipPrisma
 } from '../utils/routingIdentity.js'
@@ -293,7 +297,7 @@ if current == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
 return current
-`, { keys: [`sandbox:newchat:${creatorId}:${today}`], arguments: ['86400'] }));
+`, { keys: [`sandbox:newchat:${identityTag(creatorId)}:${today}`], arguments: ['86400'] }));
 
     const creator = await prisma.user.findUnique({ where: { id: creatorId }, select: { isVerified: true } });
     if (!creator?.isVerified && sandboxCount > 3) {
@@ -305,13 +309,20 @@ return current
     // [docs/28 Tier 0 — D3] Token grup tetap dibuat & dikirim ke pembuat (dia
     // menyimpannya di encryptedMetadata), tapi server HANYA menyimpan hash-nya
     // (pola adminSecretHash) — dump DB tidak bisa lagi dipakai untuk ikut bicara
-    // di grup. Bandingkan lewat credentialTokenMatches (dual-mode legacy).
+    // di grup. Bandingkan lewat credentialTokenMatches (hash-only).
     const authSecret = crypto.randomBytes(32).toString('hex');
     // [26.9 RBAC] Creator-generated admin capability token dikirim sebagai HASH
     // (SHA-256 hex) — token asli tidak pernah menyentuh server; ia di-seal
     // pairwise ke device creator + admin lain oleh klien.
-    const adminSecretHash = typeof req.body.adminSecretHash === 'string' && isGroup === true
-      ? req.body.adminSecretHash
+    // [2026-10 legacy purge] WAJIB untuk grup: dulu boleh null (grup pra-RBAC
+    // memakai bypass di isAdminTokenValid), dan celah itu membuat grup tanpa
+    // proteksi admin bisa lahir. Klien sekarang selalu mengirimnya pada create.
+    const rawAdminSecretHash = req.body.adminSecretHash;
+    if (isGroup === true && typeof rawAdminSecretHash !== 'string') {
+      return res.status(400).json({ error: 'adminSecretHash required for groups' });
+    }
+    const adminSecretHash = typeof rawAdminSecretHash === 'string' && isGroup === true
+      ? rawAdminSecretHash
       : null;
     if (adminSecretHash !== null && !/^[a-f0-9]{64}$/.test(adminSecretHash)) {
       return res.status(400).json({ error: 'Invalid adminSecretHash format' });
@@ -323,9 +334,14 @@ return current
         const convo = await tx.conversation.create({
           data: {
             isGroup: isGroup === true,
-            encryptedMetadata: isGroup ? encryptedMetadata : null,
+            // [docs/28 Tier 4] buang `senderId` (userId penulis) dari wrapper
+            // metadata v2 — reader tidak memakainya.
+            encryptedMetadata: isGroup ? sanitizeGroupMetadataBlob(encryptedMetadata) : null,
             authSecret: hashCredentialToken(authSecret),
-            adminSecretHash
+            adminSecretHash,
+            // [docs/28 Tier 4 / B3] createdAt grup dipotong 15 menit: presisi
+            // penuh memberi urutan/tebakan kapan grup dibuat.
+            createdAt: messageTimeBucket()
           }
         });
 
@@ -352,7 +368,7 @@ return current
       });
     } catch (dbError) {
       if (!creator?.isVerified) {
-        try { await redisClient.decr(`sandbox:newchat:${creatorId}:${today}`); } catch (_e) { }
+        try { await redisClient.decr(`sandbox:newchat:${identityTag(creatorId)}:${today}`); } catch (_e) { }
       }
       throw dbError;
     }
@@ -417,7 +433,9 @@ router.put('/:id/details', async (req, res, next) => {
     const adminCheck = await requireAdminCapabilityForRequest(id, req);
     if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
 
-    const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata } })
+    // [docs/28 Tier 4] sanitasi SEBELUM simpan supaya blob (dan event relay) bebas userId penulis.
+    const sanitizedMetadata = sanitizeGroupMetadataBlob(encryptedMetadata)
+    const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata: sanitizedMetadata } })
     // Opaque Mailbox: notify explicit targetRecipients passed from client
     const targetRecipients = req.body.targetRecipients as string[] | undefined;
     if (Array.isArray(targetRecipients) && targetRecipients.length > 0) {

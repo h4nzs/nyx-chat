@@ -75,10 +75,13 @@ test('token kosong/missing → false saat hash terpasang (fail closed)', () => {
   assert.equal(isAdminTokenValid(hash, undefined as unknown as string), false)
 })
 
-test('hash NULL/undefined (grup legacy pra-26.9) → BYPASS kompatibilitas', () => {
-  assert.equal(isAdminTokenValid(null, ''), true)
-  assert.equal(isAdminTokenValid(null, 'whatever'), true)
-  assert.equal(isAdminTokenValid(undefined, ''), true)
+test('hash NULL/undefined → fail-closed (tidak ada bypass grup tanpa capability)', () => {
+  // Dulu hash NULL = bypass kompatibilitas grup pra-26.9; jalur create grup
+  // sekarang menolak grup tanpa adminSecretHash, jadi NULL berarti tidak ada
+  // otorisasi sama sekali.
+  assert.equal(isAdminTokenValid(null, ''), false)
+  assert.equal(isAdminTokenValid(null, 'whatever'), false)
+  assert.equal(isAdminTokenValid(undefined, ''), false)
 })
 
 test('perbandingan timing-safe dilakukan pada HASH — panjang token tidak bocor', () => {

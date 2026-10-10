@@ -592,9 +592,17 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         // senderId — ditemukan saat audit DB lokal 2026-09-28).
         const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl, participants: allParticipantIds, authSecret, v: 3, generation: 1, pseudonymMap, deliveryTokenMap, members } as Parameters<typeof encryptGroupMetadata>[0], conv.id, { pseudonym: myPseudonym });
         
+        // [BUGFIX 2026-10-10] PUT /:id/details adalah operasi admin (owner/admin
+        // role = possession of admin capability token; adminSecretHash selalu
+        // terisi untuk grup baru) — tanpa X-Admin-Token server menolak 403 dan
+        // createGroup melakukan rollback (grup terhapus). Partisipan/admin lain
+        // (ParticipantList, GroupInfoPanel, rotateGroupKey) sudah mengirimnya.
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',
-            headers: { 'X-Group-Token': authSecret },
+            headers: {
+                'X-Group-Token': authSecret,
+                'X-Admin-Token': adminToken,
+            },
             body: JSON.stringify({ encryptedMetadata })
         });
         

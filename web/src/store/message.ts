@@ -20,6 +20,9 @@ import {
   retrieveRatchetStateSecurely,
   getPseudonymMap,
   getMyPseudonym,
+  // [docs/28 Tier 4] hydrate pseudonym agar senderPseudonym tidak kosong
+  // (dulu kosong → server menyimpan userId asli di Message.senderId).
+  ensureMyPseudonym,
   PreKeyBundle 
 } from "@utils/crypto";
 import toast from "react-hot-toast";
@@ -1106,7 +1109,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         targetRecipients: conversation.participants.map(getParticipantUserId),
         deleteSecret,
         // [T1] Grup metadata v2: pseudonym pengirim (server simpan verbatim).
-        senderPseudonym: conversation.isGroup ? await getMyPseudonym(conversationId) : undefined,
+        // [docs/28 Tier 4] `ensureMyPseudonym` menghidrasi peta dari metadata
+        // bila store belum punya — tanpa itu server jatuh ke fallback userId.
+        senderPseudonym: conversation.isGroup ? await ensureMyPseudonym(conversationId) : undefined,
         // [T3b TOKEN-FIRST] Piggyback token target — server mendaftarkan row
         // keanggotaan (token-keyed) untuk penerima yang belum punya. Peta di
         // sini keyed by userId server-side (routing), token datang dari
@@ -1368,8 +1373,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           isViewOnce: payloadData.isViewOnce ?? false,
           targetRecipients,
           // [T1] Grup dengan metadata v2: kirim pseudonym (server menyimpan
-          // verbatim). undefined → server pakai jalur legacy (userId).
-          senderPseudonym: await getMyPseudonym(conversationId),
+          // verbatim). [docs/28 Tier 4] tanpa pseudonym server menyimpan userId
+          // TER-SEAL (bukan mentah) — peta dihidrasi dulu agar tidak terjadi.
+          senderPseudonym: await ensureMyPseudonym(conversationId),
           // [T3b TOKEN-FIRST] Sama seperti jalur live — piggyback token target
           // agar penerima offline baru tetap terdaftar (token-keyed row).
           targetDeliveryTokens: conv?.isGroup ? buildTargetDeliveryTokens(conv) : undefined
@@ -2338,6 +2344,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // so the peer's name is resolvable and outbound messages have valid targetRecipients
       reconstructDirectParticipants(conversationId, [decryptedMsg]);
 
+      // [CONTACT STORE LIVE 2026-10-09] Peer 1:1 yang mengirim pesan otomatis
+      // menjadi kontak TANPA reload (picker grup/story membaca store ini).
+      // SenderId grup bisa pseudonym → sengaja hanya untuk percakapan 1:1.
+      void (async () => {
+          try {
+              const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+              if (!conv || conv.isGroup) return;
+              const { noteDirectMessageContact } = await import('@lib/contactStore');
+              await noteDirectMessageContact({
+                  conversationId,
+                  senderId: decryptedMsg.senderId,
+                  encryptedProfile: decryptedMsg.sender?.encryptedProfile ?? null,
+              });
+          } catch (e) {
+              console.warn('[ContactStore] Gagal mencatat kontak dari pesan masuk:', e);
+          }
+      })();
+
       // Opaque Mailbox: reconstruct group participants from encrypted metadata if empty
       if (currentUser) {
           const groupConv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
@@ -2452,16 +2476,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               } else {
                   // [INVARIANT 4 — HEAL TARGETED 2026-10-02] Pola libsignal
                   // DecryptionErrorMessage: minta ulang HANYA ke pengirim pesan
-                  // yang gagal (bukan broadcast ke seluruh grup). Mitigasi
-                  // senderId = pseudonym → resolve via metadata; resolusi gagal
-                  // → fallback broadcast terakhir (grup v1).
+                  // yang gagal (bukan broadcast ke seluruh grup). senderId =
+                  // pseudonym → resolve via metadata; pseudonym tak ada di peta
+                  // → broadcast (pengirim tak diketahui).
                   const failedSenderId = decrypted.senderId;
                   const { emitGroupKeyRequest } = await import('@lib/transportClient');
                   if (failedSenderId) {
                       const { resolvePseudonymToUserId } = await import('@utils/crypto');
-                      const targetUserId = resolvePseudonymToUserId(conversationId, failedSenderId) ?? failedSenderId;
-                      console.warn(`[Auto-Heal] Kunci tidak sinkron (Gagal ${newFailCount}x). Request ter-target ke pengirim ${targetUserId.slice(0, 8)}…`);
-                      emitGroupKeyRequest(conversationId, targetUserId);
+                      const targetUserId = resolvePseudonymToUserId(conversationId, failedSenderId);
+                      if (targetUserId) {
+                          console.warn(`[Auto-Heal] Kunci tidak sinkron (Gagal ${newFailCount}x). Request ter-target ke pengirim ${targetUserId.slice(0, 8)}…`);
+                          emitGroupKeyRequest(conversationId, targetUserId);
+                      } else {
+                          console.warn(`[Auto-Heal] Kunci tidak sinkron (Gagal ${newFailCount}x). Pseudonym tak ada di peta — fallback broadcast.`);
+                          emitGroupKeyRequest(conversationId);
+                      }
                   } else {
                       console.warn(`[Auto-Heal] Kunci tidak sinkron (Gagal ${newFailCount}x). Pengirim tak dikenal — fallback broadcast.`);
                       emitGroupKeyRequest(conversationId);

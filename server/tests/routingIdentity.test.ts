@@ -10,7 +10,7 @@
  * (AEAD deterministik, kunci dari pepper) sehingga:
  *   - server tetap bisa membukanya untuk push/sweeper/broadcast,
  *   - dump saja tidak bisa membaca keanggotaan,
- *   - lookup/upsert tetap deterministik (kandidat sealed + legacy).
+ *   - lookup/upsert tetap deterministik (nilai kanonik = seal tunggal).
  */
 
 import { test } from 'node:test';
@@ -23,11 +23,13 @@ import { openAtRest } from '../src/utils/atRestSecrets.js';
 import {
   deleteMembership,
   findMembership,
+  purgeSealedUserRows,
   resolveRoutingUser,
   routingCandidates,
   routingIdentity,
   upsertMembership,
   type MembershipPrisma,
+  type SealedOwnedRowsPrisma,
 } from '../src/utils/routingIdentity.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -95,16 +97,15 @@ test('routingIdentity: sealed deterministik, bukan userId, bisa dibuka server', 
   assert.notEqual(await routingIdentity('u-ken'), sealed, 'user berbeda → nilai berbeda');
 });
 
-test('routingCandidates: [ter-seal, apa adanya] untuk baris legacy', async () => {
+test('routingCandidates: satu nilai kanonik (sealed), tanpa kandidat plaintext', async () => {
   const candidates = await routingCandidates('u-han');
-  assert.equal(candidates.length, 2);
-  assert.equal(candidates[0], await routingIdentity('u-han'));
-  assert.equal(candidates[1], 'u-han', 'kandidat kedua melayani baris lama (plaintext)');
+  assert.deepEqual(candidates, [await routingIdentity('u-han')]);
+  assert.notEqual(candidates[0], 'u-han', 'userId asli tidak pernah jadi kandidat');
 });
 
-test('resolveRoutingUser: sealed → userId, plaintext legacy → apa adanya, kosong → null', async () => {
+test('resolveRoutingUser: sealed → userId, plaintext/kosong → null', async () => {
   assert.equal(await resolveRoutingUser(await routingIdentity('u-han')), 'u-han');
-  assert.equal(await resolveRoutingUser('u-legacy'), 'u-legacy');
+  assert.equal(await resolveRoutingUser('u-plaintext'), null, 'nilai plaintext tidak lagi dikenali');
   assert.equal(await resolveRoutingUser(null), null);
   assert.equal(await resolveRoutingUser(''), null);
 });
@@ -119,17 +120,22 @@ test('upsertMembership: baris baru disimpan ter-seal (bukan userId asli)', async
   assert.equal(rows[0]!.deliveryToken, 'tok-1');
 });
 
-test('upsertMembership: baris legacy plaintext di-upgrade, bukan diduplikasi', async () => {
+test('upsertMembership: baris plaintext lama tidak dikenali → baris baru ber-seal', async () => {
+  // Tidak ada lagi baris plaintext di DB (reset + purge). Kalaupun ada, ia
+  // tidak bisa dicocokkan oleh nilai kanonik sealed dan akan dibiarkan sebagai
+  // sisa lama — bukan di-upgrade diam-diam (FK/NOT NULL sudah tidak menyisakan
+  // jalur itu). Yang penting: penulisan baru selalu ber-seal.
   const { prisma, rows, log } = makeFake([
     { id: 'row-1', userId: 'u-han', conversationId: 'c1', deliveryToken: 'tok-lama' },
   ]);
 
   await upsertMembership(prisma, { userId: 'u-han', conversationId: 'c1', deliveryToken: 'tok-baru' });
 
-  assert.equal(rows.length, 1, 'tidak ada duplikat (deliveryToken unik tidak dilanggar)');
-  assert.equal(rows[0]!.deliveryToken, 'tok-baru');
-  assert.equal(rows[0]!.userId, 'u-han', 'baris legacy tidak diubah nilainya (masih plaintext)');
-  assert.deepEqual(log, ['findFirst', 'update'], 'jalur update, bukan create');
+  assert.deepEqual(log, ['findFirst', 'create'], 'tidak cocok → baris baru dibuat');
+  const created = rows[1]!;
+  assert.notEqual(created.userId, 'u-han');
+  assert.equal(await openAtRest(created.userId), 'u-han', 'baris baru ter-seal');
+  assert.equal(created.deliveryToken, 'tok-baru');
 });
 
 test('upsertMembership: pengulangan tidak menggandakan baris (determinisme seal)', async () => {
@@ -141,7 +147,7 @@ test('upsertMembership: pengulangan tidak menggandakan baris (determinisme seal)
   assert.equal(rows[0]!.deliveryToken, 'tok-2');
 });
 
-test('findMembership/deleteMembership: mengenali baris sealed maupun legacy', async () => {
+test('findMembership/deleteMembership: mengenali baris sealed saja', async () => {
   const sealedRow = makeFake([
     { id: 'row-1', userId: await routingIdentity('u-han'), conversationId: 'c1', deliveryToken: 't1' },
   ]);
@@ -149,15 +155,59 @@ test('findMembership/deleteMembership: mengenali baris sealed maupun legacy', as
   assert.equal(await deleteMembership(sealedRow.prisma, { userId: 'u-han', conversationId: 'c1' }), 1);
   assert.equal(sealedRow.rows.length, 0);
 
-  const legacyRow = makeFake([
-    { id: 'row-1', userId: 'u-legacy', conversationId: 'c2', deliveryToken: 't2' },
+  const plaintextRow = makeFake([
+    { id: 'row-1', userId: 'u-plaintext', conversationId: 'c2', deliveryToken: 't2' },
   ]);
-  assert.equal(await findMembership(legacyRow.prisma, { userId: 'u-legacy', conversationId: 'c2' }), true);
-  assert.equal(await deleteMembership(legacyRow.prisma, { userId: 'u-legacy', conversationId: 'c2' }), 1);
+  assert.equal(await findMembership(plaintextRow.prisma, { userId: 'u-plaintext', conversationId: 'c2' }), false);
+  assert.equal(await deleteMembership(plaintextRow.prisma, { userId: 'u-plaintext', conversationId: 'c2' }), 0);
 
   const empty = makeFake();
   assert.equal(await findMembership(empty.prisma, { userId: 'u-x', conversationId: 'c9' }), false);
   assert.equal(await deleteMembership(empty.prisma, { userId: 'u-x', conversationId: 'c9' }), 0);
+});
+
+test('purgeSealedUserRows: bersihkan keanggotaan ber-seal, story, dan block', async () => {
+  // [BUGFIX 2026-10-09] UserHiddenConversation tidak punya FK ke User lagi
+  // (nilai kolom ter-seal), jadi pembersihan saat akun dihapus harus eksplisit.
+  const tag = await routingIdentity('u-han');
+  const rows: UhcRow[] = [
+    { id: 'row-1', userId: tag, conversationId: 'c1', deliveryToken: 't1' },
+    { id: 'row-2', userId: await routingIdentity('u-other'), conversationId: 'c1', deliveryToken: 't3' },
+  ];
+  const calls: string[] = [];
+
+  const prisma: SealedOwnedRowsPrisma = {
+    userHiddenConversation: {
+      deleteMany: async ({ where }) => {
+        calls.push('membership');
+        const candidates = (where.userId as { in: string[] }).in;
+        const before = rows.length;
+        for (let i = rows.length - 1; i >= 0; i -= 1) {
+          const r = rows[i]!;
+          if (r.userId !== null && candidates.includes(r.userId)) rows.splice(i, 1);
+        }
+        return { count: before - rows.length };
+      },
+    },
+    story: {
+      deleteMany: async ({ where }) => {
+        calls.push(`story:${String((where as { authorTag?: string }).authorTag)}`);
+        return { count: 1 };
+      },
+    },
+    blockedUser: {
+      deleteMany: async ({ where }) => {
+        calls.push('blockedUser');
+        assert.ok(Array.isArray((where as { OR?: unknown[] }).OR), 'block user/blokir dicari via OR');
+        return { count: 2 };
+      },
+    },
+  };
+
+  await purgeSealedUserRows(prisma, 'u-han');
+
+  assert.deepEqual(rows.map((r) => r.id), ['row-2'], 'baris user lain tidak ikut terhapus');
+  assert.deepEqual(calls, ['membership', `story:${tag}`, 'blockedUser']);
 });
 
 test('Tier 1.2 wiring: tidak ada penulisan userId mentah ke UserHiddenConversation', () => {
@@ -173,7 +223,7 @@ test('Tier 1.2 wiring: tidak ada penulisan userId mentah ke UserHiddenConversati
     assert.doesNotMatch(
       src,
       /userHiddenConversation\.delete\(\{[\s\S]{0,80}userId_conversationId/,
-      `${name}: revocation wajib lewat deleteMembership (kandidat sealed + legacy)`
+      `${name}: revocation wajib lewat deleteMembership (nilai kanonik sealed)`
     );
   }
 

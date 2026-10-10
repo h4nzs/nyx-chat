@@ -2,6 +2,155 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧹 Purge Legacy (data lama v1 + toleransi at-rest) (2026-10-10)
+
+DB sudah direset (2026-09) dan tidak ada klien/data v1 tersisa, jadi seluruh
+jalur kompatibilitas-pra-perubahan dihapus — bukan sekadar dibiarkan.
+
+**Server — toleransi at-rest dihapus.** `credentialTokenMatches` hanya menerima
+nilai tersimpan ber-hash (cabang plaintext dibuang); `sealedLookupCandidates`
+(tenant API key) & `routingCandidates`/`resolveRoutingUser` (routing identity,
+Story/Block tag) mengembalikan/menerima bentuk ter-seal saja; `resolveRepliedToId`
+tidak lagi meloloskan plaintext; admin capability `adminSecretHash` NULL = **fail
+closed** (bukan bypass grup pra-26.9); kursor pesan `parseMessageCursor` menolak
+ISO date (hanya `seq`); mapper tak lagi memetakan `seq 0` sebagai legacy. Schema
+`Story.authorTag` + `BlockedUser.blockerTag/blockedTag` jadi **NOT NULL**.
+
+**Satu pembalikan yang disengaja:** `identifierLookupCandidates` tetap
+`[ter-pepper, nilai kiriman]` karena kandidat kedua bukan toleransi baris lama —
+ia melayani **echo klien** (server mengembalikan `usernameHash` ter-pepper, link
+berbagi profil `connect?u=` mengirimnya balik ke pencarian). Meniadakannya
+mematikan pencarian hash-ID → dikembalikan + diuji.
+
+**Web — grup v1 (protokol) dihapus.** `encryptGroupMetadata` tidak lagi menulis
+metadata v1 (rantai) dan `decryptGroupMetadata` tidak lagi membacanya; envelope
+distribusi sender key hanya v2 (pack v1 36-byte & v0 32-byte ditolak); wrapper
+pesan memakai `chainId` eksplisit (fallback prefix CK dihapus) dan SELALU
+pseudonym (fallback `?? userId` dihapus); `groupEra`/`keychainDb` hanya merutekan
+via `chainId` (alias keyId dihapus); `amIGroupAdmin` fail-closed tanpa roster v3;
+auto-heal grup tidak lagi jatuh ke userId pengirim.
+
+Verifikasi: server `tsc --noEmit` 0 & `npm test` **215/215**; web `tsc -b` 0 &
+`vitest` **289/289**. **Belum dijalankan di sini:** E2E WebTransport/kripto
+(butuh Postgres + Redis + sidecar).
+
+## 🔒 Tier 4 — Identitas Pengirim & Field At-Rest (2026-10-09)
+
+Tindak lanjut audit dump: **semua kebocoran identitas yang tersisa ditutup**,
+termasuk fallback pseudonym dan field yang tersimpan di dalam blob metadata.
+
+**1. `Message.senderId` tidak lagi bisa memuat userId asli.** Fallback
+`senderPseudonym ?? userId` dihapus; kini pseudonym klien dipakai apa adanya dan
+selain itu userId disimpan **TER-SEAL** (AEAD deterministik, `utils/senderIdentity.ts`).
+Enam jalur baca (otorisasi unsend, view-once, receipt tunggal & batch,
+`message:deleted`, mapper) membuka nilai itu sebelum membandingkan/mengirim — jadi
+perilaku klien tidak berubah, tetapi dump tidak lagi menampilkan pengirim.
+Nilai kiriman klien berbentuk UUID (klien lama) ditolak dan diganti identitas
+pengirim yang terautentikasi.
+
+**2. Wrapper metadata v2 tidak lagi membawa `senderId`.** Reader v2 merutekan
+lewat `chainId` + `senderDeviceKey` dan memverifikasi tanda tangan hanya atas
+byte `ct`, jadi field itu murni kebocoran. Klien berhenti menulisnya dan server
+menyaringnya (`utils/groupMetadataBlob.ts`) di `POST /api/conversations`,
+`PUT /:id/details`, dan `metadata:updated` — blob v1 legacy dibiarkan utuh.
+
+**3. Device id di pesan SYSTEM disegel.** 19 baris `GROUP_KEY` menyimpan
+`targetDeviceKey` = `Device.id` apa adanya (temuan analis eksternal); kini
+disegel at-rest dan dibuka saat relay/catch-up. `senderDeviceKey`/`senderSigningKey`
+tetap plaintext karena keduanya kunci publik yang memang dibagikan ke anggota grup.
+
+**4. `Message.sessionId` disegel**, dan **`Conversation.createdAt` dipotong 15 menit**
+(paritas B3) di kedua jalur pembuatan (REST + engine).
+
+**5. Redis bersih dari userId.** Lima keluarga key yang masih menyematkan
+identitas asli (`rl:story-view`, `rl:contact-bundle`, `rl:powverify`, `otpkq`,
+`sandbox:newchat`) kini memakai `identityTag()` (HMAC pepper, deterministik →
+counter tetap idempoten).
+
+**6. Klien selalu mengirim pseudonym.** `ensureMyPseudonym()` menghidrasi peta
+pseudonym dari metadata v2/v3 saat store belum memilikinya (penyebab utama
+fallback userId sebelumnya) dan `resolveSenderIdentityForGroup()` memastikan grup
+v2/v3 tidak pernah jatuh ke userId.
+
+Verifikasi: server `tsc` 0 & `npm test` **215/215** (+20 `senderIdentity`), web
+`tsc -b` 0, `vitest` **291/291** (+5), `vite build` 0, dan **live check di DB
+nyata**: baris ditulis lewat helper produksi → `pg_dump --data-only` → 7/7
+pemeriksaan pada byte tersimpan LULUS (termasuk positif-kontrol) → baris temp
+dihapus (DB kembali 39 pesan/3 percakapan/3 device).
+
+## 🔍 Audit DB & Dump Nyata (2026-10-09)
+
+Audit relasi/graph + kondisi zero-knowledge pada DB pengembangan nyata (`psql`)
+dan pada `pg_dump` yang di-restore ke schema scratch.
+
+**Bug guardrail dump simulator (diperbaiki).** `parseCopySections` memakai pola
+terminator `\n\.`, sehingga untuk tabel KOSONG (dump `FROM stdin;` langsung diikuti
+`\.`) body-nya menelan blok tabel berikutnya: di dump nyata **seluruh tabel
+`Message` (39 baris) tidak pernah diaudit** dan laporan tetap hijau. Selain itu
+target reply-edge memakai nama field Prisma (`repliedToId`) alih-alih nama kolom DB
+(`replied_to_id`), jadi pemeriksaannya vakum. Ketiga hal diperbaiki: terminator
+di-anchor ke awal baris, target memakai nama kolom DB, dan ditambah guard
+anti-vakum (`hasColumn` → kolom tidak ada = GAGAL, bukan lulus). Dengan rahasia
+nyata, audit dump kini GAGAL (exit 1) dan menunjuk tepat `Message.senderId`
+(6 identitas bocor); `Message.deleteSecret` ikut teraudit (0 → 18 nilai).
+Test `dumpAudit` 9 → 12 (3 regresi baru: tabel kosong, kebocoran setelah tabel
+kosong, dan kolom hilang).
+
+**Temuan yang belum diperbaiki (dicatat di docs/28):** `Message.senderId` memuat
+userId asli pada 6/30 pesan grup (jalur fallback `senderPseudonym ?? userId`),
+dan `Conversation.encryptedMetadata` memuat `senderId` = userId asli pembuat grup.
+Empat keluarga key Redis juga masih menyematkan userId asli (rate-limit story view,
+contact bundle, powverify, kuota OTPK, sandbox newchat).
+
+Verifikasi: server `tsc --noEmit` 0, server `npm test` **195/195**.
+
+## 🐞 Perbaikan Bug Runtime dari E2E Manual (2026-10-09)
+
+Audit log E2E manual (perpesanan 1:1 & grup berhasil didekripsi di kedua sisi)
+menemukan empat bug nyata; semuanya diperbaiki di akar masalahnya, bukan
+gejalanya.
+
+**1. Sertifikat sidecar lokal tidak pernah dirotasi → WebTransport selalu gagal.**
+Sidecar memakai ulang `transport_cert.der` yang tersimpan tanpa memeriksa masa
+berlaku, padahal WebTransport mensyaratkan sertifikat masih valid (dan rentangnya
+≤ 14 hari). Setelah 10 hari, SETIAP koneksi ditolak Chrome
+(`QUIC_TLS_CERTIFICATE_UNKNOWN` / `Code::crypto`) dan klien diam-diam jatuh ke
+fallback WebSocket. Kini `main.rs` mem-parse DER (`x509-parser`) dan merotasi bila
+sudah kedaluwarsa, belum berlaku, rentangnya > 14 hari, atau sisa masa berlaku
+< 1 hari — lalu mencetak hash baru beserta reminder `web/.env`. Ditambah 6 unit
+test (`cargo test`) untuk tiap cabang rotasi. `web/.env`
+(`VITE_TRANSPORT_CERT_HASH`) diperbarui ke hash sertifikat baru, dan fallback WT→WSS
+di DEV kini memberi petunjuk penyebabnya.
+
+**2. `UserHiddenConversation` kehilangan baris keanggotaan (P2003).** Relasi FK
+`UserHiddenConversation.user` tertinggal padahal kolomnya sudah menyimpan nilai
+**ter-seal** (docs/28 D2) → setiap `create` keanggotaan gagal
+`ForeignKeyConstraintViolation` dan hanya muncul sebagai `console.warn`. Relasi FK
+dihapus dari `schema.prisma`; pembersihan saat akun dihapus / dead man's switch
+pindah ke `purgeSealedUserRows` (kini juga menghapus baris keanggotaan). Guard baru:
+`schemaPrivacy` (D2) melarang FK pada kolom ter-seal, `routingIdentity` menguji
+purge. **Perlu `prisma db push` sekali** di DB yang masih memakai schema lama.
+
+**3. Cache pre-key tidak pernah di-invalidate.** Di `routes/keys.ts` variabel
+`identityKey` hasil destructuring `req.body` **menutupi** helper `identityKey()`
+dari `utils/redisIdentity` → `identityKey('cache:keys:…', userId)` melempar
+`TypeError` yang tertangkap `try/catch`, sehingga peer bisa menerima bundle
+pre-key basi sampai TTL 1 jam (risiko handshake E2EE gagal). Variabel di-alias
+`identityKeyB64`; guard di `redisIdentity.test.ts` mencegah terulang.
+
+**4. Kontak baru tidak muncul sampai reload.** Contact store hanya di-seed di
+`loadConversations`, jadi peer yang mengirim pesan pertama (percakapan baru ala
+Opaque Mailbox, `participants` kosong) tidak masuk store — picker create grup /
+story tampak kosong sampai aplikasi di-reload. Kini pipeline pesan memanggil
+`noteDirectMessageContact` untuk setiap pesan 1:1 yang berhasil didekripsi, dan
+`conversation:new` juga men-seed kontak dari roster bila ada.
+
+Verifikasi: server `tsc` 0, `npm test` **192/192**; web `tsc -b` 0, `vitest`
+**286/286**; `cargo test` sidecar **6/6**; probe Chrome ke sidecar membuktikan
+handshake gagal saat pin basi/kedaluwarsa dan berhasil setelah rotasi. **Belum
+dijalankan:** E2E Playwright otomatis (`transport.spec.ts`/`chat.spec.ts`) dan
+`prisma db push` pada DB pengembang.
+
 ## 🔒 Penutupan Residual DB-Dump (Tier 1.5 + D14 + 3.2) (2026-10-08)
 
 Menutup sisa item traceability audit `docs/28-db-dump-threat-model.md`: residual

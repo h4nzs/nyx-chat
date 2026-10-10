@@ -8,8 +8,9 @@
  * Aturan yang diuji:
  *   1. `reserveMessageSeq` menaikkan counter (atomik oleh DB; di sini diuji
  *      semantik increment-nya lewat fake).
- *   2. `parseMessageCursor` menerima seq (klien baru) DAN ISO date (legacy).
- *   3. `toRawServerMessage` hanya mengirim seq > 0 (0 = legacy).
+ *   2. `parseMessageCursor` menerima seq saja; kursor ISO date (klien pra-B1)
+ *      ditolak — urutan pesan kini murni seq.
+ *   3. `toRawServerMessage` meneruskan seq yang ditetapkan server.
  */
 
 import { test } from 'node:test';
@@ -55,11 +56,9 @@ test('B1: parseMessageCursor — seq numerik', () => {
   assert.deepEqual(parseMessageCursor('  7 '), { kind: 'seq', seq: 7 });
 });
 
-test('B1: parseMessageCursor — ISO date legacy', () => {
+test('B1: parseMessageCursor — kursor ISO date ditolak (legacy dibuang)', () => {
   const iso = '2026-10-08T00:00:00.000Z';
-  const parsed = parseMessageCursor(iso);
-  assert.equal(parsed.kind, 'date');
-  if (parsed.kind === 'date') assert.equal(parsed.date.toISOString(), iso);
+  assert.deepEqual(parseMessageCursor(iso), { kind: 'none' });
 });
 
 test('B1: parseMessageCursor — kosong / invalid', () => {
@@ -70,7 +69,7 @@ test('B1: parseMessageCursor — kosong / invalid', () => {
   assert.deepEqual(parseMessageCursor('99999999999999999999'), { kind: 'none' });
 });
 
-test('B1: mapper hanya mengirim seq > 0 (0/undefined = legacy)', () => {
+test('B1: mapper meneruskan seq yang ditetapkan server', () => {
   const base: PrismaMessageInput = {
     id: 'm1',
     conversationId: 'c1',
@@ -79,7 +78,7 @@ test('B1: mapper hanya mengirim seq > 0 (0/undefined = legacy)', () => {
     createdAt: '2026-10-08T00:00:00.000Z',
   };
   assert.equal(toRawServerMessage({ ...base, seq: 12 }).seq, 12);
-  assert.equal(toRawServerMessage({ ...base, seq: 0 }).seq, undefined, 'seq 0 dianggap legacy');
-  assert.equal(toRawServerMessage({ ...base, seq: null }).seq, undefined);
-  assert.equal(toRawServerMessage(base).seq, undefined);
+  assert.equal(toRawServerMessage({ ...base, seq: 0 }).seq, 0, 'angka apa pun diteruskan (bukan dipetakan ulang)');
+  assert.equal(toRawServerMessage({ ...base, seq: null }).seq, undefined, 'null = tidak ada seq');
+  assert.equal(toRawServerMessage(base).seq, undefined, 'field absen = undefined');
 });

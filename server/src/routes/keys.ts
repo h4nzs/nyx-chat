@@ -69,7 +69,17 @@ router.post(
       if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.');
       
       const deviceId = String(authUser.deviceId);
-      const { identityKey, pqIdentityKey, signedPreKey, signingKey } = req.body;
+      // [BUGFIX 2026-10-09] Dulu variabel body ini bernama `identityKey` dan
+      // MENUTUPI helper `identityKey()` dari utils/redisIdentity →
+      // `identityKey('cache:keys:bundle', userId)` melempar
+      // "identityKey is not a function" dan cache pre-key TIDAK pernah
+      // di-invalidate (peer menerima bundle basi sampai TTL 1 jam habis).
+      const {
+        identityKey: identityKeyB64,
+        pqIdentityKey,
+        signedPreKey,
+        signingKey
+      } = req.body;
 
       // [Temuan #2] Validasi ulang payload encrypted keys (defense in depth;
       // zod sudah memvalidasi bentuknya). Client lama tanpa field → undefined
@@ -86,7 +96,7 @@ router.post(
         await tx.preKeyBundle.upsert({
           where: { deviceId },
           update: {
-            identityKey: Buffer.from(identityKey, 'base64url'),
+            identityKey: Buffer.from(identityKeyB64, 'base64url'),
             pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
             key: Buffer.from(signedPreKey.key, 'base64url'),
             pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
@@ -95,7 +105,7 @@ router.post(
           },
           create: {
             deviceId,
-            identityKey: Buffer.from(identityKey, 'base64url'),
+            identityKey: Buffer.from(identityKeyB64, 'base64url'),
             pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
             key: Buffer.from(signedPreKey.key, 'base64url'),
             pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
@@ -108,7 +118,7 @@ router.post(
         await tx.device.update({
           where: { id: deviceId },
           data: {
-            ...(identityKey !== undefined && { publicKey: Buffer.from(identityKey, 'base64url') }),
+            ...(identityKeyB64 !== undefined && { publicKey: Buffer.from(identityKeyB64, 'base64url') }),
             ...(pqIdentityKey !== undefined && { pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null }),
             ...(signingKey !== undefined && { signingKey: Buffer.from(signingKey, 'base64url') }),
             // [Temuan #2] Sinkronkan salinan encryptedPrivateKey server SETIAP

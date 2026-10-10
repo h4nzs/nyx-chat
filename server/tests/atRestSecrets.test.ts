@@ -9,7 +9,7 @@
  *  - identifier ber-entropi rendah wajib di-index dengan pepper dari env
  *    (bukan hash tanpa kunci yang bisa dienumerasi),
  *  - token yang dipegang klien hanya boleh tersimpan sebagai hash (pola
- *    adminSecretHash) dengan kompatibilitas baris legacy,
+ *    adminSecretHash) — tidak ada lagi cabang plaintext,
  *  - nilai yang server harus bisa baca (routing/API key) disimpan sealed
  *    deterministik (AEAD) — tak terbaca dari dump, tetap bisa di-lookup.
  */
@@ -70,10 +70,11 @@ test('pepper: dump DB tanpa pepper tidak bisa membalik IP/fingerprint', async ()
   assert.notEqual(dumped, attackerGuess, 'menebak IP tanpa pepper tidak menghasilkan hash yang sama');
 });
 
-test('identifierLookupCandidates: [ter-pepper, apa adanya] untuk migrasi & echo klien', async () => {
-  const [first, second] = await withPepper('p', () => identifierLookupCandidates('user-hash-abc'));
-  assert.equal(first, await withPepper('p', () => pepperedIdentifier('user-hash-abc')));
-  assert.equal(second, 'user-hash-abc', 'kandidat kedua = nilai apa adanya (baris legacy / echo)');
+test('identifierLookupCandidates: [ter-pepper, nilai kiriman] untuk echo klien', async () => {
+  const candidates = await withPepper('p', () => identifierLookupCandidates('user-hash-abc'));
+  assert.equal(candidates.length, 2, 'tidak ada kandidat lain (query tetap minimal)');
+  assert.equal(candidates[0], await withPepper('p', () => pepperedIdentifier('user-hash-abc')));
+  assert.equal(candidates[1], 'user-hash-abc', 'kandidat kedua = nilai kiriman apa adanya (echo hash-ID dari share link)');
 });
 
 test('hashCredentialToken: SHA-256 hex (pola adminSecretHash)', () => {
@@ -81,16 +82,16 @@ test('hashCredentialToken: SHA-256 hex (pola adminSecretHash)', () => {
   const expected = createHash('sha256').update(token).digest('hex');
   assert.equal(hashCredentialToken(token), expected);
   assert.equal(isHashedToken(expected), true);
-  assert.equal(isHashedToken(token), true, 'token 64-hex juga terlihat seperti hash (karena itu dual-mode)');
+  assert.equal(isHashedToken(token), true, 'token 64-hex juga terlihat seperti hash');
   assert.equal(isHashedToken('pendek'), false);
 });
 
-test('credentialTokenMatches: hash baru cocok, plaintext legacy tetap cocok', () => {
+test('credentialTokenMatches: hanya nilai tersimpan ber-hash yang diterima', () => {
   const token = 'b'.repeat(64);
   const storedHashed = hashCredentialToken(token);
 
   assert.equal(credentialTokenMatches(storedHashed, token), true, 'token benar melawan nilai tersimpan (hash)');
-  assert.equal(credentialTokenMatches(token, token), true, 'baris legacy plaintext tetap bisa dipakai');
+  assert.equal(credentialTokenMatches(token, token), false, 'plaintext (pra-hash) TIDAK lagi mengotorisasi');
   assert.equal(credentialTokenMatches(storedHashed, 'c'.repeat(64)), false, 'token salah ditolak');
   assert.equal(credentialTokenMatches(null, token), false, 'tanpa secret tersimpan → tidak ada akses');
   assert.equal(credentialTokenMatches(storedHashed, ''), false, 'presentasi kosong ditolak');
@@ -123,12 +124,13 @@ test('sealAtRest: deterministik (lookup by equality) + tidak terbaca tanpa peppe
   });
 });
 
-test('sealedLookupCandidates: [sealed, apa adanya] untuk autentikasi tenant legacy', async () => {
+test('sealedLookupCandidates: hanya bentuk sealed (tanpa kandidat plaintext)', async () => {
   const key = 'api-key-abc';
-  const [sealed, raw] = await withPepper('p', () => sealedLookupCandidates(key));
-  assert.equal(raw, key, 'kandidat kedua = nilai apa adanya (baris tenant legacy)');
+  const candidates = await withPepper('p', () => sealedLookupCandidates(key));
+  assert.equal(candidates.length, 1, 'tidak ada kandidat plaintext (baris legacy sudah tidak ada)');
+  assert.notEqual(candidates[0], key, 'nilai tersimpan ter-seal, bukan API key asli');
   // Open harus di dalam pepper yang sama (di luar itu = attacker tanpa pepper).
-  const opened = await withPepper('p', () => openAtRest(sealed));
+  const opened = await withPepper('p', () => openAtRest(candidates[0]!));
   assert.equal(opened, key);
 });
 

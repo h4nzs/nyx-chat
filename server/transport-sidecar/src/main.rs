@@ -10,6 +10,47 @@ use tracing::{error, info, warn};
 use wtransport::{Connection, Endpoint, Identity, ServerConfig};
 use bytes::{BufMut, BytesMut};
 
+/// Batas keras WebTransport untuk `serverCertificateHashes`: Chrome menolak
+/// sertifikat dengan rentang validitas > 14 hari (dan menolak yang sudah kedaluwarsa).
+const WEBTRANSPORT_MAX_CERT_VALIDITY_DAYS: i64 = 14;
+/// Masa berlaku sertifikat lokal yang kita terbitkan (10 hari, sesuai spesifikasi).
+const LOCAL_CERT_VALIDITY_DAYS: i64 = 10;
+/// Rotasi lebih awal: sertifikat yang tersisa < 1 hari dianggap perlu diganti.
+const LOCAL_CERT_ROTATE_MARGIN_HOURS: i64 = 24;
+
+const CERT_PATH: &str = "transport_cert.der";
+const KEY_PATH: &str = "transport_key.der";
+
+/// Sertifikat tersimpan masih layak dipakai untuk WebTransport lokal?
+/// Mengembalikan `Err(alasan)` bila harus dirotasi — alasan dicatat di log.
+fn local_cert_is_usable(cert_der: &[u8]) -> std::result::Result<(), String> {
+    let (_, cert) = x509_parser::parse_x509_certificate(cert_der)
+        .map_err(|e| format!("DER tidak bisa di-parse: {e}"))?;
+    let validity = cert.validity();
+    let not_before = validity.not_before.timestamp();
+    let not_after = validity.not_after.timestamp();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let span_days = (not_after - not_before) / 86_400;
+
+    if span_days > WEBTRANSPORT_MAX_CERT_VALIDITY_DAYS {
+        return Err(format!(
+            "rentang validitas {} hari > batas WebTransport {} hari",
+            span_days, WEBTRANSPORT_MAX_CERT_VALIDITY_DAYS
+        ));
+    }
+    if now < not_before {
+        return Err("notBefore di masa depan (clock skew?)".to_string());
+    }
+    if now > not_after {
+        return Err(format!("sudah kedaluwarsa {} jam lalu", (now - not_after) / 3600));
+    }
+    let remaining_hours = (not_after - now) / 3600;
+    if remaining_hours < LOCAL_CERT_ROTATE_MARGIN_HOURS {
+        return Err(format!("tersisa {} jam (< margin rotasi)", remaining_hours));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 struct Claims {
     id: Option<String>,
@@ -37,6 +78,69 @@ struct DownstreamMessage {
 
 type SessionMap = Arc<DashMap<String, Arc<Connection>>>; // Key: "user_id:device_id"
 
+#[cfg(test)]
+mod cert_tests {
+    use super::{local_cert_is_usable, LOCAL_CERT_VALIDITY_DAYS};
+
+    /// Bangun sertifikat self-signed dengan offset validitas relatif ke sekarang.
+    fn cert_with_offsets(not_before: time::Duration, not_after: time::Duration) -> Vec<u8> {
+        let mut params =
+            rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("params");
+        let now = time::OffsetDateTime::now_utc();
+        params.not_before = now + not_before;
+        params.not_after = now + not_after;
+        let key_pair = rcgen::KeyPair::generate().expect("keypair");
+        params.self_signed(&key_pair).expect("cert").der().to_vec()
+    }
+
+    #[test]
+    fn fresh_local_cert_is_reused() {
+        let cert = cert_with_offsets(
+            -time::Duration::days(1),
+            time::Duration::days(LOCAL_CERT_VALIDITY_DAYS),
+        );
+        assert!(local_cert_is_usable(&cert).is_ok());
+    }
+
+    #[test]
+    fn expired_cert_is_rotated() {
+        // Sertifikat warisan dari disk: kedaluwarsa beberapa hari lalu.
+        let cert = cert_with_offsets(-time::Duration::days(30), -time::Duration::days(20));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("kedaluwarsa"), "alasan: {err}");
+    }
+
+    #[test]
+    fn cert_near_expiry_is_rotated() {
+        // Masih valid, tetapi sisa < margin rotasi (1 hari).
+        let cert = cert_with_offsets(-time::Duration::days(10), time::Duration::hours(5));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("margin rotasi"), "alasan: {err}");
+    }
+
+    #[test]
+    fn cert_with_span_over_webtransport_limit_is_rotated() {
+        // Rentang 30 hari > batas keras Chrome (14 hari).
+        let cert = cert_with_offsets(-time::Duration::days(1), time::Duration::days(29));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("batas WebTransport"), "alasan: {err}");
+    }
+
+    #[test]
+    fn not_yet_valid_cert_is_rotated() {
+        let cert = cert_with_offsets(time::Duration::days(2), time::Duration::days(9));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("notBefore"), "alasan: {err}");
+    }
+
+    #[test]
+    fn garbage_bytes_are_rotated_not_fatal() {
+        let err = local_cert_is_usable(b"not a certificate").expect_err("harus ditolak");
+        assert!(err.contains("tidak bisa di-parse"), "alasan: {err}");
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -53,29 +157,57 @@ async fn main() -> Result<()> {
         Identity::load_pemfiles(&prod_cert_path, &prod_key_path).await.context("Failed to load production PEM certificates")?
     } else {
         info!("[LOCAL] Loading/Generating persistent self-signed DER certificates...");
-        let cert_path = "transport_cert.der";
-        let key_path = "transport_key.der";
+        let cert_path = CERT_PATH;
+        let key_path = KEY_PATH;
 
-        let (cert_der, key_der) = if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
-            info!("Loading existing certificate from files...");
-            // WebTransport requires local certs to be valid for <= 14 days. 
-            // Rather than trying to parse expiration here, we'll just use it,
-            // but if it fails to connect, users can delete the .der files.
-            (std::fs::read(cert_path)?, std::fs::read(key_path)?)
+        // Cetak path ABSOLUT: sertifikat dibaca relatif terhadap cwd, sehingga
+        // menjalankan sidecar dari direktori lain menghasilkan sertifikat LAIN
+        // (hash berbeda dari yang di-pin di web/.env) — sumber kebingungan nyata.
+        let cert_abs = std::env::current_dir()
+            .map(|d| d.join(cert_path).display().to_string())
+            .unwrap_or_else(|_| cert_path.to_string());
+        info!("Sertifikat lokal: {} (dibaca relatif ke cwd)", cert_abs);
+
+        // Sertifikat lama DIPAKAI ULANG hanya bila masih valid sekarang, rentangnya
+        // ≤ batas WebTransport, dan sisa masa berlakunya belum melewati margin.
+        // Tanpa cek ini, sertifikat 10-hari yang tersimpan akan terus dipakai
+        // sesudah kedaluwarsa → SETIAP koneksi WebTransport ditolak Chrome
+        // (QUIC_TLS_CERTIFICATE_UNKNOWN) dan klien diam-diam jatuh ke fallback
+        // WebSocket. Rotasi otomatis = pin `VITE_TRANSPORT_CERT_HASH` selalu
+        // merujuk sertifikat yang benar-benar disajikan server.
+        let existing = match (std::fs::read(cert_path), std::fs::read(key_path)) {
+            (Ok(cert_der), Ok(key_der)) => match local_cert_is_usable(&cert_der) {
+                Ok(()) => {
+                    info!("Loading existing certificate from files...");
+                    Some((cert_der, key_der))
+                }
+                Err(reason) => {
+                    warn!("Sertifikat tersimpan tidak layak dipakai ({}). Sertifikat baru akan dibuat.", reason);
+                    None
+                }
+            },
+            _ => None,
+        };
+
+        let (cert_der, key_der) = if let Some(pair) = existing {
+            pair
         } else {
-            info!("Generating new self-signed certificate (valid for 10 days for WebTransport)...");
+            info!(
+                "Generating new self-signed certificate (valid for {} days for WebTransport)...",
+                LOCAL_CERT_VALIDITY_DAYS
+            );
             let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-            
+
             let mut params = rcgen::CertificateParams::new(subject_alt_names).context("Failed to create cert params")?;
             let now = time::OffsetDateTime::now_utc();
             params.not_before = now - time::Duration::days(1);
-            params.not_after = now + time::Duration::days(10);
-            
+            params.not_after = now + time::Duration::days(LOCAL_CERT_VALIDITY_DAYS);
+
             let key_pair = rcgen::KeyPair::generate().context("Failed to generate keypair")?;
             let cert = params.self_signed(&key_pair).context("Failed to create cert")?;
             let cert_der = cert.der().to_vec();
             let key_der = key_pair.serialize_der();
-            
+
             std::fs::write(cert_path, &cert_der)?;
             std::fs::write(key_path, &key_der)?;
             (cert_der, key_der)
@@ -96,6 +228,9 @@ async fn main() -> Result<()> {
     info!("║ Add this to your web/.env file:                                              ║");
     info!("║ VITE_TRANSPORT_CERT_HASH={} ║", cert_hash.to_string());
     info!("╚══════════════════════════════════════════════════════════════════════════════╝");
+    info!(
+        "Pastikan web/.env → VITE_TRANSPORT_CERT_HASH sama dengan hash di atas, lalu restart `vite dev`."
+    );
 
     let port: u16 = std::env::var("TRANSPORT_PORT")
         .unwrap_or_else(|_| "33333".to_string())

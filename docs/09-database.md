@@ -38,7 +38,7 @@ erDiagram
 | `RefreshToken` | rotating refresh tokens with `familyId` reuse detection |
 | `SessionKey` | blind-relayed session keys (initiator ciphertexts) |
 | `PushSubscription` | Web Push endpoints per device |
-| `Conversation` | isGroup, encryptedMetadata blob, `authSecret` (blind auth for group ops), `adminSecretHash` (SHA-256 hex of the admin capability token, nullable — NULL = legacy group before RBAC) |
+| `Conversation` | isGroup, encryptedMetadata blob, `authSecret` (blind auth for group ops), `adminSecretHash` (SHA-256 hex of the admin capability token; nullable in schema, but group creation rejects a missing hash and a NULL value is fail-closed — no admin op possible) |
 | `Message` | store-and-forward ciphertext (≤14 days), `deleteSecret`, view-once flags |
 | `MessageStatus` | delivery/read receipts |
 | `UserHiddenConversation` | per-user conversation visibility (Opaque Mailbox discovery) |

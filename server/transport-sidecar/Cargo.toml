@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 wtransport = "0.7"
 rcgen = "0.14"
+x509-parser = "0.18"
 tokio = { version = "1.37", features = ["full"] }
 redis = { version = "0.25.3", features = ["tokio-comp"] }
 jsonwebtoken = { version = "10.4.0", features = ["rust_crypto"] }

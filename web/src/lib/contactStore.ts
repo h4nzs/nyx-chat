@@ -186,6 +186,44 @@ export async function getContact(userId: string): Promise<ContactRecord | null> 
 // ─── Seed dari conversations (jalur warming) ────────────────────────────────
 
 /**
+ * [CONTACT STORE LIVE] Catat peer 1:1 dari satu conversation — dipakai jalur
+ * realtime (`conversation:new`) supaya kontak yang baru dibuat server langsung
+ * masuk daftar picker tanpa reload.
+ */
+export async function seedContactsFromConversation(conv: Conversation): Promise<void> {
+    await seedContactsFromConversations([conv]);
+}
+
+/**
+ * [CONTACT STORE LIVE] Catat peer dari pesan 1:1 yang baru didekripsi.
+ *
+ * Sampai 2026-10-09 contact store HANYA di-seed di `loadConversations`, jadi
+ * peer yang mengirim pesan pertama (percakapan baru dari server, participants
+ * kosong ala Opaque Mailbox) tidak pernah masuk store sampai user reload →
+ * picker create grup/story tampak kosong. Pipeline pesan memanggil ini untuk
+ * SETIAP pesan masuk yang berhasil didekripsi (live event maupun sync REST).
+ *
+ * Guard: bukan diri sendiri, bukan identitas non-persist (system/burner/guest),
+ * dan hanya untuk 1:1 (pemanggil tidak memanggilnya untuk grup — senderId grup
+ * bisa pseudonym).
+ */
+export async function noteDirectMessageContact(input: {
+    conversationId: string;
+    senderId: string;
+    encryptedProfile?: string | null;
+}): Promise<void> {
+    const { useAuthStore } = await import('@store/auth');
+    const meId = useAuthStore.getState().user?.id;
+    if (!meId || input.senderId === meId) return;
+    if (!isPersistableUserId(input.senderId)) return;
+    await upsertContact({
+        userId: input.senderId,
+        conversationId: input.conversationId,
+        encryptedProfile: input.encryptedProfile ?? null,
+    });
+}
+
+/**
  * Sinkronkan contact store dari daftar percakapan 1:1 — dipanggil setelah
  * loadConversations / addIncomingMessage. Merge-only: tidak pernah menghapus,
  * tidak pernah menurunkan lastSeenAt.

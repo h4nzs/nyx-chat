@@ -25,13 +25,17 @@ export function hashAdminToken(token: string): string {
 
 /**
  * Verifikasi kepemilikan admin capability token.
- * - Hash NULL (grup legacy pra-26.9) = BYPASS kompatibilitas — tidak bisa
- *   di-rotate retroaktif tanpa creator online; grup baru selalu terisi.
- * - Hash terpasang → token wajib cocok (timing-safe terhadap HASH, bukan
- *   token mentah — panjang token tidak pernah bocor ke perbandingan).
+ *
+ * [2026-10 legacy purge] Dulu hash NULL = BYPASS kompatibilitas untuk grup
+ * pra-26.9. Sekarang FAIL-CLOSED: tanpa hash tidak ada operasi admin. Jalur
+ * create grup menolak permintaan tanpa `adminSecretHash` (lihat routes/
+ * conversations.ts), jadi grup tanpa hash tidak lagi bisa lahir.
+ *
+ * Token dibandingkan timing-safe terhadap HASH (bukan token mentah) — panjang
+ * token tidak pernah bocor ke perbandingan.
  */
 export function isAdminTokenValid(adminSecretHash: string | null | undefined, presentedToken: string): boolean {
-  if (!adminSecretHash) return true; // legacy group: compat bypass
+  if (!adminSecretHash) return false;
   if (!presentedToken) return false;
   return safeEqualStrings(adminSecretHash, hashAdminToken(presentedToken));
 }

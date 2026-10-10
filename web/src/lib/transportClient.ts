@@ -399,6 +399,16 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
     if (decision.shouldSwitchToWss) {
       console.info(`[Transport] WebTransport gagal ${this.wtFailCount}x berturut-turut, beralih ke WebSocket fallback.`);
+      if (import.meta.env.DEV) {
+        // [2026-10-09] Penolakan handshake WT di DEV hampir selalu berarti
+        // sertifikat sidecar sudah kedaluwarsa/berotasi sehingga pin
+        // VITE_TRANSPORT_CERT_HASH basi. Sidecar kini merotasi otomatis dan
+        // mencetak hash baru — salin ke web/.env lalu restart `vite dev`.
+        console.info(
+          `[Transport] DEV: cek VITE_TRANSPORT_CERT_HASH vs hash yang dicetak sidecar ` +
+            `(sertifikat lokal masa berlaku 10 hari; sidecar merotasi & mencetak hash baru saat kedaluwarsa).`
+        );
+      }
       this.mode = 'wss';
       this.connectWss();
     } else if (decision.shouldRetryWt) {

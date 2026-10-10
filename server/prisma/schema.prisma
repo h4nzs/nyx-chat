@@ -43,11 +43,14 @@ model User {
   devices Device[]
 
   // --- RELASI PENGGUNA ---
-  // [docs/28 D8/D9] Story & BlockedUser TIDAK lagi punya relasi FK ke User:
-  // keduanya memakai identity ter-seal (authorTag / blockerTag+blockedTag)
-  // supaya dump DB tidak merekonstruksi graph sosial. Pembersihan saat akun
-  // dihapus dilakukan eksplisit lewat purgeSealedUserRows (bukan cascade).
-  hiddenConversations UserHiddenConversation[]
+  // [docs/28 D8/D9/D2] Story, BlockedUser, dan UserHiddenConversation TIDAK
+  // punya relasi FK ke User: ketiganya memakai identity TER-SEAL
+  // (authorTag / blockerTag+blockedTag / userId) supaya dump DB tidak
+  // merekonstruksi graph sosial. Pembersihan saat akun dihapus dilakukan
+  // eksplisit lewat purgeSealedUserRows (bukan cascade).
+  // CATATAN (2026-10-09): relasi `hiddenConversations` sempat tertinggal →
+  // kolom ter-seal ditolak FK `UserHiddenConversation_userId_fkey`
+  // (P2003) sehingga baris keanggotaan tidak pernah dibuat.
   authenticators      Authenticator[]
 
   // --- MULTI-TENANCY (B2B BaaS) ---
@@ -338,13 +341,15 @@ model UserHiddenConversation {
   // (sealAtRest, kunci dari NYX_AT_REST_PEPPER), bukan userId asli. Server tetap
   // membukanya untuk routing internal (utils/routingIdentity.ts), tetapi dump DB
   // sendirian tidak memuat daftar keanggotaan.
+  // PENTING: TANPA relasi/FK ke `User` — nilainya ter-seal (bukan id asli),
+  // jadi FK pasti dilanggar (P2003). Pembersihan saat akun dihapus lewat
+  // `purgeSealedUserRows` (lihat utils/routingIdentity.ts).
   userId         String?
   conversationId String
   // Opaque per-(group, member) delivery token. Wajib: setiap baris keanggotaan
   // diterbitkan klien (creator) — server tidak bisa membuatnya sendiri.
   deliveryToken  String       @unique
   createdAt      DateTime     @default(now())
-  user           User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@unique([userId, conversationId])
@@ -397,12 +402,13 @@ model Authenticator {
 // kini memakai identity TER-SEAL (sealAtRest, kunci dari NYX_AT_REST_PEPPER).
 // Server tetap bisa menurunkan "siapa diblokir siapa" untuk fungsionalitas
 // (list blocked, story gating, unblock), tetapi dump DB tidak lagi memuat graph
-// permusuhan dalam bentuk identitas. Nullable supaya `prisma db push` tetap
-// jalan di tabel yang sudah berisi baris lama (NULL = baris legacy, diabaikan).
+// permusuhan dalam bentuk identitas.
+// [2026-10 legacy purge] NOT NULL: dulu nullable demi `prisma db push` di tabel
+// berisi baris lama (NULL = baris legacy). Tidak ada lagi baris tanpa tag.
 model BlockedUser {
   id         String   @id @default(uuid())
-  blockerTag String?
-  blockedTag String?
+  blockerTag String
+  blockedTag String
   createdAt  DateTime @default(now())
 
   @@unique([blockerTag, blockedTag])
@@ -414,10 +420,12 @@ model BlockedUser {
 // `authorTag` TER-SEAL (sealAtRest). Dulu `senderId` adalah FK asli → dump DB
 // memberi "siapa membuat story kapan" tanpa perlu membukanya. Endpoint tetap
 // mengembalikan `senderId` asli (di-resolve server saat request) supaya kontrak
-// klien tidak berubah. Nullable untuk alasan migrasi yang sama dengan BlockedUser.
+// klien tidak berubah.
+// [2026-10 legacy purge] NOT NULL — alasan nullable yang sama dengan BlockedUser
+// (migrasi tabel berisi baris lama) sudah tidak berlaku.
 model Story {
   id               String   @id @default(uuid())
-  authorTag        String?
+  authorTag        String
   encryptedPayload String   @db.Text
   createdAt        DateTime @default(now())
   expiresAt        DateTime

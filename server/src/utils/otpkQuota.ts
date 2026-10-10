@@ -14,6 +14,8 @@
  */
 
 import { ApiError } from './errors.js';
+// [docs/28 Tier 4] key Redis tidak menyematkan userId asli (tag HMAC pepper).
+import { identityTag } from './redisIdentity.js';
 
 /** Batas konsumsi OTPK per pasangan (requester, target) per 24 jam. */
 export const OTPK_FETCH_DAILY_MAX = 30;
@@ -21,9 +23,15 @@ export const OTPK_FETCH_DAILY_MAX = 30;
 /** TTL counter kuota (detik) — 24 jam. */
 export const OTPK_QUOTA_TTL_SECONDS = 86400;
 
-/** Kunci Redis counter kuota OTPK untuk satu pasangan. */
+/**
+ * Kunci Redis counter kuota OTPK untuk satu pasangan.
+ *
+ * [docs/28 Tier 4] Kedua sisi di-tag (`identityTag`), bukan userId asli: snapshot
+ * Redis/AOF tidak boleh memetakan "siapa meminta pre-key siapa". Deterministik
+ * per pasangan → counter tetap idempoten seperti sebelumnya.
+ */
 export const otpkQuotaKey = (requesterId: string, targetId: string): string =>
-  `otpkq:${requesterId}:${targetId}`;
+  `otpkq:${identityTag(requesterId)}:${identityTag(targetId)}`;
 
 export type OtpkCounterFn = (key: string, ttlSeconds: number) => Promise<number>;
 

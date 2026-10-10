@@ -18,7 +18,7 @@
  *   - berbeda antar nilai → tidak ada hash yang bisa dibalik/dienumerasi.
  *
  * Semua penulisan wajib lewat `upsertMembership`/`deleteMembership` di file ini
- * supaya sealing + kompatibilitas baris legacy (nilai plaintext lama) konsisten.
+ * supaya sealing konsisten.
  */
 
 import { openAtRest, sealAtRest } from './atRestSecrets.js'
@@ -28,19 +28,21 @@ export function routingIdentity(userId: string): Promise<string> {
   return sealAtRest(userId)
 }
 
-/** Kandidat lookup: `[ter-seal, apa adanya]` — cabang kedua untuk baris legacy. */
+/**
+ * Nilai lookup kanonik (selalu ter-seal).
+ * [2026-10 legacy purge] Cabang "apa adanya" untuk baris plaintext dibuang.
+ */
 export async function routingCandidates(userId: string): Promise<string[]> {
-  return [await sealAtRest(userId), userId]
+  return [await sealAtRest(userId)]
 }
 
 /**
- * Terima nilai ter-seal (baris baru) ATAU plaintext (baris legacy) dan
- * kembalikan userId asli. Null bila kosong.
+ * Terima nilai ter-seal dan kembalikan userId asli. Null bila kosong/rusak.
+ * [2026-10 legacy purge] Fallback plaintext dibuang.
  */
 export async function resolveRoutingUser(stored: string | null | undefined): Promise<string | null> {
   if (!stored) return null
-  const opened = await openAtRest(stored)
-  return opened ?? stored
+  return openAtRest(stored)
 }
 
 /**
@@ -64,9 +66,9 @@ export interface MembershipPrisma {
 /**
  * Upsert baris keanggotaan (conversation + delivery token) untuk seorang user.
  *
- * Memakai findFirst + kandidat (bukan upsert compound-unique) supaya baris
- * LEGACY yang masih plaintext ikut ter-upgrade, bukan bikin duplikat —
- * `deliveryToken` unik, jadi duplikat akan gagal tanpa jejak yang jelas.
+ * Memakai findFirst + nilai kanonik (bukan upsert compound-unique) supaya baris
+ * yang sudah ada ter-upgrade di tempat, bukan bikin duplikat — `deliveryToken`
+ * unik, jadi duplikat akan gagal tanpa jejak yang jelas.
  */
 export async function upsertMembership(
   prisma: MembershipPrisma,
@@ -118,11 +120,13 @@ export const storyAuthorTag = routingIdentity
 export const blockedUserTag = routingIdentity
 
 /**
- * [docs/28 D8/D9] Pembersihan eksplisit milik user pada tabel yang TIDAK lagi
- * punya FK ke User (Story, BlockedUser). Dipakai saat akun dihapus / dead man's
- * switch — dulu bergantung pada `onDelete: Cascade`, yang kini tidak ada.
+ * [docs/28 D2/D8/D9] Pembersihan eksplisit milik user pada tabel yang TIDAK
+ * punya FK ke User (UserHiddenConversation, Story, BlockedUser). Dipakai saat
+ * akun dihapus / dead man's switch — dulu bergantung pada `onDelete: Cascade`,
+ * yang kini tidak ada (nilai kolomnya ter-seal, jadi FK tidak mungkin dipenuhi).
  */
 export interface SealedOwnedRowsPrisma {
+  userHiddenConversation: { deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }> };
   story: { deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }> };
   blockedUser: { deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }> };
 }
@@ -132,6 +136,9 @@ export async function purgeSealedUserRows(
   userId: string
 ): Promise<void> {
   const tag = await routingIdentity(userId)
+  // Keanggotaan grup user (baris token-first), nilai kanonik ter-seal.
+  const membership = await routingCandidates(userId)
+  await prisma.userHiddenConversation.deleteMany({ where: { userId: { in: membership } } })
   await prisma.story.deleteMany({ where: { authorTag: tag } })
   await prisma.blockedUser.deleteMany({ where: { OR: [{ blockerTag: tag }, { blockedTag: tag }] } })
 }

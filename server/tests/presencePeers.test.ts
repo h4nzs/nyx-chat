@@ -23,6 +23,20 @@ import {
   intersectOnline,
   type PresenceMembershipClient,
 } from '../src/utils/presencePeers.js';
+import { clearAtRestSecretCacheForTests, sealAtRest } from '../src/utils/atRestSecrets.js';
+
+async function withPepper<T>(pepper: string, fn: () => T | Promise<T>): Promise<T> {
+  const prev = process.env.NYX_AT_REST_PEPPER;
+  process.env.NYX_AT_REST_PEPPER = pepper;
+  clearAtRestSecretCacheForTests();
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.NYX_AT_REST_PEPPER;
+    else process.env.NYX_AT_REST_PEPPER = prev;
+    clearAtRestSecretCacheForTests();
+  }
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(path.join(here, p), 'utf8');
@@ -51,36 +65,46 @@ test('intersectOnline: hanya peer yang sedang online', () => {
   assert.deepEqual(intersectOnline([], new Set(['a'])), []);
 });
 
-test('collectPresencePeers: dua query, dedupe userId, filter null', async () => {
-  const calls: Array<Record<string, unknown>> = [];
-  const fake: PresenceMembershipClient = {
-    userHiddenConversation: {
-      findMany: async (args) => {
-        calls.push(args as Record<string, unknown>);
-        if (calls.length === 1) {
-          return [{ conversationId: 'c1' }, { conversationId: 'c2' }];
-        }
-        return [{ userId: 'u-bob' }, { userId: 'u-bob' }, { userId: null }, { userId: 'u-carol' }];
+test('collectPresencePeers: dua query, dedupe, hanya nilai ter-seal yang dikenali', async () => {
+  await withPepper('p-presence', async () => {
+    const sealedBob = await sealAtRest('u-bob');
+    const sealedCarol = await sealAtRest('u-carol');
+    const calls: Array<Record<string, unknown>> = [];
+    const fake: PresenceMembershipClient = {
+      userHiddenConversation: {
+        findMany: async (args) => {
+          calls.push(args as Record<string, unknown>);
+          if (calls.length === 1) {
+            return [{ conversationId: 'c1' }, { conversationId: 'c2' }];
+          }
+          return [
+            { userId: sealedBob },
+            { userId: sealedBob }, // duplikat lintas conversation
+            { userId: null }, // baris token-only (routing-only, tanpa identitas)
+            { userId: sealedCarol },
+            { userId: 'u-plaintext-lama' }, // baris plaintext lama → tidak dikenali lagi
+          ];
+        },
       },
-    },
-  };
+    };
 
-  const peers = await collectPresencePeers(fake, 'me');
-  assert.deepEqual(peers.sort(), ['u-bob', 'u-carol'], 'baris legacy (plaintext) tetap diresolusi');
-  assert.equal(calls.length, 2, 'dua query (conversation saya → anggota lain), bukan N+1');
-  assert.deepEqual(calls[0].select, { conversationId: true });
-  assert.deepEqual(calls[1].distinct, ['userId'], 'dedupe userId di DB');
+    const peers = await collectPresencePeers(fake, 'me');
+    assert.deepEqual(peers.sort(), ['u-bob', 'u-carol'], 'identitas ter-seal dibuka; plaintext lama diabaikan');
+    assert.equal(calls.length, 2, 'dua query (conversation saya → anggota lain), bukan N+1');
+    assert.deepEqual(calls[0].select, { conversationId: true });
+    assert.deepEqual(calls[1].distinct, ['userId'], 'dedupe userId di DB');
 
-  // [docs/28 Tier 1.2] kolom userId kini routing identity ter-seal → lookup
-  // memakai kandidat dan nilai baris dibuka kembali sebelum jadi target push.
-  const mineWhere = calls[0].where as { userId: { in: string[] } };
-  const peerWhere = calls[1].where as { conversationId: unknown; userId: { not: null; notIn: string[] } };
-  assert.equal(mineWhere.userId.in.length, 2, 'kandidat [sealed, apa adanya]');
-  assert.equal(mineWhere.userId.in[1], 'me', 'kandidat kedua = nilai apa adanya (baris legacy)');
-  assert.notEqual(mineWhere.userId.in[0], 'me', 'nilai tersimpan bukan userId asli (D2)');
-  assert.deepEqual(peerWhere.conversationId, { in: ['c1', 'c2'] });
-  assert.deepEqual(peerWhere.userId.notIn, mineWhere.userId.in, 'peer tidak termasuk diri sendiri (sealed/legacy)');
-  assert.equal(peerWhere.userId.not, null);
+    // [docs/28 Tier 1.2] kolom userId kini routing identity TER-SEAL → lookup
+    // memakai nilai kanonik (tunggal) dan nilai baris dibuka kembali sebelum
+    // dipakai sebagai target broadcast.
+    const mineWhere = calls[0].where as { userId: { in: string[] } };
+    const peerWhere = calls[1].where as { conversationId: unknown; userId: { not: null; notIn: string[] } };
+    assert.deepEqual(mineWhere.userId.in, [await sealAtRest('me')], 'kandidat = bentuk sealed tunggal');
+    assert.notEqual(mineWhere.userId.in[0], 'me', 'nilai tersimpan bukan userId asli (D2)');
+    assert.deepEqual(peerWhere.conversationId, { in: ['c1', 'c2'] });
+    assert.deepEqual(peerWhere.userId.notIn, mineWhere.userId.in, 'peer tidak termasuk diri sendiri');
+    assert.equal(peerWhere.userId.not, null);
+  });
 });
 
 test('collectPresencePeers: tanpa conversation → berhenti sebelum query kedua', async () => {

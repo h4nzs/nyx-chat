@@ -11,7 +11,7 @@
  * `migration:room:*`. Test ini mengunci dua janji:
  *
  *  (a) helper identitas — tag satu-arah untuk yang hanya dibandingkan, seal
- *      deterministik untuk yang harus dipulihkan, plus toleransi baris legacy;
+ *      deterministik untuk yang harus dipulihkan (tanpa toleransi plaintext);
  *  (b) wiring — tidak ada jalur tulis Redis yang kembali memakai userId asli.
  */
 
@@ -32,7 +32,6 @@ import {
   identityTag,
   openIdentity,
   openIdentityMembers,
-  openIdentityOrRaw,
   sealIdentity,
 } from '../src/utils/redisIdentity.js';
 
@@ -71,32 +70,31 @@ test('identityKey: sufiks key adalah tag, bukan userId', async () => {
   });
 });
 
-test('sealIdentity/openIdentity: roundtrip + toleransi legacy', async () => {
+test('sealIdentity/openIdentity: roundtrip; plaintext tidak pernah dikenali', async () => {
   await withPepper('p-redis', async () => {
     const sealed = await sealIdentity('user-42');
     assert.equal(await openIdentity(sealed), 'user-42', 'member ter-seal bisa dibuka (routing)');
     assert.notEqual(sealed, 'user-42', 'member tidak plaintext');
 
-    assert.equal(await openIdentity('user-legacy'), null, 'plaintext legacy → null (bukan nilai palsu)');
-    assert.equal(await openIdentityOrRaw('user-legacy'), 'user-legacy', 'toleransi legacy: nilai apa adanya');
+    assert.equal(await openIdentity('user-plaintext'), null, 'nilai plaintext → null (tidak dikenali)');
     assert.equal(await openIdentity(null), null);
   });
 });
 
-test('openIdentityMembers: buka ter-seal, lewati legacy, buang kosong', async () => {
+test('openIdentityMembers: buka ter-seal, buang plaintext & kosong', async () => {
   await withPepper('p-redis', async () => {
     const sealedA = await sealIdentity('a');
     const sealedB = await sealIdentity('b');
-    const resolved = await openIdentityMembers([sealedA, 'legacy', sealedB, '']);
-    assert.deepEqual(resolved, ['a', 'legacy', 'b']);
+    const resolved = await openIdentityMembers([sealedA, 'plaintext', sealedB, '']);
+    assert.deepEqual(resolved, ['a', 'b']);
   });
 });
 
-test('identityMatches: cocokkan ter-seal, baris legacy, dan tolak yang lain', async () => {
+test('identityMatches: hanya cocok dengan nilai ter-seal yang sama', async () => {
   await withPepper('p-redis', async () => {
     const sealed = await sealIdentity('owner-1');
     assert.equal(await identityMatches(sealed, 'owner-1'), true, 'nilai ter-seal cocok');
-    assert.equal(await identityMatches('owner-1', 'owner-1'), true, 'baris legacy plaintext cocok');
+    assert.equal(await identityMatches('owner-1', 'owner-1'), false, 'plaintext tidak lagi cocok');
     assert.equal(await identityMatches(sealed, 'owner-2'), false, 'user lain ditolak');
     assert.equal(await identityMatches(null, 'owner-1'), false, 'kosong → tidak cocok');
   });
@@ -134,6 +132,24 @@ test('D14 wiring: tidak ada jalur tulis Redis yang memakai userId asli', () => {
     }
     assert.doesNotMatch(src, /sAdd\('online_users', userId\)/, `${f}: online_users memakai tag`);
   }
+
+  // [BUGFIX 2026-10-09] `routes/keys.ts` pernah men-destructure `identityKey`
+  // dari `req.body` → MENUTUPI helper → `identityKey('cache:keys:…', userId)`
+  // melempar "identityKey is not a function" (tertangkap try/catch, hanya
+  // console.error) sehingga cache pre-key TIDAK pernah di-invalidate: peer
+  // menerima bundle basi sampai TTL 1 jam habis.
+  const keys = read('../src/routes/keys.ts');
+  assert.doesNotMatch(
+    keys,
+    /const\s*\{[^}]*\bidentityKey\s*[,}][^}]*\}\s*=\s*req\.body/,
+    'routes/keys.ts: jangan mengikat nama `identityKey` langsung dari req.body (menutupi helper)'
+  );
+  assert.match(keys, /identityKey: identityKeyB64/, 'field body identityKey di-alias agar tidak menutupi helper');
+  assert.equal(
+    (keys.match(/redisClient\.del\(identityKey\(/g) || []).length,
+    2,
+    'invalidate cache pre-key memakai helper identityKey() (bundle + public)'
+  );
 
   const bridge = read('../src/network/redisBridge.ts');
   const handlers = read('../src/network/realtimeHandlers.ts');

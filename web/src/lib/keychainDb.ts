@@ -264,7 +264,7 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
             eraCK: state.eraCK,
             chainId: state.chainId,
             metadataKey: state.metadataKey ? await encryptValueAtRest(state.metadataKey) : undefined,
-            // senderId ikut disimpan agar getGroupReceiverStateByKeyId bisa
+            // senderId ikut disimpan agar state device-keyed bisa
             // mengembalikan identitas pengirim yang benar (id record kini
             // device-keyed — parts[1] bukan lagi senderId).
             senderId: state.senderId,
@@ -278,11 +278,11 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
 
 // [INVARIANT 1 — multi-era 2026-10-02] Arsipkan receiver state era LAMA saat era
 // baru tiba, ala libsignal SenderKeyRecord (MAX_SENDER_KEY_STATES=5): pesan era
-// lama yang datang belakangan masih bisa di-route via keyId lookup, dan yang
+// lama yang datang belakangan masih bisa di-route via chainId lookup, dan yang
 // terpenting state era lama TIDAK DITIMPA — menghilangkan seluruh kelas bug
 // "rewind saat offline sync". Id arsip: `${id}#era_${chainId}` — TIDAK akan
 // dikembalikan oleh getGroupReceiverState (exact-id get) tapi TETAP ditemukan
-// oleh getGroupReceiverStateByKeyId / listGroupReceiverStates (startsWith scan).
+// oleh findGroupReceiverState / listGroupReceiverStates (startsWith scan).
 const MAX_ARCHIVED_RECEIVER_STATES = 5;
 
 export async function archiveGroupReceiverState(state: GroupReceiverState): Promise<void> {
@@ -994,14 +994,13 @@ export async function listGroupReceiverStates(
 
 /**
  * [REWRITE 2026-10-02 — ROUTING ALA LIBSIGNAL] Pilih receiver state untuk sebuah
- * wrapper: chainId/keyId → state (aktif lalu arsip, via `pickChainState`); bila
- * tidak ada yang cocok, jatuh ke state AKTIF milik device pengirim (posisi
- * mundur ditangani skipped-key map di dalam state). Tidak ada lagi penebakan
- * lintas era.
+ * wrapper: chainId → state (aktif lalu arsip, via `pickChainState`); bila tidak
+ * ada yang cocok, jatuh ke state AKTIF milik device pengirim (posisi mundur
+ * ditangani skipped-key map di dalam state). Tidak ada lagi penebakan lintas era.
  */
 export async function findGroupReceiverState(
   conversationId: string,
-  ref: { chainId?: string; keyId?: string },
+  ref: { chainId?: string },
   senderId?: string,
   senderDeviceKey?: string
 ): Promise<GroupReceiverState | null> {
@@ -1019,57 +1018,3 @@ export async function findGroupReceiverState(
   return null;
 }
 
-export async function getGroupReceiverStateByKeyId(conversationId: string, keyId: string): Promise<GroupReceiverState | null> {
-  return enqueueWrite(async () => {
-    const records = await db.groupReceiverStates
-      .where('id')
-      .startsWith(conversationId + '_')
-      .toArray();
-
-    const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-
-    for (const record of records) {
-        let ckString = '';
-        const rawCk: unknown = record.state.CK;
-        if (typeof rawCk === 'string') {
-            ckString = rawCk;
-        } else if (rawCk instanceof Uint8Array) {
-            ckString = sodium.to_base64(rawCk, sodium.base64_variants.URLSAFE_NO_PADDING);
-        }
-
-        const ckPlain = await decryptValueAtRest(ckString);
-        if (ckPlain === null) continue;
-
-        // [REWRITE 2026-10-02] Cocokkan juga chainId eksplisit dan anchor era —
-        // keyId pesan = CK posisi itu, sementara state bisa sudah maju (CK) dan
-        // era tetap terwakili oleh chainId/eraCK.
-        if (
-            ckPlain.substring(0, 8) === keyId ||
-            record.state.chainId === keyId ||
-            (record.state.eraCK ?? '').substring(0, 8) === keyId
-        ) {
-            // [BUGFIX 2026-10-02] id record kini device-keyed (`${conv}_${deviceKey}`)
-            // — parts[1] BUKAN lagi senderId. senderId asli disimpan di state.
-            const senderId = record.state.senderId || record.id.split('_')[1] || '';
-            
-            return {
-                id: record.id,
-                conversationId: asConversationId(conversationId),
-                senderId: asUserId(senderId),
-                CK: ckPlain,
-                N: record.state.N,
-                eraCK: record.state.eraCK,
-                chainId: record.state.chainId,
-                skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys ?? {}),
-                // [T2 FIX #13 2026-09-29] signingKey WAJIB ikut di jalur byId —
-                // semua pesan grup (dan metadata) lookup receiver state via keyId,
-                // BUKAN by-id. Tanpa ini fix #9 tidak berlaku di jalur utama:
-                // verifikasi signature butuh resolve pseudonym → metadata →
-                // chicken-and-egg → invitee gagal dekripsi total (log 2-browser).
-                signingKey: record.state.signingKey
-            };
-        }
-    }
-    return null;
-  });
-}

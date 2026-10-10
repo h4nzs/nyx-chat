@@ -41,14 +41,8 @@ export function isSameEraDistribution(
     return existing.eraCK === incomingEraCK;
   }
 
-  // Kasus 2: legacy tanpa anchor + replay N=0 — state sudah ada dan maju;
-  // envelope N=0 datang lagi = replay distribusi era yang sama.
-  if (incomingN === 0) {
-    return incomingN <= existing.N;
-  }
-
-  // Kasus 3: envelope N>0 — replay bila state tidak lebih rendah DAN
-  // anchor (bila keduanya ada) identik.
+  // Kasus 2: envelope N>0, atau state/envelope tanpa anchor — replay bila
+  // state tidak lebih rendah DAN anchor (bila keduanya ada) identik.
   return existing.N >= incomingN &&
     (!existing.eraCK || !incomingEraCK || existing.eraCK === incomingEraCK);
 }
@@ -62,10 +56,8 @@ export function isSameEraDistribution(
 
 /** Referensi rantai yang dibawa wrapper pesan/metadata. */
 export interface ChainRef {
-  /** chainId era (wrapper baru) — 8-char prefix chain key awal era. */
+  /** chainId era (wrapper v2) — identitas rantai eksplisit. */
   chainId?: string;
-  /** keyId legacy (wrapper lama) — 8-char prefix CK pada posisi pesan. */
-  keyId?: string;
 }
 
 export interface ChainStateRef {
@@ -80,32 +72,25 @@ export interface ChainStateRef {
 }
 
 /**
- * Pilih state rantai untuk sebuah pesan: cocokkan chainId (baru) lalu keyId
- * (legacy, domain sama — prefix CK) terhadap chainId/eraCK/CK tiap state.
- * State aktif diprioritaskan di atas arsip (libsignal: push_front + pop_back).
- * Return null bila tidak ada yang cocok — penebakan dilarang (sumber bug
- * "MK lintas era tertukar" 2026-10-02).
+ * Pilih state rantai untuk sebuah pesan dengan mencocokkan `chainId` eksplisit
+ * wrapper terhadap state (aktif + arsip). State aktif diprioritaskan di atas
+ * arsip (libsignal: push_front + pop_back). Return null bila tidak ada yang
+ * cocok — penebakan dilarang (sumber bug "MK lintas era tertukar" 2026-10-02).
+ * [2026-10 legacy purge] Alias keyId (prefix CK) sudah dihapus.
  */
 export function pickChainState<T extends ChainStateRef>(
   states: T[],
   ref: ChainRef
 ): T | null {
-  const ids = [ref.chainId, ref.keyId].filter(
-    (v): v is string => typeof v === 'string' && v.length > 0
-  );
-  if (ids.length === 0) return null;
+  const id = typeof ref.chainId === 'string' && ref.chainId.length > 0 ? ref.chainId : null;
+  if (!id) return null;
 
   const live = states.filter(s => !s.archivedAt);
   const archived = states.filter(s => !!s.archivedAt);
 
   for (const pool of [live, archived]) {
-    for (const id of ids) {
-      const hit =
-        pool.find(s => s.chainId === id) ??
-        pool.find(s => (s.eraCK ?? '').substring(0, 8) === id) ??
-        pool.find(s => (s.CK ?? '').substring(0, 8) === id);
-      if (hit) return hit;
-    }
+    const hit = pool.find(s => s.chainId === id);
+    if (hit) return hit;
   }
   return null;
 }

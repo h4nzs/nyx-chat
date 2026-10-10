@@ -9,7 +9,7 @@ import { env } from '../config.js';
 import { getSodium } from '../lib/sodium.js';
 import { Buffer } from 'buffer';
 import { pepperedIdentifier, sealAtRest } from '../utils/atRestSecrets.js'
-import { dayBucket } from '../utils/temporalBucket.js';
+import { dayBucket, messageTimeBucket } from '../utils/temporalBucket.js';
 
 const router = Router();
 
@@ -110,6 +110,9 @@ router.post('/rooms', requireTenantAuth, async (req: Request, res: Response) => 
       data: {
         isGroup: false,
         tenantId: tenant.id,
+        // [docs/28 Tier 4 / B3] createdAt dipotong 15 menit (paritas dengan
+        // Conversation yang dibuat lewat REST).
+        createdAt: messageTimeBucket()
       }
     });
 

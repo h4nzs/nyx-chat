@@ -44,14 +44,13 @@ async function withPepper<T>(pepper: string, fn: () => T | Promise<T>): Promise<
   }
 }
 
-test('2.2: repliedToId round-trip ter-seal; legacy plaintext tetap lolos', async () => {
+test('2.2: repliedToId round-trip ter-seal; plaintext tidak dikenali', async () => {
   await withPepper('test-pepper-reply', async () => {
     const original = 'msg_abc123';
     const sealed = await sealAtRest(original);
     assert.notEqual(sealed, original, 'nilai tersimpan bukan id asli');
     assert.equal(await resolveRepliedToId(sealed), original, 'server membuka kembali ke id asli');
-    // Baris legacy (plaintext) → openAtRest null → nilai apa adanya.
-    assert.equal(await resolveRepliedToId('msg_legacy_plain'), 'msg_legacy_plain');
+    assert.equal(await resolveRepliedToId('msg_plaintext'), null, 'plaintext (pra-seal) tidak lagi dianggap id');
     assert.equal(await resolveRepliedToId(null), null);
     assert.equal(await resolveRepliedToId(undefined), null);
   });

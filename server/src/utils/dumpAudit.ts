@@ -66,7 +66,11 @@ const IDENTITY_TARGETS: ReadonlyArray<{
   { table: 'Device', column: 'nameSealed', secrets: 'deviceNames', label: 'label device (ter-seal)' },
   { table: 'Device', column: 'installationTag', secrets: 'deviceNames', label: 'anchor instalasi (tag HMAC)' },
   { table: 'PushSubscription', column: 'endpointSealed', secrets: 'pushEndpoints', label: 'endpoint push (ter-seal)' },
-  { table: 'Message', column: 'repliedToId', secrets: 'messageIds', label: 'reply edge (ter-seal)' },
+  // Nama kolom HARUS nama kolom DB (`pg_dump` menulis skema, bukan field Prisma):
+  // `Message.repliedToId` di schema.prisma di-`@map("replied_to_id")`. Memakai
+  // nama field Prisma di sini membuat pemeriksaan reply edge VAKUM (kolom tidak
+  // pernah ketemu) — lihat guard `hasColumn` di bawah.
+  { table: 'Message', column: 'replied_to_id', secrets: 'messageIds', label: 'reply edge (ter-seal)' },
 ];
 
 /** Batas hash SHA-256 hex (pola `adminSecretHash`). */
@@ -85,12 +89,19 @@ function unquote(identifier: string): string {
  */
 export function parseCopySections(dump: string): CopySection[] {
   const sections: CopySection[] = [];
-  const copyRe = /^COPY\s+(?:[^\s()]+\.)?"?([\w]+)"?\s*\(([^)]*)\)\s+FROM stdin;\n([\s\S]*?)\n\\\./gm;
+  // Terminator `\.` HARUS di-anchor ke awal baris (`^\\.`, flag `m`), bukan
+  // `\n\\\.`. Alasannya: untuk tabel KOSONG urutannya persis
+  // `FROM stdin;\n\\.\n`, sehingga pola lama (`\n` terminator) tidak menemukan
+  // baris penutup dan body-nya menelan blok tabel BERIKUTNYA — tabel berikut itu
+  // lalu tidak pernah di-audit (audit tetap hijau padahal ada kebocoran).
+  const copyRe = /^COPY\s+(?:[^\s()]+\.)?"?([\w]+)"?\s*\(([^)]*)\)\s+FROM stdin;\r?\n([\s\S]*?)^\\\.[ \t]*\r?$/gm;
   let match: RegExpExecArray | null;
   while ((match = copyRe.exec(dump)) !== null) {
     const table = match[1]!;
     const columns = match[2]!.split(',').map(unquote);
-    const body = match[3]!;
+    // Terminator di-anchor ke `^`, jadi baris penutup tidak ikut terpotong —
+    // buang satu newline di ujung body supaya tidak jadi baris kosong palsu.
+    const body = match[3]!.replace(/\r?\n$/, '');
     const rows = body.length === 0
       ? []
       : body.split('\n').map((line) => line.split('\t').map(unescapePgValue));
@@ -124,6 +135,15 @@ export function columnValues(sections: CopySection[], table: string, column: str
   return values;
 }
 
+/**
+ * Apakah tabel+kolom benar-benar ada di dump? Dipakai sebagai guard anti-vakum:
+ * audit yang "lulus" karena kolomnya tidak ketemu adalah lebih buruk daripada
+ * audit yang gagal terang-terangan.
+ */
+export function hasColumn(sections: CopySection[], table: string, column: string): boolean {
+  return sections.some((section) => section.table === table && section.columns.includes(column));
+}
+
 /** Nilai-nilai yang ada di kolom `table.column` DAN termasuk daftar rahasia. */
 export function leakedSecrets(
   sections: CopySection[],
@@ -151,6 +171,15 @@ export function auditDumpForIdentityLeaks(dump: string, ctx: DumpAuditContext): 
   }
 
   for (const target of IDENTITY_TARGETS) {
+    // Anti-vakum: kalau kolomnya tidak ada di dump, jangan klaim "aman".
+    if (!hasColumn(sections, target.table, target.column)) {
+      findings.push({
+        rule: `${target.table}.${target.column}`,
+        ok: false,
+        detail: `${target.label}: kolom ${target.table}.${target.column} tidak ada di dump — TIDAK BISA diverifikasi (nama kolom/format dump berubah?)`,
+      });
+      continue;
+    }
     const secrets = ctx[target.secrets] ?? [];
     const leaks = leakedSecrets(sections, target.table, target.column, secrets);
     findings.push({
@@ -163,12 +192,21 @@ export function auditDumpForIdentityLeaks(dump: string, ctx: DumpAuditContext): 
     });
   }
 
-  // Rahasia otoritas: bila ada nilainya, WAJIB berbentuk hash SHA-256 64-hex
-  // (baris legacy plaintext dibiarkan lolos supaya migrasi tidak jadi merah).
+  // Rahasia otoritas: bila ada nilainya, WAJIB berbentuk hash SHA-256 64-hex.
+  // [2026-10 legacy purge] Dulu nilai plaintext (baris pra-hash) diloloskan
+  // supaya migrasi tidak merah; sekarang tidak ada baris seperti itu.
   for (const [table, column] of [
     ['Conversation', 'authSecret'],
     ['Message', 'deleteSecret'],
   ] as const) {
+    if (!hasColumn(sections, table, column)) {
+      findings.push({
+        rule: `${table}.${column}-hashed`,
+        ok: false,
+        detail: `${table}.${column}: kolom tidak ada di dump — TIDAK BISA diverifikasi`,
+      });
+      continue;
+    }
     const values = columnValues(sections, table, column);
     const notHashed = values.filter((v) => !HEX64_RE.test(v));
     findings.push({

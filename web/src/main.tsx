@@ -155,6 +155,10 @@ if (!import.meta.env.VITE_APP_SECRET) {
 }
 
 // Request Persistent Storage for Local Keystore
+// [BUGFIX 2026-10-09] Dulu tanpa `.catch`: di konteks yang menolak persistensi
+// Chrome melempar `DOMException: The operation is insecure.` → muncul sebagai
+// "Unhandled Promise rejection" di console saat startup. Persistensi bersifat
+// best-effort (keystore tetap lokal), jadi kegagalan cukup dicatat.
 if (navigator.storage && navigator.storage.persist) {
   navigator.storage.persist().then(persistent => {
     if (persistent) {
@@ -162,6 +166,8 @@ if (navigator.storage && navigator.storage.persist) {
     } else {
       console.warn("Storage may be cleared by the UA under storage pressure.");
     }
+  }).catch(err => {
+    console.warn("Persistent storage request ditolak (best-effort, diabaikan):", err);
   });
 }
 

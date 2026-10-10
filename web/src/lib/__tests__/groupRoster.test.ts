@@ -10,7 +10,7 @@
  *    terdekripsi — fail-safe ke MEMBER, buang entri korup)
  *  - shared: roleAtLeast + GROUP_ROLE_RANK (hierarki OWNER > ADMIN > MEMBER)
  *  - web: getGroupMembers / getMyGroupRole / amIGroupAdmin (baca metadata v3
- *    dari store; fallback legacy role participants untuk grup v1/v2)
+ *    dari store; tanpa roster v3 → bukan admin, fail-closed)
  *
  * Pola mock mengikuti groupPseudonyms.test.ts: conversation & auth store
  * di-mock via alias '@store/…' (stateful via variabel test), sodium tidak
@@ -121,7 +121,7 @@ describe('getGroupMembers / getMyGroupRole (web — baca metadata v3)', () => {
     conversations = []
   })
 
-  it('metadata v3 → roster ter-parse; v2/v1 → undefined (legacy)', () => {
+  it('metadata v3 → roster ter-parse; v2/v1 → undefined (bukan v3)', () => {
     conversations = [
       {
         id: 'conv-v3',
@@ -184,7 +184,7 @@ describe('getGroupMembers / getMyGroupRole (web — baca metadata v3)', () => {
   })
 })
 
-describe('amIGroupAdmin (web — admin check dari roster, fallback legacy)', () => {
+describe('amIGroupAdmin (web — admin check dari roster v3, fail-closed)', () => {
   beforeEach(async () => {
     myUserId = 'me-user'
     conversations = []
@@ -213,7 +213,7 @@ describe('amIGroupAdmin (web — admin check dari roster, fallback legacy)', () 
     expect(amIGroupAdmin('member-conv')).toBe(false)
   })
 
-  it('fallback legacy v1/v2: role ADMIN dari participants store tetap dikenali', () => {
+  it('tanpa roster v3 (v1/v2): role ADMIN/OWNER di participants TIDAK lagi memberi admin', () => {
     conversations = [
       {
         id: 'legacy-admin',
@@ -222,25 +222,13 @@ describe('amIGroupAdmin (web — admin check dari roster, fallback legacy)', () 
         participants: [{ id: 'me-user', role: 'ADMIN' }],
       },
       {
-        id: 'legacy-member',
-        isGroup: true,
-        decryptedMetadata: { title: 'v1' },
-        participants: [{ id: 'me-user', role: 'MEMBER' }],
-      },
-    ]
-    expect(amIGroupAdmin('legacy-admin')).toBe(true)
-    expect(amIGroupAdmin('legacy-member')).toBe(false)
-  })
-
-  it('fallback legacy: role OWNER di participants (mirror v3) juga admin', () => {
-    conversations = [
-      {
         id: 'legacy-owner',
         isGroup: true,
         decryptedMetadata: { title: 'v1' },
         participants: [{ id: 'me-user', role: 'OWNER' }],
       },
     ]
-    expect(amIGroupAdmin('legacy-owner')).toBe(true)
+    expect(amIGroupAdmin('legacy-admin')).toBe(false)
+    expect(amIGroupAdmin('legacy-owner')).toBe(false)
   })
 })

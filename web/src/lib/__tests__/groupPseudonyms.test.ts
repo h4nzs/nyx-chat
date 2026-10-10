@@ -61,16 +61,31 @@ vi.mock('../sodiumInitializer', () => ({
 
 let counter = 0
 
+// [docs/28 Tier 4] ensureMyPseudonym boleh jatuh ke decryptGroupMetadata; di
+// unit test ini cukup di-mock (bukan graph crypto yang berat).
+vi.mock('@utils/crypto', () => ({
+  decryptGroupMetadata: vi.fn(async () => null),
+}))
+
 import {
   generateGroupPseudonym,
   generatePseudonymMap,
   getPseudonymMap,
   getMyPseudonym,
+  ensureMyPseudonym,
+  resolveSenderIdentityForGroup,
+  requireGroupSenderIdentity,
   resolvePseudonymToUserId,
   isEphemeralReceipts,
   scheduleEphemeralReceipt,
   RECEIPT_JITTER_MAX_MS,
 } from '../groupPseudonyms'
+import { decryptGroupMetadata } from '@utils/crypto'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const decryptGroupMetadataMock = vi.mocked(decryptGroupMetadata)
 
 async function setConversations(convs: Array<Record<string, unknown>>) {
   conversations = convs
@@ -80,6 +95,8 @@ describe('T1 pseudonym helpers (lib/groupPseudonyms)', () => {
   beforeEach(async () => {
     counter = 0
     ephemeralGroups = []
+    decryptGroupMetadataMock.mockReset()
+    decryptGroupMetadataMock.mockResolvedValue(null)
     await setConversations([])
   })
 
@@ -115,6 +132,85 @@ describe('T1 pseudonym helpers (lib/groupPseudonyms)', () => {
     ])
     expect(await getMyPseudonym('conv1')).toBe('PSEUDO2')
     expect(await getMyPseudonym('conv-tidak-ada')).toBeUndefined()
+  })
+
+  // [docs/28 Tier 4] Temuan audit dump 2026-10-09: klien sering TIDAK punya
+  // pseudonym di store (peta belum ter-hydrate) sehingga jalur kirim jatuh ke
+  // `?? myId` dan userId asli tersimpan di Message.senderId + wrapper pesan.
+  it('ensureMyPseudonym: peta di store dipakai langsung (tanpa decrypt)', async () => {
+    await setConversations([
+      { id: 'conv1', isGroup: true, decryptedMetadata: { v: 3, pseudonymMap: { AAAA: 'peer-1', BBBB: 'me-user' } } },
+    ])
+    expect(await ensureMyPseudonym('conv1')).toBe('BBBB')
+    expect(decryptGroupMetadataMock).not.toHaveBeenCalled()
+  })
+
+  it('ensureMyPseudonym: hydrate dari metadata v2 yang belum ter-decrypt', async () => {
+    // Metadata v2 asli membawa `pseudonymMap`; tipe balikan publik hanya
+    // menyebut field roster, jadi cast eksplisit untuk fixture test.
+    decryptGroupMetadataMock.mockResolvedValueOnce(
+      { v: 2, pseudonymMap: { CCCC: 'me-user' } } as never
+    )
+    await setConversations([
+      {
+        id: 'conv2',
+        isGroup: true,
+        encryptedMetadata: JSON.stringify({ v: 2, kind: 'group_metadata', chainId: 'c', ct: 'x', signature: 's' }),
+      },
+    ])
+    expect(await ensureMyPseudonym('conv2')).toBe('CCCC')
+    expect(decryptGroupMetadataMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('ensureMyPseudonym: blob non-v2 / tanpa metadata → undefined (tidak menyentuh rantai)', async () => {
+    await setConversations([
+      { id: 'conv-v1', isGroup: true, encryptedMetadata: JSON.stringify({ header: { n: 0 }, ciphertext: 'ct' }) },
+      { id: 'conv-none', isGroup: true },
+    ])
+    expect(await ensureMyPseudonym('conv-v1')).toBeUndefined()
+    expect(await ensureMyPseudonym('conv-none')).toBeUndefined()
+    expect(decryptGroupMetadataMock).not.toHaveBeenCalled()
+  })
+
+  it('resolveSenderIdentityForGroup: selalu pseudonym; tanpa peta (termasuk v1) → undefined (tanpa fallback userId)', async () => {
+    await setConversations([
+      { id: 'v2-ok', isGroup: true, decryptedMetadata: { v: 2, pseudonymMap: { PPPP: 'me-user' } } },
+      { id: 'v1-legacy', isGroup: true, decryptedMetadata: { title: 'legacy' } },
+      { id: 'v2-no-map', isGroup: true, decryptedMetadata: { v: 2, generation: 3 } },
+    ])
+    expect(await resolveSenderIdentityForGroup('v2-ok')).toBe('PPPP')
+    expect(await resolveSenderIdentityForGroup('v2-no-map')).toBeUndefined()
+    // Tidak ada lagi fallback userId untuk grup tanpa peta (v1 dihapus).
+    expect(await resolveSenderIdentityForGroup('v1-legacy')).toBeUndefined()
+  })
+
+  // [BUGFIX 2026-10-10] Wrapper pesan grup WAJIB punya senderId — kalau tidak,
+  // penerima gagal me-route receiver state. Gagal keras di pengirim.
+  it('requireGroupSenderIdentity: pseudonym tersedia → dikembalikan apa adanya', () => {
+    expect(requireGroupSenderIdentity('PSEUDO-OK', 'conv1')).toBe('PSEUDO-OK')
+  })
+
+  it('requireGroupSenderIdentity: tanpa pseudonym → throw jelas, BUKAN userId/undefined', () => {
+    expect(() => requireGroupSenderIdentity(undefined, 'conv-x')).toThrowError(
+      /Pseudonym pengirim grup tidak tersedia untuk conv-x/
+    )
+    expect(() => requireGroupSenderIdentity('', 'conv-y')).toThrowError(/tidak tersedia/)
+  })
+
+  it('guard sumber: doEncryptMessage memakai requireGroupSenderIdentity (tanpa fallback userId)', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url))
+    const src = readFileSync(path.join(here, '../../utils/crypto.ts'), 'utf8')
+    expect(src).toMatch(/requireGroupSenderIdentity\(\s*await resolveSenderIdentityForGroup\(conversationId\)/)
+    // Tidak boleh ada fallback ke userId di jalur pengiriman pseudonym.
+    expect(src).not.toMatch(/senderIdForServer\s*\?\?/)
+  })
+
+  it('guard: wrapper metadata v2 tidak lagi menulis senderId (userId penulis)', () => {
+    const here = path.dirname(fileURLToPath(import.meta.url))
+    const src = readFileSync(path.join(here, '../../utils/crypto.ts'), 'utf8')
+    const wrapper = src.slice(src.indexOf("kind: 'group_metadata'"), src.indexOf("kind: 'group_metadata'") + 400)
+    expect(wrapper).not.toMatch(/senderId:/)
+    expect(wrapper).toMatch(/senderDeviceKey/)
   })
 
   it('resolvePseudonymToUserId: resolve benar; unknown/v1 → undefined', async () => {

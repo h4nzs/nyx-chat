@@ -71,9 +71,25 @@ test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConve
   assert.doesNotMatch(handlers, /persistedReaderId\s*=\s*[^;]*:\s*userId\b/, 'tidak ada fallback userId asli');
 
   // Keanggotaan: routing identity ter-seal, bukan userId.
-  assert.match(modelBody(schema, 'UserHiddenConversation'), /userId\s+String\?/, 'userId tetap nullable (baris token-only)');
+  const uhc = modelBody(schema, 'UserHiddenConversation');
+  assert.match(uhc, /userId\s+String\?/, 'userId tetap nullable (baris token-only)');
+  // [BUGFIX 2026-10-09] Kolom ter-seal TIDAK boleh punya relasi/FK ke User:
+  // nilainya bukan id asli, jadi setiap `create` PASTI gagal P2003
+  // (UserHiddenConversation_userId_fkey) dan baris keanggotaan tidak pernah
+  // tercatat — keanggotaan grup hilang tanpa jejak di log aplikasi.
+  assert.doesNotMatch(uhc, /@relation\(fields: \[userId\]/, 'userId ter-seal tanpa FK ke User');
+  assert.doesNotMatch(
+    modelBody(schema, 'User'),
+    /^\s*hiddenConversations\s+UserHiddenConversation\[\]/m,
+    'relasi balik hiddenConversations juga harus hilang'
+  );
   const routing = read('../src/utils/routingIdentity.ts');
   assert.match(routing, /sealAtRest\(userId\)/, 'nilai kolom = seal deterministik');
+  assert.match(
+    routing,
+    /userHiddenConversation\.deleteMany/,
+    'tanpa FK, pembersihan saat akun dihapus wajib eksplisit (purgeSealedUserRows)'
+  );
   for (const file of ['../src/network/realtimeHandlers.ts', '../src/routes/messages.ts', '../src/routes/conversations.ts']) {
     assert.doesNotMatch(read(file), /userHiddenConversation\.upsert\(/, `${file}: penulisan keanggotaan harus lewat upsertMembership`);
   }

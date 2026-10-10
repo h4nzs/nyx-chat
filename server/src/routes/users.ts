@@ -3,7 +3,8 @@ import { clearAuthCookies } from '../utils/sessionUtils.js';
 import { redisClient } from '../lib/redis.js';
 import { TransportOpCode } from '@nyx/shared';
 // [docs/28 Tier 1.5 / D14] key cache Redis memakai tag, bukan userId asli.
-import { identityKey } from '../utils/redisIdentity.js';
+// [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
+import { identityKey, identityTag } from '../utils/redisIdentity.js';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -169,7 +170,8 @@ router.put('/me/contact-bundle', zodValidate({
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { encryptedBundle, version } = req.body as { encryptedBundle: string; version: number };
-    const windowKey = `rl:contact-bundle:${req.user.id}:${Math.floor(Date.now() / 3_600_000)}`;
+    // [docs/28 Tier 4] tag (bukan userId) supaya snapshot Redis tidak memetakan pemilik bundle.
+    const windowKey = `rl:contact-bundle:${identityTag(req.user.id)}:${Math.floor(Date.now() / 3_600_000)}`;
     const count = Number(await redisClient.eval(`
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then
@@ -238,8 +240,8 @@ router.put('/me',
         // userId (membership murni token) dilewati (tidak ada jalur push ke sana).
         try {
           // [docs/28 Tier 1.2] kolom userId = routing identity ter-seal:
-          // lookup pakai kandidat (baris legacy), hasil dibaca balik via
-          // resolveRoutingUser sebelum dipakai sebagai target push.
+          // lookup pakai nilai kanonik, hasil dibaca balik via resolveRoutingUser
+          // sebelum dipakai sebagai target push.
           const myCandidates = await routingCandidates(userId)
           const memberships = await prisma.userHiddenConversation.findMany({
             where: { userId: { in: myCandidates } },

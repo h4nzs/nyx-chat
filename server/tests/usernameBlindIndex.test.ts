@@ -11,8 +11,9 @@
  *
  * Solusi: nilai klien di-index lagi dengan HMAC pepper dari env
  * (`pepperedIdentifier`) sebelum disimpan, dan semua lookup memakai kandidat
- * [ter-pepper, apa adanya] supaya baris legacy + nilai yang di-echo klien tetap
- * bekerja. Test ini mengunci (a) properti privasinya, (b) wiring-nya.
+ * [ter-pepper, nilai kiriman] supaya nilai ter-pepper yang di-echo klien
+ * (mis. hash-ID pada link berbagi profil) tetap menemukan user. Test ini
+ * mengunci (a) properti privasinya, (b) wiring-nya.
  */
 
 import { test } from 'node:test';
@@ -77,13 +78,20 @@ test('D6: lookup tetap deterministik dengan pepper yang sama (login tidak rusak)
   assert.equal(a, b, 'identifier sama → index sama → lookup by equality tetap jalan');
 });
 
-test('D6: baris legacy & echo klien tetap ketemu lewat kandidat lookup', async () => {
-  const clientValue = clientArgon('legacy-user');
+test('D6: echo klien (hash-ID ter-pepper) tetap ketemu lewat kandidat lookup', async () => {
+  const clientValue = clientArgon('shared-user');
   const candidates = await withPepper('p', () => identifierLookupCandidates(clientValue));
 
   assert.equal(candidates[0], await withPepper('p', () => pepperedIdentifier(clientValue)));
-  assert.equal(candidates[1], clientValue, 'kandidat kedua = nilai Argon2id mentah (baris legacy / echo)');
+  assert.equal(candidates[1], clientValue, 'kandidat kedua = nilai kiriman apa adanya (echo)');
   assert.equal(candidates.length, 2, 'tidak ada kandidat lain (query tetap minimal)');
+
+  // Simulasi share-link: klien mengirim kembali nilai TER-PEPPER yang di-echo
+  // server. Kolom DB berisi nilai ter-pepper itu, jadi kandidat kedua harus
+  // sama persis dengannya agar pencarian hash-ID tetap menemukan user.
+  const pepperedByServer = await withPepper('p', () => pepperedIdentifier(clientValue));
+  const echoCandidates = await withPepper('p', () => identifierLookupCandidates(pepperedByServer));
+  assert.ok(echoCandidates.includes(pepperedByServer), 'nilai ter-pepper yang di-echo cocok dengan baris DB');
 });
 
 test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kandidat', () => {

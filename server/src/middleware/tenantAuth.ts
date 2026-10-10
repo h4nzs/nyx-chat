@@ -20,8 +20,7 @@ export const requireTenantAuth = async (req: Request, res: Response, next: NextF
     }
 
     // [docs/28 Tier 0 — D4] `Tenant.apiKey` disimpan dalam bentuk sealed.
-    // Kandidat lookup = [sealed, apa adanya] → baris legacy (plaintext) tetap
-    // bisa autentikasi sampai di-upgrade.
+    // [2026-10 legacy purge] Kandidat plaintext (baris pra-seal) dibuang.
     const candidates = await sealedLookupCandidates(apiKey);
     const tenant = await prisma.tenant.findFirst({
       where: { apiKey: { in: candidates } }

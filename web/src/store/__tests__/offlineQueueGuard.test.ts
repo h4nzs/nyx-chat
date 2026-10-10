@@ -23,6 +23,9 @@ vi.mock('@utils/crypto', () => ({
   retrieveRatchetStateSecurely: vi.fn().mockResolvedValue(undefined),
   getPseudonymMap: vi.fn(() => undefined),
   getMyPseudonym: vi.fn().mockResolvedValue(undefined),
+  // [docs/28 Tier 4] jalur kirim memakai versi hydrate (peta dari metadata).
+  ensureMyPseudonym: vi.fn().mockResolvedValue(undefined),
+  resolveSenderIdentityForGroup: vi.fn().mockResolvedValue(undefined),
   PreKeyBundle: class {},
 }));
 

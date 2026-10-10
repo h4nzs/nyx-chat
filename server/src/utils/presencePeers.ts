@@ -70,8 +70,8 @@ export async function collectPresencePeers(
   userId: string
 ): Promise<string[]> {
   // [docs/28 Tier 1.2] kolom userId kini routing identity TER-SEAL → lookup
-  // memakai kandidat (baris legacy), dan nilai baris dibuka kembali sebelum
-  // dipakai sebagai target broadcast.
+  // memakai nilai kanonik, dan nilai baris dibuka kembali sebelum dipakai
+  // sebagai target broadcast.
   const candidates = await routingCandidates(userId)
 
   const mine = await prisma.userHiddenConversation.findMany({

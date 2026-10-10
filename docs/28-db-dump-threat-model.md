@@ -152,9 +152,24 @@ juga**, dan `UserHiddenConversation.userId` harus berhenti menyimpan identitas a
 `conversationScopedTag` (HMAC per-conversation — bukan userId asli dan **bukan**
 nilai dari klien); `UserHiddenConversation.userId` kini routing identity
 **ter-seal** yang hanya dibuka server untuk routing internal. Guard:
-`tests/schemaPrivacy.test.ts` (D2), `tests/routingIdentity.test.ts` (8).
+`tests/schemaPrivacy.test.ts` (D2), `tests/routingIdentity.test.ts` (9).
 Residual yang tetap ada: graph `Conversation` + `Message.conversationId` itu
 sendiri (§28.6).
+
+**BUG RUNTIME YANG DITEMUKAN SAAT E2E MANUAL (2026-10-09) — sudah ditutup.**
+Relasi Prisma `UserHiddenConversation.user` (FK `UserHiddenConversation_userId_fkey`
+→ `User.id`) **tertinggal** saat kolomnya diubah menjadi nilai ter-seal. Akibatnya
+setiap `create` keanggotaan gagal `P2003 ForeignKeyConstraintViolation` — tertutup
+oleh `try/catch` + `console.warn` sehingga keanggotaan grup tidak pernah tercatat
+tanpa error yang terlihat di UI (pola temuan ini hanya muncul di log server).
+Perbaikan: relasi FK dihapus dari `schema.prisma` (kolom tetap ter-seal),
+pembersihan saat akun dihapus / dead man's switch dipindah ke
+`purgeSealedUserRows` (kini ikut menghapus baris keanggotaan). Verifikasi: schema
+scratch hasil `prisma db push` menerima insert keanggotaan ber-userId ter-seal,
+sedangkan schema lama menolaknya dengan `23503` — plus guard tambahan di
+`schemaPrivacy.test.ts` (D2) yang melarang FK `@relation(fields: [userId])` dan
+menuntut pembersihan eksplisit. **Catatan migrasi:** `prisma db push` wajib
+dijalankan sekali di DB mana pun yang masih memakai schema lama.
 
 ### D3 — TINGGI: rahasia otoritas plaintext (authSecret & deleteSecret)
 - `Conversation.authSecret` = `crypto.randomBytes(32).toString('hex')`, plaintext
@@ -223,7 +238,8 @@ Klien tidak perlu berubah; tanpa pepper, dump tidak bisa membangun rainbow table
 (Migrasi: baca dual — cocokkan legacy, lalu tulis ulang baris saat login.)
 **STATUS: SELESAI (Tier 0.2).** Register menyimpan `HMAC(pepper, argonKlien)`;
 login/recovery-verify/register-check/pencarian user memakai kandidat
-`[ter-pepper, apa adanya]` sehingga klien & baris legacy tidak berubah. Guard:
+`[ter-pepper, nilai kiriman]` sehingga klien & hash-ID yang di-echo tetap
+bekerja (bukan toleransi baris legacy). Guard:
 `tests/usernameBlindIndex.test.ts` (5) + `tests/schemaPrivacy.test.ts` (D6/D7).
 
 ### D7 — TINGGI: `Device.fingerprint` = pseudo-identifier perangkat yang stabil
@@ -315,8 +331,8 @@ hanya graph "device X punya sesi di conversation C" — layak dicatat, bukan pri
    `cache:keys:*`, `rate_limit:*`); `sealIdentity(userId)` = `sealAtRest`
    (deterministik, bisa dipulihkan) untuk member SET yang dipakai sebagai target
    kirim (`burner:room:*`, `migration:room:*`, `migration_owner:*`) dan nilai
-   `linking_token:*`. Pembaca memakai kandidat `[ter-seal, apa adanya]` sehingga
-   baris legacy tetap berfungsi.
+   `linking_token:*`. Pembaca memakai bentuk ter-seal saja (toleransi plaintext
+   dihapus 2026-10).
 2. **Presence jadi lazy/opt-in** (`server/src/utils/presenceSubscriptions.ts`):
    tidak ada lagi snapshot `type:'bulk'` otomatis maupun fan-out join/leave ke
    semua peer online. Klien meminta `presence:subscribe` untuk kontak yang SEDANG
@@ -331,7 +347,8 @@ tidak mengekspos presence 'online/last seen' sama sekali).
 
 ## 28.4 Yang sudah benar — jangan diregresikan
 
-- `Message.senderId` `NULL` (1:1 / sealed sender) & pseudonym (grup v2/T1).
+- `Message.senderId` `NULL` (1:1 / sealed sender) & pseudonym (grup v2/T1) — dan
+  `userId` **TER-SEAL** untuk fallback legacy (Tier 4, 2026-10-09).
 - Token-first membership (`UserHiddenConversation.deliveryToken` unik, wajib
   diterbitkan klien) — discovery = kepemilikan token.
 - `Conversation.adminSecretHash` = hash dari token 256-bit (pola benar).
@@ -410,6 +427,43 @@ butuh `prisma db push` yang TIDAK dijalankan di sesi ini.
 
 `pnpm --filter nyx-server run privacy:dump-audit` → menjalankan jalur live.
 
+### Tier 4 — identitas pengirim & field at-rest lain (2026-10-09)
+
+Lanjutan audit dump nyata (lihat §28.7). Keputusan maintainer diambil di sesi
+ini; semuanya **mendarat** kecuali residual yang dicatat eksplisit di bawah.
+
+| # | Temuan (bukti di DB nyata) | Keputusan | Implementasi |
+|---|---|---|---|
+| 4.1 | `Message.senderId` = **userId asli** pada 6/30 pesan grup (fallback `senderPseudonym ?? userId`) | pseudonym klien dipakai apa adanya; selain itu userId disimpan **TER-SEAL** (`sealAtRest`) dan dibuka di jalur baca | `utils/senderIdentity.ts` (`senderIdForStorage`, `openSenderId`, `openMessageForClient`); 3 jalur tulis + 6 jalur baca di `realtimeHandlers.ts` (`message:unsend` termasuk otorisasi, view-once, receipt tunggal & batch, `message:deleted`), `routes/messages.ts` (`GET` catch-up + respons POST) |
+| 4.2 | Wrapper metadata v2 menyimpan `senderId` = userId penulis (1 kolom `Conversation.encryptedMetadata` + 2 baris `METADATA_UPDATED`) | berhenti menulis field itu; server **menyaring** blob v2 dari klien lama | klien: `encryptGroupMetadata` tak lagi menulis `senderId`; server: `utils/groupMetadataBlob.ts` dipakai di `POST /`, `PUT /:id/details`, dan `metadata:updated` (blob yang disimpan + yang di-relay sama-sama bersih). Blob v1 sudah tidak ditulis/dibaca sama sekali (reader v1 dihapus 2026-10) |
+| 4.3 | 19 baris SYSTEM `GROUP_KEY` menyimpan `targetDeviceKey` = **Device.id** plaintext (laporan analis eksternal) | device id disegel at-rest, dibuka saat relay/catch-up | `sealSystemContentDeviceKeys` / `openSystemContentDeviceKeys` di `utils/senderIdentity.ts`; `senderDeviceKey`/`senderSigningKey` sengaja **tidak** disegel (kunci publik yang memang dibagikan ke anggota) |
+| 4.4 | 18/89 key Redis menyematkan userId (`rl:story-view`, `rl:contact-bundle`, `rl:powverify`, `otpkq`, `sandbox:newchat`) | semua diganti `identityTag()` (HMAC pepper) | `routes/stories.ts` (dua sisi), `routes/users.ts`, `routes/auth.ts`, `utils/otpkQuota.ts`, `routes/conversations.ts`. Keluarga yang sudah aman sebelumnya tidak disentuh |
+| 4.5 | `Conversation.createdAt` presisi penuh (3/3 baris) | dipotong 15 menit (paritas B3) | `messageTimeBucket()` di `POST /api/conversations` + `routes/engine.ts` |
+| 4.6 | `Message.sessionId` (relasi device↔percakapan) plaintext | disegel at-rest, dibuka saat baca | `sealAtRest` di 2 jalur tulis, `openMessageForClient` di jalur baca |
+| 4.7 | Klien sering tidak punya pseudonym saat kirim (peta belum ter-hydrate) | klien **selalu** mengirim pseudonym untuk grup v2/v3 | `ensureMyPseudonym()` (hydrate dari metadata v2/v3 via `decryptGroupMetadata`) + `resolveSenderIdentityForGroup()`; dipakai di `store/message.ts` (2 jalur) dan `utils/crypto.ts` (distribusi kunci, wrapper pesan, `metadata:updated`) |
+
+**Residual yang disengaja (dicatat jujur):**
+
+1. **Grup v1 (pra-pseudonym)**: `resolveSenderIdentityForGroup()` masih mengembalikan
+   userId untuk grup tanpa peta v2/v3 — peer lawas membutuhkan identitas yang bisa
+   di-resolve untuk menyimpan state kunci grup (`storeReceivedSessionKey` menolak
+   senderId kosong). Kolom `Message.senderId` tetap aman (server menyegel), tetapi
+   wrapper **di dalam content E2EE** masih memuat userId sampai grup itu dimigrasi
+   ke v2 (rotasi metadata). Migrasi lazy sudah ada jalurnya; tidak dipaksakan di sini.
+2. **Payload in-flight distribusi kunci** (`session:new_key`) memakai
+   `senderPseudonym ?? userId`: nilai ini tidak pernah persist (bukan objek `data:`
+   Prisma). [2026-10 purge] fallback userId dihapus; grup v1 tidak didukung lagi.
+   Test guard menahan agar tidak ada jalur simpan baru yang memakai pola ini.
+3. **Timing & volume** per percakapan tetap terlihat server (batas fundamental —
+   lihat §28.3/§26); yang bisa dilakukan hanya mengasarkan presisi kolom, dan itu
+   sudah dilakukan (B3 + 4.5).
+
+Test yang mengunci Tier 4: `tests/senderIdentity.test.ts` **20 test**
+(round-trip seal/buka, penolakan pseudonym berbentuk UUID, sanitizer metadata v2
+vs v1, device key SYSTEM, plus 6 guard wiring) dan `web`
+`src/lib/__tests__/groupPseudonyms.test.ts` (hydrate, v2 tanpa peta, tanpa
+fallback userId, guard wrapper tanpa `senderId`).
+
 ## 28.6 Keputusan maintainer — SEMUA TERJAWAB
 
 1. **Tier mana dulu?** → Tier 0 penuh, lalu 1.1–1.5, lalu Tier 2 (B1–B5 + residual),
@@ -433,6 +487,72 @@ kasar, termasuk `Conversation.isGroup` sebagai klasifikasi grup dan
 (bukti keanggotaan, tanpa identitas).
 
 ## 28.7 Status artefak
+
+**Pembaruan 2026-10-09 (sesi bug E2E manual):** setelah audit log E2E manual
+(perpesanan 1:1 & grup terdekripsi di kedua sisi — lihat riwayat sesi), 4 bug
+runtime nyata ditemukan dan diperbaiki di luar cakupan audit awal:
+
+| Bug | Gejala | Perbaikan |
+|---|---|---|
+| FK `UserHiddenConversation_userId_fkey` | P2003 diam-diam; keanggotaan grup tak pernah tercatat | relasi FK dihapus + `purgeSealedUserRows` |
+| `identityKey` ter-shadow di `routes/keys.ts` | `TypeError: identityKey is not a function`; cache pre-key TIDAK di-invalidate (bundle basi ≤1 jam) | variabel body di-alias `identityKeyB64` |
+| Sertifikat sidecar lokal kedaluwarsa | SETIAP koneksi WebTransport ditolak (`QUIC_TLS_CERTIFICATE_UNKNOWN`) → fallback WebSocket | rotasi otomatis (validasi DER via `x509-parser`) + 6 unit test Rust |
+| Contact store hanya di-seed saat `loadConversations` | peer/kontak baru tidak muncul di picker (create grup, story) sampai reload | `noteDirectMessageContact` (jalur pesan) + seed di `conversation:new` |
+
+Verifikasi sesi itu: server `tsc` 0 & `npm test` **192/192**; web `tsc -b` 0 &
+`vitest` **286/286**; `cargo test` sidecar **6/6**; probe Chrome 149 ke sidecar
+(mismatch/kedaluwarsa → handshake gagal, sertifikat segar → `ready` sukses).
+
+**Audit DB nyata + dump (2026-10-09, sesi lanjutan).** Metode: `psql` ke
+`nyx_app` (PostgreSQL 18.6) + `pg_dump` yang dibuat maintainer di-restore ke schema
+scratch `dumpcheck` (lalu dihapus) supaya bisa di-query dengan SQL penuh.
+
+- **Faithfulness dump:** jumlah baris 18 tabel identik DB↔dump, dan md5 konten
+  (`User`, `Message`, `Device`, `UserHiddenConversation`) sama → analisis dump valid.
+- **Drift schema:** `prisma migrate diff --exit-code` = 0 (identik `schema.prisma`).
+- **Integritas graph:** 0 orphan di seluruh 14 FK; `seq` unik & ≤ counter per
+  conversation (0 baris legacy `seq=0`); 100% `createdAt`/`lastMessageAt`/
+  `updatedAt` duduk di batas bucket 15 menit (B3 terbukti di data nyata).
+- **Kolom ter-seal/tag:** 0 nilai berbentuk UUID asli; `authSecret`/`deleteSecret`
+  semuanya 64-hex; keanggotaan (3 baris) tersimpan sebagai routing identity
+  ter-seal; `Message.senderId` NULL untuk 9 pesan 1:1.
+- **Bug guardrail (diperbaiki sesi ini):** `parseCopySections` memakai `\n\\.`
+  sebagai terminator sehingga untuk tabel KOSONG (`FROM stdin;` → `\.` langsung)
+  body-nya menelan blok tabel berikutnya — tabel itu tidak pernah diaudit. Di dump
+  nyata efeknya: **seluruh tabel `Message` (39 baris) lolos audit**, dan
+  `Message.repliedToId` tidak pernah ketemu karena nama kolom DB adalah
+  `replied_to_id` (`@map`). Terminator kini di-anchor ke awal baris, target memakai
+  nama kolom DB, plus guard anti-vakum (`hasColumn` → kolom hilang = GAGAL, bukan
+  hijau). Bukti: dengan rahasia nyata, `privacy-dump-audit --dump --secrets`
+  berubah dari **exit 0 palsu** menjadi **exit 1** dan menunjuk tepat
+  `Message.senderId: 6 identitas BOCOR`; `Message.deleteSecret` ikut teraudit
+  (0 → 18 nilai). Test: `tests/dumpAudit.test.ts` (9 → **12**, +3 regresi).
+
+**Dua kebocoran sisa yang ditemukan di dump nyata** (belum diperbaiki — butuh
+keputusan maintainer karena menyentuh jalur fallback pseudonym & format metadata):
+
+1. `Message.senderId` = **userId asli** pada 6 dari 30 pesan grup
+   (`451b0e0a…`, 4 SYSTEM + 2 USER). Penyebab: `realtimeHandlers.ts` menyimpan
+   `senderPseudonym ?? userId` (2 jalur SYSTEM + 1 jalur pesan biasa) dan klien
+   tidak selalu mengirim `senderPseudonym` (`getMyPseudonym` belum siap).
+   Fallback ini dulu sengaja dipertahankan untuk grup v1 (26.2), tetapi dump
+   jadi bisa memetakan pengirim. **Diputuskan & dikerjakan 2026-10:** fallback
+   userId dihapus (pseudonym wajib; selain itu userId di-seal server-side) —
+   lihat §28.5 Tier 4.
+2. `Conversation.encryptedMetadata` (blob yang tersimpan apa adanya) memuat field
+   luar `senderId` = **userId asli pembuat grup**. Di dump: 1/1 metadata yang ada.
+   Sumber: `web/src/utils/crypto.ts` (`senderPseudonym: … ?? myId`).
+
+**Residual Redis (di luar cakupan 1.5):** dari 89 key, **18 memuat userId asli** —
+`sandbox:newchat:<userId>`, `rl:contact-bundle:<userId>`, `rl:story-view:<viewerId>:<authorId>`,
+`rl:powverify:<userId>`, `otpkq:<requesterId>:<targetId>`. Keluarga yang sudah ada
+helper-nya (`active_device`, `online_users`, `pow:user`, `cache:keys:*`) bersih.
+Semua ber-TTL ≤24 jam, tetapi snapshot Redis tetap membocorkan siapa‐melihat‐story‐siapa
+& siapa‐meminta‐prekey‐siapa.
+
+Verifikasi sesi audit ini: server `tsc --noEmit` 0, `npm test` **195/195**,
+audit dump offline exit 1 (sesuai temuan), schema scratch dibersihkan.
+
 
 - Audit ini: `docs/28-db-dump-threat-model.md`.
 - Baseline sebelum implementasi: server 109/109, web 267/267, `tsc` web+server
@@ -460,7 +580,7 @@ presence menjadi **per-kontak/langganan**.
 | 0.3 | D5 | `RefreshToken.ipAddress` & `userAgent` **dihapus** dari schema + semua jalur tulis (auth issueTokens, refresh, engine iframe). `GET /api/sessions` memakai `Device.name` + `isCurrent`; UI sesi ikut disesuaikan (dedupe per `deviceId`, bukan UA) |
 | 0.4 | D7 | `Device.fingerprint` disimpan ter-index (`HMAC(pepper, fingerprint)`): auth register/login/recovery, `PUT /api/users/keys`, dan cek hardware-binding di `redisBridge` |
 | 0.5 | D4 | `Tenant.apiKey` disimpan **sealed** (AEAD deterministik) → lookup tetap jalan; admin tetap melihat key asli (di-unseal di endpoint admin-only, key asli dikembalikan sekali saat create) |
-| 0.6 | D3 | `Conversation.authSecret` & `Message.deleteSecret` kini **hash SHA-256** (pola `adminSecretHash`), dibandingkan dual-mode (`credentialTokenMatches`) sehingga baris legacy plaintext tetap berfungsi |
+| 0.6 | D3 | `Conversation.authSecret` & `Message.deleteSecret` kini **hash SHA-256** (pola `adminSecretHash`). `credentialTokenMatches` hanya menerima nilai tersimpan ber-hash — cabang plaintext (baris legacy) sudah dihapus 2026-10 |
 
 Helper tunggal: `server/src/utils/atRestSecrets.ts` (pepper, `pepperedIdentifier`,
 `hashCredentialToken`, `credentialTokenMatches`, `sealAtRest`/`openAtRest`).
@@ -473,15 +593,11 @@ Semua pepper/key berasal dari env `NYX_AT_REST_PEPPER` (production: wajib).
 | 0.2 ✅ | Pepper blind index `usernameHash` | **Mendarat.** Register menyimpan `HMAC(pepper, argonKlien)`; login/recovery-verify/register-check/pencarian user memakai kandidat `[ter-pepper, apa adanya]` (`findFirst` + `in`), jadi klien & baris legacy tidak berubah. Nonce recovery di-key oleh identifier ter-pepper (Redis juga tidak memuat identifier mentah) dengan fallback kandidat. `isExactHash` menerima 43-char base64url (Argon2id klien) **dan** 64-hex (nilai ter-index yang di-echo server) sehingga link undangan hasil-echo tetap bisa dipakai mencari kontak. `engine.ts` (user B2B) ikut ter-pepper. Test: `tests/usernameBlindIndex.test.ts` (5 test: properti privasi + wiring). |
 | 0.7 ✅ | Presence per-kontak | **Mendarat.** Snapshot `{type:'bulk'}` dan broadcast `join`/`leave` kini hanya memuat **peer** (user yang berbagi conversation), bukan seluruh isi `online_users`. Peer diturunkan server dari `UserHiddenConversation` (`utils/presencePeers.ts`), **bukan** deklarasi klien — jadi tidak ada pertukaran bocor baru (minta klien mengirim daftar kontaknya = kebocoran baru). Disconnect (`handleDisconnect`) memakai jalur yang sama + `try/catch` supaya kegagalan DB tidak menggagalkan pembersihan koneksi. Klien: store conversation meminta refresh presence setelah membuat grup supaya badge anggota baru langsung terisi; jalur lain menyusul pada presence refresh/connect berikutnya (batasan disadari). Test: `tests/presencePeers.test.ts` (6 test). |
 | 1.1 ✅ | Blind receipt 1:1 | **Mendarat.** Di jalur 1:1 & grup v1, `MessageStatus.userId` kini diisi **tag opaque turunan server** (`conversationScopedTag` = `HMAC(pepper, "receipt:<conversationId>:<userId>")`) — bukan userId asli, dan **bukan** nilai dari klien (kalau klien bisa memilih, ia bisa memalsukan receipt atas nama user lain). Sifat tag: deterministik per (conversation, user) → upsert/guard TTL tetap idempoten; berbeda antar percakapan → tak bisa mengkorelasikan pembaca lintas chat; tak bisa dibalik tanpa pepper. Klien: di 1:1 pencocokan status tidak lagi bisa memakai identitas (server tidak menyimpannya) — UI/guard kini memperlakukan status di 1:1 sebagai milik satu-satunya peer (`MessageItem` tick + guard receipt, `ChatWindow` `unreadVisible`), sedangkan logika pseudonym grup tidak berubah. Test: 2 kontrak lama di `realtimeHandlers.test.ts` diperbarui (perilaku memang berubah) + guard regresi baru. |
-| 1.2 ✅ | `UserHiddenConversation.userId` | **Mendarat.** Kolom itu kini memuat **routing identity ter-seal** (`sealAtRest` = AEAD deterministik, kunci dari pepper), bukan userId asli. Server tetap bisa membukanya untuk routing (push/sweeper, broadcast profil, presence peer), tetapi dump DB saja tidak lagi memuat daftar keanggotaan. Sealing/legacy terpusat di `utils/routingIdentity.ts` (`routingIdentity`, `routingCandidates`, `resolveRoutingUser`, `upsertMembership`, `findMembership`, `deleteMembership`) — semua jalur tulis kini lewat helper (4 situs) dan revocation memakai `deleteMany` + kandidat supaya baris legacy ikut terhapus tanpa duplikat (deliveryToken unik). Pembaca yang ikut disesuaikan: `messageSweeper`, broadcast profil `users.ts`, `presencePeers`, kick/leave `conversations.ts`. Test: `tests/routingIdentity.test.ts` (8 test) + 2 kontrak lama diperbarui |
+| 1.2 ✅ | `UserHiddenConversation.userId` | **Mendarat.** Kolom itu kini memuat **routing identity ter-seal** (`sealAtRest` = AEAD deterministik, kunci dari pepper), bukan userId asli. Server tetap bisa membukanya untuk routing (push/sweeper, broadcast profil, presence peer), tetapi dump DB saja tidak lagi memuat daftar keanggotaan. Sealing terpusat di `utils/routingIdentity.ts` (`routingIdentity`, `routingCandidates`, `resolveRoutingUser`, `upsertMembership`, `findMembership`, `deleteMembership`) — semua jalur tulis lewat helper (4 situs) dan revocation memakai `deleteMany` (deliveryToken unik). [2026-10 purge] `routingCandidates` mengembalikan **satu** nilai ter-seal; kandidat plaintext & pembaca legacy dihapus. Pembaca yang ikut disesuaikan: `messageSweeper`, broadcast profil `users.ts`, `presencePeers`, kick/leave `conversations.ts`. Test: `tests/routingIdentity.test.ts` + 2 kontrak lama diperbarui |
 
-**Catatan migrasi 1.3/1.4:** kolom tag dibuat **nullable** supaya `prisma db push`
-tetap jalan pada tabel yang sudah berisi (Postgres tidak bisa menambah kolom NOT
-NULL tanpa default ke tabel berisi). Baris lama akan punya tag NULL: baris block
-lama menjadi yatim (tidak terbaca lagi) dan baris story lama tidak bisa dibuka
-lewat tag — keduanya bisa dibersihkan operator setelah push:
-`DELETE FROM "BlockedUser" WHERE "blockerTag" IS NULL;` dan
-`DELETE FROM "Story" WHERE "authorTag" IS NULL;` (story memang ber-TTL 24 jam).
+**Catatan migrasi 1.3/1.4 (final 2026-10):** setelah DB direset & tidak ada baris
+lama, `Story.authorTag` serta `BlockedUser.blockerTag`/`blockedTag` dijadikan
+**NOT NULL** — tidak ada lagi baris tag NULL maupun jalur baca plaintext.
 
 **Residual yang disadari (dulu, kini DITUTUP — Tier 1.5):** `Device.installationId`,
 `Device.name`, `User.externalId` (identitas B2B), dan `MessageStatus.userId` untuk
@@ -489,10 +605,8 @@ lewat tag — keduanya bisa dibersihkan operator setelah push:
 `externalIdSealed`, dan `conversationScopedTag` (1.1). Lihat temuan D4/D9/D10 dan
 §28.5 Tier 1.5.
 
-Catatan 1.2: baris yang sudah ada sebelum perubahan tetap memuat userId
-plaintext sampai baris itu ditulis ulang (upsert keanggotaan berikutnya) atau
-user dikeluarkan — semua lookup memakai kandidat `[sealed, apa adanya]`, jadi
-tidak ada data yang menyesatkan. Residual yang tersisa setelah 1.2: graph
+Catatan 1.2: tidak ada lagi baris userId plaintext (DB direset 2026-09); lookup
+memakai bentuk ter-seal tunggal. Residual yang tersisa setelah 1.2: graph
 percakapan itu sendiri (`Conversation` + `Message.conversationId` + waktu) dan
 `Device.installationId` (lihat daftar residual di atas).
 

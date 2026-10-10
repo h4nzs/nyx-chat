@@ -52,7 +52,7 @@ COPY public."Conversation" (id, "authSecret") FROM stdin;
 conv-1\t${HASH}
 \\.
 
-COPY public."Message" (id, "conversationId", "senderId", "repliedToId", "deleteSecret") FROM stdin;
+COPY public."Message" (id, "conversationId", "senderId", replied_to_id, "deleteSecret") FROM stdin;
 ${MSG}\tconv-1\t\\N\t\t${HASH}
 \\.
 
@@ -147,11 +147,69 @@ test('audit dump BOCOR → GAGAL, tepat pada kolom yang bocor', () => {
   ]);
 });
 
-test('audit reply edge: repliedToId ter-seal, bukan id pesan asli', () => {
+test('audit reply edge: replied_to_id ter-seal, bukan id pesan asli', () => {
   const dump = CLEAN_DUMP.replace(`\\N\t\t${HASH}`, `\\N\t${MSG}\t${HASH}`);
   const findings = auditDumpForIdentityLeaks(dump, CTX);
-  const reply = findings.find((f) => f.rule === 'Message.repliedToId')!;
+  const reply = findings.find((f) => f.rule === 'Message.replied_to_id')!;
   assert.equal(reply.ok, false, 'id pesan asli di reply edge harus ditangkap');
+});
+
+// REGRESI (dump nyata 2026-10-09): tabel KOSONG menelan blok tabel berikutnya,
+// sehingga kolom di tabel itu tidak pernah diaudit dan laporan tetap hijau.
+test('parseCopySections: tabel KOSONG tidak menelan tabel berikutnya', () => {
+  const dump = `COPY public."Empty" (id) FROM stdin;
+\\.
+
+COPY public."MessageStatus" (id, "userId") FROM stdin;
+st-1\t${ALICE}
+\\.
+
+COPY public."AlsoEmpty" (id) FROM stdin;
+\\.
+
+COPY public."User" (id) FROM stdin;
+u-1
+\\.
+`;
+  const sections = parseCopySections(dump);
+  assert.deepEqual(sections.map((s) => `${s.table}:${s.rows.length}`), [
+    'Empty:0',
+    'MessageStatus:1',
+    'AlsoEmpty:0',
+    'User:1',
+  ]);
+  assert.deepEqual(columnValues(sections, 'MessageStatus', 'userId'), [ALICE]);
+});
+
+test('audit: kebocoran SETELAH tabel kosong tetap ditangkap', () => {
+  const dump = `COPY public."Empty" (id) FROM stdin;
+\\.
+
+COPY public."Message" (id, "conversationId", "senderId", replied_to_id, "deleteSecret") FROM stdin;
+m-1\tconv-1\t${BOB}\t\\N\t${HASH}
+\\.
+`;
+  const findings = auditDumpForIdentityLeaks(dump, CTX);
+  const sender = findings.find((f) => f.rule === 'Message.senderId')!;
+  assert.equal(sender.ok, false, 'userId asli di Message.senderId harus GAGAL walau ada tabel kosong sebelumnya');
+});
+
+test('audit anti-vakum: kolom target tidak ada di dump → GAGAL, bukan hijau', () => {
+  const findings = auditDumpForIdentityLeaks(CLEAN_DUMP, CTX);
+  const vacuous = findings.filter((f) => !f.ok);
+  assert.deepEqual(vacuous, [], 'dump bersih tidak boleh punya finding gagal');
+
+  // Dump tanpa tabel Story/BlockedUser: kolomnya tidak bisa diverifikasi.
+  const partial = CLEAN_DUMP
+    .split('\n\n')
+    .filter((block) => !block.includes('COPY public."Story"') && !block.includes('COPY public."BlockedUser"'))
+    .join('\n\n');
+  const partialFindings = auditDumpForIdentityLeaks(partial, CTX);
+  assert.equal(auditPassed(partialFindings), false);
+  assert.deepEqual(
+    partialFindings.filter((f) => !f.ok).map((f) => f.rule).sort(),
+    ['BlockedUser.blockedTag', 'BlockedUser.blockerTag', 'Story.authorTag']
+  );
 });
 
 test('audit parse gagal → finding dump-parseable GAGAL (bukan diam-diam lolos)', () => {

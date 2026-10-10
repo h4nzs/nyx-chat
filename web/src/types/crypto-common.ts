@@ -28,17 +28,16 @@ export interface GroupRatchetState {
   // tanpa rewind). Juga dipakai arsip era lama (archiveGroupReceiverState).
   eraCK?: string;
   // [REWRITE 2026-10-02 — chainId stabil ala libsignal SenderKeyState.chain_id]
-  // Identitas era eksplisit = 8-char prefix eraCK. Stabil sepanjang rantai —
-  // berbeda dari keyId pesan (= CK posisi itu, berubah tiap posisi). Dibawa
-  // eksplisit di wrapper pesan/metadata baru agar routing penerima deterministik
-  // (sender_key_state_for_chain_id) tanpa menebak dari prefix.
+  // Identitas era eksplisit (64-bit acak per era). Stabil sepanjang rantai.
+  // Dibawa eksplisit di wrapper pesan/metadata v2 agar routing penerima
+  // deterministik (sender_key_state_for_chain_id) tanpa menebak dari prefix.
   chainId?: string;
   // [V2 2026-10-02 — RENCANA #2] Kunci metadata era (keluar dari chain sender-
   // key). Dienkripsi at-rest; receiver menerima lewat envelope distribusi v2.
   metadataKey?: string;
-  // [BUGFIX 2026-10-02] Identitas pengirim (pseudonym/userId) di dalam state —
+  // [BUGFIX 2026-10-02] Identitas pengirim (pseudonym) di dalam state —
   // id record kini device-keyed (`${conv}_${deviceKey}`) sehingga parts[1]
-  // bukan lagi senderId; getGroupReceiverStateByKeyId membaca dari sini.
+  // bukan lagi senderId; pembaca state mengambilnya dari sini.
   senderId?: string;
   // Tanggal arsip (arsip era lama saja).
   archivedAt?: number;

@@ -25,8 +25,8 @@
  *     dibandingkan dengan pemilik). Deterministik → perbandingan & `sRem`
  *     tetap bekerja, tapi dump hanya melihat ciphertext.
  *
- * Baris lama (plaintext userId) tetap terbaca: semua pembaca memakai kandidat
- * `[ter-seal, apa adanya]`, pola yang sama dengan `routingIdentity`.
+ * [2026-10 legacy purge] Toleransi nilai plaintext dibuang — semua member/key
+ * Redis kini ter-seal.
  */
 
 import { openAtRest, pepperedIdentifier, sealAtRest } from './atRestSecrets.js'
@@ -50,28 +50,22 @@ export async function sealIdentity(userId: string): Promise<string> {
 }
 
 /**
- * Buka member ter-seal. Mengembalikan null untuk nilai yang tak bisa dibuka
- * (mis. member lama yang plaintext) — pakai `openIdentityOrRaw` bila ingin
- * toleransi legacy.
+ * Buka member ter-seal. Mengembalikan null untuk nilai yang tak bisa dibuka.
+ * [2026-10 legacy purge] Dulu ada `openIdentityOrRaw` yang mengembalikan nilai
+ * plaintext apa adanya; member Redis sekarang selalu ter-seal.
  */
 export async function openIdentity(sealed: string | null | undefined): Promise<string | null> {
   return openAtRest(sealed)
 }
 
-/** Toleran legacy: nilai ter-seal dibuka, nilai plaintext dikembalikan apa adanya. */
-export async function openIdentityOrRaw(value: string): Promise<string> {
-  return (await openIdentity(value)) ?? value
-}
-
-/** Buka seluruh member SET (toleran baris legacy), buang yang tak valid. */
+/** Buka seluruh member SET, buang yang tak valid. */
 export async function openIdentityMembers(members: string[]): Promise<string[]> {
-  const resolved = await Promise.all(members.map((m) => openIdentityOrRaw(m)))
+  const resolved = await Promise.all(members.map((m) => openIdentity(m)))
   return resolved.filter((m): m is string => typeof m === 'string' && m.length > 0)
 }
 
-/** Bandingkan nilai tersimpan (ter-seal ATAU legacy) dengan userId yang dicari. */
+/** Bandingkan nilai tersimpan (ter-seal) dengan userId yang dicari. */
 export async function identityMatches(stored: string | null | undefined, userId: string): Promise<boolean> {
   if (!stored) return false
-  if (stored === userId) return true // baris legacy
   return stored === (await sealIdentity(userId))
 }

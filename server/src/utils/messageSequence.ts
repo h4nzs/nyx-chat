@@ -47,27 +47,23 @@ export async function reserveMessageSeq(
 }
 
 /**
- * [docs/28 Tier 2 — B1] Kursor paginasi: klien baru mengirim `?before=<seq>`
- * (numerik). Untuk kompatibilitas mundur, `?before=<ISO date>` (klien lama)
- * tetap diterima. Helper ini mengklasifikasikan nilai kursor.
+ * [docs/28 Tier 2 — B1] Kursor paginasi: klien mengirim `?before=<seq>` (numerik).
+ * [2026-10 legacy purge] Kursor ISO date (klien pra-B1) dibuang — urutan pesan
+ * kini murni `seq`, tidak ada lagi jalur yang butuh createdAt sebagai kursor.
  */
 export type ParsedCursor =
   | { kind: 'seq'; seq: number }
-  | { kind: 'date'; date: Date }
   | { kind: 'none' };
 
 export function parseMessageCursor(raw: unknown): ParsedCursor {
   const value = typeof raw === 'string' ? raw.trim() : '';
   if (!value) return { kind: 'none' };
 
-  // Numerik murni → seq. Wajib `>= 0`; seq dimulai dari 1.
+  // Numerik murni → seq. Wajib aman sebagai integer; seq dimulai dari 1.
   if (/^\d+$/.test(value)) {
     const seq = parseInt(value, 10);
     if (Number.isSafeInteger(seq)) return { kind: 'seq', seq };
   }
-
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) return { kind: 'date', date: parsed };
 
   return { kind: 'none' };
 }

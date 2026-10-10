@@ -18,6 +18,9 @@
  *      di-resolve server saat request).
  *   3. Karena FK cascade hilang, penghapusan akun & dead man's switch wajib
  *      membersihkan baris milik user secara eksplisit.
+ *
+ * [2026-10 legacy purge] `authorTag`/`blockerTag`/`blockedTag` kini NOT NULL;
+ * jalur baca tidak lagi mengenali baris plaintext lama.
  */
 
 import { test } from 'node:test';
@@ -31,6 +34,7 @@ import {
   blockedUserTag,
   purgeSealedUserRows,
   resolveRoutingUser,
+  routingCandidates,
   routingIdentity,
   storyAuthorTag,
   type SealedOwnedRowsPrisma,
@@ -68,9 +72,17 @@ test('D9: blockedUserTag dipakai untuk kedua sisi relasi (blokir/unblock/gating)
   assert.equal(isBlockedReverse, false, 'arah sebaliknya bukan relasi yang sama');
 });
 
-test('D8/D9: purgeSealedUserRows membersihkan Story & BlockedUser tanpa FK cascade', async () => {
+test('D2/D8/D9: purgeSealedUserRows membersihkan keanggotaan, Story & BlockedUser tanpa FK cascade', async () => {
   const calls: Array<{ model: string; where: Record<string, unknown> }> = [];
   const fake: SealedOwnedRowsPrisma = {
+    // [BUGFIX 2026-10-09] UserHiddenConversation ikut dibersihkan eksplisit:
+    // kolom userId ter-seal → tidak ada FK ke User untuk di-cascade.
+    userHiddenConversation: {
+      deleteMany: async ({ where }) => {
+        calls.push({ model: 'userHiddenConversation', where });
+        return { count: 1 };
+      },
+    },
     story: {
       deleteMany: async ({ where }) => {
         calls.push({ model: 'story', where });
@@ -88,9 +100,15 @@ test('D8/D9: purgeSealedUserRows membersihkan Story & BlockedUser tanpa FK casca
   await purgeSealedUserRows(fake, 'u-han');
 
   const tag = await storyAuthorTag('u-han');
-  assert.deepEqual(calls[0], { model: 'story', where: { authorTag: tag } }, 'story dihapus berdasarkan tag penulis');
+  const membershipCandidates = await routingCandidates('u-han');
   assert.deepEqual(
-    calls[1],
+    calls[0],
+    { model: 'userHiddenConversation', where: { userId: { in: membershipCandidates } } },
+    'keanggotaan grup dihapus via kandidat sealed + legacy'
+  );
+  assert.deepEqual(calls[1], { model: 'story', where: { authorTag: tag } }, 'story dihapus berdasarkan tag penulis');
+  assert.deepEqual(
+    calls[2],
     { model: 'blockedUser', where: { OR: [{ blockerTag: tag }, { blockedTag: tag }] } },
     'block dihapus di KEDUA arah relasi'
   );
@@ -103,12 +121,12 @@ test('D8/D9 schema: kolom identitas asli hilang, tag ter-seal menggantikan', () 
 
   assert.doesNotMatch(story, /^\s*senderId\s+\S/m, 'Story tidak lagi punya kolom senderId');
   assert.doesNotMatch(story, /sender\s+User/, 'relasi FK ke User dihapus');
-  assert.match(story, /authorTag\s+String\?/, 'penulis disimpan sebagai tag ter-seal (nullable demi migrasi)');
+  assert.match(story, /authorTag\s+String\s/, 'penulis disimpan sebagai tag ter-seal (NOT NULL)');
 
   assert.doesNotMatch(blocked, /^\s*blockerId\s+\S/m, 'tidak ada kolom blockerId');
   assert.doesNotMatch(blocked, /^\s*blockedId\s+\S/m, 'tidak ada kolom blockedId');
   assert.doesNotMatch(blocked, /User\s+@relation/, 'tidak ada relasi FK ke User');
-  assert.match(blocked, /blockerTag\s+String\?[\s\S]*blockedTag\s+String\?/, 'pasangan tag ter-seal');
+  assert.match(blocked, /blockerTag\s+String\s[\s\S]*blockedTag\s+String\s/, 'pasangan tag ter-seal (NOT NULL)');
   assert.match(blocked, /@@unique\(\[blockerTag, blockedTag\]\)/, 'uniqueness dipertahankan (idempoten)');
 
   const user = modelBody(schema, 'User');
@@ -150,9 +168,10 @@ test('D8/D9: dead man’s switch juga membersihkan baris milik user', () => {
   assert.match(sweeper, /await purgeSealedUserRows\(prisma, u\.id\)/, 'auto-destruct membersihkan Story & BlockedUser');
 });
 
-test('D8/D9: baris legacy (tag NULL / berisi identitas) tidak melempar', async () => {
-  // Baris baru: tag ter-seal. Baris lama: NULL (kolom baru) atau identitas mentah.
-  assert.equal(await resolveRoutingUser(null), null, 'tag NULL (baris legacy) → null, bukan crash');
-  assert.equal(await resolveRoutingUser('u-lama'), 'u-lama', 'nilai lama (plaintext) tetap terbaca');
-  assert.equal(await openAtRest('u-lama'), null, 'plaintext legacy memang bukan ciphertext');
+test('D8/D9: nilai NULL/plaintext tidak melempar, tapi juga tidak dikenali', async () => {
+  // Baris baru: tag ter-seal (NOT NULL). Nilai lama (NULL/identitas mentah) tidak
+  // lagi punya jalur pembacaan — resolve mengembalikan null, bukan crash.
+  assert.equal(await resolveRoutingUser(null), null, 'NULL → null, bukan crash');
+  assert.equal(await resolveRoutingUser('u-lama'), null, 'identitas plaintext tidak lagi terbaca');
+  assert.equal(await openAtRest('u-lama'), null, 'plaintext memang bukan ciphertext');
 });

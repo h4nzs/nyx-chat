@@ -12,15 +12,16 @@ import { openAtRest } from './atRestSecrets.js';
 /**
  * [docs/28 Tier 2 — 2.2] `Message.repliedToId` disimpan **TER-SEAL** (`sealAtRest`).
  * Tujuan: dump DB tidak memuat edge balasan (graf siapa membalas siapa). Server
- * membukanya saat READ (util ini); baris legacy yang masih plaintext jatuh ke
- * nilai apa adanya. Mapper TIDAK boleh mengirim nilai ter-seal ke klien —
- * karena itu `toRawServerMessage` selalu mengosongkan `repliedToId` dan pemanggil
- * read yang mengisinya kembali setelah di-unseal.
+ * membukanya saat READ (util ini). Mapper TIDAK boleh mengirim nilai ter-seal ke
+ * klien — karena itu `toRawServerMessage` selalu mengosongkan `repliedToId` dan
+ * pemanggil read yang mengisinya kembali setelah di-unseal.
+ *
+ * [2026-10 legacy purge] Fallback "nilai apa adanya" dibuang — semua baris
+ * sudah ter-seal.
  */
 export async function resolveRepliedToId(stored: string | null | undefined): Promise<string | null> {
   if (!stored) return null;
-  const opened = await openAtRest(stored);
-  return opened ?? stored;
+  return openAtRest(stored);
 }
 
 export { 
@@ -63,7 +64,8 @@ export interface PrismaMessageInput {
   fileKey?: string | null;
   sessionId?: string | null;
   encryptedSessionKey?: string | null;
-  // [docs/28 Tier 2 — B1] seq urutan per-conversation (0/undefined = legacy).
+  // [docs/28 Tier 2 — B1] seq urutan per-conversation. Wajib terisi untuk semua
+  // baris (server menetapkannya saat create).
   seq?: number | null;
   createdAt: Date | string; // Bisa Date atau ISO String
   expiresAt?: Date | string | null; // Bisa Date atau ISO String
@@ -194,9 +196,8 @@ export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage =>
   fileKey: msg.fileKey,
   sessionId: msg.sessionId,
   encryptedSessionKey: msg.encryptedSessionKey,
-  // [docs/28 Tier 2 — B1] seq > 0 → urutan berbasis sequence; 0/undefined =
-  // baris legacy (klien fallback ke createdAt).
-  seq: typeof msg.seq === 'number' && msg.seq > 0 ? msg.seq : undefined,
+  // [docs/28 Tier 2 — B1] seq = penentu urutan per-conversation.
+  seq: typeof msg.seq === 'number' ? msg.seq : undefined,
   // FIX: Aman memanggil toISOString meski input aslinya sudah berupa string
   createdAt: new Date(msg.createdAt).toISOString(),
   expiresAt: msg.expiresAt ? new Date(msg.expiresAt).toISOString() : undefined,

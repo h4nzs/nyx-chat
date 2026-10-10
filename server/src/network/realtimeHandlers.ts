@@ -51,12 +51,21 @@ import {
   identityKey,
   identityMatches,
   identityTag,
+  openIdentity,
   openIdentityMembers,
-  openIdentityOrRaw,
   sealIdentity,
 } from '../utils/redisIdentity.js';
 import { conversationScopedTag } from '../utils/atRestSecrets.js';
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js';
+// [docs/28 Tier 4] identitas pengirim at-rest: pseudonym klien dipakai apa
+// adanya, selain itu userId disimpan TER-SEAL dan dibuka lagi di jalur baca.
+import {
+  openMessageForClient,
+  openSenderId,
+  sealSystemContentDeviceKeys,
+  senderIdForStorage,
+} from '../utils/senderIdentity.js';
+import { sanitizeGroupMetadataBlob } from '../utils/groupMetadataBlob.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -237,7 +246,7 @@ export async function handleChatMessage(
           include: {}
         });
         if (existing) {
-          const safeMessage = toRawServerMessage(existing) as RawServerMessage;
+          const safeMessage = toRawServerMessage(await openMessageForClient(existing)) as RawServerMessage;
           // [docs/28 Tier 2 — 2.2] buka reply edge ter-seal sebelum dikirim.
           safeMessage.repliedToId = (await resolveRepliedToId(existing.repliedToId)) ?? undefined;
           safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
@@ -276,10 +285,16 @@ export async function handleChatMessage(
             // [T1 GROUP PSEUDONYMS — doc 26.2] Group messages: store the client-
             // supplied `senderPseudonym` (opaque, unlinkable to accounts) instead
             // of the authenticated userId. 1:1 stays sealed (senderId: null).
-            // Fallback: legacy clients (metadata v1) that do not send the field →
-            // previous behavior (userId) so old groups keep working.
-            senderId: conversation.isGroup ? (senderPseudonym ?? userId) : null,
-            content, sessionId: sessionId || null,
+            // [docs/28 Tier 4] pseudonym apa adanya; TANPA pseudonym → userId
+            // TER-SEAL (jaring pengaman; klien sekarang selalu mengirim pseudonym).
+            senderId: await senderIdForStorage({
+              isGroup: conversation.isGroup === true,
+              userId,
+              senderPseudonym,
+            }),
+            content,
+            // [docs/28 Tier 4] sessionId (relasi device↔percakapan) ter-seal.
+            sessionId: sessionId ? await sealAtRest(sessionId) : null,
             // [docs/28 Tier 2 — 2.2] edge balasan disimpan TER-SEAL (dump tidak
             // memuat "siapa membalas siapa"); dibuka lagi saat read.
             repliedToId: repliedToId ? await sealAtRest(repliedToId) : null,
@@ -311,7 +326,7 @@ export async function handleChatMessage(
       await completeMessageSlot(ctx, deviceId, tempId, newMessageRaw.id);
     }
 
-    const safeMessage = toRawServerMessage(newMessageRaw) as RawServerMessage;
+    const safeMessage = toRawServerMessage(await openMessageForClient(newMessageRaw)) as RawServerMessage;
     // [docs/28 Tier 2 — 2.2] kirim id balasan ASLI (bukan nilai ter-seal).
     if (repliedToId) safeMessage.repliedToId = repliedToId;
     if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
@@ -573,6 +588,12 @@ export async function handleKeySync(
            // menyertakan) — requester mengenali sender via peta metadata.
            // [T2 FIX #9 2026-09-28] senderSigningKey = public signing key pengirim,
            // diikat ke receiver state penerima (pola libsignal SenderKeyState).
+           // [docs/28 Tier 4] Satu-satunya tempat `?? userId` masih dipakai:
+           // payload IN-FLIGHT ini harus memuat identitas yang bisa di-resolve
+           // penerima untuk menyimpan state kunci grup (`storeReceivedSessionKey`
+           // menolak senderId kosong). Nilainya tidak pernah persist di DB; klien
+           // selalu mengirim pseudonym lewat ensureMyPseudonym, jadi cabang ini
+           // hanya jaring pengaman bila payload cacat.
            const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: senderPseudonym ?? userId, senderDeviceKey, senderSigningKey };
            if (drHeader) emitPayload.drHeader = drHeader;
            // [26.9 RBAC] Amplop admin capability token ditandai eksplisit agar
@@ -591,11 +612,13 @@ export async function handleKeySync(
            await ctx.prisma.message.create({
                data: {
                    conversationId,
-                   senderId: senderPseudonym ?? userId,
+                   senderId: await senderIdForStorage({ isGroup: true, userId, senderPseudonym }),
                    type: 'SYSTEM',
                    seq: groupKeySeq,
                    createdAt: groupKeyAt,
-                   content: JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) }),
+                   // [docs/28 Tier 4] Device.id target disimpan TER-SEAL; server
+                   // membukanya kembali saat relay/catch-up (openMessageForClient).
+                   content: await sealSystemContentDeviceKeys(JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) })),
                    expiresAt: new Date(groupKeyAt.getTime() + 7 * 24 * 60 * 60 * 1000)
                }
            }).catch((e: unknown) => console.warn('[KeySync] Failed to persist group key envelope:', e));
@@ -605,13 +628,17 @@ export async function handleKeySync(
          }
 
         case 'metadata:updated': {
-           // [T2 FIX #10 2026-09-29] senderPseudonym opsional dari klien —
-           // tanpa ini baris SYSTEM METADATA_UPDATED dipersist dengan userId
-           // asli (leak terlihat di audit DB lokal 2026-09-29). Fallback userId
-           // dipertahankan untuk klien legacy (grup v1).
+           // [T2 FIX #10 2026-09-29] senderPseudonym dari klien — tanpa ini baris
+           // SYSTEM METADATA_UPDATED dipersist dengan userId (leak terlihat di
+           // audit DB lokal 2026-09-29). [docs/28 Tier 4] nilainya kini ter-seal.
            const { conversationId, encryptedMetadata, targetRecipients, senderPseudonym } = data as { conversationId: string; encryptedMetadata: string; targetRecipients: string[]; senderPseudonym?: string };
            if (!conversationId || !encryptedMetadata || !Array.isArray(targetRecipients)) return;
            if (!await ctx.checkRateLimit(userId, 'metadata_updated', 60, 60)) return;
+
+           // [docs/28 Tier 4] buang `senderId` (userId penulis) dari wrapper
+           // metadata v2 — reader tidak memakainya, jadi dump tidak lagi
+           // memuat identitas pembuat grup (pertahanan untuk klien lama).
+           const safeMetadata = sanitizeGroupMetadataBlob(encryptedMetadata);
 
            // Persist to DB for offline delivery (like messages:distribute_keys)
            // [docs/28 Tier 2 — B1] pesan SYSTEM juga ikut urutan seq.
@@ -624,11 +651,11 @@ export async function handleKeySync(
                data: {
                    id: `sys_meta_${crypto.randomUUID()}`,
                    conversationId,
-                   senderId: senderPseudonym ?? userId,
+                   senderId: await senderIdForStorage({ isGroup: true, userId, senderPseudonym }),
                    type: 'SYSTEM',
                    seq: metaSeq,
                    createdAt: metaAt,
-                   content: JSON.stringify({ type: 'METADATA_UPDATED', encryptedMetadata }),
+                   content: JSON.stringify({ type: 'METADATA_UPDATED', encryptedMetadata: safeMetadata }),
                    isViewOnce: false,
                    expiresAt: new Date(metaAt.getTime() + 7 * 24 * 60 * 60 * 1000)
                }
@@ -636,7 +663,7 @@ export async function handleKeySync(
 
            for (const targetId of targetRecipients) {
                if (typeof targetId === 'string') {
-                   await emitEventToUser(ctx, targetId, 'conversation:updated', { id: conversationId, encryptedMetadata });
+                   await emitEventToUser(ctx, targetId, 'conversation:updated', { id: conversationId, encryptedMetadata: safeMetadata });
                }
            }
            break;
@@ -671,7 +698,10 @@ export async function handleKeySync(
           // Pesan 1:1 disimpan dengan senderId null (Opaque Mailbox), jadi proof via deleteSecret.
           // [T1] Grup: senderId sekarang pseudonym (bukan userId auth) — cabang
           // isSender tidak bisa dipakai untuk grup; deleteSecret-only (keputusan 26.7.2).
-          const isSender = msg.senderId !== null && msg.senderId === userId;
+          // [docs/28 Tier 4] bandingkan dengan nilai yang sudah DIBUKA (jalur
+          // fallback lama menyimpan userId ter-seal).
+          const openedSenderId = await openSenderId(msg.senderId);
+          const isSender = openedSenderId !== null && openedSenderId === userId;
           const hasValidSecret = typeof deleteSecret === 'string' && !!msg.deleteSecret && credentialTokenMatches(msg.deleteSecret, deleteSecret);
           if (!isSender && !hasValidSecret) {
             console.warn('[Security] Unauthorized unsend attempt by', sanitizeForLog(userId), 'for message', sanitizeForLog(messageId));
@@ -679,14 +709,14 @@ export async function handleKeySync(
           }
           // [T1] deletedBy pada notifikasi = pseudonym bila ada (jangan bocorkan
           // akun pengirim unsend ke penerima).
-          const deletedBy = msg.senderId ?? userId;
+          const deletedBy = openedSenderId ?? userId;
 
           await ctx.prisma.message.delete({ where: { id: messageId } });
 
          // Notify recipients about the unsend (Opaque Mailbox: explicit targetRecipients from client)
          const recipients = Array.isArray(targetRecipients) && targetRecipients.length > 0
            ? targetRecipients
-           : (msg.senderId ? [msg.senderId] : []);
+           : (openedSenderId ? [openedSenderId] : []);
          for (const targetId of recipients) {
            if (typeof targetId === 'string' && targetId !== userId) {
              await emitEventToUser(ctx, targetId, 'message:deleted_remotely', { messageId, conversationId, deletedBy });
@@ -703,7 +733,7 @@ export async function handleKeySync(
 
          // Emit viewed event to sender then OBLITERATE from server
          // Opaque Mailbox: use explicit targetRecipient from client if available, fallback to msg.senderId
-         const notifyTarget = targetRecipient || msg.senderId;
+         const notifyTarget = targetRecipient || (await openSenderId(msg.senderId));
          if (notifyTarget && notifyTarget !== userId) {
            await emitEventToUser(ctx, notifyTarget, 'message:viewed', { messageId, conversationId });
          }
@@ -811,7 +841,7 @@ export async function handleKeySync(
          await ctx.redisClient.del(identityKey('is_migrating', userId));
 
          // [docs/28 Tier 1.5 / D14] nilai tersimpan = ter-seal → dipetakan balik.
-         const ownerUserId = ownerId ? await openIdentityOrRaw(ownerId) : null;
+         const ownerUserId = ownerId ? await openIdentity(ownerId) : null;
          if (ownerUserId) await ctx.sendJsonToUser(ownerUserId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
          break;
        }
@@ -849,15 +879,17 @@ export async function handleKeySync(
          const { conversationId, id: messageId, targetRecipients } = data as { conversationId: string, id: string, targetRecipients?: string[] };
          if (!conversationId || !messageId) return;
 
-         const message = await ctx.prisma.message.findUnique({ where: { id: messageId } });
-         if (!message || message.senderId !== userId) return;
+       const message = await ctx.prisma.message.findUnique({ where: { id: messageId } });
+       // [docs/28 Tier 4] buka senderId ter-seal sebelum otorisasi.
+       const openedSenderId = await openSenderId(message?.senderId);
+       if (!message || openedSenderId !== userId) return;
 
          await ctx.prisma.message.delete({ where: { id: messageId } });
 
          // Notify recipients about the deletion (Opaque Mailbox: explicit targetRecipients from client)
          const recipients = Array.isArray(targetRecipients) && targetRecipients.length > 0
            ? targetRecipients
-           : (message.senderId ? [message.senderId] : []);
+           : (openedSenderId ? [openedSenderId] : []);
          for (const targetId of recipients) {
            if (typeof targetId === 'string' && targetId !== userId) {
              await emitEventToUser(ctx, targetId, 'message:deleted', { conversationId, id: messageId });
@@ -906,10 +938,12 @@ async function handleMessageStatusUpdate(
       select: { id: true, senderId: true, conversation: { select: { isGroup: true } } }
     });
     if (!msg) return;
+    // [docs/28 Tier 4] nilai ter-seal dibuka sebelum dibandingkan dengan userId.
+    const openedSenderId = await openSenderId(msg.senderId);
 
     // [T3a + docs/28 Tier 1.1 — D2] Identitas pembaca yang DIPERSIST:
     //  - grup (metadata v2) → pseudonym klien (opaque, sudah bagian protokol grup),
-    //  - 1:1 & grup v1 → TAG opaque turunan SERVER (HMAC pepper atas
+    //  - 1:1 → TAG opaque turunan SERVER (HMAC pepper atas
     //    conversationId+userId), BUKAN userId asli dan BUKAN nilai dari klien
     //    (kalau klien bisa memilih, ia bisa memalsukan receipt atas nama user lain).
     // Sebelumnya jalur ini menyimpan userId asli sehingga dump DB masih
@@ -921,9 +955,9 @@ async function handleMessageStatusUpdate(
     // Jangan update status jika pengirim sedang membaca pesan sendiri
     // (bandingkan dengan identitas PERSISTED — pseudonym adalah milik pengirim
     // di peta; userId auth adalah milik pembaca. Keduanya ≠ → bukan self-read).
-    // Skip pesan sendiri: senderId bisa userId (grup v1), pseudonym (grup v2),
-    // atau NULL (1:1 sealed sender — bukan pesan sendiri, jadi tetap direceipt).
-    if (msg.senderId !== null && (msg.senderId === userId || msg.senderId === readerPseudonym)) return;
+    // Skip pesan sendiri: senderId bisa pseudonym (grup), nilai ter-seal tanpa
+    // pseudonym, atau NULL (1:1 sealed sender — tetap direceipt).
+    if (openedSenderId !== null && (openedSenderId === userId || openedSenderId === readerPseudonym)) return;
 
     // [FIX OFFLINE-LOSS] Deteksi apakah pesan sudah pernah di-READ sebelumnya,
     // agar receipt READ berulang tidak memperpanjang masa retensi (arm TTL hanya sekali).
@@ -943,7 +977,7 @@ async function handleMessageStatusUpdate(
 
     // Notify the original message sender about the status update
     // Opaque Mailbox: use explicit targetRecipient from client if available, fallback to msg.senderId
-    const notifyTarget = targetRecipient || msg.senderId;
+    const notifyTarget = targetRecipient || openedSenderId;
     if (notifyTarget && notifyTarget !== userId) {
       await emitEventToUser(ctx, notifyTarget, 'message:status_updated', {
         conversationId,
@@ -1015,14 +1049,18 @@ async function handleMessageStatusBatchUpdate(
 
   try {
     // 1. Satu query untuk semua pesan: keberadaan + sender + isGroup
-    const messages = await ctx.prisma.message.findMany({
+    const rows = await ctx.prisma.message.findMany({
       where: { id: { in: ids } },
       select: { id: true, senderId: true, conversation: { select: { isGroup: true } } }
     });
-    if (messages.length === 0) return;
+    if (rows.length === 0) return;
+    // [docs/28 Tier 4] buka senderId ter-seal sebelum dibandingkan/dirutekan.
+    const messages = await Promise.all(
+      rows.map(async (m) => ({ ...m, senderId: await openSenderId(m.senderId) }))
+    );
 
     // [T3a + docs/28 Tier 1.1 — D2] Paritas dengan jalur per-pesan: pseudonym
-    // klien hanya untuk grup; 1:1/grup v1 memakai tag opaque turunan server.
+    // klien hanya untuk grup; 1:1 memakai tag opaque turunan server.
     const isGroupBatch = messages[0]!.conversation.isGroup;
     const persistedReaderId = isGroupBatch && readerPseudonym
       ? readerPseudonym

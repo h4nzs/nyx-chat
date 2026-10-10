@@ -50,9 +50,17 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
       const meId = useAuthStore.getState().user?.id;
       const editRecipients = conversation.participants?.filter(p => p.id !== meId)?.map(p => p.id) || [];
 
+      // [BUGFIX 2026-10-10] PUT /:id/details = operasi admin (mutasi roster/
+      // metadata) — server memverifikasi X-Admin-Token terhadap
+      // Conversation.adminSecretHash. Tanpa header ini edit judul/deskripsi
+      // ditolak 403 dan perubahan tidak pernah sampai ke anggota lain.
+      const { getMyAdminToken } = await import('@lib/groupPseudonyms');
       await api(`/api/conversations/${conversationId}/details`, {
         method: 'PUT',
-        headers: authSecret ? { 'X-Group-Token': authSecret } : undefined,
+        headers: {
+          ...(authSecret ? { 'X-Group-Token': authSecret } : {}),
+          'X-Admin-Token': getMyAdminToken(conversationId) ?? '',
+        },
         body: JSON.stringify({ encryptedMetadata, targetRecipients: editRecipients }),
       });
       toast.success(t('modals:edit_group.success'));

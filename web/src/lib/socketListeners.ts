@@ -275,6 +275,17 @@ export function initSocketListeners() {
   // 2. CONVERSATIONS
   transportClient.on('conversation:new', (conversation: Conversation) => {
     useConversationStore.getState().addOrUpdateConversation(conversation);
+    // [CONTACT STORE LIVE 2026-10-09] Percakapan 1:1 baru (peer mengirim pesan
+    // pertama) harus langsung masuk contact store — sebelumnya daftar kontak
+    // hanya di-seed saat loadConversations sehingga picker (create grup, story)
+    // tampak kosong sampai user reload. Server Opaque Mailbox mengirim
+    // participants kosong; jalur pesan (doAddIncomingMessage) yang mengisi
+    // sisanya, seeding di sini menangani bentuk data yang sudah membawa roster.
+    if (!conversation.isGroup && conversation.participants?.length) {
+      void import('@lib/contactStore')
+        .then(({ seedContactsFromConversation }) => seedContactsFromConversation(conversation))
+        .catch((e) => console.warn('[ContactStore] Seed dari conversation:new gagal:', e));
+    }
   });
 
   transportClient.on('conversation:updated', (data: Partial<Conversation> & { id: string }) => {

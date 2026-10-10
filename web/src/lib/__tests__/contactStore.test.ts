@@ -61,6 +61,7 @@ import {
     serializeContactBundle,
     parseContactBundle,
     type ContactRecord,
+    type Conversation,
 } from '@nyx/shared';
 import {
     upsertContact,
@@ -71,6 +72,8 @@ import {
     subscribeToContacts,
     deleteContact,
     seedContactsFromConversations,
+    seedContactsFromConversation,
+    noteDirectMessageContact,
     buildPeerParticipantsFromContacts,
     pushContactBundle,
     restoreContactsFromBundle,
@@ -263,6 +266,61 @@ describe('buildPeerParticipantsFromContacts', () => {
         expect(String(peers[0]!.id)).toBe('peer-a');
         expect(peers[0]!.encryptedProfile).toBe('ep-a');
         expect(peers[0]!.role).toBe('MEMBER');
+    });
+});
+
+// ─── Kontak live dari pesan/conversation 1:1 (BUGFIX 2026-10-09) ──────────
+
+ describe('noteDirectMessageContact', () => {
+    it('mencatat peer pesan masuk sebagai kontak + memicu notifikasi UI', async () => {
+        const listener = vi.fn();
+        const unsub = subscribeToContacts(listener);
+        await noteDirectMessageContact({
+            conversationId: 'conv-live',
+            senderId: 'peer-live',
+            encryptedProfile: 'ep-live',
+        });
+        await vi.advanceTimersByTimeAsync(60);
+        expect(listener).toHaveBeenCalledTimes(1);
+        unsub();
+
+        const row = await getContact('peer-live');
+        expect(row?.conversationId).toBe('conv-live');
+        expect(row?.encryptedProfile).toBe('ep-live');
+        expect(row?.firstSeenAt).toBeGreaterThan(0);
+    });
+
+    it('mengabaikan diri sendiri dan identitas non-persist', async () => {
+        await noteDirectMessageContact({ conversationId: 'c', senderId: 'me-user-id' });
+        await noteDirectMessageContact({ conversationId: 'c', senderId: 'nyx_system_id' });
+        await noteDirectMessageContact({ conversationId: 'c', senderId: 'guest_abc' });
+        await noteDirectMessageContact({ conversationId: 'c', senderId: 'burner_xyz' });
+        expect(await getAllContacts()).toEqual([]);
+    });
+
+    it('tidak menurunkan profil/kunci yang sudah ada (merge non-destruktif)', async () => {
+        await upsertContact({ userId: 'peer-keep-live', conversationId: 'c1', encryptedProfile: 'ep-1' });
+        await noteDirectMessageContact({ conversationId: 'c2', senderId: 'peer-keep-live' });
+        const row = await getContact('peer-keep-live');
+        expect(row?.encryptedProfile).toBe('ep-1');
+        expect(row?.conversationId).toBe('c2');
+    });
+});
+
+describe('seedContactsFromConversation', () => {
+    it('conversation:new 1:1 langsung tercatat (tanpa reload)', async () => {
+        await seedContactsFromConversation({
+            id: 'conv-new',
+            isGroup: false,
+            participants: [
+                { id: 'me-user-id' },
+                { id: 'peer-new', encryptedProfile: 'ep-new' },
+            ],
+        } as unknown as Conversation);
+
+        const row = await getContact('peer-new');
+        expect(row?.conversationId).toBe('conv-new');
+        expect(row?.encryptedProfile).toBe('ep-new');
     });
 });
 

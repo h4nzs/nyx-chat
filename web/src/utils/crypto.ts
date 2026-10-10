@@ -7,6 +7,10 @@ import {
   generatePseudonymMap,
   getPseudonymMap,
   getMyPseudonym,
+  // [docs/28 Tier 4] hydrate pseudonym dulu supaya jalur kirim tidak jatuh ke userId.
+  ensureMyPseudonym,
+  resolveSenderIdentityForGroup,
+  requireGroupSenderIdentity,
   resolvePseudonymToUserId,
   getDeliveryTokenMap,
   getMyDeliveryToken,
@@ -17,6 +21,8 @@ export {
   generatePseudonymMap,
   getPseudonymMap,
   getMyPseudonym,
+  ensureMyPseudonym,
+  resolveSenderIdentityForGroup,
   resolvePseudonymToUserId,
   generateDeliveryToken,
   generateDeliveryTokenMap,
@@ -59,7 +65,6 @@ import {
   getGroupSenderState,
   saveGroupSenderState,
   getGroupReceiverState,
-  getGroupReceiverStateByKeyId,
   findGroupReceiverState,
   saveGroupReceiverState,
   // [AUDIT FIX 2026-10-05] deleteGroupStates TIDAK lagi dipakai — rotasi kini
@@ -102,8 +107,8 @@ export async function encryptGroupMetadata(
   //  - Panggilan DENGAN pseudonymMap eksplisit (createGroup men-set generation:1)
   //    → dipakai apa adanya (peta awal).
   //  - Grup lawas v1 (tidak pernah punya peta) TIDAK dimigrasi otomatis di sini:
-  //    mereka tetap jalan di jalur legacy; migrasi v1→v2 lazy terjadi saat
-  //    createGroup-pattern rewrite (doc 26.5 rollout) — tidak dipaksakan.
+  //    Metadata v2/v3 SELALU punya peta (generatePseudonymMap di bawah);
+  //    grup tanpa peta (v1) sudah tidak didukung.
   if ((metadata.v === 2 || metadata.v === 3) && !metadata.pseudonymMap) {
     const prev = getPseudonymMap(conversationId);
     const nextGeneration = ((metadata.generation ?? 0) || 0) + 1;
@@ -164,28 +169,25 @@ export async function encryptGroupMetadata(
           sodium.crypto_sign_detached(ctBytes, new Uint8Array(signingPriv as unknown as ArrayLike<number>)),
           sodium.base64_variants.URLSAFE_NO_PADDING
       );
+      // [docs/28 Tier 4] `senderId` (userId penulis) DIHAPUS dari wrapper v2:
+      // reader v2 merutekan lewat `chainId` + `senderDeviceKey` dan memverifikasi
+      // tanda tangan hanya atas byte `ct`, jadi field itu tidak dipakai — dan ia
+      // membuat dump DB memuat identitas pembuat grup. Server juga menyaring
+      // field ini dari blob yang datang (utils/groupMetadataBlob.ts).
       return JSON.stringify({
           v: 2,
           kind: 'group_metadata',
           chainId: senderState.chainId,
           ct,
           signature,
-          senderId: myId,
           senderDeviceKey: myDeviceKey
       });
   }
 
-  // Jalur legacy (state lama tanpa metadataKey — grup pra-v2): metadata tetap
-  // pesan rantai. Reader v1 dipertahankan (rencana #5).
-  const result = await encryptMessage(payload, conversationId, true, undefined, `meta_${conversationId}`);
-
-  const wrapper = {
-    ...JSON.parse(result.ciphertext), // { header, ciphertext, signature }
-    senderId: myId,
-    senderDeviceKey: myDeviceKey // ✅ Tambahkan ini
-  };
-  
-  return JSON.stringify(wrapper);
+  // [2026-10 legacy purge] Jalur v1 (metadata sebagai pesan rantai) dihapus.
+  // Setiap grup sekarang punya sender state dengan chainId + metadataKey;
+  // tanpa itu metadata tidak bisa ditulis dengan aman.
+  throw new Error('Cannot encrypt group metadata: sender state lacks chainId/metadataKey (grup v2/v3 wajib)');
 }
 
 export async function decryptGroupMetadata(
@@ -195,10 +197,9 @@ export async function decryptGroupMetadata(
   try {
     const wrapper = JSON.parse(encryptedMetadataStr);
 
-    // [V2 — RENCANA #2/#5] Metadata v2 KELUAR DARI CHAIN: dekripsi XChaCha
-    // dengan metadataKey era (receiver state di-route via chainId) + verifikasi
-    // tanda tangan pengirim. Reader v1 (metadata sebagai pesan rantai) tetap ada
-    // di bawah untuk blob lama di prod.
+    // [V2 — SATU JALUR] Metadata KELUAR DARI CHAIN: dekripsi XChaCha dengan
+    // metadataKey era (receiver state di-route via chainId) + verifikasi tanda
+    // tangan pengirim. Blob v1 (metadata sebagai pesan rantai) sudah dihapus.
     if (wrapper?.v === 2 && wrapper?.kind === 'group_metadata') {
         const { workerXChaChaOpen } = await import('@lib/crypto-worker-proxy');
         const { findGroupReceiverState } = await import('@lib/keychainDb');
@@ -230,46 +231,10 @@ export async function decryptGroupMetadata(
         return JSON.parse(plaintext);
     }
 
-    // ✅ Ekstrak senderDeviceKey (jalur v1)
-    const { senderId, senderDeviceKey, ...rest } = wrapper;
-
-    if (!senderId) {
-      console.warn("Decryption failed: Missing senderId in group metadata");
-      return null;
-    }
-    
-    // Reconstruct the payload expected by decryptMessage
-    // ✅ Sertakan senderDeviceKey ke dalam cipherPayload
-    const cipherPayload = JSON.stringify({
-       ...rest,
-       senderId,
-       senderDeviceKey 
-    });
-    
-    // [REWRITE 2026-10-02] Metadata = pesan rantai SESUNGGUHNYA (mengonsumsi
-    // satu posisi — tanpa hack restore pengirim). Dekripsi normal: state
-    // di-persist, replay posisi sama ditangani skipped-key map in-record.
-    // Pass the pseudo-messageId so the creator can decrypt it from their local MK cache
-    const result = await decryptMessage(cipherPayload, conversationId, true, senderId, `meta_${conversationId}`);
-    
-    if (result.status === 'success') {
-      try {
-        let text = String(result.value);
-        // Unwrap Sealed Sender wrapper if present
-        if (text.startsWith('{') && text.includes('"senderId"')) {
-           try {
-               const p = JSON.parse(text);
-               if (p.content) text = p.content;
-           } catch {}
-        }
-        return JSON.parse(text);
-      } catch (e) {
-        return null;
-      }
-    } else {
-      console.warn(`Group metadata decryption failed: ${result.status}`, result);
-      return null;
-    }
+    // [2026-10 legacy purge] Blob v1 (metadata sebagai pesan rantai) tidak lagi
+    // dibaca — hanya blob v2 group_metadata yang didukung.
+    console.warn("Group metadata: format tidak didukung (bukan v2 group_metadata)");
+    return null;
   } catch (e) {
     console.error("Failed to decrypt group metadata", e);
     return null;
@@ -911,7 +876,7 @@ export async function ensureGroupSession(
 
       // Save self-receiver state so sealed sender group messages from self can
       // be routed by chainId — [REWRITE] id device-keyed (konsisten dengan
-      // getGroupReceiverState; format senderId-keyed adalah legacy).
+      // getGroupReceiverState).
       // [AUDIT FIX 2026-10-05] Arsipkan self state era LAMA dulu (INVARIANT 1,
       // pola libsignal): pesan era lama dari device lain milik kita tetap
       // ter-route via arsip, tidak langsung ditimpa.
@@ -959,7 +924,6 @@ export async function ensureGroupSession(
 // (lihat komentar [REMOVED 2026-09-27] di bawah).
 export type PairwiseKeyDistributionResult = {
   pairwise: number;
-  legacy: Array<Record<string, unknown>>;
 };
 
 // --- [V2 2026-10-02 — RENCANA #4: SATU JALUR DISTRIBUSI] ====================
@@ -992,9 +956,8 @@ function packGroupDistributionEnvelopeV2(
 
 /**
  * [V2 — SATU JALUR] Seal + kirim distribusi sender key era saat ini ke semua
- * device target. `senderState` wajib punya initialCK (iter 0), chainId, dan
- * metadataKey (era baru). State legacy tanpa metadataKey memakai pack v1
- * (36-byte) — receiver lama maupun baru tetap bisa memprosesnya.
+ * device target. `senderState` WAJIB punya chainId dan metadataKey (envelope v2
+ * 77-byte); tanpa keduanya fungsi melempar (pack legacy v1/v0 sudah dihapus).
  */
 export async function sendGroupSenderKeyDistribution(
   conversationId: string,
@@ -1010,22 +973,22 @@ export async function sendGroupSenderKeyDistribution(
   const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
   const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
-  const myId = useAuthStore.getState().user?.id;
 
-  const useV2 = !!(senderState.metadataKey && senderState.chainId);
   const ckToSeal = senderState.initialCK ?? senderState.CK;
   const iterToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
 
-  let packed: Uint8Array;
-  if (useV2) {
-    packed = packGroupDistributionEnvelopeV2(sodium, senderState.chainId!, iterToSeal, ckToSeal, senderState.metadataKey!);
-  } else {
-    // Legacy v1: [u32 iter][CK]
-    const ckBytes = sodium.from_base64(ckToSeal, sodium.base64_variants.URLSAFE_NO_PADDING);
-    packed = new Uint8Array(4 + ckBytes.length);
-    new DataView(packed.buffer).setUint32(0, iterToSeal, false);
-    packed.set(ckBytes, 4);
+  // [2026-10 legacy purge] Pack v1 36-byte dihapus — hanya envelope v2 (chainId
+  // + metadataKey). Tanpa keduanya, distribusi kunci tidak bisa diseal.
+  if (!senderState.chainId || !senderState.metadataKey) {
+    throw new Error('Cannot distribute sender key: state lacks chainId/metadataKey (grup v2/v3 wajib)');
   }
+  const packed: Uint8Array = packGroupDistributionEnvelopeV2(
+    sodium,
+    senderState.chainId,
+    iterToSeal,
+    ckToSeal,
+    senderState.metadataKey
+  );
 
   const distributionKeys: Array<Record<string, unknown>> = [];
   for (const t of targets) {
@@ -1042,7 +1005,10 @@ export async function sendGroupSenderKeyDistribution(
         targetDeviceKey: t.identityKey,
         key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         type: 'GROUP_KEY',
-        senderId: opts.senderIdOverride ?? (await getMyPseudonym(conversationId)) ?? myId,
+        // [docs/28 Tier 4 + legacy purge] pseudonym wajib — tidak ada lagi
+        // fallback userId untuk grup v1. Bila peta belum ada, biarkan undefined
+        // (server akan menolak/menyegel) daripada membocorkan userId.
+        senderId: opts.senderIdOverride ?? (await ensureMyPseudonym(conversationId)),
         senderDeviceKey: myIdentityKeyB64,
         senderSigningKey: mySigningKeyB64
       });
@@ -1067,13 +1033,12 @@ export async function sendGroupSenderKeyDistribution(
  * fulfilled_key sudah ter-wiring penuh server+client (dipakai auto-heal) dan
  * membawa envelope pq_box_seal per-device yang sama — server tetap hanya melihat
  * envelope opaque + routing, tanpa bisa membuka isinya.
- * Return `legacy` SELALU kosong (dipertahankan untuk kompatibilitas pemanggil).
  */
 export async function sendGroupKeyDistributionPairwise(
   conversationId: string,
   distributionKeys: Array<Record<string, unknown>>
 ): Promise<PairwiseKeyDistributionResult> {
-  const result: PairwiseKeyDistributionResult = { pairwise: 0, legacy: [] };
+  const result: PairwiseKeyDistributionResult = { pairwise: 0 };
   if (!Array.isArray(distributionKeys) || distributionKeys.length === 0) return result;
 
   const myId = useAuthStore.getState().user?.id;
@@ -1150,24 +1115,17 @@ export async function handleGroupKeyDistribution(
       throw new Error('DECRYPTION_FAILED');
   }
 
-  // [V2 — RENCANA #4/#5] Parse envelope distribusi:
-  //   v2 (77B): [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
-  //   v1 (36B): [u32 iter][CK]      — reader dipertahankan (prod punya data)
-  //   v0 (32B): CK @ iter 0         — reader dipertahankan
-  let currentN = 0;
-  let finalCKBytes = senderKeyBytes;
-  let envelopeChainIdB64: string | undefined;
-  let metadataKeyB64: string | undefined;
-
-  if (senderKeyBytes.length === GROUP_DISTRIBUTION_V2_LEN && senderKeyBytes[0] === GROUP_DISTRIBUTION_VERSION) {
-      envelopeChainIdB64 = sodium.to_base64(senderKeyBytes.slice(1, 9), sodium.base64_variants.URLSAFE_NO_PADDING);
-      currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset + 9, 4).getUint32(0, false);
-      finalCKBytes = senderKeyBytes.slice(13, 45);
-      metadataKeyB64 = sodium.to_base64(senderKeyBytes.slice(45, 77), sodium.base64_variants.URLSAFE_NO_PADDING);
-  } else if (senderKeyBytes.length === 36) {
-      currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset, senderKeyBytes.byteLength).getUint32(0, false);
-      finalCKBytes = senderKeyBytes.slice(4);
+  // [V2 — RENCANA #4/#5] Envelope distribusi v2 (77B):
+  //   [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
+  // [2026-10 legacy purge] Reader v1 (36B) & v0 (32B) dihapus.
+  if (senderKeyBytes.length !== GROUP_DISTRIBUTION_V2_LEN || senderKeyBytes[0] !== GROUP_DISTRIBUTION_VERSION) {
+      console.warn('[Crypto] Sender-key distribution envelope legacy (v0/v1) diabaikan');
+      return;
   }
+  const envelopeChainIdB64 = sodium.to_base64(senderKeyBytes.slice(1, 9), sodium.base64_variants.URLSAFE_NO_PADDING);
+  const currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset + 9, 4).getUint32(0, false);
+  const finalCKBytes = senderKeyBytes.slice(13, 45);
+  const metadataKeyB64 = sodium.to_base64(senderKeyBytes.slice(45, 77), sodium.base64_variants.URLSAFE_NO_PADDING);
 
   const senderKeyB64 = sodium.to_base64(finalCKBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
@@ -1196,7 +1154,7 @@ export async function handleGroupKeyDistribution(
 
   // Era BARU: arsipkan snapshot state lama (multi-era ala libsignal
   // MAX_SENDER_KEY_STATES) sebelum menimpa — pesan era lama yang datang
-  // belakangan tetap bisa di-route via keyId lookup ke arsip.
+  // belakangan tetap bisa di-route via chainId lookup ke arsip.
   if (existingReceiverState && !sameEra) {
       const { archiveGroupReceiverState } = await import('@lib/keychainDb');
       await archiveGroupReceiverState(existingReceiverState);
@@ -1219,8 +1177,8 @@ export async function handleGroupKeyDistribution(
           eraCK,
           // [REWRITE 2026-10-02] chainId eksplisit ala libsignal chain_id —
           // routing pesan penerima deterministik (pickChainState). Envelope v2
-          // membawa chainId RANDOM 64-bit dari pengirim; v1 fallback prefix.
-          chainId: envelopeChainIdB64 ?? eraCK?.substring(0, 8),
+          // WAJIB membawa chainId (envelope legacy sudah ditolak di atas).
+          chainId: envelopeChainIdB64,
           // [V2 — RENCANA #2] Kunci metadata era ikut terdistribusi.
           metadataKey: metadataKeyB64 ?? existingReceiverState?.metadataKey,
           // [T2 FIX #9 2026-09-28] Ikat signing key pengirim sejak distribusi.
@@ -1317,7 +1275,7 @@ export async function rotateGroupKey(
         // (C tidak terlihat!) sampai reload. createGroup sudah memakai jalur
         // ini (conversation.ts) — rotasi wajib sama agar realtime konsisten.
         const { emitMetadataUpdated } = await import('@lib/transportClient');
-        const myPseudoForMeta = await getMyPseudonym(conversationId);
+        const myPseudoForMeta = await ensureMyPseudonym(conversationId);
         emitMetadataUpdated(
           conversationId,
           newEncrypted,
@@ -1684,13 +1642,21 @@ async function doEncryptMessage(
                        participants: conversation.participants.map(getParticipantUserId),
                        v: existingMeta.v,
                    }, conversationId)
-                       .then(newEncrypted => authFetch(`/api/conversations/${conversationId}/details`, {
-                           method: 'PUT',
-                           headers: { 'X-Group-Token': existingMeta.authSecret as string },
-                           body: JSON.stringify({ encryptedMetadata: newEncrypted }),
-                       }).then(() => {
+                       .then(async newEncrypted => {
+                           // [BUGFIX 2026-10-10] PUT /:id/details = operasi admin;
+                           // tanpa X-Admin-Token server menolak 403 dan peta
+                           // pseudonym era baru tidak pernah tersinkron.
+                           const { getMyAdminToken } = await import('@lib/groupPseudonyms');
+                           await authFetch(`/api/conversations/${conversationId}/details`, {
+                               method: 'PUT',
+                               headers: {
+                                   'X-Group-Token': existingMeta.authSecret as string,
+                                   'X-Admin-Token': getMyAdminToken(conversationId) ?? '',
+                               },
+                               body: JSON.stringify({ encryptedMetadata: newEncrypted }),
+                           });
                            useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
-                       }))
+                       })
                        .catch(e => console.warn('[T1] Background pseudonym-map rotation failed:', e));
                }
              } else {
@@ -1732,9 +1698,12 @@ async function doEncryptMessage(
   }
 
   // [V2 — RENCANA #1] chainId = RANDOM 64-bit per era (bukan turunan CK).
-  // keyId legacy (prefix CK posisi) DIHAPUS dari wrapper v2 — penerima routing
-  // via chainId + header.n (iteration). State lama pra-v2: fallback prefix.
-  const chainId = senderState.chainId ?? (senderState.initialCK ?? senderState.CK).substring(0, 8);
+  // [2026-10 legacy purge] Fallback prefix CK untuk state pra-v2 dihapus —
+  // sender state era baru SELALU punya chainId eksplisit.
+  const chainId = senderState.chainId;
+  if (!chainId) {
+      throw new Error('Cannot build group message wrapper: sender state lacks chainId (grup v2/v3 wajib)');
+  }
 
   // [T1] Wrapper yang diteruskan server memakai PSEUDONYM (bukan userId) bila
   // peta metadata v2 tersedia. Server menyimpan nilai ini apa adanya di
@@ -1742,12 +1711,20 @@ async function doEncryptMessage(
   // userId via peta di decryptedMetadata; receiver-state tetap dikunci per
   // (conversationId, senderId-wrapper, senderDeviceKey) — konsisten untuk
   // distribusi kunci yang memakai pseudonym yang sama.
-  const myPseudo = await getMyPseudonym(conversationId);
-  const senderIdForServer = myPseudo ?? myId;
+  // [docs/28 Tier 4] Grup v2/v3 WAJIB pseudonym (tanpa fallback userId) — nilai
+  // ini ikut tersimpan di `Message.content` sebagai wrapper plaintext, jadi
+  // userId di sini = kebocoran at-rest (2 baris nyata di audit dump 2026-10-09).
+  // [BUGFIX 2026-10-10] Guard: wrapper TANPA senderId tidak bisa di-route
+  // penerima (JSON.stringify membuang undefined) → gagal keras di pengirim
+  // dengan pesan yang bisa ditindaklanjuti, bukan pesan mati di penerima.
+  const senderIdForServer = requireGroupSenderIdentity(
+      await resolveSenderIdentityForGroup(conversationId),
+      conversationId
+  );
 
   const payload = JSON.stringify({
-      // [V2 — RENCANA #5] Byte versi eksplisit: reader v1 dipertahankan untuk
-      // pesan lama di prod; wrapper v1 (keyId, tanpa v/chainId) tetap terbaca.
+      // [V2] Byte versi eksplisit; wrapper v1 (keyId, tanpa v/chainId) sudah
+      // tidak ditulis maupun dibaca (legacy purge 2026-10).
       v: 2,
       header: result.header,
       chainId: chainId,
@@ -1849,28 +1826,27 @@ async function doDecryptMessage(
   const isSenderKeyProtocol = payloadObj && payloadObj.signature !== undefined && payloadObj.header !== undefined;
 
   if (isSenderKeyProtocol || isGroup) {
-    const keyId = payloadObj && payloadObj.keyId;
     let senderId = (payloadObj && payloadObj.senderId) ? payloadObj.senderId : sessionId;
     const senderDeviceKey = payloadObj && payloadObj.senderDeviceKey;
 
     let receiverState = null;
 
     // [REWRITE 2026-10-02 — ROUTING ALA LIBSIGNAL sender_key_state_for_chain_id]
-    // Satu pintu pemilihan state: (1) chainId eksplisit dari wrapper baru →
-    // pickChainState atas state aktif + arsip era lama; (2) keyId legacy (wrapper
-    // lama — domain prefix sama); (3) state aktif milik device pengirim (posisi
-    // mundur ditutup skipped-key map in-record). TIDAK ADA penebakan lintas era —
-    // sumber "MK lintas era tertukar" (MAC gagal walau entri ketemu) 2026-10-02.
+    // Satu pintu pemilihan state: (1) chainId eksplisit dari wrapper v2 →
+    // pickChainState atas state aktif + arsip era lama; (2) state aktif milik
+    // device pengirim (posisi mundur ditutup skipped-key map in-record). TIDAK
+    // ADA penebakan lintas era — sumber "MK lintas era tertukar" 2026-10-02.
+    // [2026-10 legacy purge] Alias keyId (wrapper v1) dihapus.
     receiverState = await findGroupReceiverState(
         conversationId,
-        { chainId: (payloadObj && payloadObj.chainId) || undefined, keyId: keyId || undefined },
+        { chainId: (payloadObj && payloadObj.chainId) || undefined },
         senderId || undefined,
         senderDeviceKey || undefined
     );
 
     if (!receiverState) {
         if (!senderId) {
-            return { status: 'error', error: new Error('Missing senderId and keyId for group decryption (Sealed Sender failed to resolve)') };
+            return { status: 'error', error: new Error('Missing senderId for group decryption (Sealed Sender failed to resolve)') };
         }
         // [AUDIT FIX 2026-10-05 — ERA PRA-GABUNG] chainId yang tidak cocok dengan
         // state manapun (aktif + arsip) = era SEBELUM kita bergabung / era yang
@@ -1879,7 +1855,7 @@ async function doDecryptMessage(
         // Minta kunci SEKALI per era saja — tanpa dedupe ini, setiap sweep
         // re-decrypt memicu siklus request→timeout baru berulang-ulang
         // (log C: "Ratchet Advanced / chainId tak dikenal" berulang 13:21–13:25).
-        const unknownEraRef = `${conversationId}_${payloadObj?.chainId || keyId || senderDeviceKey || ''}`;
+        const unknownEraRef = `${conversationId}_${payloadObj?.chainId || senderDeviceKey || ''}`;
         const alreadyRequestedUnknownEra = unknownEraKeyRequested.has(unknownEraRef);
         if (!alreadyRequestedUnknownEra) {
             unknownEraKeyRequested.add(unknownEraRef);
@@ -2001,19 +1977,16 @@ async function doDecryptMessage(
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
         // [REWRITE 2026-10-02 — SKIPPED KEY: SATU MODEL, KEYED BY CHAIN]
         // Urutan lookup (libsignal get_sender_message_key):
-        //   1. keyId pesan (legacy alias — wrapper lama),
-        //   2. chainId era (STABIL — wrapper baru; menggantikan alias eraCK lama),
-        //   3. map skippedKeys DI DALAM record (sender_message_keys libsignal,
+        //   1. chainId era (STABIL — wrapper v2),
+        //   2. map skippedKeys DI DALAM record (sender_message_keys libsignal,
         //      keyed posisi — domain per-record jadi tak mungkin tertukar era).
-        // Lookup TANPA penebakan: entri salah-era tidak akan pernah dikembalikan
-        // (fallback scan tanpa filter sudah dihapus di keychainDb).
+        // Lookup TANPA penebakan: entri salah-era tidak akan pernah dikembalikan.
+        // [2026-10 legacy purge] Alias keyId pesan (wrapper v1) dihapus.
         const { getGroupSkippedKey, deleteGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
-        const messageKeyId = payloadObj.keyId as string | undefined;
         const chainAlias = receiverState.chainId ?? receiverState.eraCK?.substring(0, 8);
-        let skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, messageKeyId);
-        if (!skippedMkB64 && chainAlias && chainAlias !== messageKeyId) {
-            skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, chainAlias);
-        }
+        let skippedMkB64 = chainAlias
+            ? await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, chainAlias)
+            : null;
         if (!skippedMkB64 && receiverState.skippedKeys) {
             skippedMkB64 = receiverState.skippedKeys[String(header.n)] ?? null;
         }
@@ -2080,25 +2053,11 @@ async function doDecryptMessage(
         }
         
         // Mirror ke tabel skipped-keys: keyed by chainId (STABIL — semua posisi
-        // era yang sama berbagi alias) + keyId pesan (kompatibilitas pembaca
-        // legacy). Entri tidak pernah dihapus (invarian MK-persist).
+        // era yang sama berbagi alias). Entri tidak pernah dihapus (invarian
+        // MK-persist).
         const chainIdForSkip = chainAlias ?? receiverState.CK?.substring(0, 8);
         for (const sk of result.skippedKeys) {
             await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk, chainIdForSkip);
-        }
-
-        // [MK KEMBAR — WARISAN FORMAT LAMA] Metadata format lama memakai posisi
-        // yang sama dengan pesan berikutnya (hack restore pengirim lama). Simpan
-        // MK terkonsumsi juga di bawah keyId pesan agar kembarannya (metadata
-        // lama yang di-persist server) tetap terdekripsi setelah format baru
-        // berjalan. Metadata BARU tidak lagi kembar (tanpa restore).
-        if (result.mk && messageKeyId && messageKeyId !== chainIdForSkip) {
-            await storeGroupSkippedKey(
-                conversationId, senderId, senderDeviceKey,
-                header.n,
-                sodium.to_base64(result.mk, sodium.base64_variants.URLSAFE_NO_PADDING),
-                messageKeyId
-            );
         }
 
         // [REWRITE 2026-10-02] Persist state HASIL — termasuk peta skippedKeys

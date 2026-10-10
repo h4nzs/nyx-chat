@@ -54,7 +54,7 @@ export async function generateDeliveryTokenMap(participantIds: string[]): Promis
   return map;
 }
 
-/** Peta token grup ini dari decryptedMetadata v2/v3 (undefined = legacy). */
+/** Peta token grup ini dari decryptedMetadata v2/v3 (undefined = bukan v2/v3). */
 export function getDeliveryTokenMap(conversationId: string): Record<string, string> | undefined {
   const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   const meta = conv?.decryptedMetadata as { v?: number; deliveryTokenMap?: Record<string, string> } | undefined;
@@ -63,8 +63,7 @@ export function getDeliveryTokenMap(conversationId: string): Record<string, stri
 
 /**
  * Token SAYA untuk percakapan ini — dikirim saat sync agar discovery memakai
- * possession token, bukan join userId (jalur legacy tetap jalan transitional).
- * Peta kanonis { userId -> token }.
+ * possession token, bukan join userId. Peta kanonis { userId -> token }.
  */
 export function getMyDeliveryToken(conversationId: string): DeliveryToken | undefined {
   const map = getDeliveryTokenMap(conversationId);
@@ -120,8 +119,8 @@ export async function generatePseudonymMap(participantIds: string[]): Promise<Re
 }
 
 /**
- * Baca peta pseudonym dari decryptedMetadata (bila metadata v2).
- * Return undefined untuk metadata v1 (grup lawas — jalur userId lama tetap jalan).
+ * Baca peta pseudonym dari decryptedMetadata (bila metadata v2/v3).
+ * Return undefined bila metadata bukan v2/v3 (tidak ada peta).
  * [T3b] Lihat juga helper deliveryToken di bawah — pola akses identik.
  */
 export function getPseudonymMap(conversationId: string): Record<string, string> | undefined {
@@ -201,8 +200,7 @@ export async function hydrateMyAdminTokens(): Promise<void> {
 // --- [T4 ROSTER v3] Role & membership helpers (baca dari metadata) ---
 
 /**
- * Roster ber-role grup dari decryptedMetadata v3. Return undefined = bukan
- * v3 (grup v1/v2 lawas → UI pakai fallback role lama dari participants).
+ * Roster ber-role grup dari decryptedMetadata v3. Return undefined = bukan v3.
  */
 export function getGroupMembers(conversationId: string): GroupMemberEntry[] | undefined {
   const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
@@ -218,17 +216,13 @@ export function getMyGroupRole(conversationId: string): GroupRole | undefined {
 }
 
 /**
- * Boleh saya lakukan aksi admin di grup ini? OWNER/ADMIN boleh; fallback:
- * grup v1/v2 tanpa roster → role lama dari participants store (kompat).
+ * Boleh saya lakukan aksi admin di grup ini? Hanya OWNER/ADMIN dari roster
+ * metadata v3. Grup tanpa roster v3 → bukan admin (fail-closed): server juga
+ * mem-gate mutasi destruktif dengan admin capability token.
  */
 export function amIGroupAdmin(conversationId: string): boolean {
   const role = getMyGroupRole(conversationId);
-  if (role) return roleAtLeast(role, 'ADMIN');
-  // Fallback legacy (grup lawas tanpa roster v3).
-  const myId = useAuthStore.getState().user?.id;
-  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-  const legacyRole = conv?.participants.find(p => p.id === myId)?.role as string | undefined;
-  return legacyRole === 'ADMIN' || legacyRole === 'OWNER';
+  return !!role && roleAtLeast(role, 'ADMIN');
 }
 
 /**
@@ -242,6 +236,79 @@ export async function getMyPseudonym(conversationId: string): Promise<Pseudonym 
   if (!myId) return undefined;
   const found = Object.entries(map).find(([, uid]) => uid === myId);
   return found ? asPseudonym(found[0]) : undefined;
+}
+
+/**
+ * [docs/28 Tier 4] Pseudonym saya DENGAN satu usaha terakhir: bila peta belum
+ * ada di store, coba dekripsi metadata v2/v3 percakapan (yang membawa
+ * `pseudonymMap`). Tanpa ini jalur kirim jatuh ke fallback userId → userId asli
+ * tersimpan di `Message.senderId` & di wrapper pesan (temuan audit dump
+ * 2026-10-09: 6 baris + 2 wrapper).
+ *
+ * Mengembalikan undefined HANYA bila grup benar-benar pra-v2 (tidak punya peta)
+ * atau metadata-nya belum bisa didekripsi.
+ */
+export async function ensureMyPseudonym(conversationId: string): Promise<Pseudonym | undefined> {
+  const direct = await getMyPseudonym(conversationId);
+  if (direct) return direct;
+
+  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conv?.encryptedMetadata) return undefined;
+
+  // Hanya wrapper v2/v3 yang membawa peta; blob v1 legacy tidak perlu dicoba
+  // (dan dekripsi v1 menyentuh rantai — tidak boleh dipanggil serampangan).
+  try {
+    const wrapper = JSON.parse(String(conv.encryptedMetadata)) as { v?: number; kind?: string };
+    if (wrapper?.v !== 2 || wrapper?.kind !== 'group_metadata') return undefined;
+  } catch {
+    return undefined;
+  }
+
+  try {
+    const { decryptGroupMetadata } = await import('@utils/crypto');
+    const dec = await decryptGroupMetadata(String(conv.encryptedMetadata), conversationId);
+    const map = (dec as { pseudonymMap?: Record<string, string> } | null)?.pseudonymMap;
+    const found = findPseudonymInMap(map, useAuthStore.getState().user?.id);
+    return found ? asPseudonym(found) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [docs/28 Tier 4] Identitas pengirim untuk jalur yang TIDAK boleh menyimpan
+ * userId asli (isian `Message.senderId`, wrapper pesan grup).
+ *
+ * SELALU pseudonym grup (v2/v3); undefined bila peta belum tersedia — pemanggil
+ * tidak boleh jatuh ke userId. Fallback userId untuk grup v1 sudah dihapus
+ * (tidak ada lagi grup v1; lihat docs/28).
+ */
+export async function resolveSenderIdentityForGroup(conversationId: string): Promise<string | undefined> {
+  return ensureMyPseudonym(conversationId);
+}
+
+/**
+ * [BUGFIX 2026-10-10] Guard pamungkas jalur KIRIM grup: wrapper pesan wajib
+ * membawa pseudonym pengirim. `JSON.stringify` membuang field `undefined`,
+ * sehingga wrapper tanpa senderId tidak bisa di-route penerima ("Missing
+ * senderId for group decryption") dan menyisakan pesan mati tanpa jejak.
+ *
+ * Gagal keras di pengirim dengan pesan yang bisa ditindaklanjuti jauh lebih
+ * baik daripada mengirim wrapper cacat (dan tidak boleh jatuh ke userId —
+ * itu kebocoran at-rest, lihat docs/28 Tier 4).
+ */
+export function requireGroupSenderIdentity(
+  senderPseudonym: string | undefined,
+  conversationId: string
+): string {
+  if (!senderPseudonym) {
+    throw new Error(
+      `Pseudonym pengirim grup tidak tersedia untuk ${conversationId}: metadata grup v2/v3 belum ` +
+        'ter-dekripsi atau tidak membawa pseudonymMap. Sinkronkan metadata grup (muat ulang / tunggu ' +
+        'catch-up) lalu kirim ulang.'
+    );
+  }
+  return senderPseudonym;
 }
 
 /** Resolve pseudonym -> userId (untuk penerima). Bukan anggota peta → undefined. */

@@ -14,7 +14,9 @@ import { deleteR2File } from '../utils/r2.js'
 import { z } from 'zod'
 import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { sanitizeForLog } from '../utils/logger.js'
-import { credentialTokenMatches } from '../utils/atRestSecrets.js'
+import { credentialTokenMatches, sealAtRest } from '../utils/atRestSecrets.js'
+// [docs/28 Tier 4] identitas at-rest: senderId/sessionId/device-key ter-seal.
+import { openMessageForClient } from '../utils/senderIdentity.js'
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js'
 // [docs/28 Tier 2 — B1] seq atomik per-conversation + parser kursor.
 import { reserveMessageSeq, parseMessageCursor, type SeqPrismaClient } from '../utils/messageSequence.js'
@@ -24,12 +26,6 @@ import { messageTimeBucket } from '../utils/temporalBucket.js'
 const router: Router = Router()
 router.use(requireAuth)
 
-// Helper untuk menyuntikkan properti 'repliedToId' yang hilang dari DB (karena E2EE refactor)
-// agar kompatibel dengan toRawServerMessage mapper.
-const ensureLegacyMessageFields = <T extends Record<string, unknown>>(msg: T) => ({
-  ...msg,
-  repliedToId: msg.repliedToId || null
-});
 
 // ==========================================
 // 1. GET PENDING MESSAGES (Offline Catch-up)
@@ -52,28 +48,16 @@ router.get('/:conversationId', async (req, res, next) => {
     const now = new Date();
     const fourteenDaysAgo = new Date(now.getTime() - CATCH_UP_MAX_CURSOR_AGE_MS);
 
-    // [docs/28 Tier 2 — B1] Kursor: `seq` (klien baru) atau ISO date (legacy).
-    // Kursor seq mengurutkan berdasarkan `Message.seq`; date tetap didukung
-    // supaya klien/baris lama tidak rusak sebelum backfill dijalankan.
+    // [docs/28 Tier 2 — B1] Kursor = `seq` numerik.
     const cursor = parseMessageCursor(req.query.before);
-    let beforeDate: Date | null = null;
-    let beforeSeq: number | null = null;
-    if (cursor.kind === 'date') {
-      // Cursor lebih tua dari 14 hari di-clamp — pesan lebih tua dari itu sudah
-      // dihapus sweeper, jadi meng-query lebih jauh hanya membuang index scan.
-      beforeDate = cursor.date.getTime() < fourteenDaysAgo.getTime() ? fourteenDaysAgo : cursor.date;
-    } else if (cursor.kind === 'seq') {
-      beforeSeq = cursor.seq;
-    }
-    // Clamp jumlah juga (limit param legacy dari client lama, di-cap ke ukuran halaman).
+    const beforeSeq = cursor.kind === 'seq' ? cursor.seq : null;
+    // Clamp jumlah (limit di-cap ke ukuran halaman).
     const limitRaw = parseInt(String(req.query.limit ?? ''), 10);
     const take = Math.min(!isNaN(limitRaw) && limitRaw > 0 ? limitRaw : CATCH_UP_PAGE_SIZE, CATCH_UP_PAGE_SIZE);
 
     // Window retensi (createdAt) tetap membatasi umur; kursor seq menambah
-    // filter `seq < beforeSeq`. Baris legacy (seq=0) otomatis urut di bawah.
-    const retentionWindow = beforeDate
-      ? { gt: fourteenDaysAgo, lt: beforeDate }
-      : { gt: fourteenDaysAgo };
+    // filter `seq < beforeSeq`.
+    const retentionWindow = { gt: fourteenDaysAgo };
     const seqWindow = beforeSeq !== null ? { lt: beforeSeq } : undefined;
 
     const messageWhere = {
@@ -91,9 +75,8 @@ router.get('/:conversationId', async (req, res, next) => {
     const messages = await prisma.message.findMany({
       where: messageWhere,
       take: take + 1,
-      // [docs/28 Tier 2 — B1] urutan utama = seq (createdAt hanya tie-break
-      // untuk baris legacy yang semuanya seq=0).
-      orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
+      // [docs/28 Tier 2 — B1] urutan = seq (unik per conversation).
+      orderBy: [{ seq: 'desc' }],
       include: {
         statuses: true // Biarkan untuk kompatibilitas tipe balikan (meskipun isinya mungkin kosong)
       }
@@ -115,7 +98,7 @@ router.get('/:conversationId', async (req, res, next) => {
           { expiresAt: { gt: now } }
         ]
       },
-      orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ seq: 'desc' }],
       take: 50,
       include: {
         statuses: true
@@ -145,19 +128,16 @@ router.get('/:conversationId', async (req, res, next) => {
     [...page, ...systemMessagesDesc].forEach(msg => allMessagesMap.set(msg.id, msg));
     if (firstSystemMessage) allMessagesMap.set(firstSystemMessage.id, firstSystemMessage);
     
-    // [docs/28 Tier 2 — B1] urut utama seq desc; createdAt tie-break legacy.
-    const mergedMessages = Array.from(allMessagesMap.values()).sort((a, b) => {
-      const sa = a.seq ?? 0;
-      const sb = b.seq ?? 0;
-      if (sa !== sb) return sb - sa;
-      return b.createdAt.getTime() - a.createdAt.getTime();
-    });
+    // [docs/28 Tier 2 — B1] urut utama seq desc (seq unik per conversation).
+    const mergedMessages = Array.from(allMessagesMap.values()).sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0));
 
     // FIX 1: Suntikkan null untuk repliedToId agar TS tidak error
     // [docs/28 Tier 2 — 2.2] kolom repliedToId TER-SEAL → buka per-pesan sebelum
     // dikirim (mapper sengaja mengosongkannya agar nilai ter-seal tak bocor).
     const safeMessages = await Promise.all(mergedMessages.map(async (msg) => {
-      const mapped = toRawServerMessage(ensureLegacyMessageFields(msg));
+      // [docs/28 Tier 4] buka senderId/sessionId/device-key ter-seal sebelum relay.
+      const opened = await openMessageForClient(msg);
+      const mapped = toRawServerMessage(opened);
       const realReply = await resolveRepliedToId(msg.repliedToId);
       if (realReply) mapped.repliedToId = realReply;
       return mapped;
@@ -168,15 +148,10 @@ router.get('/:conversationId', async (req, res, next) => {
 
     // Cursor berikutnya = pesan USER tertua di halaman ini (bukan system, yang
     // di-include penuh tiap halaman agar tidak pernah bolong).
-    // [docs/28 Tier 2 — B1] Kursor = seq bila tersedia (baris baru); baris
-    // legacy (seq=0) → fallback ISO createdAt agar klien lama tetap jalan.
+    // [docs/28 Tier 2 — B1] Kursor = seq.
     const oldestUserMessage = page.length > 0 ? page[page.length - 1] : null;
-    const nextCursor = hasMore && oldestUserMessage
-      ? ((oldestUserMessage.seq && oldestUserMessage.seq > 0)
-          ? String(oldestUserMessage.seq)
-          : (oldestUserMessage.createdAt instanceof Date
-              ? oldestUserMessage.createdAt.toISOString()
-              : new Date(oldestUserMessage.createdAt).toISOString()))
+    const nextCursor = hasMore && oldestUserMessage && oldestUserMessage.seq
+      ? String(oldestUserMessage.seq)
       : null;
 
     res.json({ items, hasMore, nextCursor })
@@ -229,7 +204,8 @@ router.post('/', zodValidate({
           conversationId,
           senderId: null,
           content,
-          sessionId: sessionId || null,
+          // [docs/28 Tier 4] sessionId (relasi device↔percakapan) disimpan TER-SEAL.
+          sessionId: sessionId ? await sealAtRest(sessionId) : null,
           seq,
           createdAt: messageAt,
           expiresAt: finalExpiresAt,
@@ -247,8 +223,7 @@ router.post('/', zodValidate({
       return created;
     })
 
-    // FIX 2: Suntikkan null untuk repliedToId
-    const safeMessage = toRawServerMessage(ensureLegacyMessageFields(newMessageRaw));
+    const safeMessage = toRawServerMessage(await openMessageForClient(newMessageRaw));
 
     // Inject tempId (Optimistic UI)
     if (tempId !== undefined) {

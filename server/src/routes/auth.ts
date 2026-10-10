@@ -23,7 +23,8 @@ import {
   sealAtRest,
 } from '../utils/atRestSecrets.js'
 // [docs/28 Tier 1.5 / D14] key Redis memakai tag, bukan userId asli (Redis = artefak setara dump).
-import { identityKey } from '../utils/redisIdentity.js'
+// [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
+import { identityKey, identityTag } from '../utils/redisIdentity.js'
 // [docs/28 Tier 2 — B4] bucket metadata temporal (hari/15 menit).
 import { dayBucket, deviceActivityBucket } from '../utils/temporalBucket.js'
 import { nanoid } from 'nanoid'
@@ -235,8 +236,9 @@ async (req, res, next) => {
     // [docs/28 Tier 0 — D6] Blind index disimpan TER-PEPPER (HMAC dari nilai
     // Argon2id klien): parameternya publik & salt-nya statis, jadi hash mentah
     // bisa dibangunkan rainbow table global. Dalam dump, tanpa pepper tidak ada
-    // yang bisa dibalik. Kandidat lookup = [ter-pepper, apa adanya] supaya baris
-    // legacy (dan nilai yang di-echo klien) tetap bekerja.
+    // yang bisa dibalik. Kandidat kedua (nilai kiriman apa adanya) melayani
+    // echo: klien bisa mengirim `usernameHash` ter-pepper yang dikembalikan
+    // server (link berbagi profil) — lihat identifierLookupCandidates().
     const existingUser = await prisma.user.findFirst({
       where: { usernameHash: { in: identifierLookupCandidates(usernameHash) } },
       select: { id: true }
@@ -616,8 +618,9 @@ router.post('/recover', authLimiter, zodValidate({
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
 
-    // Kandidat kunci: [ter-pepper, apa adanya] — tahan terhadap klien yang
-    // mengirim bentuk berbeda antara /recover/challenge dan /recover/verify.
+    // Kandidat kunci: [ter-pepper, nilai kiriman] — tahan terhadap klien yang
+    // mengirim bentuk berbeda antara /recover/challenge dan /recover/verify
+    // (bisa Argon2id mentah atau hash ter-pepper yang di-echo server).
     let cachedNonce: string | null = null;
     for (const candidate of identifierLookupCandidates(usernameHash)) {
       const key = `recover_nonce:${candidate}`;
@@ -833,7 +836,7 @@ if current == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
 return current
-`, { keys: [`rl:powverify:${userId}`], arguments: ['3600'] }));
+`, { keys: [`rl:powverify:${identityTag(userId)}`], arguments: ['3600'] }));
       if (!Number.isNaN(vCount) && vCount > 30) {
         throw new ApiError(429, 'Too many verification attempts. Please try again later.');
       }

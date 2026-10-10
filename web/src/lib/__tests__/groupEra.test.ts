@@ -29,17 +29,17 @@ describe('isSameEraDistribution', () => {
     expect(isSameEraDistribution(state, ERA_B_INITIAL, 0)).toBe(false);
   });
 
-  it('legacy tanpa anchor: replay N=0 pada state maju = replay era sama', () => {
+  it('tanpa anchor era (state belum punya eraCK): replay N=0 pada state maju = replay era sama', () => {
     const state = { CK: ERA_A_CURRENT, N: 5 };
     expect(isSameEraDistribution(state, ERA_A_INITIAL, 0)).toBe(true);
   });
 
-  it('legacy tanpa anchor: envelope N>0 dengan state lebih rendah = era/maju baru (bukan replay)', () => {
+  it('tanpa anchor era: envelope N>0 dengan state lebih rendah = era/maju baru (bukan replay)', () => {
     const state = { CK: ERA_A_CURRENT, N: 2 };
     expect(isSameEraDistribution(state, 'whatever', 5)).toBe(false);
   });
 
-  it('legacy tanpa anchor: envelope N>0 dengan state ≥ envelope = replay', () => {
+  it('tanpa anchor era: envelope N>0 dengan state ≥ envelope = replay', () => {
     const state = { CK: ERA_A_CURRENT, N: 5 };
     expect(isSameEraDistribution(state, 'whatever', 3)).toBe(true);
   });
@@ -73,17 +73,11 @@ describe('pickChainState (routing ala libsignal sender_key_state_for_chain_id)',
     expect(pickChainState([live, archived], { chainId: 'chainA__' })).toBe(archived);
   });
 
-  it('wrapper lama: keyId = CK posisi terkini → state aktif', () => {
-    expect(pickChainState([archived, live], { keyId: 'chainB__' })).toBe(live);
+  it('chainId tak dikenal → null (TIDAK menebak — sumber bug MK lintas era)', () => {
+    expect(pickChainState([live, archived], { chainId: 'chainX__' })).toBeNull();
   });
 
-  it('keyId tak dikenal → null (TIDAK menebak — sumber bug MK lintas era)', () => {
-    expect(pickChainState([live, archived], { keyId: 'chainX__' })).toBeNull();
+  it('tanpa chainId → null (keyId legacy sudah dihapus)', () => {
     expect(pickChainState([live, archived], {})).toBeNull();
-  });
-
-  it('tanpa chainId eksplisit (state lama): keyId cocok via eraCK prefix', () => {
-    const legacy = { eraCK: 'chainA__initialCK…', CK: 'chainA__currentCK…', N: 2 };
-    expect(pickChainState([legacy], { keyId: 'chainA__' })).toBe(legacy);
   });
 });
