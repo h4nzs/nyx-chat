@@ -41,7 +41,29 @@ import {
   getHandshakePayload,
   shouldOmitRatchetCt,
   trimPaddedPlaintext,
+  type DrProtocolStateView,
 } from '@lib/drProtocol';
+// [docs/33 §33.7 — jalur versi paralel v1/v2] Bentuk wire v2, keputusan versi,
+// dan state braid ter-seal. Modul-modul ini murni (bisa diuji tanpa worker).
+import {
+  SPQR_CAPABILITY_OVERRIDE,
+  resolveOutboundRatchetVersion,
+  spqrSendingEnabled,
+} from '@lib/spqrNegotiation';
+import {
+  buildSpqrHeader,
+  decodeSpqrFrames,
+  extractVersionDeclaration,
+  parseSpqrHeader,
+  versionDeclaration,
+  type SpqrDrHeader,
+} from '@lib/spqrWire';
+import {
+  deleteSpqrState,
+  flushSpqrState,
+  loadSpqrState,
+  saveSpqrState,
+} from '@lib/spqrState';
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
@@ -70,12 +92,25 @@ import {
   // [AUDIT FIX 2026-10-05] deleteGroupStates TIDAK lagi dipakai — rotasi kini
   // hanya mengganti sender state (receiver states diarsip, bukan dihapus).
   deleteGroupSenderState,
-  deleteConversationKeychain,
+  deleteConversationKeychain as deleteConversationKeychainAtRest,
   deleteRatchetSession,
   deleteSessionKeys
 } from '@lib/keychainDb';
 
-export { deleteConversationKeychain, deleteRatchetSession, deleteSessionKeys };
+export { deleteRatchetSession, deleteSessionKeys };
+
+/**
+ * Hapus keychain percakapan **termasuk state braid v2** (baris `nyx_spqr_state_v1:*`
+ * + tulis yang masih menunggu debounce). Dibungkus di sini — bukan di
+ * `keychainDb` — supaya `spqrState` tetap tidak mengimpor balik `keychainDb`
+ * (modul yang sama menyediakan seal at-rest).
+ */
+export async function deleteConversationKeychain(conversationId: string): Promise<void> {
+  await deleteSpqrState(conversationId).catch((error) => {
+    console.warn('[SPQR] Gagal menghapus state braid saat menghapus keychain:', error);
+  });
+  await deleteConversationKeychainAtRest(conversationId);
+}
 
 import { 
   emitSessionKeyFulfillment, 
@@ -246,6 +281,168 @@ export async function decryptGroupMetadata(
 // graph worker) — import + re-export di atas.
 
 // --- Secure Storage Helpers ---
+
+// ---------------------------------------------------------------------------
+// [docs/33 §33.7] Jalur v2 (braid SPQR) — pembantu 1:1
+// ---------------------------------------------------------------------------
+
+/**
+ * Kapabilitas transport hasil negosiasi (kosong = fallback WSS / sidecar lama).
+ * Impor dinamis: `transportClient` menarik store auth, dan `utils/crypto`
+ * diimpor oleh store — impor statis akan membuat siklus modul.
+ */
+async function transportCapabilities(): Promise<string[]> {
+  try {
+    const { getNegotiatedCapabilities } = await import('@lib/transportClient');
+    return getNegotiatedCapabilities();
+  } catch {
+    return [];
+  }
+}
+
+/** Bentuk hasil jalur v2 (state DR v1 tidak disentuh). */
+interface SpqrEncryptResult {
+  state: DoubleRatchetState;
+  header: SpqrDrHeader;
+  ciphertext: Uint8Array;
+  mk: Uint8Array;
+}
+
+/**
+ * Enkripsi jalur v2. Mengembalikan `null` (bukan melempar) bila jalur v2 belum
+ * bisa dipakai — mis. modul WASM belum ter-cache dan perangkat offline, atau
+ * sesi ini didirikan sebelum v2 ada (tidak punya akar braid). Pemanggil akan
+ * memakai jalur v1; state braid TIDAK pernah maju setengah jalan karena op
+ * worker mengembalikan state hanya saat seluruh langkah berhasil.
+ */
+async function encryptSpqrMessage(input: {
+  conversationId: string;
+  state: DoubleRatchetState;
+  sealedPayload: string;
+}): Promise<SpqrEncryptResult | null> {
+  const authKeyB64 = input.state.spqrAuthKey;
+  const direction = input.state.spqrDirection;
+  if (!authKeyB64 || !direction) return null;
+
+  const sodium = await getSodiumLib();
+  const { worker_spqr_ratchet_init, worker_spqr_ratchet_encrypt } = await getWorkerProxy();
+
+  try {
+    let spqrState = (await loadSpqrState(input.conversationId))?.state;
+    if (!spqrState) {
+      const init = await worker_spqr_ratchet_init({
+        authKey: sodium.from_base64(authKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING),
+        direction,
+      });
+      spqrState = init.state;
+    }
+
+    const result = await worker_spqr_ratchet_encrypt({
+      serializedState: spqrState,
+      plaintext: input.sealedPayload,
+    });
+
+    // Header dibangun SEBELUM state disimpan: header yang tidak sah (mis. frame
+    // kosong) harus menggagalkan pengiriman, bukan tersimpan sebagai state maju.
+    const header = buildSpqrHeader({ frames: result.frames });
+    await saveSpqrState({
+      sessionId: input.conversationId,
+      state: result.state,
+      version: 'v2',
+    });
+
+    return { state: input.state, header, ciphertext: result.ciphertext, mk: result.mk };
+  } catch (error) {
+    console.warn('[SPQR] Jalur v2 gagal — pengiriman ini memakai v1:', error);
+    return null;
+  }
+}
+
+/**
+ * Dekripsi pesan jalur v2 (header ber-`v: 2`).
+ *
+ * Anti-downgrade arah masuk: header v2 **tidak** pernah dicoba dibaca sebagai
+ * v1. Bila kita tidak punya akar braid (sesi lama), hasilnya error/pending yang
+ * terlihat — bukan pesan yang diam-diam gagal.
+ *
+ * Saklar operator TIDAK mematikan jalur baca (lihat catatan di badan fungsi).
+ */
+async function decryptSpqrMessage(input: {
+  conversationId: string;
+  messageId?: string;
+  header: SpqrDrHeader;
+  actualCipher: string;
+}): Promise<DecryptResult> {
+  const sodium = await getSodiumLib();
+  // [KILL SWITCH 2026-10-14] Membaca v2 **tidak** ikut dimatikan oleh saklar
+  // operator (`VITE_SPQR_FORCE_V1` / kill switch runtime DEV). Saklar itu
+  // menghentikan **pengiriman & iklan** v2; menolak membaca v2 yang sudah
+  // terkirim akan mengubah tindakan operator menjadi kehilangan pesan, padahal
+  // state braid justru sengaja dipertahankan supaya rollback aman (`docs/33`
+  // §33.8). Bila state braid benar-benar tidak ada, hasilnya tetap error yang
+  // terlihat di bawah — bukan pesan yang diam-diam gagal.
+
+  const state = await retrieveRatchetStateSecurely(input.conversationId);
+  if (!state) return { status: 'pending', reason: 'waiting_for_ratchet_state' };
+  if (!state.spqrAuthKey || !state.spqrDirection) {
+    // Sesi didirikan sebelum jalur v2 ada → tidak punya akar braid yang sama
+    // dengan pengirim. Terlihat sebagai error, bukan "coba v1 dan berharap".
+    return { status: 'error', error: new Error('spqr: sesi ini tidak punya state braid (didirikan sebagai v1)') };
+  }
+
+  const { worker_spqr_ratchet_init, worker_spqr_ratchet_decrypt } = await getWorkerProxy();
+
+  let spqrState = (await loadSpqrState(input.conversationId))?.state;
+  if (!spqrState) {
+    // Pesan v2 pertama (peer sudah menyatakan mampu): state braid lahir dari
+    // akar X3DH yang sama di kedua sisi, jadi tidak perlu handshake baru.
+    const init = await worker_spqr_ratchet_init({
+      authKey: sodium.from_base64(state.spqrAuthKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+      direction: state.spqrDirection,
+    });
+    spqrState = init.state;
+  }
+
+  const frames = decodeSpqrFrames(input.header);
+  const combined = sodium.from_base64(input.actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const result = await worker_spqr_ratchet_decrypt({
+    serializedState: spqrState,
+    frames,
+    ciphertext: combined,
+  });
+
+  // State braid disimpan lebih dulu: rangkaian frame peer sudah dikonsumsi, dan
+  // membuang state yang sudah maju akan memutus rantai untuk pesan berikutnya.
+  await saveSpqrState({
+    sessionId: input.conversationId,
+    state: result.state,
+    version: 'v2',
+  });
+
+  if (!result.plaintext || !result.mk) {
+    // Rangkaian frame tanpa message key = peer hanya mengirim braid (belum ada
+    // konten). State sudah maju; pesan ini menunggu pesan berikutnya.
+    return { status: 'pending', reason: 'waiting_for_key' };
+  }
+
+  if (input.messageId) {
+    await storeMessageKeySecurely(input.messageId, result.mk);
+  }
+
+  const plaintext = sodium.to_string(result.plaintext);
+  const peerVersion = extractVersionDeclaration(plaintext);
+  const persisted = attachClientProtocolFields(
+    state,
+    state,
+    {
+      peerSessionConfirmed: true,
+      ...(peerVersion ? { peerAckRatchetVersion: peerVersion } : {}),
+    }
+  );
+  await storeRatchetStateSecurely(input.conversationId, persisted);
+
+  return { status: 'success', value: plaintext };
+}
 
 async function getMasterSeedOrThrow(): Promise<Uint8Array> {
   const masterSeed = await useAuthStore.getState().getMasterSeed();
@@ -486,6 +683,13 @@ export function installOtpkMidSessionRefill(): void {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       scheduleOtpkTopUpCheck();
+    } else {
+      // [docs/33 §33.5/§33.7] Tab disembunyikan = kesempatan terakhir menulis
+      // state braid v2 yang masih tertahan debounce 250 ms. Kehilangan tulis itu
+      // berarti langkah ratchet terakhir tidak tersimpan → frame berikutnya bisa
+      // mengulang chunk yang sudah dipakai peer (pesan tak terbaca). Fire-and-
+      // forget: menulis state tidak boleh menahan UI.
+      void flushSpqrState().catch(() => {});
     }
   });
 }
@@ -789,9 +993,10 @@ export async function ensureGroupSession(
                   continue;
               }
 
-              const { getPeerIdentityKey, savePeerIdentityKey } = await import('@lib/keychainDb');
-              const existingKey = await getPeerIdentityKey(uId);
-              if (existingKey && existingKey !== bundle.identityKey) {
+              // [docs/29 §7.2] observasi pin (tidak menimpa pin yang dipercaya).
+              const { observePeerIdentityKey } = await import('@lib/peerIdentityTrust');
+              const observation = await observePeerIdentityKey(uId, bundle.identityKey);
+              if (observation.status === 'changed') {
                   const { useMessageStore } = await import('@store/message');
                   const { t } = await import('i18next');
                   const { default: toast } = await import('react-hot-toast');
@@ -810,7 +1015,6 @@ export async function ensureGroupSession(
                       link: `/chat/${conversationId}`
                   }, 6000);
               }
-              await savePeerIdentityKey(uId, bundle.identityKey);
 
               const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
               const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
@@ -1426,6 +1630,11 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0, t
 
 const XCHACHA20_NONCE_BYTES = 24;
 
+/**
+ * Header DR v1 (beku, `docs/04`). Jalur v2 memakai `SpqrDrHeader` (`{ v: 2, b }`)
+ * — tipenya sengaja terpisah supaya percabangan versi tidak bisa "ditebak" dari
+ * bentuk objek yang sama.
+ */
 export interface DrHeader {
   kemPk: string; // Ganti 'dh' jadi 'kemPk'
   ct: string;    // Tambahkan 'ct' (Ciphertext)
@@ -1522,6 +1731,16 @@ async function doEncryptMessage(
               theirPqSignedPreKeyPublic
           });
 
+          // [docs/33 §33.7] Sesi BARU = braid baru: akar braid = rahasia X3DH
+          // yang sama di kedua sisi. State braid sendiri lahir malas saat v2
+          // pertama benar-benar dipakai (modul WASM 506 KiB tidak dibayar oleh
+          // percakapan yang tetap di v1); yang disimpan di sini hanya akarnya.
+          await deleteSpqrState(conversationId);
+          state = attachClientProtocolFields(state, {}, {
+              spqrAuthKey: sodium.to_base64(sessionKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+              spqrDirection: 'A2B',
+          });
+
           x3dhData = {
               initiatorSigningKey: sodium.to_base64(mySigningKey.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
               initiatorCiphertexts: sodium.to_base64(initiatorCiphertexts, sodium.base64_variants.URLSAFE_NO_PADDING),
@@ -1536,12 +1755,71 @@ async function doEncryptMessage(
       // [DR PROTOCOL 2026-10-05 — ACK RATCHET] ackKem = KEMr kita (chain peer
       // yang sudah kita step) — diterima peer lewat payload TERENKRIPSI (AEAD
       // otentik); dipakai peer untuk memutuskan omit-ct di header berikutnya.
+      //
+      // [docs/33 §33.7 / docs/04] + `ackV` = deklarasi versi ratchet yang BISA
+      // kita buka (v2 = braid SPQR). Deklarasi ini yang menjadi syarat peer
+      // mengirim v2 ke kita — kapabilitas transport saja tidak cukup.
       const sealedPayload = JSON.stringify({
           content: text,
           senderId: myId,
           senderDeviceKey: myPublicKeyB64,
-          ...(state?.KEMr ? { ackKem: state.KEMr } : {})
+          ...(state?.KEMr ? { ackKem: state.KEMr } : {}),
+          ...versionDeclaration(spqrSendingEnabled() ? 'v2' : 'v1')
       });
+
+      // [docs/33 §33.7 — jalur versi paralel] Versi pengiriman diputuskan per
+      // pesan: v2 hanya bila peer sudah menyatakan mampu (`ackV`) DAN relay
+      // mengiklankan kapabilitas `spqr-ratchet`. Peer yang belum menyatakan →
+      // jalur v1 beku, tanpa kecuali (klien lama tidak pernah menerima header v2).
+      const outboundDecision = resolveOutboundRatchetVersion({
+          currentOutbound: state?.ratchetVersion ?? 'v1',
+          peerDeclaredVersion: state?.peerAckRatchetVersion ?? null,
+          negotiatedCapabilities: await transportCapabilities(),
+          capabilityOverride: SPQR_CAPABILITY_OVERRIDE,
+      });
+
+      const clientFieldsPatch: DrProtocolStateView = {
+          ...(x3dhData ? { pendingHandshake: x3dhData, peerSessionConfirmed: false } : {}),
+          ratchetVersion: outboundDecision.version,
+      };
+
+      if (outboundDecision.version === 'v2') {
+          const v2Result = await encryptSpqrMessage({
+              conversationId,
+              state: state ?? {},
+              sealedPayload,
+          });
+          if (v2Result) {
+              if (messageId && v2Result.mk) {
+                  await storeMessageKeySecurely(messageId, new Uint8Array(v2Result.mk));
+              }
+              // State DR v1 TIDAK maju di jalur v2 (tidak ada frame v1 yang
+              // dikirim) — ia hanya menyimpan bidang klien (versi + handshake).
+              const persistedV2 = attachClientProtocolFields(
+                  v2Result.state,
+                  state ?? {},
+                  clientFieldsPatch
+              );
+              await storeRatchetStateSecurely(conversationId, persistedV2);
+
+              const handshakeV2 = getHandshakePayload(persistedV2);
+              const payloadV2 = JSON.stringify({
+                  dr: v2Result.header,
+                  ciphertext: sodium.to_base64(new Uint8Array(v2Result.ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING),
+                  ...(handshakeV2 ? { x3dh: handshakeV2 } : {})
+              });
+
+              return {
+                  ciphertext: payloadV2,
+                  mk: new Uint8Array(v2Result.mk),
+                  drHeader: v2Result.header as unknown as DrHeader,
+              };
+          }
+          // Jalur v2 gagal (mis. modul WASM belum ter-cache dan perangkat
+          // offline) → pengiriman ini memakai v1. Op worker bersifat atomik,
+          // jadi state braid tidak pernah maju setengah jalan; peer membaca v1
+          // lewat jalur beku yang sama. Percobaan v2 diulang pada pesan berikutnya.
+      }
 
       const result = await worker_dr_ratchet_encrypt({
           serializedState: state,
@@ -1559,9 +1837,7 @@ async function doEncryptMessage(
       const persistedState = attachClientProtocolFields(
           result.state,
           state ?? {},
-          x3dhData
-              ? { pendingHandshake: x3dhData, peerSessionConfirmed: false }
-              : {}
+          clientFieldsPatch
       );
       await storeRatchetStateSecurely(conversationId, persistedState);
 
@@ -2167,6 +2443,19 @@ async function doDecryptMessage(
           }
       }
 
+      // [docs/33 §33.7 — jalur versi paralel] Header v2 (braid SPQR) ditangani
+      // modul terpisah dan TIDAK pernah dibaca sebagai v1: menerka versi dari
+      // header jaringan adalah cara paling mudah kehilangan riwayat pesan.
+      const spqrHeader = parseSpqrHeader(drHeader);
+      if (spqrHeader) {
+          return await decryptSpqrMessage({
+              conversationId,
+              messageId,
+              header: spqrHeader,
+              actualCipher,
+          });
+      }
+
       const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
       if (skippedMkStr) {
           const mk = sodium.from_base64(skippedMkStr, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -2263,11 +2552,19 @@ async function doDecryptMessage(
       // peer memegang sesi ini: (1) hentikan re-kiriman x3dh (x3dh-until-
       // confirmed), (2) simpan ackKem peer (pengirim berikutnya boleh omit-ct).
       // Bidang klien ditempel ulang — serializeState worker me-strip-nya.
-      const peerAck = extractPeerAck(sodium.to_string(new Uint8Array(result.plaintext)));
+      const decryptedPlaintext = sodium.to_string(new Uint8Array(result.plaintext));
+      const peerAck = extractPeerAck(decryptedPlaintext);
+      // [docs/33 §33.7] Deklarasi versi peer (`ackV`) hanya diterima dari payload
+      // yang sudah lolos AEAD — ia yang mengizinkan pengiriman v2 berikutnya.
+      const peerVersion = extractVersionDeclaration(decryptedPlaintext);
       const persistedState = attachClientProtocolFields(
           result.state,
           state ?? {},
-          { peerSessionConfirmed: true, ...(peerAck ? { peerAckedKem: peerAck } : {}) }
+          {
+              peerSessionConfirmed: true,
+              ...(peerAck ? { peerAckedKem: peerAck } : {}),
+              ...(peerVersion ? { peerAckRatchetVersion: peerVersion } : {}),
+          }
       );
 
       // FINALLY, update the ratchet state to advance the chain
@@ -2386,18 +2683,17 @@ export async function establishSessionFromPreKeyBundle(
   }
 
   // 1. Check Identity Change (Security Warning)
-  const { getPeerIdentityKey, savePeerIdentityKey } = await import('@lib/keychainDb');
-  const existingKey = await getPeerIdentityKey(peerUserId);
+  // [docs/29 §7.2] Pin TIDAK lagi ditimpa otomatis: perubahan kunci hanya dicatat
+  // sebagai `pendingKey` di peerIdentityTrust (`trustedKey` tetap), sehingga
+  // perubahan berikutnya masih terdeteksi dan pin yang diverifikasi user tidak
+  // hilang setelah peringatan pertama.
+  const { observePeerIdentityKey } = await import('@lib/peerIdentityTrust');
   const newIdentityKeyB64 = preKeyBundle.identityKey;
-
-  let identityChanged = false;
-  if (existingKey && existingKey !== newIdentityKeyB64) {
-      identityChanged = true;
-      console.warn(`[Security] Identity key changed for user ${peerUserId}. Previous: ${existingKey.substring(0, 10)}... New: ${newIdentityKeyB64.substring(0, 10)}...`);
+  const observation = await observePeerIdentityKey(peerUserId, newIdentityKeyB64);
+  const identityChanged = observation.status === 'changed';
+  if (identityChanged) {
+      console.warn(`[Security] Identity key changed for user ${peerUserId}. Pinned: ${observation.trustedKey.substring(0, 10)}... New: ${observation.pendingKey.substring(0, 10)}...`);
   }
-
-  // Store/Update the known identity key
-  await savePeerIdentityKey(peerUserId, newIdentityKeyB64);
   
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -2464,7 +2760,9 @@ export async function deriveSessionKeyAsRecipient(
     ? sodium.from_base64(initiatorCiphertextsInput, sodium.base64_variants.URLSAFE_NO_PADDING)
     : initiatorCiphertextsInput;
   
-  let myOneTimePreKey: { privateKey: Uint8Array } | undefined;
+  // [LINT 2026-10-11] `let myOneTimePreKey` dihapus: tidak pernah di-assign
+  // (selalu undefined) dan jalur OTPK sudah ditangani worker regenerate di bawah;
+  // meneruskan `undefined` ke worker identik dengan menghilangkan argumennya.
 
   if (otpkId !== undefined) {
     const masterSeed = await getMasterSeedOrThrow();
@@ -2486,22 +2784,18 @@ export async function deriveSessionKeyAsRecipient(
     }
   }
 
-  try {
-    const sessionKey = await worker_x3dh_recipient({
-      myIdentityKey: myIdentityKeyPair,
-      mySignedPreKey: mySignedPreKeyPair,
-      myPqIdentityKey: myPqIdentityKeyPair,
-      myPqSignedPreKey: myPqSignedPreKeyPair,
-      theirSigningKey,         // Hapus baris theirIdentityKey dan theirEphemeralKey, ganti dengan ini
-      initiatorCiphertexts,    // Tambahkan baris ini
-      myOneTimePreKey
-    });
-    if (otpkId !== undefined) {
-      await deleteOneTimePreKey(otpkId);
-    }
-    return sessionKey;
-  } finally {
+  const sessionKey = await worker_x3dh_recipient({
+    myIdentityKey: myIdentityKeyPair,
+    mySignedPreKey: mySignedPreKeyPair,
+    myPqIdentityKey: myPqIdentityKeyPair,
+    myPqSignedPreKey: myPqSignedPreKeyPair,
+    theirSigningKey,         // Hapus baris theirIdentityKey dan theirEphemeralKey, ganti dengan ini
+    initiatorCiphertexts    // Tambahkan baris ini
+  });
+  if (otpkId !== undefined) {
+    await deleteOneTimePreKey(otpkId);
   }
+  return sessionKey;
 }
 
 // --- Key Recovery & Fulfillment ---

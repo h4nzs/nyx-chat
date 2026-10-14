@@ -340,9 +340,10 @@ export async function decryptMessageObject(
 
                         if (peerId) {
                             const bundle = await fetchPreKeyBundle(peerId);
-                            const { getPeerIdentityKey, savePeerIdentityKey } = await import('@lib/keychainDb');
-                            const existingKey = await getPeerIdentityKey(peerId);
-                            if (existingKey && existingKey !== bundle.identityKey) {
+                            // [docs/29 §7.2] observasi pin — pin yang dipercaya tidak ditimpa.
+                            const { observePeerIdentityKey } = await import('@lib/peerIdentityTrust');
+                            const observation = await observePeerIdentityKey(peerId, bundle.identityKey);
+                            if (observation.status === 'changed') {
                                 const { t } = await import('i18next');
                                 const { default: toast } = await import('react-hot-toast');
                                 const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
@@ -360,7 +361,6 @@ export async function decryptMessageObject(
                                     link: `/chat/${rawMsg.conversationId}`
                                 }, 6000);
                             }
-                            await savePeerIdentityKey(peerId, bundle.identityKey);
                         }
                     } catch (e) {
                         console.error("[X3DH] Failed to verify peer identity", e);
@@ -389,7 +389,21 @@ export async function decryptMessageObject(
                         myPqSignedPreKey: myPqSignedPreKeyPair
                     });
 
-                    await storeRatchetStateSecurely(rawMsg.conversationId, newState);
+                    // [docs/33 §33.7 — jalur versi paralel] Sesi baru → braid baru:
+                    // akar braid v2 = rahasia X3DH yang sama (peran penerima =
+                    // `B2A`). State braid-nya sendiri lahir malas saat v2 pertama
+                    // dipakai; yang disimpan di sini hanya akarnya, ter-seal
+                    // bersama baris state DR yang lain (`ENC1:`).
+                    const { attachClientProtocolFields } = await import('@lib/drProtocol');
+                    const { deleteSpqrState } = await import('@lib/spqrState');
+                    await deleteSpqrState(rawMsg.conversationId);
+                    const sodiumForBraid = await getSodium();
+                    const bobState = attachClientProtocolFields(newState, {}, {
+                        spqrAuthKey: sodiumForBraid.to_base64(sessionKey, sodiumForBraid.base64_variants.URLSAFE_NO_PADDING),
+                        spqrDirection: 'B2A',
+                    });
+
+                    await storeRatchetStateSecurely(rawMsg.conversationId, bobState);
                     contentToDecrypt = JSON.stringify(payload);
                 }
             } catch (e) {
@@ -661,14 +675,16 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                           await db.ratchetSessions.delete(conversationId);
                           
                           const { getSodiumLib, fetchPreKeyBundle, establishSessionFromPreKeyBundle } = await import('@utils/crypto');
-                          const { getPeerIdentityKey } = await import('@lib/keychainDb');
+                          const { getPeerIdentityTrust } = await import('@lib/peerIdentityTrust');
                           const { useAuthStore } = await import('@store/auth');
                           const { t } = await import('i18next');
                           const { default: toast } = await import('react-hot-toast');
                           const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
                           const { useMessageStore } = await import('@store/message');
                           
-                          const existingKey = await getPeerIdentityKey(senderId);
+                          // Pin yang dipercaya (bukan kunci yang baru di-commit) — poll
+                          // di bawah menunggu bundle baru sampai cocok dengan pin.
+                          const existingKey = (await getPeerIdentityTrust(senderId))?.trustedKey;
                           let retries = 6; // Max 6 attempts (9 seconds total)
                           
                           const pollForNewBundle = async () => {

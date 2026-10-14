@@ -39,3 +39,24 @@ test-results/
 # Local debugging / testing artifacts
 dump.rdb
 temp_log.txt
+
+# SPQR WASM wrapper (docs/33): crate `spqr` TIDAK di-vendor ke repo (pin terpisah),
+# jadi artefak build `dist/spqr.wasm` justru DI-commit — test & kapabilitas
+# `spqr-ratchet` membacanya. Cargo.toml di-generate `build.sh` (memuat path
+# checkout lokal) sehingga tidak di-commit; Cargo.lock ikut di-commit.
+packages/spqr-wasm/target/
+packages/spqr-wasm/Cargo.toml
+!packages/spqr-wasm/dist/
+!packages/spqr-wasm/dist/spqr.wasm
+
+# Verifier Key Transparency (docs/34): alasan sama seperti spqr-wasm (checkout
+# libsignal tidak di-vendor → artefak WASM di-commit, Cargo.toml di-generate).
+packages/keytrans-wasm/target/
+packages/keytrans-wasm/Cargo.toml
+!packages/keytrans-wasm/dist/
+!packages/keytrans-wasm/dist/keytrans.wasm
+
+# Layanan baca/tulis Key Transparency NYX (docs/32 §32.8): biner hasil build
+# bergantung pada checkout upstream privat, jadi tidak di-commit.
+server/kt-query/nyx-kt-query
+server/kt-query/kt-query

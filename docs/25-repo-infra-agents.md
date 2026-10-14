@@ -15,6 +15,7 @@ Everything at the repository root that isn't the web/server/shared/marketing cod
 | `SECURITY.md` | Coordinated disclosure protocol / bug bounty (linked from the marketing `security` page CTA) |
 | `COMMERCIAL.md` | Commercial dual-licensing guide (AGPL vs proprietary) |
 | `.env.example` | Combined template: server vars (top) + `VITE_*` web vars (bottom) |
+| `NOTICE` | Third-party attribution for the **Signal** code NYX uses (crate `spqr`, `libsignal-keytrans`, `key-transparency-server`): AGPL-3.0-only, pinned commits, and how each is consumed — upstream sources are **not vendored** (build-time path dependency + committed WASM artifacts in `packages/spqr-wasm/dist/`, `packages/keytrans-wasm/dist/`). Keep it in sync with the pins in `docs/30` §30.2 whenever an upstream pin moves. |
 
 ## 25.2 Root config files
 

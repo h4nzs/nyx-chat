@@ -443,6 +443,58 @@ export function worker_dr_ratchet_decrypt(payload: {
     }));
 }
 
+// --- [docs/33 §33.7] SPQR (jalur v2) PROXY FUNCTIONS ---
+
+/** State awal braid v2. `authKey` = rahasia X3DH (`sk`) yang sama di kedua sisi. */
+export function worker_spqr_ratchet_init(payload: {
+    authKey: Uint8Array,
+    direction: 'A2B' | 'B2A'
+}): Promise<{ state: Uint8Array }> {
+    return sendToWorker<{ state: ArrayBuffer }>('spqr_ratchet_init', {
+        authKey: asBuffer(payload.authKey),
+        direction: payload.direction
+    }).then(res => ({ state: asU8(res.state) }));
+}
+
+/**
+ * Satu langkah pengiriman v2: state braid + seluruh frame peer.
+ * `frames` bisa lebih dari satu (pertukaran braid sebelum message key ada).
+ */
+export function worker_spqr_ratchet_encrypt(payload: {
+    serializedState: Uint8Array,
+    plaintext: CryptoBuffer | string
+}): Promise<{ state: Uint8Array, frames: Uint8Array[], ciphertext: Uint8Array, mk: Uint8Array }> {
+    return sendToWorker<{ state: ArrayBuffer, frames: ArrayBuffer[], ciphertext: ArrayBuffer, mk: ArrayBuffer }>('spqr_ratchet_encrypt', {
+        serializedState: asBuffer(payload.serializedState),
+        plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : asBuffer(payload.plaintext)
+    }).then(res => ({
+        state: asU8(res.state),
+        frames: (res.frames ?? []).map(asU8),
+        ciphertext: asU8(res.ciphertext),
+        mk: asU8(res.mk)
+    }));
+}
+
+/**
+ * Satu langkah penerimaan v2. `plaintext`/`mk` `null` = pesan hanya membawa
+ * braid (belum ada isi untuk pengguna).
+ */
+export function worker_spqr_ratchet_decrypt(payload: {
+    serializedState: Uint8Array,
+    frames: Uint8Array[],
+    ciphertext: Uint8Array
+}): Promise<{ state: Uint8Array, plaintext: Uint8Array | null, mk: Uint8Array | null }> {
+    return sendToWorker<{ state: ArrayBuffer, plaintext: ArrayBuffer | null, mk: ArrayBuffer | null }>('spqr_ratchet_decrypt', {
+        serializedState: asBuffer(payload.serializedState),
+        frames: payload.frames.map(asBuffer),
+        ciphertext: asBuffer(payload.ciphertext)
+    }).then(res => ({
+        state: asU8(res.state),
+        plaintext: res.plaintext ? asU8(res.plaintext) : null,
+        mk: res.mk ? asU8(res.mk) : null
+    }));
+}
+
 // --- GROUP RATCHET PROXY FUNCTIONS ---
 
 export async function groupInitSenderKey(): Promise<{ senderKeyB64: string; chainIdB64: string; metadataKeyB64: string }> {

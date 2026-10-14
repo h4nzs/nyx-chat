@@ -1,0 +1,378 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
+
+/**
+ * [docs/27 §27.7 + docs/30 WS-G] Metrik operasional TANPA telemetry.
+ *
+ * Prinsip (docs/30 §30.1 poin 4): metrik hanya boleh berupa **hitungan event**,
+ * tidak pernah identitas. Modul ini menegakkannya secara struktural, bukan lewat
+ * disiplin penulis kode:
+ *
+ *   1. Metrik WAJIB dideklarasikan lebih dulu (`defineCounter`/`defineGauge`/
+ *      `defineHistogram`) — jadi tidak ada deret waktu yang lahir dari nilai
+ *      runtime (kardinalitas tak terbatas = bentuk exfil paling mudah).
+ *   2. Nama label WAJIB ada di deklarasi metrik.
+ *   3. Nilai label WAJIB lolos `isSafeLabelValue()`: pendek, dan tidak berbentuk
+ *      UUID / heksadesimal panjang / base64url panjang / IP / email.
+ *      Pelanggaran ditolak + dihitung di `nyx_metrics_rejected_total`
+ *      (jadi percobaan menaruh identitas ke metrik justru TERLIHAT, bukan hilang).
+ *
+ * Tidak ada dependency: eksposisi teks format Prometheus ditulis di sini supaya
+ * jalur ini bisa diuji tanpa jaringan dan tanpa supply chain baru.
+ */
+
+export type MetricType = 'counter' | 'gauge' | 'histogram';
+
+export interface MetricDef {
+  readonly name: string;
+  readonly type: MetricType;
+  readonly help: string;
+  readonly labelNames: readonly string[];
+  /** Batas bucket histogram (detik / satuan apa pun yang diukur). */
+  readonly buckets?: readonly number[];
+}
+
+interface Series {
+  labels: Record<string, string>;
+  value: number;
+  /** Khusus histogram. */
+  bucketCounts?: number[];
+  sum?: number;
+  count?: number;
+}
+
+interface MetricState {
+  def: MetricDef;
+  series: Map<string, Series>;
+}
+
+/** Panjang maksimum nilai label — enum pendek, bukan identifier. */
+const MAX_LABEL_VALUE_LENGTH = 24;
+
+/**
+ * Bentuk yang DILARANG muncul sebagai nilai label. Semuanya adalah nilai yang
+ * bisa memetakan metrik kembali ke user/perangkat.
+ */
+const FORBIDDEN_LABEL_VALUE_PATTERNS: readonly RegExp[] = [
+  // UUID (userId, conversationId, deviceId).
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  // Heksadesimal panjang: 32 byte (usernameHash/identityKey) ke atas.
+  /^[0-9a-f]{32,}$/i,
+  // base64url panjang: hashId / token / key.
+  /^[A-Za-z0-9_-]{22,}$/,
+  // IPv4.
+  /^\d{1,3}(\.\d{1,3}){3}$/,
+  // IPv6 (setidaknya dua blok titik-dua).
+  /(?:[0-9a-f]{0,4}:){2,}[0-9a-f]{0,4}/i,
+  // Email.
+  /@/,
+];
+
+const METRIC_NAME_PATTERN = /^nyx_[a-z0-9_]+$/;
+
+const metrics = new Map<string, MetricState>();
+
+/** Alasan penolakan — nilainya enum pendek (aman untuk label). */
+type RejectionReason = 'unknown_metric' | 'unknown_label' | 'label_value' | 'wrong_type';
+
+function defineMetric(def: MetricDef): MetricDef {
+  if (!METRIC_NAME_PATTERN.test(def.name)) {
+    throw new Error(`Nama metrik tidak sah (harus nyx_<snake_case>): ${def.name}`);
+  }
+  if (metrics.has(def.name)) {
+    throw new Error(`Metrik sudah dideklarasikan: ${def.name}`);
+  }
+  for (const label of def.labelNames) {
+    if (!/^[a-z][a-z0-9_]*$/.test(label)) {
+      throw new Error(`Nama label tidak sah pada ${def.name}: ${label}`);
+    }
+  }
+  if (def.type === 'histogram' && (!def.buckets || def.buckets.length === 0)) {
+    throw new Error(`Histogram ${def.name} harus punya buckets`);
+  }
+  metrics.set(def.name, { def, series: new Map() });
+  return def;
+}
+
+export function defineCounter(
+  name: string,
+  help: string,
+  labelNames: readonly string[] = []
+): MetricDef {
+  return defineMetric({ name, type: 'counter', help, labelNames });
+}
+
+export function defineGauge(
+  name: string,
+  help: string,
+  labelNames: readonly string[] = []
+): MetricDef {
+  return defineMetric({ name, type: 'gauge', help, labelNames });
+}
+
+export function defineHistogram(
+  name: string,
+  help: string,
+  buckets: readonly number[],
+  labelNames: readonly string[] = []
+): MetricDef {
+  return defineMetric({ name, type: 'histogram', help, labelNames, buckets });
+}
+
+function isSafeLabelValue(value: unknown): value is string | number {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'string') return false;
+  if (value.length === 0 || value.length > MAX_LABEL_VALUE_LENGTH) return false;
+  return !FORBIDDEN_LABEL_VALUE_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function seriesKey(labels: Record<string, string>): string {
+  const keys = Object.keys(labels).sort();
+  return keys.map((key) => `${key}=${labels[key]}`).join('|');
+}
+
+function getOrCreateSeries(state: MetricState, normalized: Record<string, string>): Series {
+  const key = seriesKey(normalized);
+  let series = state.series.get(key);
+  if (!series) {
+    series = { labels: normalized, value: 0 };
+    if (state.def.type === 'histogram') {
+      series.bucketCounts = new Array<number>(state.def.buckets!.length).fill(0);
+      series.sum = 0;
+      series.count = 0;
+    }
+    state.series.set(key, series);
+  }
+  return series;
+}
+
+/** Validasi nama label + nilai; `null` = tolak (dan hitung sebagai penolakan). */
+function validateLabels(
+  def: MetricDef,
+  labels: Record<string, string | number> | undefined
+): Record<string, string> | null {
+  const normalized: Record<string, string> = {};
+  if (!labels) return normalized;
+
+  for (const [name, raw] of Object.entries(labels)) {
+    if (!def.labelNames.includes(name)) {
+      return null;
+    }
+    if (!isSafeLabelValue(raw)) {
+      return null;
+    }
+    normalized[name] = String(raw);
+  }
+  // Semua label terdeklarasi WAJIB ada, supaya deret waktu tidak bercampur
+  // bentuk (satu metrik dengan 2 himpunan label berbeda = query yang bohong).
+  for (const required of def.labelNames) {
+    if (!(required in normalized)) return null;
+  }
+  return normalized;
+}
+
+function recordRejection(reason: RejectionReason): void {
+  const state = metrics.get('nyx_metrics_rejected_total');
+  if (!state) return;
+  const series = getOrCreateSeries(state, { reason });
+  series.value += 1;
+}
+
+/** Tambah counter. Kalau label identitas → ditolak + tercatat, bukan dikirim. */
+export function incCounter(def: MetricDef, labels?: Record<string, string | number>, amount = 1): void {
+  const state = metrics.get(def.name);
+  if (!state) {
+    recordRejection('unknown_metric');
+    return;
+  }
+  const normalized = validateLabels(state.def, labels);
+  if (!normalized) {
+    recordRejection('label_value');
+    return;
+  }
+  if (state.def.type !== 'counter') {
+    recordRejection('wrong_type');
+    return;
+  }
+  getOrCreateSeries(state, normalized).value += amount;
+}
+
+export function setGauge(def: MetricDef, value: number, labels?: Record<string, string | number>): void {
+  const state = metrics.get(def.name);
+  if (!state) {
+    recordRejection('unknown_metric');
+    return;
+  }
+  if (state.def.type !== 'gauge') {
+    recordRejection('wrong_type');
+    return;
+  }
+  const normalized = validateLabels(state.def, labels);
+  if (!normalized) {
+    recordRejection('label_value');
+    return;
+  }
+  getOrCreateSeries(state, normalized).value = value;
+}
+
+export function observeHistogram(def: MetricDef, value: number, labels?: Record<string, string | number>): void {
+  const state = metrics.get(def.name);
+  if (!state) {
+    recordRejection('unknown_metric');
+    return;
+  }
+  if (state.def.type !== 'histogram' || !state.def.buckets) {
+    recordRejection('wrong_type');
+    return;
+  }
+  if (!Number.isFinite(value)) {
+    recordRejection('label_value');
+    return;
+  }
+  const normalized = validateLabels(state.def, labels);
+  if (!normalized) {
+    recordRejection('label_value');
+    return;
+  }
+  const series = getOrCreateSeries(state, normalized);
+  const buckets = state.def.buckets;
+  for (let i = 0; i < buckets.length; i++) {
+    if (value <= buckets[i]!) series.bucketCounts![i]! += 1;
+  }
+  series.sum! += value;
+  series.count! += 1;
+}
+
+/** Timestamp waktu-proses (untuk `*_last_run_timestamp_seconds`). */
+export function nowSeconds(): number {
+  return Date.now() / 1000;
+}
+
+function escapeLabelValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
+function formatSample(name: string, labels: Record<string, string>, value: number): string {
+  const keys = Object.keys(labels).sort();
+  const labelText =
+    keys.length === 0
+      ? ''
+      : `{${keys.map((key) => `${key}="${escapeLabelValue(labels[key]!)}"`).join(',')}}`;
+  // Prometheus menolak NaN/Inf pada counter; gauge boleh (mis. suhu tak tersedia).
+  const numeric = Number.isFinite(value) ? value : 0;
+  return `${name}${labelText} ${numeric}`;
+}
+
+/** Eksposisi format teks Prometheus 0.0.4. */
+export function renderMetricsText(): string {
+  const lines: string[] = [];
+  for (const state of metrics.values()) {
+    const { def } = state;
+    lines.push(`# HELP ${def.name} ${def.help.replace(/\n/g, ' ')}`);
+    lines.push(`# TYPE ${def.name} ${def.type}`);
+    if (def.type === 'histogram') {
+      const buckets = def.buckets!;
+      for (const series of state.series.values()) {
+        for (let i = 0; i < buckets.length; i++) {
+          lines.push(
+            formatSample(`${def.name}_bucket`, { ...series.labels, le: String(buckets[i]) }, series.bucketCounts![i]!)
+          );
+        }
+        lines.push(formatSample(`${def.name}_bucket`, { ...series.labels, le: '+Inf' }, series.count!));
+        lines.push(formatSample(`${def.name}_sum`, series.labels, series.sum!));
+        lines.push(formatSample(`${def.name}_count`, series.labels, series.count!));
+      }
+      continue;
+    }
+    for (const series of state.series.values()) {
+      lines.push(formatSample(def.name, series.labels, series.value));
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** Reset seluruh deret waktu (hook test saja) — deklarasi metrik tetap. */
+export function resetMetricsForTests(): void {
+  for (const state of metrics.values()) {
+    state.series.clear();
+  }
+}
+
+// ============================================================================
+// Deklarasi metrik NYX (docs/30 WS-G). Semua nama label = enum pendek.
+// ============================================================================
+
+/** Penolakan pencatatan metrik karena label tidak sah (harus tetap 0). */
+export const METRICS_REJECTED = defineCounter(
+  'nyx_metrics_rejected_total',
+  'Percobaan mencatat metrik dengan label tidak sah (indikasi kebocoran identitas ke metrik)',
+  ['reason']
+);
+
+/** Operasi relay yang diproses, per opcode transport. */
+export const RELAY_OPS = defineCounter(
+  'nyx_relay_ops_total',
+  'Operasi relay upstream yang diproses, per opcode',
+  ['op', 'result']
+);
+
+/** Sesi/perangkat yang ditolak pemeriksaan keamanan (single-active-device, hardware mismatch). */
+export const SECURITY_BLOCKS = defineCounter(
+  'nyx_security_blocks_total',
+  'Operasi yang diblokir pemeriksaan keamanan sesi/perangkat',
+  ['op', 'reason']
+);
+
+/** Durasi satu putaran sweeper (detik). */
+export const SWEEPER_DURATION = defineHistogram(
+  'nyx_sweeper_duration_seconds',
+  'Durasi putaran sweeper sistem',
+  [1, 5, 15, 30, 60, 120, 300],
+  ['result']
+);
+
+/** Waktu (unix) putaran sweeper terakhir yang selesai. */
+export const SWEEPER_LAST_RUN = defineGauge(
+  'nyx_sweeper_last_run_timestamp_seconds',
+  'Unix timestamp putaran sweeper terakhir yang selesai',
+  ['result']
+);
+
+/** [docs/31 §31.6 fase 3] Operasi backup (presign/unduh/hapus), per hasil. Tanpa identitas. */
+export const BACKUP_OPS = defineCounter(
+  'nyx_backup_ops_total',
+  'Operasi endpoint backup, per op dan hasil',
+  ['op', 'result']
+);
+
+/** [docs/30 §30.5 WS-A] Penulisan entri log Key Transparency, per hasil. Tanpa identitas. */
+export const KT_WRITES = defineCounter(
+  'nyx_kt_writes_total',
+  'Penulisan entri log Key Transparency, per hasil',
+  ['result']
+);
+
+/** Unix timestamp penulisan log KT terakhir yang berhasil (lag = now − nilai ini). */
+export const KT_LAST_SUCCESS = defineGauge(
+  'nyx_kt_last_success_timestamp_seconds',
+  'Unix timestamp penulisan log Key Transparency terakhir yang berhasil'
+);
+
+/**
+ * [docs/30 §30.5 WS-A / docs/32 §32.8] Permintaan bukti ke layanan baca KT
+ * (proxy `/api/keys/kt/*`), per hasil. `disabled` penting: tanpa `KT_QUERY_URL`
+ * klien jatuh ke TOFU, dan itu harus terlihat di dashboard, bukan senyap.
+ */
+export const KT_QUERIES = defineCounter(
+  'nyx_kt_queries_total',
+  'Permintaan bukti Key Transparency (baca), per hasil',
+  ['result']
+);
+
+/** Baris yang dibersihkan sweeper, per jenis. */
+export const SWEEPER_DELETED = defineCounter(
+  'nyx_sweeper_deleted_rows_total',
+  'Baris yang dihapus sweeper sistem, per jenis',
+  ['kind']
+);

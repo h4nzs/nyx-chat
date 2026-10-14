@@ -795,6 +795,31 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         import('@lib/coverTraffic').then(m => m.notifyRealSend()).catch(() => {});
     }
 
+    // [docs/29 §7.2] HARD GATE: kunci identitas peer 1:1 berubah dan belum
+    // diterima user → pesan USER ditahan (pesan kontrol/silent tetap lewat
+    // supaya receipt & sinkronisasi tidak macet). Perubahan kunci tanpa
+    // konfirmasi adalah sinyal MITM terarah; dulu ini hanya jadi bubble
+    // peringatan sementara pengiriman tetap jalan ke kunci penyerang.
+    if (!shouldBeSilent && !conversation.isGroup) {
+      try {
+        const { hasPendingIdentityChangeForConversation } = await import('@lib/peerIdentityTrust');
+        if (await hasPendingIdentityChangeForConversation(conversationId)) {
+          const blockedText = i18n.t(
+            'errors:identity_changed_blocked',
+            'Kunci keamanan kontak ini berubah. Verifikasi di Info Kontak sebelum mengirim pesan.'
+          );
+          toast.error(blockedText, { icon: '🛡️', duration: 8000 });
+          // Jalur unggah media menaruh bubble optimistik lebih dulu — tandai gagal
+          // supaya tidak menggantung 'SENDING' selamanya.
+          get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' } as Partial<Message>);
+          return;
+        }
+      } catch (e) {
+        // Fail-open: kegagalan membaca pin tidak boleh memblokir pesan sah.
+        console.warn('[Security] Gagal memeriksa pin identitas (gate dilewati):', e);
+      }
+    }
+
     if (!shouldBeSilent) {
         let optimisticContent = data.content;
         let isOptimisticSilent = false;

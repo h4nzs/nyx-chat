@@ -1,8 +1,16 @@
 import { EventEmitter } from 'eventemitter3';
 import { io, type Socket } from 'socket.io-client';
-import { TransportOpCode } from '@nyx/shared';
+import {
+  CLIENT_CAPABILITIES,
+  TRANSPORT_PROTOCOL_VERSION,
+  encodeTransportHello,
+  negotiateCapabilities,
+  parseTransportHello,
+  TransportOpCode,
+} from '@nyx/shared';
 import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from '@nyx/shared';
 import { decideTransportMode, OUTGOING_OPCODE_MAP } from './transportMode';
+import { advertisedCapabilities } from './spqrNegotiation';
 import { useAuthStore } from '../store/auth';
 
 import type { 
@@ -15,10 +23,54 @@ import type {
   UserId
 } from '@nyx/shared';
 
+// ============================================================================
+// [docs/29 §5.6] Kapabilitas transport — state modul, diakses lewat helper.
+// ============================================================================
+//
+// Yang diiklankan HANYA kapabilitas yang benar-benar sudah dipahami klien ini.
+// Server boleh memilih format payload berdasarkan daftar ini, jadi mengiklankan
+// fitur yang belum siap = pesan rusak (persis masalah yang mau dihindari).
+//
+// [docs/33 §33.7] `spqr-ratchet` masuk lewat `advertisedCapabilities()` (saklar
+// integrasi + kill switch `VITE_SPQR_FORCE_V1`), bukan literal di sini: nama
+// kapabilitas hidup di `@nyx/shared` dan keputusan mengiklankannya di
+// `spqrNegotiation.ts`. Kapabilitas ini hanya menyatakan "deployment boleh
+// melewatkan frame v2" — versi sesi tetap ditentukan deklarasi peer (`ackV`).
+const ANNOUNCED_CLIENT_CAPABILITIES: string[] = [
+  CLIENT_CAPABILITIES.HELLO_V1,
+  ...advertisedCapabilities(),
+];
+const HELLO_ACK_TIMEOUT_MS = 5000;
+
+let negotiatedCapabilities: string[] = [];
+let negotiatedProtocolVersion = 0;
+let capabilityNegotiationDone = false;
+
+/** Kapabilitas hasil negosiasi klien↔server (kosong = legacy). */
+export const getNegotiatedCapabilities = (): string[] => negotiatedCapabilities;
+
+/** Apakah kapabilitas (hasil negosiasi) tersedia di sesi ini? */
+export const hasTransportCapability = (capability: string): boolean =>
+  negotiatedCapabilities.includes(capability);
+
+/** Versi protokol transport server (0 = belum/legacy). */
+export const getNegotiatedProtocolVersion = (): number => negotiatedProtocolVersion;
+
+/** Sudah selesai dinegosiasikan (atau server lama diam)? */
+export const isCapabilityNegotiationDone = (): boolean => capabilityNegotiationDone;
+
+function resetCapabilityState(done: boolean): void {
+  negotiatedCapabilities = [];
+  negotiatedProtocolVersion = 0;
+  capabilityNegotiationDone = done;
+}
+
 type TransportEvents = {
   // Connection
   'connect': [];
   'disconnect': [reason: string];
+  // [docs/29 §5.6] kapabilitas hasil negosiasi (kosong = server legacy)
+  'capabilities': [capabilities: string[]];
   
   // Messages
   'message:new': [payload: BinaryPayload];
@@ -105,6 +157,8 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private socket: Socket | null = null;
   private wssOfflineQueue: { opCode: TransportOpCode; payload: BinaryPayload }[] = [];
   private silentNoopOpcodes = new Set<TransportOpCode>();
+  // [docs/29 §5.6] Timer tunggu balasan HELLO (sidecar lama tidak menjawab).
+  private helloTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     super();
@@ -229,6 +283,12 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
     socket.on('connect', () => {
       this.connected = true;
+      // Jalur WSS (socket.io) tidak punya HELLO: tandai negosiasi SELESAI tanpa
+      // kapabilitas supaya state tidak menggantung "pending" selamanya, dan
+      // tetap emit supaya pelanggan event tidak menunggu selamanya.
+      this.clearHelloTimer();
+      resetCapabilityState(true);
+      this.emit('capabilities', []);
       this.emit('connect');
     });
 
@@ -275,10 +335,14 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
           this.wtStableTimer = null;
           this.wtFailCount = 0;
         }, this.WT_STABLE_MS);
+        // [docs/29 §5.6] Tiap sesi WT baru menegosiasikan kapabilitasnya sendiri.
+        this.sendCapabilityHello();
         this.emit('connect');
         break;
       case 'DISCONNECTED':
         this.connected = false;
+        this.clearHelloTimer();
+        resetCapabilityState(false);
         this.emit('disconnect', data.reason);
         // Hitung sebagai kegagalan bila masih menyambung ATAU sesi baru saja
         // terbuka lalu langsung ditutup (ditolak sidecar — pola loop reload).
@@ -318,6 +382,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       case TransportOpCode.ACK:
         this.handleAck(payload);
         break;
+      case TransportOpCode.HELLO:
+        this.handleCapabilityHelloReply(payload);
+        break;
       case TransportOpCode.KICK:
         try {
            const parsedJson = JSON.parse(new TextDecoder().decode(payload)) as unknown;
@@ -347,6 +414,65 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
            }
         } catch (e) {}
         break;
+    }
+  }
+
+  // --- [docs/29 §5.6] Negosiasi kapabilitas ---
+
+  /**
+   * Kirim HELLO setelah terautentikasi; tanpa balasan → mode legacy.
+   *
+   * HELLO HARUS lewat stream bidi (worker `CAPABILITY_HELLO`): server membalas
+   * di stream yang sama. Lewat `sendStream` (uni) balasan tidak mungkin datang,
+   * dan sidecar akan meneruskan frame itu ke `nyx:upstream:11` — padahal opcode
+   * ini transport-local dan tidak boleh sampai ke Node.
+   */
+  private sendCapabilityHello(): void {
+    this.clearHelloTimer();
+    resetCapabilityState(false);
+    if (this.mode !== 'wt' || !this.connected) {
+      // Tidak ada jalur WT: fallback WSS tidak punya HELLO → legacy, selesai.
+      resetCapabilityState(true);
+      return;
+    }
+    try {
+      const payload = encodeTransportHello({ v: TRANSPORT_PROTOCOL_VERSION, caps: ANNOUNCED_CLIENT_CAPABILITIES });
+      const message: MainToTransportWorker = { type: 'CAPABILITY_HELLO', payload };
+      this.worker.postMessage(message, [payload.buffer]);
+    } catch (e) {
+      console.warn('[Transport] Gagal mengirim HELLO kapabilitas:', e);
+    }
+    this.helloTimer = setTimeout(() => {
+      this.helloTimer = null;
+      // Sidecar lama (atau jaringan lambat): jalan sebagai legacy, bukan error.
+      resetCapabilityState(true);
+      console.info('[Transport] Tidak ada balasan HELLO — jalan dalam mode legacy (tanpa kapabilitas).');
+      this.emit('capabilities', []);
+    }, HELLO_ACK_TIMEOUT_MS);
+  }
+
+  /** Balasan HELLO dari sidecar: simpan irisan kapabilitas yang disepakati. */
+  private handleCapabilityHelloReply(payload: BinaryPayload): void {
+    const parsed = parseTransportHello(payload);
+    if (!parsed) {
+      console.warn('[Transport] Balasan HELLO tidak sah — diabaikan (mode legacy).');
+      return;
+    }
+    // Irisan di sisi klien juga: server TIDAK boleh mengaktifkan kapabilitas yang
+    // tidak kita iklankan (pertahanan terhadap server/konfigurasi salah).
+    const agreed = negotiateCapabilities(ANNOUNCED_CLIENT_CAPABILITIES, parsed.caps);
+    negotiatedCapabilities = agreed;
+    negotiatedProtocolVersion = parsed.v;
+    capabilityNegotiationDone = true;
+    this.clearHelloTimer();
+    console.info(`[Transport] Kapabilitas dinegosiasikan (protokol v${parsed.v}): ${agreed.length > 0 ? agreed.join(', ') : '—'}`);
+    this.emit('capabilities', agreed);
+  }
+
+  private clearHelloTimer(): void {
+    if (this.helloTimer !== null) {
+      clearTimeout(this.helloTimer);
+      this.helloTimer = null;
     }
   }
 
@@ -642,20 +768,21 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   transportClient.sendEvent('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderSigningKey?: string, senderId?: string }[]): Promise<void> {
-  return new Promise(async (resolve, reject) => {
-    if (!transportClient.connected) return reject(new Error('Socket not connected'));
-    // [T2 FINAL] Pairwise DR adalah satu-satunya jalur — fallback legacy
-    // `messages:distribute_keys` dihapus (prod reset, semua klien ter-update).
-    try {
-      const { sendGroupKeyDistributionPairwise } = await import('../utils/crypto');
-      const { pairwise } = await sendGroupKeyDistributionPairwise(conversationId, keys);
-      if (pairwise > 0) console.debug(`[T2] ${pairwise} envelope(s) dikirim via pairwise session`);
-      resolve();
-    } catch (e) {
-      reject(e instanceof Error ? e : new Error('Failed to distribute keys'));
-    }
-  });
+// [LINT 2026-10-11] Dulu `new Promise(async (resolve, reject) => …)` — executor
+// async adalah bug class: throw SEBELUM await pertama tidak pernah sampai ke
+// reject() (menjadi unhandled rejection). Diubah ke async function biasa;
+// pesan error untuk pemanggil tetap sama.
+export async function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderSigningKey?: string, senderId?: string }[]): Promise<void> {
+  if (!transportClient.connected) throw new Error('Socket not connected');
+  // [T2 FINAL] Pairwise DR adalah satu-satunya jalur — fallback legacy
+  // `messages:distribute_keys` dihapus (prod reset, semua klien ter-update).
+  try {
+    const { sendGroupKeyDistributionPairwise } = await import('../utils/crypto');
+    const { pairwise } = await sendGroupKeyDistributionPairwise(conversationId, keys);
+    if (pairwise > 0) console.debug(`[T2] ${pairwise} envelope(s) dikirim via pairwise session`);
+  } catch (e) {
+    throw e instanceof Error ? e : new Error('Failed to distribute keys');
+  }
 }
 
 export async function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {

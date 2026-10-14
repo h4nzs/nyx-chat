@@ -1,0 +1,97 @@
+NOTICE — third-party components used by NYX
+================================================================================
+
+NYX (this repository, "nyx-chat") is licensed under the GNU Affero General
+Public License v3 (see `LICENSE`). Commercial dual-licensing is described in
+`COMMERCIAL.md`.
+
+Besides ordinary npm/Cargo/Go dependencies (tracked in `pnpm-lock.yaml`,
+`Cargo.lock`, `go.sum`), this project **uses source code from Signal Messenger,
+LLC** (https://signal.org, https://github.com/signalapp), all under
+**AGPL-3.0-only**. Those upstream projects are **not vendored or copied into this
+repository**: each one is pinned to a commit and consumed either as a **build-time
+path dependency** (a local checkout of the pinned commit) or through a **committed
+build artifact** produced from that checkout. The pin list also lives in
+`docs/30` §30.2.
+
+--------------------------------------------------------------------------------
+1. Signal SparsePostQuantumRatchet — crate `spqr` (post-quantum ratchet / ML-KEM braid)
+--------------------------------------------------------------------------------
+Upstream:      https://github.com/signalapp/SparsePostQuantumRatchet
+Pinned commit: 06959b4708f9b7b1e94d0f8cc835f3958c077e94  (2026-09-16, "Update version to v1.6.0.", crate version 1.6.0)
+License:       AGPL-3.0-only (upstream `LICENSE`; crate `Cargo.toml` declares `AGPL-3.0-only`)
+
+How NYX uses it (unmodified):
+  * `packages/spqr-wasm/` — a thin Rust wrapper (`src/lib.rs`) that compiles the
+    crate to `wasm32-unknown-unknown` (raw module, no `wasm-bindgen`, zero imports).
+    `build.sh` generates `Cargo.toml` (not committed, see `.gitignore`) pointing at
+    the local pinned checkout via `spqr = { path = "<checkout>/SparsePostQuantumRatchet" }`.
+  * Committed build artifact: `packages/spqr-wasm/dist/spqr.wasm` (518,832 bytes).
+  * Client use: `web/src/lib/spqrRatchet.ts`, `spqrWire.ts`, `spqrSession.ts`,
+    `spqrState.ts`, `spqrNegotiation.ts`, and worker ops
+    `spqr_ratchet_init` / `spqr_ratchet_encrypt` / `spqr_ratchet_decrypt`
+    (`web/src/workers/crypto.worker.ts`). Design/spec: `docs/33`.
+
+Tests run against the pinned checkout itself (documented in `docs/33` §33.6):
+`cargo +nightly test --release --lib` → 57 passed, 0 failed.
+
+--------------------------------------------------------------------------------
+2. Signal libsignal — crate `libsignal-keytrans` (Key Transparency verifier)
+--------------------------------------------------------------------------------
+Upstream:      https://github.com/signalapp/libsignal
+Pinned commit: e8cc2dddd578859b4a029c9c94670b24ce2b616a  (2026-09-22)
+License:       AGPL-3.0-only (upstream `LICENSE`; crate declares `license.workspace = true`, workspace license = AGPL-3.0-only)
+
+How NYX uses it (unmodified):
+  * `packages/keytrans-wasm/` — thin wrapper (`src/lib.rs`) compiled to
+    `wasm32-unknown-unknown` (raw module, no `wasm-bindgen`). `build.sh` generates
+    `Cargo.toml` (not committed) with
+    `libsignal-keytrans = { path = "<checkout>/rust/keytrans" }`
+    (`LIBSIGNAL_PATH`, default `~/signal/libsignal`).
+  * Committed build artifact: `packages/keytrans-wasm/dist/keytrans.wasm` (299,846 bytes).
+  * Client use: `web/src/lib/keyTransparency.ts` (ops `verify_search`,
+    `verify_monitor`, `verify_distinguished`, `monitor_next`, `condense_update`)
+    wired into the prekey-bundle trust decision by `ktBundleProof.ts`,
+    `ktSubject.ts`, `ktMonitoring.ts`, `peerIdentityTrust.ts`. Design/spec: `docs/34`.
+
+Other parts of libsignal were read only as an implementation reference, without
+copying code — e.g. the group sender-key design (`docs/16`). A libsignal-based
+cross-implementation ratchet oracle is planned but **not implemented**
+(`docs/30` WS-G(6), `docs/11` §11.4).
+
+--------------------------------------------------------------------------------
+3. Signal key-transparency-server (Key Transparency log service, Go)
+--------------------------------------------------------------------------------
+Upstream:      https://github.com/signalapp/key-transparency-server
+Pinned commit: 30b7a2a40604fbe04545d47f26e4c5a35f5d3161  (2026-08-18, "Update go to 1.26.6")
+License:       AGPL-3.0-only (upstream `LICENSE`)
+
+How NYX uses it (unmodified upstream packages):
+  * `server/kt-query/` — a thin Go service (`main.go`, `query.go`, `write.go`,
+    `store.go`, `config.go`) that owns the local LevelDB log and serves NYX's read
+    and write paths. The upstream module is **not vendored**: the committed
+    `server/kt-query/go.mod` carries
+
+        replace github.com/signalapp/keytransparency => ../../../signal/key-transparency-server
+
+    (upstream module is private and cannot be fetched over the network).
+    `server/kt-query/build.sh` re-points that `replace` directive at
+    `NYX_KT_UPSTREAM` when the checkout lives elsewhere, and restores it afterwards.
+  * Server-side proxy/metrics: `server/src/routes/ktQuery.ts`; client log writer:
+    `server/src/utils/keyTransparency.ts` (`docs/32`).
+
+--------------------------------------------------------------------------------
+Notes for redistribution
+--------------------------------------------------------------------------------
+* Because the pinned upstream sources are AGPL-3.0, every distributed copy of the
+  compiled artifacts above (`packages/spqr-wasm/dist/spqr.wasm`,
+  `packages/keytrans-wasm/dist/keytrans.wasm`) and of the `kt-query` binary is a
+  distribution of AGPL-3.0 code. Corresponding source is the upstream repository at
+  the pinned commit listed above (plus this repository's thin wrappers).
+* Rebuilding the artifacts requires those checkouts at the pinned commits
+  (see each `build.sh` and `README.md`); CI does not rebuild them, it uses the
+  committed artifacts.
+* Keep this file together with `LICENSE` in any redistribution.
+
+Pins are recorded here and in `docs/30` §30.2; repository layout and root-policy
+files are catalogued in `docs/25`.

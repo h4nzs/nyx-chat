@@ -51,6 +51,43 @@ Stored encrypted private-key bundle (IndexedDB `kvStore.nyx_encrypted_keys`):
 - **Own-message decryption:** self messages first try the stored `mk` with `crypto_secretbox_xchacha20poly1305_open_easy`; failure falls back to the DR path (multi-device). If an own message ultimately fails, it is marked `waiting_for_key` (retryable) — never an error bubble.
 - **x3dh-until-confirmed (2026-10-05):** the initiator attaches the `x3dh` handshake to **every** message until the first incoming reply decrypts under the current session (`peerSessionConfirmed` in the DR state, maintained client-side — see `web/src/lib/drProtocol.ts`). A lost/expired first message no longer wedges the conversation: the peer can derive from any later message (derivation is deterministic, so re-derive re-syncs to the same chain). The sealed payload also carries `ackKem` (the sender's current `KEMr`), authenticated by the AEAD; the peer records it as `peerAckedKem` and **omits the 1120-byte KEM `ct`** from subsequent headers once the ack matches its current chain. A new chain whose header lacks `ct` is rejected **before any state mutation** (`Missing ratchet key material`) and falls into the archived-session fallback. Recovery for a receiver that lost its state mid-conversation remains `PROTOCOL_RESET` (the confirmed sender no longer re-sends the handshake).
 
+### 4.5.1 Ratchet v2 (braid SPQR) — jalur versi paralel (2026-10-14)
+
+Jalur **v1 di atas tetap beku dan tetap satu-satunya default**. v2 hidup
+berdampingan (`docs/33` §33.10) dan hanya dipakai bila **peer membuktikan** bisa
+membacanya:
+
+- **Deployment gate (transport):** sidecar mengiklankan `spqr-ratchet` di
+  `SERVER_CAPABILITIES` + klien mengiklankannya di HELLO. Ini hanya berarti
+  "deployment ini melewatkan frame v2", bukan jaminan tentang peer.
+- **Bukti peer (in-band, otentikasi AEAD):** payload ter-seal membawa `ackV: 2`
+  (= "versi ratchet yang bisa SAYA buka"). Pengirim baru memakai v2 setelah
+  melihat `ackV: 2` dari peer. Klien lama tidak pernah menerima header v2.
+- **Header (versi baru, bukan tambalan):**
+  - v1: `{ kemPk, ct, n, pn }` — tanpa penanda versi (§4.5).
+  - v2: `{ v: 2, b: [frame…] }` — `b` = satu atau lebih frame braid (base64url,
+    ≤16 frame, ≤4096 karakter/frame). Tidak ada `kemPk`/`ct` 1120 byte; tidak
+    ada `n`/`pn` karena urutan & pesan hilang ditangani braid.
+- **Message key** lahir dari `spqr_send`/`spqr_recv` (ML-KEM Braid + erasure
+  coding) alih-alih langkah DH+KEM. Sisa jalur **identik v1**: padding 8 KB,
+  nonce 24 byte, XChaCha20-Poly1305 → ciphertext di wire sama bentuknya,
+  termasuk pemakaian ulang MK (pesan duplikat) lewat MK cache.
+- **State berdampingan:** state DR v1 tidak pernah ditimpa (jalur rollback),
+  state braid disimpan per sesi di baris `kvStore` terpisah
+  (`nyx_spqr_state_v1:*`, ter-seal `ENC1:`) dengan tulis di-koalesensi 250 ms.
+  Akar braid = rahasia X3DH (`sk`) yang sama di kedua sisi; disimpan di baris
+  state DR sebagai `spqrAuthKey`/`spqrDirection` (juga ter-seal).
+- **Rollback:** peer berhenti menyatakan v2 (atau kill switch operator
+  `VITE_SPQR_FORCE_V1=1`, dan di build DEV kill switch runtime
+  `localStorage['nyx_spqr_force_v1']`) → pengiriman kembali ke v1, state braid
+  **dipertahankan** sehingga pesan v2 yang sudah lewat tetap terbaca.
+  **Saklar hanya menghentikan kirim + iklan — bukan jalur baca**: menolak membaca
+  v2 yang sudah terkirim akan mengubah tindakan operator menjadi kehilangan
+  pesan. Bukti dua klien: `web/e2e/spqr.spec.ts` (test "kill switch satu klien").
+- **Anti-downgrade arah masuk:** header v2 **tidak pernah** dibaca sebagai v1
+  (dan sebaliknya). Tanpa akar braid (sesi yang didirikan sebagai v1) → error
+  terlihat, bukan kegagalan diam-diam.
+
 ## 4.6 Group sender-key ratchet (v2, libsignal model)
 
 - **Sender state** `{ CK, N, initialCK, chainId, metadataKey, ... }` per conversation; **receiver state** one per `(conversation, senderDeviceKey)` carrying `{CK, N, eraCK, chainId, metadataKey, skippedKeys, signingKey}` — both live in IndexedDB `groupSenderStates` / `groupReceiverStates`, **encrypted at rest** (`ENC1:` prefix in `keychainDb.ts`). Era changes archive the old receiver state (max 5, `#era_<chainId>` ids).
@@ -65,7 +102,7 @@ Stored encrypted private-key bundle (IndexedDB `kvStore.nyx_encrypted_keys`):
 
 IndexedDB keychain values are wrapped: `"ENC1:" + base64url(worker_encrypt_session_key(bytes, masterSeed))`.
 
-- Applied to: group chain keys, group skipped keys, story keys (and 1:1 ratchet/session/message keys use the same primitive via their own helpers).
+- Applied to: group chain keys, group skipped keys, story keys, 1:1 braid (v2) state rows `nyx_spqr_state_v1:*` (and 1:1 ratchet/session/message keys use the same primitive via their own helpers).
 - Legacy plaintext values are still readable; `migrateKeychainAtRestEncryption()` (triggered on unlock via `saveDeviceAutoUnlockKey`) rewrites them.
 - `decryptValueAtRest` returns the value unchanged when it lacks the prefix (legacy), `null` when decryption fails.
 
@@ -76,10 +113,10 @@ IndexedDB keychain values are wrapped: `"ENC1:" + base64url(worker_encrypt_sessi
 
 ## 4.10 Traffic cover
 
-- Every user message is padded to **8192 bytes** before encryption (`PADDING_BLOCK_SIZE`) to defeat size analysis.
+- Every user message is padded to **8192 bytes** before encryption (`PADDING_BLOCK_SIZE`) to defeat size analysis — jalur v2 memakai padding yang sama (hanya penghasil message key yang berbeda).
 - Idle WebTransport connections emit 1000-byte random datagrams every ~3s (`CHAFF` opcode 0x00 — ignored by the sidecar). Real frames are never delayed by chaff.
 
-## 4.11 Worker operation catalog (45 ops)
+## 4.11 Worker operation catalog (48 ops)
 
 | Op | Purpose |
 |---|---|
@@ -94,7 +131,8 @@ IndexedDB keychain values are wrapped: `"ENC1:" + base64url(worker_encrypt_sessi
 | `pq_box_seal/_open` | X-Wing hybrid sealing |
 | `xchacha_seal/_open` | **Canonical envelope** (§4.2) |
 | `x3dh_initiator` / `x3dh_recipient` / `x3dh_recipient_regenerate` | PQX3DH handshake |
-| `dr_init_alice` / `dr_init_bob` / `dr_ratchet_encrypt` / `dr_ratchet_decrypt` | Double Ratchet |
+| `dr_init_alice` / `dr_init_bob` / `dr_ratchet_encrypt` / `dr_ratchet_decrypt` | Double Ratchet (v1, beku) |
+| `spqr_ratchet_init` / `spqr_ratchet_encrypt` / `spqr_ratchet_decrypt` | Ratchet v2 (braid SPQR, §4.5.1) |
 | `group_init_sender_key` / `group_ratchet_encrypt` / `group_ratchet_decrypt` / `group_decrypt_skipped` | Group ratchet |
 | `burner_dr_init_guest` / `burner_dr_init_host` / `burner_dr_encrypt` / `burner_dr_decrypt` | Burner PQ-DR |
 | `file_encrypt` / `file_decrypt` | Attachments |

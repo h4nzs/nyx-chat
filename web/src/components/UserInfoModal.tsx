@@ -324,7 +324,8 @@ export default function UserInfoModal() {
           onClose={() => setShowSafetyModal(false)}
           onVerify={() => {
             if (activeId && user.publicKey) {
-              setVerified(activeId, safetyNumber);
+              // [docs/29 §7.2] verifikasi = menerima kunci baru (hard gate kirim).
+              setVerified(activeId, safetyNumber, String(user.id));
             }
             setShowSafetyModal(false);
           }}

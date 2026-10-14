@@ -19,10 +19,14 @@ import usersRouter from "./routes/users.js";
 import conversationsRouter from "./routes/conversations.js";
 import messagesRouter from "./routes/messages.js";
 import uploadsRouter from "./routes/uploads.js";
+import backupRouter from "./routes/backup.js";
 import keysRouter from "./routes/keys.js";
+import ktQueryRouter from "./routes/ktQuery.js";
 import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
+// [docs/30 §30.9 WS-E(2)] Penerbit alamat relay panggilan (token, bukan userId).
+import callTokensRouter from "./routes/callTokens.js";
 import adminRouter from "./routes/admin.js";
 import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
@@ -327,10 +331,15 @@ app.use((req, res, next) => {
   doubleCsrfProtection(req, res, next);
 });
 
+// [docs/30 §30.5 WS-A] Proxy bukti Key Transparency. Di-mount SEBELUM router
+// keys yang lebih umum supaya `/api/keys/kt/*` tidak jatuh ke `/:something`.
+app.use("/api/keys/kt", ktQueryRouter);
+
 // Keys router HARUS di-mount di bawah doubleCsrfProtection. Sebelumnya
 // diletakkan sebelum layer CSRF → mutasi pre-key bisa di-CSRF lintas situs
 // (cookie SameSite=None + form urlencoded tanpa preflight).
 app.use("/api/keys", keysRouter);
+app.use("/api/call-tokens", callTokensRouter);
 
 app.get("/api/csrf-token", (req: Request, res: Response) => {
   const csrfToken = generateCsrfToken(req, res);
@@ -374,6 +383,7 @@ app.use("/api/users", usersRouter);
 app.use("/api/conversations", conversationsRouter);
 app.use("/api/messages", messagesRouter);
 app.use("/api/uploads", uploadsRouter);
+app.use("/api/backup", backupRouter);
 app.use("/api/previews", previewsRouter);
 app.use("/api/session-keys", sessionKeysRouter);
 app.use("/api/reports", reportRoutes);

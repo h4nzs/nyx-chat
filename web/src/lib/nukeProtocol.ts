@@ -37,6 +37,15 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
       clearBlobCache();
     } catch (_e) {}
 
+    // 0.55 Matikan state braid v2 yang tertahan debounce DAN barisnya.
+    // Baris `nyx_spqr_state_v1:*` ikut terhapus bersama IndexedDB, tapi antrean
+    // tulis di memori harus dimatikan lebih dulu — kalau tidak, satu tulis
+    // 250 ms terakhir bisa menghidupkan kembali state ratchet setelah wipe.
+    try {
+      const { clearSpqrStates } = await import('./spqrState');
+      await clearSpqrStates();
+    } catch (_e) {}
+
     // 0.6 Wipe OPFS (encrypted attachment cache)
     try {
       const { wipeOPFS } = await import('./opfsStorage');

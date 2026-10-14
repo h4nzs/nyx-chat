@@ -2,6 +2,577 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔐 SPQR tuntas: ratchet jalur v2 hidup berdampingan dengan jalur beku — 2026-10-14
+
+WS-D berhenti di batas "pembungkus + test" karena mengganti langkah `KEMs/KEMr`
+mengubah **protokol beku** (`docs/04`). Sekarang versi jalur barunya ada,
+dipilih lewat bukti peer, dan dibuktikan E2E di Chrome — bukan tambalan pada
+format lama.
+
+- **Wire v2 (versi baru):** header `{v: 2, b: [frame…]}` (frame braid ~37 B)
+  menggantikan `kemPk`+`ct` 1120 B di jalur v1; sisa jalur **identik** (pad 8 KB,
+  nonce 24 B, XChaCha20-Poly1305) sehingga ciphertext di wire tetap satu bentuk
+  dan MK cache untuk pesan duplikat tetap berlaku.
+- **Bukti dari peer sebelum kirim:** `ackV: 2` di payload ter-seal = "versi ratchet yang
+  bisa saya buka". Pengirim hanya memakai v2 setelah melihat deklarasi itu dari
+  peer — klien lama **tidak pernah** menerima header yang tak bisa dibacanya.
+  Sesi yang sudah v2 sticky (reconnect/WSS tidak menurunkannya), rollback
+  mengembalikan `preservedVersion: 'v2'` sehingga state braid tidak dihapus.
+- **State berdampingan:** state DR v1 tidak pernah ditimpa; state braid per sesi
+  di baris `nyx_spqr_state_v1:*` (ter-seal `ENC1:`, tulis di-koalesensi 250 ms,
+  dibaca dari antrean pending, di-flush saat tab disembunyikan, dibuang saat
+  wipe). Akar braid (`spqrAuthKey`/`spqrDirection`) menumpang di baris state DR
+  supaya modul WASM 506 KiB tetap dimuat malas.
+- **Gate deployment di relay:** sidecar mengiklankan `spqr-ratchet`
+  (`SERVER_CAPABILITIES`) — saklar tingkat deployment; kill switch klien:
+  `VITE_SPQR_FORCE_V1=1` (build-time) dan kill switch **runtime**
+  `localStorage['nyx_spqr_force_v1']` (hanya build DEV, dibaca per pengiriman).
+  **Saklar hanya menghentikan kirim + iklan, bukan jalur baca:** menolak membaca
+  v2 yang sudah terkirim akan mengubah tindakan operator menjadi kehilangan
+  pesan, padahal state braid justru sengaja dipertahankan.
+- **Bukti:** 13 test `spqrSession` (modul WASM sungguhan + ratchet palsu untuk
+  loop tanpa key), 8 test `spqrWire`, 18 test negosiasi, `cargo test` sidecar,
+  dan E2E Chrome `web/e2e/spqr.spec.ts` yang memeriksa amplop **di server**
+  (`dr.v === 2`, ada `b`, tanpa `kemPk`) sambil memastikan peer membaca plaintext.
+- **Gate §30.8 poin 1 sekarang tertutup:** test internal crate `spqr` pada
+  checkout pin (`06959b4708f9` = v1.6.0) dijalankan — `cargo +nightly test
+  --release --lib` → **57 passed, 0 failed**, exit 0 (stable gagal `E0658`,
+  `std::assert_matches`). Karena satu langkah `send` crate = satu chunk di wire,
+  test chunked itu (`v1::test::chaos` 10.000 tick / `onlineoffline_healing_unidir`
+  100.000 tick) juga memberi bukti **loss per chunk** untuk gate poin 2.
+- **Rollback kini diuji dua klien nyata** (sebelumnya hanya resolver + ratchet
+  palsu): test kedua `web/e2e/spqr.spec.ts` memaksa satu klien kembali ke v1 di
+  tengah sesi v2 lewat kill switch runtime DEV. Dari amplop di server: klien yang
+  di-rollback **mengirim v1 lagi**, peer (sesi v2) tetap membacanya, pesan v2 dari
+  peer **tetap terbaca** di klien yang di-rollback, dan baris state braid-nya
+  masih ada (`loadSpqrState` → `v2`).
+- **Modul WASM masuk precache service worker:** `**/*.wasm` ditambahkan ke
+  `injectManifest.globPatterns` (`web/vite.config.ts`) sehingga `spqr-*.wasm` dan
+  `keytrans-*.wasm` tersedia offline sejak install (terverifikasi di `dist/sw.js`);
+  biaya install PWA bertambah **±0,8 MB** tak terkompresi.
+
+## 🔐 KT masuk jalur bundle + loop monitor berjalan; SPQR siap-sambung — 2026-10-14
+
+Tiga hal yang selama ini "ada tapi tidak dipanggil" sekarang dipanggil, ditambah
+prasyarat integrasi SPQR. Semua bertambah **tanpa** mengubah format beku.
+
+### Verifikasi log Key Transparency di jalur prekey bundle
+
+Sampai hari ini klien hanya **menulis** log KT; bundle kunci palsu dari server
+masih diterima karena pin TOFU percaya apa pun pada kontak pertama.
+
+- `web/src/lib/ktBundleProof.ts` — ambil bukti `/api/keys/kt/*`, verifikasi WASM,
+  bandingkan kunci di log dengan kunci bundle → verdict (tidak melempar):
+  `confirmed` / `mismatch` / `unverifiable` / `unavailable` / `unknown-subject`.
+- `web/src/lib/ktSubject.ts` — **username peer** diturunkan dari profil E2EE
+  (cache RAM → participant → dekripsi `encryptedProfile` percakapan → kontak).
+  Tanpa ini search key `0x75‖Argon2id(username)` tidak bisa dibentuk, jadi dulu
+  verifikasi mustahil dipanggil dari jalur bundle.
+- `web/src/lib/peerIdentityTrust.ts` — verdict masuk **sebelum** kunci dipin:
+  `mismatch` pada kontak **pertama** kini memblokir kirim + memunculkan banner
+  (dulu tidak terdeteksi siapa pun), `confirmed` mencatat `ktVerifiedAt` (TTL 24
+  jam agar tidak memanggil log berulang), verdict lain tetap TOFU tetapi tercatat
+  (`ktLastVerdict`) — KT yang mati tidak boleh membuat NYX tidak bisa dipakai.
+- UI: banner identitas membedakan `source: 'kt'` ("kunci bertentangan dengan log
+  publik") dari rotasi biasa, 2 kunci i18n ×4 bahasa.
+
+### Loop monitor dijalankan penjadwal
+
+`runKtMonitorOnce` sudah ada sejak kemarin tetapi tidak pernah dipanggil — jadi
+klien tidak pernah punya bukti konsistensi (`docs/34` §34.5: tanpa itu perubahan
+kunci tidak terdeteksi).
+
+- `monitorKeyTransparency()` (jembatan verifier + config ke
+  `POST /api/keys/kt/monitor`), `startKtMonitorLoop()` (jeda awal 30 s lalu tiap
+  6 jam, satu langkah pada satu waktu, gagal ≠ berhenti), dan wiring `App.tsx`
+  dengan impor dinamis (WASM 295 KiB tidak masuk bundel awal) + toast saat
+  `keyVersion` di log naik.
+
+### Prasyarat integrasi SPQR (jalur pesan v2 belum dinyalakan)
+
+- `web/src/lib/spqrNegotiation.ts` — keputusan versi ratchet: kapabilitas hanya
+  dibaca saat sesi **didirikan** (tidak ada perubahan versi di tengah sesi),
+  anti-downgrade (v2 hanya bila kedua sisi mampu), saklar tunggal
+  `SPQR_INTEGRATION_ENABLED=false`, dan rollback eksplisit yang **mempertahankan**
+  state v2 agar pesan lama tetap terbaca.
+- `web/src/lib/spqrState.ts` — state braid per sesi: ter-seal `ENC1:`, tulis
+  di-koalesensi 250 ms (benchmark: state 3,8 KiB/langkah), batas 64 KiB
+  diperiksa sebelum masuk antre, dan fail-closed saat dibaca. Sisa langkah =
+  versi wire baru di header DR + ack + memanggil modul ini (`docs/33` §33.7).
+
+Verifikasi: web `tsc` 0, `vitest` **551/551** (67 file), server `tsc` 0, server
+`node:test` 351 pass/1 skip, dan E2E chromium di lingkungan lokal (Postgres +
+Redis lokal siap; catatan lama "E2E tidak bisa dijalankan" sudah tidak berlaku —
+`docs/30` M4): `auth.spec` **3/3**, `chat.spec` (kirim pesan antar dua klien) +
+`profile.spec` **2/2**.
+
+## 🐛 Burner guest: sesi ephemeral tidak lagi dibunuh bootstrap `/drop` — 2026-10-14
+
+Regresi E2E burner (host kirim lampiran → guest tak pernah menerima) berakar pada
+**dua hal**, keduanya di jalur guest:
+
+- **Bootstrap aplikasi balapan dengan `POST /api/auth/burner`.** Halaman `/drop`
+  menjalankan `bootstrap()` seperti halaman lain. Guest bukan akun server, jadi
+  refresh-nya gagal dan fallback `GET /api/users/me` menjawab 401 — lalu jalur
+  `catch` bootstrap **menghapus cookie `at` + `user`** yang baru diterbitkan untuk
+  guest. Uplink burner turun, BurnerChat menerbitkan **identitas guest baru**,
+  dan balasan host hilang (relay `burner:reply` ditujukan ke id lama).
+  `App.tsx` sekarang melewati bootstrap store di route `/drop`.
+- **`burner:join` tidak pernah diulang setelah reconnect.** Keanggotaan
+  `burner:room:<roomId>` mengikat identitas socket saat join, sedangkan guest
+  ephemeral bisa berganti identitas dan WebTransport bisa reconnect. `BurnerChat`
+  kini join ulang setiap event `connect` transport.
+- Verifikasi: `pnpm exec playwright test --project=chrome --grep burner` →
+  **2 passed** (host→guest lampiran tampil sebagai preview; room yang di-destroy
+  tidak kembali setelah reload). Spec ikut diperbaiki: pembukaan burner host
+  dilakukan in-app (reload menghapus DR host yang RAM-only), Quick Tour ditutup
+  setelah tiap navigasi penuh, dan Destroy ditunggu selesai sebelum reload —
+  rinciannya di `docs/11-testing.md`.
+
+## 🔁 KT: penyimpanan state monitoring + satu langkah loop — 2026-10-13
+
+`docs/34` §34.5 menyimpulkan bahwa **loop monitor bukan opsional**: tanpa anchor
+tree head yang tersimpan, perubahan `search`/tree head tidak terdeteksi. Sampai
+sekarang tak ada tempat menyimpannya. Sekarang ada:
+
+- Tabel Dexie **`ktMonitoring`** (`web/src/lib/db.ts` versi 11, murni aditif) —
+  satu baris per `0x75||usernameHash(32)`, dengan `treeHead`,
+  `monitoringData`, `distinguishedTreeHead`, dan `keyVersion` **ter-seal
+  `ENC1:`** (masterSeed). Search key sendiri sudah hash 32 byte → boleh jadi PK
+  plaintext; nilai bukti tidak.
+- `web/src/lib/ktMonitoring.ts`: `saveKtState`/`loadKtStates` (update parsial
+  mempertahankan nilai lama), `planKtMonitor` (pilih baris siap + anchor),
+  `runKtMonitorOnce` (rakit permintaan via op 6 → `POST /monitor` →
+  `verifyMonitor` → simpan), `clearKtStates`.
+- **Fail-closed**: state hanya ditulis setelah verifikasi berhasil — bukti palsu
+  atau jaringan gagal tidak mengubah apa pun. Diuji eksplisit.
+- `KtMonitorOutcome.changed` melaporkan `keyVersion` yang naik (kandidat
+  notifikasi ke user); modul tetap bebas UI/toast.
+- Verifikasi: `web/src/lib/__tests__/ktMonitoring.test.ts` — **7 test** (round-trip
+  ter-seal, update parsial, `planKtMonitor`, fail-closed dengan bukti tidak sah
+  dari fixture jalur produksi). Suite web: 507 → **514**.
+
+Sisa: penjadwalan timer + notifikasi UI, dan loop ini baru punya data setelah
+verifier dipanggil di jalur bundle (§34.6 poin 1).
+
+## 🐛 Registrasi tidak lagi terblokir prompt kunci saat onboarding — 2026-10-13
+
+Suite E2E tidak pernah bisa hijau: setelah `POST /api/auth/register` berhasil
+(201), muncul overlay **"ACCESS CONTROL PAD"** (`PasswordPromptModal`) dan alur
+onboarding berhenti — modal `TRUST LEVEL VERIFICATION` (tombol *Skip for now*)
+tak pernah tampil. Akar masalahnya bukan di jalur registrasi, melainkan di helper
+at-rest: `keychainDb.getMasterSeedOrUndefined()` memanggil
+`useAuthStore.getState().getMasterSeed()`, yang **memunculkan prompt**. Helper itu
+dipanggil fire-and-forget oleh `migrateKeychainAtRestEncryption()` dari
+`saveDeviceAutoUnlockKey()`, yaitu saat vault belum ter-unlock dan identitas user
+belum ter-scope — jadi prompt itu tak pernah bisa dijawab.
+
+- `useAuthStore.getMasterSeedIfUnlocked()` baru: cache → auto-unlock senyap →
+  `undefined` bila terkunci; **tidak** menyentuh `keysRetrievalPromise` bersama
+  (agar tidak mencuri hasil pemanggil yang memang boleh memunculkan prompt).
+- `keychainDb.getMasterSeedOrUndefined()` memakainya — sesuai namanya, tidak
+  pernah memblokir.
+- Helper E2E `dismissModalCloseButton` (di `web/e2e/helpers/registration.ts`)
+  menggantikan `locator(...).first().click()` yang rapuh pada tombol `×`: elemen
+  sering "not stable"/detached saat modal lama masih ber-animasi keluar; kini
+  lokator di-resolve ulang tiap percobaan + `force`. `auth.spec.ts` dimigrasikan
+  ke helper bersama itu (sebelumnya menyalin rantai onboarding).
+- `settings.spec.ts`: klik konfirmasi scoped ke dialog + `force`.
+
+Hasil E2E chromium (mesin ini, sidecar berjalan): `auth.spec` 3/3, `profile`,
+`security`, `settings` lulus; 2 test burner (`regression.spec`) masih gagal di
+`ESTABLISHING_UPLINK` (perlu ditelusuri terpisah).
+
+## 🔧 KT: op `monitor_build` — permintaan monitor dirakit di WASM — 2026-10-13
+
+Langkah berikutnya yang `docs/34` §34.6 poin 2 catat ("ABI WASM belum punya op
+untuk membangun permintaan monitor") sudah ditutup. `packages/keytrans-wasm`
+sekarang mengekspor op **6 `monitor_build`**: dari `StoredMonitoringData` dan
+tree head (`StoredTreeHead`) yang sudah dimiliki klien, ia merakit
+`transparency.MonitorRequest` (protobuf) siap dikirim ke `/api/keys/kt/monitor`.
+
+- Encoding protobuf dilakukan **di Rust** (bukan JS) — konsisten dengan aturan
+  "tidak ada parser protobuf di klien"; `commitment_index` diambil dari keluaran
+  VRF bukti search terakhir, `entry_position` dari posisi log terakhir.
+- Pembungkus TS: `verifier.buildMonitorRequest({ monitoringData, distinguishedTreeHead, lastTreeHead })`.
+- `lastTreeHead` opsional: bila dikirim, `consistency.last` ikut terisi (bukti
+  konsistensi menyala); bila tidak, hanya `consistency.distinguished` (anchor).
+- Bukti: `web/src/lib/__tests__/keyTransparency.test.ts` naik dari 16 → **18 test**
+  (`buildMonitorRequest` dari monitoring data nyata + penolakan daftar kosong);
+  artefak WASM dibangun ulang (`dist/keytrans.wasm`, 299.846 B).
+
+Sisa yang jujur (tetap seperti `docs/34` §34.6): penyimpanan monitoring data/tree
+head per kontak di keychain (`ENC1:`) dan penjadwalan loop belum ada; loop itu
+juga baru punya data setelah verifier dipanggil di jalur bundle (poin 1).
+
+## 🔍 Sisi baca Key Transparency milik NYX sendiri (`nyx-kt-query`) — 2026-10-13
+
+Sampai sekarang NYX hanya **menulis** log KT: tidak ada cara meminta bukti, jadi
+verifier klien (`docs/34`) tak punya sumber. Menyediakan sisi baca ternyata tidak
+bisa memakai query service upstream, dan tidak bisa dijalankan sebagai proses
+kedua. Keduanya dibuktikan dengan menjalankan binary Go yang sesungguhnya, bukan
+dengan membaca dokumen (`docs/32` §32.8):
+
+```
+== A) SEARCH tanpa entri ACI di log (kondisi log NYX) ==   search permission denied
+== B) SEARCH dengan nilai format Signal 0x00||aci16 ==     ACI + username hash: OK
+== C) tulis nilai format NYX (1286 B) ke search key itu ==  entry ditulis (tree 4)
+== D) SEARCH setelah nilai format NYX ==                    rpc error: Unavailable: unexpected error
+```
+
+`aciSearch()` wajib, dan `usernameHashSearch()` bukan hanya menolak nilai yang
+bukan `0x00||aci16` — ia menggagalkan seluruh `SearchV2`. Temuan kedua:
+`storage.newFileLock(readOnly=true)` mengambil `LOCK_SH` di level OS sedangkan
+penulis memegang `LOCK_EX`, sehingga membuka LevelDB yang sama secara read-only
+pun gagal (`resource temporarily unavailable`); goleveldb hanya melepas kunci
+*in-process*-nya, bukan flock-nya.
+
+Karena itu satu proses memiliki basis data — dan proses itu milik NYX:
+**`server/kt-query`** (Go, paket `tree/transparency` + `db` upstream yang di-pin,
+tanpa fork) menyajikan tiga peran: baca bukti NYX (`GET /search`,
+`/distinguished`, `POST /monitor`, `/config`), tulis lewat gRPC
+`KeyTransparencyTestService.Update` (**protokol penulis lama tidak berubah** —
+`KT_SERVER_URL` tetap), dan kunci `distinguished`. Server NYX meneruskannya lewat
+`/api/keys/kt/*` (byte protobuf base64url apa adanya; parser dan verifikasi tetap
+di WASM) dengan metrik `nyx_kt_queries_total{result}` dan degradasi terlihat:
+tanpa `KT_QUERY_URL`, endpoint menjawab 503 `KT_QUERY_DISABLED` dan bukan TOFU
+senyap.
+
+Verifikasi: 18 test Go (termasuk `VerifySearch` **dan** `VerifyMonitor` upstream
+menelan bukti untuk nilai NYX 1286 byte), 13 test proxy server (`ktQuery.test.ts`),
+dan jalur hidup penuh — penulis TS → adapter → HTTP → fixture → **verifier
+libsignal di WASM** (16 test, termasuk rotasi kunci terhadap anchor bukti
+sebelumnya). Temuan saat menjalankan jalur itu: tanpa klien mengirim `last`, server
+tidak menyalakan bukti konsistensi dan verifikasi dengan anchor gagal sebagai
+`Malformed proof` — perilaku yang sekarang dikunci test.
+
+Sisa yang jujur: loop monitor klien butuh op WASM baru (`monitor_build`),
+pemanggilan verifier di jalur bundle (`processPreKeyBundle`), dan
+auditor/`SetAuditorHead` belum dikerjakan — `docs/34` §34.6.
+
+## 🔐 Verifier Key Transparency (nyata, bukan mock) + ratchet SPQR PQ (2026-10-13)
+
+Dua workstream `docs/30` yang selama ini hanya punya "toolchain terbukti":
+**WS-A** (verifier KT di klien) dan **WS-D** (SPQR), plus penutupan gate
+observability/anti-abuse dari milestone sebelumnya.
+
+**WS-A — verifier KT di klien (`docs/34`).** Crate `libsignal-keytrans`
+berhasil dikompilasi ke `wasm32-unknown-unknown` (`packages/keytrans-wasm/`,
+295 KB, **nol import**, tanpa `wasm-bindgen`) dengan ABI scratch-buffer:
+`verify_search`, `verify_monitor`, `verify_distinguished`, `monitor_next`, dan
+`condense_update`. Klien `web/src/lib/keyTransparency.ts` + **12 test**
+(`web/src/lib/__tests__/keyTransparency.test.ts`) yang memverifikasi **bukti
+nyata dari binary Go `key-transparency-server`** — fixture dibuat oleh
+`server/scripts/kt-fixtures.ts` (`pnpm --filter nyx-server run kt:fixtures`),
+menulis dua entri NYX lewat penulis log dengan `return_update_response=true`
+(tree 63→64, `vrf_proof` 80 B). Test mengunci: nilai terverifikasi,
+rotasi kunci, **MITM (nilai palsu) ditolak**, `vrf_proof`/`opening` diubah
+ditolak, dengan anchor `search`/`tree head` palsu ditolak, kunci VRF/search key
+salah ditolak, dan fuzz 200 input tanpa trap.
+
+Temuan yang dicatat jujur (`docs/34` §34.5): pada pencarian **pertama** (belum
+ada anchor) perubahan di `search`/`tree head` belum terdeteksi — keamanan KT
+bergantung pada loop monitor yang menyimpan tree head. Karena itu integrasi ke
+jalur bundle produksi dan loop monitor otomatis **belum** dikerjakan (§34.6),
+bersama auditor/`SetAuditorHead`.
+
+**WS-D — pembungkus + test + benchmark SPQR (`docs/33`).** Crate `spqr`
+v1.6.0 dikompilasi ke WASM sebagai raw module tanpa import, dengan entropi
+disuntik host (`getrandom_backend="custom"`) sehingga RNG-nya bisa diaudit dari
+klien. `web/src/lib/spqrRatchet.ts` + **10 test** memakai modul hasil build
+sungguhan: kesepakatan message key, entropi host deterministik, entropi kurang →
+`SpqrError(4)`, fuzz, **kehilangan 1..N−1 pesan**, **pengiriman keluar urutan**,
+dan kehilangan dua arah — semuanya sembuh. Benchmark terukur
+(`pnpm --filter nyx-web run bench:spqr`): pesan mapan 37 B, **state 3,8 KiB per
+langkah**, `send` p50 0,26 ms / `recv` p50 0,12 ms (mesin dev). Bug nyata yang
+ditemukan & diperbaiki di jalan: `memory.buffer` dibaca sebelum getter pointer
+Rust → alokasi malas + `memory.grow` melepas ArrayBuffer ("detached") pada
+instance kedua dan seterusnya.
+
+Gate yang **belum** tertutup dan dicatat sebagai residual: test internal crate
+`spqr` (butuh nightly, kompilasi >10 menit) belum dijalankan; erasure coding
+**per chunk** ada di modul `pub(crate)` crate sehingga hanya bisa diuji di
+bentuk yang teramati dari ABI publik (pesan hilang/keluar urutan).
+
+**Verifikasi:** web `tsc` 0, server `tsc` 0, `pnpm --filter nyx-web run build`
+exit 0, vitest **501/501** (62 file), server `node:test` **336/336** (1 skip:
+test live KT yang butuh binary).
+
+## 🛡️ WS-G(4)/(5) + penutup WS-F: otorisasi grup teruji, fuzz parser, kolom waktu kontak (2026-10-12)
+
+Audit residual `docs/30` (non-E2E). Tiga hal yang ditutup:
+
+**WS-G(4) — jalur grup kini punya test perilaku.** Keputusan otorisasi yang
+dulu tersebar inline di `routes/conversations.ts` dipindah ke
+`server/src/utils/groupAccess.ts` (add/kick anggota, leave, details, rotasi
+kunci, purge) dan diuji sebagai **perilaku** dengan klien Prisma palsu
+(`tests/groupAccess.test.ts`, 17 test) — bukan regex atas source. Yang dikunci:
+kode status + pesan kontrak, **urutan** gate (token → capability admin →
+hitungan anggota), 409 `MEMBERS_REMAIN` sebelum apa pun dihapus, fail-closed
+saat `adminSecretHash` NULL, dan bahwa pencarian baris keanggotaan memakai nilai
+routing ter-seal (userId mentah tidak pernah jadi nilai query). Catatan kontrak
+lama yang sengaja dipertahankan: `PUT /:id/details` menjawab 403 (bukan 404)
+untuk conversation yang tidak ada.
+
+**WS-G(5) — fuzz parser input tak terpercaya (deterministik).** Web:
+`web/src/lib/fuzzParsers.ts` + runner vitest untuk `parseTransportHello`,
+`readBackupHeader`, `unpadBackupPayload`, `parseBackupArchive`,
+`readBackupChunk` (5 × 100k input ≈ 50 s, 0 temuan) dengan invariant bentuk
+hasil, bukan sekadar "tidak crash", plus **self-test** yang membuktikan harness
+benar-benar melaporkan temuan. Sidecar: keputusan framing `[opcode][len][payload]`
+yang dulu ditulis empat kali inline dipindah ke crate lib (`src/protocol.rs`,
+`src/fuzz.rs`, runner `src/bin/fuzz-framing.rs`) dan di-fuzz 160,9 juta iterasi
+per 300 s (536k/detik → gate 1 jam ≈ 1,9 miliar input, 0 temuan), termasuk
+differential test melawan implementasi referensi kedua. `cargo test` masuk CI
+(job `e2e-chrome`).
+
+**WS-F — kolom waktu terakhir yang masih plaintext.** `ContactRow.updatedAt`
+dan `ProfileCacheRecord.updatedAt` (pola aktivitas di IndexedDB) kini di-seal
+(`ENC1:`) di titik tulis dan di rel migrasi unlock yang sudah ada
+(`migrateAtRestSealing`, idempoten; vault terkunci tidak pernah menghapus
+plaintext). Pembaca kontak memakai `openLocalNumber`, jadi baris lama tetap
+terbaca.
+
+Plus artefak observability yang dijanjikan `docs/30` §30.11(1) tetapi belum ada:
+`ops/grafana/dashboards/nyx-overview.json` (18 panel; query = metrik yang sudah
+dideklarasikan `metrics.ts`, ambang disamakan dengan `ops/prometheus/alerts.yml`).
+
+Sisa yang **tidak** dikerjakan di audit ini (dicatat eksplisit di `docs/30`
+§30.20): WS-E(2) signaling call berbasis token (hanya bisa diverifikasi lewat
+E2E call chrome), WS-G(6) vektor DR/sender-key vs oracle libsignal (butuh build
+libsignal + menyentuh jalur kripto beku), WS-H per-hash-ASN (butuh data ASN),
+WS-A/WS-D (proyek tersendiri).
+
+## 🔐 WS-F langkah 1–3: skema + wiring urutan terenkripsi & seal kolom struktur (2026-10-12)
+
+`web/src/lib/localOrderKey.ts` (+ modul daun `localOrderBucket.ts`; 19 test) — kolom pengurutan vault lokal
+(`createdAt`) tidak bisa langsung di-seal: ciphertext tidak punya urutan
+leksikal, jadi range-scan indeks + `.limit()` sebelum dekripsi hilang dan
+paginasi `fetch-older` rusak. Skema dua lapis:
+
+- `orderBucketMs` — waktu di-floor ke bucket 15 menit (`LOCAL_TIME_BUCKET_MS`,
+  konstanta yang sama dengan bucket `createdAt`/`lastMessageAt` server) → tetap
+  bisa diindeks, dan granularitasnya **sudah** dipublikasikan server, jadi tidak
+  menambah kebocoran.
+- `createdAtSealed` — presisi sebagai envelope `ENC1:` (helper sama dengan
+  `seq`); urutan presisi dipulihkan setelah kandidat diambil, bukan sebelum.
+
+Opsi "nilai urut ter-HMAC" di `docs/30` §30.20 ditolak saat implementasi (HMAC
+adalah fungsi acak → indeks tidak bisa di-range-scan). Aturan yang diuji:
+kursor `beforeDate` tetap **inklusif** dan keluaran tetap lama→baru seperti
+`.reverse().limit().reverse()` lama, baris tanpa waktu dibuang, dan pembaca
+harus mengambil bucket batas **utuh** (`equals([conv, bucket])`) — kalau
+berhenti di `limit` baris pertama, baris lebih tua di bucket batas terlewat
+permanen (indeks mengurutkan kunci yang sama berdasarkan primary key).
+
+**Wiring (langkah 2).** `db.ts`: Dexie **v9** mengganti indeks pesan ke
+`[conversationId+orderBucketMs]` dan mengisi bucket baris lama saat upgrade
+(murni aritmetika waktu — `masterSeed` belum tentu tersedia saat DB dibuka).
+`shadowVaultDb.ts`: writer menyegel `createdAt` lewat `ensureOrderFields`
+(plaintext baru dilepas **setelah** envelope berhasil dibuat), pembaca
+berpaginasi per bucket utuh dengan jendela maksimum 32 bucket (~8 jam) dan
+**memulai halaman pertama dari bucket terbaru yang ada** — bukan dari `now`,
+karena percakapan yang sepi berhari-hari akan tampak kosong kalau begitu.
+`messageSearch` mengurut lewat lapis presisi (bukan `sortBy('createdAt')` yang
+kini berisi ciphertext). Baris yang masuk melewati writer — restore `.nyxbak`
+(`liveBackupStore`) dan impor JSON — dinormalkan lewat
+`shadowVault.normalizeOrderIndex()` (idempoten), karena tanpa kolom bucket
+pesannya tersimpan tapi tidak pernah muncul di query.
+
+Test baru: `localOrderKey.test.ts` (19) dan `shadowVaultOrderIndex.test.ts`
+(10, tabel palsu yang meniru indeks bucket), plus `vaultSeqPersistence.test.ts`
+yang fake-nya diperbaiki agar benar-benar menyaring per kunci (sebelumnya
+mengembalikan seluruh tabel) dan menguji jalur perbaikan baris lama.
+Verifikasi: `tsc` 0, `vitest` **414/414** (52 file), build web exit 0.
+
+**Langkah 3 — kolom struktur di-seal di tempat.** `senderId`, `repliedToId`,
+`isViewOnce`, `isDeletedLocal`, `expiresAt` (ms) dan `Conversation.isGroup` kini
+disimpan sebagai envelope `ENC1:` **di kolom yang sama** (pola `seq`), lewat
+`sealLocalText`/`sealLocalFlag` + pembacanya (`openLocalText`/`openLocalFlag`,
+toleran baris plaintext lama). Dexie **v10** melepas indeks yang jadi tak
+berguna: `messages.senderId`, `messages.isDeletedLocal`, `conversations.isGroup`
+(tidak ada satu pun klausa query yang memakainya).
+
+Dua jebakan yang ikut ditutup dan dikunci test:
+- Nilai ter-seal **selalu truthy**, jadi pembaca yang dulu menulis
+  `if (row.isViewOnce || row.isDeletedLocal)` (mis. `messageSearch`) harus
+  membukanya dulu — kalau tidak, seluruh hasil pencarian akan ter-skip.
+- `expiresAt` yang sudah berupa envelope **tidak boleh** diurai `Date.parse`:
+  jalur tulis ulang sekarang mempertahankan baris lama apa adanya
+  (`readExpiresAt` untuk membaca; tanpa itu expiry pesan hilang saat tombol
+  status/unsend menyentuh baris itu).
+
+`status` sengaja tidak ikut: tidak ada jalur tulis yang menyimpannya, jadi
+menyegelnya tidak menambah privasi apa pun.
+
+Verifikasi: `tsc` 0, `vitest` **427/427** (53 file), build web exit 0;
+`shadowVaultOrderIndex.test.ts` bertambah jadi 14 test (round-trip kolom
+ter-seal, kompatibilitas baris lama, expiry, `isGroup`).
+
+**Semantik Dexie kini benar-benar diuji, bukan diasumsikan.**
+`dexieMigration.test.ts` (9 test, devDependency baru `fake-indexeddb`) membangun
+dulu DB versi-1 berisi baris lama (indeks `[conversationId+createdAt]`, kolom
+plaintext), lalu membukanya dengan skema aplikasi: upgrade v1→v9 mengisi
+`orderBucketMs` untuk semua baris, indeks `[conversationId+orderBucketMs]`
+terisi dan bisa di-range-scan (`.equals([conv, bucket])` dan
+`.between(min,max).reverse().limit(1)`), v10 benar-benar menghapus indeks
+`senderId`/`isDeletedLocal`/`conversations.isGroup`, dan pembaca/writer vault
+berjalan di atas IndexedDB nyata (termasuk round-trip konten + kolom ter-seal
+serta `normalizeOrderIndex` untuk baris hasil restore).
+
+**Belum diverifikasi:** E2E browser (UI chat scroll-back, upgrade pada profil
+pengguna nyata). Catatan test: stub `crypto-worker-proxy` tidak aman untuk
+dekripsi **konkuren** di lingkungan test, jadi asersi yang butuh dekripsi
+dijalankan berurutan (kode produksi tetap `Promise.all`).
+
+## 🧹 WS-G(7) dedup helper E2E (2026-10-12)
+
+`web/e2e/helpers/registration.ts` jadi satu-satunya sumber helper onboarding.
+Sebelumnya `registerUser` disalin di **6 spec** dan salinannya sudah menyimpang:
+`settings.spec` butuh langkah skip biometric lebih dulu, varian itu kini
+eksplisit sebagai `registerUserViaBiometric`. Ikut dipindah: probe WebTransport
+(dulu `supportsWebTransport` di `regression.spec` **dan** `webTransportSupported`
+di `transport.spec`, plus satu evaluasi inline di `chat.spec`), lalu blok
+"cari peer → buka chat → kirim → peer menerima" yang disalin di `chat.spec` dan
+`transport.spec` (×2) menjadi `openDirectChatWith` / `sendChatMessage` /
+`expectPeerReceivesMessage`.
+
+Semantik tiap spec dipertahankan secara sengaja: `supportsWebTransport` default
+mengevaluasi tanpa navigasi (perilaku lama `chat`/`transport`), `regression.spec`
+memakai `{ navigateToAppOrigin: true }` (cek harus setelah mendarat di origin app
+karena di about:blank `isSecureContext` bisa `false`); asersi kemunculan bubble
+dan pengukuran latency tetap di spec agar toleransi timeout tidak bergeser.
+
+Verifikasi: web `tsc` 0, `vitest` **385/385** (50 file), `playwright test --list`
+22 test / 7 file. **Tidak dijalankan:** suite E2E-nya sendiri — Postgres lokal di
+mesin ini tidak punya role `nyx_user`/db `nyx_app` sehingga `e2e/global.setup.ts`
+gagal di langkah reset sebelum spec berjalan (kondisi lingkungan, bukan
+perubahan ini); Redis dev sudah dihidupkan untuk percobaan tersebut.
+
+## 🛡️ WS-E(1) coturn + WS-I username links + WS-H guard registrasi (2026-10-12)
+
+Tindak lanjut audit kode terhadap `docs/30` (item yang belum).
+
+**WS-E(1) — coturn self-host jadi primer.** `GET /api/keys/turn` sekarang
+menerbitkan kredensial TURN **time-limited** (HMAC-SHA1, konvensi coturn
+`use-auth-secret`) dari `TURN_URLS` + `TURN_STATIC_AUTH_SECRET` (TTL default
+600 s). Username memakai `identityTag(userId)` — **bukan** userId — sehingga log
+coturn tidak memetakan sesi call ke akun (`docs/28`). Cloudflare TURN turun jadi
+cadangan; STUN pihak ketiga tetap tidak dipakai. Logika murni di
+`server/src/utils/turnCredentials.ts` + `tests/turnCredentials.test.ts` (7 test,
+klok disuntik).
+
+**WS-I — link pendek `/u/<hashId>`.** Route baru (di dalam `ProtectedRoute`)
+`/u/:hashId` meneruskan hashId ke alur `/connect` yang sudah ada (pencocokan
+persis via `/api/users/search`, tanpa enumerasi). Validasi bentuk sama dengan
+server (`43` base64url | `64` hex) di `web/src/utils/usernameLink.ts` +
+`usernameLink.test.ts` (5 test).
+
+**WS-H — guard burst registrasi tanpa PII (sebagian).**
+`server/src/utils/registrationGuard.ts`: kuota per **sumber** (IP di-HMAC dengan
+pepper — IP mentah tidak pernah disimpan) dan per **instalasi**
+(`deviceInstallationTag`), counter Redis `INCR`+`EXPIRE` atomik, fail-open saat
+Redis error. Wiring di `auth.ts` register lewat env
+`ABUSE_REGISTRATION_GUARD=on` (default off = no-op, rollback tanpa deploy
+logika). 5 test (`registrationGuard.test.ts`). **Belum:** kuota per-hash-ASN
+(repo tidak punya sumber data ASN), WebAuthn attestation akun baru, drill
+false-positive NAT.
+
+**WS-G(4) sebagian — test perilaku endpoint.** Dua jalur dipindah ke util yang
+diuji dengan klien Prisma palsu:
+- `server/src/utils/sessionRevocation.ts` (+ `sessionRevocation.test.ts`, 3 test):
+  `DELETE /api/sessions/:jti` — jti milik user lain → 404 tanpa mutasi, revokasi
+  seluruh family, blacklist hanya JTI belum kedaluwarsa.
+- `server/src/utils/keyBundle.ts` (+ `keyBundle.test.ts`, 5 test): pemetaan
+  perangkat → bundle yang dulu **disalin 3×** di `keys.ts` (Buffer/Uint8Array/
+  string → base64url, `null` tetap `null`, bundle publik tanpa signed pre-key).
+
+Verifikasi: server `tsc` 0 & `npm test` **283/283** (+20); web `tsc` 0 &
+`vitest` **385/385** (50 file); `pnpm -r run build` selesai. **Belum dijalankan:**
+E2E call chrome dengan coturn, dan drill produksi.
+
+**Ditahan (butuh keputusan):** WS-F (seal kolom sorting lokal — `docs/30` §30.20
+menyatakan ini bukan tambalan; menyegel kolom jalur-panas tanpa mengubah semua
+pembaca akan merusak sorting/paginasi). WS-G(7) (dedup helper E2E) yang tadinya
+ikut ditahan sudah dikerjakan di entri di atas.
+
+## 📥 UI restore berkas `.nyxbak` manual (2026-10-12)
+
+Menutup batasan fase 4: jalur berkas manual kini punya UI, tidak hanya
+`migration:*` (`docs/31` §31.6c).
+
+- `web/src/components/BackupRestoreModal.tsx` — pemilih berkas `.nyxbak` +
+  prompt recovery phrase, dibuka dari tombol "Restore from .nyxbak File" di
+  modul Data pada `SettingsPage`.
+- Urutan defensif: `readBackupFile` memvalidasi header **sebelum** phrase
+  disentuh (berkas asing/terpotong tidak memicu KDF 128 MB) →
+  `openFramedBackupWithPhrase` (progres per frame) → hapus `deviceId` + bersihkan
+  `identityKeys` (bootstrap identitas baru, konsisten dengan "Import Vault") →
+  reload. Tombol non-aktif sampai berkas **dan** phrase terisi; phrase dinormalkan
+  (`trim` + `lowercase`).
+- i18n: `modals:backup_restore.*` (14 key) + `settings:data.restore_backup` di
+  keempat bahasa (en/id/es/pt-BR).
+- Test baru `src/components/__tests__/backupRestoreModal.test.tsx` (4 test):
+  berkas asing ditolak tanpa memanggil restore, tombol non-aktif sampai lengkap,
+  byte arsip & phrase dinormalkan diteruskan, phrase salah → error tanpa klaim
+  sukses.
+
+Verifikasi: web `tsc --noEmit` 0 & `vitest` **380 test** (49 file);
+`pnpm --filter nyx-web run build` exit 0; `oxlint` file baru 0 error/0 warning.
+
+## 📊 WS-C fase 5 — Benchmark backup 10k pesan (2026-10-12)
+
+Klaim "format ber-frame muat untuk 10k pesan" sekarang menjadi **angka terukur**,
+bukan asumsi (`docs/31` §31.6d, gate `docs/30` §30.7):
+
+- `web/src/lib/backupBench.ts` — harness: fixture deterministik (LCG, tanpa
+  `Math.random`) berisi 10 000 pesan + kunci pesan, `runBackupBenchmark` mengukur
+  waktu + puncak heap/RSS export/import (sampling `process.memoryUsage()` tiap
+  10 ms), verifikasi integritas per tabel (`countsEqual`, tidak peduli urutan
+  frame karena `scramble` default), dan `formatBackupBenchmark` untuk laporan.
+- Script `pnpm --filter nyx-web run bench:backup` menjalankan benchmark penuh;
+  suite normal hanya menjalankan bench 200 pesan (cepat, tetap menguji
+  integritas). Ambang gate longgar ada di `BACKUP_BENCH_BUDGET`.
+- **Hasil (dev, Linux, Node 26, satu proses, `chunkBytes` 64 KB; rentang dua
+  eksekusi, variasi ≈ ±10 %):** 10 000 pesan → **20 272 catatan**, arsip
+  **4.62 MB / 79 frame**; **export 1.34–1.51 s** (puncak heap ~147 MB, RSS
+  ~296 MB), **restore 0.62–0.77 s** (puncak heap ~147 MB, RSS ~312 MB);
+  integritas `OK`.
+- Batasan yang dicatat eksplisit: **I/O IndexedDB tidak diukur** (store in-memory
+  → angka adalah batas bawah kripto + serialisasi); puncak memori hanya sampel
+  10 ms; `restoreFramedBackup` masih menahan seluruh catatan di memori sebelum
+  satu transaksi tulis.
+
+Verifikasi: web `tsc --noEmit` 0 & `vitest` **376 test** (3 baru di
+`backupBench.test.ts`); benchmark 10k lulus gate di mesin ini.
+
+## 🔐 WS-C fase 4 — Restore `.nyxbak` di perangkat pengganti (2026-10-12)
+
+Migrasi perangkat (`migration:*`) sekarang memindahkan **arsip backup ber-frame**
+(`docs/31` §31.6c), bukan lagi JSON vault tunggal + AES-GCM:
+
+- `web/src/lib/backupRestore.ts` — lem antara `backupFormat`/`backupPayload` dan
+  Dexie: `createFramedBackup`, `restoreFramedBackup` (progres **per frame**),
+  `openFramedBackupWithPhrase` (jalur berkas manual lewat recovery phrase),
+  adapter `readTablesFromDexie`/`writeTablesToDexie` (satu transaksi `rw`,
+  `clear()` → `bulkPut()`), `liveBackupStore()` (impor `./db` dinamis sehingga
+  modul aman diuji tanpa IndexedDB), dan `formatBackupSize`.
+- `backupPayload.ts`: `readBackupChunk(frame, codec)` diekstrak dari
+  `readBackupChunks` (satu implementasi validasi) agar restore bisa melaporkan
+  progres per frame tanpa menduplikasi parser.
+- `MigrationSendPage` membangun arsip pada tahap prefetch (kunci acak 32 byte
+  diseal ke kunci publik penerima via QR); `MigrationReceivePage` merakit ulang
+  chunk, membuka seal, dan memulihkan per frame dengan progres 0–100 %.
+- **Perbaikan nyata:** chunk migrasi kini dikirim sebagai **base64**, bukan
+  `ArrayBuffer`. Transport men-serialize payload dengan `JSON.stringify`, jadi
+  `ArrayBuffer` yang dikirim apa adanya menjadi `{}` dan chunk penerima (yang
+  mengharapkan base64) tidak akan pernah cocok.
+
+Verifikasi: web `tsc --noEmit` 0 & `vitest` **373/373** (10 test baru
+`backupRestore.test.ts`, kripto sungguhan + Dexie palsu); `pnpm -r run build`
+selesai (shared/server/web/marketing + postbuild). **Belum dijalankan di sini:**
+E2E WebTransport (butuh Postgres + Redis + sidecar + Chrome full build).
+
 ## 🧹 Purge Legacy (data lama v1 + toleransi at-rest) (2026-10-10)
 
 DB sudah direset (2026-09) dan tidak ada klien/data v1 tersisa, jadi seluruh

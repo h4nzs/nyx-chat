@@ -1,0 +1,27 @@
+# TEMPLATE — `build.sh` menyalin berkas ini ke `Cargo.toml` sambil mengganti
+# `__SPQR_PATH__` dengan path crate `spqr` (pin docs/30 §30.2: 06959b4708f9,
+# crate `spqr` v1.6.0). Crate itu TIDAK di-vendor ke repo ini (AGPL-3.0, tapi
+# ukurannya besar dan dipin sebagai checkout terpisah), jadi Cargo.toml hasil
+# generate tidak ikut di-commit.
+[package]
+name = "nyx-spqr-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spqr = { path = "__SPQR_PATH__", default-features = false }
+# Entropi datang dari host (cfg getrandom_backend="custom"); crate ini tidak
+# pernah memakai backend wasm_js/wasm-bindgen.
+getrandom = "0.3"
+rand = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -20,6 +20,7 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
 const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
+const UsernameLinkPage = lazy(() => import('./pages/UsernameLinkPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const BurnerChat = lazy(() => import('./pages/BurnerChat'));
 const EmbedChatPage = lazy(() => import('./pages/EmbedChatPage'));
@@ -78,6 +79,7 @@ import { useCommandPaletteStore } from './store/commandPalette';
 import { useModalStore } from './store/modal';
 import { useContextMenuStore } from './store/contextMenu';
 import { preloadOnIdle } from '@utils/modalPreload';
+import i18n from './i18n';
 import { useCallStore } from './store/callStore';
 import { useConversationStore } from './store/conversation';
 import { useSystemStore } from './store/systemStore';
@@ -88,8 +90,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { transportClient, connectSocket, disconnectSocket } from './lib/transportClient';
 import { initSocketListeners } from './lib/socketListeners';
 
-// Initialize socket instance once
-transportClient;
+// [LINT 2026-10-11] Baris `transportClient;` dihapus: pernyataan kosong tanpa
+// efek (modul sudah di-import di atas, singleton dibuat saat import).
 initSocketListeners();
 
 // --- Components ---
@@ -285,12 +287,27 @@ const AppContent = () => {
   // 1. Bootstrap Auth
   useEffect(() => {
     const initAuth = async () => {
+      // [BURNER GUEST] Halaman /drop TIDAK punya sesi akun: identitas guest
+      // dibuat BurnerChat lewat `POST /api/auth/burner` sesaat setelah mount.
+      // Bootstrap store di sini BALAPAN dengan itu — refresh guest memang gagal
+      // (token ephemeral), lalu fallback `GET /api/users/me` 401 dan jalur catch
+      // bootstrap MEMBERSIHKAN cookie `at` + `user` yang baru diterbitkan.
+      // Akibatnya uplink burner turun, identitas guest berganti, dan balasan host
+      // (`burner:reply` hanya di-relay ke anggota room) tidak pernah sampai.
+      if (window.location.pathname === '/drop') {
+        useAuthStore.setState({ isBootstrapping: false });
+        return;
+      }
       try {
         await bootstrap();
         
         const { user, accessToken, silentRefresh, logout } = useAuthStore.getState();
+        // [BURNER GUEST] Guest tidak bisa di-refresh (token ephemeral) — jangan
+        // pernah panggil logout() untuk mereka: logout menghapus cookie sesi yang
+        // masih sah dan mematikan uplink burner yang sedang berjalan.
+        const isGuest = user?.role === 'GUEST' || user?.id?.startsWith('guest_');
         // If we think we are logged in, but we don't have an AT
-        if (user && !accessToken) {
+        if (user && !accessToken && !isGuest) {
           const success = await silentRefresh();
           if (!success) {
               logout();
@@ -326,6 +343,51 @@ const AppContent = () => {
       }
     }
   }, [user, location.pathname, isDeviceFlow]);
+
+  // 2b. [docs/34 §34.5] Loop monitor Key Transparency.
+  //
+  // Kenapa di app shell dan bukan di store kripto: langkah monitor adalah
+  // pekerjaan latar yang hanya masuk akal selama sesi terautentikasi dengan
+  // vault terbuka (`hasRestoredKeys`) — dan modul WASM-nya 295 KiB, jadi impor
+  // dinamis di sini menjaga bundel awal tetap tanpa KT.
+  useEffect(() => {
+    if (!user || !hasRestoredKeys) return;
+
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+
+    void (async () => {
+      try {
+        const [{ startKtMonitorLoop }, { monitorKeyTransparency }] = await Promise.all([
+          import('@lib/ktMonitoring'),
+          import('@lib/ktBundleProof'),
+        ]);
+        if (cancelled) return;
+        stop = startKtMonitorLoop({
+          run: () => monitorKeyTransparency(),
+          onChanged: (changes) => {
+            // Kenaikan `keyVersion` di log = kandidat rotasi kunci; pesan yang
+            // datang dari kunci lama akan tampil `keyVersion` lama + terdeteksi
+            // oleh pin identitas (`docs/34` §34.6 poin 1).
+            toast(i18n.t('chat:banners.kt_key_rotation', {
+              count: changes.length,
+              defaultValue: 'Key Transparency: a contact key rotation was published in the log.',
+            }), { icon: '🔐', duration: 6000 });
+          },
+          onError: (error) => {
+            console.warn('[KT] Langkah monitor gagal (loop tetap berjalan):', error);
+          },
+        });
+      } catch (error) {
+        console.warn('[KT] Loop monitor tidak bisa dimulai:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [user, hasRestoredKeys]);
 
   // 3. Apply Theme
   useEffect(() => {
@@ -505,6 +567,8 @@ const AppContent = () => {
 
                 <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
                 <Route path="/connect" element={<PageWrapper><ConnectPage /></PageWrapper>} />
+                {/* [docs/30 WS-I] link pendek /u/<hashId> → alur connect */}
+                <Route path="/u/:hashId" element={<PageWrapper><UsernameLinkPage /></PageWrapper>} />
               </Route>
 
               {/* Embed Route (No Layout/Sidebar) */}

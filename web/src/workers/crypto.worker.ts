@@ -16,9 +16,46 @@ import type {
 } from '../types/crypto-common';
 
 import { getSodium } from '../lib/sodiumInitializer';
+// [docs/33 §33.7 poin 1 — jalur versi paralel] Modul braid SPQR. Artefaknya
+// dibaca sebagai URL aset lalu di-fetch di dalam worker (raw module, tanpa
+// glue JS): modul 506 KiB ini TIDAK ikut bundel JS, jadi klien yang tidak pernah
+// memakai jalur v2 tidak membayarnya. Instansiasi + guard "nol import" ada di
+// `spqrRatchet.ts`; orkestrasi langkah (send sampai key ada) di `spqrSession.ts`.
+import spqrWasmUrl from '../../../packages/spqr-wasm/dist/spqr.wasm?url';
+import { instantiateSpqrRatchet, type SpqrDirection, type SpqrRatchet } from '../lib/spqrRatchet';
+import { initSpqrSession, spqrRecvStep, spqrSendStep } from '../lib/spqrSession';
 
 let sodium: Awaited<ReturnType<typeof getSodium>>;
 let isReady = false;
+
+// ---------------------------------------------------------------------------
+// [JALUR v2 — SPQR] Modul WASM dimuat sekali per worker (lazy).
+// ---------------------------------------------------------------------------
+//
+// Satu instans dipakai bersama semua sesi: ABI-nya stateless dari sisi JS
+// (state selalu eksplisit sebagai byte), dan seluruh rangkaian langkah ratchet
+// berjalan SINKRON tanpa `await` di tengah (`spqrSendStep`/`spqrRecvStep`),
+// jadi tidak ada dua operasi yang bisa menyela satu sama lain di scratch buffer
+// Rust. Memuat modul saat op pertama (bukan saat worker lahir) menjaga jalur v1
+// tidak membayar 506 KiB + kompilasi bila v2 tidak pernah dipakai.
+let spqrRatchet: SpqrRatchet | null = null;
+let spqrWasmBytes: Uint8Array<ArrayBuffer> | null = null;
+
+async function loadSpqrWasmBytes(): Promise<Uint8Array<ArrayBuffer>> {
+  if (spqrWasmBytes) return spqrWasmBytes;
+  const response = await fetch(spqrWasmUrl);
+  if (!response.ok) {
+    throw new Error(`spqr: gagal memuat modul WASM (HTTP ${response.status})`);
+  }
+  spqrWasmBytes = new Uint8Array(await response.arrayBuffer());
+  return spqrWasmBytes;
+}
+
+async function getSpqrRatchet(): Promise<SpqrRatchet> {
+  if (spqrRatchet) return spqrRatchet;
+  spqrRatchet = instantiateSpqrRatchet(await loadSpqrWasmBytes());
+  return spqrRatchet;
+}
 
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
 
@@ -586,6 +623,13 @@ export type WorkerMessage =
   | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; myPqSignedPreKey: SodiumKeyPair }; id: string }
   | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
   | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: DoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string }
+  // [docs/33 §33.7 — jalur v2 (braid SPQR)] State braid adalah byte opaque milik
+  // modul WASM; worker hanya menyimpan/memajukannya. `frames` = satu atau lebih
+  // frame braid berurutan (lihat `spqrSession.ts`: satu langkah SPQR belum tentu
+  // menghasilkan message key).
+  | { type: 'spqr_ratchet_init'; payload: { authKey: CryptoBuffer; direction: SpqrDirection }; id: string }
+  | { type: 'spqr_ratchet_encrypt'; payload: { serializedState: CryptoBuffer; plaintext: string | CryptoBuffer }; id: string }
+  | { type: 'spqr_ratchet_decrypt'; payload: { serializedState: CryptoBuffer; frames: CryptoBuffer[]; ciphertext: CryptoBuffer }; id: string }
   | { type: 'group_init_sender_key'; payload: void; id: string }
   | { type: 'group_ratchet_encrypt'; payload: { serializedState: GroupRatchetState; plaintext: string | CryptoBuffer; signingPrivateKey: CryptoBuffer }; id: string }
   | { type: 'group_ratchet_decrypt'; payload: { serializedState: GroupRatchetState; header: GroupRatchetHeader; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string }
@@ -1992,6 +2036,124 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           if (state.RK) sodium.memzero(state.RK);
           if (state.CKs) sodium.memzero(state.CKs);
           if (state.CKr) sodium.memzero(state.CKr);
+        }
+        break;
+      }
+
+      // ======================================================================
+      // [docs/33 §33.7 — JALUR v2] Ratchet braid SPQR.
+      //
+      // Yang SAMA dengan v1: pad 8 KB traffic-cover, nonce 24 byte acak,
+      // XChaCha20-Poly1305 dengan message key — jadi format ciphertext di wire
+      // identik dan `secretbox_open_easy` tetap bisa membuka pesan v2 yang
+      // MK-nya sudah di-cache (pesan duplikat).
+      //
+      // Yang BEDA: message key tidak lagi lahir dari langkah DH+KEM, melainkan
+      // dari braid ML-KEM (`spqrSendStep`/`spqrRecvStep`). Karena itu header v2
+      // tidak membawa `kemPk`/`ct` 1120 byte, tapi frame braid ~37 byte.
+      // ======================================================================
+      case 'spqr_ratchet_init': {
+        const { authKey, direction } = payload as { authKey: CryptoBuffer; direction: SpqrDirection };
+        const authKeyBytes = new Uint8Array(authKey);
+        try {
+          if (authKeyBytes.length === 0) throw new Error('spqr: authKey kosong');
+          const ratchet = await getSpqrRatchet();
+          result = { state: initSpqrSession(ratchet, { authKey: authKeyBytes, direction }).slice() };
+        } finally {
+          // authKey = rahasia X3DH; zeroing manual (bukan sodium) supaya jalur ini
+          // tetap benar walau sodium belum siap.
+          authKeyBytes.fill(0);
+        }
+        break;
+      }
+
+      case 'spqr_ratchet_encrypt': {
+        const { serializedState, plaintext } = payload as { serializedState: CryptoBuffer; plaintext: CryptoBuffer | string };
+        const stateBytes = new Uint8Array(serializedState);
+        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
+
+        let nonce: Uint8Array | null = null;
+        let ciphertext: Uint8Array | null = null;
+        let mk: Uint8Array | null = null;
+
+        try {
+          const ratchet = await getSpqrRatchet();
+          // Rangkaian langkah ini SINKRON (tanpa await) — scratch buffer Rust
+          // tidak boleh disela op lain.
+          const step = spqrSendStep(ratchet, stateBytes);
+          mk = step.key;
+
+          nonce = sodium.randombytes_buf(24);
+          const FINAL_OVERHEAD = 24 + 16; // 24 (nonce) + 16 (MAC)
+          const paddedPlaintext = padBuffer(plaintextBytes, PADDING_BLOCK_SIZE - FINAL_OVERHEAD);
+          ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(paddedPlaintext, null, null, nonce, mk);
+          if (!nonce || !ciphertext) throw new Error("Encryption failed");
+
+          const combined = new Uint8Array(nonce.length + ciphertext.length);
+          combined.set(nonce);
+          combined.set(ciphertext, nonce.length);
+
+          result = {
+            state: step.state.slice(),
+            frames: step.frames.map((frame) => frame.slice()),
+            ciphertext: combined.slice(),
+            mk: mk.slice()
+          };
+        } finally {
+          if (mk) sodium.memzero(mk);
+          if (nonce) sodium.memzero(nonce);
+          if (ciphertext) sodium.memzero(ciphertext);
+          sodium.memzero(stateBytes);
+          sodium.memzero(plaintextBytes);
+        }
+        break;
+      }
+
+      case 'spqr_ratchet_decrypt': {
+        const { serializedState, frames, ciphertext } = payload as {
+          serializedState: CryptoBuffer;
+          frames: CryptoBuffer[];
+          ciphertext: CryptoBuffer;
+        };
+        const stateBytes = new Uint8Array(serializedState);
+        const frameBytes = (frames ?? []).map((frame) => new Uint8Array(frame));
+        const ciphertextBytes = new Uint8Array(ciphertext);
+
+        let mk: Uint8Array | null = null;
+        let plaintext: Uint8Array | null = null;
+
+        try {
+          const ratchet = await getSpqrRatchet();
+          const step = spqrRecvStep(ratchet, { state: stateBytes, frames: frameBytes });
+          mk = step.key;
+          if (!mk || mk.length === 0) {
+            // Rangkaian frame braid tanpa message key = pesan pembawa braid saja
+            // (peer belum mengirim konten). Bukan kegagalan kripto: pemanggil
+            // memperlakukannya sebagai "belum ada isi".
+            result = { state: step.state.slice(), plaintext: null, mk: null };
+            break;
+          }
+
+          if (ciphertextBytes.length <= 24 + 16) throw new Error('spqr: ciphertext terlalu pendek');
+          const nonce = ciphertextBytes.slice(0, 24);
+          const ctext = ciphertextBytes.slice(24);
+          const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+          if (!decrypted) throw new Error("Decryption failed");
+
+          const FINAL_OVERHEAD = 24 + 16;
+          plaintext = unpadBuffer(decrypted, PADDING_BLOCK_SIZE - FINAL_OVERHEAD);
+
+          result = {
+            state: step.state.slice(),
+            plaintext: plaintext.slice(),
+            mk: mk.slice()
+          };
+        } finally {
+          if (mk) sodium.memzero(mk);
+          if (plaintext) sodium.memzero(plaintext);
+          sodium.memzero(stateBytes);
+          for (const frame of frameBytes) sodium.memzero(frame);
+          sodium.memzero(ciphertextBytes);
         }
         break;
       }

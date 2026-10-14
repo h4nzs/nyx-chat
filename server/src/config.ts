@@ -23,6 +23,15 @@ if (!csrfSecretRaw && process.env.NODE_ENV === 'production') {
   console.warn('⚠️  CSRF_SECRET not set (or empty). Falling back to JWT_SECRET for CSRF protection. For better security isolation, set CSRF_SECRET to an independent random value in your PRODUCTION .env file (the one copied over server/.env on deploy).');
 }
 
+// [docs/31 §31.6 fase 3] Rahasia turunan kunci objek backup (HMAC). Bila tidak
+// diset, jatuh ke JWT_SECRET — tetapi rotasi JWT_SECRET akan membuat backup
+// awan lama tak bisa ditemukan lagi, jadi produksi sebaiknya menyetel nilai
+// independen yang stabil.
+const backupKeySecretRaw = (process.env.BACKUP_KEY_SECRET || '').trim();
+if (!backupKeySecretRaw && process.env.NODE_ENV === 'production') {
+  console.warn('⚠️  BACKUP_KEY_SECRET not set. Falling back to JWT_SECRET for backup object keys; rotating JWT_SECRET will orphan existing cloud backups. Set BACKUP_KEY_SECRET to an independent stable random value in your PRODUCTION .env file.');
+}
+
 export const env = {
   port: parseInt(process.env.PORT || '4000', 10),
   corsOrigin: (process.env.CORS_ORIGIN || 'https://app.nyx-app.my.id')
@@ -50,6 +59,7 @@ export const env = {
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
   chatSecret: process.env.CHAT_SECRET || '',
+  backupKeySecret: backupKeySecretRaw || process.env.JWT_SECRET || 'dev-backup-secret',
   r2AccountId: process.env.R2_ACCOUNT_ID || "",
   r2AccessKeyId: process.env.R2_ACCESS_KEY_ID || "",
   r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",

@@ -1,0 +1,528 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
+
+/**
+ * [docs/30 §30.5 WS-A / docs/32] Penulis log **Key Transparency**.
+ *
+ * Server KT yang dipakai adalah binary Go `key-transparency-server` (pin §30.2)
+ * apa adanya: **tidak ada perubahan protokol**. Yang NYX sediakan di sini:
+ *
+ *   1. **Search key** = `0x75 ('u') || usernameHash(32 byte)` — tipe
+ *      `UsernameHashPrefix` sudah ada di server KT (terverifikasi di kode:
+ *      `cmd/shared/constants.go` + `cmd/kt-server/util.go`), dan karena
+ *      usernameHash NYX adalah keluaran Argon2id 64MB (bukan nomor telepon),
+ *      log tidak menjadi kamus baru.
+ *   2. **Nilai log (format NYX v1)** — kanonik, tetap (frozen), didokumentasikan
+ *      di `docs/32`: versi, keyVersion, identityKey, pqIdentityKey, signingKey,
+ *      dan bucket waktu harian. Tidak ada userId, IP, atau nama.
+ *   3. **Transport gRPC tanpa dependensi**: satu unary call
+ *      `kt_test.KeyTransparencyTestService/Update` lewat HTTP/2 (`node:http2`),
+ *      dengan framing gRPC 5 byte dan pemeriksaan `grpc-status`. Ditulis tangan
+ *      (protobuf yang dipakai hanya beberapa field) supaya tidak menambah
+ *      dependensi gRPC/protobuf ke server.
+ *
+ * Sifat yang dijaga:
+ *   - **Idempoten** — penulisan hanya bergantung pada `(searchKey, keyVersion)`;
+ *     server KT sendiri menganggap update duplikat sebagai sukses (`nil, nil`).
+ *   - **Fail-visible, tidak memblokir** — kegagalan KT tidak menggagalkan
+ *     registrasi (ketersediaan), tetapi dihitung di metrik
+ *     `nyx_kt_writes_total{result="error"}` dan di-log dengan search key
+ *     ter-hash (tidak ada identitas).
+ *   - **Nonaktif secara default** — tanpa `KT_SERVER_URL`, modul ini no-op.
+ *
+ * Sisa yang jujur (dicatat di docs/30 §30.20): **verifier klien** (Spike-1
+ * KT→WASM: verifikasi VRF/commitment atas search & monitor proof) belum ada —
+ * selama itu, log ini belum memberi jaminan terhadap server yang memalsukan
+ * bundle, hanya menyediakan jejak yang bisa diaudit belakangan.
+ */
+
+import http2 from 'node:http2';
+import { createHash } from 'node:crypto';
+
+import { incCounter, setGauge, KT_WRITES, KT_LAST_SUCCESS } from './metrics.js';
+
+/** Prefix tipe search key di server KT (`shared.UsernameHashPrefix`). */
+export const KT_USERNAME_HASH_PREFIX = 0x75;
+
+/** Panjang usernameHash NYX (Argon2id 64MB → 32 byte). */
+export const KT_USERNAME_HASH_BYTES = 32;
+
+/** Versi format nilai log NYX. */
+export const KT_VALUE_VERSION = 1;
+
+/** Bentuk kanonik nilai log v1 (byte). */
+export const KT_VALUE_V1_BYTES =
+  1 + // version
+  1 + // keyVersion
+  32 + // identityKey (X25519)
+  1216 + // pqIdentityKey (ML-KEM-768)
+  32 + // signingKey (Ed25519)
+  4; // updatedAtDay (uint32 big-endian)
+
+/** Path gRPC layanan update (test service dari repo KT — lihat docs/32). */
+export const KT_UPDATE_GRPC_PATH = '/kt_test.KeyTransparencyTestService/Update';
+
+/** Umur dedupe penulisan (ms) — optimisasi, bukan pengaman. */
+export const KT_DEDUPE_TTL_MS = 10 * 60 * 1000;
+
+// ============================================================================
+// Protobuf minimal (hanya yang dipakai kontrak update)
+// ============================================================================
+
+function varint(value: number | bigint): Uint8Array {
+  let v = typeof value === 'bigint' ? value : BigInt(value);
+  const out: number[] = [];
+  while (v > 0x7fn) {
+    out.push(Number((v & 0x7fn) | 0x80n));
+    v >>= 7n;
+  }
+  out.push(Number(v));
+  return new Uint8Array(out);
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+const bytesField = (field: number, value: Uint8Array): Uint8Array =>
+  concatBytes(varint((field << 3) | 2), varint(value.length), value);
+const messageField = (field: number, encoded: Uint8Array): Uint8Array => bytesField(field, encoded);
+const boolField = (field: number, value: boolean): Uint8Array =>
+  value ? concatBytes(varint(field << 3), varint(1)) : new Uint8Array(0);
+const uintField = (field: number, value: number | bigint): Uint8Array =>
+  concatBytes(varint(field << 3), varint(value));
+
+export interface KtConsistency {
+  last?: number | bigint;
+  distinguished?: number | bigint;
+}
+
+export interface KtUpdateRequest {
+  searchKey: Uint8Array;
+  value: Uint8Array;
+  consistency?: KtConsistency;
+  returnUpdateResponse?: boolean;
+}
+
+/** `transparency.UpdateRequest` → byte protobuf. */
+export function encodeKtUpdateRequest(request: KtUpdateRequest): Uint8Array {
+  const parts: Uint8Array[] = [bytesField(1, request.searchKey), bytesField(2, request.value)];
+
+  // Field `consistency` WAJIB hadir (boleh kosong): server KT menolak update
+  // dengan "consistency cannot be nil" bila field ini tidak ada — terverifikasi
+  // terhadap binary Go yang sesungguhnya (lihat test live di tests/keyTransparency).
+  const consistency: Uint8Array[] = [];
+  if (request.consistency?.last !== undefined) consistency.push(uintField(1, request.consistency.last));
+  if (request.consistency?.distinguished !== undefined) {
+    consistency.push(uintField(2, request.consistency.distinguished));
+  }
+  parts.push(messageField(3, concatBytes(...consistency)));
+
+  parts.push(boolField(5, request.returnUpdateResponse === true));
+  return concatBytes(...parts);
+}
+
+/** Pembaca varint (untuk decode respon). */
+function readVarint(bytes: Uint8Array, offset: number): { value: bigint; next: number } | null {
+  let value = 0n;
+  let shift = 0n;
+  let index = offset;
+  while (index < bytes.length) {
+    const byte = bytes[index]!;
+    value |= BigInt(byte & 0x7f) << shift;
+    index++;
+    if ((byte & 0x80) === 0) return { value, next: index };
+    shift += 7n;
+    if (shift > 63n) return null;
+  }
+  return null;
+}
+
+/** Bidang length-delimited/varint dari sebuah pesan protobuf. */
+export function decodeProtoFields(bytes: Uint8Array): Map<number, Array<Uint8Array | bigint>> {
+  const fields = new Map<number, Array<Uint8Array | bigint>>();
+  let offset = 0;
+  while (offset < bytes.length) {
+    const key = readVarint(bytes, offset);
+    if (!key) break;
+    const field = Number(key.value >> 3n);
+    const wire = Number(key.value & 0x7n);
+    offset = key.next;
+    if (wire === 0) {
+      const value = readVarint(bytes, offset);
+      if (!value) break;
+      offset = value.next;
+      fields.set(field, [...(fields.get(field) ?? []), value.value]);
+    } else if (wire === 2) {
+      const len = readVarint(bytes, offset);
+      if (!len) break;
+      const start = len.next;
+      const end = start + Number(len.value);
+      if (end > bytes.length) break;
+      fields.set(field, [...(fields.get(field) ?? []), bytes.subarray(start, end)]);
+      offset = end;
+    } else if (wire === 5) {
+      offset += 4;
+    } else if (wire === 1) {
+      offset += 8;
+    } else {
+      break;
+    }
+  }
+  return fields;
+}
+
+export interface KtUpdateResponseSummary {
+  /** Ukuran pohon setelah update, bila server mengembalikan tree head. */
+  treeSize: bigint | null;
+  /** Panjang proof VRF (byte), null bila tidak ada. */
+  vrfProofLength: number | null;
+  /** True bila server mengembalikan respons penuh (bukan duplikat/kosong). */
+  hasUpdateProof: boolean;
+}
+
+/** Ambil ringkasan `transparency.UpdateResponse` tanpa perlu memverifikasi proof. */
+export function summarizeKtUpdateResponse(bytes: Uint8Array): KtUpdateResponseSummary {
+  if (bytes.length === 0) return { treeSize: null, vrfProofLength: null, hasUpdateProof: false };
+
+  const response = decodeProtoFields(bytes);
+  const treeHead = response.get(1)?.[0];
+  let treeSize: bigint | null = null;
+  if (treeHead instanceof Uint8Array) {
+    const fullTreeHead = decodeProtoFields(treeHead);
+    const head = fullTreeHead.get(1)?.[0];
+    if (head instanceof Uint8Array) {
+      const value = decodeProtoFields(head).get(1)?.[0];
+      if (typeof value === 'bigint') treeSize = value;
+    }
+  }
+  const vrfProof = response.get(2)?.[0];
+  return {
+    treeSize,
+    vrfProofLength: vrfProof instanceof Uint8Array ? vrfProof.length : null,
+    hasUpdateProof: response.has(3) || response.has(4),
+  };
+}
+
+// ============================================================================
+// Framing gRPC + transport HTTP/2
+// ============================================================================
+
+/** Bungkus pesan protobuf dalam frame gRPC (compress flag + panjang 4 byte BE). */
+export function frameGrpcMessage(message: Uint8Array): Uint8Array {
+  const frame = new Uint8Array(5 + message.length);
+  frame[0] = 0;
+  new DataView(frame.buffer).setUint32(1, message.length, false);
+  frame.set(message, 5);
+  return frame;
+}
+
+/** Ambil pesan-pesan dari buffer frame gRPC (bisa >1, bisa belum lengkap). */
+export function parseGrpcFrames(buffer: Uint8Array): { messages: Uint8Array[]; rest: Uint8Array } {
+  const messages: Uint8Array[] = [];
+  let offset = 0;
+  while (buffer.length - offset >= 5) {
+    const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 5);
+    const compressed = buffer[offset]!;
+    const length = view.getUint32(1, false);
+    if (buffer.length - offset - 5 < length) break;
+    if (compressed !== 0) throw new Error('GRPC_COMPRESSED_MESSAGE_UNSUPPORTED');
+    messages.push(buffer.subarray(offset + 5, offset + 5 + length));
+    offset += 5 + length;
+  }
+  return { messages, rest: buffer.subarray(offset) };
+}
+
+export interface KtTransport {
+  /** Kirim satu unary Update; mengembalikan byte `UpdateResponse`. */
+  update(requestBytes: Uint8Array): Promise<Uint8Array>;
+}
+
+/**
+ * Transport gRPC HTTP/2 (h2c) tanpa dependensi. `endpoint` mis.
+ * `http://127.0.0.1:8081`.
+ */
+export function createGrpcKtTransport(input: { endpoint: string; timeoutMs?: number }): KtTransport {
+  const timeoutMs = input.timeoutMs ?? 5000;
+
+  return {
+    update(requestBytes: Uint8Array): Promise<Uint8Array> {
+      return new Promise<Uint8Array>((resolve, reject) => {
+        let settled = false;
+        const client = http2.connect(input.endpoint);
+        const finish = (error: Error | null, value?: Uint8Array) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          client.close();
+          if (error) reject(error);
+          else resolve(value ?? new Uint8Array(0));
+        };
+
+        const timer = setTimeout(() => finish(new Error('KT_UPDATE_TIMEOUT')), timeoutMs);
+
+        client.on('error', (err) => finish(err));
+
+        const request = client.request({
+          ':method': 'POST',
+          ':path': KT_UPDATE_GRPC_PATH,
+          'content-type': 'application/grpc+proto',
+          te: 'trailers',
+        });
+
+        const chunks: Buffer[] = [];
+        let grpcStatus: string | null = null;
+        let grpcMessage = '';
+
+        // Status bisa datang di header (trailers-only) atau di trailer; gRPC
+        // meng-encode pesannya sebagai persen, jadi dibuka dulu sebelum dipakai.
+        const readStatus = (headers: http2.IncomingHttpHeaders) => {
+          const status = headers['grpc-status'];
+          if (typeof status === 'string' || typeof status === 'number') grpcStatus = String(status);
+          const message = headers['grpc-message'];
+          if (typeof message === 'string' && message.length > 0) {
+            try {
+              grpcMessage = decodeURIComponent(message);
+            } catch {
+              grpcMessage = message;
+            }
+          }
+        };
+
+        request.on('response', readStatus);
+        request.on('trailers', readStatus);
+        request.on('data', (chunk: Buffer) => chunks.push(chunk));
+        request.on('error', (err) => finish(err));
+        request.on('end', () => {
+          if (grpcStatus !== null && grpcStatus !== '0') {
+            finish(new Error(`KT_UPDATE_GRPC_STATUS_${grpcStatus}${grpcMessage ? `:${grpcMessage}` : ''}`));
+            return;
+          }
+          try {
+            const { messages } = parseGrpcFrames(new Uint8Array(Buffer.concat(chunks)));
+            finish(null, messages[0] ?? new Uint8Array(0));
+          } catch (e) {
+            finish(e as Error);
+          }
+        });
+
+        request.end(Buffer.from(frameGrpcMessage(requestBytes)));
+      });
+    },
+  };
+}
+
+// ============================================================================
+// Entri log (format nilai NYX v1)
+// ============================================================================
+
+export interface KtLogEntryInput {
+  /** usernameHash dari klien: base64url dari 32 byte. */
+  usernameHash: string;
+  identityKey: Uint8Array;
+  pqIdentityKey: Uint8Array;
+  signingKey: Uint8Array;
+  keyVersion: number;
+  /** Bucket harian (`dayBucket()`) — presisi detik tidak pernah masuk log. */
+  updatedAtDay: number;
+}
+
+export interface KtLogEntry {
+  searchKey: Uint8Array;
+  value: Uint8Array;
+  keyVersion: number;
+  /** Identitas log untuk dedupe/log (bukan identitas pengguna). */
+  entryTag: string;
+}
+
+export function decodeBase64Url(value: string): Uint8Array | null {
+  try {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const buffer = Buffer.from(normalized, 'base64');
+    if (buffer.length === 0) return null;
+    return new Uint8Array(buffer);
+  } catch {
+    return null;
+  }
+}
+
+/** Search key KT untuk usernameHash NYX: `0x75 || usernameHash`. */
+export function ktSearchKey(usernameHash: Uint8Array): Uint8Array {
+  if (usernameHash.length !== KT_USERNAME_HASH_BYTES) {
+    throw new Error('KT_USERNAME_HASH_LENGTH_INVALID');
+  }
+  return concatBytes(new Uint8Array([KT_USERNAME_HASH_PREFIX]), usernameHash);
+}
+
+/** Nilai log v1 (kanonik, frozen). */
+export function encodeKtValue(entry: {
+  identityKey: Uint8Array;
+  pqIdentityKey: Uint8Array;
+  signingKey: Uint8Array;
+  keyVersion: number;
+  updatedAtDay: number;
+}): Uint8Array {
+  if (entry.identityKey.length !== 32) throw new Error('KT_IDENTITY_KEY_LENGTH_INVALID');
+  if (entry.signingKey.length !== 32) throw new Error('KT_SIGNING_KEY_LENGTH_INVALID');
+  if (entry.pqIdentityKey.length !== 1216) throw new Error('KT_PQ_KEY_LENGTH_INVALID');
+
+  const value = new Uint8Array(KT_VALUE_V1_BYTES);
+  let offset = 0;
+  value[offset++] = KT_VALUE_VERSION;
+  value[offset++] = entry.keyVersion & 0xff;
+  value.set(entry.identityKey, offset);
+  offset += 32;
+  value.set(entry.pqIdentityKey, offset);
+  offset += 1216;
+  value.set(entry.signingKey, offset);
+  offset += 32;
+  new DataView(value.buffer).setUint32(offset, entry.updatedAtDay >>> 0, false);
+  return value;
+}
+
+/** Baca kembali nilai log v1 (round-trip & audit). */
+export function decodeKtValue(value: Uint8Array): {
+  version: number;
+  keyVersion: number;
+  identityKey: Uint8Array;
+  pqIdentityKey: Uint8Array;
+  signingKey: Uint8Array;
+  updatedAtDay: number;
+} {
+  if (value.length !== KT_VALUE_V1_BYTES) throw new Error('KT_VALUE_LENGTH_INVALID');
+  if (value[0] !== KT_VALUE_VERSION) throw new Error('KT_VALUE_VERSION_UNSUPPORTED');
+  return {
+    version: value[0]!,
+    keyVersion: value[1]!,
+    identityKey: value.subarray(2, 34),
+    pqIdentityKey: value.subarray(34, 1250),
+    signingKey: value.subarray(1250, 1282),
+    updatedAtDay: new DataView(value.buffer, value.byteOffset + 1282, 4).getUint32(0, false),
+  };
+}
+
+/** Tag entri untuk dedupe/log: sha256(searchKey) — tanpa identitas. */
+export const ktEntryTag = (searchKey: Uint8Array): string =>
+  createHash('sha256').update(searchKey).digest('hex').slice(0, 16);
+
+/**
+ * Digest nilai log. Dipakai sebagai bagian kunci dedupe: **perubahan kunci harus
+ * tetap ditulis** (itu inti auditabilitas), jadi dedupe tidak boleh hanya
+ * melihat (searchKey, keyVersion) — dua pemulihan akun berturut-turut punya
+ * keyVersion yang sama tetapi nilai yang berbeda.
+ */
+export const ktValueDigest = (value: Uint8Array): string =>
+  createHash('sha256').update(value).digest('hex').slice(0, 8);
+
+/** Bangun entri dari input mentah klien. Melempar bila bentuknya tidak sah. */
+export function buildKtLogEntry(input: KtLogEntryInput): KtLogEntry {
+  const usernameHash = decodeBase64Url(input.usernameHash);
+  if (!usernameHash) throw new Error('KT_USERNAME_HASH_INVALID');
+
+  const searchKey = ktSearchKey(usernameHash);
+  const value = encodeKtValue(input);
+  return { searchKey, value, keyVersion: input.keyVersion, entryTag: ktEntryTag(searchKey) };
+}
+
+// ============================================================================
+// Penulis idempoten
+// ============================================================================
+
+const recentWrites = new Map<string, number>();
+
+/** Hook test: buang dedupe. */
+export function clearKtDedupeForTests(): void {
+  recentWrites.clear();
+}
+
+export interface KtCommitResult {
+  ok: boolean;
+  skipped?: 'DISABLED' | 'DUPLICATE';
+  reason?: string;
+  treeSize?: bigint | null;
+}
+
+/**
+ * Tulis satu entri ke log. **Tidak pernah melempar**: kegagalan dicatat sebagai
+ * metrik + log (search key ter-hash) supaya registrasi tetap jalan, dan operator
+ * melihat lag di dashboard (`nyx_kt_writes_total`).
+ */
+export async function commitKeyTransparencyEntry(
+  entry: KtLogEntry,
+  options: { transport?: KtTransport; now?: number } = {}
+): Promise<KtCommitResult> {
+  const endpoint = process.env.KT_SERVER_URL;
+  const transport =
+    options.transport ??
+    (endpoint ? createGrpcKtTransport({ endpoint, timeoutMs: Number(process.env.KT_TIMEOUT_MS) || 5000 }) : null);
+
+  if (!transport) return { ok: false, skipped: 'DISABLED' };
+
+  const now = options.now ?? Date.now();
+  // Dedupe = (search key, versi kunci, nilai). Nilai yang sama tidak ditulis dua
+  // kali; nilai yang BERUBAH selalu ditulis meski versinya sama.
+  const dedupeKey = `${entry.entryTag}:${entry.keyVersion}:${ktValueDigest(entry.value)}`;
+  const last = recentWrites.get(dedupeKey);
+  if (last !== undefined && now - last < KT_DEDUPE_TTL_MS) {
+    return { ok: true, skipped: 'DUPLICATE' };
+  }
+
+  try {
+    const responseBytes = await transport.update(
+      encodeKtUpdateRequest({
+        searchKey: entry.searchKey,
+        value: entry.value,
+        returnUpdateResponse: true,
+      })
+    );
+    const summary = summarizeKtUpdateResponse(responseBytes);
+
+    recentWrites.set(dedupeKey, now);
+    if (recentWrites.size > 10_000) {
+      for (const [key, timestamp] of recentWrites) {
+        if (now - timestamp >= KT_DEDUPE_TTL_MS) recentWrites.delete(key);
+      }
+    }
+
+    incCounter(KT_WRITES, { result: 'ok' });
+    setGauge(KT_LAST_SUCCESS, Math.floor(now / 1000));
+    return { ok: true, treeSize: summary.treeSize };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'UNKNOWN';
+    incCounter(KT_WRITES, { result: 'error' });
+    console.error(`[KT] Penulisan log gagal (entry ${entry.entryTag}, keyVersion ${entry.keyVersion}): ${reason}`);
+    return { ok: false, reason };
+  }
+}
+
+/**
+ * Jalur pakai di route: bangun entri lalu tulis. Bila bentuk input tidak sah
+ * (mis. usernameHash bukan 32 byte), entri dilewati dengan peringatan — bukan
+ * menulis nilai yang salah ke log publik.
+ */
+export async function publishKeyTransparencyEntry(
+  input: KtLogEntryInput,
+  options: { transport?: KtTransport; now?: number } = {}
+): Promise<KtCommitResult> {
+  if (!process.env.KT_SERVER_URL && !options.transport) return { ok: false, skipped: 'DISABLED' };
+
+  let entry: KtLogEntry;
+  try {
+    entry = buildKtLogEntry(input);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'UNKNOWN';
+    incCounter(KT_WRITES, { result: 'invalid' });
+    console.warn(`[KT] Entri log dilewati (keyVersion ${input.keyVersion}): ${reason}`);
+    return { ok: false, reason };
+  }
+
+  return commitKeyTransparencyEntry(entry, options);
+}

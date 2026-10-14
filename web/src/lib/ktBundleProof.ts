@@ -1,0 +1,545 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
+
+/**
+ * [docs/34 §34.6 poin 1] Verifikasi prekey bundle terhadap **log Key Transparency**.
+ *
+ * Sampai sekarang NYX hanya *menulis* log KT dan punya verifier
+ * (`web/src/lib/keyTransparency.ts`) yang belum pernah dipanggil jalur produksi.
+ * Akibatnya server masih bisa menyajikan bundle kunci palsu yang konsisten dengan
+ * dirinya sendiri (TOFU): `peerIdentityTrust` hanya membandingkan kunci baru
+ * dengan pin sebelumnya, dan pada kontak pertama ia menerima apa pun.
+ *
+ * Modul ini menutup celah itu: sebelum sebuah `identityKey` dipin, bukti log
+ * untuk `0x75 || usernameHash(32)` peer diambil lewat `/api/keys/kt/*`,
+ * **diverifikasi di klien** (WASM `libsignal-keytrans`), lalu kunci di dalam
+ * nilai log dibandingkan dengan kunci yang disajikan bundle.
+ *
+ * Hasilnya sebuah *verdict* (tidak melempar):
+ *
+ * | status | arti | tindakan pemanggil |
+ * |---|---|---|
+ * | `confirmed` | bukti sah **dan** kunci log = kunci bundle | pin seperti biasa, tandai terverifikasi |
+ * | `mismatch` | bukti sah, **tetapi** kunci log ≠ kunci bundle | JANGAN pin kunci bundle; blokir kirim + minta user memverifikasi safety number |
+ * | `unverifiable` | bukti/bukti-konsistensi ditolak verifier | tidak memblokir; catat (bisa berarti anchor basi ATAU server berbohong) |
+ * | `unavailable` | KT nonaktif / jaringan / subjek tak ada di log | TOFU seperti sebelumnya, catat |
+ * | `unknown-subject` | username peer belum diketahui → search key tak bisa diturunkan | TOFU, tanpa panggilan jaringan |
+ *
+ * Kenapa bukan `crypto.worker.ts`: verifikasi berjalan di thread utama lewat
+ * impor dinamis (`keyTransparency.ts` + `keytrans.wasm` 295 KiB), jadi bundle
+ * di aplikasi yang **tidak** mengaktifkan KT tidak menanggung biaya muatnya
+ * sama sekali. Verifikasi hanya terjadi saat bundle peer pertama dibaca
+ * (dan di-cache), bukan per pesan — anggarannya milidetik dibanding CPU
+ * pembangkitan kunci.
+ *
+ * Batas yang jujur (lihat `docs/34`):
+ *   1. Search key membutuhkan **username peer** (Argon2id klien). Kalau username
+ *      belum diketahui, verifikasi mustahil — dicatat sebagai `unknown-subject`,
+ *      bukan diam-diam dianggap sah.
+ *   2. `mismatch` hanya bisa dikatakan bila bukti terverifikasi: tanpa anchor
+ *      tersimpan, perubahan di dalam `search`/tree head tidak terdeteksi — karena
+ *      itu tree size + monitoring data disimpan (`ktMonitoring`) dan dikirim
+ *      sebagai `last` pada verifikasi berikutnya.
+ *   3. Anchor distinguished diambil sekali saat verifikasi pertama; kalau gagal,
+ *      verifikasi search tetap sah (konsistensi saja yang belum bisa dibuktikan).
+ */
+
+import { api } from './api';
+import {
+  hexToBytes,
+  ktSearchKeyHex,
+  loadKtStates,
+  runKtMonitorOnce,
+  saveKtState,
+  type KtMonitorOutcome,
+  type KtStateUpdate,
+  type KtStoredState,
+} from './ktMonitoring';
+import {
+  KT_MODE_CONTACT_MONITORING,
+  KtVerificationError,
+  instantiateKeyTransparencyVerifier,
+  type KeyTransparencyVerifier,
+  type KtConfig,
+} from './keyTransparency';
+
+/** Prefix tipe search key di log KT (`shared.UsernameHashPrefix`, docs/32). */
+export const KT_SEARCH_PREFIX = 0x75;
+/** Versi format nilai log NYX yang dipahami modul ini. */
+export const KT_VALUE_VERSION = 1;
+/** Panjang nilai log v1: 1+1+32+1216+32+4. */
+export const KT_VALUE_BYTES = 1286;
+/** Jeda minimum antar percobaan saat KT tidak tersedia (ms). */
+export const KT_UNAVAILABLE_BACKOFF_MS = 5 * 60 * 1000;
+/** Umur maksimum konfirmasi KT yang dianggap masih segar (ms). */
+export const KT_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
+
+export type KtVerdictStatus =
+  | 'confirmed'
+  | 'mismatch'
+  | 'unverifiable'
+  | 'unavailable'
+  | 'unknown-subject';
+
+export interface KtVerdict {
+  status: KtVerdictStatus;
+  /** Alasan ringkas (hanya untuk log/diagnostik, bukan untuk UI). */
+  reason?: string;
+  /** `keyVersion` dari nilai log yang terverifikasi. */
+  keyVersion?: number;
+  /** `identityKey` di log (hex) saat status `mismatch`. */
+  logIdentityKey?: string;
+}
+
+export interface KtRemoteConfig {
+  mode: number;
+  signatureKey: string;
+  vrfKey: string;
+  auditorKeys?: string[];
+  valueFormat?: string;
+}
+
+export interface KtProof {
+  fullTreeHead: Uint8Array;
+  condensed: Uint8Array;
+}
+
+export interface KtProofQuery {
+  searchKey: Uint8Array;
+  /** Ukuran pohon yang sudah dipercaya klien (menyalakan bukti konsistensi). */
+  last?: number;
+  distinguished?: number;
+}
+
+export interface KtBundleCheckInput {
+  userId: string;
+  /** Username peer (login name). `undefined`/kosong → `unknown-subject`. */
+  username?: string | null;
+  /** `identityKey` dari prekey bundle (base64url). */
+  identityKey: string;
+  now?: Date | number;
+}
+
+export interface KtBundleDeps {
+  hashUsername?: (username: string) => Promise<string>;
+  fetchConfig?: () => Promise<KtRemoteConfig>;
+  /** Bukti search untuk satu search key (`GET /api/keys/kt/search`). */
+  fetchProof?: (query: KtProofQuery) => Promise<KtProof>;
+  /** Bukti anchor distinguished (`GET /api/keys/kt/distinguished`). */
+  fetchAnchor?: (query: { last?: number; distinguished?: number }) => Promise<KtProof>;
+  verifier?: KeyTransparencyVerifier;
+  loadStates?: () => Promise<KtStoredState[]>;
+  saveState?: (update: KtStateUpdate) => Promise<void>;
+  log?: (event: string, detail: Record<string, unknown>) => void;
+}
+
+export interface ParsedKtValue {
+  version: number;
+  keyVersion: number;
+  identityKey: Uint8Array;
+  pqIdentityKey: Uint8Array;
+  signingKey: Uint8Array;
+  updatedAtDay: number;
+}
+
+// ---------------------------------------------------------------------------
+// Kodek
+// ---------------------------------------------------------------------------
+
+const BASE64URL_32 = /^[A-Za-z0-9_-]{43}$/;
+
+export function base64UrlToBytes(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) out[index] = binary.charCodeAt(index);
+  return out;
+}
+
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+/**
+ * Search key log dari usernameHash base64url 32 byte: `0x75 || hash`.
+ * Bentuk yang ditolak dilempar (bukan diam-diam dipotong) — search key salah
+ * akan terlihat sebagai "subjek tak ada di log", yang menyesatkan.
+ */
+export function ktSearchKeyFromUsernameHash(usernameHashB64Url: string): Uint8Array {
+  if (!BASE64URL_32.test(usernameHashB64Url)) {
+    throw new Error('kt: usernameHash harus base64url dari 32 byte');
+  }
+  const hash = base64UrlToBytes(usernameHashB64Url);
+  const searchKey = new Uint8Array(1 + hash.length);
+  searchKey[0] = KT_SEARCH_PREFIX;
+  searchKey.set(hash, 1);
+  return searchKey;
+}
+
+/** Urai nilai log v1 NYX (`docs/32`): versi, keyVersion, kunci-kunci, bucket hari. */
+export function parseKtValue(value: Uint8Array): ParsedKtValue {
+  if (value.length < KT_VALUE_BYTES) {
+    throw new Error(`kt: nilai log terlalu pendek (${value.length} < ${KT_VALUE_BYTES})`);
+  }
+  const version = value[0]!;
+  if (version !== KT_VALUE_VERSION) {
+    throw new Error(`kt: versi nilai log tidak dikenal (${version})`);
+  }
+  const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
+  return {
+    version,
+    keyVersion: value[1]!,
+    identityKey: value.subarray(2, 34).slice(),
+    pqIdentityKey: value.subarray(34, 34 + 1216).slice(),
+    signingKey: value.subarray(34 + 1216, 34 + 1216 + 32).slice(),
+    updatedAtDay: view.getUint32(34 + 1216 + 32, false),
+  };
+}
+
+/**
+ * `FullTreeHead.tree_head.tree_size` dari byte `FullTreeHead` (protobuf).
+ * Angka ini yang harus dikirim sebagai `last` pada permintaan berikutnya supaya
+ * server menyertakan bukti konsistensi (tanpa itu verifikasi ber-anchor gagal
+ * `Malformed proof` — temuan `docs/34` §34.5a).
+ */
+export function treeSizeFromFullTreeHead(fullTreeHead: Uint8Array): number {
+  let index = 0;
+  const varint = (): number => {
+    let value = 0;
+    let shift = 0;
+    while (index < fullTreeHead.length) {
+      const byte = fullTreeHead[index++]!;
+      value |= (byte & 0x7f) << shift;
+      if ((byte & 0x80) === 0) return value >>> 0;
+      shift += 7;
+    }
+    throw new Error('kt: varint terpotong pada FullTreeHead');
+  };
+
+  while (index < fullTreeHead.length) {
+    const key = varint();
+    const wire = key & 0x07;
+    if (wire === 2) {
+      const length = varint();
+      if (key >> 3 === 1) {
+        const sub = fullTreeHead.subarray(index, index + length);
+        if ((sub[0]! >> 3) !== 1 || (sub[0]! & 0x07) !== 0) {
+          throw new Error('kt: tree head tidak diawali tree_size');
+        }
+        let subIndex = 1;
+        let size = 0;
+        let shift = 0;
+        while (subIndex < sub.length) {
+          const byte = sub[subIndex++]!;
+          size |= (byte & 0x7f) << shift;
+          if ((byte & 0x80) === 0) return size >>> 0;
+          shift += 7;
+        }
+        throw new Error('kt: tree_size terpotong');
+      }
+      index += length;
+    } else if (wire === 0) {
+      varint();
+    } else if (wire === 5) {
+      index += 4;
+    } else if (wire === 1) {
+      index += 8;
+    } else {
+      throw new Error(`kt: wire-type ${wire} tidak didukung`);
+    }
+  }
+  throw new Error('kt: FullTreeHead tanpa tree_head');
+}
+
+// ---------------------------------------------------------------------------
+// Loader lazy (modul WASM + config)
+// ---------------------------------------------------------------------------
+
+let verifierPromise: Promise<KeyTransparencyVerifier> | null = null;
+let cachedConfig: KtConfig | null = null;
+let lastUnavailableAt = 0;
+
+/** Hook test: buang cache config & instance WASM. */
+export function resetKtBundleProofCaches(): void {
+  verifierPromise = null;
+  cachedConfig = null;
+  lastUnavailableAt = 0;
+}
+
+/**
+ * Muat verifier sekali per sesi. Modul WASM diambil lewat URL aset Vite
+ * (`?url`) sehingga hanya diunduh saat KT benar-benar dipakai.
+ */
+async function loadKtVerifier(): Promise<KeyTransparencyVerifier> {
+  if (!verifierPromise) {
+    verifierPromise = (async () => {
+      const [{ instantiateKeyTransparencyVerifier: instantiate }, wasmModule] = await Promise.all([
+        import('./keyTransparency'),
+        import('../../../packages/keytrans-wasm/dist/keytrans.wasm?url'),
+      ]);
+      const url = (wasmModule as { default: string }).default;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier (${response.status})`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return instantiate(bytes as Uint8Array<ArrayBuffer>);
+    })();
+  }
+  try {
+    return await verifierPromise;
+  } catch (error) {
+    verifierPromise = null;
+    throw error;
+  }
+}
+
+const hexToBytesLocal = (value: string): Uint8Array => {
+  if (value.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(value)) {
+    throw new Error('kt: kunci publik log bukan hex');
+  }
+  return hexToBytes(value.toLowerCase());
+};
+
+async function defaultFetchConfig(): Promise<KtRemoteConfig> {
+  return await api<KtRemoteConfig>('/api/keys/kt/config');
+}
+
+async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
+  const params = new URLSearchParams({ hash: bytesToBase64Url(query.searchKey.subarray(1)) });
+  if (query.last !== undefined) params.set('last', String(query.last));
+  if (query.distinguished !== undefined) params.set('distinguished', String(query.distinguished));
+  const response = await api<{ fullTreeHead: string; condensed: string }>(
+    `/api/keys/kt/search?${params.toString()}`
+  );
+  return {
+    fullTreeHead: base64UrlToBytes(response.fullTreeHead),
+    condensed: base64UrlToBytes(response.condensed),
+  };
+}
+
+async function defaultFetchAnchor(query: { last?: number; distinguished?: number }): Promise<KtProof> {
+  const params = new URLSearchParams();
+  if (query.last !== undefined) params.set('last', String(query.last));
+  if (query.distinguished !== undefined) params.set('distinguished', String(query.distinguished));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await api<{ fullTreeHead: string; condensed: string }>(
+    `/api/keys/kt/distinguished${suffix}`
+  );
+  return {
+    fullTreeHead: base64UrlToBytes(response.fullTreeHead),
+    condensed: base64UrlToBytes(response.condensed),
+  };
+}
+
+async function resolveConfig(
+  fetchConfig: () => Promise<KtRemoteConfig>
+): Promise<KtConfig> {
+  if (cachedConfig) return cachedConfig;
+  const remote = await fetchConfig();
+  if (typeof remote.mode !== 'number' || !remote.signatureKey || !remote.vrfKey) {
+    throw new Error('kt: config log tidak lengkap');
+  }
+  const config: KtConfig = {
+    // Mode divalidasi sebagai angka di atas; tipe `KtMode` adalah union nilai
+    // yang dikenal verifier.
+    mode: remote.mode as KtConfig['mode'],
+    signatureKey: hexToBytesLocal(remote.signatureKey),
+    vrfKey: hexToBytesLocal(remote.vrfKey),
+    auditorKeys: (remote.auditorKeys ?? []).map(hexToBytesLocal),
+  };
+  cachedConfig = config;
+  return config;
+}
+
+const defaultLog = (event: string, detail: Record<string, unknown>) => {
+  try {
+    console.warn(`[KT] ${event}`, detail);
+  } catch {
+    // Log tidak boleh membuat jalur kunci gagal.
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Pemeriksaan
+// ---------------------------------------------------------------------------
+
+const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let index = 0; index < a.length; index++) diff |= a[index]! ^ b[index]!;
+  return diff === 0;
+};
+
+/**
+ * Verifikasi `identityKey` bundle peer terhadap log Key Transparency.
+ *
+ * Tidak pernah melempar: setiap kegagalan (KT nonaktif, subjek tak ada di log,
+ * bukti ditolak) dikembalikan sebagai verdict + dicatat. Pemanggil yang memutuskan
+ * apakah status itu memblokir pengiriman — `mismatch` HARUS memblokir.
+ */
+export async function checkBundleAgainstKeyTransparency(
+  input: KtBundleCheckInput,
+  deps: KtBundleDeps = {}
+): Promise<KtVerdict> {
+  const log = deps.log ?? defaultLog;
+  const username = input.username?.trim();
+  if (!username) return { status: 'unknown-subject', reason: 'username peer belum diketahui' };
+
+  const now = input.now === undefined ? Date.now() : typeof input.now === 'number' ? input.now : input.now.getTime();
+  // Backoff: jangan hammer layanan KT yang sedang mati (registrasi/login tetap jalan).
+  if (now - lastUnavailableAt < KT_UNAVAILABLE_BACKOFF_MS) {
+    return { status: 'unavailable', reason: 'backoff setelah kegagalan sebelumnya' };
+  }
+
+  try {
+    const hashUsername =
+      deps.hashUsername ?? (await import('./crypto-worker-proxy')).hashUsername;
+    const usernameHash = await hashUsername(username.toLowerCase());
+    const searchKey = ktSearchKeyFromUsernameHash(usernameHash);
+
+    const loadStates = deps.loadStates ?? loadKtStates;
+    const states = await loadStates();
+    const wanted = ktSearchKeyHex(searchKey);
+    const state = states.find((candidate) => ktSearchKeyHex(candidate.searchKey) === wanted);
+
+    const fetchConfig = deps.fetchConfig ?? defaultFetchConfig;
+    const fetchProof = deps.fetchProof ?? defaultFetchProof;
+    const fetchAnchor = deps.fetchAnchor ?? defaultFetchAnchor;
+    const saveState = deps.saveState ?? saveKtState;
+    const verifier = deps.verifier ?? (await loadKtVerifier());
+    const config = await resolveConfig(fetchConfig);
+
+    const proof = await fetchProof({ searchKey, last: state?.treeSize });
+    const result = verifier.verifySearch({
+      config,
+      searchKey,
+      condensedResponse: proof.condensed,
+      fullTreeHead: proof.fullTreeHead,
+      context: state
+        ? {
+            lastTreeHead: state.treeHead,
+            lastDistinguishedTreeHead: state.distinguishedTreeHead,
+            monitoringData: state.monitoringData,
+          }
+        : undefined,
+      now,
+    });
+
+    const parsed = parseKtValue(result.value);
+    const treeSize = treeSizeFromFullTreeHead(proof.fullTreeHead);
+
+    // Anchor distinguished: hanya dibutuhkan untuk membuktikan konsistensi
+    // (deteksi split-view). Kegagalannya tidak membatalkan bukti search.
+    let anchor = state?.distinguishedTreeHead;
+    if (!anchor) {
+      try {
+        const anchorProof = await fetchAnchor({});
+        anchor = verifier.verifySearch({
+          config,
+          searchKey: new TextEncoder().encode('distinguished'),
+          condensedResponse: anchorProof.condensed,
+          fullTreeHead: anchorProof.fullTreeHead,
+          now,
+        }).treeHead;
+      } catch (error) {
+        log('kt.anchor-unavailable', { reason: (error as Error).message });
+      }
+    }
+
+    // State hanya ditulis setelah verifikasi berhasil (fail-closed).
+    await saveState({
+      searchKey,
+      treeHead: result.treeHead,
+      monitoringData: result.monitoringData,
+      distinguishedTreeHead: anchor,
+      keyVersion: parsed.keyVersion,
+      treeSize,
+    });
+
+    let served: Uint8Array;
+    try {
+      served = base64UrlToBytes(input.identityKey);
+    } catch {
+      return { status: 'unavailable', reason: 'identityKey bundle bukan base64url' };
+    }
+
+    if (!bytesEqual(parsed.identityKey, served)) {
+      log('kt.key-mismatch', {
+        userId: input.userId,
+        logIdentityKey: bytesToHex(parsed.identityKey),
+        keyVersion: parsed.keyVersion,
+      });
+      return {
+        status: 'mismatch',
+        keyVersion: parsed.keyVersion,
+        logIdentityKey: bytesToHex(parsed.identityKey),
+      };
+    }
+
+    return { status: 'confirmed', keyVersion: parsed.keyVersion };
+  } catch (error) {
+    if (error instanceof KtVerificationError) {
+      // Bukti DITOLAK verifier: bisa anchor basi, bisa server berbohong.
+      log('kt.proof-rejected', { userId: input.userId, reason: error.message });
+      return { status: 'unverifiable', reason: error.message };
+    }
+    lastUnavailableAt = now;
+    const reason = error instanceof Error ? error.message : String(error);
+    log('kt.unavailable', { userId: input.userId, reason });
+    return { status: 'unavailable', reason };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Loop monitor (docs/34 §34.5: tanpa ini, KT tidak mendeteksi apa pun)
+// ---------------------------------------------------------------------------
+
+async function defaultFetchMonitor(request: Uint8Array): Promise<Uint8Array> {
+  const response = await api<{ monitorResponse: string }>('/api/keys/kt/monitor', {
+    method: 'POST',
+    body: JSON.stringify({ monitorRequest: bytesToBase64Url(request) }),
+  });
+  return base64UrlToBytes(response.monitorResponse);
+}
+
+export interface KtMonitorDeps {
+  verifier?: KeyTransparencyVerifier;
+  fetchConfig?: () => Promise<KtRemoteConfig>;
+  fetchMonitor?: (request: Uint8Array) => Promise<Uint8Array>;
+  states?: KtStoredState[];
+  now?: Date | number;
+}
+
+/**
+ * Satu langkah monitor lengkap: state tersimpan → permintaan → bukti dari
+ * `/api/keys/kt/monitor` → verifikasi di klien → state baru disimpan.
+ *
+ * Ini jembatan antara penjadwal (`ktMonitoring.startKtMonitorLoop`) dan verifier
+ * WASM: tanpa panggilan ini, op `monitor_build`/`verify_monitor` tidak pernah
+ * berjalan di produksi dan klien tidak punya bukti konsistensi — yaitu kondisi
+ * yang membuat perubahan kunci **tak terdeteksi** (`docs/34` §34.5).
+ *
+ * Tidak ada langkah monitornya yang mengubah kunci yang dipercaya: hasilnya
+ * adalah state baru + daftar `keyVersion` yang naik (pemanggil yang memutuskan
+ * cara menampilkannya). Kesalahan diteruskan ke pemanggil (penjadwal menangkap).
+ */
+export async function monitorKeyTransparency(deps: KtMonitorDeps = {}): Promise<KtMonitorOutcome> {
+  const verifier = deps.verifier ?? (await loadKtVerifier());
+  const config = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
+  return await runKtMonitorOnce({
+    verifier,
+    config,
+    fetchMonitor: deps.fetchMonitor ?? defaultFetchMonitor,
+    states: deps.states,
+    now: deps.now,
+  });
+}
+
+/** Konfigurasi mode yang dipakai deployment NYX (dipakai test & diagnostik). */
+export const KT_DEFAULT_MODE = KT_MODE_CONTACT_MONITORING;

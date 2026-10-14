@@ -4,3 +4,4 @@ export * from './types.js';
 export * from './socket.js';
 export * from './constants.js';
 export * from './transport.js';
+export * from './credentials.js';

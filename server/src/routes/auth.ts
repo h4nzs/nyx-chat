@@ -8,7 +8,7 @@ import { ApiError } from '../utils/errors.js'
 import { newJti, refreshExpiryDate, signAccessToken, verifyJwt, signTransportTicket } from '../utils/jwt.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
-import { clearAuthCookies, revokeFamily } from '../utils/sessionUtils.js'
+import { clearAuthCookies, isEphemeralGuestSubject, revokeFamily } from '../utils/sessionUtils.js'
 import { resolvePowIdentity } from '../utils/powIdentity.js'
 import { cfAwareClientIp } from '../utils/clientIp.js'
 import { env } from '../config.js'
@@ -25,6 +25,8 @@ import {
 // [docs/28 Tier 1.5 / D14] key Redis memakai tag, bukan userId asli (Redis = artefak setara dump).
 // [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
+// [docs/30 §30.12 WS-H] Guard burst registrasi (per sumber IP-hash & instalasi).
+import { enforceRegistrationBurst } from '../utils/registrationGuard.js'
 // [docs/28 Tier 2 — B4] bucket metadata temporal (hari/15 menit).
 import { dayBucket, deviceActivityBucket } from '../utils/temporalBucket.js'
 import { nanoid } from 'nanoid'
@@ -37,6 +39,15 @@ import {
   verifyAuthenticationResponse
 } from '@simplewebauthn/server'
 import { isoBase64URL } from '@simplewebauthn/server/helpers'
+// [docs/30 §30.5 WS-A] Jejak kunci identitas di log Key Transparency.
+import { publishKeyTransparencyEntry } from '../utils/keyTransparency.js'
+// [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru (gerbang sybil).
+import {
+  attestationPolicyFromEnv,
+  consumeAttestationChallenge,
+  storeAttestationChallenge,
+  verifyNewAccountAttestation
+} from '../utils/webauthnAttestation.js'
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // ✅ FIX: Import tipe JWT Payload dari shared
@@ -213,6 +224,36 @@ const isValidBase64Url = (str: string, expectedBytes?: number) => {
 
 const validateKey = (expectedBytes?: number) => z.string().refine(val => isValidBase64Url(val, expectedBytes), { message: `Invalid key format or length (expected ${expectedBytes || 'valid base64url'})` });
 
+/**
+ * [docs/30 §30.12 WS-H] Opsi attestation untuk pendaftaran akun baru.
+ *
+ * Publik (belum ada akun) dan dibatasi `authLimiter`. Attestation diminta
+ * `direct` supaya statement attestation benar-benar dikirim, dan challenge-nya
+ * disimpan sekali-pakai di Redis (`attestation:chal:*`, TTL 10 menit) — bukti
+ * tidak bisa diputar ulang untuk membuat akun kedua.
+ */
+router.post('/register/attestation-options', authLimiter, async (_req, res, next) => {
+  try {
+    const options = await generateRegistrationOptions({
+      rpName,
+      rpID,
+      // Belum ada akun: user id acak (tidak menautkan ke usernameHash apa pun).
+      userID: crypto.randomBytes(32),
+      userName: `nyx-new-account-${crypto.randomBytes(4).toString('hex')}`,
+      attestationType: 'direct',
+      excludeCredentials: [],
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'required',
+        authenticatorAttachment: 'platform'
+      }
+    })
+
+    await storeAttestationChallenge(redisClient, options.challenge)
+    res.json(options)
+  } catch (e) { next(e) }
+})
+
 router.post('/register', authLimiter, zodValidate({
   body: z.object({
     usernameHash: z.string().min(10),
@@ -223,7 +264,12 @@ router.post('/register', authLimiter, zodValidate({
     signingKey: validateKey(32),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
-    turnstileToken: z.string().optional()
+    turnstileToken: z.string().optional(),
+    // [docs/30 §30.12 WS-H] Bukti attestation (diminta hanya bila gerbang menyala).
+    attestation: z.object({
+      challenge: z.string().min(1).max(256),
+      response: z.unknown()
+    }).optional()
   })
 }),
 async (req, res, next) => {
@@ -251,6 +297,61 @@ async (req, res, next) => {
     const _iid = req.headers['x-nyx-installation-id'];
     const installationId = typeof _iid === 'string' ? _iid : undefined;
 
+    // [docs/30 §30.12 WS-H] Batasi pendaftaran massal per sumber (IP ter-HMAC,
+    // bukan IP mentah), per instalasi, dan per jaringan (ASN dari tabel lokal).
+    // No-op kecuali ABUSE_REGISTRATION_GUARD=on, sehingga jalan keluar/rollback
+    // tidak butuh deploy logika baru.
+    const burst = await enforceRegistrationBurst({ ip: cfAwareClientIp(req), installationId });
+
+    // [docs/30 §30.12 WS-H langkah 2] Gerbang attestation perangkat: diwajibkan
+    // oleh env (semua akun baru) ATAU oleh heuristik burst sybil per-ASN.
+    // Diverifikasi SEBELUM akun dibuat — kegagalan tidak meninggalkan baris User.
+    const attestationRequired = process.env.ABUSE_REQUIRE_ATTESTATION === 'on' || burst.requireAttestation;
+    let attestedCredential: {
+      credentialId: string;
+      publicKey: Uint8Array<ArrayBuffer>;
+      counter: number;
+      deviceType: string;
+      backedUp: boolean;
+      tier: string;
+    } | null = null;
+
+    if (attestationRequired) {
+      const proof = req.body.attestation as { challenge: string; response: unknown } | undefined;
+      if (!proof) throw new ApiError(428, 'ATTESTATION_REQUIRED');
+
+      const challengeAlive = await consumeAttestationChallenge(redisClient, proof.challenge);
+      if (!challengeAlive) throw new ApiError(403, 'ATTESTATION_CHALLENGE_INVALID');
+
+      let verification;
+      try {
+        verification = await verifyNewAccountAttestation({
+          response: proof.response,
+          expectedChallenge: proof.challenge,
+          expectedOrigin,
+          expectedRPID: rpID,
+          policy: attestationPolicyFromEnv()
+        });
+      } catch (verifyErr) {
+        // Respons tidak sah menurut pustaka (struktur/tanda tangan) → tolak, jangan 500.
+        console.warn('[WS-H] Attestation akun baru tidak sah:', verifyErr);
+        throw new ApiError(403, 'ATTESTATION_INVALID');
+      }
+
+      if (!verification.verified || !verification.credentialId || !verification.credentialPublicKey) {
+        throw new ApiError(403, `ATTESTATION_REJECTED: ${verification.reason ?? 'UNKNOWN'}`);
+      }
+
+      attestedCredential = {
+        credentialId: verification.credentialId,
+        publicKey: verification.credentialPublicKey,
+        counter: verification.counter,
+        deviceType: verification.credentialDeviceType ?? 'singleDevice',
+        backedUp: verification.credentialBackedUp,
+        tier: verification.tier
+      };
+    }
+
     const user = await prisma.user.create({
       data: {
         usernameHash: pepperedIdentifier(usernameHash),
@@ -258,7 +359,24 @@ async (req, res, next) => {
         // [docs/28 Tier 2 — B4] hari pendaftaran (bucket harian), bukan detik.
         lastActiveDay: dayBucket(),
         encryptedProfile,
-        isVerified: false,
+        // [WS-H] Akun yang lolos attestation perangkat langsung terverifikasi
+        // (setara menambahkan passkey), jadi ia bisa memakai fitur yang butuh
+        // verifikasi tanpa langkah tambahan.
+        isVerified: attestedCredential !== null,
+        authenticators: attestedCredential
+          ? {
+              create: [
+                {
+                  id: nanoid(),
+                  credentialID: attestedCredential.credentialId,
+                  credentialPublicKey: isoBase64URL.fromBuffer(attestedCredential.publicKey),
+                  counter: BigInt(attestedCredential.counter),
+                  credentialDeviceType: attestedCredential.deviceType,
+                  credentialBackedUp: attestedCredential.backedUp
+                }
+              ]
+            }
+          : undefined,
         devices: {
           create: {
             // FIX 1: Safe Buffer conversion for optional inputs
@@ -281,6 +399,19 @@ async (req, res, next) => {
     const device = user.devices[0]
     if (!device) throw new ApiError(500, 'Registration succeeded but device was not created.')
     const deviceId = device.id
+
+    // [docs/30 §30.5 WS-A] Catat kunci publik di log KT (no-op tanpa KT_SERVER_URL).
+    // Fire-and-forget: latensi registrasi tidak bergantung pada log; kegagalan
+    // terlihat sebagai metrik `nyx_kt_writes_total{result="error"}` + log
+    // (search key ter-hash, tanpa identitas).
+    void publishKeyTransparencyEntry({
+      usernameHash,
+      identityKey: Buffer.from(publicKey, 'base64url'),
+      pqIdentityKey: Buffer.from(pqPublicKey ?? '', 'base64url'),
+      signingKey: Buffer.from(signingKey, 'base64url'),
+      keyVersion: 1,
+      updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
+    });
     const tokens = await issueTokens(user, deviceId, req)
     setAuthCookies(res, tokens)
 
@@ -289,7 +420,9 @@ async (req, res, next) => {
       user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, subscriptionTier: user.subscriptionTier },
       accessToken: tokens.access,
       deviceId,
-      needVerification: false
+      needVerification: false,
+      // Tier attestation yang diterima (`hardware`/`self`), null bila gerbang mati.
+      attestationTier: attestedCredential?.tier ?? null
     })
   } catch (e: unknown) {
     if (typeof e === 'object' && e !== null && 'code' in e && (e as Record<string, unknown>).code === 'P2002') {
@@ -486,6 +619,13 @@ router.post('/refresh', async (req, res, next) => {
 
     let basis = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } })
     if (!basis) {
+      // [BURNER GUEST] Refresh token guest memang TIDAK pernah dipersist (lihat
+      // issueTokens) → "tidak ditemukan" di sini normal untuk halaman /drop.
+      // JANGAN clear cookie: `at` masih sah dan `GET /api/auth/transport-ticket`
+      // butuh cookie itu, kalau dibersihkan uplink burner tidak pernah naik.
+      if (isEphemeralGuestSubject(payload.sub)) {
+        throw new ApiError(401, 'Guest sessions are ephemeral and cannot be refreshed.');
+      }
       // Token doesn't exist in DB at all — either never existed or was fully deleted.
       // Clear cookies and require re-login.
       clearAuthCookies(res)
@@ -691,6 +831,19 @@ router.post('/recover', authLimiter, zodValidate({
           }
         })
     ]);
+
+    // [docs/30 §30.5 WS-A] Pemulihan akun = kunci identitas baru → wajib terlihat
+    // di log KT. `usernameHash` di sini adalah `identifier` dari klien; bila klien
+    // mengirim bentuk ter-pepper (bukan Argon2id mentah 32 byte), entri dilewati
+    // dengan peringatan — server tidak bisa menurunkan search key dari pepper.
+    void publishKeyTransparencyEntry({
+      usernameHash,
+      identityKey: Buffer.from(publicKey, 'base64url'),
+      pqIdentityKey: Buffer.from(pqPublicKey ?? '', 'base64url'),
+      signingKey: Buffer.from(signingKey, 'base64url'),
+      keyVersion: 2,
+      updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
+    });
 
     const tokens = await issueTokens(updatedUser, newDevice.id, req);    
     setAuthCookies(res, tokens);

@@ -324,6 +324,22 @@ export interface DoubleRatchetState {
   peerSessionConfirmed?: boolean;
   pendingHandshake?: { initiatorSigningKey: string; initiatorCiphertexts: string; otpkId?: number };
   peerAckedKem?: string;
+  // [docs/33 §33.7 — jalur versi paralel] Bidang klien untuk jalur v2 (braid
+  // SPQR). Worker TIDAK membacanya (state braid hidup di baris terpisah,
+  // `spqrState.ts`); ia hanya menumpang di baris state DR supaya akar braid
+  // tersedia saat v2 pertama dipakai (modul WASM 506 KiB jadi muat malas,
+  // bukan biaya setiap sesi). Baris state sendiri sudah ter-seal `ENC1:`.
+  //  - spqrAuthKey: rahasia X3DH (`sk`) base64url — akar braid yang sama di
+  //    kedua sisi (pengirim & penerima menurunkannya dari handshake yang sama).
+  //  - spqrDirection: peran braid (`A2B` = inisiator, `B2A` = penerima).
+  spqrAuthKey?: string;
+  spqrDirection?: 'A2B' | 'B2A';
+  //  - ratchetVersion: versi yang dipakai untuk MENGIRIM di sesi ini
+  //    (`v2` = braid SPQR); diputuskan `spqrNegotiation.resolveOutboundRatchetVersion`.
+  //  - peerAckRatchetVersion: versi yang peer nyatakan bisa dibaca (`ackV` di
+  //    payload ter-seal) — satu-satunya bukti yang dianggap sah.
+  ratchetVersion?: 'v1' | 'v2';
+  peerAckRatchetVersion?: 'v1' | 'v2' | null;
 }
 
 // ============================================================================

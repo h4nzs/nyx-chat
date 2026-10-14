@@ -212,7 +212,9 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
           onClose={() => setShowSafetyModal(false)}
           onVerify={() => {
         if (activeId && safetyNumber) {
-          setVerified(activeId, safetyNumber);
+          // [docs/29 §7.2] Verifikasi safety number = menerima kunci baru
+          // (membuka hard gate kirim) — peerUserId wajib ikut.
+          setVerified(activeId, safetyNumber, String(user.id));
         }
         setShowSafetyModal(false);
       }}

@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import { orderBucketOf } from './localOrderBucket';
 import type { Message } from '@store/conversation';
 import type { ConversationId, UserId, MessageId, StoryId, DoubleRatchetState } from '@nyx/shared';
 import type { GroupRatchetState } from '../types/crypto-common';
@@ -9,24 +10,38 @@ export interface DecryptedMessageRecord {
   id: MessageId;
   conversationId: ConversationId;
   content: string | null; // ENCRYPTED Base64 string at rest
-  repliedToId?: MessageId;
+  // [docs/30 WS-F langkah 3] `repliedToId`, `senderId`, `isViewOnce`,
+  // `isDeletedLocal`, `expiresAt` di-seal **di tempat** (`ENC1:`), jadi tipenya
+  // menerima bentuk lama juga. Tidak ada indeks yang bergantung padanya lagi
+  // (lihat versi 10 di bawah): pembacaannya lewat `openLocalText`/`openLocalFlag`.
+  repliedToId?: string | null;
   repliedTo?: string; // Encrypted JSON string of the replied message
-  createdAt: string | Date;
+  // [docs/30 WS-F] `createdAt` adalah **bentuk lama** (plaintext ISO/Date) yang
+  // masih dibaca dari baris yang belum ditulis ulang; baris baru menyimpannya
+  // ter-seal di `createdAtSealed` dan mengosongkan kolom ini (`null`).
+  createdAt: string | Date | null;
+  // [docs/30 WS-F] lapis presisi ter-seal (`ENC1:`, envelope yang sama dengan `seq`).
+  createdAtSealed?: string | null;
+  // [docs/30 WS-F] lapis indeks: waktu di-floor ke bucket 15 menit (plaintext).
+  // Satu-satunya kolom yang boleh dipakai untuk range-scan/paginasi.
+  orderBucketMs?: number | null;
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
-  senderId: UserId;
+  senderId: string;
   senderName?: string; // Encrypted sender name
   senderUsername?: string; // Encrypted sender username
   senderAvatarUrl?: string; // Encrypted avatar URL
-  isViewOnce?: boolean;
-  isDeletedLocal?: boolean;
+  isViewOnce?: boolean | string;
+  isDeletedLocal?: boolean | string;
   fileMeta?: string;
-  expiresAt?: string | null;
+  expiresAt?: string | number | null;
   // [docs/28 Tier 2 — B2] waktu kirim presisi (dari ciphertext).
   sentAt?: number;
   // [docs/28 Tier 2 — B1] seq per-conversation (urutan & kursor paginasi SERVER).
   // Tanpa ini, setelah reload `oldestMessage.seq` hilang → fetch-older jatuh ke
   // kursor ISO-date legacy yang bisa mengulang sebagian halaman.
-  seq?: number;
+  // [docs/29 §5.5] disimpan sebagai envelope `ENC1:` (string); baris lama masih
+  // berbentuk angka plaintext → tipe union, dibaca lewat `openLocalNumber()`.
+  seq?: number | string;
 }
 
 export interface PqDrSessionRecord {
@@ -122,12 +137,18 @@ export interface ProfileCacheRecord {
   avatarUrl: string | null;
   description: string | null;
   encryptedHash: string; // Hash profil terenkripsi untuk deteksi perubahan
-  updatedAt: number;
+  // [docs/30 WS-F §30.10] waktu penulisan cache — tidak ada indeks/query yang
+  // memakainya, jadi disimpan sebagai envelope `ENC1:` (baris lama masih
+  // angka plaintext; tidak ada pembaca, jadi tidak perlu `openLocalNumber`).
+  updatedAt: number | string;
 }
 
 export interface ConversationRecord {
   id: ConversationId;
-  isGroup: boolean;
+  // [docs/30 WS-F langkah 3] `isGroup` di-seal di tempat (`ENC1:` atau boolean
+  // baris lama) — tidak ada query yang memakainya sebagai indeks; `isPinned`/
+  // `isArchived` memang tidak pernah ditulis siapa pun.
+  isGroup: boolean | string;
   encryptedMetadata: string | null;
   decryptedMetadata: string | null; // Encrypted JSON string of decrypted group metadata
   lastMessageAt: string | Date | null;
@@ -141,10 +162,44 @@ export interface ConversationRecord {
 // ContactRecord TERENKRIPSI (encryptVaultText — kunci deterministik dari
 // identity private key, jadi bisa di-restore lintas device via bundle).
 // Lihat lib/contactStore.ts untuk CRUD + sinkronisasi.
+/**
+ * [docs/34 §34.6 poin 2] State monitoring Key Transparency per search key.
+ *
+ * Satu baris per `0x75||usernameHash(32)` yang pernah diverifikasi klien.
+ * Semua nilai bukti di-seal `ENC1:` (masterSeed) — IndexedDB tidak boleh
+ * menyimpan tree head/monitoring data dalam bentuk terbaca, karena keduanya
+ * mengungkap kontak mana yang dimonitor. `searchKeyHex` sengaja plaintext:
+ * ia sudah hash 32 byte (tidak reversible), dan ia satu-satunya kunci indeks.
+ */
+export interface KtMonitoringRecord {
+  searchKeyHex: string; // PK (hex dari search key)
+  /** `StoredTreeHead` (base64url) ter-seal, `null` bila belum ada bukti. */
+  treeHead: string | null;
+  /** `StoredMonitoringData` (base64url) ter-seal. */
+  monitoringData: string | null;
+  /** `StoredTreeHead` distinguished (anchor monitor) ter-seal. */
+  distinguishedTreeHead: string | null;
+  /** `keyVersion` terakhir yang terverifikasi (ter-seal, string angka). */
+  keyVersion: string | null;
+  /**
+   * Ukuran pohon (`FullTreeHead.tree_head.tree_size`) saat bukti terakhir
+   * diterima — ter-seal (string angka), `null` bila belum ada. Dikirim sebagai
+   * `last` pada permintaan berikutnya supaya server menyertakan bukti
+   * konsistensi.
+   */
+  treeSize: string | null;
+  /** Waktu tulis terakhir (ter-seal, ISO). */
+  updatedAt: string;
+}
+
 export interface ContactRow {
   userId: UserId; // PK
   data: string; // ENCRYPTED JSON ContactRecord (base64 envelope)
-  updatedAt: number;
+  // [docs/30 WS-F §30.10] waktu tulis baris — satu-satunya kolom waktu kontak
+  // yang dulu plaintext (pola aktivitas di IndexedDB). Tidak ada indeks/query
+  // yang bergantung padanya; dibaca hanya sebagai fallback `firstSeenAt`/
+  // `lastSeenAt` lewat `openLocalNumber` (baris lama plaintext tetap terbaca).
+  updatedAt: number | string;
 }
 
 export class NyxDatabase extends Dexie {
@@ -180,6 +235,9 @@ export class NyxDatabase extends Dexie {
 
   // Contact Store (P1 2026-10-05)
   contacts!: Table<ContactRow, string>;
+
+  // [docs/34 §34.6] State monitoring Key Transparency (per search key).
+  ktMonitoring!: Table<KtMonitoringRecord, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -246,6 +304,57 @@ export class NyxDatabase extends Dexie {
 
     this.version(8).stores({
       contacts: 'userId'
+    });
+
+    // [docs/30 WS-F] v9 — kolom pengurutan pesan di-seal, diganti indeks bucket.
+    //
+    // `messages` dulu diindeks langsung pada `createdAt` presisi; setelah
+    // `createdAt` jadi envelope `ENC1:` (ciphertext tidak punya urutan leksikal)
+    // indeks itu tidak berguna, jadi range-scan dipindah ke `orderBucketMs`.
+    //
+    // Upgrade di sini sengaja HANYA mengisi bucket: perhitungannya murni
+    // aritmetika waktu (masterSeed belum tentu tersedia saat DB dibuka), dan
+    // IndexedDB mengisi indeks baru setelah callback upgrade pada data hasil
+    // akhir — jadi baris lama langsung muncul di indeks tanpa perlu membuka kunci.
+    // Lapis presisi baris lama tetap plaintext sampai baris ditulis ulang
+    // (pola yang sama dengan `seq`, docs/29 §5.5) dan tetap terbaca lewat
+    // `openOrderInstant`.
+    this.version(9).stores({
+      messages: 'id, conversationId, [conversationId+orderBucketMs], senderId, isDeletedLocal'
+    }).upgrade(trans => {
+      return trans.table('messages').toCollection().modify((row: DecryptedMessageRecord) => {
+        if (typeof row.orderBucketMs === 'number') return;
+        const bucket = orderBucketOf(row.createdAt ?? null);
+        if (bucket !== null) row.orderBucketMs = bucket;
+      });
+    });
+
+    // [docs/30 WS-F langkah 3] v10 — indeks sisa kolom struktur dilepas.
+    //
+    // `senderId` dan `isDeletedLocal` tidak pernah dipakai sebagai klausa query
+    // (grep `.where('senderId')`/`.where('isDeletedLocal')` bersih), dan
+    // `conversations.isGroup` juga tidak. Sekarang ketiganya di-seal, jadi
+    // indeksnya bukan cuma tak terpakai — isinya jadi ciphertext acak. Tidak ada
+    // migrasi data: baris lama tetap plaintext sampai ditulis ulang dan tetap
+    // terbaca lewat `openLocalText`/`openLocalFlag`.
+    this.version(10).stores({
+      messages: 'id, conversationId, [conversationId+orderBucketMs]',
+      conversations: 'id'
+    });
+
+    // [docs/34 §34.6 poin 2] v11 — tabel state monitoring KT. Murni aditif: tidak
+    // ada baris lama yang perlu diubah, jadi tidak ada callback `upgrade`.
+    this.version(11).stores({
+      ktMonitoring: 'searchKeyHex'
+    });
+
+    // [docs/34 §34.6 poin 1] v12 — `KtMonitoringRecord.treeSize` (ukuran pohon
+    // terakhir yang SUDAH dipercaya). Bukti konsistensi hanya dinyalakan server
+    // bila klien mengirim `last`; tanpa kolom ini klien kehilangan angkanya
+    // setelah reload dan verifikasi ber-anchor gagal `Malformed proof`.
+    // Murni aditif (kolom baru, baris lama `null`), jadi tanpa `upgrade`.
+    this.version(12).stores({
+      ktMonitoring: 'searchKeyHex'
     });
   }
 }

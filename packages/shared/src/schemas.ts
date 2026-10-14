@@ -145,9 +145,19 @@ export const IncomingMessageSchema = z.object({
 // --- WebRTC Signaling Schemas ---
 export const WebRTCSignalTypeSchema = z.enum(['request', 'accept', 'offer', 'answer', 'ice-candidate', 'end', 'reject']);
 
+// [docs/30 §30.9 WS-E(2)] Alamat relay panggilan: token buram 24 byte
+// (base64url, 32 karakter) yang diterbitkan server per sesi. Dipakai sebagai
+// `from`/`to` signaling menggantikan userId supaya paket relay, log, dan
+// pub/sub tidak pernah memuat identifier jangka panjang. Bentuknya ketat:
+// userId yang dikirim klien lama ditolak, bukan dianggap token.
+export const CALL_RELAY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+export const CallRelayTokenSchema = z
+  .string()
+  .regex(CALL_RELAY_TOKEN_PATTERN, 'invalid_call_relay_token');
+
 export const WebRTCSignalingSchema = z.object({
   type: WebRTCSignalTypeSchema,
-  from: UserIdSchema,
+  from: CallRelayTokenSchema,
   // Using passthrough because payload is often an encrypted string during 'webrtc:secure_signal' 
   // but could be object if not fully encrypted at the transport layer
   payload: z.unknown().optional(), 

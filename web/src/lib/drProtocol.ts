@@ -18,6 +18,14 @@
 //    KEMr-nya di dalam payload terenkripsi (`ackKem`); bila ack = chain
 //    pengirim saat ini, `ct` dihilangkan dari header (~1.5KB/pesan hemat).
 //    Receiver yang belum step tetap menerima ct → tetap bisa step.
+//
+// 3. [docs/33 §33.7 / docs/04 jalur versi paralel] Versi wire ratchet — v1 (DR
+//    hybrid NYX, beku) vs v2 (braid SPQR). Keputusan versi keluar selalu
+//    `spqrNegotiation.resolveOutboundRatchetVersion`; berkas ini menyimpan
+//    hasilnya di state klien (`ratchetVersion`) beserta bukti dari peer
+//    (`peerAckRatchetVersion`).
+
+import type { RatchetWireVersion } from './spqrNegotiation';
 
 /** Bidang state DR yang relevan untuk keputusan protokol (sisi klien). */
 export interface DrProtocolStateView {
@@ -28,6 +36,20 @@ export interface DrProtocolStateView {
     otpkId?: number;
   } | null;
   peerAckedKem?: string | null;
+  /**
+   * Versi ratchet untuk **pengiriman** di sesi ini (`v2` = braid SPQR).
+   * Diputuskan tiap pengiriman oleh `resolveOutboundRatchetVersion`.
+   */
+  ratchetVersion?: RatchetWireVersion | null;
+  /**
+   * Versi yang dinyatakan peer bisa dibaca (`ackV` di payload ter-seal).
+   * `null` = belum pernah ada deklarasi → tetap v1.
+   */
+  peerAckRatchetVersion?: RatchetWireVersion | null;
+  /** Akar braid v2 (rahasia X3DH, base64url) — lihat `DoubleRatchetState`. */
+  spqrAuthKey?: string;
+  /** Peran braid v2 (`A2B` = inisiator, `B2A` = penerima). */
+  spqrDirection?: 'A2B' | 'B2A';
 }
 
 /** Payload x3dh yang menempel di wrapper pesan (plaintext envelope). */
@@ -137,5 +159,17 @@ export function attachClientProtocolFields<S extends object>(
       patch.peerAckedKem !== undefined
         ? patch.peerAckedKem
         : (previous.peerAckedKem ?? null),
+    ratchetVersion:
+      patch.ratchetVersion !== undefined
+        ? patch.ratchetVersion
+        : (previous.ratchetVersion ?? 'v1'),
+    peerAckRatchetVersion:
+      patch.peerAckRatchetVersion !== undefined
+        ? patch.peerAckRatchetVersion
+        : (previous.peerAckRatchetVersion ?? null),
+    spqrAuthKey:
+      patch.spqrAuthKey !== undefined ? patch.spqrAuthKey : previous.spqrAuthKey,
+    spqrDirection:
+      patch.spqrDirection !== undefined ? patch.spqrDirection : previous.spqrDirection,
   };
 }

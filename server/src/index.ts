@@ -12,6 +12,10 @@ async function main() {
   const { attachWssGateway } = await import('./realtime/gateway.js')
   const { startMessageSweeper } = await import('./jobs/messageSweeper.js')
   const { startSystemSweeper } = await import('./jobs/systemSweeper.js')
+  // [docs/30 WS-G] Metrik event-only, diekspos hanya di loopback.
+  const { startMetricsServer, stopMetricsServer } = await import('./utils/metricsEndpoint.js')
+
+  startMetricsServer()
 
   const httpServer = createServer(app)
 
@@ -41,6 +45,7 @@ async function main() {
     } catch {
       // Gateway may not have been attached — nothing to drain.
     }
+    stopMetricsServer()
     httpServer.close(() => process.exit(0))
     // Hard exit fallback if keep-alive connections refuse to drop.
     setTimeout(() => process.exit(0), 5000).unref()
