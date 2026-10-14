@@ -74,7 +74,13 @@
     "encryption_recommendation": "Rekomendasi Protokol Enkripsi",
     "encryption_desc": "Untuk handshake awal, pastikan kedua pihak ONLINE.",
     "burner_warning_title": "Sesi Ephemeral Aktif",
-    "burner_warning_desc": "Jangan memuat ulang atau menutup halaman ini. Semua riwayat chat hanya tersimpan di RAM dan akan hilang secara permanen."
+    "burner_warning_desc": "Jangan memuat ulang atau menutup halaman ini. Semua riwayat chat hanya tersimpan di RAM dan akan hilang secara permanen.",
+    "identity_changed": "Peringatan Keamanan: Kunci Kontak Berubah",
+    "identity_changed_desc": "Kunci identitas kontak ini berbeda dari yang kamu percayai. Pengiriman ditahan sampai kamu memverifikasi safety number yang baru.",
+    "identity_changed_action": "Verifikasi sekarang",
+    "identity_kt_mismatch": "Peringatan Keamanan: Kunci Bertentangan dengan Log Publik",
+    "identity_kt_mismatch_desc": "Kunci yang dikirim server ini bukan kunci yang tercatat di log Key Transparency publik. Ini bisa berarti serangan sedang berlangsung. Pengiriman ditahan sampai kamu memverifikasi safety number dengan kontak lewat jalur lain.",
+    "kt_key_rotation": "Key Transparency: rotasi kunci kontak terbit di log publik."
   },
   "status": {
     "signal_lost": "Sinyal Hilang",

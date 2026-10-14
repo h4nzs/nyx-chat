@@ -49,6 +49,11 @@ export default defineConfig(({ mode }) => {
             '**/*.png',
             '**/*.svg',
             '**/*.mjs',
+            // [docs/33 §33.10] Modul WASM jalur v2 (`spqr-*.wasm`, 506 KiB) dan
+            // verifier KT (`keytrans-*.wasm`) ikut di-precache supaya keduanya
+            // tersedia offline sejak install, bukan mengandalkan cache HTTP
+            // yang bisa di-revalidate. Biaya: install PWA bertambah ±0,8 MB.
+            '**/*.wasm',
             '**/*.json',
             '**/*.woff',
             '**/*.woff2',

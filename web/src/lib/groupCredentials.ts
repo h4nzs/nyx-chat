@@ -10,10 +10,16 @@
  *   1. random message per (conversation, member): 16 byte acak + convId —
  *      TIDAK mengandung identitas.
  *   2. blind message dengan issuer public key (dari /credential-issuer-key).
- *   3. kirim blinded message → server blindSign (server tak tahu isinya).
+ *   3. kirim blinded message + BUKTI KEANGGOTAAN (X-Group-Token authSecret atau
+ *      delivery token) → server blindSign (server tak tahu isinya).
  *   4. finalize di worker (memakai `inv` yang tak pernah meninggalkan klien).
  *   5. commit serial (SHA-384 prepared message) + conversationId ke server
- *      untuk verifikasi & revocation.
+ *      untuk verifikasi & revocation (dibatasi tiket issuance, docs/29 §7.1).
+ *
+ * [docs/29 §7.1] Server menolak issuance tanpa bukti keanggotaan dan memeriksa
+ * bahwa pesan yang ditandatangani memang menyebut conversationId-nya (binding
+ * konteks, lihat @nyx/shared/credentials). Format pesan TIDAK berubah — sudah
+ * menyebut convId sejak awal — yang berubah hanya penegakannya.
  *
  * Alur presentation (saat sync): kirim header X-Group-Credentials berisi
  * (keyVersion, convId, preparedMsg, signature) — server verifikasi tanpa
@@ -22,6 +28,8 @@
 
 import { authFetch } from '@lib/api';
 import { worker_credential_blind, worker_credential_finalize } from '@lib/crypto-worker-proxy';
+import { getMyDeliveryToken, getMyGroupToken } from '@lib/groupPseudonyms';
+import { buildCredentialMessage, CREDENTIAL_RANDOM_HEX_LENGTH } from '@nyx/shared';
 
 export interface GroupCredential {
   /** conversation id yang diklaim credential ini. */
@@ -49,13 +57,41 @@ async function getIssuerKey(): Promise<{ keyVersion: number; publicJwk: JsonWebK
 }
 
 function randomMessage(conversationId: string): string {
-  // Format: nyx-grp-cred:v1:<convId>:<32-hex random>. convId ikut di-commit ke
-  // server (serial↔conversation), random 128-bit membuat message tak bisa
-  // di-link ke anggota; server hanya melihat bentuk blind-nya saat issuance.
-  const arr = new Uint8Array(16);
+  // Format dibagi dengan server lewat @nyx/shared (docs/29 §7.1):
+  // `nyx-grp-cred:v1:<convId>:<32-hex random>`. convId ikut di-commit ke server
+  // (serial↔conversation) DAN ikut ditandatangani issuer, sehingga server bisa
+  // memverifikasi binding konteks saat presentasi; random 128-bit membuat
+  // message tak bisa di-link ke anggota (server hanya melihat bentuk blind-nya).
+  const arr = new Uint8Array(CREDENTIAL_RANDOM_HEX_LENGTH / 2);
   crypto.getRandomValues(arr);
   const hex = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-  return `nyx-grp-cred:v1:${conversationId}:${hex}`;
+  return buildCredentialMessage(conversationId, hex);
+}
+
+/**
+ * [docs/29 §7.1] Bukti keanggotaan untuk issuance/commit credential.
+ *
+ * Server menolak issuance tanpa bukti (dulu endpoint menandatangani blinded
+ * message apa pun untuk user terautentikasi mana pun). Dua bentuk bukti yang
+ * bisa dikirim klien, keduanya sudah dimiliki anggota sah:
+ *   - `X-Group-Token` = authSecret grup dari encrypted metadata (blind member
+ *     auth, pola yang sama dengan mutasi grup lain),
+ *   - `X-Delivery-Tokens` = token undangan milik saya untuk percakapan ini.
+ * Bila keduanya belum tersedia (metadata belum ter-dekripsi) header tidak
+ * dikirim dan issuance ditunda — sync tetap jalan lewat jalur id lokal.
+ */
+function buildIssuanceHeaders(conversationId: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  try {
+    const groupToken = getMyGroupToken(conversationId);
+    if (groupToken) headers['X-Group-Token'] = groupToken;
+    const deliveryToken = getMyDeliveryToken(conversationId);
+    if (deliveryToken) headers['X-Delivery-Tokens'] = String(deliveryToken);
+  } catch {
+    // Store belum siap → kirim tanpa header; server akan menolak dan
+    // ensureCredential() dipanggil lagi pada sync berikutnya.
+  }
+  return headers;
 }
 
 /**
@@ -70,8 +106,10 @@ export async function ensureCredential(conversationId: string): Promise<GroupCre
     const message = randomMessage(conversationId);
     const { preparedMsgB64, blindedMsgB64, inv } = await worker_credential_blind({ publicJwk, message });
 
+    const proofHeaders = buildIssuanceHeaders(conversationId);
     const issueRes = await authFetch<{ blindSig: string; keyVersion: number }>('/api/conversations/credential-issuance', {
       method: 'POST',
+      headers: Object.keys(proofHeaders).length > 0 ? proofHeaders : undefined,
       body: JSON.stringify({ conversationId, blindedMsg: blindedMsgB64 }),
     });
 
@@ -92,8 +130,12 @@ export async function ensureCredential(conversationId: string): Promise<GroupCre
     const preparedBytes = Uint8Array.from(atob(preparedMsgB64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
     const digest = await crypto.subtle.digest('SHA-384', preparedBytes);
     const serial = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+    // Commit memerlukan bukti keanggotaan yang sama + tiket issuance (docs/29
+    // §7.1) — header diturunkan ulang di sini, bukan disimpan, supaya tetap
+    // benar bila metadata baru ter-dekripsi di antara issuance dan commit.
     authFetch('/api/conversations/credential-commit', {
       method: 'POST',
+      headers: Object.keys(buildIssuanceHeaders(conversationId)).length > 0 ? buildIssuanceHeaders(conversationId) : undefined,
       body: JSON.stringify({ conversationId, keyVersion: cred.keyVersion, serial }),
     }).catch(() => {});
 

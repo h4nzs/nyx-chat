@@ -31,11 +31,18 @@
   "failed_to_rotate_group_keys": "CRÍTICO: Error al rotar las claves del grupo. El chat es inseguro.",
   "media_error": "Error de medios: {{error}}",
   "call_failed": "Error al iniciar la llamada E2EE.",
+  "call_no_turn": "El servidor de retransmisión de llamadas (TURN) no está disponible — la llamada puede fallar fuera de tu red local.",
   "update_failed": "Error en la actualización: {{error}}",
   "block_failed": "Error al bloquear: {{error}}",
   "unblock_failed": "Error al desbloquear: {{error}}",
   "failed_to_delete_conversation": "Error al eliminar la conversación.",
   "failed_to_delete_group": "Error al eliminar el grupo.",
   "failed_to_toggle_pinned_conversation": "Error al fijar/desfijar la conversación.",
-  "failed_to_send_message_timeout": "Error al enviar el mensaje (Tiempo de espera agotado)."
+  "failed_to_send_message_timeout": "Error al enviar el mensaje (Tiempo de espera agotado).",
+  "identity_changed_blocked": "La clave de seguridad del contacto cambió. Verifícala en Información del contacto antes de enviar mensajes.",
+  "registration_attestation_unsupported": "Este dispositivo no tiene autenticador de plataforma (Touch ID / Windows Hello), así que no puede aportar la atestación de dispositivo requerida.",
+  "registration_attestation_expired": "El desafío de verificación del dispositivo ha caducado. Vuelve a intentar el registro.",
+  "registration_attestation_invalid": "No se pudo validar la verificación del dispositivo, así que la cuenta no se creó.",
+  "registration_attestation_hardware_required": "Este dispositivo no pudo demostrar que está respaldado por hardware. El registro requiere una atestación de hardware (Touch ID / Windows Hello / llave de seguridad).",
+  "registration_attestation_user_verification": "Confirma con tu PIN o biometría para terminar de crear esta cuenta."
 }

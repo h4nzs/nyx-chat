@@ -11,6 +11,7 @@ import { useConnectionStore } from '@store/connection';
 import { useAuthStore } from '@store/auth';
 import { useThemeStore } from '@store/theme';
 import { useBurnerStore } from '@store/burner';
+import { useVerificationStore } from '@store/verification';
 import useDynamicIslandStore from '@store/dynamicIsland';
 import LinkPreviewCard from './LinkPreviewCard';
 import { useMessageStore } from '@store/message';
@@ -188,7 +189,11 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   const burnerSession = useBurnerStore((s) => s.activeSessions[conversation.id]);
   const isWaitingForGuest = isBurner && !burnerSession?.drState && !!useAuthStore.getState().user;
 
-  const isInputDisabled = !isConnected || isOtherParticipantBlocked || isWaitingForGuest;
+  // [docs/29 §7.2] Hard gate: perubahan kunci identitas peer yang belum diterima
+  // user menonaktifkan composer (bukan sekadar banner) sampai safety number baru
+  // diverifikasi — mencegah pesan terkirim ke kunci penyerang.
+  const hasIdentityAlert = useVerificationStore(s => !!s.identityAlerts[conversation.id]);
+  const isInputDisabled = !isConnected || isOtherParticipantBlocked || isWaitingForGuest || hasIdentityAlert;
 
   const getPlaceholderText = () => {
     if (isWaitingForGuest) return "Waiting for guest to establish secure connection...";

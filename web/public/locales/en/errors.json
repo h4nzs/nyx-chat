@@ -26,6 +26,7 @@
   "failed_to_rotate_group_keys": "CRITICAL: Failed to rotate keys for group. The chat is insecure.",
   "media_error": "Media Error: {{error}}",
   "call_failed": "Failed to start E2EE call.",
+  "call_no_turn": "Call relay (TURN) server is unavailable — the call may fail outside your local network.",
   "update_failed": "Update failed: {{error}}",
   "block_failed": "Block failed: {{error}}",
   "unblock_failed": "Unblock failed: {{error}}",
@@ -37,5 +38,11 @@
   "failed_to_disable_notifications": "Failed to disable notifications",
   "failed_to_load_linked_devices": "Failed to load linked devices",
   "failed_to_revoke_device": "Failed to revoke device",
-  "please_start_a_chat_with_yourself_saved_": "Please start a chat with yourself ('Saved Messages') first to use it as a sync channel."
+  "please_start_a_chat_with_yourself_saved_": "Please start a chat with yourself ('Saved Messages') first to use it as a sync channel.",
+  "identity_changed_blocked": "Contact security key changed. Verify it in Contact Info before sending messages.",
+  "registration_attestation_unsupported": "This device has no platform authenticator (Touch ID / Windows Hello), so it cannot provide the required device attestation.",
+  "registration_attestation_expired": "The device verification challenge has expired. Please try registering again.",
+  "registration_attestation_invalid": "The device verification could not be validated, so the account was not created.",
+  "registration_attestation_hardware_required": "This device could not prove it is hardware-backed. Registration requires a hardware attestation (Touch ID / Windows Hello / security key).",
+  "registration_attestation_user_verification": "Confirm with your PIN or biometrics to finish creating this account."
 }

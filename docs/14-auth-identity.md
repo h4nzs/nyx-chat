@@ -110,6 +110,7 @@ sequenceDiagram
 
 - `KeyManagementPage` can export the encrypted keychain (`exportDatabaseToJson`) and import it (`importDatabaseFromJson`).
 - **Migration protocol** (`MigrationSendPage`/`MigrationReceivePage` + `migration:*` events in the Redis bridge): a QR handshake (`auth:request_linking_qr`), then the vault is streamed chunk-by-chunk over WebTransport (`migration:start`/`migration:chunk`/`migration:ack`), owner-only. During migration `is_migrating:<userId>` allows two devices temporarily.
+- **Framed backup restore (`docs/31` §31.6c):** the payload streamed by the migration pages is now a framed, AEAD-authenticated `.nyxbak` archive built by `lib/backupRestore.ts` (random 32-byte key sealed to the receiver's QR public key; chunks sent as base64). `MigrationReceivePage` restores it per frame with 0–100 % progress. The same archive format can be opened from a file with the recovery phrase via `openFramedBackupWithPhrase`.
 
 ## 14.11 Files to know
 

@@ -308,7 +308,7 @@ router.delete('/:id', async (req, res, next) => {
 
     // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
     if (r2Key) {
-       const safeR2Key = r2Key.replace(/[^a-zA-Z0-9_\-\./]/g, '').substring(0, 255);
+       const safeR2Key = r2Key.replace(/[^a-zA-Z0-9_.\-/]/g, '').substring(0, 255);
        const parts = safeR2Key.split('/');
        const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
        if (!filename) return res.status(400).json({ error: 'Invalid file key' });

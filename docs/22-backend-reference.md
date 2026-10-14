@@ -47,11 +47,35 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 - `handleKeySync` events: `session:request_key`, `session:fulfill_response`, `session:request_missing`, `messages:distribute_keys`, `group:request_key`, `group:fulfilled_key`, `metadata:updated`, `auth:request_linking_qr`, `message:unsend`, `message:view_once_opened`, `push:subscribe`/`unsubscribe`, `burner:*`, `migration:*`, `message:*` status events.
 - `checkRateLimit` (atomic Lua), `isActiveDeviceAllowed` (60 s cache), `sendAck`.
 
-## 22.5 Utilities (`utils/`, 12) & lib (`lib/`, 3)
+## 22.5 Utilities (`utils/`, 36) & lib (`lib/`, 4)
 
 | File | Purpose |
 |---|---|
 | `errors.ts` | `ApiError` |
+| `atRestSecrets.ts` | `sealAtRest`/`openAtRest`/`credentialTokenMatches`/`hashCredentialToken` — sealing deterministik dari `NYX_AT_REST_PEPPER` (docs/28 Tier 0) |
+| `routingIdentity.ts` | `routingIdentity`/`routingCandidates`/`upsertMembership`/`findMembership`/`deleteMembership`/`purgeSealedUserRows` — kolom routing & keanggotaan ter-seal |
+| `senderIdentity.ts` | identitas pengirim at-rest (docs/28 Tier 4) |
+| `temporalBucket.ts` | `messageTimeBucket` (15 menit) untuk `createdAt`/`expiresAt`/`lastMessageAt`/`MessageStatus.updatedAt` |
+| `messageSequence.ts` | `seq` per-conversation (urutan & kursor paginasi) |
+| `credentialAuth.ts` | Gate keanggotaan issuance credential + `requireAdminCapability` (docs/29 §7.1) |
+| `groupAccess.ts` | Otorisasi jalur grup: add/kick anggota, leave, details, rotasi kunci, purge (`BLIND_AUTH_REQUIRED` / `ADMIN_AUTH_REQUIRED` / `MEMBERS_REMAIN`) |
+| `adminCapability.ts` | `hashAdminToken`/`isAdminTokenValid` (SHA-256, constant-time, NULL hash = fail-closed) |
+| `credentialIssuance.ts` | Kuota + tiket issuance credential blind RSA |
+| `keyBundle.ts` | Pemetaan device Prisma → `IDeviceTemplate`/bundle publik |
+| `sessionKeys.ts` / `sessionRevocation.ts` | Blind relay session key; revokasi sesi (ownership 404, family, blacklist TTL) |
+| `encryptedKeysSync.ts` | Salinan `encryptedPrivateKey` terbaru saat bundle di-upload |
+| `otpkQuota.ts` | Kuota harian OTPK per pasangan (Lua INCR+EXPIRE, fail-closed) |
+| `registrationGuard.ts` | Anti-abuse registrasi bertingkat tanpa PII (IP ter-HMAC + per instalasi) |
+| `clientIp.ts` | IP klien tahan pemalsuan (Cloudflare proxy/tunnel) |
+| `powIdentity.ts` | Rate-state PoW (VIP gate) |
+| `redisIdentity.ts` | `identityKey`/`identityTag` — key Redis ber-tag, tanpa userId mentah |
+| `redisResilience.ts` | `checkRateLimit` di atas client Redis yang diberikan |
+| `presencePeers.ts` / `presenceSubscriptions.ts` | Presence per-kontak (peer-scoped, lazy/opt-in) |
+| `metrics.ts` / `metricsEndpoint.ts` | Deklarasi metrik event-only + exporter `/metrics` loopback |
+| `dumpAudit.ts` | Analisis dump DB (murni, tanpa DB) dipakai `scripts/privacy-dump-audit.ts` |
+| `groupMetadataBlob.ts` | Sanitasi blob metadata grup tanpa identitas penulis |
+| `backupObject.ts` | Kunci objek R2 backup akun (HMAC, tanpa userId) |
+| `turnCredentials.ts` | Kredensial TURN time-limited (coturn `static-auth-secret`) |
 | `jwt.ts` | `signAccessToken` (15m), `signTransportTicket` (15s), `verifyJwt`, `newJti`, `refreshExpiryDate` (30d) |
 | `logger.ts` | `sanitizeForLog` (log-injection scrub) |
 | `password.ts` | argon2id `hashPassword`/`verifyPassword` (32 MB / 3 iter) |

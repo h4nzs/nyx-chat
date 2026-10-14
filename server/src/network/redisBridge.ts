@@ -15,6 +15,12 @@ import { identityKey, identityTag, sealIdentity } from '../utils/redisIdentity.j
 import { notifyPresenceWatchers, clearPresenceSubscriptions } from '../utils/presenceSubscriptions.js';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 import { handleChatMessage, handleKeySync, handlePresence, type RealtimeContext } from './realtimeHandlers.js';
+// [docs/30 WS-G] Metrik event-only: label hanya enum pendek (opcode/reason),
+// tidak pernah userId/deviceId — penjaganya ada di utils/metrics.ts.
+import { incCounter, RELAY_OPS, SECURITY_BLOCKS } from '../utils/metrics.js';
+// [docs/30 §30.9 WS-E(2)] Signaling panggilan dialamatkan lewat token relay buram,
+// bukan userId — payload relay & `nyx:downstream` tidak lagi memuat identitas.
+import { relayCallSignal } from '../utils/callRelayTokens.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -72,6 +78,7 @@ export async function initializeRedisBridge() {
 
       await handleUpstreamMessage(data.user_id, data.device_id, opCode, data.payload, data.msgId);
     } catch (error) {
+      incCounter(RELAY_OPS, { op: relayOpLabel(channel), result: 'error' });
       console.error('❌ Error processing upstream message:', error);
     }
   });
@@ -155,6 +162,12 @@ export async function isActiveDeviceAllowed(userId: string, deviceId: string): P
   return !active || active === deviceId;
 }
 
+/** Label opcode yang aman untuk metrik (`0x1`, `0x63`) — nilai terbatas. */
+function relayOpLabel(opCode: number | string): string {
+  const numeric = typeof opCode === 'number' ? opCode : Number.parseInt(String(opCode).split(':').pop() || '0', 10);
+  return `0x${Number.isFinite(numeric) ? numeric.toString(16) : 'unknown'}`;
+}
+
 async function handleUpstreamMessage(userId: string, deviceId: string, opCode: number, base64Payload: string, _msgIdFromWrapper?: string) {  const buffer = Buffer.from(base64Payload, 'base64');
   const payloadStr = buffer.toString('utf-8');
   let payload: Record<string, unknown>;
@@ -173,9 +186,13 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   if (opCode !== 0x00 && opCode !== 99) {
     const allowed = await isActiveDeviceAllowed(userId, deviceId);
     if (!allowed) {
+      incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'device_inactive' });
+      incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'blocked' });
       console.warn(`[Security] Blocked opcode ${opCode} from non-active device ${sanitizeForLog(deviceId)} (user ${sanitizeForLog(userId)})`);
       return;
     }
+    // Operasi lolos gate keamanan → diteruskan ke handler.
+    incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'accepted' });
   }
 
   switch (opCode) {
@@ -183,10 +200,10 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       await handleChatMessage(realtimeCtx, userId, deviceId, payload as unknown as MessageSendPayload, msgId);
       break;
     case TransportOpCode.WEBRTC_SIGNAL:
-      await handleWebRtcRelay(userId, payload as { to: string, type: string, payload: string }, TransportOpCode.WEBRTC_SIGNAL);
+      await handleWebRtcRelay(userId, deviceId, payload as { to?: string, type?: string, payload?: string }, TransportOpCode.WEBRTC_SIGNAL);
       break;
     case TransportOpCode.WEBRTC_ICE:
-      await handleWebRtcRelay(userId, payload as { to: string, type: string, payload: string }, TransportOpCode.WEBRTC_ICE);
+      await handleWebRtcRelay(userId, deviceId, payload as { to?: string, type?: string, payload?: string }, TransportOpCode.WEBRTC_ICE);
       break;
     case TransportOpCode.PRESENCE:
       await handlePresence(realtimeCtx, userId, payload as { event: 'active' | 'away' | 'typing:start' | 'typing:stop', conversationId?: string });
@@ -218,6 +235,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         const isMigrating = await redisClient.exists(identityKey('is_migrating', userId));
 
         if (activeDeviceId && activeDeviceId !== deviceId && !isMigrating) {
+          incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'session_revoked' });
           console.warn(`[Security-L1] Revoked device ${deviceId} (User ${userId}) tried to connect. Kicking...`);
           const kickPayload = Buffer.from(JSON.stringify({
             reason: 'SESSION_REVOKED',
@@ -238,6 +256,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         if (device && device.fingerprint) {
            // 🛡️ PERBAIKAN: Cegah bypass dengan menghilangkan payload 'identity'
            if (!authData.identity) {
+              incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'identity_missing' });
               console.warn(`[Security-L2] Missing identity payload from device ${deviceId} (User ${userId}). Kicking...`);
               const kickPayload = Buffer.from(JSON.stringify({
                 reason: 'HARDWARE_MISMATCH',
@@ -258,6 +277,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
              && device.installationTag === deviceInstallationTag(authData.identity.installationId);
 
            if (!isFingerprintMatch && !isAnchorMatch) {
+              incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'hardware_mismatch' });
               console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${userId}). Possible session cloning. Kicking...`);
               const kickPayload = Buffer.from(JSON.stringify({
                 reason: 'HARDWARE_MISMATCH',
@@ -273,6 +293,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       }
       break;
     default:
+      incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'unhandled' });
       console.warn(`⚠️ Unhandled OpCode: 0x${opCode.toString(16)} from user ${userId}`);
   }
   }
@@ -320,10 +341,36 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   }
   }
 
-async function handleWebRtcRelay(fromUserId: string, payload: { to: string, type: string, payload: string }, opCode: TransportOpCode) {
-  if (!payload.to) return;
-  const relayPayload = { from: fromUserId, type: payload.type, payload: payload.payload };
-  await sendJsonToUser(payload.to, opCode, relayPayload, opCode === TransportOpCode.WEBRTC_ICE);
+/**
+ * [docs/30 §30.9 WS-E(2)] Relay panggilan: `to` adalah **token relay**, bukan
+ * userId. Token tak dikenal / berbentuk salah → drop (fail-closed) dan dihitung
+ * sebagai blokir keamanan; envelope yang diteruskan memuat token pengirim, jadi
+ * jalur relay, log, dan pub/sub tidak pernah melihat pasangan userId→userId.
+ */
+async function handleWebRtcRelay(
+  fromUserId: string,
+  fromDeviceId: string | null,
+  payload: { to?: string, type?: string, payload?: string },
+  opCode: TransportOpCode
+) {
+  const decision = await relayCallSignal(redisClient, {
+    fromUserId,
+    fromDeviceId: fromDeviceId ?? null,
+    payload,
+  }).catch(() => null);
+
+  if (!decision) {
+    incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'call_token_unknown' });
+    return;
+  }
+
+  await sendJsonToUser(
+    decision.target.userId,
+    opCode,
+    decision.envelope,
+    opCode === TransportOpCode.WEBRTC_ICE,
+    decision.target.deviceId ?? undefined
+  );
 }
 
 

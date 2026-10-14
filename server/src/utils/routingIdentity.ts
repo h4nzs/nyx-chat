@@ -49,17 +49,28 @@ export async function resolveRoutingUser(stored: string | null | undefined): Pro
  * Bentuk minimal klien Prisma (metode bergaya `method()`, jadi bivarian →
  * PrismaClient asli tetap assignable lewat cast di call site).
  */
-export interface MembershipPrisma {
-  userHiddenConversation: {
-    findFirst(args: {
-      where: Record<string, unknown>;
-      select: { id?: boolean };
-    }): Promise<{ id?: string } | null>;
+export interface MembershipPrisma extends MembershipLookup {
+  userHiddenConversation: MembershipLookup['userHiddenConversation'] & {
     update(args: { where: { id: string }; data: { deliveryToken: string } }): Promise<unknown>;
     create(args: {
       data: { userId: string; conversationId: string; deliveryToken: string };
     }): Promise<unknown>;
     deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
+  };
+}
+
+/**
+ * Bagian minimal yang dibutuhkan pembacaan keanggotaan (tanpa tulis).
+ * Dipisah supaya jalur otorisasi (`utils/groupAccess.ts`) bisa memakai helper
+ * yang sama tanpa harus menerima kontrak tulis — satu implementasi pencarian
+ * nilai routing ter-seal untuk semua pemanggil.
+ */
+export interface MembershipLookup {
+  userHiddenConversation: {
+    findFirst(args: {
+      where: Record<string, unknown>;
+      select: { id?: boolean };
+    }): Promise<{ id?: string } | null>;
   };
 }
 
@@ -99,7 +110,7 @@ export async function upsertMembership(
 
 /** Cek kepemilikan baris keanggotaan (leave tanpa group token). */
 export async function findMembership(
-  prisma: MembershipPrisma,
+  prisma: MembershipLookup,
   input: { userId: string; conversationId: string }
 ): Promise<boolean> {
   const candidates = await routingCandidates(input.userId)

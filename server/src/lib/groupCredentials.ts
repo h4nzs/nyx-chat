@@ -35,6 +35,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { prisma } from './prisma.js'
 import { env } from '../config.js'
+// [docs/29 §7.1] Format pesan credential dibagi klien↔server (packages/shared)
+// supaya binding konteks bisa diperiksa server, bukan disimpan sebagai string
+// duplikat yang bisa menyimpang.
+import { credentialClaimFromPrepared } from '@nyx/shared'
 
 export const CREDENTIAL_SUITE = 'RSABSSA-SHA384-PSS-Randomized'
 export const ISSUER_KEY_MODULUS = 2048
@@ -251,8 +255,10 @@ async function getPublicJwkForVersion(keyVersion: number): Promise<JsonWebKey | 
 
 /**
  * Verifikasi presentasi credential: tanda tangan valid (issuer key versi
- * `keyVersion`) DAN serial terdaftar untuk conversationId. Tidak ada lookup
- * identitas — kepemilikan (msg, sig) = bukti keanggotaan.
+ * `keyVersion`), **binding konteks** (`preparedMsg` wajib menyebut
+ * conversationId yang diklaim — docs/29 §7.1), DAN serial terdaftar untuk
+ * conversationId. Tidak ada lookup identitas — kepemilikan (msg, sig) = bukti
+ * keanggotaan.
  */
 export async function verifyPresentation(
   conversationId: string,
@@ -260,6 +266,13 @@ export async function verifyPresentation(
   preparedMsg: Uint8Array,
   signature: Uint8Array
 ): Promise<boolean> {
+  // Binding konteks: format pesan NYX yang beku menyebut conversationId-nya.
+  // Ini menutup pemakaian-silang antar-conversation seandainya satu serial
+  // pernah tercatat pada conversation lain (defense in depth; serial check di
+  // bawah tetap jadi gerbang utama).
+  const claim = credentialClaimFromPrepared(preparedMsg)
+  if (!claim || claim.conversationId !== conversationId) return false
+
   const serial = serialOf(preparedMsg)
   const registered = await prisma.groupCredential.findUnique({
     where: { serial },

@@ -35,6 +35,13 @@ Optional env: `PROD_CERT_PATH` / `PROD_KEY_PATH` (CA-signed cert in prod; self-s
 - **Datagrams**: small frames (e.g. chaff, ICE). Opcode `0x00` ignored.
 - **Server→client**: sidecar reads `nyx:downstream` messages and writes frames to the target session's uni-stream or datagram (`is_datagram` flag).
 
+The decision logic for all four reader paths is now a **pure function** in
+`src/protocol.rs` (`classify_inbound`, `parse_inbound_frame`, `parse_transport_hello`)
+exporting `InboundFrame`/`InboundHeader`; `src/main.rs` only does I/O. Ordering
+that must not change: CHAFF first (cheapest, no allocation) → hard payload limit
+→ HELLO/message. `cargo test` covers every outcome plus a deterministic fuzz
+campaign (`src/fuzz.rs`, runner `src/bin/fuzz-framing.rs`, docs/11 §11.1c).
+
 ## 8.5 Redis envelope
 
 Upstream (sidecar → Node): publish to `nyx:upstream:<op_code>`:
@@ -60,7 +67,21 @@ The sidecar hardcodes magic numbers for CHAFF/AUTH (`0x00`), ACK (`0x06`), KICK 
 - Runs under pm2 as `nyx-sidecar` (`--cwd /root/nyx-app/server`), rebuilt by CI on every deploy (`cargo build --release`), binary shipped in the deploy zip.
 - The sidecar only needs `JWT_SECRET` + `REDIS_URL` + `TRANSPORT_PORT`; prod `.env` supplies them.
 
-## 8.9 Known limitations
+## 8.9 Fuzz & tests
+
+```bash
+cd server/transport-sidecar
+cargo test                                        # 17 tests incl. 20k-iteration campaign
+NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing   # gate ≥1 jam
+```
+
+Targets: frame classification/buffer parsing (incl. `length = u32::MAX`, chaff
+with an incomplete payload, empty payload), HELLO parsing limits, and a
+**differential** check against a second, independently written reference
+implementation (`reference_forward`). Findings print `TEMUAN: …` with the seed +
+input and exit non-zero, so the long run can be a nightly gate.
+
+## 8.10 Known limitations
 
 - No sequence numbers across reconnects (ordering relies on `createdAt` in the UI).
 - If the sidecar is down, realtime stops (no socket.io fallback) — clients retry with exponential backoff.

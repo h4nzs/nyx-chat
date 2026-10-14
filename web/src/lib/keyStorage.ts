@@ -220,11 +220,16 @@ export const saveDeviceAutoUnlockKey = async (key: string) => {
     // Bersihkan nilai lama yang pernah dipersist ke IndexedDB (migrasi)
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
 
-    // Sesi sudah ter-unlock → jalankan migrasi enkripsi at-rest keychain
-    // (fire-and-forget; idempotent; antre di write queue keychain)
+    // Sesi sudah ter-unlock → jalankan migrasi enkripsi at-rest keychain,
+    // lalu migrasi vault (docs/30 WS-F §30.10 poin 2: baris lama yang masih
+    // plaintext di-seal + bucket indeks diisi). Fire-and-forget; keduanya
+    // idempoten, dan yang kedua menunggu yang pertama selesai supaya tidak
+    // berebut masterSeed/queue.
     import('./keychainDb')
       .then(m => m.migrateKeychainAtRestEncryption())
-      .catch(e => console.warn('[KeyStorage] Keychain at-rest migration failed:', e));
+      .then(() => import('./shadowVaultDb'))
+      .then(m => m.shadowVault.migrateAtRestSealing())
+      .catch(e => console.warn('[KeyStorage] At-rest migration failed:', e));
   } catch (error) {
     console.error('Failed to save device auto unlock key');
     throw new Error('Storage failure');

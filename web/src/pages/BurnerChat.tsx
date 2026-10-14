@@ -91,16 +91,24 @@ export default function BurnerChat() {
     if (location.hash) {
       initializeFromHash(location.hash);
     }
-    
-    // Explicitly join the room for anonymous guest
-    const socket = transportClient;
-    if (socket && location.hash) {
-       const hashPart = location.hash.split('#')[1];
-       if (hashPart) {
-          const [id] = hashPart.split(':');
-          transportClient.sendEvent('burner:join', { roomId: id });
-       }
-    }
+
+    // Explicitly join the room for anonymous guest.
+    //
+    // [BURNER GUEST] Keanggotaan room mengikat IDENTITAS socket saat join. Sesi
+    // guest ephemeral bisa berganti identitas (reload me-wipe sesi stale lalu
+    // `POST /api/auth/burner` menerbitkan id baru) dan WebTransport bisa
+    // reconnect — kalau tidak di-join ulang, `burner:reply` host (relay ke
+    // anggota room) tidak pernah sampai ke guest yang sedang aktif.
+    const hashPart = location.hash.split('#')[1];
+    const roomId = hashPart ? hashPart.split(':')[0] : undefined;
+    if (!roomId) return;
+
+    const join = () => transportClient.sendEvent('burner:join', { roomId });
+    join();
+    transportClient.on('connect', join);
+    return () => {
+      transportClient.off('connect', join);
+    };
   }, [location.hash, initializeFromHash]);
 
   useEffect(() => {

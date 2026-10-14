@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { ramProfiles, idbProfiles, profileKeys, decryptProfileMock } = vi.hoisted(() => ({
     ramProfiles: new Map<string, unknown>(),
-    idbProfiles: new Map<string, { id: string; name: string; avatarUrl: string | null; description: string | null; encryptedHash: string; updatedAt: number }>(),
+    idbProfiles: new Map<string, { id: string; name: string; avatarUrl: string | null; description: string | null; encryptedHash: string; updatedAt: number | string }>(),
     profileKeys: new Map<string, string>(),
     decryptProfileMock: vi.fn(async (_ep: string, _key: string) => JSON.stringify({ name: 'Peer Name', username: 'peer', avatarUrl: null })),
 }));
@@ -23,14 +23,20 @@ vi.mock('@lib/crypto-worker-proxy', () => ({
 }));
 
 vi.mock('@lib/keychainDb', () => ({
+    AT_REST_PREFIX: 'ENC1:',
     getProfileKey: async (userId: string) => profileKeys.get(userId),
+    // [docs/30 WS-F §30.10] `profileCache.updatedAt` ditulis ter-seal; mock harus
+    // menyediakan jalur at-rest yang sama dengan produksi.
+    encryptValueAtRest: async (value: string) => 'ENC1:' + Buffer.from(value, 'utf8').toString('base64'),
+    decryptValueAtRest: async (stored: string) =>
+        stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null,
 }));
 
 vi.mock('@lib/db', () => ({
     db: {
         profileCache: {
             get: async (userId: string) => idbProfiles.get(userId),
-            put: async (row: { id: string; name: string; avatarUrl: string | null; description: string | null; encryptedHash: string; updatedAt: number }) => {
+            put: async (row: { id: string; name: string; avatarUrl: string | null; description: string | null; encryptedHash: string; updatedAt: number | string }) => {
                 idbProfiles.set(row.id, row);
             },
         },

@@ -1,4 +1,20 @@
 {
+  "backup_restore": {
+    "title": "Restore from Backup File",
+    "warning": "Restoring an archive overwrites the local data on this device.",
+    "file_label": ".nyxbak file",
+    "choose_file": "Choose file...",
+    "invalid_file": "Not a valid NYX backup file.",
+    "no_file_selected": "Choose a .nyxbak file first.",
+    "phrase_label": "Recovery phrase",
+    "phrase_placeholder": "word1 word2 word3 ...",
+    "progress": "Restoring... {{percent}}%",
+    "restore_button": "Restore",
+    "restoring": "Restoring...",
+    "success": "Vault restored: {{records}} records · {{size}}",
+    "failed": "Restore failed: the archive may be corrupted.",
+    "wrong_phrase": "Wrong recovery phrase or corrupted archive."
+  },
   "add_participant": {
     "title": "Add Participants",
     "search_placeholder": "Search users...",

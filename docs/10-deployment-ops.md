@@ -77,12 +77,16 @@ ls /root/backups/                       # nightly pg_dumps
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify |
 | `VAPID_SUBJECT/PUBLIC_KEY/PRIVATE_KEY` | Web Push |
 | `R2_ACCOUNT_ID/ACCESS_KEY_ID/SECRET_ACCESS_KEY/BUCKET_NAME/PUBLIC_DOMAIN` | Cloudflare R2 |
-| `CF_ACCOUNT_ID/CF_TURN_KEY_ID/CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) |
+| `BACKUP_KEY_SECRET` | Rahasia HMAC kunci objek backup R2 (fallback `JWT_SECRET`; harus STABIL — lihat `docs/31` §31.6b) |
+| `CF_ACCOUNT_ID/CF_TURN_KEY_ID/CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) — **cadangan** sejak WS-E(1) |
+| `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. Lihat `docs/30` §30.9 |
+| `ABUSE_REGISTRATION_GUARD` | `on` = aktifkan guard burst registrasi per sumber (IP ter-HMAC) & per instalasi; default off (no-op). Lihat `docs/30` §30.12 |
 | `SUPABASE_URL/SUPABASE_SERVICE_KEY` | (legacy, optional) |
 | `NOWPAYMENTS_API_KEY/IPN_SECRET` | Payments (crypto-only) |
 | `DISCORD_REPORT_WEBHOOK_URL` | Abuse reports |
 | `RESEND_API_KEY` | Email (optional) |
 | `TRANSPORT_PORT` | Sidecar port (33333) |
+| `METRICS_HOST` / `METRICS_PORT` | Exporter metrik loopback (default `127.0.0.1:9464`; `0` = mati) — lihat §10.12 |
 | `NODE_ENV` | production |
 
 ### Web (`web/.env` → build-time `VITE_*`)
@@ -299,3 +303,61 @@ Restart Postgres after the change and confirm with `SHOW shared_buffers;`.
 
 
 
+## 10.12 Observability tanpa telemetry (added 2026-10-11, docs/30 WS-G)
+
+Prinsipnya dari `docs/27` §27.7 dan `docs/30` §30.1: **hitung event, jangan
+pernah identitas.** Yang menegakkan itu bukan disiplin penulis kode, melainkan
+`server/src/utils/metrics.ts`:
+
+1. Metrik wajib dideklarasikan lebih dulu (`defineCounter/Gauge/Histogram`) →
+   tidak ada deret waktu yang lahir dari nilai runtime (kardinalitas tak
+   terbatas adalah jalur exfil paling mudah).
+2. Label wajib ada di deklarasi; nilai label wajib pendek (≤24 char) dan bukan
+   bentuk UUID / heksadesimal ≥32 / base64url ≥22 / IPv4 / IPv6 / email.
+3. Pelanggaran **ditolak lalu dihitung** di `nyx_metrics_rejected_total` →
+   percobaan menaruh identitas ke metrik justru memicu alert
+   (`NyxMetricsIdentityLeakAttempt`), bukan hilang diam-diam.
+
+**Endpoint.** `GET /metrics` dilayani oleh HTTP listener terpisah yang hanya
+bind loopback (`METRICS_HOST=127.0.0.1`, `METRICS_PORT=9464`; `0` = mati) —
+**bukan** route Express, karena nginx mem-proxy semua path ke `nyx-api`. Jangan
+membuka port ini ke internet, dan jangan menambah relabel Prometheus yang
+menyuntikkan header/query ke label.
+
+**Metrik yang tersedia hari ini:**
+
+| Metrik | Arti |
+|---|---|
+| `nyx_relay_ops_total{op,result}` | Operasi relay upstream (`accepted`/`blocked`/`unhandled`/`error`) per opcode |
+| `nyx_security_blocks_total{op,reason}` | Blokir keamanan sesi/perangkat (`device_inactive`, `session_revoked`, `identity_missing`, `hardware_mismatch`) |
+| `nyx_sweeper_duration_seconds{result}` | Durasi putaran sweeper |
+| `nyx_sweeper_last_run_timestamp_seconds{result}` | Kapan sweeper terakhir selesai (termasuk yang gagal) |
+| `nyx_sweeper_deleted_rows_total{kind}` | Baris dibersihkan (`refresh_token`, `session_key`, `account`, `story`) |
+| `nyx_metrics_rejected_total{reason}` | Harus **selalu 0** di produksi; >0 = ada kode yang mencoba mengirim identitas ke metrik |
+
+**Pemasangan (ops di VPS):** Prometheus + Grafana + exporter
+node/postgres/redis di host yang sama; scrape config &
+alert: `ops/prometheus/prometheus.yml`, `ops/prometheus/alerts.yml`; dashboard
+Grafana: `ops/grafana/dashboards/nyx-overview.json` (impor manual: Grafana →
+Dashboards → Import, pilih datasource Prometheus). Alertmanager tidak
+di-commit (berisi token notifikasi).
+
+**Dashboard yang di-commit** memakai metrik yang sama dengan alert — ambang di
+panel dijaga identik dengan `alerts.yml` supaya tidak ada dua kebenaran. Panel
+`nyx_metrics_rejected_total` (harus 0) dan `Redis key ter-evict` sengaja diberi
+warna merah pada nilai > 0: keduanya berarti jaminan privasi/rate-limit sudah
+bocor, bukan sekadar performa.
+
+**Fuzz parser (gate §30.11 butir 4) — bukan bagian deploy, jalankan nightly:**
+`pnpm --filter nyx-web run fuzz:parsers:hour` dan
+`cd server/transport-sidecar && NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing`
+(lihat docs/11 §11.1c). Per-PR cukup `cargo test` + kampanye pendek vitest.
+
+**Load test relay:** `scripts/load/relay.k6.js` (500 VU, ambang p95 < 200 ms,
+error < 1%). Butuh `NYX_USER`, `NYX_PASS`, `NYX_USERNAME_HASH`,
+`NYX_CONVERSATION_ID`. Skrip ini **menulis** pesan — jalankan hanya ke
+server uji, bukan produksi. Jalur biner WebTransport/WSS diukur terpisah lewat
+harness browser (`docs/11`), karena k6 tidak punya WebTransport.
+
+**Game day (gate M1):** matikan exporter → `NyxMetricsExporterDown`; isi disk
+sampai <12% → `NyxHostDiskLow`; hentikan sweeper → `NyxSweeperStale`.

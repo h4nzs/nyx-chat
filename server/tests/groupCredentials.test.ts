@@ -78,7 +78,11 @@ test('26.8.1: issuance endpoint — server hanya melihat blinded message, tidak 
   assert.match(src, /credential-issuance/, 'endpoint issuance ada');
   assert.match(src, /credential-issuer-key/, 'endpoint public key ada');
   assert.match(src, /credential-commit/, 'endpoint commit serial ada');
-  assert.match(src, /cred:issue:\$\{req\.user\.id\}/, 'quota anti-abuse per (user, conversation, hari)');
+  // [docs/29 §7.1] quota anti-abuse per (user, conversation, hari) lewat helper
+  // ber-tag (userId asli TIDAK boleh masuk kunci Redis) — lihat
+  // credentialIssuance.test.ts untuk kontrak lengkapnya.
+  assert.match(src, /credentialIssuanceKey\(req\.user\.id, conversationId, today!\)/, 'quota anti-abuse ber-tag');
+  assert.doesNotMatch(src, /cred:issue:\$\{req\.user\.id\}/, 'kunci Redis tanpa userId mentah');
   // Blinded message divalidasi ukurannya sebelum ditandatangani
   assert.match(src, /blinded\.length === 0 \|\| blinded\.length > 512/, 'validasi ukuran blinded message');
 });

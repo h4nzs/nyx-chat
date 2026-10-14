@@ -53,6 +53,45 @@ const KeyRotationBanner = () => {
   );
 };
 
+// [docs/29 §7.2] Hard gate identitas: perubahan kunci peer yang belum diterima
+// user memblokir pengiriman sampai user memverifikasi safety number baru.
+const IdentityChangeBanner = ({
+  peerId,
+  source,
+}: {
+  peerId?: string;
+  source?: 'tofu' | 'kt';
+}) => {
+  const { t } = useTranslation(['chat']);
+  // [docs/34 §34.6 poin 1] `kt` = kunci bertentangan dengan log publik
+  // (Key Transparency), bukan sekadar rotasi kunci biasa — copy-nya dibedakan
+  // supaya user tahu bukti mana yang menolak kunci itu.
+  const fromLog = source === 'kt';
+  return (
+    <div className="bg-red-500/10 border-y border-red-500/20 px-4 py-3 text-red-600 dark:text-red-400">
+      <div className="flex items-center gap-3">
+        <FiShield className="flex-shrink-0 animate-pulse" size={18} />
+        <div className="font-mono text-xs flex-1">
+          <p className="font-bold uppercase tracking-wider">
+            {fromLog ? t('banners.identity_kt_mismatch') : t('banners.identity_changed')}
+          </p>
+          <p className="opacity-80">
+            {fromLog ? t('banners.identity_kt_mismatch_desc') : t('banners.identity_changed_desc')}
+          </p>
+        </div>
+        {peerId && (
+          <button
+            onClick={() => useModalStore.getState().openProfileModal(peerId)}
+            className="flex-shrink-0 px-3 py-1.5 rounded-lg bg-red-500 text-white text-[10px] font-bold uppercase tracking-wider active:scale-95 transition-all"
+          >
+            {t('banners.identity_changed_action')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const NewConversationBanner = () => {
   const { t } = useTranslation(['chat']);
   return (
@@ -285,6 +324,13 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleStopRecording = useMessageInputStore(state => state.handleStopRecording);
   
   const typingIndicators = usePresenceStore(state => state.typingIndicators);
+  // [docs/29 §7.2] Perubahan kunci identitas peer yang belum diterima user:
+  // banner + hard gate kirim (composer dinonaktifkan; lihat MessageInput).
+  const identityAlert = useVerificationStore(s => s.identityAlerts[id]);
+  const gatePeerId = conversation && !conversation.isGroup
+    ? conversation.participants?.find(p => getParticipantUserId(p) !== meId)
+    : undefined;
+  const gatePeerUserId = gatePeerId ? String(getParticipantUserId(gatePeerId)) : undefined;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [lightboxMessage, setLightboxMessage] = useState<Message | null>(null);
   const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
@@ -608,6 +654,9 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               </div>
 
               {conversation.keyRotationPending && <KeyRotationBanner />}
+              {identityAlert && (
+                <IdentityChangeBanner peerId={gatePeerUserId} source={identityAlert.source} />
+              )}
               
               <MessageInput
                 onSend={handleSendMessage}

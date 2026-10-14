@@ -10,6 +10,26 @@ use tracing::{error, info, warn};
 use wtransport::{Connection, Endpoint, Identity, ServerConfig};
 use bytes::{BufMut, BytesMut};
 
+// ============================================================================
+// [docs/29 §5.6 / docs/30 WS-G(5)] Negosiasi kapabilitas transport
+// ============================================================================
+//
+// Klien mengirim HELLO (opcode 0x0B) pada stream bidi kontrol setelah
+// terautentikasi; sidecar membalas dengan IRISAN kapabilitas yang dipahami
+// KEDUANYA, dan TIDAK meneruskan frame ini ke Redis/Node (murni kontrol
+// transport). Klien/sidecar lama tidak mengirim/menjawab → dianggap legacy
+// (daftar kosong) tanpa perubahan perilaku.
+//
+// Keputusan murni (HELLO + bingkai `[opcode][len:u32 BE][payload]`) hidup di
+// crate lib `protocol.rs` supaya bisa diuji/di-fuzz tanpa soket WebTransport
+// nyata (`cargo test`, `cargo run --release --bin fuzz-framing`). Kontrak
+// numeriknya tetap sinkron dengan `packages/shared/src/transport.ts`.
+use transport_sidecar::protocol::{
+    classify_inbound, hello_reply_frame, hello_reply_payload, parse_inbound_frame,
+    parse_transport_hello, InboundFrame, InboundHeader, ACK_OPCODE, HANDSHAKE_OPCODE,
+    MAX_BIDI_PAYLOAD_BYTES,
+};
+
 /// Batas keras WebTransport untuk `serverCertificateHashes`: Chrome menolak
 /// sertifikat dengan rentang validitas > 14 hari (dan menolak yang sudah kedaluwarsa).
 const WEBTRANSPORT_MAX_CERT_VALIDITY_DAYS: i64 = 14;
@@ -538,16 +558,18 @@ async fn handle_connection(
 
                         let op_code = header[0];
                         let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
-                        
-                        // TRAFFIC COVER: Ignore Chaff packets
-                        if op_code == 0x00 {
-                            return;
-                        }
-                        
-                        // MAX 32KB for Handshake/Bi-stream payloads
-                        if length > 32768 {
-                            warn!("Payload too large: {} bytes", length);
-                            return;
+
+                        // [docs/30 WS-G(5)] Keputusan dipakai bersama jalur
+                        // uni/datagram: CHAFF dibuang, > 32 KB ditolak, HELLO
+                        // dikenali — semuanya lewat `protocol::classify_inbound`.
+                        let header_kind = classify_inbound(op_code, length, MAX_BIDI_PAYLOAD_BYTES);
+                        match header_kind {
+                            InboundHeader::Chaff => return,
+                            InboundHeader::TooLarge => {
+                                warn!("Payload too large: {} bytes", length);
+                                return;
+                            }
+                            InboundHeader::Hello | InboundHeader::Message => {}
                         }
 
                         let mut payload = vec![0u8; length];
@@ -560,6 +582,29 @@ async fn handle_connection(
                         }
 
                         if read == length {
+                            // [docs/29 §5.6] Negosiasi kapabilitas: transport-local,
+                            // TIDAK diteruskan ke Redis/Node. Balas dengan versi
+                            // server + irisan kapabilitas.
+                            if header_kind == InboundHeader::Hello {
+                                match parse_transport_hello(&payload) {
+                                    Some(hello) => {
+                                        let reply = hello_reply_payload(&hello.caps);
+                                        let _ = send.write_all(&hello_reply_frame(&reply)).await;
+                                        info!(
+                                            "HELLO dari user {} (v{}, {} cap) → dijawab {} cap",
+                                            uid,
+                                            hello.v,
+                                            hello.caps.len(),
+                                            parse_transport_hello(&reply).map(|r| r.caps.len()).unwrap_or(0)
+                                        );
+                                    }
+                                    None => {
+                                        warn!("HELLO tidak sah dari user {} — diabaikan (legacy)", uid);
+                                    }
+                                }
+                                return;
+                            }
+
                             let b64_payload = data_encoding::BASE64URL_NOPAD.encode(&payload);
                             let msg = UpstreamMessage {
                                 user_id: uid,
@@ -572,9 +617,9 @@ async fn handle_connection(
                                 let channel = format!("nyx:upstream:{}", op_code);
                                 let _: Result<(), _> = p.publish(channel, json).await;
 
-                                // For HANDSHAKE (0x0A), send back immediate ACK to client
-                                if op_code == 0x0A {
-                                    let ack_frame = [0x06, 0, 0, 0, 0]; // ACK OpCode + 0 length
+                                // For HANDSHAKE, send back immediate ACK to client
+                                if op_code == HANDSHAKE_OPCODE {
+                                    let ack_frame = [ACK_OPCODE, 0, 0, 0, 0]; // ACK OpCode + 0 length
                                     let _ = send.write_all(&ack_frame).await;
                                 }
                             }
@@ -605,31 +650,31 @@ async fn handle_connection(
                             buffer.extend_from_slice(&chunk[..n]);
                         }
                         
-                        if buffer.len() >= 5 {
-                            let op_code = buffer[0];
-                            let length = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]) as usize;
-
-                            // TRAFFIC COVER: Ignore Chaff packets
-                            if op_code == 0x00 {
-                                return;
-                            }
-
-                            if buffer.len() >= 5 + length {
-                                let payload = &buffer[5..5+length];
+                        // [docs/30 WS-G(5)] Parser murni untuk buffer utuh: CHAFF,
+                        // HELLO, dan frame terpotong TIDAK pernah diteruskan ke
+                        // `nyx:upstream:*` (opcode transport-local bocor = regresi).
+                        match parse_inbound_frame(&buffer, usize::MAX) {
+                            InboundFrame::Forward { op_code, payload } => {
                                 let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
-                                
+
                                 let msg = UpstreamMessage {
                                     user_id: uid,
                                     device_id: did,
                                     op_code,
                                     payload: b64_payload,
                                 };
-                                
+
                                 if let Ok(json) = serde_json::to_string(&msg) {
                                     let channel = format!("nyx:upstream:{}", op_code);
                                     let _: Result<(), _> = p.publish(channel, json).await;
                                 }
                             }
+                            // [docs/29 §5.6] HELLO hanya sah di stream BIDI (butuh
+                            // balasan irisan kapabilitas).
+                            InboundFrame::Hello(_) => {
+                                warn!("HELLO di stream uni dari user {} — diabaikan (harus bidi)", uid);
+                            }
+                            _ => {}
                         }
                     });
                 }
@@ -646,31 +691,29 @@ async fn handle_connection(
         loop {
             match c3.receive_datagram().await {
                 Ok(datagram) => {
-                    if datagram.len() >= 5 {
-                        let op_code = datagram[0];
-                        let length = u32::from_be_bytes([datagram[1], datagram[2], datagram[3], datagram[4]]) as usize;
-
-                        // TRAFFIC COVER: Ignore Chaff packets
-                        if op_code == 0x00 {
-                            continue;
-                        }
-
-                        if datagram.len() >= 5 + length {
-                            let payload = &datagram[5..5+length];
+                    // [docs/30 WS-G(5)] Parser murni yang sama dengan jalur uni.
+                    match parse_inbound_frame(&datagram, usize::MAX) {
+                        InboundFrame::Forward { op_code, payload } => {
                             let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
-                            
+
                             let msg = UpstreamMessage {
                                 user_id: user_id3.clone(),
                                 device_id: device_id3.clone(),
                                 op_code,
                                 payload: b64_payload,
                             };
-                            
+
                             if let Ok(json) = serde_json::to_string(&msg) {
                                 let channel = format!("nyx:upstream:{}", op_code);
                                 let _: Result<(), _> = p3.publish(channel, json).await;
                             }
                         }
+                        // [docs/29 §5.6] HELLO tidak pernah valid di datagram
+                        // (tidak ada balasan di jalur ini) — jangan diteruskan.
+                        InboundFrame::Hello(_) => {
+                            warn!("HELLO di datagram dari user {} — diabaikan (harus bidi)", user_id3);
+                        }
+                        _ => {}
                     }
                 }
                 Err(_) => break,

@@ -30,9 +30,16 @@ Branded nominal types (`UserId`, `ConversationId`, `MessageId`, `StoryId`) + cas
 
 ### `index.ts` — re-exports everything.
 
-## 23.2 Rust transport sidecar (`server/transport-sidecar/src/main.rs`, 562 L)
+## 23.2 Rust transport sidecar (`server/transport-sidecar/`)
 
-Single-file binary on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoken`, `dashmap`, `serde`, `data-encoding`, `uuid`, `time`, `url`.
+Lib + binaries on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoken`, `dashmap`, `serde`, `data-encoding`, `uuid`, `time`, `url`.
+
+| File | Role |
+|---|---|
+| `src/main.rs` | I/O only: endpoint/TLS, auth, session map, kick, the four reader loops |
+| `src/protocol.rs` | **pure** protocol: opcode + HELLO constants, `parse_transport_hello`, `negotiate_capabilities`, `hello_reply_frame/payload`, `classify_inbound`, `parse_inbound_frame`, `reference_forward` |
+| `src/fuzz.rs` | deterministic campaign (xorshift64) over framing + HELLO, incl. differential check |
+| `src/bin/fuzz-framing.rs` | runner: `NYX_FUZZ_SECONDS` / `NYX_FUZZ_ITERS` / `NYX_FUZZ_SEED`, exit 1 on finding |
 
 ### Startup
 1. **TLS cert**: prod → `PROD_CERT_PATH`/`PROD_KEY_PATH`; dev → persistent self-signed DER (`transport_cert.der`/`transport_key.der`), SAN localhost/127.0.0.1, 10-day validity. Prints the **SHA-256 cert hash** → paste into `web/.env` as `VITE_TRANSPORT_CERT_HASH`.
@@ -45,7 +52,7 @@ Single-file binary on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoke
 
 ### `handle_connection`
 - **Single active device:** scan `user:` sessions in the `DashMap<String, Arc<Connection>>` → kick old ("Logged in on another device"); insert `{user}:{device}:{uuid}`.
-- Three reader loops: **bidi** (drop `0x00` chaff; max 32 KB; `0x0A` → ACK `[0x06,0,0,0,0]`), **uni-stream**, **datagram** — each publishes to `nyx:upstream:<opcode>`.
+- Three reader loops: **bidi** (drop `0x00` chaff; max 32 KB; `0x0A` → ACK `[0x06,0,0,0,0]`; `0x0B` HELLO → capability reply, never forwarded), **uni-stream**, **datagram** — each publishes to `nyx:upstream:<opcode>` via `protocol::parse_inbound_frame` (chaff/HELLO/truncated are never forwarded).
 - On `conn.closed()`: remove session + publish opcode `99` (disconnect) for Node cleanup.
 
 ### Hardcoded opcodes (must stay in sync with `packages/shared/src/transport.ts`)
@@ -60,3 +67,5 @@ Single-file binary on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoke
 | `packages/shared/src/schemas.ts` | Zod validation + jitless |
 | `packages/shared/src/brands.ts` | branded id types |
 | `server/transport-sidecar/src/main.rs` | QUIC termination, session map, kick, chaff |
+| `server/transport-sidecar/src/protocol.rs` | pure frame/HELLO decisions (unit + fuzz tested) |
+| `server/transport-sidecar/src/fuzz.rs` + `src/bin/fuzz-framing.rs` | deterministic fuzz campaign + long-run runner |

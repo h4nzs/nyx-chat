@@ -74,7 +74,16 @@ The server never learns roles (Opaque Mailbox), so authorization = possession of
 
 - **Creation:** `createGroup` generates a random 256-bit admin token client-side; the server receives only its SHA-256 hex (`Conversation.adminSecretHash`, validated `^[a-f0-9]{64}$`). The client caches the plaintext token per conversation in kvStore `nyx_group_admin_tokens` (at-rest `ENC1:`), hydrated in `loadConversations`.
 - **Guard:** `requireAdminCapability` (`server/src/utils/adminCapability.ts`) gates `PUT /:id/details`, `POST /:id/key-rotation`, and `DELETE /:id/group` via header `X-Admin-Token` (constant-time compare against the stored hash). **NULL hash = fail-closed** (2026-10 legacy purge) — the create route rejects a group without `adminSecretHash`, and a row with a NULL hash can no longer perform any admin op. All clients therefore send `X-Admin-Token` alongside `X-Group-Token` on group metadata writes.
-- **Distribution:** the token is sealed pairwise (`pq_box_seal`) to each member and relayed via `group:fulfilled_key` with the `adminToken: true` flag (realtime + offline sync branch in `message.ts` — processed as a capability, never as a chain key). Done at group creation, on MEMBER→ADMIN promotion, re-sealed to all other admins on every `rotateGroupKey`, and transferred to the successor admin when the owner leaves.
+- **Where the checks live (WS-G(4)):** every group-route decision is a testable util
+(`server/src/utils/groupAccess.ts` for membership/leave/details/rotation/purge,
+`credentialAuth.ts` for issuance/admin) and `server/tests/groupAccess.test.ts`
+locks the exact status codes, the message strings (`BLIND_AUTH_REQUIRED: …`,
+`ADMIN_AUTH_REQUIRED: …`, `MEMBERS_REMAIN: …`) and the ORDER of the gates
+(token → admin → member count). `PUT /:id/details` keeps its legacy behaviour of
+answering **403 (not 404)** for a missing conversation — do not "fix" it without a
+client contract change.
+
+**Distribution:** the token is sealed pairwise (`pq_box_seal`) to each member and relayed via `group:fulfilled_key` with the `adminToken: true` flag (realtime + offline sync branch in `message.ts` — processed as a capability, never as a chain key). Done at group creation, on MEMBER→ADMIN promotion, re-sealed to all other admins on every `rotateGroupKey`, and transferred to the successor admin when the owner leaves.
 - **UI gating:** rotate-key button (`amIAdmin`), "Delete Group" menu/swipe entry (`canDeleteGroup`), and the solo-leave dialog variant all check admin status locally; the server-side guard is the source of truth.
 - **Trade-off:** the server cannot distinguish between admins and a stolen token stays valid until the next rotation — mitigated by re-sealing on every membership change.
 

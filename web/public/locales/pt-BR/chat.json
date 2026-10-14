@@ -74,7 +74,13 @@
     "encryption_recommendation": "Recomendação do Protocolo de Criptografia",
     "encryption_desc": "Para a conexão inicial, certifique-se de que ambos estejam ONLINE.",
     "burner_warning_desc": "Não atualize nem feche esta página. Todo o histórico do chat vive apenas na RAM e será perdido permanentemente.",
-    "burner_warning_title": "Sessão efêmera ativa"
+    "burner_warning_title": "Sessão efêmera ativa",
+    "identity_changed": "Alerta de Segurança: Chave do Contato Mudou",
+    "identity_changed_desc": "A chave de identidade deste contato é diferente da que você confiava. O envio fica pausado até você verificar o novo número de segurança.",
+    "identity_changed_action": "Verificar agora",
+    "identity_kt_mismatch": "Alerta de Segurança: Chave Contraria o Registro Público",
+    "identity_kt_mismatch_desc": "A chave enviada por este servidor não é a registrada no registro público de Key Transparency. Isso pode indicar um ataque em andamento. O envio fica pausado até você verificar o número de segurança com o contato por outro canal.",
+    "kt_key_rotation": "Key Transparency: uma rotação de chave de contato foi publicada no registro."
   },
   "status": {
     "signal_lost": "Sinal Perdido",

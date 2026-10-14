@@ -1,4 +1,20 @@
 {
+  "backup_restore": {
+    "title": "Restaurar de Arquivo de Backup",
+    "warning": "Restaurar um arquivo sobrescreve os dados locais deste dispositivo.",
+    "file_label": "Arquivo .nyxbak",
+    "choose_file": "Escolher arquivo...",
+    "invalid_file": "Não é um arquivo de backup NYX válido.",
+    "no_file_selected": "Escolha um arquivo .nyxbak primeiro.",
+    "phrase_label": "Frase de recuperação",
+    "phrase_placeholder": "palavra1 palavra2 palavra3 ...",
+    "progress": "Restaurando... {{percent}}%",
+    "restore_button": "Restaurar",
+    "restoring": "Restaurando...",
+    "success": "Cofre restaurado: {{records}} registros · {{size}}",
+    "failed": "Restauração falhou: o arquivo pode estar corrompido.",
+    "wrong_phrase": "Frase de recuperação incorreta ou arquivo corrompido."
+  },
   "add_participant": {
     "title": "Adicionar Participante",
     "search_placeholder": "Buscar usuários...",

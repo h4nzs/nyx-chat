@@ -31,11 +31,18 @@
   "failed_to_rotate_group_keys": "CRÍTICO: Falha ao rotacionar chaves para o grupo. O chat está inseguro.",
   "media_error": "Erro de mídia: {{error}}",
   "call_failed": "Falha ao iniciar chamada E2EE.",
+  "call_no_turn": "O servidor de retransmissão de chamadas (TURN) está indisponível — a chamada pode falhar fora da sua rede local.",
   "update_failed": "Falha na atualização: {{error}}",
   "block_failed": "Falha ao bloquear: {{error}}",
   "unblock_failed": "Falha ao desbloquear: {{error}}",
   "failed_to_delete_conversation": "Falha ao excluir conversa.",
   "failed_to_delete_group": "Falha ao excluir grupo.",
   "failed_to_toggle_pinned_conversation": "Falha ao fixar/desafixar conversa.",
-  "failed_to_send_message_timeout": "Falha ao enviar mensagem: tempo limite atingido."
+  "failed_to_send_message_timeout": "Falha ao enviar mensagem: tempo limite atingido.",
+  "identity_changed_blocked": "A chave de segurança do contato mudou. Verifique em Informações do contato antes de enviar mensagens.",
+  "registration_attestation_unsupported": "Este dispositivo não tem autenticador de plataforma (Touch ID / Windows Hello), então não pode fornecer a atestação de dispositivo exigida.",
+  "registration_attestation_expired": "O desafio de verificação do dispositivo expirou. Tente o cadastro novamente.",
+  "registration_attestation_invalid": "A verificação do dispositivo não pôde ser validada, então a conta não foi criada.",
+  "registration_attestation_hardware_required": "Este dispositivo não conseguiu comprovar suporte de hardware. O cadastro exige atestação de hardware (Touch ID / Windows Hello / chave de segurança).",
+  "registration_attestation_user_verification": "Confirme com seu PIN ou biometria para concluir a criação desta conta."
 }

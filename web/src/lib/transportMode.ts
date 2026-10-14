@@ -50,9 +50,10 @@ export type OutgoingMapping =
  *                         typing:start|typing:stop|active|away)
  *  ACK           (0x06) -> 'message:ack_delivered' (fixed; konfirmasi terkirim)
  *
- *  CHAFF / WEBRTC_SIGNAL / WEBRTC_ICE / KICK / HANDSHAKE -> noop
+ *  CHAFF / WEBRTC_SIGNAL / WEBRTC_ICE / KICK / HANDSHAKE / HELLO -> noop
  *  (tidak didukung oleh fallback WebSocket di MVP; diam-diam diabaikan sekali
- *  per opCode).
+ *  per opCode. HELLO khusus transport WebTransport — jalur WSS langsung
+ *  menandai negosiasi kapabilitas selesai tanpa kapabilitas, docs/29 §5.6).
  */
 export const OUTGOING_OPCODE_MAP: Record<TransportOpCode, OutgoingMapping> = {
   [TransportOpCode.CHAFF]: { kind: 'noop' },
@@ -64,6 +65,7 @@ export const OUTGOING_OPCODE_MAP: Record<TransportOpCode, OutgoingMapping> = {
   [TransportOpCode.ACK]: { kind: 'fixed', event: 'message:ack_delivered' },
   [TransportOpCode.KICK]: { kind: 'noop' },
   [TransportOpCode.HANDSHAKE]: { kind: 'noop' },
+  [TransportOpCode.HELLO]: { kind: 'noop' },
 };
 
 /** OpCode yang WAJIB punya mapping keluar yang bisa dipakai (bukan noop) di MVP. */

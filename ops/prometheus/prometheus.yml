@@ -1,0 +1,57 @@
+# Copyright (c) 2026 [han]. All rights reserved.
+# This file is part of NYX, licensed under the AGPL-3.0.
+# For commercial licensing, contact [admin@nyx-app.my.id].
+#
+# [docs/27 §27.7 + docs/30 WS-G] Scrape config Prometheus untuk VPS NYX.
+#
+# Prinsip: metrik NYX hanya hidup di **loopback** (server/src/utils/metricsEndpoint.ts).
+# Prometheus jalan di host yang sama, jadi tidak ada port metrik yang perlu
+# dibuka ke internet — dan nginx TIDAK mem-proxy /metrics (endpoint itu bukan
+# route Express).
+#
+# Pemasangan (ops R5, docs/10 §10.12):
+#   sudo mkdir -p /etc/prometheus /var/lib/prometheus
+#   sudo cp ops/prometheus/prometheus.yml /etc/prometheus/
+#   sudo cp ops/prometheus/alerts.yml /etc/prometheus/
+#   # jalankan prometheus (systemd/docker) dengan --config.file=/etc/prometheus/prometheus.yml
+#
+# Metrik NYX sengaja TIDAK memuat identitas: label hanya enum (opcode, result,
+# reason, kind). Jangan menambahkan relabel yang menyuntikkan nilai dari HTTP
+# header/query — itu pintu masuk kebocoran identitas ke time series.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  # Aplikasi NYX (Express + bridge + sweeper). Exporter: METRICS_PORT (default 9464).
+  - job_name: nyx-api
+    static_configs:
+      - targets: ['127.0.0.1:9464']
+
+  # Sidecar WebTransport (Rust) — belum mengekspos /metrics; entry disiapkan
+  # supaya saat exporter-nya ditambah (docs/30 WS-G lanjutan) tidak perlu ubah
+  # topologi. Comment dulu agar tidak memicu up==0 palsu.
+  # - job_name: nyx-sidecar
+  #   static_configs:
+  #     - targets: ['127.0.0.1:9465']
+
+  - job_name: node
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['127.0.0.1:9187']
+
+  - job_name: redis
+    static_configs:
+      - targets: ['127.0.0.1:9121']
+
+# [docs/30 WS-A] Saat KT berjalan (proses `nyx-kt`), tambahkan job-nya di sini
+# beserta alert lag log KT. Jangan mengekspos port gRPC KT ke publik: hanya
+# `nyx-api` (loopback) yang boleh menulis/membaca log.

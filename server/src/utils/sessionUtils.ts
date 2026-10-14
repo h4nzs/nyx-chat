@@ -19,6 +19,19 @@ export function clearAuthCookies (res: Response): void {
 }
 
 /**
+ * Apakah subjek JWT ini guest ephemeral (Burner Chat `/drop`)?
+ *
+ * `issueTokens` sengaja TIDAK mempersist refresh token guest (tidak ada baris
+ * User/Device → FK gagal), sehingga `POST /api/auth/refresh` untuk guest selalu
+ * berakhir 401 "token tidak ditemukan". Itu kondisi NORMAL, bukan sesi rusak —
+ * jangan `clearAuthCookies` di jalur itu: cookie `at` (15 menit) masih sah dan
+ * dipakai `GET /api/auth/transport-ticket` untuk menaikkan uplink burner.
+ */
+export function isEphemeralGuestSubject (sub: unknown): boolean {
+  return typeof sub === 'string' && sub.startsWith('guest_')
+}
+
+/**
  * Revoke seluruh refresh token dalam satu family (rotasi chain) dan
  * blacklist semua JTI-nya di Redis secara PARALEL (sebelumnya sequential).
  * Dipakai pada: reuse detection, logout, dan session revocation.

@@ -7,41 +7,21 @@
 //
 // Jalankan di environment yang mendukung: browser desktop normal / CI
 // dengan Chrome penuh. Butuh sidecar WebTransport + server + DB + Redis.
-import { test, expect, Page, Browser } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import {
+  registerUser,
+  supportsWebTransport,
+  openDirectChatWith,
+  sendChatMessage,
+  expectPeerReceivesMessage,
+} from './helpers/registration';
 
-async function webTransportSupported(page: Page): Promise<boolean> {
-  return page.evaluate(() => typeof WebTransport !== 'undefined');
-}
-
-// Helper register (sama dengan spec lain — flow modal onboarding aktual)
-async function registerUser(page: Page, displayName: string, username: string) {
-  await page.goto('/register');
-  await page.getByRole('textbox', { name: /Display Name/i }).fill(displayName);
-  await page.getByRole('textbox', { name: /Username/i }).fill(username);
-  await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
-  await page.getByRole('button', { name: /Initialize Identity/i }).click();
-  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 60000 });
-  await page.getByRole('button', { name: /Skip for now/i }).click();
-  await page.getByRole('button', { name: /Acknowledge/i }).waitFor({ state: 'visible', timeout: 20000 });
-  await page.getByRole('button', { name: /Acknowledge/i }).click();
-  await page.getByRole('button', { name: /Sequence Recorded/i }).waitFor({ state: 'visible', timeout: 20000 });
-  await page.getByRole('button', { name: /Sequence Recorded/i }).click();
-  const closeBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-  await closeBtn.waitFor({ state: 'visible', timeout: 20000 });
-  await closeBtn.click();
-  await page.waitForTimeout(1000);
-  const closeBtn2 = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-  if (await closeBtn2.isVisible().catch(() => false)) await closeBtn2.click();
-  const skipInit = page.getByRole('button', { name: /Skip for now/i });
-  try { await skipInit.waitFor({ state: 'visible', timeout: 15000 }); await skipInit.click(); } catch (e) {}
-  await page.getByRole('heading', { name: /System Ready/i }).waitFor({ state: 'visible', timeout: 30000 });
-}
 
 test.describe('Real-time Transport (WebTransport)', () => {
   test.setTimeout(300000);
 
   test('kirim pesan → terima di peer (latency end-to-end)', async ({ page, browser }) => {
-    test.skip(!(await webTransportSupported(page)), 'WebTransport tidak tersedia di environment ini');
+    test.skip(!(await supportsWebTransport(page, { navigateToAppOrigin: true })), 'WebTransport tidak tersedia di environment ini');
 
     const usernameA = `wta_${Date.now()}`;
     const usernameB = `wtb_${Date.now()}`;
@@ -53,21 +33,11 @@ test.describe('Real-time Transport (WebTransport)', () => {
 
     // Alice mencari Bob & membuka chat
     await page.bringToFront();
-    const searchInput = page.getByRole('textbox', { name: /search/i }).first();
-    await searchInput.waitFor({ state: 'visible', timeout: 15000 });
-    await searchInput.fill(usernameB);
-    await searchInput.press('Enter');
-    const searchResult = page.locator(`text=${usernameB}`).first();
-    await expect(searchResult).toBeVisible({ timeout: 30000 });
-    await searchResult.click();
-
-    const messageInput = page.locator('textarea[placeholder*="essage"], input[placeholder*="essage"]').first();
-    await expect(messageInput).toBeVisible({ timeout: 10000 });
+    await openDirectChatWith(page, usernameB);
 
     const testMessage = `WT-latency-${Date.now()}`;
     const t0 = Date.now();
-    await messageInput.fill(testMessage);
-    await messageInput.press('Enter');
+    await sendChatMessage(page, testMessage);
 
     // Optimistic bubble tampil cepat
     await expect(page.locator(`text=${testMessage}`).first()).toBeVisible({ timeout: 5000 });
@@ -76,10 +46,7 @@ test.describe('Real-time Transport (WebTransport)', () => {
 
     // Peer menerima via WebTransport real-time
     await pageB.bringToFront();
-    const chatFromAlice = pageB.locator('div').filter({ hasText: testMessage }).first();
-    await expect(chatFromAlice).toBeVisible({ timeout: 15000 });
-    await chatFromAlice.click();
-    await expect(pageB.locator(`text=${testMessage}`).first()).toBeVisible({ timeout: 15000 });
+    await expectPeerReceivesMessage(pageB, testMessage);
     const endToEndMs = Date.now() - t0;
     console.log(`[perf] end-to-end receive: ${endToEndMs}ms`);
 
@@ -91,7 +58,7 @@ test.describe('Real-time Transport (WebTransport)', () => {
   });
 
   test('unsend: pengirim menghapus → pesan hilang di kedua sisi', async ({ page, browser }) => {
-    test.skip(!(await webTransportSupported(page)), 'WebTransport tidak tersedia di environment ini');
+    test.skip(!(await supportsWebTransport(page, { navigateToAppOrigin: true })), 'WebTransport tidak tersedia di environment ini');
 
     const usernameA = `wuc_${Date.now()}`;
     const usernameB = `wud_${Date.now()}`;
@@ -102,18 +69,10 @@ test.describe('Real-time Transport (WebTransport)', () => {
     await registerUser(pageB, 'Bob U', usernameB);
 
     await page.bringToFront();
-    const searchInput = page.getByRole('textbox', { name: /search/i }).first();
-    await searchInput.waitFor({ state: 'visible', timeout: 15000 });
-    await searchInput.fill(usernameB);
-    await searchInput.press('Enter');
-    await expect(page.locator(`text=${usernameB}`).first()).toBeVisible({ timeout: 30000 });
-    await page.locator(`text=${usernameB}`).first().click();
+    await openDirectChatWith(page, usernameB);
 
-    const messageInput = page.locator('textarea[placeholder*="essage"], input[placeholder*="essage"]').first();
-    await expect(messageInput).toBeVisible({ timeout: 10000 });
     const testMessage = `WT-unsend-${Date.now()}`;
-    await messageInput.fill(testMessage);
-    await messageInput.press('Enter');
+    await sendChatMessage(page, testMessage);
     await expect(page.locator(`text=${testMessage}`).first()).toBeVisible({ timeout: 10000 });
 
     // Peer melihat pesan

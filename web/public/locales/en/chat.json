@@ -74,7 +74,13 @@
     "encryption_recommendation": "Encryption Protocol Recommendation",
     "encryption_desc": "For the initial handshake, ensure both parties are ONLINE.",
     "burner_warning_title": "Ephemeral Session Active",
-    "burner_warning_desc": "Do not refresh or close this page. All chat history is RAM-only and will be permanently lost."
+    "burner_warning_desc": "Do not refresh or close this page. All chat history is RAM-only and will be permanently lost.",
+    "identity_changed": "Security Alert: Contact Key Changed",
+    "identity_changed_desc": "This contact's identity key is different from the one you trusted. Sending is paused until you verify the new safety number.",
+    "identity_changed_action": "Verify now",
+    "identity_kt_mismatch": "Security Alert: Key Contradicts Public Log",
+    "identity_kt_mismatch_desc": "The key this server sent is not the key recorded in the public Key Transparency log. This can mean an attack in progress. Sending is paused until you verify the safety number with the contact through another channel.",
+    "kt_key_rotation": "Key Transparency: a contact key rotation was published in the log."
   },
   "status": {
     "signal_lost": "Signal Lost",

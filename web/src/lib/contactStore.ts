@@ -33,6 +33,10 @@ import {
     type Conversation,
 } from '@nyx/shared';
 import { encryptVaultText, decryptVaultText } from './shadowVaultDb';
+// [docs/30 WS-F §30.10] `ContactRow.updatedAt` di-seal (pola `seq`): nilai
+// presisi hanya bocor lewat indeks — kolom ini tidak diindeks, jadi cukup
+// envelope `ENC1:` + pembacaan toleran baris lama (`openLocalNumber`).
+import { openLocalNumber, sealLocalNumber } from './localAtRest';
 
 const BUNDLE_VERSION_KEY = 'contact_bundle_version';
 
@@ -58,13 +62,17 @@ async function decryptRow(row: ContactRow): Promise<ContactRecord | null> {
     try {
         const parsed = JSON.parse(plain) as Partial<ContactRecord>;
         if (typeof parsed.userId !== 'string' || parsed.userId.length === 0) return null;
+        // Fallback catatan lama tanpa firstSeenAt/lastSeenAt: kolom `updatedAt`
+        // bisa ter-seal (`ENC1:`) atau angka plaintext → selalu lewat pembaca
+        // toleran; nilai yang tak terbaca jatuh ke 0 (bukan `NaN`).
+        const rowUpdatedAt = (await openLocalNumber(row.updatedAt)) ?? 0;
         return {
             userId: parsed.userId,
             conversationId: typeof parsed.conversationId === 'string' ? parsed.conversationId : null,
             encryptedProfile: typeof parsed.encryptedProfile === 'string' ? parsed.encryptedProfile : null,
             publicKey: typeof parsed.publicKey === 'string' ? parsed.publicKey : undefined,
-            firstSeenAt: typeof parsed.firstSeenAt === 'number' ? parsed.firstSeenAt : row.updatedAt,
-            lastSeenAt: typeof parsed.lastSeenAt === 'number' ? parsed.lastSeenAt : row.updatedAt,
+            firstSeenAt: typeof parsed.firstSeenAt === 'number' ? parsed.firstSeenAt : rowUpdatedAt,
+            lastSeenAt: typeof parsed.lastSeenAt === 'number' ? parsed.lastSeenAt : rowUpdatedAt,
             alias: typeof parsed.alias === 'string' ? parsed.alias : undefined,
             blocked: parsed.blocked === true,
         };
@@ -142,7 +150,7 @@ export async function upsertContact(input: {
     await db.contacts.put({
         userId,
         data: await encryptRecord(record),
-        updatedAt: now,
+        updatedAt: (await sealLocalNumber(now)) ?? now,
     });
 
     void scheduleContactBundlePush();
@@ -382,7 +390,7 @@ export async function restoreContactsFromBundle(): Promise<number> {
             await db.contacts.put({
                 userId: asUserId(c.userId),
                 data: await encryptRecord(c),
-                updatedAt: now,
+                updatedAt: (await sealLocalNumber(now)) ?? now,
             });
             added++;
         }

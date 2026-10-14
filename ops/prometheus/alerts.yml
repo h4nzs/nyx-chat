@@ -1,0 +1,139 @@
+# Copyright (c) 2026 [han]. All rights reserved.
+# This file is part of NYX, licensed under the AGPL-3.0.
+# For commercial licensing, contact [admin@nyx-app.my.id].
+#
+# [docs/27 §27.7 + docs/30 WS-G] Alert untuk VPS NYX.
+#
+# Semua aturan di bawah HANYA memakai metrik event/host — tidak ada label yang
+# memuat userId/usernameHash/IP (lihat server/src/utils/metrics.ts; penjaganya
+# menolak nilai berbentuk identitas). Snapshot hierarki:
+#
+#   ops/prometheus/prometheus.yml   — konfigurasi scrape (loopback /metrics)
+#   ops/prometheus/alerts.yml       — file ini
+#
+# Notifikasi: sambungkan via Alertmanager (`alertmanager.yml` di VPS, tidak di
+# commit karena berisi token). Target respons: lihat docs/10 §10.12.
+
+groups:
+  - name: nyx-app
+    rules:
+      # Eksporter metrik mati = kita kehilangan seluruh visibilitas. Ini alarm
+      # "buta", bukan alarm performa — makanya severity-nya tinggi.
+      - alert: NyxMetricsExporterDown
+        expr: up{job="nyx-api"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Exporter metrik nyx-api tidak bisa di-scrape"
+          description: "Prometheus gagal scrape selama 5 menit. Cek proses pm2 nyx-api dan port loopback METRICS_PORT."
+
+      # Penjaga privasi: nilai berbentuk identitas pernah dicoba masuk ke metrik.
+      # Harus SELALU 0 di produksi.
+      - alert: NyxMetricsIdentityLeakAttempt
+        expr: increase(nyx_metrics_rejected_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ada percobaan mencatat metrik dengan label identitas"
+          description: "nyx_metrics_rejected_total naik (reason={{ $labels.reason }}). Ada kode baru yang mencoba mengirim userId/usernameHash/IP/token ke metrik. Perbaiki pemanggilnya (server/src/utils/metrics.ts akan selalu menolak nilainya)."
+
+      # Sweeper harian tidak jalan / gagal → data kedaluwarsa menumpuk
+      # (token, session key, story, dead-man switch tidak tereksekusi).
+      - alert: NyxSweeperStale
+        expr: time() - max(nyx_sweeper_last_run_timestamp_seconds) > 26 * 3600
+        for: 30m
+        labels:
+          severity: high
+        annotations:
+          summary: "Sweeper sistem belum jalan >26 jam"
+          description: "Cek pm2 nyx-api (cron in-process) dan log '[Cron]'."
+
+      - alert: NyxSweeperFailed
+        expr: increase(nyx_sweeper_duration_seconds_count{result="error"}[26h]) > 0
+        for: 0m
+        labels:
+          severity: high
+        annotations:
+          summary: "Putaran sweeper sistem gagal"
+          description: "Lihat log '[Cron] Gagal melakukan pembersihan database' — biasanya Postgres tak bisa dihubungi atau lock."
+
+      - alert: NyxSweeperSlow
+        expr: histogram_quantile(0.95, sum(rate(nyx_sweeper_duration_seconds_bucket[7d])) by (le)) > 120
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sweeper makin lambat (p95 > 120s)"
+          description: "Biasanya indeks hilang atau tabel membengkak. Cek EXPLAIN pada query sweeper."
+
+      # Blokir keamanan sesi melonjak = indikasi kloning sesi / device di-kick
+      # massal / klien stuck di device lama.
+      - alert: NyxSecurityBlocksSpike
+        expr: increase(nyx_security_blocks_total[30m]) > 25
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Blokir keamanan sesi/perangkat melonjak ({{ $labels.reason }})"
+          description: "Periksa apakah ini pola kloning sesi, atau klien yang perlu re-auth setelah deploy."
+
+  - name: nyx-host
+    rules:
+      - alert: NyxHostDiskLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.12
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk VPS < 12% tersisa"
+          description: "Postgres + Redis AOF + log pm2 + (nanti) log KT. Bersihkan log lama atau besarkan volume."
+
+      - alert: NyxHostMemoryPressure
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+        for: 15m
+        labels:
+          severity: high
+        annotations:
+          summary: "RAM VPS > 90% terpakai"
+          description: "Cek proses terbesar (pm2, Postgres). Argon2id 64MB per login + fan-out grup adalah puncak yang wajar."
+
+      - alert: NyxRedisEvictingRateLimits
+        expr: increase(redis_evicted_keys_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: high
+        annotations:
+          summary: "Redis meng-evict key (rate limit bisa hilang)"
+          description: "Key rate-limit harus selamat: pisahkan namespace rate limit ke DB logis/prefix dengan policy noeviction (docs/10 §10.11)."
+
+      - alert: NyxRedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis tidak bisa di-scrape"
+          description: "Realtime (pub/sub, presence, rate limit) bergantung penuh pada Redis."
+
+      # [docs/30 WS-A / docs/32] Log Key Transparency harus terus menerima
+      # tulisan; kegagalan berarti kunci baru tidak punya jejak audit. Hanya
+      # menyala bila ADA percobaan tulis (jadi instance sepi tidak salah alarm).
+      - alert: NyxKeyTransparencyWriteFailing
+        expr: increase(nyx_kt_writes_total{result="error"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Penulisan log Key Transparency gagal"
+          description: "Cek proses KT (leveldb) + KT_SERVER_URL. Kegagalan tidak memblokir registrasi, jadi hanya terlihat dari sini (docs/32)."
+
+      - alert: NyxKeyTransparencyStalled
+        expr: increase(nyx_kt_writes_total{result="error"}[1h]) > 0 and (time() - nyx_kt_last_success_timestamp_seconds) > 3600
+        for: 10m
+        labels:
+          severity: high
+        annotations:
+          summary: "Log KT gagal total selama 1 jam"
+          description: "Semua percobaan tulis gagal tanpa satu pun sukses: kemungkinan binary KT mati atau endpoint salah. Kunci identitas baru tidak ter-audit."

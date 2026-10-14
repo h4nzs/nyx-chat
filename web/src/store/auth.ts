@@ -4,6 +4,13 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { MinimalUserSchema } from '@nyx/shared';
 import { authFetch, api } from "@lib/api";
+// [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru.
+import {
+  attestationErrorKey,
+  createRegistrationAttestation,
+  isAttestationRequiredError,
+  type RegistrationAttestation
+} from "@lib/registerAttestation";
 import { disconnectSocket, connectSocket } from '@lib/transportClient';
 import { clearAuthCookies } from "@lib/tokenStorage";
 import { useModalStore } from "./modal";
@@ -152,6 +159,13 @@ type Actions = {
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getPqSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getMasterSeed: () => Promise<Uint8Array | undefined>;
+  /**
+   * Master seed **tanpa** memunculkan prompt password: cache dulu, lalu coba
+   * auto-unlock; `undefined` bila vault benar-benar terkunci. Dipakai jalur
+   * "best effort" seperti sealing at-rest (keychain) yang tidak boleh memblokir
+   * UI dengan modal (mis. saat registrasi, saat vault belum ter-unlock).
+   */
+  getMasterSeedIfUnlocked: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
   setAccessToken: (token: string | null) => void;
   updateProfile: (data: { encryptedProfile: string }) => Promise<void>;
@@ -647,24 +661,46 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         const { getFullDeviceIdentity } = await import('@utils/fingerprint');
         const { fingerprint, installationId } = await getFullDeviceIdentity();
-        const res = await api<{ accessToken: string; user: User; deviceId?: string }>("/api/auth/register", {
-          method: "POST",
-          headers: { 
-            'X-Nyx-Fingerprint': fingerprint,
-            'X-Nyx-Installation-Id': installationId
-          },
-          body: JSON.stringify({
-            usernameHash,
-            password,
-            encryptedProfile,
-            publicKey: encryptionPublicKeyB64,
-            pqPublicKey: pqEncryptionPublicKeyB64,
-            signingKey: signingPublicKeyB64,
-            encryptedPrivateKeys,
-            deviceName: getDeviceName(),
-            turnstileToken
-          }),
-        });
+        // [docs/30 §30.12 WS-H] Bila server meminta bukti perangkat (kebijakan
+        // operator, atau heuristik burst sybil per-jaringan), jalankan upacara
+        // WebAuthn lalu kirim ulang pendaftaran SEKALI bersama buktinya. Bila
+        // tetap ditolak, akun tidak dibuat — kita tampilkan alasan yang jelas.
+        const registerOnce = (attestation?: RegistrationAttestation) =>
+          api<{ accessToken: string; user: User; deviceId?: string; attestationTier?: string | null }>("/api/auth/register", {
+            method: "POST",
+            headers: {
+              'X-Nyx-Fingerprint': fingerprint,
+              'X-Nyx-Installation-Id': installationId
+            },
+            body: JSON.stringify({
+              usernameHash,
+              password,
+              encryptedProfile,
+              publicKey: encryptionPublicKeyB64,
+              pqPublicKey: pqEncryptionPublicKeyB64,
+              signingKey: signingPublicKeyB64,
+              encryptedPrivateKeys,
+              deviceName: getDeviceName(),
+              turnstileToken,
+              ...(attestation ? { attestation } : {})
+            }),
+          });
+
+        let res: Awaited<ReturnType<typeof registerOnce>>;
+        try {
+          res = await registerOnce();
+        } catch (error) {
+          if (!isAttestationRequiredError(error)) throw error;
+          try {
+            res = await registerOnce(await createRegistrationAttestation());
+          } catch (attestationError) {
+            toast.error(i18n.t(
+              `errors:${attestationErrorKey(attestationError)}`,
+              'Registration was rejected: this device could not provide the required hardware attestation.'
+            ));
+            throw attestationError;
+          }
+        }
 
         if (res.deviceId) {
            localStorage.setItem('deviceId', res.deviceId);
@@ -806,6 +842,25 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       return keys.masterSeed;
     },
+    async getMasterSeedIfUnlocked() {
+      // Cache dulu — jalur cepat setelah unlock/registrasi.
+      if (privateKeysCache) return privateKeysCache.masterSeed;
+      // Coba auto-unlock secara senyap; TIDAK menyentuh `keysRetrievalPromise`
+      // bersama (supaya tidak mencuri hasil pemanggil yang memang boleh
+      // memunculkan prompt).
+      try {
+        const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+        const autoUnlockKey = await getDeviceAutoUnlockKey();
+        const encryptedKeys = await getEncryptedKeys();
+        if (!autoUnlockKey || !encryptedKeys) return undefined;
+        const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+        if (!result.success) return undefined;
+        privateKeysCache = result.keys;
+        return result.keys.masterSeed;
+      } catch {
+        return undefined;
+      }
+    },
     async getSigningPrivateKey() {
       const keys = await retrieveAndCacheKeys();
       return keys.signing;
@@ -883,6 +938,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     silentRefresh: async () => {
+      // [BURNER GUEST] Sesi guest ephemeral: server sengaja TIDAK mempersist
+      // refresh token guest (lihat issueTokens, role GUEST), jadi POST
+      // /api/auth/refresh pasti 401 — dan jalur 401 itu memanggil
+      // `clearAuthCookies`, mematikan cookie `at` yang masih sah. Akibatnya
+      // guest kehilangan sesi beberapa ratus ms setelah dapat token, dan
+      // `GET /api/auth/transport-ticket` ikut 401 → uplink burner tidak pernah
+      // naik (ESTABLISHING_UPLINK selamanya). Guest memang tidak punya jalur
+      // refresh: laporkan gagal tanpa menyentuh jaringan.
+      const currentUser = get().user;
+      if (currentUser?.role === 'GUEST' || currentUser?.id?.startsWith('guest_')) return false;
+
       if (refreshPromise) return refreshPromise;
 
       refreshPromise = (async () => {

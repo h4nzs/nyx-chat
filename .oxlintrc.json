@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "warn"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }],
+
+    "no-async-promise-executor": "error",
+    "no-unassigned-vars": "error",
+    "no-unused-expressions": "error",
+    "no-useless-escape": "error",
+    "no-debugger": "error",
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "no-unsafe-negation": "error",
+    "no-dupe-keys": "error",
+    "no-func-assign": "error",
+    "no-redeclare": "error",
+    "no-self-assign": "error",
+    "no-self-compare": "error",
+    "no-unsafe-finally": "error",
+    "no-constant-condition": "error",
+    "no-fallthrough": "error",
+    "valid-typeof": "error",
+    "use-isnan": "error",
+    "no-sparse-arrays": "error",
+    "no-obj-calls": "error",
+    "no-empty-pattern": "error",
+    "no-prototype-builtins": "error",
+    "no-await-in-loop": "off",
+    "no-console": "off",
+    "no-empty": ["error", { "allowEmptyCatch": true }]
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**", "**/e2e/**"],
+      "rules": {
+        "no-unused-vars": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/.astro/**",
+    "**/*.min.js",
+    "**/playwright-report/**",
+    "**/test-results/**"
+  ]
+}

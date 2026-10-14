@@ -1,4 +1,20 @@
 {
+  "backup_restore": {
+    "title": "Restaurar desde archivo de copia",
+    "warning": "Restaurar un archivo sobrescribe los datos locales de este dispositivo.",
+    "file_label": "Archivo .nyxbak",
+    "choose_file": "Elegir archivo...",
+    "invalid_file": "No es un archivo de copia NYX válido.",
+    "no_file_selected": "Elige primero un archivo .nyxbak.",
+    "phrase_label": "Frase de recuperación",
+    "phrase_placeholder": "palabra1 palabra2 palabra3 ...",
+    "progress": "Restaurando... {{percent}}%",
+    "restore_button": "Restaurar",
+    "restoring": "Restaurando...",
+    "success": "Bóveda restaurada: {{records}} registros · {{size}}",
+    "failed": "Restauración fallida: el archivo puede estar dañado.",
+    "wrong_phrase": "Frase de recuperación incorrecta o archivo dañado."
+  },
   "add_participant": {
     "title": "Añadir participante",
     "search_placeholder": "Buscar usuarios...",

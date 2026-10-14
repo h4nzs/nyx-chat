@@ -114,6 +114,18 @@ Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. R
 | POST | `/burner-presigned` | Presigned upload for burner guests |
 | POST | `/groups/:id/avatar` | Set group avatar URL |
 
+## backup — `/api/backup`
+
+Backup ber-frame terenkripsi (`.nyxbak`) — lihat `docs/31`. Server hanya melihat blob opaque; kunci objek diturunkan HMAC dari `(BACKUP_KEY_SECRET, userId)` tanpa userId di kunci, dan tidak ada tabel DB baru (satu objek per akun, unggah menimpa).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/presign` | Presigned PUT URL (`uploadLimiter`); body `{ size, urlTtl? }`; kuota FREE 100 MB / SUBSCRIBER 500 MB; butuh akun terverifikasi |
+| POST | `/download-url` | Presigned GET URL (`generalLimiter`); body `{ urlTtl? }` |
+| DELETE | `/` | Hapus objek backup akun (`generalLimiter`) |
+
+Batasan yang jujur: kuota ditegakkan terhadap `size` yang **diklaim klien** (sama seperti `/api/uploads/presigned`); penegakan keras ada di kebijakan bucket/lifecycle R2. Rotasi `BACKUP_KEY_SECRET`/`JWT_SECRET` membuat backup awan lama tidak bisa ditemukan lagi.
+
 ## previews — `/api/previews`
 
 | Method | Path | Notes |

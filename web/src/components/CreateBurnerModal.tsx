@@ -89,6 +89,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
         >
           <button 
             onClick={onClose}
+            aria-label={t('common:actions.close_modal', 'Close modal')}
             className="absolute top-4 right-4 p-2 text-text-secondary hover:text-text-primary bg-black/5 dark:bg-white/5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
           >
             <FiX size={20} />

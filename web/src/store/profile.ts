@@ -2,6 +2,8 @@ import { createWithEqualityFn } from 'zustand/traditional';
 import { decryptProfile } from '@lib/crypto-worker-proxy';
 import { getProfileKey } from '@lib/keychainDb';
 import { db } from '@lib/db';
+// [docs/30 WS-F §30.10] kolom waktu cache profil di-seal (tidak ada pembaca).
+import { sealLocalNumber } from '@lib/localAtRest';
 import type { UserId } from '@nyx/shared';
 
 export type DecryptedProfile = {
@@ -103,7 +105,8 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
         avatarUrl: parsed.avatarUrl || null,
         description: parsed.description || null,
         encryptedHash: encryptedProfile,
-        updatedAt: Date.now()
+        // [docs/30 WS-F §30.10] kolom waktu di-seal (tidak ada pembaca/indeks).
+        updatedAt: (await sealLocalNumber(Date.now())) ?? Date.now()
       });
 
       return parsed;

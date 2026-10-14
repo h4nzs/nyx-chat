@@ -12,11 +12,21 @@ import { ApiError } from '../utils/errors.js'
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // [docs/28 Tier 1.5 / D14] key cache Redis memakai tag, bukan userId asli.
-import { identityKey } from '../utils/redisIdentity.js'
+import { identityKey, identityTag } from '../utils/redisIdentity.js'
+// [docs/30 §30.9 WS-E(1)] coturn self-host: kredensial TURN time-limited (HMAC).
+import {
+  buildTurnIceServers,
+  isCoturnConfigured,
+  mintTurnCredential,
+  parseTurnUrls,
+  type TurnIceServer,
+} from '../utils/turnCredentials.js'
 // ✅ Menggunakan AuthJwtPayload dari paket shared
 import type { AuthJwtPayload, IDeviceTemplate, IPreKeyBundle } from '@nyx/shared'
 import { makeOtpkQuotaGate } from '../utils/otpkQuota.js'
 import { validateEncryptedPrivateKeysPayload, toEncryptedPrivateKeyPatch } from '../utils/encryptedKeysSync.js'
+// [docs/30 WS-G(4)] Pemetaan perangkat → bundle dipakai di 3 jalur; satu util teruji.
+import { toDeviceTemplate, toPublicDeviceBundle } from '../utils/keyBundle.js'
 
 // === Kuota harian konsumsi OTPK per pasangan (requester, target) ===
 // Lua INCR+EXPIRE atomik — pola yang sama dengan limiter lain di repo.
@@ -256,18 +266,7 @@ router.get(
           throw new ApiError(404, 'Device identity not fully initialized.');
         }
 
-        deviceTemplate = {
-          id: device.id,
-          identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-          pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-          signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey),
-          signedPreKey: device.preKeyBundle ? {
-            key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
-            pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
-            signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
-            pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
-          } : null
-        };
+        deviceTemplate = toDeviceTemplate(device);
 
         // Save to Redis
         try {
@@ -371,12 +370,7 @@ router.post(
         for (const device of devices) {
           if (!device.signingKey || !device.publicKey) continue;
 
-          const bundle: Record<string, unknown> = {
-            deviceId: device.id,
-            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
-          };
+          const bundle = toPublicDeviceBundle(device);
 
           const arr = dbResults.get(device.userId) || [];
           arr.push(bundle);
@@ -462,18 +456,7 @@ router.post(
         for (const device of devices) {
           if (!device.signingKey || !device.publicKey) continue;
 
-          const template = {
-            id: device.id,
-            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey),
-            signedPreKey: device.preKeyBundle ? {
-              key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
-              pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
-              signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
-              pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
-            } : null
-          };
+          const template = toDeviceTemplate(device) as unknown as Record<string, unknown>;
 
           // Cache individually
           await redisClient.set(identityKey('cache:keys:bundle', device.userId), JSON.stringify(template), { EX: 3600 });
@@ -580,14 +563,60 @@ router.get(
 )
 
 interface TurnResponse {
-  iceServers?: Array<{ urls: string; username?: string; credential?: string }>;
+  iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }>;
 }
 
+/**
+ * [docs/29 §5.7] STUN milik OPERATOR (opsional, dipisah koma di `ICE_STUN_URLS`).
+ *
+ * Dulu setiap jalur gagal TURN (env kosong, Cloudflare tidak mengembalikan
+ * `iceServers`, atau error transient) mengembalikan STUN publik milik pihak
+ * ketiga — artinya IP klien bocor ke operator luar tepat pada momen paling
+ * sensitif, dan operator tidak pernah tahu TURN-nya mati. Sekarang: STUN pihak
+ * ketiga TIDAK dipakai sama sekali; operator boleh mendeklarasikan STUN-nya
+ * sendiri (coturn), dan kalau tidak ada, endpoint gagal **terlihat**
+ * (503/502 + error code).
+ */
+function operatorStunServers(): string[] {
+  return (process.env.ICE_STUN_URLS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+const withOperatorStun = (stun: string[]): { iceServers: Array<{ urls: string }>; stunOnly: true } => ({
+  iceServers: stun.map((urls) => ({ urls })),
+  stunOnly: true,
+});
+
 router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
+  const stun = operatorStunServers();
   try {
+    // [docs/30 §30.9 WS-E(1)] coturn self-host = PRIMER. Kredensial di-terbitkan
+    // server (HMAC time-limited), username memakai `identityTag` — bukan userId —
+    // sehingga log coturn tidak memetakan sesi call ke akun (docs/28).
+    // Cloudflare TURN tetap ada di bawah sebagai cadangan bila coturn kosong.
+    const turnUrls = parseTurnUrls(process.env.TURN_URLS);
+    const turnSecret = process.env.TURN_STATIC_AUTH_SECRET;
+    if (isCoturnConfigured(turnSecret, turnUrls)) {
+      const credential = mintTurnCredential({
+        secret: turnSecret as string,
+        identityTag: identityTag((req.user as AuthJwtPayload).id),
+        ttlSeconds: process.env.TURN_TTL ? Number(process.env.TURN_TTL) : undefined,
+      });
+      const iceServers: Array<TurnIceServer | { urls: string }> = buildTurnIceServers(turnUrls, credential);
+      for (const urls of stun) iceServers.push({ urls });
+      return res.json({ iceServers });
+    }
+
     const { env } = await import('../config.js');
     if (!env.cfAccountId || !env.cfTurnKeyId || !env.cfTurnApiToken) {
-      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      if (stun.length > 0) {
+        console.warn('[TURN] Cloudflare TURN tidak dikonfigurasi — memakai STUN operator (ICE_STUN_URLS) saja.');
+        return res.json(withOperatorStun(stun));
+      }
+      console.error('[TURN] Tidak ada TURN (Cloudflare) maupun STUN operator (ICE_STUN_URLS) — menolak dengan 503, tanpa fallback ke STUN pihak ketiga.');
+      return res.status(503).json({ error: 'TURN_NOT_CONFIGURED', iceServers: [] });
     }
 
     const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`;
@@ -598,16 +627,26 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ ttl: 86400 })
-    });      const data = await response.json() as TurnResponse;
+    });
 
-    if (data.iceServers) {
+    if (!response.ok) {
+      console.error(`[TURN] Cloudflare credentials API gagal: HTTP ${response.status}`);
+      if (stun.length > 0) return res.json(withOperatorStun(stun));
+      return res.status(502).json({ error: 'TURN_UNAVAILABLE', iceServers: [] });
+    }
+
+    const data = await response.json() as TurnResponse;
+    if (data.iceServers && data.iceServers.length > 0) {
       return res.json({ iceServers: data.iceServers });
     }
 
-    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    console.error('[TURN] Cloudflare tidak mengembalikan iceServers — menolak (tanpa fallback STUN pihak ketiga).');
+    if (stun.length > 0) return res.json(withOperatorStun(stun));
+    return res.status(502).json({ error: 'TURN_UNAVAILABLE', iceServers: [] });
   } catch (error) {
     console.error('[TURN] Failed to fetch credentials:', error);
-    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    if (stun.length > 0) return res.json(withOperatorStun(stun));
+    return res.status(502).json({ error: 'TURN_UNAVAILABLE', iceServers: [] });
   }
 });
 

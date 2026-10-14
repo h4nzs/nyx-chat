@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectCommandInput } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectCommandInput } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
@@ -43,6 +43,18 @@ export const getPresignedUploadUrl = async (key: string, contentType: string, ur
   })
 
   return url
+}
+
+// [docs/31 §31.6 fase 3] URL unduh presigned untuk objek privat (mis. backup).
+// Tidak menandatangani header Content-Type/Checksum apa pun, sehingga klien
+// boleh mengirim `Range` untuk membaca arsip per frame tanpa mematahkan signature.
+export const getPresignedDownloadUrl = async (key: string, urlTtl: number = 300) => {
+  const command = new GetObjectCommand({
+    Bucket: env.r2BucketName,
+    Key: key
+  })
+
+  return await getSignedUrl(s3Client, command, { expiresIn: urlTtl })
 }
 
 // Hapus file

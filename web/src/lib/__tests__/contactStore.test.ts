@@ -56,6 +56,16 @@ vi.mock('@lib/sodiumInitializer', () => ({
     getSodium: vi.fn(async () => null),
 }));
 
+// [docs/30 WS-F §30.10] Seal at-rest nyata (prefix `ENC1:` + base64), supaya
+// kolom waktu kontak benar-benar diuji sebagai ter-seal — bukan passthrough.
+vi.mock('@lib/keychainDb', () => ({
+    AT_REST_PREFIX: 'ENC1:',
+    encryptValueAtRest: vi.fn(async (value: string) => 'ENC1:' + Buffer.from(value, 'utf8').toString('base64')),
+    decryptValueAtRest: vi.fn(async (stored: string) =>
+        stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null
+    ),
+}));
+
 import {
     getParticipantUserId,
     serializeContactBundle,
@@ -63,6 +73,7 @@ import {
     type ContactRecord,
     type Conversation,
 } from '@nyx/shared';
+import { openLocalNumber } from '../localAtRest';
 import {
     upsertContact,
     setContactBlocked,
@@ -194,6 +205,30 @@ describe('contactStore CRUD', () => {
         await upsertContact({ userId: 'peer1', conversationId: 'conv1' }); // tanpa profile
         const rec = await getContact('peer1');
         expect(rec!.encryptedProfile).toBe('ep1');
+    });
+
+    it('[docs/30 WS-F] kolom waktu baris (`updatedAt`) tersimpan TER-SEAL, bukan angka plaintext', async () => {
+        await upsertContact({ userId: 'peer-time', conversationId: null });
+        const row = rows.get('peer-time')!;
+        expect(typeof row.updatedAt).toBe('string');
+        expect(String(row.updatedAt).startsWith('ENC1:')).toBe(true);
+        // Nilai presisi tidak boleh bisa dibaca dari dump IndexedDB.
+        expect(String(row.updatedAt)).not.toContain(String(Date.now()));
+        expect(await openLocalNumber(row.updatedAt)).toBe(Date.now());
+    });
+
+    it('[docs/30 WS-F] baris lama (updatedAt plaintext) tetap terbaca sebagai fallback waktu kontak', async () => {
+        // Record lama tanpa firstSeenAt/lastSeenAt + baris dengan angka plaintext:
+        // satu-satunya sumber waktu adalah kolom `updatedAt`.
+        const legacyAt = 1_700_000_000_000;
+        rows.set('peer-legacy', {
+            userId: 'peer-legacy',
+            data: 'ENC1:' + Buffer.from(JSON.stringify({ userId: 'peer-legacy', blocked: false }), 'utf8').toString('base64'),
+            updatedAt: legacyAt,
+        });
+        const rec = await getContact('peer-legacy');
+        expect(rec?.firstSeenAt).toBe(legacyAt);
+        expect(rec?.lastSeenAt).toBe(legacyAt);
     });
 
     it('guest_/burner_/system TIDAK masuk store', async () => {

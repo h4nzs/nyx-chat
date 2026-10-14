@@ -1,61 +1,10 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+// [docs/30 WS-G(7)] Rantai onboarding tinggal di satu tempat
+// (`helpers/registration.ts`) — sebelumnya disalin di sini dan mulai menyimpang.
+import { registerUser } from './helpers/registration';
 
 test.describe('Authentication & Onboarding', () => {
   test.setTimeout(180000); 
-
-  // Helper: Registrasi Akun dan Bypass Semua Modal Awal
-  async function registerAndBypass(page: Page, displayName: string, username: string) {
-    await page.goto('/register');
-    
-    await page.getByRole('textbox', { name: /Display Name/i }).fill(displayName);
-    await page.getByRole('textbox', { name: /Username/i }).fill(username);
-    await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
-    await page.getByRole('button', { name: /Initialize Identity/i }).click();
-
-    // 1. TRUST LEVEL VERIFICATION (muncul setelah registrasi selesai, ~15-20 detik)
-    await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 60000 });
-    await page.getByRole('button', { name: /Skip for now/i }).click();
-
-    // 2. Protocol: Recovery
-    await page.getByRole('button', { name: /Acknowledge/i }).waitFor({ state: 'visible', timeout: 20000 });
-    await page.getByRole('button', { name: /Acknowledge/i }).click();
-
-    // 3. Secure Phrase
-    await page.getByRole('button', { name: /Sequence Recorded/i }).waitFor({ state: 'visible', timeout: 20000 });
-    await page.getByRole('button', { name: /Sequence Recorded/i }).click();
-
-    // 4. Verify Sequence (tutup via × — kadang butuh dua klik karena regenerasi kata)
-    const closeVerifyBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-    await closeVerifyBtn.waitFor({ state: 'visible', timeout: 20000 });
-    await closeVerifyBtn.click();
-    await page.waitForTimeout(1000);
-    const closeVerifyBtn2 = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-    if (await closeVerifyBtn2.isVisible().catch(() => false)) {
-      await closeVerifyBtn2.click();
-    }
-
-    // 5. Bypass System Init Modal
-    const skipSystemInitBtn = page.getByRole('button', { name: /Skip for now/i });
-    try {
-      await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 15000 });
-      await skipSystemInitBtn.click();
-      await skipSystemInitBtn.waitFor({ state: 'hidden', timeout: 5000 });
-    } catch (e) {
-      console.log('System Init modal skipped or not found');
-    }
-
-    // 6. Bypass Quick Tour Modal (If it appears)
-    const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-    try {
-      await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-      await closeTourBtn.click();
-    } catch (e) {
-      console.log('Quick Tour modal skipped or not found');
-    }
-
-    // Verifikasi mendarat di Dashboard
-    await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 30000 });
-  }
 
   test('Register with Proof of Work', async ({ page }) => {
     await page.route('**/api/auth/pow/challenge', async route => {
@@ -67,14 +16,14 @@ test.describe('Authentication & Onboarding', () => {
         json: { message: 'Registered successfully', user: { id: 'mock_id', username: 'testuser_pow' }, tokens: { access: 'token', refresh: 'token' } }
       });
     });
-    await registerAndBypass(page, 'Test User', 'testuser_pow');
+    await registerUser(page, 'Test User', 'testuser_pow');
   });
 
   test('Login with correct password', async ({ page }) => {
     const username = `loginuser_${Date.now()}`;
     
     // 1. Register User
-    await registerAndBypass(page, 'Test Login User', username);
+    await registerUser(page, 'Test Login User', username);
     
     // 2. Clear Session — logout via app API dulu (cookie HttpOnly tidak bisa dihapus
     //    langsung dari document.cookie), lalu bersihkan storage lokal.

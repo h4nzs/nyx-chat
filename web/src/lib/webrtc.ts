@@ -8,25 +8,46 @@ import { WebRTCSignalingSchema } from '@nyx/shared';
 import i18n from '../i18n';
 import { transportClient } from './transportClient';
 import { TransportOpCode, BinaryPayload } from '@nyx/shared';
+// [docs/30 §30.9 WS-E(2)] Signaling dialamatkan lewat token relay buram, bukan userId.
+import { callRelayTokenFor, ensureCallRelayTokens, userIdForCallRelayToken } from './callRelayTokens';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;
+
+/**
+ * [docs/29 §5.7] Apakah ICE server (TURN/STUN) sedang tidak tersedia?
+ *
+ * Dulu jalur gagal request TURN jatuh ke STUN publik milik pihak ketiga — IP
+ * klien bocor ke operator luar tepat saat panggilan gagal, dan kegagalan TURN
+ * tidak pernah terlihat. Sekarang kegagalan TIDAK diganti server pihak ketiga: kita
+ * mengembalikan daftar kosong (hanya kandidat host / LAN) dan menandai status
+ * ini supaya UI bisa memberi tahu user bahwa TURN mati.
+ */
+let iceUnavailable = false;
+export const isIceUnavailable = (): boolean => iceUnavailable;
 
 const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
   if (cachedIceServers && Date.now() < turnCacheExp) {
     return cachedIceServers;
   }
   try {
-    const res = await api<{ iceServers: RTCIceServer[] }>('/api/keys/turn');
-    if (res && res.iceServers) {
+    const res = await api<{ iceServers: RTCIceServer[]; stunOnly?: boolean }>('/api/keys/turn');
+    if (res && Array.isArray(res.iceServers) && res.iceServers.length > 0) {
+      if (res.stunOnly) {
+        console.warn('[WebRTC] Hanya STUN yang tersedia (TURN tidak dikonfigurasi di server) — panggilan mungkin gagal di luar jaringan lokal.');
+      }
       cachedIceServers = res.iceServers;
       turnCacheExp = Date.now() + (12 * 60 * 60 * 1000); // Cache for 12 hours
-      return cachedIceServers!;
+      iceUnavailable = false;
+      return cachedIceServers;
     }
-    throw new Error("Invalid format");
+    throw new Error('TURN_NOT_AVAILABLE');
   } catch (err) {
-    console.error('Failed to get TURN servers:', err);
-    return [{ urls: 'stun:stun.l.google.com:19302' }];
+    // Tidak ada fallback ke STUN pihak ketiga (docs/29 §5.7): kegagalan TURN
+    // harus terlihat, bukan dipindahkan ke operator luar.
+    iceUnavailable = true;
+    console.error('[WebRTC] ICE server tidak tersedia — tanpa TURN hanya kandidat host (LAN) yang bisa dipakai:', err);
+    return [];
   }
 };
 
@@ -94,10 +115,17 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {}) 
     console.error(`Cannot send secure signal ${type}: Missing Call Key`);
     return;
   }
+  // [docs/30 §30.9 WS-E(2)] `to` di sini masih userId internal (dipakai sebagai
+  // kunci peerConnections/callStore); yang keluar ke wire adalah token relay.
+  const relayToken = await callRelayTokenFor(to);
+  if (!relayToken) {
+    console.error(`Cannot send secure signal ${type}: alamat relay tidak tersedia (fail-closed)`);
+    return;
+  }
   try {
     const { encryptCallSignal } = await import('../utils/crypto');
     const encryptedPayload = await encryptCallSignal(payload, callKey);
-    const data = { to, type, payload: encryptedPayload };
+    const data = { to: relayToken, type, payload: encryptedPayload };
     const buffer = new TextEncoder().encode(JSON.stringify(data));
     
     if (type === 'ice-candidate') {
@@ -155,7 +183,7 @@ const getMediaStream = async (video: boolean) => {
 
 export const startCall = async (to: string, isVideo: boolean, callerProfile: MinimalProfile) => {
   try {
-    const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
+    const { generateCallKey } = await import('../utils/crypto');
     const callKey = await generateCallKey();
     
     useCallStore.getState().setOutgoingCall(asUserId(to), isVideo, callerProfile, callKey);
@@ -202,35 +230,32 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
     // If 'to' is a group, we might need to iterate participants.
     
     const iceServers = await getDynamicIceServers();
+    if (isIceUnavailable()) {
+      // Terlihat, bukan senyap: panggilan tetap dicoba (host candidates cukup di
+      // LAN) tapi user diberi tahu kenapa panggilan jarak jauh bisa gagal.
+      import('react-hot-toast').then(m => m.default.error(i18n.t('errors:call_no_turn', 'Server relay panggilan (TURN) tidak tersedia — panggilan mungkin gagal di luar jaringan lokal.')));
+    }
 
     if (conversation.isGroup) {
-        // For groups, we might broadcast 'request' or wait? 
+        // For groups, we might broadcast 'request' or wait?
         // Simple Mesh: Send 'request' to all other participants.
-        conversation.participants.forEach(p => {
-            // [P2 NORMALISASI] getParticipantUserId (dulu userId||p.id).
-            const pid = getParticipantUserId(p);
-            if (pid !== currentUser?.id) {
-                 const pc = createPeerConnection(pid, iceServers);
-                 // We create offer immediately? Or send 'request' first?
-                 // Original logic sent 'request'.
-                 // We can just send 'request' to notify them to ring.
-                 // Encrypt payload
-                 encryptCallSignal({ isVideo, callerProfile }, callKey).then(enc => {
-                     const data = { to: pid, type: 'request', payload: enc };
-                     const buffer = new TextEncoder().encode(JSON.stringify(data));
-                     transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
-                 });
-            }
-        });
+        // [P2 NORMALISASI] getParticipantUserId (dulu userId||p.id).
+        const peerIds = conversation.participants
+            .map(p => getParticipantUserId(p))
+            .filter((pid): pid is string => Boolean(pid) && pid !== currentUser?.id);
+        // [docs/30 §30.9 WS-E(2)] Satu request untuk semua peserta, lalu kirim
+        // lewat jalur yang sama dengan 1:1 (tidak ada userId di wire).
+        await ensureCallRelayTokens(peerIds);
+        for (const pid of peerIds) {
+            createPeerConnection(pid, iceServers);
+            // We can just send 'request' to notify them to ring.
+            await sendSecureSignal(pid, 'request', { isVideo, callerProfile });
+        }
     } else {
         // 1:1
-        const pc = createPeerConnection(to, iceServers);
+        createPeerConnection(to, iceServers);
         // 2. Encrypt the signaling metadata and send via unified event
-        const payload = { isVideo, callerProfile };
-        const encryptedPayload = await encryptCallSignal(payload, callKey);
-        const data = { to, type: 'request', payload: encryptedPayload };
-        const buffer = new TextEncoder().encode(JSON.stringify(data));
-        transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
+        await sendSecureSignal(to, 'request', { isVideo, callerProfile });
     }
 
   } catch (err) {
@@ -311,7 +336,14 @@ export const initWebRTCListeners = () => {
         return; 
     }
 
-    const data = parsed.data;
+    // [docs/30 §30.9 WS-E(2)] `from` di wire adalah alamat relay buram; petakan
+    // ke userId SEBELUM dipakai sebagai kunci peer. Tak dikenal → drop.
+    const senderId = await userIdForCallRelayToken(parsed.data.from);
+    if (!senderId) {
+        console.warn('[WebRTC] SECURITY BLOCK: Dropping signal dengan alamat relay tidak dikenal.');
+        return;
+    }
+    const data = { ...parsed.data, from: asUserId(senderId) };
     const state = useCallStore.getState();
     let callKey = state.ephemeralCallKey;
 

@@ -30,7 +30,7 @@ export async function resolveDns (urlOrHostname: string): Promise<string> {
   }
 
   // Validate hostname format to prevent injection
-  if (!/^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(hostname) && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+  if (!/^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(hostname) && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
      // Allow simple hostnames or IPs if they are valid, but be strict about weird chars
      // For now, let dns.lookup handle validity, but we could add regex for extra safety
   }

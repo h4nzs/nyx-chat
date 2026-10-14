@@ -12,6 +12,8 @@ import { redisClient } from '../lib/redis.js'
 import { revokeFamily } from '../utils/sessionUtils.js'
 // [docs/28 Tier 1.5] label perangkat tersimpan ter-seal.
 import { openAtRest } from '../utils/atRestSecrets.js'
+// [docs/30 WS-G(4)] Logika revokasi sesi dipindah ke util teruji (fake Prisma).
+import { revokeSessionFamily, type SessionRevocationDb } from '../utils/sessionRevocation.js'
 
 const router: Router = Router()
 
@@ -83,37 +85,19 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     const { jti } = req.params
     const userId = req.user.id
 
-    // Validasi kepemilikan session
-    const token = await prisma.refreshToken.findUnique({
-      where: { jti: String(jti) },
-      include: { device: { select: { userId: true } } }
-    })
-
-    if (!token || token.device?.userId !== userId) {
-      throw new ApiError(404, 'Session not found or unauthorized')
-    }
-
-    // Revoke ALL tokens in this family (prevents reuse of rotated tokens)
-    await prisma.refreshToken.updateMany({
-      where: { familyId: token.familyId, revokedAt: null },
-      data: { revokedAt: new Date() }
-    });
-
-    // Add all JTIs in this family to Redis blacklist
-    const familyTokens = await prisma.refreshToken.findMany({
-      where: { familyId: token.familyId },
-      select: { jti: true, expiresAt: true }
-    });
-    for (const ft of familyTokens) {
-      const expiresIn = Math.floor((new Date(ft.expiresAt).getTime() - Date.now()) / 1000);
-      if (expiresIn > 0) {
-        await redisClient.setEx(`revoked_jti:${ft.jti}`, expiresIn, '1').catch(() => {});
+    // [docs/30 WS-G(4)] Validasi kepemilikan + revokasi seluruh family + isi
+    // blacklist JTI dikerjakan util yang diuji perilakunya (`sessionRevocation`).
+    const revocation = await revokeSessionFamily(
+      prisma as unknown as SessionRevocationDb,
+      { jti: String(jti), userId },
+      async (tokenJti, ttlSeconds) => {
+        await redisClient.setEx(`revoked_jti:${tokenJti}`, ttlSeconds, '1').catch(() => {});
       }
-    }
+    );
 
     try {
       await emitEventToUser(userId, 'force_logout', { jti });
-      await sendJsonToUser(userId, TransportOpCode.KICK, { deviceId: token.deviceId }, false, token.deviceId);
+      await sendJsonToUser(userId, TransportOpCode.KICK, { deviceId: revocation.deviceId }, false, revocation.deviceId ?? undefined);
     } catch (err) {
       console.error("[Session] Failed to send KICK or force_logout:", err)
     }

@@ -117,16 +117,22 @@ describe('PasswordPromptModal biometric unlock (kontrak RAM-only)', () => {
     return btn
   }
 
+  // Batas default `waitFor` (1 s) terlalu ketat saat suite penuh jalan paralel:
+  // alur klik biometric menunggu import dinamis + mock crypto, dan sudah terukur
+  // ~1,2 s di mesin dev (pernah flake 1× dalam run paralel). Timeout besar =
+  // konvensi repo untuk assertion lambat (lihat AGENTS.md).
+  const SLOW = { timeout: 5_000 } as const;
+
   async function openAndClickBiometric() {
     render(React.createElement(PasswordPromptModal))
-    await waitFor(() => expect(findBiometricButton()).toBeTruthy())
+    await waitFor(() => expect(findBiometricButton()).toBeTruthy(), SLOW)
     fireEvent.click(findBiometricButton())
     await waitFor(() => {
       expect(unlockWithBiometric).toHaveBeenCalledTimes(1)
-    })
+    }, SLOW)
     await waitFor(() => {
       expect(modalState.onPasswordSubmit).toHaveBeenCalled()
-    })
+    }, SLOW)
   }
 
   it('membuka vault ke RAM via unlockFromRecoveryPhrase dan mengirim sinyal null', async () => {
@@ -175,12 +181,12 @@ describe('PasswordPromptModal biometric unlock (kontrak RAM-only)', () => {
     unlockFromRecoveryPhrase.mockResolvedValue(false)
 
     render(React.createElement(PasswordPromptModal))
-    await waitFor(() => expect(findBiometricButton()).toBeTruthy())
+    await waitFor(() => expect(findBiometricButton()).toBeTruthy(), SLOW)
     fireEvent.click(findBiometricButton())
 
     await waitFor(() => {
       expect(screen.getByText(/corrupt/i)).toBeInTheDocument()
-    })
+    }, SLOW)
     expect(modalState.onPasswordSubmit).not.toHaveBeenCalled()
     expect(modalState.hidePasswordPrompt).not.toHaveBeenCalled()
   })
@@ -189,12 +195,12 @@ describe('PasswordPromptModal biometric unlock (kontrak RAM-only)', () => {
     unlockWithBiometric.mockResolvedValue({ authResp: {}, recoveryPhrase: null })
 
     render(React.createElement(PasswordPromptModal))
-    await waitFor(() => expect(findBiometricButton()).toBeTruthy())
+    await waitFor(() => expect(findBiometricButton()).toBeTruthy(), SLOW)
     fireEvent.click(findBiometricButton())
 
     await waitFor(() => {
       expect(screen.getByText(/corrupt/i)).toBeInTheDocument()
-    })
+    }, SLOW)
     expect(unlockFromRecoveryPhrase).not.toHaveBeenCalled()
     expect(saveEncryptedKeys).not.toHaveBeenCalled()
   })

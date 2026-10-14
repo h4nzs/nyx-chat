@@ -1,6 +1,17 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { purgeSealedUserRows } from '../utils/routingIdentity.js';
+// [docs/30 WS-G] Metrik event-only untuk sweeper: durasi, hasil, jumlah baris
+// yang dibersihkan per jenis (tanpa identitas apa pun).
+import {
+  incCounter,
+  observeHistogram,
+  setGauge,
+  nowSeconds,
+  SWEEPER_DURATION,
+  SWEEPER_LAST_RUN,
+  SWEEPER_DELETED,
+} from '../utils/metrics.js';
 
 // Jadwalkan untuk jalan setiap jam 00:00 (server time) tiap hari
 export const startSystemSweeper = () => {
@@ -9,6 +20,8 @@ export const startSystemSweeper = () => {
   cron.schedule('0 0 * * *', async () => {
     console.log('[Cron] Memulai pembersihan database harian...');
     const now = new Date();
+    const startedAt = Date.now();
+    let sweepResult: 'ok' | 'error' = 'ok';
 
     try {
       // 1. Bersihkan RefreshToken kadaluarsa & yang sudah di-revoke (logout)
@@ -21,6 +34,7 @@ export const startSystemSweeper = () => {
         }
       });
       if (deletedTokens.count > 0) {
+        incCounter(SWEEPER_DELETED, { kind: 'refresh_token' }, deletedTokens.count);
         console.log(`[Cron] Berhasil menghapus ${deletedTokens.count} token kadaluarsa.`);
       }
 
@@ -39,6 +53,7 @@ export const startSystemSweeper = () => {
       });
 
       if (deletedSessionKeys.count > 0) {
+        incCounter(SWEEPER_DELETED, { kind: 'session_key' }, deletedSessionKeys.count);
         console.log(`[Cron] Berhasil menghapus ${deletedSessionKeys.count} kunci sesi kadaluarsa/usang.`);
       }
 
@@ -69,6 +84,7 @@ export const startSystemSweeper = () => {
         }
       }
       if (nukedCount > 0) {
+         incCounter(SWEEPER_DELETED, { kind: 'account' }, nukedCount);
          console.log(`[Cron] Auto-destructed ${nukedCount} dormant accounts.`);
       }
 
@@ -98,11 +114,18 @@ export const startSystemSweeper = () => {
         where: { expiresAt: { lte: now } }
       });
       if (deletedStories.count > 0) {
+        incCounter(SWEEPER_DELETED, { kind: 'story' }, deletedStories.count);
         console.log(`[Cron] 🧹 Dihapus ${deletedStories.count} story kadaluarsa.`);
       }
 
     } catch (error) {
+      sweepResult = 'error';
       console.error('[Cron] Gagal melakukan pembersihan database:', error);
+    } finally {
+      // Dicatat di finally supaya putaran yang GAGAL pun terlihat (lag sweeper
+      // yang tak terukur adalah cara paling mudah kehilangan alert disk penuh).
+      observeHistogram(SWEEPER_DURATION, (Date.now() - startedAt) / 1000, { result: sweepResult });
+      setGauge(SWEEPER_LAST_RUN, nowSeconds(), { result: sweepResult });
     }
   });
 };

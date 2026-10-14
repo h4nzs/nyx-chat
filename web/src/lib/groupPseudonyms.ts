@@ -74,18 +74,37 @@ export function getMyDeliveryToken(conversationId: string): DeliveryToken | unde
   return token ? asDeliveryToken(token) : undefined;
 }
 
-/** Semua token milik saya lintas grup (untuk header X-Delivery-Tokens saat sync). */
+/**
+ * Semua token milik saya lintas grup (untuk header X-Delivery-Tokens saat sync).
+ *
+ * [BUGFIX 2026-10-11] Dulu filter `meta?.v !== 2` → metadata **v3** (satu-satunya
+ * bentuk yang masih ditulis, lihat 2026-10 purge) selalu dilewati, sehingga
+ * discovery token-first tidak pernah menerima token grup v3: device baru tanpa
+ * id lokal tidak menemukan grupnya sebelum ada pesan relay. Kontrak peta
+ * token sama di v2 & v3 (`getDeliveryTokenMap`), jadi filternya disamakan.
+ */
 export function collectMyDeliveryTokens(): DeliveryToken[] {
   const myId = useAuthStore.getState().user?.id;
   if (!myId) return [];
   const tokens: DeliveryToken[] = [];
   for (const conv of useConversationStore.getState().conversations) {
     const meta = conv.decryptedMetadata as { v?: number; deliveryTokenMap?: Record<string, string> } | undefined;
-    if (meta?.v !== 2 || !meta.deliveryTokenMap) continue;
+    if ((meta?.v !== 2 && meta?.v !== 3) || !meta.deliveryTokenMap) continue;
     const token = meta.deliveryTokenMap[myId];
     if (token) tokens.push(asDeliveryToken(token));
   }
   return tokens;
+}
+
+/**
+ * Blind auth grup (`authSecret`) milik percakapan ini, bila metadata v2/v3
+ * sudah ter-dekripsi. Dipakai sebagai bukti keanggotaan saat issuance credential
+ * (docs/29 §7.1) — sama seperti X-Group-Token pada mutasi grup lain.
+ */
+export function getMyGroupToken(conversationId: string): string | undefined {
+  const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  const meta = conv?.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
+  return (meta?.v === 2 || meta?.v === 3) ? meta.authSecret : undefined;
 }
 
 /** Random per-group sender pseudonym (base64url of 16 random bytes). */

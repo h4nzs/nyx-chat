@@ -12,8 +12,9 @@ const QRCode = (
 import { FiDownloadCloud, FiCheckCircle, FiAlertTriangle } from 'react-icons/fi';
 import { transportClient, connectSocket } from '@lib/transportClient';
 import { getSodium } from '@lib/sodiumInitializer';
-import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
-import { importDatabaseFromJson } from '@lib/keychainDb';
+import { libsodiumBackupCrypto } from '@lib/backupFormat';
+import { libsodiumBackupValueCodec } from '@lib/backupPayload';
+import { restoreFramedBackup, liveBackupStore, formatBackupSize } from '@lib/backupRestore';
 const uuidv4 = () => crypto.randomUUID();
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
@@ -63,7 +64,7 @@ export default function MigrationReceivePage() {
       transportClient.on('migration:start', (payload) => {
         const data = payload as { roomId: string; totalChunks: number; sealedKey: string; };
         metaRef.current = data;
-        chunksRef.current = new Array(data.totalChunks);
+        chunksRef.current = Array.from({ length: data.totalChunks }, () => '');
         migrationStartedRef.current = false;
         setStatus('receiving');
         toast.loading(tRef.current('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
@@ -79,7 +80,7 @@ export default function MigrationReceivePage() {
         if (receivedCount === total && !migrationStartedRef.current) {
           migrationStartedRef.current = true;
           setStatus('decrypting');
-          toast.loading(tRef.current('common:migration.decrypting_vault', 'Mendekripsi brankas...'), { id: 'mig' });
+          toast.loading(tRef.current('common:migration.restoring_data', 'Memulihkan basis data...'), { id: 'mig' });
           await processMigration(sodium);
         }
       });
@@ -98,52 +99,63 @@ export default function MigrationReceivePage() {
       const { sealedKey } = metaRef.current!;
       const sealedKeyBytes = sodium.from_base64(sealedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       
-      // 1. Decrypt the AES Key using our Private Key
-      const aesKey = sodium.crypto_box_seal_open(sealedKeyBytes, keysRef.current!.publicKey, keysRef.current!.privateKey);
+      // 1. Buka kunci arsip 32 byte memakai private key perangkat ini.
+      const key = sodium.crypto_box_seal_open(sealedKeyBytes, keysRef.current!.publicKey, keysRef.current!.privateKey);
       
-      // 2. Reassemble chunks
+      // 2. Rakit ulang chunk base64 menjadi arsip ber-frame utuh.
       const chunksDecoded = chunksRef.current.map(c => sodium.from_base64(c, sodium.base64_variants.URLSAFE_NO_PADDING));
       const totalLength = chunksDecoded.reduce((acc, val) => acc + val.byteLength, 0);
-      const combinedCiphertext = new Uint8Array(totalLength);
+      const archiveBytes = new Uint8Array(totalLength);
       let offset = 0;
       for (const chunk of chunksDecoded) {
-        combinedCiphertext.set(chunk, offset);
+        archiveBytes.set(chunk, offset);
         offset += chunk.byteLength;
       }
 
-      // 3. Prepare payload for worker (IV + Ciphertext)
-      const workerPayload = new Uint8Array(combinedCiphertext.length);
-      workerPayload.set(combinedCiphertext);
+      // 3. Verifikasi + dekripsi + tulis per frame (AAD menolak tamper/terpotong).
+      const crypto = libsodiumBackupCrypto(sodium as unknown as Parameters<typeof libsodiumBackupCrypto>[0]);
+      const codec = libsodiumBackupValueCodec(sodium as unknown as Parameters<typeof libsodiumBackupValueCodec>[0]);
+      const store = await liveBackupStore();
 
-      // 4. Decrypt via Worker
-      const decryptedBuffer = await worker_file_decrypt(workerPayload.buffer, aesKey);
-      const jsonString = new TextDecoder().decode(decryptedBuffer);
-
-      // 5. Import to IDB
-      await importDatabaseFromJson(jsonString);
+      const report = await restoreFramedBackup({
+        store,
+        bytes: archiveBytes,
+        key,
+        crypto,
+        codec,
+        onProgress: (done, total) => setProgress(Math.round((done / total) * 100)),
+      });
       
       // ✅ OPSI A: FORCE NEW IDENTITY FOR NEW DEVICE
-      // After importing the vault (which contains the old deviceId and keys),
-      // we MUST clear them so that on the next reload, the app detects
+      // After importing the vault (which contains the old deviceId),
+      // we MUST clear it so that on the next reload, the app detects
       // it has no local identity keys and performs a NEW DEVICE BOOTSTRAP.
       localStorage.removeItem('deviceId');
       
       transportClient.sendEvent('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 
       setStatus('success');
-      toast.success(tRef.current('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
+      toast.success(
+        tRef.current('common:migration.restore_summary', 'Dipulihkan {{records}} catatan · {{size}}', {
+          records: report.records,
+          size: formatBackupSize(report.size),
+        }),
+        { id: 'mig', duration: 4000 }
+      );
+      toast.success(tRef.current('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig-done' });
       
       // Hard reload to apply the imported state and trigger key regeneration
       setTimeout(() => window.location.href = '/', 2500); 
     } catch (e) {
       console.error(e);
-      toast.error(tRef.current('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
+      toast.error(tRef.current('common:migration.restore_failed', 'Restore gagal: data mungkin rusak atau kunci salah.'), { id: 'mig' });
       
       if (metaRef.current?.roomId) {
          transportClient.sendEvent('migration:ack', { roomId: metaRef.current.roomId, success: false });
       }
 
       setStatus('waiting');
+      setProgress(0);
       migrationStartedRef.current = false;
     }
   };
@@ -169,7 +181,7 @@ export default function MigrationReceivePage() {
           <div className="w-[250px] h-[250px] bg-bg-surface animate-pulse rounded-xl"></div>
         )}
         
-        {status === 'receiving' && (
+        {(status === 'receiving' || status === 'decrypting') && (
           <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center rounded-xl text-accent backdrop-blur-sm">
              <FiDownloadCloud size={40} className="mb-2 animate-bounce" />
              <span className="font-bold font-mono">{progress}%</span>

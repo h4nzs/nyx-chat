@@ -57,8 +57,8 @@
     "keys": "Kunci Enkripsi",
     "sessions": "Sesi Aktif",
     "export_vault": "Ekspor Brankas",
-    "import_vault": "Impor Brankas",
-    "transfer": "Transfer ke Perangkat Baru (QR)"
+    "import_vault": "Impor Brankas",      "transfer": "Transfer ke Perangkat Baru (QR)",
+      "restore_backup": "Pulihkan dari Berkas .nyxbak"
   },
   "support": {
     "push_notif": "Notifikasi Push",

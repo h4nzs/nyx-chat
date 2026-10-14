@@ -18,8 +18,15 @@ import type { ConversationId, UserId, MessageId } from '@nyx/shared';
 export const AT_REST_PREFIX = 'ENC1:';
 
 async function getMasterSeedOrUndefined(): Promise<Uint8Array | undefined> {
+  // [FIX 2026-10-13] Harus NON-prompting: `migrateKeychainAtRestEncryption`
+  // (dipanggil fire-and-forget dari `saveDeviceAutoUnlockKey`) memakai helper ini
+  // saat registrasi, ketika vault belum ter-unlock dan identitas user belum sempat
+  // ter-scope. Memakai `getMasterSeed()` yang memunculkan prompt membuat modal
+  // "ACCESS CONTROL PAD" menghalangi alur onboarding. Fungsi bernama "OrUndefined"
+  // memang tidak boleh memblokir; bila terkunci, jawabannya `undefined` (dan
+  // pemanggil sudah menangani itu dengan menyimpan nilai apa adanya).
   const { useAuthStore } = await import('@store/auth');
-  return useAuthStore.getState().getMasterSeed();
+  return useAuthStore.getState().getMasterSeedIfUnlocked();
 }
 
 export async function encryptValueAtRest(value: string): Promise<string> {

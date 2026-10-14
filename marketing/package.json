@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "lint": "eslint .",
+    "lint": "oxlint src",
     "preview": "astro preview"
   },
   "dependencies": {

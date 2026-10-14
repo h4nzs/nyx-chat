@@ -1,48 +1,8 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
 import path from 'node:path';
+import { registerUser, supportsWebTransport, dismissOnboardingTour } from './helpers/registration';
 
-// Helper (duplikasi per spec — konvensi repo): Registrasi User + bypass modal awal
-async function registerUser(page: Page, displayName: string, username: string) {
-  await page.goto('/register');
-
-  await page.getByRole('textbox', { name: /Display Name/i }).fill(displayName);
-  await page.getByRole('textbox', { name: /Username/i }).fill(username);
-  await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
-  await page.getByRole('button', { name: /Initialize Identity/i }).click();
-
-  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 60000 });
-  await page.getByRole('button', { name: /Skip for now/i }).click();
-
-  await page.getByRole('button', { name: /Acknowledge/i }).waitFor({ state: 'visible', timeout: 20000 });
-  await page.getByRole('button', { name: /Acknowledge/i }).click();
-
-  await page.getByRole('button', { name: /Sequence Recorded/i }).waitFor({ state: 'visible', timeout: 20000 });
-  await page.getByRole('button', { name: /Sequence Recorded/i }).click();
-
-  const closeVerifyBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-  await closeVerifyBtn.waitFor({ state: 'visible', timeout: 20000 });
-  await closeVerifyBtn.click();
-  await page.waitForTimeout(1000);
-  const closeVerifyBtn2 = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-  if (await closeVerifyBtn2.isVisible().catch(() => false)) {
-    await closeVerifyBtn2.click();
-  }
-
-  const skipSystemInitBtn = page.getByRole('button', { name: /Skip for now/i });
-  try {
-    await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 15000 });
-    await skipSystemInitBtn.click();
-    await skipSystemInitBtn.waitFor({ state: 'hidden', timeout: 5000 });
-  } catch (e) {}
-
-  const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-  try {
-    await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await closeTourBtn.click();
-  } catch (e) {}
-
-  await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 30000 });
-}
+const GUEST_PLACEHOLDER = 'Type an ephemeral message...';
 
 // Helper: bikin link burner dari sidebar host, buka di konteks guest, kirim teks awal
 async function openBurnerAsGuest(
@@ -64,35 +24,79 @@ async function openBurnerAsGuest(
   const roomId = hrefMatch![1]!.split(':')[0]!;
   expect(roomId.startsWith('burner_')).toBe(true);
 
-  // 3. Klik COPY SECURE LINK → menambahkan conversation burner ke store host &
-  //    mengarahkan host ke ChatWindow burner (tempat MessageInput + Destroy berada).
+  // 3. Klik COPY SECURE LINK → menambahkan conversation burner ke store host
+  //    (ChatWindow host di /chat/<roomId> yang memuat MessageInput + Destroy).
   const copyBtn = page.getByRole('button', { name: /Copy Secure Link/i }).first();
   await expect(copyBtn).toBeVisible({ timeout: 10000 });
   await copyBtn.click();
 
-  // 4. Buka link di konteks guest terisolasi
+  // 4. Tutup modal burner — kalau tidak, overlay `z-[100]`-nya menelan klik
+  //    baris sidebar berikutnya. Backdrop-nya menutup on-click; diklik lewat
+  //    `mouse.click` di pojok supaya tidak tersangkut cek "stable" framer-motion.
+  if (await copyBtn.isVisible().catch(() => false)) {
+    await page.mouse.click(5, 5);
+  }
+  await expect(page.getByRole('button', { name: /Copy Secure Link/i })).toHaveCount(0, { timeout: 10000 });
+
+  // 5. Buka link di konteks guest terisolasi
   const guestPage = await context.newPage();
   await guestPage.goto(link);
-
-  // 5. Guest kirim teks awal agar DR host terinisialisasi
-  const guestInput = guestPage.getByPlaceholder('Type an ephemeral message...').first();
-  await expect(guestInput).toBeVisible({ timeout: 30000 });
-  await guestInput.fill('ping');
-  await guestInput.press('Enter');
+  await sendBurnerMessage(guestPage, 'ping');
 
   return { guestPage, roomId };
 }
 
+/** Kirim satu pesan di halaman burner (/drop guest atau ChatWindow host). */
+async function sendBurnerMessage(page: Page, text: string): Promise<void> {
+  const input = page.getByPlaceholder(GUEST_PLACEHOLDER).or(
+    page.locator('textarea[placeholder*="essage"], input[placeholder*="essage"]')
+  ).first();
+  await expect(input).toBeVisible({ timeout: 30000 });
+  await expect(input).toBeEnabled({ timeout: 30000 });
+  await input.fill(text);
+  await input.press('Enter');
+}
+
+/**
+ * Host membuka percakapan burner-nya lewat baris sidebar (navigasi in-app).
+ *
+ * PENTING: state Double Ratchet host untuk burner hidup HANYA di RAM
+ * (`useBurnerStore.activeSessions`). `page.goto('/chat/<roomId>')` me-reload
+ * halaman dan menghapus state itu → komposer host terkunci di "Waiting for
+ * guest to establish secure connection..." dan lampiran tak bisa dikirim.
+ * Membuka lewat baris sidebar = perilaku user yang sebenarnya dan state tetap utuh
+ * (pesan awal guest sudah menginisialisasi DR host via `burner:receive`).
+ */
+async function openBurnerChatOnHost(page: Page, roomId: string): Promise<void> {
+  const burnerRow = page.locator('div.cursor-pointer').filter({ hasText: 'ping' }).first();
+  await expect(burnerRow).toBeVisible({ timeout: 30000 });
+  await burnerRow.click();
+
+  await expect(page).toHaveURL(new RegExp(roomId));
+  await expect(
+    page.getByRole('button', { name: /Destroy Burner Session/i }).first()
+  ).toBeVisible({ timeout: 30000 });
+}
+
 async function sendFileFromHost(page: Page, filePath: string) {
+  // Komposer host terkunci selama DR burner belum ada (isWaitingForGuest) →
+  // tunggu sampai placeholder "Waiting for guest..." hilang dulu.
+  await expect(page.getByPlaceholder(/Waiting for guest/i)).toHaveCount(0, { timeout: 30000 });
+
   // MessageInput staging flow: pilih file → preview → klik tombol kirim
   // Input file sengaja disembunyikan (className="hidden") → tidak perlu visible.
   const fileInput = page.locator('input[type="file"]').first();
   await fileInput.waitFor({ state: 'attached', timeout: 15000 });
   await fileInput.setInputFiles(filePath);
 
-  // Preview staging muncul dengan nama file → klik tombol submit composer
+  // Staging muncul sebelum kirim: thumbnail untuk gambar, dan hanya lampiran
+  // non-gambar yang menampilkan nama file → terima keduanya.
   const stagedName = filePath.split('/').pop()!;
-  await expect(page.locator('text=' + stagedName).first()).toBeVisible({ timeout: 15000 });
+  const staged = page
+    .locator('img[alt="preview"]')
+    .or(page.locator('text=' + stagedName))
+    .first();
+  await expect(staged).toBeVisible({ timeout: 15000 });
 
   const sendBtn = page.locator('form button[type="submit"]').first();
   await expect(sendBtn).toBeEnabled({ timeout: 10000 });
@@ -100,17 +104,13 @@ async function sendFileFromHost(page: Page, filePath: string) {
 }
 
 // Cek WebTransport HARUS setelah navigasi ke origin app (di about:blank,
-// `window.isSecureContext === false` → WebTransport undefined meski didukung).
-async function supportsWebTransport(page: Page): Promise<boolean> {
-  await page.goto('/');
-  return page.evaluate(() => typeof WebTransport !== 'undefined');
-}
-
+// `window.isSecureContext === false` → WebTransport undefined meski didukung) —
+// opsi `navigateToAppOrigin` di helper.
 test.describe('Regression: burner flows', () => {
   test.setTimeout(240000);
 
   test('host sends a photo → guest bubble shows a preview (regression: no preview on host→guest files)', async ({ page, browser }) => {
-    const supported = await supportsWebTransport(page);
+    const supported = await supportsWebTransport(page, { navigateToAppOrigin: true });
     test.skip(!supported, 'WebTransport tidak tersedia di environment ini');
 
     const hostName = `bh_${Date.now()}`;
@@ -119,9 +119,8 @@ test.describe('Regression: burner flows', () => {
     const context = await browser.newContext();
     const { guestPage, roomId } = await openBurnerAsGuest(page, context);
 
-    // Host buka chat burner & kirim foto
-    await page.goto(`/chat/${roomId}`);
-    await page.waitForTimeout(1000);
+    // Host buka chat burner (in-app, tanpa reload) & kirim foto
+    await openBurnerChatOnHost(page, roomId);
 
     const imgPath = path.resolve(process.cwd(), 'public', 'pwa-192x192.png');
     await sendFileFromHost(page, imgPath);
@@ -133,7 +132,7 @@ test.describe('Regression: burner flows', () => {
   });
 
   test('burner conversation destroyed on host stays deleted after reload (regression: reappears)', async ({ page, browser }) => {
-    const supported = await supportsWebTransport(page);
+    const supported = await supportsWebTransport(page, { navigateToAppOrigin: true });
     test.skip(!supported, 'WebTransport tidak tersedia di environment ini');
 
     const hostName = `bd_${Date.now()}`;
@@ -142,20 +141,32 @@ test.describe('Regression: burner flows', () => {
     const context = await browser.newContext();
     const { roomId } = await openBurnerAsGuest(page, context);
 
-    await page.goto(`/chat/${roomId}`);
-    await page.waitForTimeout(1000);
+    await openBurnerChatOnHost(page, roomId);
 
     // Destroy sesi dari ChatWindow host
     const destroyBtn = page.getByRole('button', { name: /Destroy Burner Session/i }).first();
     await expect(destroyBtn).toBeVisible({ timeout: 15000 });
     await destroyBtn.click();
 
-    // Setelah destroy, host dialihkan ke /chat — reload & pastikan room tidak kembali
-    await page.waitForTimeout(1000);
+    // Efek destroy asinkron (baris conversation dihapus dari IndexedDB lokal).
+    // Reload terlalu cepat membatalkan penghapusan itu dan room tampak "kembali"
+    // — jadi tunggu barisnya benar-benar hilang dulu (sekaligus asersi bahwa
+    // destroy memang membersihkan UI tanpa reload).
+    await expect(
+      page.locator('div.cursor-pointer').filter({ hasText: /No messages yet|ping/ })
+    ).toHaveCount(0, { timeout: 20000 });
+
+    // Setelah destroy: reload penuh → room yang sudah dihancurkan tidak boleh
+    // muncul kembali di daftar chat (regresi: conversation di-restore dari DB).
     await page.reload();
-    await page.waitForTimeout(3000);
+    // Quick Tour hanya ter-mount setelah bootstrap reload (isBootstrapping) →
+    // kalau belum ditandai selesai ia menutupi sidebar dengan overlay fixed.
+    await dismissOnboardingTour(page, 15000);
+    await expect(page.getByRole('link', { name: /Settings/i })).toBeVisible({ timeout: 30000 });
 
     await expect(page.locator(`a[href*="${roomId}"]`)).toHaveCount(0);
     await expect(page.locator('div', { hasText: roomId }).first()).toHaveCount(0);
+    // Host hanya punya satu percakapan (burner tadi) → daftar chat harus kosong.
+    await expect(page.getByText('No conversations yet')).toBeVisible({ timeout: 30000 });
   });
 });

@@ -53,9 +53,14 @@ jobs:
           JWT_SECRET: ci-jwt-secret-not-for-prod
 
   lint:
-    name: Lint (non-blocking — typescript-eslint belum support TS 7)
+    # [2026-10-11] Lint kini BLOCKING lewat oxlint (Rust; tidak terikat versi TS).
+    # Rule level error = kelas bug/keamanan (no-eval, no-new-func,
+    # no-async-promise-executor, no-unsafe-negation, dll) dan harus 0.
+    # Kategori `correctness` sengaja masih `warn`: ada ±250 temuan lama
+    # (mayoritas no-unused-vars) yang dibersihkan bertahap — jangan naikkan ke
+    # error sebelum angkanya 0, atau CI jadi merah terus dan diabaikan.
+    name: Lint (oxlint — rule error blocking)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -193,6 +198,9 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+      - name: Test sidecar (protokol murni + fuzz deterministik)
+        working-directory: server/transport-sidecar
+        run: cargo test
       - name: Build sidecar
         working-directory: server/transport-sidecar
         run: cargo build --release

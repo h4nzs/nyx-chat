@@ -18,6 +18,7 @@ import {
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
+import BackupRestoreModal from '../components/BackupRestoreModal';
 import { api } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
 import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
@@ -180,6 +181,7 @@ export default function SettingsPage() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
 
   const handleDeleteAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -977,6 +979,19 @@ export default function SettingsPage() {
                    <FiSend size={18} />
                    {t('settings:data.transfer')}
                  </button>
+                 <button 
+                   onClick={() => setShowRestoreModal(true)}
+                   className="
+                     col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-purple-500 font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiDatabase size={18} />
+                   {t('settings:data.restore_backup')}
+                 </button>
                  <input 
                     type="file" 
                     ref={vaultInputRef} 
@@ -1187,6 +1202,7 @@ export default function SettingsPage() {
 
       {/* MODALS */}
       {showReportModal && <ReportBugModal onClose={() => setShowReportModal(false)} />}
+      <BackupRestoreModal isOpen={showRestoreModal} onClose={() => setShowRestoreModal(false)} />
       
       {avatarCropTarget && (
         <ImageCropperModal

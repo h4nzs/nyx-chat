@@ -12,14 +12,26 @@ import {
   verifyPresentation, SERIAL_HEX_LENGTH, CREDENTIAL_SUITE,
 } from '../lib/groupCredentials.js'
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
-import { isAdminTokenValid, extractHeader } from '../utils/adminCapability.js'
 import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js'
+// [docs/29 §7.1] Gate keanggotaan issuance + capability admin (bisa diuji
+// dengan klien Prisma palsu; lihat tests/credentialAuth.test.ts).
+import {
+  DELIVERY_TOKEN_RE, authorizeCredentialIssuance, type CredentialAuthDb,
+} from '../utils/credentialAuth.js'
+import {
+  authorizeMemberMutation, authorizeMemberLeave, authorizeDetailsWrite,
+  authorizeKeyRotation, authorizeGroupPurge, type GroupAccessDb,
+} from '../utils/groupAccess.js'
+import {
+  CREDENTIAL_INCR_LUA, CREDENTIAL_QUOTA_TTL_SECONDS, commitAllowed, credentialCommitKey,
+  credentialDays, credentialIssuanceKey, exceedsIssuanceQuota,
+} from '../utils/credentialIssuance.js'
 // [docs/28 Tier 4] identitas at-rest: key Redis ber-tag + metadata grup tanpa userId penulis.
 import { identityTag } from '../utils/redisIdentity.js'
 import { sanitizeGroupMetadataBlob } from '../utils/groupMetadataBlob.js'
 import { messageTimeBucket } from '../utils/temporalBucket.js'
 import {
-  upsertMembership, findMembership, deleteMembership, type MembershipPrisma
+  upsertMembership, deleteMembership, type MembershipPrisma
 } from '../utils/routingIdentity.js'
 import type { Conversation } from '@nyx/shared'
 
@@ -33,22 +45,20 @@ const ConversationSchema = z.object({
 // Server stores (conversationId, token) — it cannot link token → identity
 // beyond the routing-only row it is told to create. TOKEN-FIRST: discovery
 // adalah possession token, bukan join userId (26.8.1 trigger #1 tertutup).
-const DeliveryTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{22}$/)
+const DeliveryTokenSchema = z.string().regex(DELIVERY_TOKEN_RE)
 
 const router: Router = Router()
 router.use(requireAuth)
 
-async function requireAdminCapabilityForRequest(conversationId: string, req: { headers: Record<string, unknown> }): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  const conversation = await prisma.conversation.findUnique({
-    where: { id: conversationId },
-    select: { adminSecretHash: true },
-  }) as { adminSecretHash: string | null } | null;
-  if (!conversation) return { ok: false, status: 404, error: 'Not found' };
-  if (!isAdminTokenValid(conversation.adminSecretHash, extractHeader(req.headers['x-admin-token']))) {
-    return { ok: false, status: 403, error: 'ADMIN_AUTH_REQUIRED: Invalid or missing X-Admin-Token' };
-  }
-  return { ok: true };
-}
+// [docs/29 §7.1 / docs/30 WS-G] Otorisasi issuance credential dan capability
+// admin kini tinggal di `utils/credentialAuth.ts` supaya keputusannya bisa
+// diuji sebagai perilaku (klien Prisma palsu) — bukan hanya regex atas source.
+const authDb = prisma as unknown as CredentialAuthDb
+
+// [docs/30 WS-G(4) sisa] Jalur grup (anggota/leave/details/rotasi/purge) juga
+// dipindah ke `utils/groupAccess.ts` — tes perilakunya di
+// `tests/groupAccess.test.ts` mengunci urutan gate & kode status, bukan teks.
+const groupDb = prisma as unknown as GroupAccessDb
 
 // [26.8.1] Issuer public key — dibagikan bebas ke semua klien.
 router.get('/credential-issuer-key', async (req, res, next) => {
@@ -59,32 +69,43 @@ router.get('/credential-issuer-key', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
-// [26.8.1] Credential issuance — klien mengirim (conversationId, preparedMsg)
+// [26.8.1] Credential issuance — klien mengirim (conversationId, blindedMsg)
 // yang sudah di-blind. Server hanya melihat blinded message; TIDAK bisa
 // mengaitkannya dengan user/anggota. Kontrak kepercayaan: klien hanya meminta
 // satu credential per keanggotaannya; server mencatat serial untuk dedupe &
 // revocation (serial = hash prepared message, tidak bisa di-link balik).
+// [docs/29 §7.1] WAJIB membawa bukti keanggotaan (X-Group-Token atau delivery
+// token) — lihat authorizeCredentialIssuance.
 router.post('/credential-issuance', zodValidate({
   body: z.object({
     conversationId: z.string().min(1).max(64),
     blindedMsg: z.string().min(1).max(1024), // base64url dari blinded message
+    // Alternatif bukti keanggotaan untuk klien yang belum bisa mengirim header
+    // (mis. token undangan sudah didapat, metadata belum ter-dekripsi).
+    deliveryToken: z.string().regex(DELIVERY_TOKEN_RE).optional(),
   })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { conversationId, blindedMsg } = req.body as { conversationId: string; blindedMsg: string }
+    const { conversationId, blindedMsg, deliveryToken } = req.body as {
+      conversationId: string; blindedMsg: string; deliveryToken?: string
+    }
+
+    if (!(await authorizeCredentialIssuance(authDb, conversationId, req.headers as unknown as Record<string, unknown>, deliveryToken))) {
+      return res.status(403).json({ error: 'MEMBERSHIP_PROOF_REQUIRED: Valid X-Group-Token or delivery token required.' });
+    }
 
     // Per-user quota anti-abuse: satu issuance per (user, conversation) per hari.
     // Grup nyata tidak perlu lebih — credential tidak berubah kecuali re-join.
-    const today = new Date().toISOString().split('T')[0];
-    const count = Number(await redisClient.eval(`
-local current = redis.call('INCR', KEYS[1])
-if current == 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[1])
-end
-return current
-`, { keys: [`cred:issue:${req.user.id}:${conversationId}:${today}`], arguments: ['86400'] }));
-    if (count > 3) {
+    // [docs/29 §7.1] key memakai identityTag (bukan userId mentah): Redis
+    // persisten = artefak setara dump, jadi kunci tidak boleh memuat identitas.
+    // Counter yang sama juga berfungsi sebagai TIKET yang dibatasi di commit.
+    const [today] = credentialDays();
+    const issueKey = credentialIssuanceKey(req.user.id, conversationId, today!);
+    const count = Number(await redisClient.eval(CREDENTIAL_INCR_LUA, {
+      keys: [issueKey], arguments: [String(CREDENTIAL_QUOTA_TTL_SECONDS)],
+    }));
+    if (exceedsIssuanceQuota(count)) {
       return res.status(429).json({ error: 'CREDENTIAL_QUOTA: Too many issuance requests.' });
     }
 
@@ -117,19 +138,47 @@ return current
 
 // [26.8.1] Credential commit — setelah finalize, klien mengirim serial
 // prepared-message + conversationId agar server mengaitkannya untuk verifikasi
-// & revocation. Server tidak bisa memverifikasi klaim ini saat commit —
-// integritas dijaga oleh verifikasi saat presentasi (serial hanya lolos bila
-// tanda tangannya valid untuk conversationId yang diklaim).
+// & revocation.
+//
+// Integritas isi dijaga saat PRESENTASI (serial hanya lolos bila tanda tangan
+// valid untuk conversationId yang diklaim + binding konteks cocok). Di sini
+// yang ditegakkan: (a) bukti keanggotaan yang sama seperti issuance, (b) commit
+// tidak boleh melebihi jumlah issuance hari itu — tanpa ini siapa pun bisa
+// menyuntikkan serial 96-hex sembarang tanpa batas (spam tabel GroupCredential).
 router.post('/credential-commit', zodValidate({
   body: z.object({
     conversationId: z.string().min(1).max(64),
     keyVersion: z.number().int().min(1),
     serial: z.string().length(SERIAL_HEX_LENGTH),
+    deliveryToken: z.string().regex(DELIVERY_TOKEN_RE).optional(),
   })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { conversationId, keyVersion, serial } = req.body as { conversationId: string; keyVersion: number; serial: string }
+    const { conversationId, keyVersion, serial, deliveryToken } = req.body as {
+      conversationId: string; keyVersion: number; serial: string; deliveryToken?: string
+    }
+
+    if (!(await authorizeCredentialIssuance(authDb, conversationId, req.headers as unknown as Record<string, unknown>, deliveryToken))) {
+      return res.status(403).json({ error: 'MEMBERSHIP_PROOF_REQUIRED: Valid X-Group-Token or delivery token required.' });
+    }
+
+    // Ticket check: issuance di hari ini ATAU kemarin (grace tengah malam).
+    const days = credentialDays();
+    const issuedCounts = await Promise.all(days.map(day =>
+      redisClient.get(credentialIssuanceKey(req.user.id, conversationId, day!))
+    ));
+    const issued = issuedCounts.reduce((max, raw) => Math.max(max, Number(raw ?? 0)), 0);
+
+    const [today] = days;
+    const commitKey = credentialCommitKey(req.user.id, conversationId, today!);
+    const committed = Number(await redisClient.eval(CREDENTIAL_INCR_LUA, {
+      keys: [commitKey], arguments: [String(CREDENTIAL_QUOTA_TTL_SECONDS)],
+    }));
+    if (!commitAllowed(committed, issued)) {
+      return res.status(403).json({ error: 'CREDENTIAL_COMMIT_WITHOUT_ISSUANCE: No issuance ticket for this credential.' });
+    }
+
     await recordIssuedCredential(serial, conversationId, keyVersion)
     res.status(201).json({ ok: true })
   } catch (error) { next(error) }
@@ -423,15 +472,11 @@ router.put('/:id/details', async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { id } = req.params
     const { encryptedMetadata } = req.body
-    const groupToken = req.headers['x-group-token']
 
-    const conversation = await prisma.conversation.findUnique({ where: { id }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-    if (!conversation || !credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
-        return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
-    }
-    // [26.9 RBAC] Menulis ulang metadata = mutasi roster/role — ADMIN ONLY.
-    const adminCheck = await requireAdminCapabilityForRequest(id, req);
-    if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
+    // [docs/30 WS-G(4)] Gate token grup + capability admin (urutan & kode status
+    // sama seperti sebelumnya; lihat `authorizeDetailsWrite`).
+    const accessGate = await authorizeDetailsWrite(groupDb, id, req.headers as Record<string, unknown>)
+    if (!accessGate.ok) return res.status(accessGate.status).json({ error: accessGate.error })
 
     // [docs/28 Tier 4] sanitasi SEBELUM simpan supaya blob (dan event relay) bebas userId penulis.
     const sanitizedMetadata = sanitizeGroupMetadataBlob(encryptedMetadata)
@@ -453,13 +498,10 @@ router.put('/:id/details', async (req, res, next) => {
 router.post('/:id/participants', async (req, res, next) => {
   const { id: conversationId } = req.params;
   const { userIds } = req.body;
-  const groupToken = req.headers['x-group-token'];
 
-  const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-  if (!conversation) return res.status(404).json({ error: 'Not found' });
-  if (!credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
-      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
-  }
+  // [docs/30 WS-G(4)] 404 conversation hilang → 403 tanpa/salah X-Group-Token.
+  const memberGate = await authorizeMemberMutation(groupDb, conversationId, req.headers as Record<string, unknown>);
+  if (!memberGate.ok) return res.status(memberGate.status).json({ error: memberGate.error });
   // [BUGFIX 2026-10-01] JANGAN pass record parsial (select: authSecret saja) ke
   // toConversation — Date.toISOString(undefined) meledak "Invalid time value"
   // → 500 saat add participant. Broadcast pakai payload minimal (Opaque
@@ -498,13 +540,10 @@ router.post('/:id/participants', async (req, res, next) => {
 
 router.delete('/:id/participants/:userId', async (req, res, next) => {
   const { id: conversationId, userId } = req.params;
-  const groupToken = req.headers['x-group-token'];
 
-  const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-  if (!conversation) return res.status(404).json({ error: 'Not found' });
-  if (!credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
-      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
-  }
+  // [docs/30 WS-G(4)] Kick = mutasi anggota; gate yang sama dengan add.
+  const kickGate = await authorizeMemberMutation(groupDb, conversationId, req.headers as Record<string, unknown>);
+  if (!kickGate.ok) return res.status(kickGate.status).json({ error: kickGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
   const removeRecipients = req.body.targetRecipients as string[] | undefined;
@@ -523,25 +562,13 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
 router.delete('/:id/leave', async (req, res, next) => {
   const { id: conversationId } = req.params;
   const userId = req.user!.id;
-  const groupToken = req.headers['x-group-token'];
 
-  const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-  if (!conversation) return res.status(404).json({ error: 'Not found' });
-  const tokenOk = credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '');
-  if (!tokenOk) {
-    // [BUGFIX 2026-10-02 — LEAVE TANPA METADATA] Anggota yang metadata-nya
-    // belum ter-decrypt tidak punya authSecret (authSecret hidup di dalam
-    // metadata) → sebelumnya leave SELALU 403 ("Group token unavailable").
-    // Cukup aman menerima leave via baris delivery-token milik user sendiri:
-    // requireAuth sudah mengaitkan akun, dan row UserHiddenConversation
-    // (userId↔conversationId) SUDAH ada di server — mengizinkan user
-    // menghapus row-nya sendiri tidak membocorkan apa pun yang baru. Ini
-    // juga semantik Signal: leave = pencabutan keanggotaan, bukan akses konten.
-    const ownsDeliveryToken = await findMembership(prisma as unknown as MembershipPrisma, { userId, conversationId });
-    if (!ownsDeliveryToken) {
-      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
-    }
-  }
+  // [BUGFIX 2026-10-02 — LEAVE TANPA METADATA, dipertahankan] Anggota yang
+  // metadata-nya belum ter-decrypt tidak punya authSecret (authSecret hidup di
+  // dalam metadata) → sebelumnya leave SELALU 403. Jalur kedua: baris
+  // delivery-token milik user sendiri (lihat `authorizeMemberLeave`).
+  const leaveGate = await authorizeMemberLeave(groupDb, conversationId, req.headers as Record<string, unknown>, userId);
+  if (!leaveGate.ok) return res.status(leaveGate.status).json({ error: leaveGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
   const leaveRecipients = req.body.targetRecipients as string[] | undefined;
@@ -565,25 +592,11 @@ router.delete('/:id/group', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { id } = req.params
-    const groupToken = req.headers['x-group-token']
 
-    const conversation = await prisma.conversation.findUnique({
-      where: { id },
-      select: { authSecret: true, isGroup: true },
-    }) as { authSecret: string | null; isGroup: boolean } | null
-    if (!conversation) return res.status(404).json({ error: 'Not found' })
-    if (!conversation.isGroup) return res.status(400).json({ error: 'Not a group' })
-    if (!credentialTokenMatches(conversation.authSecret, typeof groupToken === 'string' ? groupToken : '')) {
-      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' })
-    }
-    // [26.9 RBAC] Purge grup permanen = operasi admin.
-    const adminCheck = await requireAdminCapabilityForRequest(id, req);
-    if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
-
-    const remainingMembers = await prisma.userHiddenConversation.count({ where: { conversationId: id } })
-    if (remainingMembers > 0) {
-      return res.status(409).json({ error: 'MEMBERS_REMAIN: group still has active members' })
-    }
+    // [26.9 RBAC] Purge grup permanen = operasi admin; urutan gate (404 → 400 →
+    // 403 token → admin → 409 MEMBERS_REMAIN) diuji di `tests/groupAccess.test.ts`.
+    const purgeGate = await authorizeGroupPurge(groupDb, id, req.headers as Record<string, unknown>)
+    if (!purgeGate.ok) return res.status(purgeGate.status).json({ error: purgeGate.error })
 
     await prisma.groupCredential.deleteMany({ where: { conversationId: id } })
     await prisma.conversation.delete({ where: { id } })
@@ -621,8 +634,8 @@ router.post('/:id/key-rotation', async (req, res, next) => {
     // [26.9 RBAC] Rotasi kunci = operasi admin (non-admin tetap bisa lazy-rotate
     // lokal via ensureGroupSession saat kirim pesan — endpoint ini hanya untuk
     // rotasi AKTIF oleh pengelola grup).
-    const adminCheck = await requireAdminCapabilityForRequest(id, req);
-    if (!adminCheck.ok) return res.status(adminCheck.status).json({ error: adminCheck.error });
+    const rotateGate = await authorizeKeyRotation(groupDb, id, req.headers as Record<string, unknown>)
+    if (!rotateGate.ok) return res.status(rotateGate.status).json({ error: rotateGate.error })
 
     const updatedConversation = await prisma.conversation.update({
       where: { id },

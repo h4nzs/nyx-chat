@@ -57,8 +57,8 @@
     "keys": "Claves de cifrado",
     "sessions": "Sesiones activas",
     "export_vault": "Exportar bóveda",
-    "import_vault": "Importar bóveda",
-    "transfer": "Transferir a nuevo dispositivo (QR)"
+    "import_vault": "Importar bóveda",      "transfer": "Transferir a nuevo dispositivo (QR)",
+      "restore_backup": "Restaurar desde archivo .nyxbak"
   },
   "support": {
     "push_notif": "Notificaciones Push",

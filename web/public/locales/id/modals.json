@@ -1,4 +1,20 @@
 {
+  "backup_restore": {
+    "title": "Restore dari Berkas Backup",
+    "warning": "Memulihkan arsip akan menimpa data lokal di perangkat ini.",
+    "file_label": "Berkas .nyxbak",
+    "choose_file": "Pilih berkas...",
+    "invalid_file": "Bukan berkas backup NYX yang sah.",
+    "no_file_selected": "Pilih berkas .nyxbak terlebih dahulu.",
+    "phrase_label": "Recovery phrase",
+    "phrase_placeholder": "kata1 kata2 kata3 ...",
+    "progress": "Memulihkan... {{percent}}%",
+    "restore_button": "Restore",
+    "restoring": "Memulihkan...",
+    "success": "Brankas dipulihkan: {{records}} catatan · {{size}}",
+    "failed": "Restore gagal: arsip mungkin rusak.",
+    "wrong_phrase": "Recovery phrase salah atau arsip rusak."
+  },
   "add_participant": {
     "title": "Tambah Peserta",
     "search_placeholder": "Cari pengguna...",

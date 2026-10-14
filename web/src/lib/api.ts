@@ -13,6 +13,16 @@ const API_URL = envUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;
 
+// [CSRF RACE] `generateCsrfToken` server MENERBITKAN cookie baru setiap panggilan
+// `GET /api/csrf-token`. Bila beberapa mutasi berjalan paralel saat cache masih
+// dingin (mis. StrictMode double-invoke, atau boot + aksi user bersamaan),
+// masing-masing memanggil endpoint itu dan cookie terakhir menimpa yang lain —
+// sementara cache klien menyimpan token dari respons yang selesai lebih dulu →
+// POST acak ditolak `403 Invalid CSRF token`.
+// Single-flight: satu request in-flight dibagi ke semua pemanggil, jadi token di
+// cache SELALU token dari cookie yang terakhir ditulis server.
+let csrfTokenPromise: Promise<string> | null = null;
+
 // [ROBUSTNESS] Timeout default request REST. Tanpa ini, request yang menggantung
 // (server tak merespons, jaringan setengah mati) menunggu tanpa batas — UI
 // nyangkut tanpa pesan error dan offline queue terasa mati.
@@ -102,25 +112,36 @@ export class ApiError extends Error {
  */
 export async function getCsrfToken(): Promise<string> {
   if (csrfTokenCache) return csrfTokenCache;
-  const { signal, cancel } = combineWithTimeout(CSRF_TIMEOUT_MS, null);
+  if (csrfTokenPromise) return csrfTokenPromise;
+
+  csrfTokenPromise = (async () => {
+    const { signal, cancel } = combineWithTimeout(CSRF_TIMEOUT_MS, null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/csrf-token`, {
+        credentials: "include",
+        headers: { 'x-nyx-installation-id': await getClientInstallationId() },
+        signal,
+      });
+      if (!res.ok) throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+
+      const data = await res.json();
+      csrfTokenCache = data.csrfToken;
+      return csrfTokenCache!;
+    } catch (error) {
+      console.error("Error fetching CSRF token:", error);
+      // Jangan throw error di sini agar request GET biasa tetap jalan meski tanpa CSRF
+      return "";
+    } finally {
+      cancel();
+    }
+  })();
 
   try {
-    const res = await fetch(`${API_URL}/api/csrf-token`, {
-      credentials: "include",
-      headers: { 'x-nyx-installation-id': await getClientInstallationId() },
-      signal,
-    });
-    if (!res.ok) throw new Error(`Failed to fetch CSRF token: ${res.status}`);
-    
-    const data = await res.json();
-    csrfTokenCache = data.csrfToken;
-    return csrfTokenCache!;
-  } catch (error) {
-    console.error("Error fetching CSRF token:", error);
-    // Jangan throw error di sini agar request GET biasa tetap jalan meski tanpa CSRF
-    return ""; 
+    return await csrfTokenPromise;
   } finally {
-    cancel();
+    // Dibuka lagi setelah selesai supaya kegagalan (mis. offline) bisa dicoba ulang.
+    csrfTokenPromise = null;
   }
 }
 

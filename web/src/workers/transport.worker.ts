@@ -24,6 +24,10 @@ let pendingSends = 0;
 // Koneksi putus lebih awal (transport null) ditangani offlineQueue di
 // transportClient.ts — di sini hanya error PENGIRIMAN yang di-re-queue.
 const MAX_RETRY_QUEUE = 200;
+
+// [docs/29 §5.6] Batas tunggu balasan HELLO kapabilitas. Sidecar lama tidak
+// menjawab; setelah ini klien lanjut sebagai legacy (bukan error).
+const CAPABILITY_HELLO_TIMEOUT_MS = 5000;
 const retryQueue: { item: { opCode: number, payload: Uint8Array, useStream: boolean }, attempts: number }[] = [];
 let flushingRetries = false;
 
@@ -338,6 +342,52 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
     case 'SEND_DATAGRAM':
       if (transport) {
         enqueueSend({ opCode: data.opCode, payload: data.payload, useStream: false });
+      }
+      break;
+    case 'CAPABILITY_HELLO':
+      // [docs/29 §5.6] HELLO dikirim di stream BIDI supaya balasan sidecar
+      // (irisan kapabilitas) bisa dibaca di stream yang sama. Balasannya
+      // diteruskan sebagai DATA_RECEIVED dengan opcode HELLO (0x0B) dan
+      // ditangani jalur routeOpCode yang sama dengan frame masuk lainnya.
+      if (transport) {
+        try {
+          const stream = await transport.createBidirectionalStream();
+          const writer = stream.writable.getWriter();
+          const reader = stream.readable.getReader();
+
+          const frame = new Uint8Array(5 + data.payload.length);
+          frame[0] = TransportOpCode.HELLO;
+          new DataView(frame.buffer).setUint32(1, data.payload.length, false);
+          frame.set(data.payload, 5);
+
+          await writer.write(frame);
+          await writer.close();
+
+          const timeout = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), CAPABILITY_HELLO_TIMEOUT_MS)
+          );
+          const readReply = (async () => {
+            const { value, done } = await reader.read();
+            return done || !value ? null : value;
+          })();
+
+          const reply = await Promise.race([readReply, timeout]);
+          if (reply && reply.length >= 5) {
+            const view = new DataView(reply.buffer, reply.byteOffset, reply.byteLength);
+            const replyOpCode = reply[0] as TransportOpCode;
+            const replyLength = view.getUint32(1, false);
+            if (reply.length >= 5 + replyLength) {
+              const payload = new Uint8Array(reply.subarray(5, 5 + replyLength));
+              postMessage(
+                { type: 'DATA_RECEIVED', opCode: replyOpCode, payload } satisfies TransportWorkerToMain,
+                [payload.buffer]
+              );
+            }
+          }
+        } catch (e) {
+          // Bukan fatal: timer di transportClient.ts akan menandai mode legacy.
+          console.debug('Transport: HELLO kapabilitas gagal dikirim:', e instanceof Error ? e.message : e);
+        }
       }
       break;
     case 'START_HANDSHAKE':
