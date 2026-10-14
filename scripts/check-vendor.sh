@@ -49,6 +49,12 @@ tracked() {
 if check_file vendor/signal/spqr/Cargo.toml "jalankan scripts/vendor-signal.sh"; then
   grep -q '^name = "spqr"' vendor/signal/spqr/Cargo.toml \
     || { say_error vendor/signal/spqr/Cargo.toml "bukan manifest crate 'spqr'."; failed=1; }
+  # Upstream meng-commit Cargo.lock; salinan tanpa lock berarti bukan salinan utuh
+  # (dan lock yang ditulis ulang cargo lokal = versi dependensi berbeda dari pin).
+  if [[ ! -f vendor/signal/spqr/Cargo.lock ]]; then
+    say_error vendor/signal/spqr/Cargo.lock "Cargo.lock upstream hilang — jalankan scripts/vendor-signal.sh (salinan harus utuh)."
+    failed=1
+  fi
   echo "ok: vendor/signal/spqr ($(du -sh vendor/signal/spqr | cut -f1))"
 fi
 
@@ -99,6 +105,7 @@ fi
 # --- 4: ter-track git -------------------------------------------------------
 if [[ -d vendor/signal ]]; then
   tracked vendor/signal/spqr/Cargo.toml
+  tracked vendor/signal/spqr/Cargo.lock
   tracked vendor/signal/libsignal-keytrans/Cargo.toml
   tracked vendor/README.md
 fi

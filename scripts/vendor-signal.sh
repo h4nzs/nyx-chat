@@ -117,7 +117,11 @@ check_pin "$SPQR_SRC" "$PIN_SPQR" "SparsePostQuantumRatchet"
 SPQR_DST="$REPO_ROOT/vendor/signal/spqr"
 rm -rf "$SPQR_DST"
 mkdir -p "$SPQR_DST"
-for item in Cargo.toml build.rs LICENSE README.md SECURITY.md src benches proofs; do
+# `Cargo.lock` ikut disalin apa adanya (upstream meng-commit-nya). Jangan biarkan
+# cargo di direktori ini menulis ulang lock-nya — itu membuat salinan berbeda
+# dari pin tanpa perubahan kode (kejadian nyata: `cargo test` di vendor/ pernah
+# menaikkan versi beberapa dependensi di lock yang ikut ter-commit).
+for item in Cargo.toml Cargo.lock build.rs LICENSE README.md SECURITY.md src benches proofs; do
   [[ -e "$SPQR_SRC/$item" ]] || fail "SparsePostQuantumRatchet/$item tidak ada"
   cp -R "$SPQR_SRC/$item" "$SPQR_DST/"
 done
@@ -175,12 +179,14 @@ atribusi, dan daftar artefak yang dikirim ada di [\`NOTICE\`](../../NOTICE).
 
 | Direktori | Upstream | Commit | Catatan |
 |---|---|---|---|
-| \`spqr/\` | https://github.com/signalapp/SparsePostQuantumRatchet | \`$PIN_SPQR\` | crate \`spqr\` v1.6.0 disalin utuh (\`src\`, \`benches\`, \`proofs\`, \`build.rs\`) |
+| \`spqr/\` | https://github.com/signalapp/SparsePostQuantumRatchet | \`$PIN_SPQR\` | crate \`spqr\` v1.6.0 disalin utuh (\`src\`, \`benches\`, \`proofs\`, \`build.rs\`, \`Cargo.lock\` upstream apa adanya) |
 | \`libsignal-keytrans/\` | https://github.com/signalapp/libsignal (\`rust/keytrans\`) | \`$PIN_LIBSIGNAL\` | \`Cargo.toml\` dimaterialisasi (semua \`workspace = true\` → versi eksplisit) karena crate ini berdiri sendiri di sini |
 | \`../../server/kt-query/vendor/\` | https://github.com/signalapp/key-transparency-server | \`$PIN_KT_SERVER\` | dihasilkan \`go mod vendor\`, bukan oleh skrip ini |
 
 Keduanya dipakai **tanpa patch**: perubahan perilaku harus datang dari naiknya
-pin, bukan suntingan di sini. Rebuild artefak WASM:
+pin, bukan suntingan di sini (jangan jalankan \`cargo\` di dalam direktori
+vendor — itu menulis ulang \`Cargo.lock\`/\`target/\`; gunakan salinan lain bila
+perlu). Rebuild artefak WASM:
 
 \`\`\`bash
 (cd packages/spqr-wasm && ./build.sh)          # SPQR_CRATE_PATH=... untuk checkout lain
