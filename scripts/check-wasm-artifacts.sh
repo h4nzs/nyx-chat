@@ -82,7 +82,7 @@ if [[ "$failed" -ne 0 ]]; then
 
 Perbaikan (butuh checkout Signal pada commit pin — daftar di NOTICE):
   (cd packages/spqr-wasm && ./build.sh)
-  (cd packages/keytrans-wasm && ./build.sh)          # LIBSIGNAL_PATH=~/signal/libsignal
+  (cd packages/keytrans-wasm && ./build.sh)          # sumber ter-vendor (vendor/signal/…)
 lalu commit `packages/*/dist/*.wasm`. CI tidak bisa membangun ulang artefak ini.
 EOF
   exit 1

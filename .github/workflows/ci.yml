@@ -16,6 +16,23 @@ jobs:
       # dan tanpa artefak itu `pnpm run build` pecah di dalam Vite.
       - name: Guard artefak WASM ter-commit (docs/33 · docs/34)
         run: bash scripts/check-wasm-artifacts.sh
+      # Gagal cepat bila sumber Signal ter-vendor (vendor/signal, server/kt-query/vendor)
+      # hilang/basi/tidak ter-commit — tanpa itu clone bersih tidak bisa dibangun
+      # dan NOTICE berbohong soal apa yang didistribusikan (pin vs isi).
+      - name: Guard sumber Signal ter-vendor (NOTICE · docs/30 §30.2)
+        run: bash scripts/check-vendor.sh
+      # Bukti bahwa modul Go yang di-vendor benar-benar membangun & lulus test
+      # tanpa checkout upstream (vendor mode, tanpa `replace`).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/kt-query/go.mod
+          cache-dependency-path: server/kt-query/go.sum
+      - name: Build & test kt-query dari vendor (Go)
+        working-directory: server/kt-query
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:

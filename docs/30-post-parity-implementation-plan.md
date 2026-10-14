@@ -41,7 +41,7 @@
    `docs/30` §30.2, dan ditulis di `CHANGELOG.md`. **`NOTICE` sudah ada di root
    (2026-10-14)**: tiga komponen Signal (crate `spqr`, `libsignal-keytrans`,
    `key-transparency-server`) beserta lisensi + commit pin + cara konsumsinya
-   (checkout lokal sebagai path dependency, tanpa vendor; artefak WASM di-commit).
+   (awalnya checkout lokal sebagai path dependency; **di-revisi 2026-10-14**: sumber disalin ke `vendor/signal/` + `server/kt-query/vendor/`, artefak WASM tetap di-commit).
 
 ---
 
@@ -541,7 +541,7 @@ Keputusan yang masih terbuka (dibutuhkan saat workstream-nya mulai):
 - WS-C: bucket R2 privat khusus backup vs memakai bucket media yang ada.
 - WS-E: coturn di VPS yang sama (port 3478/5349) vs VPS kedua.
 - WS-K: platform klien native pertama (menentukan layanan push: FCM/APNs).
-- Atribusi: bentuk `NOTICE` untuk kode Signal yang dipakai (KT server, `keytrans`, `spqr`) — **dijawab 2026-10-14: `NOTICE` di root, tanpa vendor** (checkout lokal + artefak WASM ter-commit).
+- Atribusi: bentuk `NOTICE` untuk kode Signal yang dipakai (KT server, `keytrans`, `spqr`) — **dijawab 2026-10-14: `NOTICE` di root**; awalnya tanpa vendor (checkout lokal + artefak WASM ter-commit), lalu **di-revisi pada hari yang sama menjadi vendor penuh** (`vendor/signal/`, `server/kt-query/vendor/`) supaya clone bersih & CI bisa membangun tanpa checkout di luar repo.
 
 ---
 
@@ -564,9 +564,12 @@ Keputusan yang masih terbuka (dibutuhkan saat workstream-nya mulai):
    box (dan apakah catatan low-memory di kode masih berlaku).
 7. **Atribusi**: NOTICE + pin commit untuk kode Signal yang dipakai (KT server,
    `keytrans`, `spqr`) — perlu persetujuan eksplisit karena masuk ke repo AGPL
-   NYX. **✅ 2026-10-14:** `NOTICE` dibuat di root (lisensi, commit pin, cara
-   konsumsi); keputusan maintainer yang diambil adalah **tanpa vendor** — yang
-   masuk repo hanya pembungkus tipis + artefak build, bukan sumber upstream.
+   NYX. **✅ 2026-10-14 (direvisi hari itu juga):** `NOTICE` dibuat di root
+   (lisensi, commit pin, cara konsumsi) dan sumbernya **di-vendor penuh**
+   (`vendor/signal/`, `server/kt-query/vendor/`) — keputusan awal "tanpa vendor"
+   (pembungkus tipis + artefak build saja) dibalik karena build harus jalan di
+   clone bersih dan CI tanpa checkout Signal; `scripts/check-vendor.sh` menjaga
+   salinan tetap cocok dengan pin dan ter-commit.
 8. **Klien native**: platform pertama (Android vs iOS vs desktop) — menentukan
    layanan push yang dipakai.
 
@@ -577,7 +580,7 @@ Keputusan yang masih terbuka (dibutuhkan saat workstream-nya mulai):
 | Risiko | Dampak | Mitigasi |
 |---|---|---|
 | WASM compile gagal (protoc/prost/RNG) | jadwal WS-A/WS-D | Spike di M0; fallback port TS dengan vektor yang sama |
-| Kode Signal berubah (fork/API) | drift | pin commit; **tanpa vendor** (checkout lokal sebagai path dependency + artefak WASM ter-commit); catat pin di `NOTICE` + `docs/25` |
+| Kode Signal berubah (fork/API) | drift | pin commit; sumber **di-vendor** (`vendor/signal/`, `server/kt-query/vendor/`) + artefak WASM ter-commit; catat pin di `NOTICE` + `docs/25`; `scripts/check-vendor.sh` memverifikasi isi vendor masih cocok dengan pin |
 | Ledakan ukuran log KT | disk VPS | metrik + snapshot R2 + retensi |
 | Multi-device menambah permukaan metadata | regresi privasi | device list bertanda tangan + aturan `docs/28` + audit script |
 | Backup jadi jalur exfil baru | kebocoran | server hanya melihat blob; kunci dari recovery phrase; kuota |

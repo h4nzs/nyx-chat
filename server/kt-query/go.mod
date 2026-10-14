@@ -3,18 +3,14 @@ module github.com/h4nzs/nyx-chat/server/kt-query
 go 1.26.6
 
 // `github.com/signalapp/keytransparency` TIDAK dapat diambil dari jaringan
-// (repo privat — `git ls-remote` menjawab "Repository not found"), jadi modul
-// ini dibangun terhadap checkout lokal yang di-pin (`docs/32` §32.1:
-// commit 30b7a2a40604) melalui `replace` di bawah.
+// (repo privat — `git ls-remote` menjawab "Repository not found"). Karena itu
+// modul ini **ter-vendor penuh** di `vendor/github.com/signalapp/keytransparency`
+// (dihasilkan `go mod vendor` dari checkout upstream yang di-pin, `docs/32`
+// §32.1: commit 30b7a2a40604) — tidak ada directive `replace`, jadi `go build`
+// tidak menyentuh jaringan maupun checkout di luar repo.
 //
-// Layout yang diharapkan (lihat README + build.sh):
-//
-//	~/signal/key-transparency-server   <-- checkout upstream (commit ter-pin)
-//	~/nyx-chat/server/kt-query         <-- modul ini
-//
-// Untuk layout lain, jalankan `server/kt-query/build.sh` dengan
-// `NYX_KT_UPSTREAM=/path/ke/key-transparency-server`; script itu menyetel ulang
-// directive `replace` di bawah sebelum membangun.
+// Memperbarui sink: jalankan `scripts/vendor-signal.sh`, lalu (dari direktori
+// ini) `go mod vendor` terhadap checkout upstream pada pin baru. Detail: README.
 require github.com/signalapp/keytransparency v0.0.0
 
 require (
@@ -61,4 +57,3 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 )
 
-replace github.com/signalapp/keytransparency => ../../../signal/key-transparency-server

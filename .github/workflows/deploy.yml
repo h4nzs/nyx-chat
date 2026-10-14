@@ -18,6 +18,13 @@ jobs:
       - name: 🛡️ Guard artefak WASM ter-commit (docs/33 · docs/34)
         run: bash scripts/check-wasm-artifacts.sh
 
+      # Gagal cepat bila sumber Signal ter-vendor tidak ikut ter-commit: deploy
+      # mengirim zip tanpa checkout Signal, jadi `vendor/` yang hilang membuat
+      # artefak yang dikirim tidak bisa dibangun ulang dari repo (NOTICE memuat
+      # pin-nya).
+      - name: 🛡️ Guard sumber Signal ter-vendor (NOTICE · docs/30 §30.2)
+        run: bash scripts/check-vendor.sh
+
       # --- SETUP PNPM ---
       - name: Install pnpm manually (Bypass GitHub Outage)
         run: npm install -g pnpm@11.4.0

@@ -1,0 +1,16 @@
+//
+// Copyright 2025 Signal Messenger, LLC
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+
+syntax = "proto3";
+package kt_test;
+
+option go_package = "github.com/signalapp/keytransparency/cmd/kt-test/pb";
+import "transparency.proto";
+
+// A key transparency service intended for local testing and development purposes only.
+service KeyTransparencyTestService {
+  // An endpoint used by local clients to update a search key.
+  rpc Update(transparency.UpdateRequest) returns (transparency.UpdateResponse) {}
+}

@@ -52,24 +52,30 @@ penyimpanan semuanya dari paket upstream (`tree/transparency`, `db`) yang di-pin
 
 ## Bangun
 
-Modul ini bergantung pada paket dari repo upstream yang **privat**, jadi
-dibangun terhadap checkout lokal yang di-pin (`docs/32` §32.1: commit
-`30b7a2a40604`):
+Modul ini bergantung pada paket dari repo upstream yang **privat**, jadi paket
+itu **ter-vendor penuh** di `vendor/github.com/signalapp/keytransparency`
+(dihasilkan `go mod vendor` dari checkout upstream pada pin `docs/32` §32.1:
+commit `30b7a2a40604`). `go.mod` tidak memuat directive `replace`, jadi build
+tidak menyentuh jaringan maupun checkout di luar repo:
 
 ```bash
-# checkout upstream di tempat default (~/signal/key-transparency-server)
+# build (default: -mod=vendor)
 server/kt-query/build.sh
 
-# atau arahkan ke lokasi lain
-NYX_KT_UPSTREAM=/path/ke/key-transparency-server server/kt-query/build.sh
-
-# jalankan test
+# jalankan vet + test
 server/kt-query/build.sh test
+
+# mode "kejar pin" — pakai checkout lokal dulu, sebelum re-vendor
+NYX_KT_UPSTREAM=/path/ke/key-transparency-server server/kt-query/build.sh
 ```
 
-`build.sh` menyetel directive `replace` di `go.mod` sementara, lalu
-mengembalikannya. Tanpa skrip itu, `go build` tetap bekerja selama checkout ada
-di tempat default.
+Perbarui sink saat pin naik: jalankan `scripts/vendor-signal.sh` (mengecek
+commit pin), lalu dari direktori ini
+`NYX_KT_UPSTREAM=~/signal/key-transparency-server go mod vendor` untuk pin baru —
+selama `replace` tidak ada di `go.mod`, perintah itu perlu `go mod edit -replace`
+sementara; `build.sh` dengan `NYX_KT_UPSTREAM` melakukan hal yang sama untuk
+sekadar membangun. Setelah `vendor/` tergenerasi ulang, commit `go.mod`,
+`go.sum`, dan `vendor/` bersama-sama.
 
 ## Jalankan
 
@@ -117,7 +123,7 @@ Signal lain. Monitor dibatasi 64 kunci per permintaan.
 ## Verifikasi
 
 ```bash
-# test unit + integrasi (butuh checkout upstream)
+# test unit + integrasi (dari vendor/ — tidak butuh checkout upstream)
 server/kt-query/build.sh test
 ```
 

@@ -1,0 +1,126 @@
+//
+// Copyright 2025 Signal Messenger, LLC
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+
+syntax = "proto3";
+package kt_query;
+
+option go_package = "github.com/signalapp/keytransparency/cmd/kt-query/pb";
+import "transparency.proto";
+
+// An external-facing, read-only key transparency service used by Signal's chat server
+// to look up and monitor identifiers.
+// There are three types of identifier mappings stored by the key transparency log:
+// - An ACI which maps to an ACI identity key
+// - An E164-formatted phone number which maps to an ACI
+// - A username hash which also maps to an ACI
+// Separately, the log also stores and periodically updates a fixed value known as the `distinguished` key.
+// Clients use the verified tree head from looking up this key for future calls to the Search and Monitor endpoints.
+service KeyTransparencyQueryService {
+  // An endpoint used by clients to look up the most recent `distinguished` key.
+  rpc DistinguishedV2(DistinguishedRequest) returns (DistinguishedResponse) {}
+  // An endpoint used by clients to search for the given identifiers in the transparency log.
+  // The server returns proof that the requested identifiers exist in the log.
+  rpc SearchV2(SearchRequest) returns (SearchResponseV2) {}
+  // An endpoint that allows users to monitor a group of identifiers by returning proof that the log continues to be
+  // constructed correctly in later entries for those identifiers.
+  rpc MonitorV2(MonitorRequest) returns (MonitorResponseV2) {}
+}
+
+// DistinguishedRequest looks up the most recent `distinguished` key in the transparency log.
+message DistinguishedRequest {
+  // The tree size of the last verified distinguished request. With the exception of a client's
+  // very first request, this field should always be populated.
+  optional uint64 last = 1;
+}
+
+// DistinguishedResponse contains the tree head and search proof for the most recent `distinguished` key in the log.
+message DistinguishedResponse {
+  transparency.FullTreeHead tree_head = 1;
+  CondensedTreeSearchResponse distinguished = 2;
+}
+
+// SearchRequest comes from a user that wishes to look up one or more identifiers in the transparency log.
+message SearchRequest {
+  bytes aci = 1;
+  bytes aci_identity_key = 2;
+  optional bytes username_hash = 3;
+  optional E164SearchRequest e164_search_request = 4;
+  transparency.Consistency consistency = 5;
+}
+
+// E164SearchRequest contains the data that the user must provide when looking up an E164
+message E164SearchRequest {
+  optional string e164 = 1;
+  bytes unidentified_access_key = 2;
+}
+
+// CondensedTreeSearchResponse contains the search proof and other data for a given identifier.
+// It is used in the SearchResponse protobuf which is returned to external clients.
+message CondensedTreeSearchResponse {
+  bytes vrf_proof = 1;
+  transparency.SearchProof search = 2;
+  bytes opening = 3;
+  transparency.UpdateValue value = 4;
+}
+
+// Indicates that the client is not authorized to make the request because it did not provide
+// the correct set of data.
+message PermissionDenied {}
+
+// SearchResponse contains search proofs for each of the requested identifiers.
+message SearchResponse {
+  transparency.FullTreeHead tree_head = 1;
+  CondensedTreeSearchResponse aci = 2;
+  optional CondensedTreeSearchResponse e164 = 3;
+  optional CondensedTreeSearchResponse username_hash = 4;
+}
+
+message SearchResponseV2 {
+  oneof response {
+    SearchResponse search_response = 1;
+    PermissionDenied permission_denied = 2;
+  }
+}
+
+message MonitorRequest {
+  AciMonitorRequest aci = 1;
+  optional UsernameHashMonitorRequest username_hash = 2;
+  optional E164MonitorRequest e164 = 3;
+
+  transparency.Consistency consistency = 4;
+}
+
+message AciMonitorRequest {
+  bytes aci = 1;
+  uint64 entry_position = 2;
+  bytes commitment_index = 3;
+}
+
+message UsernameHashMonitorRequest {
+  bytes username_hash = 1;
+  uint64 entry_position = 2;
+  bytes commitment_index = 3;
+}
+
+message E164MonitorRequest {
+  optional string e164 = 1;
+  uint64 entry_position = 2;
+  bytes commitment_index = 3;
+}
+
+message MonitorResponse {
+  transparency.FullTreeHead tree_head = 1;
+  transparency.MonitorProof aci = 2;
+  optional transparency.MonitorProof username_hash = 3;
+  optional transparency.MonitorProof e164 = 4;
+  repeated bytes inclusion = 5;
+}
+
+message MonitorResponseV2 {
+  oneof response {
+    MonitorResponse monitor_response = 1;
+    PermissionDenied permission_denied = 2;
+  }
+}

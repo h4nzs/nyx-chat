@@ -1,0 +1,35 @@
+//
+// Copyright 2025 Signal Messenger, LLC
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+
+syntax = "proto3";
+package keytransparency;
+
+option go_package = "github.com/signalapp/keytransparency/tree/prefix/pb";
+
+message ParentNode {
+    bytes hash = 1; // The hash of this subtree. This hash can be in a populated part of the tree
+                    // or a stand-in hash.
+    optional uint64 ptr = 2; // The id of the log entry where this subtree is stored.
+    optional uint64 firstUpdatePosition = 3; // If this node is a stand-in hash, this is the log position needed to re-generate it.
+}
+
+message LeafNode {
+    uint32 ctr = 1; // Counter, incremented each time the key is inserted.
+
+    // Commitment to the update value. This is stored here instead of in the
+    // transparency tree implementation to speed up proof generation.
+    bytes commitment = 2;
+}
+
+message LogEntry {
+    bytes index = 1;  // The full index that was inserted.
+    repeated ParentNode copath = 2;
+    uint64 firstUpdatePosition = 3; // The first log tree position where this index was updated.
+                                    // Used to generate new stand-in values.
+
+    optional LeafNode leaf = 4;
+
+    bytes precomputed32 = 6; // Pre-computed intermediate value at level 32.
+}

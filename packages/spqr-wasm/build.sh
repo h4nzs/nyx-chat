@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # [docs/30 §30.8 WS-D] Bangun pembungkus WASM untuk crate `spqr`.
 #
-# Pemakaian:
+# Sumber default = crate ter-vendor di repo ini (`vendor/signal/spqr`), jadi
+# clone bersih bisa membangun tanpa checkout Signal di luar. Override ke
+# checkout lain (mis. saat mengejar pin baru sebelum re-vendor):
+#
 #   SPQR_CRATE_PATH=~/signal/SparsePostQuantumRatchet ./build.sh
 #
 # Hasil: dist/spqr.wasm (raw module, tanpa wasm-bindgen/wasm-pack).
@@ -12,10 +15,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-SPQR_CRATE_PATH="${SPQR_CRATE_PATH:-$HOME/signal/SparsePostQuantumRatchet}"
+SPQR_CRATE_PATH="${SPQR_CRATE_PATH:-$(cd ../.. && pwd)/vendor/signal/spqr}"
 if [[ ! -f "$SPQR_CRATE_PATH/Cargo.toml" ]]; then
   echo "❌ Crate spqr tidak ditemukan di: $SPQR_CRATE_PATH" >&2
-  echo "   Setel SPQR_CRATE_PATH ke checkout SparsePostQuantumRatchet (pin docs/30 §30.2)." >&2
+  echo "   Jalankan scripts/vendor-signal.sh (atau set SPQR_CRATE_PATH ke checkout SparsePostQuantumRatchet, pin docs/30 §30.2)." >&2
   exit 1
 fi
 

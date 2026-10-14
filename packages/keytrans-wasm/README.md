@@ -18,14 +18,18 @@ mempercayai server.
 
 ```bash
 cd packages/keytrans-wasm
-LIBSIGNAL_PATH=~/signal/libsignal ./build.sh
+./build.sh                                  # crate ter-vendor (vendor/signal/libsignal-keytrans)
+KEYTRANS_PATH=~/signal/libsignal/rust/keytrans ./build.sh      # checkout lain
+LIBSIGNAL_PATH=~/signal/libsignal ./build.sh                   # alias lama
 # → dist/keytrans.wasm
 ```
 
-Prasyarat: `rustup target add wasm32-unknown-unknown`, `protoc` (build-dependency
-`libsignal-keytrans` memakai `prost-build`), dan checkout libsignal pada pin yang
-sama. `Cargo.toml` di-generate oleh `build.sh` (memuat path checkout lokal) →
-tidak di-commit; `Cargo.lock` dan `dist/keytrans.wasm` di-commit.
+Prasyarat: `rustup target add wasm32-unknown-unknown` dan `protoc`
+(build-dependency `libsignal-keytrans` memakai `prost-build`). Sumber default
+adalah salinan ter-vendor di `vendor/signal/libsignal-keytrans` (lihat
+`vendor/README.md`), jadi clone bersih bisa membangun tanpa checkout libsignal.
+`Cargo.toml` di-generate oleh `build.sh` (memuat path yang dipilih) → tidak
+di-commit; `Cargo.lock` dan `dist/keytrans.wasm` di-commit.
 
 ## ABI
 

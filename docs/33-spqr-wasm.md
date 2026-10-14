@@ -30,7 +30,8 @@ pesan — jadi chain simetris NYX (XChaCha20-Poly1305) tidak perlu berubah.
 |---|---|
 | `packages/spqr-wasm/src/lib.rs` | pembungkus Rust: ABI primitif, entropi disuntik host |
 | `packages/spqr-wasm/build.sh` | build ke `wasm32-unknown-unknown` (tanpa `wasm-pack`), menyalin `Cargo.toml.in` → `Cargo.toml` |
-| `packages/spqr-wasm/dist/spqr.wasm` | **artefak ter-commit** (506,7 KiB) — crate `spqr` tidak di-vendor |
+| `vendor/signal/spqr/` | crate `spqr` **ter-vendor** (pin §30.2), sumber default `build.sh` |
+| `packages/spqr-wasm/dist/spqr.wasm` | **artefak ter-commit** (506,7 KiB) dari sumber ter-vendor itu |
 | `web/src/lib/spqrRatchet.ts` | pembungkus TS: framing, kode hasil, `SpqrError`, injeksi entropi |
 | `web/src/lib/spqrBench.ts` | harness benchmark (gate §30.8 poin 5) |
 | `web/src/lib/__tests__/spqrRatchet.test.ts` | 10 test properti dengan modul hasil build sungguhan |
@@ -122,8 +123,10 @@ Angka apa adanya; ambang penjaga regresi ada di `SPQR_BENCH_BUDGET`.
 
 ## 33.6 Bukti dari crate ter-pin — **LULUS (2026-10-14)**
 
-Rencana: menjalankan test internal crate `spqr` pada checkout pin
-(`~/signal/SparsePostQuantumRatchet`) sebagai bukti kedua. Sebelumnya langkah ini
+Rencana: menjalankan test internal crate `spqr` pada crate pin
+(sekarang tersedia di repo: `vendor/signal/spqr`; `scripts/vendor-signal.sh`
+menyalinnya dari checkout `~/signal/SparsePostQuantumRatchet`) sebagai bukti
+kedua. Sebelumnya langkah ini
 tercatat "belum dijalankan" karena anggaran waktu; sekarang dijalankan dan
 hasilnya dicatat apa adanya:
 
@@ -133,7 +136,9 @@ hasilnya dicatat apa adanya:
 | `cargo +nightly test --release --lib` (nightly 1.101.0) | **57 passed; 0 failed; 0 ignored** dalam 12,5 s, exit 0 |
 
 Checkout yang diuji adalah **pin yang sama** yang dikompilasi ke WASM untuk jalur
-v2: HEAD `06959b4708f9` = v1.6.0 (pin §30.2), working tree tanpa perubahan kode.
+v2: HEAD `06959b4708f9` = v1.6.0 (pin §30.2), working tree tanpa perubahan kode
+(isi itu kini disimpan utuh di `vendor/signal/spqr`, jadi `cargo +nightly test
+--release --lib` bisa diulang dari repo ini).
 Yang ikut lulus adalah property test proptest crate (`random_balanced`,
 `random_balanced_out_of_order`, `chaos`, `onlineoffline_healing`,
 `random_slow_alex_healing_auth_bidir`, `hybrid_ratchet`). Catatan jujur soal

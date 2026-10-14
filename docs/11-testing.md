@@ -116,10 +116,11 @@ nightly / sebelum rilis besar (`docs/30` §30.20 sisa WS-G).
 
 **Test internal crate `spqr` (gate `docs/30` §30.8 poin 1) — manual, bukan per-PR:**
 butuh toolchain nightly + dev-dependency besar (proptest, criterion, libcrux).
-Jalankan di checkout pin `06959b4708f9` (v1.6.0):
+Jalankan pada sumber ter-vendor (pin `06959b4708f9`, v1.6.0) — tidak perlu
+checkout di luar repo:
 
 ```bash
-cd ~/signal/SparsePostQuantumRatchet
+cd vendor/signal/spqr
 cargo +nightly test --release --lib   # 57 passed; exit 0 (~12 s saat target/ hangat)
 ```
 

@@ -21,19 +21,21 @@ v2 (PQ forward secrecy **dan** post-compromise security).
 
 ```bash
 cd packages/spqr-wasm
-SPQR_CRATE_PATH=~/signal/SparsePostQuantumRatchet ./build.sh
+./build.sh                                  # crate ter-vendor (vendor/signal/spqr)
+SPQR_CRATE_PATH=~/signal/SparsePostQuantumRatchet ./build.sh   # checkout lain (kejar pin)
 # → dist/spqr.wasm
 ```
 
-Prasyarat: `rustup target add wasm32-unknown-unknown`, `protoc` (build-dependency
-`spqr` memakai `prost-build`), dan checkout crate `spqr` pada pin yang sama
-(`docs/30` §30.2). Build memakan waktu (LTO, `codegen-units = 1`).
+Prasyarat: `rustup target add wasm32-unknown-unknown` dan `protoc`
+(build-dependency `spqr` memakai `prost-build`). Sumber default adalah salinan
+ter-vendor di `vendor/signal/spqr` (lihat `vendor/README.md`); tanpa clone
+Signal di luar repo pun build jalan. Build memakan waktu (LTO, `codegen-units = 1`).
 
 `Cargo.toml` **di-generate** oleh `build.sh` dari `Cargo.toml.in` karena memuat
-path checkout lokal, jadi ia tidak di-commit. `Cargo.lock` ikut di-commit supaya
-build reprodusibel. `dist/spqr.wasm` **di-commit** (pengecualian di `.gitignore`)
-karena crate `spqr` tidak di-vendor: tanpa artefak ini test WASM akan di-skip dan
-kapabilitas `spqr-ratchet` tidak punya implementasi.
+path crate yang dipilih, jadi ia tidak di-commit. `Cargo.lock` ikut di-commit
+supaya build reprodusibel. `dist/spqr.wasm` **di-commit** (pengecualian di
+`.gitignore`) sebagai artefak siap-pakai; kalau hilang, test WASM di-skip dan
+kapabilitas `spqr-ratchet` kehilangan implementasinya.
 
 ## ABI
 

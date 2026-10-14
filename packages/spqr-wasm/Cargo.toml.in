@@ -1,8 +1,9 @@
 # TEMPLATE — `build.sh` menyalin berkas ini ke `Cargo.toml` sambil mengganti
 # `__SPQR_PATH__` dengan path crate `spqr` (pin docs/30 §30.2: 06959b4708f9,
-# crate `spqr` v1.6.0). Crate itu TIDAK di-vendor ke repo ini (AGPL-3.0, tapi
-# ukurannya besar dan dipin sebagai checkout terpisah), jadi Cargo.toml hasil
-# generate tidak ikut di-commit.
+# crate `spqr` v1.6.0). Default = salinan ter-vendor `vendor/signal/spqr`
+# (lihat `vendor/README.md`), jadi clone bersih tidak butuh checkout di luar;
+# `SPQR_CRATE_PATH` masih bisa menunjuk checkout lain. Cargo.toml hasil generate
+# tidak di-commit karena memuat path tersebut.
 [package]
 name = "nyx-spqr-wasm"
 version = "0.1.0"

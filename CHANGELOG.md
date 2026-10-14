@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## 📦 Sumber Signal masuk repo: `vendor/` penuh — 2026-10-14
+
+Sebelumnya kode Signal yang dipakai NYX hanya hidup sebagai **checkout lokal di
+luar repo**: `packages/*/build.sh` menunjuk `~/signal/...`, `server/kt-query`
+memakai `replace` ke path itu, dan CI bergantung pada artefak WASM yang sudah
+di-commit. Akibatnya clone bersih tidak bisa membangun apa pun yang menyentuh
+Signal, dan tidak ada cara memeriksa "kode apa yang sebenarnya dipakai" dari
+dalam repo. Sekarang sumbernya **di-vendor utuh** (±25 MB) sehingga satu clone
+cukup:
+
+- **Rust:** `vendor/signal/spqr` (crate `spqr` v1.6.0, pin `06959b4708f9`,
+disalin apa adanya termasuk `benches`/`proofs`) dan
+`vendor/signal/libsignal-keytrans` (pin `e8cc2dddd578`), dengan manifest
+libsignal **dimaterialisasi** — setiap `workspace = true` ditulis ulang jadi versi
+eksplisit karena crate itu kini berdiri sendiri. Tidak ada patch pada kode
+upstream; perubahan perilaku hanya boleh datang dari naiknya pin.
+- **Go:** `server/kt-query/vendor/github.com/signalapp/keytransparency` (pin
+`30b7a2a40604`), dihasilkan `go mod vendor`. `go.mod` **tidak lagi memuat
+`replace`** ke checkout lokal, jadi `go build/test` jalan offline dengan
+`-mod=vendor`.
+- **Pembungkus ikut berubah:** `packages/spqr-wasm/build.sh` dan
+`packages/keytrans-wasm/build.sh` sekarang default ke sumber ter-vendor
+(`SPQR_CRATE_PATH` / `KEYTRANS_PATH`, alias lama `LIBSIGNAL_PATH` masih
+didukung) untuk mode "kejar pin"; `server/kt-query/build.sh` menolak build tanpa
+`vendor/` dan hanya memakai `NYX_KT_UPSTREAM` bila diminta eksplisit.
+- **`NOTICE` dan dokumen diperbaiki:** klaim "tidak di-vendor" diganti dengan
+fakta vendoring (sumber upstream kini ikut didistribusikan → wajib berada di
+repo bersama `LICENSE`), termasuk `README.md`, `AGENTS.md`, `docs/11` §11.3,
+`docs/25` §25.3, `docs/30` §30.1/§30.15/§30.16b/§30.17, `docs/33` §33.2/§33.6,
+dan komentar `.gitignore`.
+- **Guard & CI:** `scripts/vendor-signal.sh` (re-vendor dari checkout pada pin,
+menolak commit yang tidak cocok), `scripts/check-vendor.sh` (manifest ada &
+ter-materialisasi, pin di `vendor/README.md` cocok dengan `NOTICE`, `go.mod`
+tanpa `replace`, tiap paket di `modules.txt` ada di disk, semuanya ter-track),
+dan langkah CI baru yang menjalankan guard itu plus `go build/vet/test`
+`server/kt-query` dari vendor (dengan `setup-go` dari `go-version-file`).
+- **Bukti:** `cargo +nightly test --release --lib` di crate ter-vendor →
+**57 passed, 0 failed** (sama dengan checkout pin); `go vet` + `go test`
+`server/kt-query` → lulus, termasuk build dengan `GOPROXY=off` +
+`GOMODCACHE` kosong (bukti tidak menyentuh jaringan); 28 test web
+(`spqrRatchet` 10 + `keyTransparency` 18) lulus terhadap kedua WASM yang
+**dibangun ulang dari sumber ter-vendor**. sha256 artefak WASM bergeser
+(46168c12…→62a72c14… spqr; 8f29334e…→3c35c0df… keytrans) karena rustc menyematkan
+metadata path sumber — perilakunya diverifikasi lewat test di atas, bukan lewat
+hash.
+
 ## 🔐 SPQR tuntas: ratchet jalur v2 hidup berdampingan dengan jalur beku — 2026-10-14
 
 WS-D berhenti di batas "pembungkus + test" karena mengganti langkah `KEMs/KEMr`

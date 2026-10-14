@@ -1,7 +1,10 @@
 # TEMPLATE — `build.sh` menyalin berkas ini ke `Cargo.toml` sambil mengganti
-# `__LIBSIGNAL_PATH__` dengan path checkout libsignal (pin docs/30 §30.2:
-# `libsignal/rust/keytrans` e8cc2dddd578). Crate libsignal TIDAK di-vendor
-# (AGPL-3.0 + workspace besar), jadi Cargo.toml hasil generate tidak di-commit.
+# `__KEYTRANS_PATH__` dengan path crate `libsignal-keytrans` (pin docs/30 §30.2:
+# `libsignal/rust/keytrans` e8cc2dddd578). Default = salinan ter-vendor
+# `vendor/signal/libsignal-keytrans` (lihat `vendor/README.md`), jadi clone
+# bersih tidak butuh checkout libsignal di luar; `KEYTRANS_PATH` (atau alias
+# lama `LIBSIGNAL_PATH`) masih bisa menunjuk checkout lain. Cargo.toml hasil
+# generate tidak di-commit karena memuat path tersebut.
 [package]
 name = "nyx-keytrans-wasm"
 version = "0.1.0"
@@ -15,7 +18,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # Versi prost WAJIB sama dengan yang dipakai `libsignal-keytrans` (trait
 # `Message` berbeda antar versi, jadi prost 0.13 tidak bisa men-decode tipe 0.14).
-libsignal-keytrans = { path = "__LIBSIGNAL_PATH__/rust/keytrans" }
+libsignal-keytrans = { path = "__KEYTRANS_PATH__" }
 prost = "0.14"
 
 [profile.release]

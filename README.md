@@ -196,7 +196,7 @@ If you are a corporation, startup, or enterprise looking to integrate NYX into a
 
 ### 🧾 Third-party attribution (Signal)
 
-Parts of NYX are built around **unmodified code from Signal Messenger, LLC** (all AGPL-3.0-only). That upstream source is **not vendored or copied** into this repository: each project is pinned to a commit and consumed as a *build-time path dependency*, so what lives here are only our thin wrappers plus the compiled WASM artifacts.
+Parts of NYX are built around **unmodified code from Signal Messenger, LLC** (all AGPL-3.0-only). Each project is pinned to a commit and **vendored into this repository** (`vendor/signal/` for Rust, `server/kt-query/vendor/` for Go), so a fresh clone builds without any checkout outside the repo — what lives here are the pinned sources, our thin wrappers, and the compiled WASM artifacts. See `NOTICE` and `docs/30` §30.2.
 
 | Component in this repo | Upstream project | Why it is here |
 |---|---|---|

@@ -1,0 +1,47 @@
+#
+# Copyright (C) 2024 Signal Messenger, LLC.
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+
+[package]
+name = "libsignal-keytrans"
+version = "0.0.1"
+authors = ["Signal Messenger LLC"]
+license = "AGPL-3.0-only"
+edition = "2024"
+
+[dependencies]
+curve25519-dalek = { version = "5.0" }
+displaydoc = { version = "0.2.6" }
+ed25519-dalek = { version = "3.0" }
+hex = { version = "0.4.3" }
+hmac = { version = "0.13.0" }
+itertools = { version = "0.15.0" }
+prost = { version = "0.14" }
+sha2 = { version = "0.11" }
+zerocopy = { version = "0.8.33", features = ["derive"] }
+
+[build-dependencies]
+prost-build = { version = "0.14" }
+
+[dev-dependencies]
+assert_matches = { version = "1.5" }
+const-str = { version = "1.0" }
+criterion = { version = "0.5" }
+proptest = { version = "1.7" }
+test-case = { version = "3.3" }
+uuid = { version = "1.5" }
+
+[[bench]]
+name = "verify"
+harness = false
+
+# [lints] workspace = true (libsignal) — ditulis ulang saat vendoring.
+[lints.clippy]
+cast_possible_truncation = "warn"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(fuzzing)',
+    'cfg(tokio_unstable)',
+] }
