@@ -194,6 +194,18 @@ This guarantees that NYX remains free and open-source for the community. However
 If you are a corporation, startup, or enterprise looking to integrate NYX into a proprietary product without the AGPL-3.0 obligations, you must acquire a Commercial License.
 👉 **[Read the Commercial Licensing Guide here](COMMERCIAL.md)**.
 
+### 🧾 Third-party attribution (Signal)
+
+Parts of NYX are built around **unmodified code from Signal Messenger, LLC** (all AGPL-3.0-only). That upstream source is **not vendored or copied** into this repository: each project is pinned to a commit and consumed as a *build-time path dependency*, so what lives here are only our thin wrappers plus the compiled WASM artifacts.
+
+| Component in this repo | Upstream project | Why it is here |
+|---|---|---|
+| `packages/spqr-wasm/` (crate `spqr` v1.6.0) | SparsePostQuantumRatchet | Post-quantum ratchet (ML-KEM braid) for wire v2 |
+| `packages/keytrans-wasm/` (crate `libsignal-keytrans`) | libsignal | Key Transparency verifier in the browser |
+| `server/kt-query/` | key-transparency-server | KT log service (read/write) beside the API |
+
+Licenses, the exact **pinned commits**, how each artifact is built, byte sizes, and the redistribution obligations are documented in **[`NOTICE`](NOTICE)** — keep that file together with `LICENSE` in any redistribution.
+
 ---
 
 ## 🌙 Branding & Anti-Impersonation Policy

@@ -13,6 +13,11 @@ jobs:
       - name: 📥 Checkout Code
         uses: actions/checkout@v7
 
+      # Gagal cepat sebelum build: artefak WASM (spqr/keytrans) tidak dibangun di
+      # CI, jadi kalau tidak ter-commit `pnpm --filter nyx-web run build` pecah.
+      - name: 🛡️ Guard artefak WASM ter-commit (docs/33 · docs/34)
+        run: bash scripts/check-wasm-artifacts.sh
+
       # --- SETUP PNPM ---
       - name: Install pnpm manually (Bypass GitHub Outage)
         run: npm install -g pnpm@11.4.0

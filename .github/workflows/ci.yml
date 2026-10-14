@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Gagal cepat bila artefak WASM (spqr/keytrans) tidak ikut ter-commit:
+      # CI tidak membangunnya (checkout Signal tidak ada di runner — NOTICE),
+      # dan tanpa artefak itu `pnpm run build` pecah di dalam Vite.
+      - name: Guard artefak WASM ter-commit (docs/33 · docs/34)
+        run: bash scripts/check-wasm-artifacts.sh
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:

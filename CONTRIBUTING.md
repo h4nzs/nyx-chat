@@ -24,6 +24,16 @@ Before you write any code, understand our architectural boundaries:
 5. **Test your code:** Ensure building works (`pnpm run build` in both `/web` and `/server`).
 6. **Issue a PR:** Use the provided Pull Request template.
 
+## 🧾 Third-party attribution & committed artifacts (Signal)
+
+Some subsystems are built around **unmodified Signal code** (AGPL-3.0-only) that is pinned to a commit and consumed as a build-time path dependency — the three components, their commits, and everything that actually lives in this repo are listed in **[`NOTICE`](NOTICE)**. Read it before touching `packages/spqr-wasm/`, `packages/keytrans-wasm/`, or `server/kt-query/`.
+
+Rules that keep this setup working:
+
+1. **Never delete, truncate, or hand-edit** `packages/spqr-wasm/dist/spqr.wasm` and `packages/keytrans-wasm/dist/keytrans.wasm`. They are committed on purpose (CI cannot rebuild them: the pinned Signal checkouts do not exist on the runner) and a missing artifact breaks the web build — `crypto.worker.ts` imports `spqr.wasm?url`.
+2. To regenerate an artifact, run the package's `build.sh` against the pinned checkout and commit the result. `bash scripts/check-wasm-artifacts.sh` is the guard CI runs (missing / empty / untracked artifact → red build).
+3. When an upstream pin moves, update **`NOTICE` (commit hash + artifact size) and the pins in `docs/30` §30.2 in the same PR**.
+
 ## 🕵️ Where We Need Help
 - Auditing the Web Worker crypto implementation (`crypto.worker.ts`).
 - Memory profiling the React Virtualized lists for massive chat histories.
