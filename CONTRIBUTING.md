@@ -13,7 +13,7 @@ Before you write any code, understand our architectural boundaries:
 1. **The Core Crypto is Sacred:** Do **NOT** bump, update, or modify `libsodium-wrappers` or its type definitions. Backward compatibility in the Double Ratchet engine is our absolute highest priority.
 2. **Package Manager:** We use `pnpm` exclusively. Do not use `npm` or `yarn`. Do not commit `package-lock.json` or `yarn.lock`.
 3. **Strict State:** We use Zustand v5. Do not return objects in selectors without `useShallow`, or you will trigger infinite render loops.
-4. **Formatting/Linting:** We use **oxlint** (`pnpm run lint`, config in `.oxlintrc.json`). CI is **blocking on `error`** — rules at `error` level and the `correctness` category must stay at 0 findings. ESLint configs are still in the tree but dead (`typescript-eslint` does not support TypeScript 7); do not re-enable them.
+4. **Formatting/Linting:** We use **oxlint** (`pnpm run lint`, config in `.oxlintrc.json`) — our only linter. CI is **blocking on `error`**: rules at `error` level and the `correctness` category must stay at 0 findings. ESLint was removed entirely on 2026-10-15 (configs, devDependencies and directives) because `typescript-eslint` rejects TypeScript 7 — do not reintroduce it. Suppressions use `// oxlint-disable-next-line <rule>` placed on the line directly above the code.
 
 ## 🛠️ Development Workflow
 

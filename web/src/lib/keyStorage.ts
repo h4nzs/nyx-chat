@@ -166,8 +166,7 @@ const resolveStoredAutoUnlockKey = (stored: string): string | undefined => {
 
 const getActiveUserId = (): string | null => {
   try {
-    // 1. Auth store (import dinamis untuk menghindari cycle module).
-    //    eslint-disable-next-line @typescript-eslint/no-var-requires
+    // 1. Auth store (dibaca lewat `globalThis` untuk menghindari cycle module).
     const mod = (globalThis as Record<string, unknown>).__nyxAuthStore as
       | { getState: () => { user?: { id?: string } | null } }
       | undefined;

@@ -63,5 +63,5 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 ## Quick facts
 
 - **Stack:** pnpm monorepo — React 19 + Vite 8 (web), Express 5 + Prisma 7 + Redis (server), Astro (marketing), Rust `wtransport` (transport sidecar).
-- **Repo root conventions:** see [AGENTS.md](../AGENTS.md) — it contains hard-earned operational rules (shared package rebuild order, frozen crypto formats, Zod jitless, ESLint status, prod DB layout).
+- **Repo root conventions:** see [AGENTS.md](../AGENTS.md) — it contains hard-earned operational rules (shared package rebuild order, frozen crypto formats, Zod jitless, lint gate (oxlint) + aturan direktif penekan, prod DB layout).
 - **E2EE core files (do not split):** `web/src/workers/crypto.worker.ts`, `web/src/lib/crypto-worker-proxy.ts`, `web/src/lib/messagePipeline.ts`.

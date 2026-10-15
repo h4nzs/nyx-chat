@@ -117,9 +117,9 @@ export function useUserSearch(rawSearchTerm: string, options: UseUserSearchOptio
     }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-    // excludeIds dieksekusi di dalam effect via Set snapshot — memasukkannya
-    // ke deps hanya memicu re-filter, bukan request ulang (cache menahan).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Sengaja hanya bergantung pada `rawSearchTerm`: excludeIds dieksekusi di
+    // dalam effect via Set snapshot — memasukkannya ke deps hanya memicu
+    // re-filter, bukan request ulang (cache menahan).
   }, [rawSearchTerm]);
 
   return { results, isSearching, searchError };

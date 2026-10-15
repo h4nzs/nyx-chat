@@ -44,7 +44,6 @@ Thumbs.db
 /.nyc_output
 
 # Cache
-.eslintcache
 .stylelintcache
 .turbo
 .vercel

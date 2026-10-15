@@ -68,7 +68,7 @@ pnpm --filter nyx-web exec playwright test --project=chromium   # E2E (needs sta
 
 ## 2.5 Toolchain quirks
 
-- **ESLint is broken repo-wide** (typescript-eslint does not support TypeScript 7.0 yet). The CI lint job is intentionally `continue-on-error`. Use `tsc --noEmit` + build as your verification. Do not attempt to fix lint errors.
+- **Lint = oxlint** (Rust; tidak terikat versi TypeScript), satu-satunya linter di repo. ESLint dihapus sepenuhnya 2026-10-15 (config + devDependency + direktif) karena `typescript-eslint` menolak TS 7.0 — jangan dihidupkan kembali. Jalankan `pnpm run lint`; rule level `error` dan kategori `correctness` **blocking** (harus 0 temuan), sisa `no-unused-vars` sengaja `warn`. Direktif penekan: `// oxlint-disable-next-line <rule>` tepat di atas baris kode yang disasar.
 - **TypeScript is strict** in every package, including `noUncheckedIndexedAccess` (web, server, shared) — array/record indexing yields `T | undefined`.
 - **Jest is dead** — server tests use `node:test` via `tsx` (files are listed explicitly in `server/package.json` `test` script).
 - **Zod 4 must run jitless** (no `eval`) because prod CSP has no `unsafe-eval`. The flag is set by direct mutation of `globalThis.__zod_globalConfig.jitless` in `packages/shared/src/schemas.ts` and `web/src/zodSetup.ts` — never via `zod.config()` (it gets tree-shaken in production builds).

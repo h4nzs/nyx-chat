@@ -38,13 +38,14 @@
    model ProVerif), ribuan test, capability negotiation (`DeviceCapability`,
    `ClientRelease`), spam-filter ML, registration fraud analytics, audit
    eksternal, dan klien native di semua platform. NYX: satu worker TS monolitik,
-   ±292 test web + 215 test server, **ESLint mati repo-wide** (TS 7.0.2 vs
-   typescript-eslint), klien web saja.
+   ratusan test web + server, lint lewat **oxlint** sejak 2026-10-15 (ESLint tidak
+   pernah jalan di TS 7.0.2 dan kini dihapus — §7.4), klien web saja.
 5. **Hal paling layak diadopsi, urut ROI:** (1) gate issuance credential +
    binding konteks; (2) key transparency (mulai dari versi "lite" berbasis
    gossip); (3) multi-device; (4) backup terenkripsi inkremental; (5) capability
    negotiation di handshake; (6) SPQR-style PQ ratchet (FS **dan** PCS, bukan
-   cuma FS); (7) kebangkitan ESLint + test vector lintas-implementasi.
+   cuma FS); (7) static analysis + test vector lintas-implementasi (lint:
+   **oxlint blocking**, §7.4).
 
 ---
 
@@ -356,6 +357,8 @@ akun.
   jalankan ESLint dengan alias `typescript@5` khusus lint (parser bisa
   diarahkan), atau adopsi linter berbasis Rust (`oxlint`) sebagai gantinya, lalu
   buat sebagian rule jadi blocking di CI.
+  → **Diselesaikan 2026-10-15 lewat jalur kedua (oxlint); ESLint dihapus
+  sepenuhnya. Lihat §7.4.**
 - **Test berbasis source-text.** `server/tests/groupCredentials.test.ts` (dan
   pola serupa di `schemaPrivacy.test.ts`) meng-assert regex atas source.
   Roundtrip kriptonya nyata (bagus), tapi klaim perilaku (endpoint, otorisasi)
@@ -473,9 +476,26 @@ Lihat §5.5. Bucket/`ENC1:`-kan `lastMessageAt`, `seq`, `updatedAt`, `isGroup`
 `migrateAtRestSealing`); sisa plaintext hanya primary key dan bucket indeks yang
 memang harus bisa di-range-scan (§5.5).
 
-### 7.4 ESLint tidak berjalan sama sekali — **MEDIUM**
+### 7.4 ESLint tidak berjalan sama sekali — **MEDIUM (selesai 2026-10-15)**
 
 Tidak ada static analysis di repo yang memegang kripto. Lihat §5.8.
+
+**Status 2026-10-15: SELESAI — oxlint menjadi satu-satunya linter.** ESLint tidak
+pernah bisa dijalankan di repo ini (`typescript-eslint` menolak TypeScript 7), jadi
+jalannya bukan "perbaiki ESLint" melainkan menggantinya: `pnpm run lint` menjalankan
+`oxlint src` di tiap paket dengan konfigurasi tunggal `.oxlintrc.json`, job CI `lint`
+**blocking** untuk rule level `error` dan kategori `correctness` (0 temuan), sisa
+`no-unused-vars` sengaja `warn`.
+
+Pada 2026-10-15 sisa ESLint dihapus tuntas supaya tidak ada dua sumber kebenaran:
+ketiga `eslint.config.js` (`web`, `server`, `marketing`), 20 devDependency
+(`eslint`, `@eslint/js`, `typescript-eslint`, plugin react/astro/import/n/promise,
+`globals`, parser-nya) dan semua direktif `eslint-disable` lama. Bukti bahwa ini
+bukan sekadar pembersihan kosmetik: satu direktif `no-control-regex` di
+`server/src/utils/logger.ts` **benar-benar dipakai** (menghapus keduanya membuat
+lint gagal), jadi ia dipindahkan ke sintaks `oxlint-disable-next-line` tepat di atas
+baris kodenya; 4 direktif lain terbukti mati (`--report-unused-disable-directives`)
+dan diganti komentar biasa yang tetap menjelaskan alasannya.
 
 ### 7.5 Duplikasi helper E2E antar-spec — **LOW (selesai 2026-10-12)**
 
@@ -500,7 +520,7 @@ manual ke enam spec.
 | 2 | Pindahkan verification state ke keychain + hard gate perubahan kunci | `web/src/utils/verification.ts`, `web/src/utils/crypto.ts`, `web/src/lib/messagePipeline.ts` | Perubahan identitas → kirim diblokir sampai konfirmasi; state tahan reload & wipe terkelola |
 | 3 | Buang fallback Google STUN | `server/src/routes/keys.ts:590,607,610`, `web/src/lib/webrtc.ts:29` | Tidak ada `google.com` di jalur ICE; kegagalan TURN jadi error eksplisit |
 | 4 | Bucket/`ENC1:` metadata lokal | `web/src/lib/db.ts`, `shadowVaultDb.ts`, `keychainDb.ts` | Tidak ada `lastMessageAt` presisi & `seq` plaintext di IndexedDB |
-| 5 | Nyalakan kembali lint (alias TS 5 untuk lint atau oxlint) | `web/eslint.config.js`, `server/eslint.config.js`, `package.json` | `pnpm -r lint` jalan; sebagian rule blocking di CI |
+| 5 | Nyalakan kembali lint (alias TS 5 untuk lint atau oxlint) — **landed 2026-10-15**: oxlint menggantikan ESLint sepenuhnya; config ESLint dihapus | `.oxlintrc.json`, `package.json` (per paket `lint: oxlint src`) | `pnpm run lint` jalan; rule `error` + kategori `correctness` blocking di CI (0 temuan) |
 | 6 | Test vector lintas-implementasi (DR/sender-key/era) | `web/src/lib/__tests__/`, `server/tests/`, `tools/dr-oracle/` | Vektor dari libsignal/SPQR lulus untuk primitif yang identik. **Landed:** KAT primitif (`cryptoKnownAnswer`, `argonKnownAnswer`) **plus** oracle Go non-libsodium dua arah untuk X3DH/KEM/kdfChain/AEAD (`docs/30` WS-G(6)); **residual:** sender-key chain / skipped key / `SessionRecord` tetap internal |
 | 7 | Capability negotiation di handshake | `packages/shared/src/transport.ts`, sidecar `main.rs`, `web/src/lib/transportClient.ts` | Klien lama tanpa `capabilities` tetap jalan |
 

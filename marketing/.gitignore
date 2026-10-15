@@ -2,7 +2,6 @@
 dist/
 
 # cache files
-.eslintcache
 .turbo/
 .vercel/
 .netlify/

@@ -95,15 +95,48 @@ boot menyebut guard/rahasia yang belum diset (`utils/startupSignals.ts`, murni &
 teruji). `docs/10` diperbarui: checklist post-deploy + tabel env + pengamanan
 endpoint cleanup.
 
+### ESLint dihapus tuntas — oxlint satu-satunya linter (2026-10-15)
+
+ESLint tidak pernah bisa dijalankan di repo ini (`typescript-eslint` menolak
+TypeScript 7), jadi selama ini ada **dua sumber kebenaran**: aturan yang ditulis
+di `eslint.config.js` yang tidak pernah dieksekusi, dan `oxlint` yang benar-benar
+menahan regresi. Sekarang yang kedua menjadi satu-satunya:
+
+- ketiga `eslint.config.js` (`web`, `server`, `marketing`) dihapus;
+- **20 devDependency** eslint/* dicabut (`eslint`, `@eslint/js`,
+  `typescript-eslint`, `@typescript-eslint/*`, plugin react/astro/import/n/promise,
+  `astro-eslint-parser`, `globals`) → `pnpm-lock.yaml` −1365 baris, 124 paket
+  hilang dari `node_modules`, `pnpm install --frozen-lockfile` tetap bersih;
+- direktif `eslint-disable` lama diganti: yang masih menahan sesuatu dipindahkan
+  ke sintaks `// oxlint-disable-next-line <rule>` **tepat di atas baris kodenya**,
+yang mati dihapus dan diganti komentar biasa.
+
+Temuan yang membuat pembersihan ini bukan kosmetik: di
+`server/src/utils/logger.ts` ada DUA direktif bertumpuk (`oxlint-` di atas
+komentar, `eslint-` di atas kode). Yang menahan `no-control-regex` sebenarnya
+hanya yang kedua — sementara direktif pertama dicatat oxlint sebagai *unused*,
+sehingga menghapus "yang sudah tidak perlu" tanpa memeriksa justru akan
+menyalakan error. Kini tinggal satu direktif, di posisi yang benar, dengan
+komentar yang menjelaskan jebakan itu. Sisa direktif mati diperiksa dengan
+`npx oxlint src --report-unused-disable-directives` (kini 0 di semua paket).
+
+Hasilnya diverifikasi: `pnpm run lint` tetap **0 error** dengan jumlah temuan
+identik sebelum/sesudah (2/3/49/194 warning per paket) — jadi tidak ada aturan
+yang ikut hilang bersama ESLint.
+
 ### Dokumen yang menyimpang dari kode
 
 `README` (lint: oxlint **blocking**, bukan ESLint non-blocking), `CONTRIBUTING`
 (ESLint v10 → oxlint; "build-time path dependency"/"CI tidak bisa rebuild" →
-ter-vendor + hash diverifikasi), `docs/04` §4.6 ("v1/v0 tetap terbaca" → memang
-ditolak), nuansa "header beku vs payload aditif" (`ackV`/`ktG`/`ackKem`),
-`docs/30` §30.19 (rujukan dokumen yang tidak pernah ada), header
-`spqrNegotiation.ts` (keputusan per pengiriman, bukan hanya saat sesi didirikan),
-dan `/**` ganda. Versi dinaikkan ke **3.0.0** (breaking: legacy purge + kolom baru).
+ter-vendor + hash diverifikasi), `docs/02` §2.5 ("lint non-blocking, jangan
+perbaiki error lint" → oxlint blocking), `docs/10` §10.2 (job `lint` di tabel CI),
+`docs/29` §7.4 + roadmap (lint dinyatakan selesai), `docs/README`,
+`docs/25`, `GEMINI.md`, `.github/PULL_REQUEST_TEMPLATE.md`,
+`docs/04` §4.6 ("v1/v0 tetap terbaca" → memang ditolak), nuansa "header beku vs
+payload aditif" (`ackV`/`ktG`/`ackKem`), `docs/30` §30.19 (rujukan dokumen yang
+tidak pernah ada), header `spqrNegotiation.ts` (keputusan per pengiriman, bukan
+hanya saat sesi didirikan), dan `/**` ganda. Versi dinaikkan ke **3.0.0**
+(breaking: legacy purge + kolom baru).
 
 ### Yang SENGAJA belum ditutup (dipertahankan apa adanya, dicatat di `docs/28` §28.11)
 

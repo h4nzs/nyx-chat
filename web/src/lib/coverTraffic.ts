@@ -242,9 +242,8 @@ export function getCoverScheduler(onSendCover?: (conversationId: string) => void
       masterEnabled: true,
       maximumGroups: new Set<string>(),
       isTransportConnected: () => {
-        // Dynamic read + dynamic import: menghindari circular dependency statis.
+        // Dynamic read lewat `globalThis`: menghindari circular dependency statis.
         try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const store = (globalThis as { __nyx_connection_probe?: () => string }).__nyx_connection_probe;
           return store ? store() === 'connected' : false;
         } catch {

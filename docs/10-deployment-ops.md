@@ -23,8 +23,8 @@ On PR and push to `main`:
 | Job | Content |
 |---|---|
 | `build` | frozen-lockfile install → prisma generate → `pnpm run build` |
-| `unit` | `pnpm run test` (102 server + 164 web tests) |
-| `lint` | non-blocking (`continue-on-error`) — typescript-eslint ≠ TS 7 |
+| `unit` | `pnpm run test` — seluruh test server (`node:test` + `tsx`) dan web (vitest). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
+| `lint` | **BLOCKING** — `pnpm run lint` = `oxlint src` per paket (ESLint dihapus 2026-10-15). Nol temuan untuk rule level `error` + kategori `correctness`; `no-unused-vars` sengaja `warn` |
 | `audit` | `pnpm audit --prod` |
 | `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip |
 | `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; **coturn installed & started** (loopback relay, `allow-loopback-peers` only in CI) with `TURN_URLS`/`TURN_STATIC_AUTH_SECRET` in the job env; runs `--project=chrome` (WebTransport + real TURN relay active) |

@@ -7,7 +7,7 @@ Everything at the repository root that isn't the web/server/shared/marketing cod
 | File | Purpose |
 |---|---|
 | `README.md` | Project landing readme (philosophy, stack, deployment, docs index) |
-| `AGENTS.md` | Operational rules that agents/contributors must follow: shared-package rebuild order, frozen crypto formats, Zod jitless, broken-ESLint status, prod DB layout, WebTransport cert pinning, frontend gotchas, deploy secrets layout. **Read before touching crypto or CI.** |
+| `AGENTS.md` | Operational rules that agents/contributors must follow: shared-package rebuild order, frozen crypto formats, Zod jitless, lint gate (oxlint — satu-satunya linter sejak ESLint dihapus 2026-10-15) + aturan direktif penekan, prod DB layout, WebTransport cert pinning, frontend gotchas, deploy secrets layout. **Read before touching crypto or CI.** |
 | `GEMINI.md` | Instructions for the Gemini coding agent (repo conventions, build/test commands, guardrails) |
 | `CHANGELOG.md` | Release history |
 | `CONTRIBUTING.md` | Contribution guide |

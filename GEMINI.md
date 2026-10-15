@@ -60,7 +60,7 @@ pnpm build
 ## 📜 Development Conventions
 
 ### Coding Standards
-- **Strict Linting**: ESLint v10 (Flat Config) is enforced. Run `pnpm lint` to verify.
+- **Strict Linting**: **oxlint** is the only linter (`pnpm lint`, config `.oxlintrc.json`); ESLint was removed on 2026-10-15. Rules at `error` level and the `correctness` category must stay at 0 findings. Suppressions: `// oxlint-disable-next-line <rule>` directly above the code line.
 - **Type Safety**: TypeScript is used everywhere. Ensure `tsc` passes before committing.
 - **ES Modules**: The project uses Native ESM (`"type": "module"`).
 

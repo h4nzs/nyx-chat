@@ -91,7 +91,6 @@ export default function AdminDashboard() {
     } else {
       loadAllData();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, navigate, activeTab]);
 
   const handleUnban = (bannedUser: BannedUser) => {

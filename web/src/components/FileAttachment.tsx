@@ -216,7 +216,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
          try { URL.revokeObjectURL(objectUrl); } catch (e) {}
       }
     };
-  // Tambahkan getFileType ke dependency array eslint jika diminta (opsional)
+  // `getFileType` sengaja tidak masuk daftar dependensi: ia fungsi murni atas
+  // `message`, yang sudah ada di daftar ini.
   }, [message, lastKeychainUpdate, retryCount, isGroup, t]);
 
   // JANGAN REVOKE decryptedUrl di sini karena ia mungkin berasal dari cache global 
