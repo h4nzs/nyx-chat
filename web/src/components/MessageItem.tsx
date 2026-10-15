@@ -264,7 +264,9 @@ if (socket?.connected) {
 
   if (message.isDeletedLocal || message.deletedAt || message.content === "[This message was deleted]") {
     return (
-      <div ref={ref} className={`flex items-center p-2 ${mine ? 'justify-end' : 'justify-start'}`}>
+      // `data-testid` dipakai E2E: teks tombstone berbeda per bahasa, jadi
+      // assertion berbasis teks akan lolos/gagal karena locale, bukan karena bug.
+      <div ref={ref} data-testid="message-tombstone" className={`flex items-center p-2 ${mine ? 'justify-end' : 'justify-start'}`}>
         <div className="flex items-center gap-2 text-xs italic text-text-secondary bg-bg-surface px-3 py-1.5 rounded-xl border border-text-secondary/10 shadow-sm">
            <FiTrash2 size={12} />
            <span>{t('chat:messages.message_deleted')}</span>

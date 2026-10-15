@@ -6,12 +6,17 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"flag"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,11 +25,35 @@ import (
 	"google.golang.org/grpc"
 )
 
+// sortedKeys mengembalikan nama auditor terurut — hanya untuk log startup yang
+// deterministik (urutan map acak akan membuat log sulit dibandingkan).
+func sortedKeys(keys map[string]ed25519.PublicKey) []string {
+	names := make([]string, 0, len(keys))
+	for name := range keys {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func envOr(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
 	}
 	return fallback
+}
+
+func envInt(name string, fallback int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		log.Printf("[kt-query] %s tidak sah (%q), memakai %d", name, raw, fallback)
+		return fallback
+	}
+	return parsed
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {
@@ -47,9 +76,17 @@ func main() {
 		"alamat HTTP baca (wajib loopback; proxy ada di server NYX)")
 	writeAddr := flag.String("write-addr", envOr("NYX_KT_WRITE_ADDR", "127.0.0.1:8081"),
 		"alamat gRPC test-update; default sama dengan KT_SERVER_URL penulis agar tidak berubah")
+	auditorAddr := flag.String("auditor-addr", envOr("NYX_KT_AUDITOR_ADDR", "127.0.0.1:8082"),
+		"alamat gRPC layanan auditor pihak ketiga (TreeSize/Audit/SetAuditorHead); kosong = nonaktif")
 	dbFile := flag.String("db", "", "override `db.file` dari config")
 	distinguished := flag.Duration("distinguished", 0,
 		"interval kunci distinguished; 0 = pakai `api.distinguished` dari config")
+	snapshotDir := flag.String("snapshot-dir", envOr("NYX_KT_SNAPSHOT_DIR", ""),
+		"direktori arsip snapshot basis data; kosong = snapshot nonaktif")
+	snapshotInterval := flag.Duration("snapshot-interval", envDuration("NYX_KT_SNAPSHOT_INTERVAL", 24*time.Hour),
+		"jeda antar snapshot (dipakai bila -snapshot-dir diisi)")
+	snapshotKeep := flag.Int("snapshot-keep", envInt("NYX_KT_SNAPSHOT_KEEP", defaultSnapshotKeep),
+		"jumlah arsip snapshot terakhir yang disimpan di -snapshot-dir")
 	checkOnly := flag.Bool("check", false, "buka database + bangun pohon, lalu keluar (health check deploy)")
 	flag.Parse()
 
@@ -94,8 +131,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	updates := &updateService{cfg: config, store: store}
+	// Satu kunci untuk semua penulis state pohon: update penulis NYX dan
+	// `SetAuditorHead` dari auditor tidak boleh berjalan bersamaan.
+	mu := &sync.Mutex{}
+	updates := &updateService{cfg: config, store: store, mu: mu}
 	go updates.runDistinguished(ctx, interval)
+
+	// [docs/10 §10.13] Salinan harian log KT: penulisan dijeda, direktori disalin,
+	// salinan diverifikasi terhadap tree head hidup, lalu diarsipkan. Pengunggahan
+	// ke R2 dilakukan proses lain (`server/src/jobs/ktSnapshot.ts`) — kredensial
+	// objek tidak dipasang di proses log.
+	if *snapshotDir != "" {
+		snapshotter := newSnapshotter(config, store, file, mu, *snapshotDir, *snapshotKeep)
+		go snapshotter.run(ctx, *snapshotInterval)
+	} else {
+		log.Printf("[kt-query] snapshot nonaktif (NYX_KT_SNAPSHOT_DIR kosong)")
+	}
 
 	grpcListener, err := net.Listen("tcp", *writeAddr)
 	if err != nil {
@@ -109,6 +160,30 @@ func main() {
 			log.Printf("[kt-query] gRPC berhenti: %v", err)
 		}
 	}()
+
+	// Layanan auditor: listener terpisah supaya penulis log dan auditor tidak
+	// berbagi port (auditor adalah pihak ketiga; jalur penulis tetap tidak berubah).
+	var auditorServer *grpc.Server
+	var auditorListener net.Listener
+	if *auditorAddr != "" {
+		auditorListener, err = net.Listen("tcp", *auditorAddr)
+		if err != nil {
+			log.Fatalf("[kt-query] listen gRPC auditor %s: %v", *auditorAddr, err)
+		}
+		auditorServer = grpc.NewServer()
+		pb.RegisterKeyTransparencyAuditorServiceServer(auditorServer, &auditorService{cfg: config, store: store, mu: mu})
+		auditors := "(tidak ada auditor terkonfigurasi)"
+		if len(config.AuditorKeys) > 0 {
+			auditors = strings.Join(sortedKeys(config.AuditorKeys), ",")
+		}
+		go func() {
+			log.Printf("[kt-query] auditor gRPC di %s — auditor terkonfigurasi: %s (mode=%d)",
+				*auditorAddr, auditors, config.Mode)
+			if err := auditorServer.Serve(auditorListener); err != nil {
+				log.Printf("[kt-query] gRPC auditor berhenti: %v", err)
+			}
+		}()
+	}
 
 	httpServer := &http.Server{
 		Addr:              *readAddr,
@@ -125,6 +200,9 @@ func main() {
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
 		grpcServer.GracefulStop()
+		if auditorServer != nil {
+			auditorServer.GracefulStop()
+		}
 	}()
 
 	log.Printf("[kt-query] HTTP baca di http://%s (loopback saja — jangan expose)", *readAddr)

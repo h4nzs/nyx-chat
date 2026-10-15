@@ -85,7 +85,7 @@ router.post('/resolve', requireAuth, zodValidate({ body: resolveSchema }), async
 
   // Token berbentuk salah dijawab `null` (bukan error) supaya klien bisa
   // memproses paket relay yang datang bersamaan tanpa membocorkan alasan.
-  for (const token of [...new Set(body.tokens)]) {
+  for (const token of Array.from(new Set(body.tokens))) {
     if (!isCallRelayToken(token)) {
       users[token] = null
       continue

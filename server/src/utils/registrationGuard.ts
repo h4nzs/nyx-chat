@@ -29,6 +29,7 @@
 import { ApiError } from './errors.js';
 import { deviceInstallationTag, pepperedIdentifier } from './atRestSecrets.js';
 import { asnIndexFromEnv, lookupAsn } from './asnLookup.js';
+import { incCounter, REGISTRATION_GUARD_OBSERVED } from './metrics.js';
 
 /** Jendela burst (detik) — 1 jam. */
 export const REGISTRATION_BURST_WINDOW_SECONDS = 3600;
@@ -56,6 +57,48 @@ export const REGISTRATION_MAX_PER_ASN = 100;
 export const REGISTRATION_SYBIL_BURST_MAX_PER_ASN = 25;
 
 export type RegistrationCounterFn = (key: string, ttlSeconds: number) => Promise<number>;
+
+/**
+ * Mode guard (`ABUSE_REGISTRATION_GUARD`):
+ *
+ *   - `off` (default) — no-op, tidak menyentuh Redis.
+ *   - `shadow` — **evaluasi penuh, tidak menahan siapa pun**: verdict dicatat ke
+ *     metrik `nyx_registration_guard_observed_total{action="would_*"}` dan log.
+ *     Ini jalur untuk mengukur false-positive jaringan besar (NAT kantor) di
+ *     lapangan sebelum menyalakan blokir — tanpa mengubah perilaku satu pun
+ *     pengguna, dan tanpa menyimpan identitas apa pun.
+ *   - `on` — berlaku penuh: batas keras → 429, heuristik burst → wajib attestation.
+ *
+ * Mode tak dikenal dibaca sebagai `off` (fail-open, pola env lain di repo) dan
+ * dicatat — jangan biarkan salah tulis env mengunci registrasi.
+ */
+export type RegistrationGuardMode = 'off' | 'shadow' | 'on';
+
+export function parseRegistrationGuardMode(value: string | undefined | null): RegistrationGuardMode {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized === 'on' || normalized === 'true' || normalized === '1') return 'on';
+  if (normalized === 'shadow') return 'shadow';
+  return 'off';
+}
+
+/** True bila env berisi nilai yang dikenali (`on`/`true`/`1`/`shadow`/`off`/kosong). */
+export function isKnownRegistrationGuardModeValue(value: string | undefined | null): boolean {
+  const normalized = (value ?? '').trim().toLowerCase();
+  return normalized === '' || ['on', 'true', '1', 'shadow', 'off', 'false', '0'].includes(normalized);
+}
+
+/** Ringkasan keputusan guard untuk observabilitas (tanpa identitas apa pun). */
+export interface RegistrationGuardObservation {
+  mode: RegistrationGuardMode;
+  /** Keputusan yang **akan** diambil mode `on` (dipakai juga oleh mode `on`). */
+  verdict: RegistrationBurstVerdict;
+  /** Nilai counter mentah (tanpa identitas) — untuk log diagnostik operator. */
+  counts: { source: number | null; installation: number | null; asn: number | null; asnBurst: number | null };
+}
+
+/** Nama label `reason` untuk metrik (bounded — tidak ada nilai runtime). */
+const observationReason = (verdict: RegistrationBurstVerdict): string =>
+  verdict.reason ?? (verdict.requireAttestation ? 'BURST' : 'none');
 
 export interface RegistrationBurstInput {
   sourceCount: number;
@@ -115,15 +158,25 @@ export const registrationAsnBurstKey = (asn: string): string =>
   `regburst:asnfast:${pepperedIdentifier(`asn:${asn}`)}`;
 
 /**
- * Gate dengan counter yang dapat disuntik. Saat `enabled` false → no-op (jalan
- * keluar: ubah env tanpa deploy ulang logika). Melempar `ApiError(429)` saat
- * salah satu tingkat keras terlampaui; mengembalikan `requireAttestation` saat
- * heuristik sybil menyala.
+ * Gate dengan counter yang dapat disuntik.
+ *
+ * `mode` boleh berupa boolean untuk pemanggil lama (`true` = `on`, `false` =
+ * `off`). Mode `on` melempar `ApiError(429)` saat salah satu tingkat keras
+ * terlampaui dan mengembalikan `requireAttestation` saat heuristik burst menyala;
+ * mode `shadow` mengembalikan keputusan yang sama **tanpa menahan**, plus
+ * `observation` supaya pemanggil bisa mencatatnya.
  */
 export const makeRegistrationGuard =
-  (incr: RegistrationCounterFn, enabled: boolean) =>
-  async (opts: { ip: string; installationId?: string; asn?: string | null }): Promise<{ requireAttestation: boolean }> => {
-    if (!enabled) return { requireAttestation: false };
+  (incr: RegistrationCounterFn, mode: RegistrationGuardMode | boolean = 'off') =>
+  async (opts: {
+    ip: string;
+    installationId?: string;
+    asn?: string | null;
+    /** Dipanggil pada mode `shadow` dengan keputusan hipotetis (log/metrik). */
+    onObservation?: (observation: RegistrationGuardObservation) => void;
+  }): Promise<{ requireAttestation: boolean; observation?: RegistrationGuardObservation }> => {
+    const effectiveMode: RegistrationGuardMode = typeof mode === 'boolean' ? (mode ? 'on' : 'off') : mode;
+    if (effectiveMode === 'off') return { requireAttestation: false };
 
     const sourceCount = await incr(registrationSourceKey(opts.ip), REGISTRATION_BURST_WINDOW_SECONDS);
     const installationCount = opts.installationId
@@ -138,7 +191,32 @@ export const makeRegistrationGuard =
     }
 
     const verdict = evaluateRegistrationBurst({ sourceCount, installationCount, asnCount, asnBurstCount });
+
+    if (effectiveMode === 'shadow') {
+      // Nama label SENGAJA pendek: penjaga di `metrics.ts` menolak nilai label
+      // yang berbentuk base64url (≥22 karakter dari [A-Za-z0-9_-]) — dan enum
+      // panjang seperti `would_require_attestation` masuk pola itu. Ditolaknya
+      // tidak senyap: `nyx_metrics_rejected_total` naik dan alarm KRITIS
+      // `NyxMetricsIdentityLeakAttempt` menyala. Nilai pendek = aman.
+      const action = !verdict.allowed
+        ? 'would_block'
+        : verdict.requireAttestation
+          ? 'would_attest'
+          : 'allowed';
+      incCounter(REGISTRATION_GUARD_OBSERVED, { action, reason: observationReason(verdict) });
+      const observation: RegistrationGuardObservation = {
+        mode: 'shadow',
+        verdict,
+        counts: { source: sourceCount, installation: installationCount, asn: asnCount, asnBurst: asnBurstCount },
+      };
+      opts.onObservation?.(observation);
+      // Shadow TIDAK pernah mengubah perilaku: tidak memblokir, tidak menuntut
+      // attestation. Keputusan hipotetisnya hanya terlihat lewat metrik/log.
+      return { requireAttestation: false, observation };
+    }
+
     if (!verdict.allowed) {
+      incCounter(REGISTRATION_GUARD_OBSERVED, { action: 'blocked', reason: observationReason(verdict) });
       const scope =
         verdict.reason === 'SOURCE' ? 'network' : verdict.reason === 'INSTALLATION' ? 'device' : 'network operator';
       throw new ApiError(
@@ -146,6 +224,10 @@ export const makeRegistrationGuard =
         `REGISTRATION_BURST_LIMIT: Too many accounts created from this ${scope}. Please try again later.`
       );
     }
+    incCounter(REGISTRATION_GUARD_OBSERVED, {
+      action: verdict.requireAttestation ? 'require_attestation' : 'allowed',
+      reason: observationReason(verdict),
+    });
     return { requireAttestation: verdict.requireAttestation };
   };
 
@@ -159,21 +241,48 @@ return current
 `;
 
 /**
- * Jalur produksi: aktif hanya bila `ABUSE_REGISTRATION_GUARD=on` (rollback
- * terdokumentasi lewat env, `docs/30` §30.19.5). Redis diimpor dinamis supaya
- * modul ini tetap bisa diuji tanpa Redis; tabel ASN dibaca dari berkas lokal
- * (`ASN_DB_FILE`) dan lapisan ASN dilewati bila berkas tidak ada.
+ * Jalur produksi: `ABUSE_REGISTRATION_GUARD` = `on` | `shadow` | `off`
+ * (default `off`; rollback terdokumentasi lewat env, `docs/30` §30.19.5).
+ *
+ * Redis diimpor dinamis supaya modul ini tetap bisa diuji tanpa Redis; tabel ASN
+ * dibaca dari berkas lokal (`ASN_DB_FILE`) dan lapisan ASN dilewati bila berkas
+ * tidak ada (lapisan yang dilewati tetap terlihat: `asnCount = null`).
+ *
+ * Mode `shadow` adalah jalur pengukuran WS-H: keputusan hipotetis dicatat ke
+ * `nyx_registration_guard_observed_total` + log operator, perilaku untuk pengguna
+ * **tidak berubah sama sekali** (`requireAttestation` selalu false).
  */
 export async function enforceRegistrationBurst(opts: {
   ip: string;
   installationId?: string;
 }): Promise<{ requireAttestation: boolean }> {
-  if (process.env.ABUSE_REGISTRATION_GUARD !== 'on') return { requireAttestation: false };
+  if (!isKnownRegistrationGuardModeValue(process.env.ABUSE_REGISTRATION_GUARD)) {
+    // Fail-open, tapi berisik: salah tulis env tidak boleh diam-diam
+    // menonaktifkan guard saat operator mengira sudah `on`.
+    console.warn(
+      `[RegistrationGuard] ABUSE_REGISTRATION_GUARD="${process.env.ABUSE_REGISTRATION_GUARD}" tak dikenal → diperlakukan "off". Nilai sah: on | shadow | off.`
+    );
+  }
+
+  const mode = parseRegistrationGuardMode(process.env.ABUSE_REGISTRATION_GUARD);
+  if (mode === 'off') return { requireAttestation: false };
 
   const { redisClient } = await import('../lib/redis.js');
   const incr: RegistrationCounterFn = async (key, ttlSeconds) =>
     Number(await redisClient.eval(REG_BURST_LUA, { keys: [key], arguments: [String(ttlSeconds)] }));
 
   const asn = lookupAsn(asnIndexFromEnv(), opts.ip);
-  return makeRegistrationGuard(incr, true)({ ...opts, asn });
+  return makeRegistrationGuard(incr, mode)({
+    ...opts,
+    asn,
+    onObservation: (observation) => {
+      // Tanpa identitas: hanya angka counter + verdict.
+      console.warn('[RegistrationGuard][shadow]', {
+        wouldBlock: !observation.verdict.allowed,
+        reason: observation.verdict.reason ?? null,
+        wouldRequireAttestation: observation.verdict.requireAttestation,
+        counts: observation.counts,
+      });
+    },
+  });
 }

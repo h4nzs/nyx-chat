@@ -71,7 +71,8 @@ async function syncConversationIndex(conversationId: string): Promise<DecryptedM
   }
 
   // Baris yang sudah tidak ada di vault (dihapus) → buang dari indeks.
-  for (const id of [...fingerprints.keys()]) {
+  // Snapshot eksplisit: `fingerprints` dimutasi di dalam loop.
+  for (const id of Array.from(fingerprints.keys())) {
     if (seen.has(id)) continue;
     searchIndex.remove(id);
     plaintextCache.delete(id);

@@ -25,9 +25,21 @@ async function verifyUser(page: Page) {
   await powBtn.click();
 
   // TUNGGU PROSES MINING SELESAI
-  // Waktu tunggu diperpanjang (60 detik) karena Web Worker butuh waktu untuk kalkulasi PoW
+  //
+  // Anggaran 60 detik terbukti tidak cukup dan membuat spec ini gagal ~1 dari 5
+  // run (snapshot kegagalannya memperlihatkan modal masih "Mining hash collision...
+  // CPU at 100%" saat timeout) — jadi ini soal biaya kripto, bukan locator atau
+  // produk: `minePoW` adalah **Argon2id 16 MB per percobaan** (crypto.worker.ts)
+  // mengejar prefiks heksa `floor(difficulty/2)` nol. Alur ini sampai difficulty 6
+  // (registrasi sudah memakai satu challenge, upgrade ini memakai challenge kedua
+  // → `min(4 + count, 8)`), artinya ~16^3 = 4096 evaluasi Argon2id 16 MB — puluhan
+  // detik, dengan ekor geometris yang mudah melewati 60 detik. Batasnya sekarang
+  // disamakan dengan **timeout PoW milik klien sendiri** (300 detik di
+  // `crypto-worker-proxy.minePoW`): badge harus muncul dalam anggaran yang sama
+  // dengan yang dijanjikan aplikasi ke pengguna; kalau mining memang tidak pernah
+  // selesai, test tetap gagal (bukan diloloskan).
   const verifiedBadge = page.locator('span', { hasText: /verified/i }).first();
-  await expect(verifiedBadge).toBeVisible({ timeout: 60000 });
+  await expect(verifiedBadge).toBeVisible({ timeout: 300000 });
 
   // Setelah berhasil diverifikasi, kembali ke layar chat
   const chatLink = page.locator('a[href="/chat"], a[aria-label="Back"]').first();
@@ -40,8 +52,11 @@ async function verifyUser(page: Page) {
 }
 
 test.describe('Chat Functionality', () => {
-  // Naikkan timeout global karena kita melakukan Registrasi (x2) + Mining PoW (x1)
-  test.setTimeout(240000); 
+  // Naikkan timeout global: Registrasi (x2, terukur 40-70 detik masing-masing di
+  // mesin ini) + Mining PoW (sampai timeout kliennya sendiri, 300 detik) + kirim
+  // pesan. Harus LEBIH BESAR dari anggaran mining, kalau tidak timeout global yang
+  // menangkap lebih dulu dan pesan kegagalannya tidak lagi menunjukkan penyebabnya.
+  test.setTimeout(480000);
 
   test('Start a new conversation and send a message', async ({ page, browser }) => {
     // Membutuhkan WebTransport untuk penerimaan real-time — skip bila tak tersedia

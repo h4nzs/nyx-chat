@@ -29,7 +29,9 @@ import {
   REGISTRATION_SYBIL_BURST_MAX_PER_ASN,
   REGISTRATION_SYBIL_WINDOW_SECONDS,
   evaluateRegistrationBurst,
+  isKnownRegistrationGuardModeValue,
   makeRegistrationGuard,
+  parseRegistrationGuardMode,
   registrationAsnBurstKey,
   registrationAsnKey,
   registrationInstallationKey,
@@ -191,4 +193,134 @@ test('makeRegistrationGuard: enabled=false tidak menyentuh counter sama sekali',
   const verdict = await guard({ ip: '198.51.100.1', installationId: 'iid-1', asn: '13335' });
   assert.deepEqual(verdict, { requireAttestation: false });
   assert.equal(touched, 0);
+});
+
+// ============================================================================
+// [docs/30 §30.12 WS-H] Mode SHADOW — jalur pengukuran false-positive lapangan.
+//
+// Yang diukur di lapangan adalah "berapa banyak pengguna SAH yang akan tertahan
+// kalau guard dinyalakan". Karena itu mode shadow wajib: (a) tetap menghitung
+// SEMUA lapisan (kalau ia no-op, angkanya bohong), dan (b) tidak boleh mengubah
+// perilaku satu pun pengguna (tidak blokir, tidak menuntut attestation).
+// ============================================================================
+
+test('parseRegistrationGuardMode: hanya nilai yang pasti dianggap menyala', () => {
+  assert.equal(parseRegistrationGuardMode('on'), 'on');
+  assert.equal(parseRegistrationGuardMode(' TRUE '), 'on');
+  assert.equal(parseRegistrationGuardMode('1'), 'on');
+  assert.equal(parseRegistrationGuardMode('shadow'), 'shadow');
+  assert.equal(parseRegistrationGuardMode('Shadow'), 'shadow');
+  assert.equal(parseRegistrationGuardMode('off'), 'off');
+  // Fail-open + berisik: salah tulis env TIDAK boleh mengunci registrasi.
+  assert.equal(parseRegistrationGuardMode('yes'), 'off');
+  assert.equal(parseRegistrationGuardMode(undefined), 'off');
+  assert.equal(parseRegistrationGuardMode(''), 'off');
+
+  assert.equal(isKnownRegistrationGuardModeValue('on'), true);
+  assert.equal(isKnownRegistrationGuardModeValue('shadow'), true);
+  assert.equal(isKnownRegistrationGuardModeValue(''), true);
+  assert.equal(isKnownRegistrationGuardModeValue('yes'), false);
+});
+
+test('mode shadow: menghitung semua lapisan TAPI tidak menahan siapa pun', async () => {
+  const keys: string[] = [];
+  const observations: Array<{ blocked: boolean; reason: string; counts: Record<string, number | null> }> = [];
+  const guard = makeRegistrationGuard(async (key) => {
+    keys.push(key);
+    // Melewati batas ASN keras (100/jam) — mode `on` akan 429 di sini.
+    return key.startsWith('regburst:asn:') ? REGISTRATION_MAX_PER_ASN : 1;
+  }, 'shadow');
+
+  const verdict = await guard({
+    ip: '198.51.100.9',
+    installationId: 'iid-shadow',
+    asn: '64500',
+    onObservation: (o) =>
+      observations.push({
+        blocked: !o.verdict.allowed,
+        reason: String(o.verdict.reason),
+        counts: o.counts,
+      }),
+  });
+
+  // 1. Perilaku pengguna TIDAK berubah.
+  assert.deepEqual(verdict.requireAttestation, false, 'shadow tidak boleh menuntut attestation');
+  assert.equal(verdict.observation?.mode, 'shadow');
+  assert.equal(verdict.observation?.verdict.allowed, false, 'verdict hipotetis tetap dihitung');
+
+  // 2. Semua lapisan tetap diukur (kalau tidak, angka false-positive bohong).
+  assert.equal(keys.length, 4);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0]!.blocked, true);
+  assert.equal(observations[0]!.reason, 'ASN');
+  assert.equal(observations[0]!.counts.asn, REGISTRATION_MAX_PER_ASN);
+});
+
+test('mode shadow: burst sybil → would_require_attestation, pengguna tetap lolos tanpa attestation', async () => {
+  const guard = makeRegistrationGuard(async (key) =>
+    key.startsWith('regburst:asnfast:') ? REGISTRATION_SYBIL_BURST_MAX_PER_ASN : 1, 'shadow');
+
+  const verdict = await guard({ ip: '198.51.100.9', installationId: 'iid-shadow', asn: '64500' });
+  assert.equal(verdict.requireAttestation, false);
+  assert.deepEqual(verdict.observation?.verdict, { allowed: true, requireAttestation: true });
+});
+
+test('mode shadow: NAT kantor besar (tersebar) → tidak ada yang akan tertahan', async () => {
+  // 40 akun tersebar sepanjang jam dari satu ASN, burst 10 menit hanya 8, dan
+  // tiap instalasi sendiri — inilah "false positive" yang ingin diukur = nol.
+  const guard = makeRegistrationGuard(async (key) => {
+    if (key.startsWith('regburst:asn:')) return 40;
+    if (key.startsWith('regburst:asnfast:')) return 8;
+    return 1;
+  }, 'shadow');
+
+  const verdict = await guard({ ip: '198.51.100.9', installationId: 'iid-office', asn: '64500' });
+  assert.deepEqual(verdict.observation?.verdict, { allowed: true, requireAttestation: false });
+  assert.equal(verdict.requireAttestation, false);
+});
+
+test('label metrik guard aman: tidak menyalakan alarm kebocoran identitas', async () => {
+  // Regresi yang ingin dicegah: nama label enum yang panjang (mis.
+  // `would_require_attestation`, 24 karakter) tertangkap penjaga bentuk
+  // base64url di `metrics.ts` → metrik DITOLAK, dan `nyx_metrics_rejected_total`
+  // naik → alarm KRITIS `NyxMetricsIdentityLeakAttempt` menyala di produksi
+  // hanya karena nama label, bukan karena kebocoran.
+  const { renderMetricsText, resetMetricsForTests } = await import('../src/utils/metrics.js');
+  resetMetricsForTests();
+
+  const shadowBlocked = makeRegistrationGuard(async (key) =>
+    key.startsWith('regburst:asn:') ? REGISTRATION_MAX_PER_ASN : 1, 'shadow');
+  await shadowBlocked({ ip: '198.51.100.9', installationId: 'iid-safe', asn: '64500' });
+
+  const shadowAttest = makeRegistrationGuard(async (key) =>
+    key.startsWith('regburst:asnfast:') ? REGISTRATION_SYBIL_BURST_MAX_PER_ASN : 1, 'shadow');
+  await shadowAttest({ ip: '198.51.100.9', installationId: 'iid-safe', asn: '64500' });
+
+  const shadowAllowed = makeRegistrationGuard(async () => 1, 'shadow');
+  await shadowAllowed({ ip: '198.51.100.9', installationId: 'iid-safe', asn: '64500' });
+
+  const strictAllowed = makeRegistrationGuard(async () => 1, 'on');
+  await strictAllowed({ ip: '198.51.100.9', installationId: 'iid-safe', asn: '64500' });
+
+  const text = renderMetricsText();
+  // HELP/TYPE selalu ada (metriknya dideklarasikan) — yang menandakan penolakan
+  // adalah SAMPLE dengan nilai (baris `nyx_metrics_rejected_total{...} N`).
+  const rejectedSample = text
+    .split('\n')
+    .filter((line) => line.startsWith('nyx_metrics_rejected_total{'))
+    .join(' | ');
+  assert.equal(rejectedSample, '', `label metrik ditolak penjaga: ${rejectedSample}`);
+  assert.match(text, /nyx_registration_guard_observed_total\{action="would_block"/);
+  assert.match(text, /nyx_registration_guard_observed_total\{action="would_attest"/);
+  assert.match(text, /nyx_registration_guard_observed_total\{action="allowed"/);
+});
+
+test('mode off tidak diturunkan dari nilai tak dikenal (fail-open, bukan blokir)', async () => {
+  const guard = makeRegistrationGuard(async () => REGISTRATION_MAX_PER_ASN + 1, parseRegistrationGuardMode('nyala-dong'));
+  const verdict = await guard({ ip: '198.51.100.9', installationId: 'iid-x', asn: '64500' });
+  assert.deepEqual(verdict, { requireAttestation: false });
+
+  // Kontras: mode `on` pada counter yang sama memang menahan.
+  const strict = makeRegistrationGuard(async () => REGISTRATION_MAX_PER_SOURCE + 1, 'on');
+  await assert.rejects(() => strict({ ip: '198.51.100.9', installationId: 'iid-x' }), /REGISTRATION_BURST_LIMIT/);
 });

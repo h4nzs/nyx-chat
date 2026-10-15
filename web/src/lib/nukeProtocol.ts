@@ -46,6 +46,15 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
       await clearSpqrStates();
     } catch (_e) {}
 
+    // 0.56 Hapus jangkar + head peer gossip KT (`docs/30` §30.5 tahap C).
+    // Baris `ktGossip` ikut terhapus bersama IndexedDB, tapi **cache RAM** harus
+    // dikosongkan lebih dulu — kalau tidak, jalur kirim masih bisa menyisipkan
+    // `ktG` dalam jendela sebelum reload (dan head sesi lama ikut terbawa).
+    try {
+      const { clearKtGossip } = await import('./ktGossip');
+      await clearKtGossip();
+    } catch (_e) {}
+
     // 0.6 Wipe OPFS (encrypted attachment cache)
     try {
       const { wipeOPFS } = await import('./opfsStorage');

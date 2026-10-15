@@ -1,15 +1,19 @@
 # 34 — Verifier Key Transparency di klien
 
 > **Status: verified-search landed + teruji terhadap bukti nyata, termasuk dari
-> jalur baca produksi (2026-10-13); integrasi jalur bundle + loop monitor
-> landed (2026-10-14).** Modul WASM (`packages/keytrans-wasm`, kompilasi
-> `libsignal-keytrans`), pembungkus klien (`web/src/lib/keyTransparency.ts`),
-> pemakai produksinya (`web/src/lib/ktBundleProof.ts`,
-> `web/src/lib/ktSubject.ts`, `web/src/lib/ktMonitoring.ts`), dan **18 test**
-> verifier — 12 berbasis `UpdateResponse` binary Go, 4 berbasis bukti dari
-> `server/kt-query` (`docs/32` §32.8), termasuk rotasi kunci terhadap anchor bukti
-> sebelumnya. Bundle peer kini **diverifikasi terhadap log sebelum dipin**
-> (§34.6a), dan loop monitor dijalankan penjadwal (§34.6b). Yang **belum**: auditor
+> jalur baca produksi (2026-10-13); integrasi jalur bundle + loop monitor +
+> auditor + gossip landed (2026-10-14).** Modul WASM
+> (`packages/keytrans-wasm`, kompilasi `libsignal-keytrans`), pembungkus klien
+> (`web/src/lib/keyTransparency.ts`), pemakai produksinya
+> (`web/src/lib/ktBundleProof.ts`, `web/src/lib/ktSubject.ts`,
+> `web/src/lib/ktMonitoring.ts`, `web/src/lib/ktGossip.ts`), dan **60 test**
+> verifier di lima berkas — `keyTransparency.test.ts` 12 (bukti nyata dari penulis
+> Go + `server/kt-query`, termasuk rotasi kunci terhadap anchor bukti sebelumnya),
+> `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 9,
+> `ktSubject.test.ts` 8. Bundle peer kini **diverifikasi terhadap log sebelum
+> dipin** (§34.6a), loop monitor dijalankan penjadwal (§34.6b), auditor pihak
+> ketiga dilayani `server/kt-query` (`audit.go`), dan tree head di-gossip antar
+> klien (§34.6c). Yang **belum**: auditor
 > + gossip (mode 3) — §34.6 poin 3.
 
 Rencana & gate: `docs/30` §30.5. Sisi penulis log: `docs/32`.
@@ -190,7 +194,7 @@ Perilaku yang berubah (dan patut diingat):
 
 Verifikasi: `peerIdentityTrust.test.ts` (+5 test: mismatch kontak pertama,
 penerimaan user, TTL konfirmasi, sumber `kt` di daftar pending, unknown-subject)
-dan `ktSubject.test.ts` (7 test: prioritas sumber + fail-open).
+dan `ktSubject.test.ts` (8 test: prioritas sumber + fail-open).
 
 ## 34.6b Loop monitor (landed 2026-10-14)
 
@@ -208,10 +212,11 @@ adalah **pemanggilnya**:
   impor dinamis sehingga WASM tidak masuk bundel awal); `keyVersion` yang naik
   memunculkan toast `chat:banners.kt_key_rotation` (4 bahasa).
 
-7 test baru di `ktMonitoring.test.ts` (urutan penjadwalan, tidak menumpuk, tidak
+9 test di `ktMonitoring.test.ts` (urutan penjadwalan, tidak menumpuk, tidak
 berhenti saat gagal, pelaporan `changed`, dan tanpa state → tidak memanggil
 jaringan). Loop ini tidak mengubah kunci yang dipercaya: hasilnya state baru +
-notifikasi; keputusan blokir tetap di jalur pin (§34.6a).
+notifikasi; keputusan blokir tetap di jalur pin (§34.6a). Setiap langkah juga
+menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
 
 ## 34.6 Sisa pekerjaan
 
@@ -220,23 +225,65 @@ notifikasi; keputusan blokir tetap di jalur pin (§34.6a).
    Catatan: loop baru punya data setelah verifikasi search pertama berhasil, dan
    verifikasi itu butuh username peer (§34.6a poin 3), jadi profil peer harus
    pernah terdekripsi.
-3. **Auditor + gossip** — mengaktifkan mode 3, `SetAuditorHead`, dan bertukar
-   tree head lewat slot metadata pesan yang sudah ada, sesuai `docs/30` §30.5
-   tahap C. Ini juga yang membuat byte tanda tangan auditor benar-benar diperiksa
-   (§34.5 residual 1).
-4. **Degradasi terlihat** — bila KT mati: klien jalan dengan TOFU + banner
-   "verifikasi kunci tidak tersedia" (fail-visible, tercatat di metrik). Baris
-   pin sudah menyimpan `ktLastVerdict`, sehingga UI diagnostik bisa dibuat dari
-   data itu tanpa menyentuh jalur kripto.
-5. **Rollback** — kapabilitas `KT_LITE` di `packages/shared/src/transport.ts`
-   sudah jadi gerbang minimum; menghapus jalur KT tidak mengubah perilaku klien
-   lama (semua pemanggil memperlakukan verdict non-`mismatch` sebagai TOFU).
+3. ~~**Auditor + gossip**~~ — **landed 2026-10-14**: auditor pihak ketiga
+   dilayani `server/kt-query/audit.go` (mode 3, `TreeSize`/`Audit`/`SetAuditorHead`
+   lewat verifikasi upstream) dan gossip tree head hidup di `ktGossip.ts`
+   (§34.6c). Dua sisa yang jujur: (a) **auditor belum dioperasikan** — belum ada
+   proses auditor yang mengirim `SetAuditorHead`, jadi tanda tangan auditor di
+   bukti masih tidak diperiksa siapa pun di lapangan (`§34.5` residual 1 tetap
+   berlaku sampai ada auditor); (b) gate CI `cmd/generate-auditing-test-vectors`
+   dan interop `cmd/kt-client` **tidak dijalankan** (keduanya `package main` di
+   repo upstream, tidak di-vendor) — jalur auditor dibuktikan `audit_test.go`
+   dengan verifier upstream yang sama.
+4. **Degradasi terlihat** — bila KT mati: klien jalan dengan TOFU; verdict-nya
+   tersimpan di baris pin (`ktLastVerdict`) dan setiap permintaan bukti dihitung
+   di `nyx_kt_queries_total{result="disabled"|"error"}`. **Tidak ada banner**
+   "verifikasi kunci tidak tersedia" — yang tampil ke user hanya toast rotasi
+   kunci; banner diagnostik adalah pekerjaan UI, bukan perilaku yang sudah ada.
+5. **Rollback** — jalur nyatanya adalah **mengosongkan `KT_QUERY_URL`**: endpoint
+   `/api/keys/kt/*` menjawab 503 dan setiap verdict menjadi `unavailable` (TOFU),
+   tanpa perubahan kode klien. Kapabilitas `KT_LITE` di
+   `packages/shared/src/transport.ts` **dideklarasikan tetapi tidak pernah
+   diiklankan/dibaca** — dulu disebut gerbang rollback di sini, nyatanya bukan.
 6. **Verifikasi E2E jalur KT** — tidak bisa dijalankan di suite E2E NYX (butuh
    layanan `nyx-kt-query` + penulis log hidup; dengan `KT_QUERY_URL` kosong,
    setiap verdict `unavailable` dan pin tetap TOFU). Yang bisa diverifikasi
-   sekarang: unit/properti (**50 test** di `keyTransparency.test.ts` 18,
-   `ktMonitoring.test.ts` 11, `peerIdentityTrust.test.ts` 14, `ktSubject.test.ts` 7)
-   + jalur hidup manual (`docs/32` §32.8).
+   sekarang: unit/properti (**60 test**: `keyTransparency.test.ts` 12,
+   `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 9,
+   `ktSubject.test.ts` 8) + jalur hidup manual (`docs/32` §32.8).
+
+## 34.6c Auditor + gossip (landed 2026-10-14)
+
+**Auditor pihak ketiga (mode 3).** Log NYX berjalan `ContactMonitoring` selama
+belum ada auditor: bukti yang disajikan memuat byte tanda tangan auditor, tetapi
+nol auditor head berarti tidak ada yang memeriksanya. Yang ditambahkan:
+`server/kt-query` menyajikan layanan auditor upstream di listener terpisah
+(`NYX_KT_AUDITOR_ADDR`, default `127.0.0.1:8082`) — `TreeSize`, `Audit`, dan
+`SetAuditorHead`. Verifikasi tanda tangan **bukan** milik kami: `SetAuditorHead`
+meneruskan ke `tree.SetAuditorHead` upstream, jadi aturan kriptonya identik dengan
+Signal. Nama auditor dibawa di metadata `x-nyx-auditor-name` (deployment loopback
+tanpa mTLS); kunci publiknya tetap dari `api.auditors` di config, dan nama tak
+terkonfigurasi ditolak lebih awal (`PermissionDenied`). `audit_test.go`
+menunjukkan inti mode 3: verifier upstream **menolak** bukti "auditor tree head not
+provided" sebelum ada head, dan **menerima** sesudahnya; tanda tangan yang diubah,
+kunci penyerang, dan mode bukan third-party semuanya ditolak.
+
+**Gossip tree head.** Split-view (log menyajikan pohon berbeda ke klien berbeda)
+tidak bisa dideteksi satu klien sendirian — masing-masing konsisten dengan
+dirinya. `ktGossip.ts` menutupnya tanpa jalur data baru: jangkar `(treeSize,
+root)` ikut di **payload ter-seal** (field `ktG`, sebagaimana `ackV`), dibaca dari
+payload yang sudah lolos AEAD, lalu dibandingkan dengan jangkar lokal. Aturannya
+satu fakta yang tidak butuh bukti tambahan: untuk satu `treeSize`, pohon hanya
+punya satu root → ukuran sama + root beda = **split-view** (toast
+`chat:banners.kt_split_view` di 4 bahasa); ukuran berbeda hanya dicatat
+(`peer-ahead`/`peer-stale`) dan **tidak** dipakai menyimpulkan apa pun tanpa bukti
+konsistensi. Root diambil dari `GET /api/keys/kt/head` (JSON kecil dari
+`kt-query`): root tidak bisa dibaca dari byte `FullTreeHead` tanpa parser
+protobuf, dan parser protobuf hanya boleh di WASM (`§34.2`). State (jangkar +
+head peer per sesi) disimpan ter-seal `ENC1:` di Dexie **v13** (`ktGossip`, satu
+baris), dimuat saat app siap, dan dibersihkan `executeLocalWipe`. 17 test
+(`ktGossip.test.ts`) termasuk payload peer yang rusak, dedup tulis, batas 64 peer,
+head peer yang lebih tua/lebih baru, dan fail-open saat tabel tidak ada.
 
 ## 34.7 Privasi
 

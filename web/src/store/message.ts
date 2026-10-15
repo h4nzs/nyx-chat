@@ -2892,7 +2892,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       const finalMessage: Message = {
-        ...(oldMsg || {}), 
+        ...oldMsg,
         ...(newMessage as Message), 
         // === FIX CENTANG BIRU HILANG ===
         statuses: finalStatuses,

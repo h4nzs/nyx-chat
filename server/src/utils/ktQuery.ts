@@ -207,3 +207,45 @@ export async function fetchKtPublicConfig(): Promise<KtPublicConfig> {
     throw new KtQueryError('MALFORMED_RESPONSE', 'config KT bukan JSON');
   }
 }
+
+/**
+ * Tree head NYX sebagai JSON kecil — jangkar **gossip** antar-klien
+ * (`web/src/lib/ktGossip.ts`).
+ *
+ * Kenapa tidak diambil dari bukti protobuf: root di dalam `FullTreeHead` harus
+ * dihitung klien dari proof (itulah inti KT), dan mem-parsing protobuf di JS
+ * dilarang (`docs/34` §34.2). Untuk gossip, yang dibutuhkan hanya angka yang
+ * bisa dibandingkan; kalau angka itu tidak cocok dengan bukti yang diverifikasi,
+ * verifikasi bukti itu sendiri yang gagal — jadi tidak ada jalur kepercayaan baru.
+ */
+export interface KtHead {
+  treeSize: number;
+  timestamp: number;
+  /** Root 32 byte sebagai hex (64 karakter). */
+  root: string;
+}
+
+const HEX_32_BYTES = /^[0-9a-f]{64}$/;
+
+export async function fetchKtHead(): Promise<KtHead> {
+  const bytes = await request('/head');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new KtQueryError('MALFORMED_RESPONSE', 'head KT bukan JSON');
+  }
+  const head = parsed as Partial<KtHead> | null;
+  if (
+    !head ||
+    typeof head.treeSize !== 'number' ||
+    !Number.isInteger(head.treeSize) ||
+    head.treeSize <= 0 ||
+    typeof head.timestamp !== 'number' ||
+    typeof head.root !== 'string' ||
+    !HEX_32_BYTES.test(head.root)
+  ) {
+    throw new KtQueryError('MALFORMED_RESPONSE', 'head KT tidak lengkap/tidak sah');
+  }
+  return { treeSize: head.treeSize, timestamp: head.timestamp, root: head.root };
+}

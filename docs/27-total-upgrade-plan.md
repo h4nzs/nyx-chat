@@ -161,7 +161,9 @@ and benefits from parallel infrastructure).
    sidecar cert expiry.
 3. **Load test before reopening:** k6/artillery script that simulates 500
    concurrent users, 20 msgs/s aggregate, group fan-out storms — must hold
-   p95 < 200ms for relay operations.
+   p95 < 200ms for relay operations. *(✅ 2026-10-14: `scripts/load/relay.k6.js` —
+   500 VU terukur, send p95 74,4 ms / fetch p95 68,8 ms, 0% error; jalankan lewat
+   `scripts/load/run-relay-load.sh`.)*
 4. **Game-day runbook:** update docs/10 with the new topology + rollback steps;
    rehearse deploy on the new box before announcing.
 
@@ -176,12 +178,12 @@ SFU calls (until 1:1 call blinding ships).
 | Phase | Blocker for | Acceptance gate |
 |---|---|---|
 | 0 Infra | everything | deploy.yml green on new box; backups verified |
-| 1 Server | T2/T4, client lifting | parity tests green; load test p95<200ms |
+| 1 Server | T2/T4, client lifting | parity tests green; load test p95<200ms (✅ 2026-10-14, terukur) |
 | 2 Client | launch UX | full vitest+playwright suite; manual matrix |
 | 3 Privacy tiers | relaunch promise | tier-by-tier with per-tier tests (26.5) |
 | 4 Calls | privacy parity with 1:1 messages | coturn self-hosted; signaling blinded |
 | 5 Media | UX polish | R2 lifecycle verified; SSRF tests |
-| 6 Observability | ops maturity | alerts firing in a game-day drill |
+| 6 Observability | ops maturity | alerts firing in a game-day drill (✅ 2026-10-14: `scripts/drill-alerts.sh`, 14 aturan dengan kasus menyala/tidak-menyala, jalan per-PR) |
 
 Reopen the service to users only after Phase 1–3 acceptance. The relaunch story
 writes itself: same NYX, now with group metadata at Signal-V2-or-better posture,

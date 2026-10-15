@@ -237,11 +237,18 @@ Keputusan desain yang penting untuk pembaca berikutnya:
 
 ### Sisa yang jujur
 
-1. **Loop monitor klien belum jalan.** `POST /monitor` benar dan teruji (bahkan
-   lolos `VerifyMonitor` upstream), tetapi permintaannya harus dibangun dari
-   monitoring data tersimpan — ABI WASM belum punya op untuk itu (`docs/34`
-   §34.6 poin 2). Tanpa monitor, jaminan yang diberikan baru "nilai ini ada di
-   log", belum "log belum menulis ulang nilai itu".
-2. **Auditor pihak ketiga belum aktif** (`SetAuditorHead`, mode 3).
+1. ~~**Loop monitor klien belum jalan.**~~ **Sudah jalan (2026-10-14)**: ABI WASM
+   punya `monitor_build`/`verify_monitor`, state disimpan `ktMonitoring` (ter-seal),
+   dan penjadwal `startKtMonitorLoop` berjalan di app shell — lihat `docs/34`
+   §34.6b. Catatan: loop hanya punya data setelah verifikasi search pertama
+   berhasil (butuh username peer).
+2. **Auditor pihak ketiga belum dioperasikan** — kode sudah ada dan teruji
+   (`server/kt-query/audit.go`, mode 3, `SetAuditorHead`), tetapi belum ada proses
+   auditor yang mengirim tanda tangannya, jadi byte auditor di bukti masih tidak
+   diperiksa di lapangan (`docs/34` §34.6 poin 3).
 3. **`keyVersion` masih konstanta alur** (§32.7 poin 2).
-4. **Snapshot LevelDB → R2** masih residual seperti sebelumnya.
+4. ~~**Snapshot LevelDB → R2**~~ **Sudah ada (2026-10-14)**: `kt-query/snapshot.go`
+   membuat arsip harian **terverifikasi** (tree head + root salinan dibandingkan
+   dengan pohon hidup) dan `server/src/jobs/ktSnapshot.ts` mengunggahnya ke R2
+   dengan retensi 30 hari. **Sisa:** menjalankan di VPS (direktori + kredensial)
+   dan membuktikan pemulihan dari arsip.

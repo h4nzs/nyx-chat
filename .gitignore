@@ -66,3 +66,14 @@ packages/keytrans-wasm/Cargo.toml
 # `server/kt-query/vendor/`, lihat NOTICE).
 server/kt-query/nyx-kt-query
 server/kt-query/kt-query
+# `build.sh` juga menghasilkan CLI audit (`nyx-kt-check`) — biner, bukan sumber
+# (sumbernya `cmd/nyx-kt-check/`).
+server/kt-query/nyx-kt-check
+
+# Oracle DR lintas-implementasi (`tools/dr-oracle`, docs/30 WS-G(6)): sumber Go
+# di-commit, binernya tidak (`go build`/`go build ./...` meninggalkannya di sini).
+tools/dr-oracle/nyx-dr-oracle
+
+# [docs/30 WS-G(2)] Binari alat drill yang diunduh skrip (`promtool`,
+# scripts/drill-alerts.sh) — jangan di-commit: ~110MB dan terikat platform.
+.cache/

@@ -12,6 +12,9 @@ async function main() {
   const { attachWssGateway } = await import('./realtime/gateway.js')
   const { startMessageSweeper } = await import('./jobs/messageSweeper.js')
   const { startSystemSweeper } = await import('./jobs/systemSweeper.js')
+  // [docs/10 §10.13] Unggah harian arsip snapshot log KT dari dir milik
+  // `nyx-kt-query` ke R2 (kredensial objek hanya hidup di proses ini).
+  const { startKtSnapshotUploader } = await import('./jobs/ktSnapshot.js')
   // [docs/30 WS-G] Metrik event-only, diekspos hanya di loopback.
   const { startMetricsServer, stopMetricsServer } = await import('./utils/metricsEndpoint.js')
 
@@ -23,6 +26,7 @@ async function main() {
   attachWssGateway(httpServer)
   startMessageSweeper()
   startSystemSweeper()
+  startKtSnapshotUploader()
 
   const PORT = Number(process.env.PORT || 4000)
   // Bind loopback by default: only cloudflared (same host) needs to reach us.

@@ -1,12 +1,22 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "oxc"],
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
   "categories": {
-    "correctness": "warn"
+    "correctness": "error"
   },
   "rules": {
-    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }],
-
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
     "no-async-promise-executor": "error",
     "no-unassigned-vars": "error",
     "no-unused-expressions": "error",
@@ -33,11 +43,21 @@
     "no-prototype-builtins": "error",
     "no-await-in-loop": "off",
     "no-console": "off",
-    "no-empty": ["error", { "allowEmptyCatch": true }]
+    "no-empty": [
+      "error",
+      {
+        "allowEmptyCatch": true
+      }
+    ]
   },
   "overrides": [
     {
-      "files": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**", "**/e2e/**"],
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/__tests__/**",
+        "**/e2e/**"
+      ],
       "rules": {
         "no-unused-vars": "off"
       }

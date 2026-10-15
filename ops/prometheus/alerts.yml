@@ -41,8 +41,18 @@ groups:
 
       # Sweeper harian tidak jalan / gagal → data kedaluwarsa menumpuk
       # (token, session key, story, dead-man switch tidak tereksekusi).
+      #
+      # [drill 2026-10-14] Suku kedua dari `or` WAJIB: gauge ini hanya lahir
+      # setelah satu putaran sweeper selesai (`sweepOnce` finally). Saat proses
+      # baru (belum pernah menyapu) seri-nya TIDAK ADA, dan `time() - max(...)`
+      # atas vektor kosong = kosong → alert diam. Skenario yang justru paling
+      # penting (cron mati sejak boot / pm2 restart sebelum 00:00) tidak pernah
+      # terdeteksi. `absent_over_time` menutupnya dan TIDAK false-positive saat
+      # restart normal: sampel lama masih ada di dalam jendela 26 jam.
       - alert: NyxSweeperStale
-        expr: time() - max(nyx_sweeper_last_run_timestamp_seconds) > 26 * 3600
+        expr: |
+          time() - max(nyx_sweeper_last_run_timestamp_seconds) > 26 * 3600
+          or absent_over_time(nyx_sweeper_last_run_timestamp_seconds[26h])
         for: 30m
         labels:
           severity: high
@@ -129,11 +139,58 @@ groups:
           summary: "Penulisan log Key Transparency gagal"
           description: "Cek proses KT (leveldb) + KT_SERVER_URL. Kegagalan tidak memblokir registrasi, jadi hanya terlihat dari sini (docs/32)."
 
+      # [drill 2026-10-14] DUA cacat ditemukan di sini, keduanya membuat aturan
+      # ini MUSTAHIL menyala (dead rule):
+      #
+      #   1. `A and B` mencocokkan **label yang sama**. Sisi kiri
+      #      (`increase(...{result="error"})`) punya label `result="error"`,
+      #      sedangkan sisi kanan (`time() - nyx_kt_last_success_...`) TIDAK punya
+      #      label → irisan selalu kosong → alert tidak pernah menyala. Karena itu
+      #      sisi kiri diagregasi `sum()` agar labelnya sepadan (label-free).
+      #   2. Gauge `last_success` hanya ada SETELAH satu tulisan sukses; instance
+      #      yang belum pernah sukses (kasus paling gawat) membuat `time() -`
+      #      atas seri kosong → tidak ada data. Ditutup dengan `absent_over_time`.
       - alert: NyxKeyTransparencyStalled
-        expr: increase(nyx_kt_writes_total{result="error"}[1h]) > 0 and (time() - nyx_kt_last_success_timestamp_seconds) > 3600
+        expr: |
+          sum(increase(nyx_kt_writes_total{result="error"}[1h])) > 0
+          and (
+            time() - max(nyx_kt_last_success_timestamp_seconds) > 3600
+            or absent_over_time(nyx_kt_last_success_timestamp_seconds[1h])
+          )
         for: 10m
         labels:
           severity: high
         annotations:
           summary: "Log KT gagal total selama 1 jam"
           description: "Semua percobaan tulis gagal tanpa satu pun sukses: kemungkinan binary KT mati atau endpoint salah. Kunci identitas baru tidak ter-audit."
+
+      # [docs/10 §10.13] Snapshot log KT: tanpa unggahan yang sukses, log hanya
+      # hidup di SATU disk. `increase(...{result="error"}) > 0` saja tidak cukup
+      # (instance yang tidak pernah mencoba juga tidak pernah error), jadi
+      # alarmnya adalah "tidak ada unggahan sukses selama 36 jam" — cukup longgar
+      # untuk jadwal harian + retry, cukup ketat untuk menangkap cron mati.
+      # [drill 2026-10-14] `increase(...) == 0` saja hanya bisa menyala bila
+      # counter-nya SUDAH PERNAH ada; instance yang sejak boot tidak pernah
+      # mencoba mengunggah (cron tidak jalan) menghasilkan vektor kosong → alert
+      # tidak pernah menyala, padahal itu tepat skenario yang ingin ditangkap.
+      # `absent_over_time` membuat "tidak ada unggahan sukses selama 36 jam"
+      # benar untuk kedua bentuk: seri ada tapi datar, ATAU seri tidak ada.
+      - alert: NyxKtSnapshotNotUploaded
+        expr: |
+          increase(nyx_kt_snapshot_upload_total{result="ok"}[36h]) == 0
+          or absent_over_time(nyx_kt_snapshot_upload_total{result="ok"}[36h])
+        for: 1h
+        labels:
+          severity: high
+        annotations:
+          summary: "Snapshot log KT tidak diunggah ke R2 selama 36 jam"
+          description: "Cek KT_SNAPSHOT_DIR di server NYX, NYX_KT_SNAPSHOT_DIR di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13)."
+
+      - alert: NyxKtSnapshotUploadFailing
+        expr: increase(nyx_kt_snapshot_upload_total{result="error"}[24h]) > 0
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Unggahan snapshot log KT gagal"
+          description: "Kredensial R2, bucket, atau berkas arsip bermasalah. Arsip lokal tetap ada (dipangkas 7), tetapi riwayat panjang di R2 berhenti bertambah."

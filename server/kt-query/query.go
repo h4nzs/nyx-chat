@@ -80,6 +80,7 @@ type queryServer struct {
 func (qs *queryServer) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", qs.handleHealth)
+	mux.HandleFunc("/head", qs.handleHead)
 	mux.HandleFunc("/config", qs.handleConfig)
 	mux.HandleFunc("/search", qs.handleSearch)
 	mux.HandleFunc("/distinguished", qs.handleDistinguished)
@@ -103,6 +104,44 @@ func (qs *queryServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"treeSize": head.TreeSize, "timestamp": head.Timestamp})
+}
+
+// handleHead mengembalikan tree head NYX sebagai JSON kecil: ukuran, timestamp,
+// dan **root** (hex). Ini jangkar yang dipakai fitur gossip antar-klien
+// (`web/src/lib/ktGossip.ts`): dua klien yang saling bertukar root untuk ukuran
+// pohon yang sama bisa membuktikan split-view.
+//
+// Kenapa endpoint terpisah, bukan dari bukti: root di dalam `FullTreeHead`
+// protobuf harus **dihitung klien** dari proof (itu intinya KT), sedangkan
+// jangkar gossip tidak perlu dihitung ulang — ia hanya dibandingkan antar-klien,
+// dan kalau tidak cocok dengan bukti yang diverifikasi, verifikasi itu sendiri
+// yang gagal. Tanpa endpoint ini klien harus mem-parse protobuf di JS, yang
+// justru dilarang (`docs/34` §34.2: parser protobuf hanya di WASM).
+func (qs *queryServer) handleHead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET saja")
+		return
+	}
+	tree, err := qs.source.Tree()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
+		return
+	}
+	head := tree.GetTransparencyTreeHead()
+	if head == nil {
+		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "tree head hilang")
+		return
+	}
+	root, err := tree.GetLogTree().GetRoot(head.TreeSize)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "UNAVAILABLE", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"treeSize":  head.TreeSize,
+		"timestamp": head.Timestamp,
+		"root":      hex.EncodeToString(root),
+	})
 }
 
 // handleConfig mengembalikan kunci publik log. Ini bagian dari keamanan: klien

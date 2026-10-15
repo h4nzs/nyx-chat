@@ -70,9 +70,15 @@ test('B4 skema: User punya lastActiveDay (bucket harian), bukan lastActiveAt pre
 });
 
 test('B4 wiring: sweepers & auth memakai kolom/utility bucket', () => {
+  // Kebijakan pembersihan hidup di `jobs/cleanup.ts` (dipisah dari cron supaya
+  // jalur manual `/api/admin/cleanup` menjalankan kode yang sama) — jadi kolom
+  // bucket dicek di modul kebijakan, dan cron hanya dicek sebagai pemanggilnya.
+  const cleanup = readFileSync(path.join(here, '../src/jobs/cleanup.ts'), 'utf8');
+  assert.match(cleanup, /lastActiveDay/, 'dead man\'s switch memakai bucket harian');
+  assert.doesNotMatch(cleanup, /lastActiveAt/, 'tidak lagi menyentuh kolom presisi');
+
   const sweeper = readFileSync(path.join(here, '../src/jobs/systemSweeper.ts'), 'utf8');
-  assert.match(sweeper, /lastActiveDay/, 'dead man\'s switch memakai bucket harian');
-  assert.doesNotMatch(sweeper, /lastActiveAt/, 'tidak lagi menyentuh kolom presisi');
+  assert.match(sweeper, /runCleanup\(/, 'sweeper memakai kebijakan bersama, bukan salinan');
 
   const auth = readFileSync(path.join(here, '../src/routes/auth.ts'), 'utf8');
   assert.doesNotMatch(auth, /lastActiveAt:\s*new Date\(\)/, 'write device memakai bucket, bukan new Date()');

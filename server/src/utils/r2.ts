@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectCommandInput } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommandInput } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
@@ -55,6 +55,46 @@ export const getPresignedDownloadUrl = async (key: string, urlTtl: number = 300)
   })
 
   return await getSignedUrl(s3Client, command, { expiresIn: urlTtl })
+}
+
+/**
+ * [docs/10 §10.13] Tulis objek dari sisi server (bukan presign) — dipakai job
+ * snapshot log KT: berkasnya ada di host, bukan di browser, jadi tidak ada
+ * gunanya membuat URL bertanda tangan.
+ */
+export const putR2Object = async (key: string, body: Uint8Array, contentType = 'application/octet-stream') => {
+  const command = new PutObjectCommand({
+    Bucket: env.r2BucketName,
+    Key: key,
+    Body: body,
+    ContentType: contentType
+  })
+
+  return await s3Client.send(command)
+}
+
+/**
+ * Daftar objek di bawah satu prefix (dipakai retensi snapshot). Dipaginasi
+ * penuh: satu halaman hanya memuat 1000 kunci, dan retensi yang diam-diam
+ * berhenti di halaman pertama adalah cara paling halus kehilangan riwayat.
+ */
+export const listR2Objects = async (prefix: string): Promise<Array<{ key: string; lastModified?: Date }>> => {
+  const out: Array<{ key: string; lastModified?: Date }> = []
+  let continuationToken: string | undefined
+
+  do {
+    const page = await s3Client.send(new ListObjectsV2Command({
+      Bucket: env.r2BucketName,
+      Prefix: prefix,
+      ContinuationToken: continuationToken
+    }))
+    for (const object of page.Contents ?? []) {
+      if (object.Key) out.push({ key: object.Key, lastModified: object.LastModified })
+    }
+    continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  return out
 }
 
 // Hapus file

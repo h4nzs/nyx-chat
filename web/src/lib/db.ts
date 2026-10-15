@@ -192,6 +192,19 @@ export interface KtMonitoringRecord {
   updatedAt: string;
 }
 
+/**
+ * [docs/30 §30.5 tahap C] Baris tunggal gossip tree head (`web/src/lib/ktGossip.ts`).
+ *
+ * Satu baris menyimpan seluruh state gossip dalam satu JSON ter-seal: jangkar
+ * terakhir yang dipercaya + head terakhir per sesi. Head peer mengungkap kapan
+ * percakapan itu aktif (dan sesi mana yang dipakai), jadi tidak boleh plaintext —
+ * `ENC1:` (masterSeed), pola yang sama dengan `ktMonitoring`.
+ */
+export interface KtGossipRow {
+  id: string; // PK; selalu satu baris (lihat KT_GOSSIP_ROW_ID)
+  blob: string; // JSON ter-seal (ENC1:)
+}
+
 export interface ContactRow {
   userId: UserId; // PK
   data: string; // ENCRYPTED JSON ContactRecord (base64 envelope)
@@ -238,6 +251,9 @@ export class NyxDatabase extends Dexie {
 
   // [docs/34 §34.6] State monitoring Key Transparency (per search key).
   ktMonitoring!: Table<KtMonitoringRecord, string>;
+
+  // [docs/30 §30.5 tahap C] Jangkar + head peer untuk deteksi split-view.
+  ktGossip!: Table<KtGossipRow, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -355,6 +371,12 @@ export class NyxDatabase extends Dexie {
     // Murni aditif (kolom baru, baris lama `null`), jadi tanpa `upgrade`.
     this.version(12).stores({
       ktMonitoring: 'searchKeyHex'
+    });
+
+    // [docs/30 §30.5 tahap C] v13 — tabel gossip (`ktGossip`): jangkar tree head
+    // yang dibagikan antar-klien + head terakhir per sesi. Murni aditif.
+    this.version(13).stores({
+      ktGossip: 'id'
     });
   }
 }

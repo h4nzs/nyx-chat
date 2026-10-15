@@ -138,7 +138,7 @@ function getOrCreateSeries(state: MetricState, normalized: Record<string, string
   if (!series) {
     series = { labels: normalized, value: 0 };
     if (state.def.type === 'histogram') {
-      series.bucketCounts = new Array<number>(state.def.buckets!.length).fill(0);
+      series.bucketCounts = Array.from({ length: state.def.buckets!.length }, () => 0);
       series.sum = 0;
       series.count = 0;
     }
@@ -368,6 +368,40 @@ export const KT_QUERIES = defineCounter(
   'nyx_kt_queries_total',
   'Permintaan bukti Key Transparency (baca), per hasil',
   ['result']
+);
+
+/**
+ * [docs/10 §10.13] Unggahan arsip snapshot log KT ke R2, per hasil. `error`
+ * penting: snapshot yang tiap hari gagal diunggah berarti log hanya hidup di
+ * satu disk, dan itu tidak terlihat dari mana pun kecuali dari sini.
+ */
+export const KT_SNAPSHOT_UPLOAD = defineCounter(
+  'nyx_kt_snapshot_upload_total',
+  'Unggahan arsip snapshot log Key Transparency ke R2, per hasil',
+  ['result']
+);
+
+/** Arsip snapshot log KT yang dihapus dari R2 karena melewati retensi. */
+export const KT_SNAPSHOT_DELETED = defineCounter(
+  'nyx_kt_snapshot_deleted_total',
+  'Arsip snapshot log Key Transparency yang dihapus dari R2, per hasil',
+  ['result']
+);
+
+/**
+ * [docs/30 §30.12 WS-H] Hasil evaluasi guard registrasi, per tindakan + alasan.
+ *
+ * `would_*` adalah **mode shadow** (`ABUSE_REGISTRATION_GUARD=shadow`): guard
+ * mengevaluasi persis seperti mode `on` tetapi tidak menahan siapa pun — hanya
+ * mencatat berapa banyak yang *akan* tertahan/wajib attestation. Inilah cara
+ * mengukur false-positive NAT besar (kantor dengan satu ASN) dengan data
+ * lapangan tanpa memblokir satu pun pengguna sah; tanpa mode ini, satu-satunya
+ * cara mengukur adalah menyalakan blokir dan melihat keluhan.
+ */
+export const REGISTRATION_GUARD_OBSERVED = defineCounter(
+  'nyx_registration_guard_observed_total',
+  'Hasil evaluasi guard registrasi (shadow = keputusan hipotetis), per tindakan dan alasan',
+  ['action', 'reason']
 );
 
 /** Baris yang dibersihkan sweeper, per jenis. */

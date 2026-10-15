@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ func newWriteTestService(t *testing.T) (*httptest.Server, *updateService, *trans
 	config := testPrivateConfig(t)
 	store := db.NewMemoryTransparencyStore()
 	source := &storeTreeSource{cfg: config, store: store}
-	updates := &updateService{cfg: config, store: store}
+	updates := &updateService{cfg: config, store: store, mu: &sync.Mutex{}}
 
 	server := httptest.NewServer((&queryServer{source: source}).routes())
 	t.Cleanup(server.Close)

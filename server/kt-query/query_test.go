@@ -285,6 +285,47 @@ func TestSearchNilaiNYXLolosVerifikasiUpstream(t *testing.T) {
 	}
 }
 
+func TestHeadMengembalikanUkuranDanRootUntukGossip(t *testing.T) {
+	server, _, _ := newTestServer(t)
+
+	response, err := http.Get(server.URL + "/head")
+	if err != nil {
+		t.Fatalf("GET /head: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, ingin 200", response.StatusCode)
+	}
+	var head struct {
+		TreeSize  uint64 `json:"treeSize"`
+		Timestamp int64  `json:"timestamp"`
+		Root      string `json:"root"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&head); err != nil {
+		t.Fatalf("urai /head: %v", err)
+	}
+	// newTestServer menulis tiga entri (v1, rotasi v2, distinguished).
+	if head.TreeSize != 3 {
+		t.Fatalf("treeSize = %d, ingin 3", head.TreeSize)
+	}
+	if raw, err := hex.DecodeString(head.Root); err != nil || len(raw) != 32 {
+		t.Fatalf("root bukan 32 byte hex: %q (err=%v)", head.Root, err)
+	}
+	if head.Timestamp == 0 {
+		t.Fatal("timestamp kosong")
+	}
+
+	// POST bukan cara memakai endpoint ini.
+	postResponse, err := http.Post(server.URL+"/head", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /head: %v", err)
+	}
+	defer postResponse.Body.Close()
+	if postResponse.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("status POST = %d, ingin 405", postResponse.StatusCode)
+	}
+}
+
 func TestSearchHashTidakDikenalMenghasilkanNotFound(t *testing.T) {
 	server, _, _ := newTestServer(t)
 

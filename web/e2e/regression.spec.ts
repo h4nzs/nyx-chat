@@ -156,6 +156,32 @@ test.describe('Regression: burner flows', () => {
       page.locator('div.cursor-pointer').filter({ hasText: /No messages yet|ping/ })
     ).toHaveCount(0, { timeout: 20000 });
 
+    // Barrier di lapis PERSISTENSI — bukan UI.
+    //
+    // `deleteConversation` menghapus baris dari state UI secara **sinkron**, lalu
+    // menunggu hapus di IndexedDB; handler klik di `ChatWindow` tidak menunggu
+    // rantai itu. Jadi baris UI yang sudah hilang BUKAN bukti bahwa penghapusan
+    // sudah tertulis, dan reload tepat setelahnya membatalkannya → room "muncul
+    // kembali", membuat spec ini lulus/gagal bergantung timing (terbukti: lulus 2
+    // dari 4 run suite penuh 2026-10-15, dan snapshot kegagalannya memperlihatkan
+    // baris `Unknown / No messages yet` yang justru baris burner-nya). Yang diuji
+    // spec ini adalah **bertahannya** penghapusan setelah reload, jadi tunggu
+    // sampai vault benar-benar bersih dulu; kalau penghapusan memang tidak pernah
+    // tertulis, barrier ini sendiri yang gagal.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async (room) => {
+            // @ts-ignore — path absolut Vite dev server (runtime-only)
+            const { db } = await import('/src/lib/db.ts');
+            const conversation = await db.conversations.get(room);
+            const messages = await db.messages.where('conversationId').equals(room).count();
+            return `${conversation ? 1 : 0}/${messages}`;
+          }, roomId),
+        { timeout: 30000, message: 'vault masih memuat percakapan/pesan burner yang sudah dihancurkan' }
+      )
+      .toBe('0/0');
+
     // Setelah destroy: reload penuh → room yang sudah dihancurkan tidak boleh
     // muncul kembali di daftar chat (regresi: conversation di-restore dari DB).
     await page.reload();

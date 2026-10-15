@@ -1,0 +1,444 @@
+# Copyright (c) 2026 [han]. All rights reserved.
+# This file is part of NYX, licensed under the AGPL-3.0.
+# For commercial licensing, contact [admin@nyx-app.my.id].
+#
+# [docs/30 WS-G(2)] DRILL alert: uji unit aturan `alerts.yml` memakai
+# `promtool test rules`. Ini yang membedakan "aturan ditulis" dari "aturan
+# benar-benar menyala": setiap aturan punya kasus MENYALA, dan aturan yang
+# mudah salah punya kasus TIDAK MENYALA (supaya ambang tidak terlalu longgar).
+#
+# Jalankan:
+#   scripts/drill-alerts.sh                 # cek config + rules + drill ini
+#   promtool test rules ops/prometheus/tests.yml
+#
+# Konvensi nilai seri di bawah:
+#   `0x40`      = 64 sampel bernilai 0 (32 menit @30s)
+#   `0+1x120`   = counter naik 1 tiap scrape (1 menit^-1 @30s)
+#   `-100000x60`= gauge "timestamp" yang sengaja negatif: `time() - x` selalu
+#                 > ambang apa pun tanpa bergantung pada basis waktu eval
+#                 promtool (0 = epoch). Ini satu-satunya alasan nilai negatif
+#                 muncul di sini; tidak ada seri produksi yang bernilai negatif.
+
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  # ==========================================================================
+  # nyx-app
+  # ==========================================================================
+
+  - name: 'NyxMetricsExporterDown: menyala saat exporter mati 5 menit'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-api"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxMetricsExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: nyx-api
+              alertname: NyxMetricsExporterDown
+            exp_annotations:
+              summary: 'Exporter metrik nyx-api tidak bisa di-scrape'
+              description: 'Prometheus gagal scrape selama 5 menit. Cek proses pm2 nyx-api dan port loopback METRICS_PORT.'
+
+  - name: 'NyxMetricsExporterDown: tidak menyala saat scrape sehat'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-api"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxMetricsExporterDown
+        exp_alerts: []
+
+  - name: 'NyxMetricsIdentityLeakAttempt: menyala pada penolakan label identitas'
+    interval: 30s
+    input_series:
+      - series: 'nyx_metrics_rejected_total{reason="label_value"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxMetricsIdentityLeakAttempt
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              reason: label_value
+              alertname: NyxMetricsIdentityLeakAttempt
+            exp_annotations:
+              summary: 'Ada percobaan mencatat metrik dengan label identitas'
+              description: 'nyx_metrics_rejected_total naik (reason=label_value). Ada kode baru yang mencoba mengirim userId/usernameHash/IP/token ke metrik. Perbaiki pemanggilnya (server/src/utils/metrics.ts akan selalu menolak nilainya).'
+
+  - name: 'NyxMetricsIdentityLeakAttempt: tidak menyala saat penjaga tetap 0'
+    interval: 30s
+    input_series:
+      - series: 'nyx_metrics_rejected_total{reason="label_value"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxMetricsIdentityLeakAttempt
+        exp_alerts: []
+
+  - name: 'NyxSweeperStale: menyala saat run terakhir basi'
+    interval: 30s
+    input_series:
+      - series: 'nyx_sweeper_last_run_timestamp_seconds{result="ok"}'
+        values: '-100000x100'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxSweeperStale
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxSweeperStale
+            exp_annotations:
+              summary: 'Sweeper sistem belum jalan >26 jam'
+              description: "Cek pm2 nyx-api (cron in-process) dan log '[Cron]'."
+
+  # Drill 2026-10-14: seri TIDAK ADA (proses baru / cron mati sejak boot).
+  # Sebelum perbaikan, `time() - max(...)` atas vektor kosong = kosong → diam.
+  - name: 'NyxSweeperStale: menyala walau gauge sweeper belum pernah ada'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-api"}'
+        values: '1x100'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxSweeperStale
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxSweeperStale
+            exp_annotations:
+              summary: 'Sweeper sistem belum jalan >26 jam'
+              description: "Cek pm2 nyx-api (cron in-process) dan log '[Cron]'."
+
+  - name: 'NyxSweeperStale: tidak menyala saat restart normal (sampel lama masih ada)'
+    interval: 30s
+    input_series:
+      # Sweeper baru saja menyelesaikan putaran: gauge = timestamp segar
+      # (jauh di atas `time()`), jadi baik `time() - max(...)` maupun
+      # `absent_over_time(...)` tidak terpenuhi.
+      - series: 'nyx_sweeper_last_run_timestamp_seconds{result="ok"}'
+        values: '1000000000x100'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxSweeperStale
+        exp_alerts: []
+
+  - name: 'NyxSweeperFailed: menyala saat ada putaran error'
+    interval: 30s
+    input_series:
+      - series: 'nyx_sweeper_duration_seconds_count{result="error"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxSweeperFailed
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxSweeperFailed
+            exp_annotations:
+              summary: 'Putaran sweeper sistem gagal'
+              description: "Lihat log '[Cron] Gagal melakukan pembersihan database' — biasanya Postgres tak bisa dihubungi atau lock."
+
+  - name: 'NyxSweeperFailed: tidak menyala saat semua putaran sukses'
+    interval: 30s
+    input_series:
+      - series: 'nyx_sweeper_duration_seconds_count{result="error"}'
+        values: '0x40'
+      - series: 'nyx_sweeper_duration_seconds_count{result="ok"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxSweeperFailed
+        exp_alerts: []
+
+  - name: 'NyxSweeperSlow: menyala saat p95 > 120s'
+    interval: 30s
+    input_series:
+      - series: 'nyx_sweeper_duration_seconds_bucket{result="ok",le="300"}'
+        values: '1+1x300'
+      - series: 'nyx_sweeper_duration_seconds_bucket{result="ok",le="+Inf"}'
+        values: '1+1x300'
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: NyxSweeperSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxSweeperSlow
+            exp_annotations:
+              summary: 'Sweeper makin lambat (p95 > 120s)'
+              description: 'Biasanya indeks hilang atau tabel membengkak. Cek EXPLAIN pada query sweeper.'
+
+  - name: 'NyxSweeperSlow: tidak menyala saat p95 rendah'
+    interval: 30s
+    input_series:
+      - series: 'nyx_sweeper_duration_seconds_bucket{result="ok",le="5"}'
+        values: '1+1x300'
+      - series: 'nyx_sweeper_duration_seconds_bucket{result="ok",le="300"}'
+        values: '1+1x300'
+      - series: 'nyx_sweeper_duration_seconds_bucket{result="ok",le="+Inf"}'
+        values: '1+1x300'
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: NyxSweeperSlow
+        exp_alerts: []
+
+  - name: 'NyxSecurityBlocksSpike: menyala saat blokir > 25 / 30 menit'
+    interval: 30s
+    input_series:
+      - series: 'nyx_security_blocks_total{op="relay",reason="STALE_DEVICE"}'
+        values: '0+1x140'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: NyxSecurityBlocksSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              op: relay
+              reason: STALE_DEVICE
+              alertname: NyxSecurityBlocksSpike
+            exp_annotations:
+              summary: 'Blokir keamanan sesi/perangkat melonjak (STALE_DEVICE)'
+              description: 'Periksa apakah ini pola kloning sesi, atau klien yang perlu re-auth setelah deploy.'
+
+  - name: 'NyxSecurityBlocksSpike: tidak menyala pada laju blokir normal'
+    interval: 30s
+    input_series:
+      - series: 'nyx_security_blocks_total{op="relay",reason="STALE_DEVICE"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxSecurityBlocksSpike
+        exp_alerts: []
+
+  # ==========================================================================
+  # nyx-host
+  # ==========================================================================
+
+  - name: 'NyxHostDiskLow: menyala saat disk < 12%'
+    interval: 30s
+    input_series:
+      - series: 'node_filesystem_avail_bytes{mountpoint="/"}'
+        values: '10x40'
+      - series: 'node_filesystem_size_bytes{mountpoint="/"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxHostDiskLow
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              mountpoint: '/'
+              alertname: NyxHostDiskLow
+            exp_annotations:
+              summary: 'Disk VPS < 12% tersisa'
+              description: 'Postgres + Redis AOF + log pm2 + (nanti) log KT. Bersihkan log lama atau besarkan volume.'
+
+  - name: 'NyxHostMemoryPressure: menyala saat RAM > 90%'
+    interval: 30s
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '5x40'
+      - series: 'node_memory_MemTotal_bytes'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxHostMemoryPressure
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxHostMemoryPressure
+            exp_annotations:
+              summary: 'RAM VPS > 90% terpakai'
+              description: 'Cek proses terbesar (pm2, Postgres). Argon2id 64MB per login + fan-out grup adalah puncak yang wajar.'
+
+  - name: 'NyxHostMemoryPressure: tidak menyala saat RAM lega'
+    interval: 30s
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '50x40'
+      - series: 'node_memory_MemTotal_bytes'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxHostMemoryPressure
+        exp_alerts: []
+
+  - name: 'NyxRedisEvictingRateLimits: menyala saat ada eviction'
+    interval: 30s
+    input_series:
+      - series: 'redis_evicted_keys_total'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxRedisEvictingRateLimits
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxRedisEvictingRateLimits
+            exp_annotations:
+              summary: 'Redis meng-evict key (rate limit bisa hilang)'
+              description: 'Key rate-limit harus selamat: pisahkan namespace rate limit ke DB logis/prefix dengan policy noeviction (docs/10 §10.11).'
+
+  - name: 'NyxRedisDown: menyala saat Redis tidak ter-scrape'
+    interval: 30s
+    input_series:
+      - series: 'up{job="redis"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxRedisDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: redis
+              alertname: NyxRedisDown
+            exp_annotations:
+              summary: 'Redis tidak bisa di-scrape'
+              description: 'Realtime (pub/sub, presence, rate limit) bergantung penuh pada Redis.'
+
+  - name: 'NyxKeyTransparencyWriteFailing: menyala saat tulisan KT error'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_writes_total{result="error"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKeyTransparencyWriteFailing
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxKeyTransparencyWriteFailing
+            exp_annotations:
+              summary: 'Penulisan log Key Transparency gagal'
+              description: 'Cek proses KT (leveldb) + KT_SERVER_URL. Kegagalan tidak memblokir registrasi, jadi hanya terlihat dari sini (docs/32).'
+
+  - name: 'NyxKeyTransparencyWriteFailing: tidak menyala saat tulisan KT sukses'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_writes_total{result="ok"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKeyTransparencyWriteFailing
+        exp_alerts: []
+
+  - name: 'NyxKeyTransparencyStalled: menyala saat error jalan tanpa sukses'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_writes_total{result="error"}'
+        values: '0+1x60'
+      - series: 'nyx_kt_last_success_timestamp_seconds'
+        values: '-100000x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKeyTransparencyStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKeyTransparencyStalled
+            exp_annotations:
+              summary: 'Log KT gagal total selama 1 jam'
+              description: 'Semua percobaan tulis gagal tanpa satu pun sukses: kemungkinan binary KT mati atau endpoint salah. Kunci identitas baru tidak ter-audit.'
+
+  # Drill 2026-10-14: gauge `last_success` belum pernah ada (tidak ada satu pun
+  # tulisan sukses sejak boot) → dulu alert diam.
+  - name: 'NyxKeyTransparencyStalled: menyala meski last_success belum pernah ada'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_writes_total{result="error"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKeyTransparencyStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKeyTransparencyStalled
+            exp_annotations:
+              summary: 'Log KT gagal total selama 1 jam'
+              description: 'Semua percobaan tulis gagal tanpa satu pun sukses: kemungkinan binary KT mati atau endpoint salah. Kunci identitas baru tidak ter-audit.'
+
+  - name: 'NyxKeyTransparencyStalled: tidak menyala saat ada tulisan sukses baru'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_writes_total{result="error"}'
+        values: '0+1x60'
+      - series: 'nyx_kt_last_success_timestamp_seconds'
+        values: '1000000000x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKeyTransparencyStalled
+        exp_alerts: []
+
+  - name: 'NyxKtSnapshotNotUploaded: menyala saat tidak ada unggahan sukses 36 jam'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-api"}'
+        values: '1x400'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtSnapshotNotUploaded
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              # `absent_over_time` mewarisi label dari matcher kesetaraan.
+              result: ok
+              alertname: NyxKtSnapshotNotUploaded
+            exp_annotations:
+              summary: 'Snapshot log KT tidak diunggah ke R2 selama 36 jam'
+              description: 'Cek KT_SNAPSHOT_DIR di server NYX, NYX_KT_SNAPSHOT_DIR di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13).'
+
+  - name: 'NyxKtSnapshotNotUploaded: menyala saat counter datar (cron mati, seri ada)'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_snapshot_upload_total{result="ok"}'
+        values: '3x400'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtSnapshotNotUploaded
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: ok
+              alertname: NyxKtSnapshotNotUploaded
+            exp_annotations:
+              summary: 'Snapshot log KT tidak diunggah ke R2 selama 36 jam'
+              description: 'Cek KT_SNAPSHOT_DIR di server NYX, NYX_KT_SNAPSHOT_DIR di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13).'
+
+  - name: 'NyxKtSnapshotNotUploaded: tidak menyala saat unggahan harian sukses'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_snapshot_upload_total{result="ok"}'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtSnapshotNotUploaded
+        exp_alerts: []
+
+  - name: 'NyxKtSnapshotUploadFailing: menyala saat unggahan gagal'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_snapshot_upload_total{result="error"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtSnapshotUploadFailing
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxKtSnapshotUploadFailing
+            exp_annotations:
+              summary: 'Unggahan snapshot log KT gagal'
+              description: 'Kredensial R2, bucket, atau berkas arsip bermasalah. Arsip lokal tetap ada (dipangkas 7), tetapi riwayat panjang di R2 berhenti bertambah.'
+

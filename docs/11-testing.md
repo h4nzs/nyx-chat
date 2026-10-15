@@ -4,10 +4,12 @@
 
 | Package | Runner | Command | Count |
 |---|---|---|---|
-| server | `node:test` via `tsx` (Jest config is dead — ignore it) | `pnpm --filter nyx-server run test` | 41 files / 352 tests |
-| web | Vitest (jsdom) | `pnpm --filter nyx-web run test` | 64 files / 517 tests |
-| sidecar | `cargo test` (Rust, murni tanpa soket) | `cd server/transport-sidecar && cargo test` | 2 targets / 17 tests |
-| everything | — | `pnpm -r --if-present run test` | 97 files |
+| server | `node:test` via `tsx` (Jest config is dead — ignore it) | `pnpm --filter nyx-server run test` | 48 files / 380 tests (379 pass + 1 skip) |
+| web | Vitest (jsdom) | `pnpm --filter nyx-web run test` | 72 files / 615 tests |
+| kt-query | `go test` lewat `build.sh test` (vendor, tanpa jaringan) | `server/kt-query/build.sh test` | 31 tests |
+| sidecar | `cargo test` (Rust, murni tanpa soket) | `cd server/transport-sidecar && cargo test` | 2 targets / 18 tests |
+| everything | — | `pnpm -r --if-present run test` | 120 files (server 48 + web 72) |
+| DR oracle | Go (implementasi kedua, tanpa libsodium) | `cd tools/dr-oracle && go run . -check` | vektor 9 test web + interop 4 test |
 
 Server tests are listed explicitly in `server/package.json` (`tsx --test tests/…`). They must **not** require Postgres/Redis — Prisma clients are faked (see `tests/sessionKeys.test.ts`).
 
@@ -86,6 +88,29 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 - Postgres + Redis running.
 - API dev: `pnpm --filter nyx-server dev`.
 - Web dev: `pnpm --filter nyx-web dev`.
+- `e2e/call.spec.ts` needs a **running coturn** whose static auth secret matches the server (`TURN_URLS` + `TURN_STATIC_AUTH_SECRET`, `docs/30` §30.9 WS-E(1)). Locally (docker, loopback peers → `allow-loopback-peers` is required, coturn refuses loopback peers by default):
+  ```bash
+  cat > /tmp/coturn.conf <<'EOF'
+  listening-ip=127.0.0.1
+  relay-ip=127.0.0.1
+  listening-port=3478
+  min-port=49160
+  max-port=49200
+  use-auth-secret
+  static-auth-secret=<same as server TURN_STATIC_AUTH_SECRET>
+  realm=nyx.local
+  fingerprint
+  no-cli
+  no-tls
+  no-dtls
+  allow-loopback-peers
+  log-file=stdout
+  EOF
+  docker run -d --name nyx-coturn --network host \
+    -v /tmp/coturn.conf:/etc/coturn/turnserver.conf:ro coturn/coturn:4.6-alpine
+  ```
+  CI does the same in the `e2e-chrome` job (apt coturn + `/etc/turnserver.conf` + `ss -lun | grep :3478`). Without coturn the spec **skips with a written reason** — it never passes through Cloudflare TURN instead.
+- `call.spec.ts` needs the **chrome** project (`--project=chrome`): it drives `RTCPeerConnection` from the page, which works in any Chromium, but the spec belongs with the full-browser job and only Chrome has WebTransport next to it. It exchanges SDP **without trickle ICE**, so it must wait for `iceGatheringState === 'complete'` before `setRemoteDescription` — handing over candidate-less SDP makes ICE stall in `new` and looks exactly like "coturn is broken".
 - WebTransport specs additionally need the Rust sidecar (they **auto-skip** when `WebTransport` is undefined — e.g. headless Chromium without QUIC).
   - Perhatikan: di Chromium yang **punya** `WebTransport` tapi sidecar-nya tidak jalan (mesin dev), spec burner/transport **tidak** skip — mereka gagal di `ESTABLISHING_UPLINK`. Jalankan sidecar (`cargo build --release` + `JWT_SECRET`/`REDIS_URL`/`TRANSPORT_PORT=33333`) atau pakai `--project=chrome` seperti CI.
 
@@ -96,8 +121,10 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 - **Quick Tour hanya ter-mount SETELAH bootstrap selesai** (`Chat.tsx` mensyaratkan `!isBootstrapping && user.hasCompletedOnboarding === false`), dan setelah registrasi `isBootstrapping` masih `true` sampai ada reload halaman. Artinya `dismissOnboardingTour(page)` di `registerUser` tidak menemukan apa pun untuk spec yang tidak pernah reload — dan sebaliknya spec yang **melakukan reload** (`page.goto`, `page.reload`) melihat tour muncul lalu: overlay `fixed inset-0`-nya menolak klik berikutnya (`subtree intercepts pointer events`). Jadi: panggil `dismissOnboardingTour(page)` SETELAH setiap navigasi penuh, bukan hanya sekali setelah registrasi. Klik `×` menandai onboarding selesai di server, jadi tour tidak kembali setelah reload berikutnya.
 - **State burner host hidup HANYA di RAM** (`useBurnerStore.activeSessions`). `page.goto('/chat/<roomId>')` me-reload halaman → DR host hilang → komposer host terkunci di "Waiting for guest to establish secure connection..." (lampiran tak bisa dikirim), dan baris conversation-nya bisa belum terbaca lagi karena persistensi ke IndexedDB bersifat fire-and-forget. Buka room burner lewat **baris sidebar (navigasi in-app)**, tunggu preview pesan guest muncul (bukti `burner:receive` sudah menginisialisasi DR host), baru berinteraksi — lihat `e2e/regression.spec.ts` (`openBurnerChatOnHost`).
 - **Halaman guest `/drop` tidak boleh melewati bootstrap sesi aplikasi**: guest bukan akun server (`GET /api/users/me` → 401) dan fallback 401 bootstrap **menghapus cookie `at`** milik sesi ephemeral yang baru diterbitkan `POST /api/auth/burner`. Akibatnya identitas guest berganti dan `burner:reply` (relay ke anggota `burner:room:<roomId>`) tidak pernah sampai — gejala: guest hanya melihat pesannya sendiri. Guard ada di `App.tsx` (bootstrap dilewati di `/drop`) dan `BurnerChat.tsx` (join ulang tiap transport `connect`).
-- **Destroy burner asinkron**: hapus baris conversation dari IndexedDB butuh beberapa ratus ms. Reload tepat setelah klik Destroy membatalkan penghapusan itu → room tampak "kembali". Tunggu baris sidebar benar-benar hilang (`expect(...).toHaveCount(0)`) sebelum reload.
-- Slow assertions use `expect.poll` / generous timeouts (crypto registration takes 15–60s).
+- **Destroy burner asinkron, dan barrier-nya harus di IndexedDB** bukan di UI: `deleteConversation` menghapus baris dari state UI **sinkron** lalu menunggu hapus Dexie, sementara handler klik `ChatWindow` tidak menunggu rantai itu. Menunggu baris sidebar hilang saja TIDAK cukup (terbukti flaky 2026-10-15: lulus 2 dari 4 run suite, dengan snapshot kegagalan memperlihatkan baris burner `Unknown / No messages yet` kembali setelah reload). Pola yang dipakai `regression.spec`: `expect.poll` atas `db.conversations.get(roomId)` + `db.messages.where('conversationId')` harus `0/0` sebelum reload — gagal di barrier itu berarti penghapusan memang tidak pernah tertulis.
+- Slow assertions use `expect.poll` / generous timeouts. Registration is **15–20 s on an idle box but 40–70 s measured while busy** (Argon2 in the worker competes with everything else on one core), so `helpers/registration.ts` waits **90 s** for the Proof-of-Trust modal and specs that register **must** raise the global timeout (`test.setTimeout(180000)`; `chat.spec` uses 480 s because it also mines PoW). The default 60 s timeout is eaten by registration alone: specs then die mid-flow and the failure message points at whatever line happened to be running — that is how `settings.spec` looked like a broken eject flow, and how the 60 s claim in this file went unnoticed.
+- **Latency assertions must exclude the sender's local crypto.** `transport.spec` measures the *relay leg* (optimistic bubble visible → peer bubble readable, budget 8 s) and only logs the raw end-to-end number, because Argon2 + DR session setup on the sender measured 1.8–4.5 s on the same machine and made the total swing 7.4–17.2 s with identical code.
+- **PoW waits must be as wide as the client's own PoW timeout, not wider.** `minePoW` is **Argon2id at 16 MB per attempt** (`crypto.worker.ts`) hunting a hex prefix of `floor(difficulty/2)` zeros; `chat.spec`'s verify flow reaches difficulty 6 (registration already burnt one challenge, the upgrade takes a second → `min(4 + count, 8)`), i.e. ~16³ ≈ 4096 Argon2id evaluations. A 60 s badge wait failed ~1 run in 5 with the modal still showing “Mining hash collision…” — a crypto-budget failure that reads like a broken locator. The wait is now the client's own 300 s (`crypto-worker-proxy.minePoW`) and the spec's global timeout sits **above** it (480 s), so a genuine mine failure surfaces as the badge assertion instead of a global timeout that hides the cause.
 - **`e2e/spqr.spec.ts` (ratchet v2 / braid SPQR)** membuktikan jalur versi paralel dari amplop yang tersimpan **di server** (`dr.v === 2`, ada `b`, tanpa `kemPk`) sambil memastikan peer benar-benar membaca plaintext. Ia butuh jalur v2 aktif: di CI sidecar mengiklankan `spqr-ratchet`; di mesin dev tanpa sidecar jalankan `VITE_SPQR_FORCE_V2=1 pnpm --filter nyx-web dev` (override hanya dihormati di build DEV). Bila keduanya tidak ada, spec **skip dengan alasan tertulis** — bukan lulus palsu.
   - Test kedua menutup **rollback operator** dengan dua klien: satu klien dipaksa kembali ke v1 lewat kill switch runtime DEV (`localStorage['nyx_spqr_force_v1']`, konstanta `SPQR_RUNTIME_KILL_SWITCH_KEY`) karena `VITE_SPQR_FORCE_V1` bersifat build-time (= sama untuk semua klien, jadi rollback satu klien tidak bisa diuji). Yang diasersikan: klien yang di-rollback **mengirim v1 lagi di wire**, peer tetap bisa membacanya (state v1 tidak pernah ditimpa), pesan v2 dari peer **tetap terbaca** di klien yang di-rollback, dan baris state braid-nya masih ada.
   - Pembacaan amplop WAJIB menunggu pesan benar-benar tersimpan di server (`expect.poll` atas jumlah item) — pesan muncul di UI secara optimistis, jadi membaca "pesan terbaru" tanpa poll akan mengambil pesan sebelumnya.
@@ -108,11 +135,16 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 
 | Job | Browser | Transport |
 |---|---|---|
-| `e2e` | Playwright chromium (headless shell) | transport specs skipped |
-| `e2e-chrome` | Google Chrome via apt (`channel: 'chrome'`) | `cargo test` (protokol murni + fuzz 20k) → **sidecar built + running**, cert hash parsed from its banner → transport + chat specs run fully |
+| `e2e` | Playwright chromium (headless shell) | transport specs skipped; diakhiri **drill alert terhadap exporter nyata** (`scripts/drill-alerts.sh`, metrik dari API yang baru dinyalakan) |
+| `e2e-chrome` | Google Chrome via apt (`channel: 'chrome'`) | `cargo test` (protokol murni + fuzz 20k) → **sidecar built + running**, cert hash parsed from its banner → transport + chat specs run fully; **coturn diinstal + dijalankan** (`TURN_URLS`/`TURN_STATIC_AUTH_SECRET` di env job) → `call.spec` run fully |
+| `alerts` | — | `promtool check config`/`check rules`/`test rules` atas 14 aturan (`SKIP_LIVE=1`) |
+| `dr-oracle` | — | oracle Go: `build`/`vet`/`test` + gate drift vektor (`go run . -check`) + `x3dhOracleVectors.test.ts` + `x3dhOracleInterop.test.ts` |
 
 Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR: keduanya dijalankan
-nightly / sebelum rilis besar (`docs/30` §30.20 sisa WS-G).
+nightly / sebelum rilis besar (`docs/30` §30.20 sisa WS-G). Terakhir dijalankan
+(2026-10-14): fuzz sidecar 160,9 juta iterasi/300 s (0 temuan) dan k6 beban penuh
+(`scripts/load/run-relay-load.sh`, 500 VU — send p95 74,4 ms / fetch p95 68,8 ms,
+0% error). Drill alert + vektor oracle **sudah** jalan per-PR (tabel di atas).
 
 **Test internal crate `spqr` (gate `docs/30` §30.8 poin 1) — manual, bukan per-PR:**
 butuh toolchain nightly + dev-dependency besar (proptest, criterion, libcrux).
@@ -129,11 +161,20 @@ yang masih unstable (`error[E0658]`).
 
 ## 11.4 What is NOT covered (known gaps)
 
-- No browser-level test for WebRTC calls.
-- No cross-implementation DR/sender-key vectors against a libsignal oracle
-  (`docs/30` WS-G(6)) — needs a Rust harness built from the pinned libsignal
-  checkout; not part of the repo build.
-- No fuzz target for the KT proof verifier (blocked: WS-A not implemented).
+- WebRTC calls have a browser-level relay test (`e2e/call.spec.ts`, coturn, chrome project) but **no full in-app call flow** (UI `call:*` signaling → `webrtc.ts` → relay): the spec drives `RTCPeerConnection` directly with the server-issued credentials. Two-browser call setup still has no E2E.
+- DR/sender-key vectors are **partial** (`docs/30` WS-G(6)): primitif di bawah
+  ratchet (X25519, Ed25519→X25519, X-Wing, BLAKE2b keyed, XChaCha20-Poly1305,
+  urutan/panjang rahasia X3DH) dibandingkan dua arah dengan oracle **Go tanpa
+  libsodium** (`tools/dr-oracle`, job CI `dr-oracle`), tapi **bukan** terhadap
+  libsignal: sender-key chain, skipped key, dan `SessionRecord` tidak punya
+  oracle eksternal — hanya diuji internal (`spqrRatchet.test.ts`, crate SPQR).
+- No fuzz target for the KT proof verifier. WS-A **sudah ada** (verifier + penulis +
+  jalur baca `server/kt-query`), jadi blokirnya bukan lagi "belum diimplementasikan"
+  melainkan bentuk masukannya: `verify_search`/`verify_monitor` menerima protobuf
+  dari jaringan dan hash input (byte bukti) tidak bisa dibuat bermakna dengan
+  mutasi acak — yang dibutuhkan vektor bukti nyata yang dimutasi terarah
+  (`vrf_proof`/`opening`/`tree_size` diubah). Sebagian sudah ada sebagai test
+  penolakan di `keyTransparency.test.ts`; fuzzing proporsional masih TODO.
 - No test for the biometric (WebAuthn) login path (needs a real authenticator).
 - Payment webhooks are only unit-tested indirectly (HMAC compare helper).
 - Crypto worker internals are exercised through E2E flows, not unit tests (worker is monolithic by design).

@@ -4,7 +4,13 @@ import { registerUserViaBiometric as registerUser } from './helpers/registration
 
 test.describe('Settings & Emergency Eject', () => {
   test('Emergency eject clears session data', async ({ page }) => {
-    test.setTimeout(60000);
+    // Anggaran waktu HARUS soal registrasi, bukan soal alur eject: rantai modal
+    // onboarding (Proof of Trust → Recovery → Verify Sequence → Tour) + Argon2
+    // memakan 40–70 detik dengan sendirinya. Sebelum ini 60 detik, jadi spec
+    // selalu mati di tengah (`Target page, context or browser has been closed`)
+    // dan TIDAK pernah benar-benar memverifikasi eject — hanya tampak seperti
+    // kegagalan produk saat `page.goto('/chat')` belum sempat dialihkan ulang.
+    test.setTimeout(180000);
     const username = `logout_${Date.now()}`;
     await registerUser(page, 'Logout User', username);
 
@@ -30,9 +36,13 @@ test.describe('Settings & Emergency Eject', () => {
     // 4. Verify redirected to login/onboarding
     await expect(page).toHaveURL(/(\/login|\/register|\/)$/, { timeout: 15000 });
 
-    // 5. Verify IndexedDB is functionally cleared by attempting to go back to a protected route
+    // 5. Verify IndexedDB is functionally cleared by attempting to go back to a protected route.
+    //    Redirect `/chat` → login hanya terjadi SETELAH bootstrap selesai (GET
+    //    /api/users/me → 401) dan itu memakan waktu di mesin ini; `expect.poll`
+    //    memberi anggaran itu tanpa menunggu satu navigasi penuh lagi.
     await page.goto('/chat');
-    // Should be redirected back to login because session is gone
-    await expect(page).toHaveURL(/(\/login|\/register|\/)$/, { timeout: 10000 });
+    await expect
+      .poll(async () => new URL(page.url()).pathname, { timeout: 30000 })
+      .toMatch(/^\/(login|register)?$/);
   });
 });

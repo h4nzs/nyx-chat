@@ -15,18 +15,25 @@
  *      ditolak, dan attestation `none` yang sah secara kriptografis tetap
  *      ditolak sebagai bukti perangkat keras.
  *
- * Catatan jujur: attestation perangkat keras sungguhan (packed/tpm dengan x5c)
- * tidak bisa dibangkitkan di unit test tanpa authenticator nyata — itu celah
- * E2E yang dicatat di `docs/30` §30.20.
+ * Tingkat ketiga (2026-10-15) menutup celah yang dulu tercatat di
+ * `docs/30` §30.20: attestation `packed` **format sungguhan** dengan rantai
+ * `x5c` sungguhan (root CA + leaf ber-EKU AIK TPM, kunci ECDSA P-256, tanda
+ * tangan ECDSA sungguhan) diverifikasi pustaka yang sama, lalu diputuskan
+ * kebijakan. Yang tetap tidak bisa dibangkitkan di sini dan hanya bisa diuji
+ * dengan perangkat fisik: kunci privat benar-benar berada di dalam silikon
+ * (TPM/Secure Enclave/Titan). Fixture dibuat
+ * `server/scripts/webauthn-attestation-fixtures.ts`.
  */
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import {
   ATTESTATION_CHALLENGE_TTL_SECONDS,
   DEFAULT_ATTESTATION_POLICY,
+  TPM_AIK_EKU_OID,
   attestationChallengeKey,
   attestationPolicyFromEnv,
   classifyAttestationTier,
@@ -34,6 +41,7 @@ import {
   evaluateAttestationPolicy,
   hasCertificateChain,
   storeAttestationChallenge,
+  verifyAttestationChain,
   verifyNewAccountAttestation,
 } from '../src/utils/webauthnAttestation.js';
 
@@ -76,24 +84,29 @@ const sha256 = (data: Uint8Array): Uint8Array => new Uint8Array(crypto.createHas
 const CREDENTIAL_ID = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
 const AAGUID_ZEROS = new Uint8Array(16);
 
-/** COSE EC2 P-256 (alg ES256) — kunci publik dummy, sah secara struktur. */
-function coseEc2P256(): Uint8Array {
+/** COSE EC2 P-256 (alg ES256). Koordinat bisa diisi kunci nyata (attestation self). */
+function coseEc2P256(x?: Uint8Array, y?: Uint8Array): Uint8Array {
   return cborMap([
     [cborUint(1), cborUint(2)],
     [cborUint(3), cborNegInt(-7)],
     [cborNegInt(-1), cborUint(1)],
-    [cborNegInt(-2), cborBytes(new Uint8Array(32).fill(0x11))],
-    [cborNegInt(-3), cborBytes(new Uint8Array(32).fill(0x22))],
+    [cborNegInt(-2), cborBytes(x ?? new Uint8Array(32).fill(0x11))],
+    [cborNegInt(-3), cborBytes(y ?? new Uint8Array(32).fill(0x22))],
   ]);
 }
 
-function buildAuthData(opts: { rpId: string; userVerified?: boolean; aaguid?: Uint8Array }): Uint8Array {
+function buildAuthData(opts: {
+  rpId: string;
+  userVerified?: boolean;
+  aaguid?: Uint8Array;
+  coseKey?: Uint8Array;
+}): Uint8Array {
   const rpIdHash = sha256(new TextEncoder().encode(opts.rpId));
   const flags = new Uint8Array([0x01 | 0x40 | (opts.userVerified === false ? 0 : 0x04)]); // UP | AT | UV
   const counter = new Uint8Array([0, 0, 0, 1]);
   const aaguid = opts.aaguid ?? AAGUID_ZEROS;
   const credIdLen = new Uint8Array([CREDENTIAL_ID.length >> 8, CREDENTIAL_ID.length & 0xff]);
-  return concat(rpIdHash, flags, counter, aaguid, credIdLen, CREDENTIAL_ID, coseEc2P256());
+  return concat(rpIdHash, flags, counter, aaguid, credIdLen, CREDENTIAL_ID, opts.coseKey ?? coseEc2P256());
 }
 
 function buildAttestationObject(opts: {
@@ -108,17 +121,19 @@ function buildAttestationObject(opts: {
   ]);
 }
 
+/** Byte clientDataJSON yang dipakai pustaka — dipakai juga untuk menandatangani. */
+function clientDataFor(challenge: string, origin: string): Uint8Array {
+  return new TextEncoder().encode(
+    JSON.stringify({ type: 'webauthn.create', challenge, origin, crossOrigin: false })
+  );
+}
+
 function buildRegistrationResponse(opts: {
   attestationObject: Uint8Array;
   challenge: string;
   origin: string;
 }): Record<string, unknown> {
-  const clientDataJSON = JSON.stringify({
-    type: 'webauthn.create',
-    challenge: opts.challenge,
-    origin: opts.origin,
-    crossOrigin: false,
-  });
+  const clientDataJSON = new TextDecoder().decode(clientDataFor(opts.challenge, opts.origin));
   return {
     id: b64url(CREDENTIAL_ID),
     rawId: b64url(CREDENTIAL_ID),
@@ -150,6 +165,19 @@ test('classifyAttestationTier: none / self / hardware', () => {
   assert.equal(classifyAttestationTier({ fmt: 'tpm', hasCertificateChain: true }), 'hardware');
 });
 
+/** Bukti rantai yang lolos semua aturan (untuk test kebijakan murni). */
+const trustedChain = (overrides: Partial<ReturnType<typeof baseChain>> = {}) => ({ ...baseChain(), ...overrides });
+const baseChain = () => ({
+  length: 2,
+  linked: true,
+  topSelfSigned: true,
+  withinValidity: true,
+  topFingerprint: 'AA:BB:CC',
+  pinnedRootMatch: null as boolean | null,
+  leafExtendedKeyUsage: [TPM_AIK_EKU_OID],
+  failures: [] as string[],
+});
+
 test('evaluateAttestationPolicy: matriks keputusan', () => {
   const hardware = {
     fmt: 'packed',
@@ -157,6 +185,7 @@ test('evaluateAttestationPolicy: matriks keputusan', () => {
     credentialDeviceType: 'singleDevice',
     userVerified: true,
     hasCertificateChain: true,
+    certificateChain: trustedChain(),
   };
   assert.deepEqual(evaluateAttestationPolicy(hardware), { accepted: true, tier: 'hardware' });
 
@@ -207,11 +236,56 @@ test('evaluateAttestationPolicy: matriks keputusan', () => {
     evaluateAttestationPolicy({ ...hardware, credentialDeviceType: 'multiDevice' }, { ...DEFAULT_ATTESTATION_POLICY, requireSingleDevice: false }),
     { accepted: true, tier: 'hardware' }
   );
+
+  // Rantai ada tapi tidak bisa dipercaya: kode kegagalan pertama yang dilaporkan.
+  assert.equal(
+    evaluateAttestationPolicy({ ...hardware, certificateChain: trustedChain({ failures: ['CERTIFICATE_EXPIRED'] }) }).reason,
+    'CERTIFICATE_EXPIRED'
+  );
+  assert.equal(
+    evaluateAttestationPolicy({ ...hardware, certificateChain: trustedChain({ failures: ['CHAIN_TOO_SHORT', 'TOP_NOT_SELF_SIGNED'] }) }).reason,
+    'CHAIN_TOO_SHORT'
+  );
+  assert.equal(
+    evaluateAttestationPolicy({ ...hardware, certificateChain: null }).reason,
+    'ATTESTATION_CHAIN_UNPARSEABLE'
+  );
+  // Escape hatch operator: melewatkan pemeriksaan rantai harus eksplisit.
+  assert.deepEqual(
+    evaluateAttestationPolicy(
+      { ...hardware, certificateChain: trustedChain({ failures: ['ROOT_NOT_TRUSTED'] }) },
+      { ...DEFAULT_ATTESTATION_POLICY, requireVerifiedChain: false }
+    ),
+    { accepted: true, tier: 'hardware' }
+  );
+
+  // `fmt: 'tpm'` tanpa EKU AIK bukan bukti perangkat: tanda tangannya sah, tapi
+  // tidak ada yang menjamin penanda tangannya AIK.
+  assert.equal(
+    evaluateAttestationPolicy({
+      ...hardware,
+      fmt: 'tpm',
+      certificateChain: trustedChain({ leafExtendedKeyUsage: ['1.3.6.1.5.5.7.3.2'] }),
+    }).reason,
+    'TPM_AIK_EKU_MISSING'
+  );
+  assert.deepEqual(evaluateAttestationPolicy({ ...hardware, fmt: 'tpm' }), { accepted: true, tier: 'hardware' });
+  assert.deepEqual(
+    evaluateAttestationPolicy(
+      { ...hardware, fmt: 'tpm', certificateChain: trustedChain({ leafExtendedKeyUsage: [] }) },
+      { ...DEFAULT_ATTESTATION_POLICY, requireTpmAikEku: false }
+    ),
+    { accepted: true, tier: 'hardware' }
+  );
 });
 
 test('attestationPolicyFromEnv: default ketat, override eksplisit', () => {
   const defaults = attestationPolicyFromEnv({} as NodeJS.ProcessEnv);
   assert.deepEqual(defaults, DEFAULT_ATTESTATION_POLICY);
+
+  assert.equal(defaults.requireVerifiedChain, true);
+  assert.equal(defaults.requireTpmAikEku, true);
+  assert.deepEqual(defaults.trustedAttestationRoots, []);
 
   const relaxed = attestationPolicyFromEnv({
     ABUSE_ATTESTATION_FORMATS: 'packed, tpm ',
@@ -220,6 +294,9 @@ test('attestationPolicyFromEnv: default ketat, override eksplisit', () => {
     ABUSE_ATTESTATION_BLOCKED_AAGUIDS: 'AAAA-1, BBBB-2',
     ABUSE_ATTESTATION_ALLOW_NO_UV: 'on',
     ABUSE_ATTESTATION_ALLOW_SYNCED: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'on',
+    ABUSE_ATTESTATION_ROOTS: 'aa:bb, cc:dd',
+    ABUSE_ATTESTATION_ALLOW_NO_AIK_EKU: 'on',
   } as NodeJS.ProcessEnv);
   assert.deepEqual(relaxed.allowedFormats, ['packed', 'tpm']);
   assert.equal(relaxed.allowSelfAttestation, true);
@@ -227,6 +304,9 @@ test('attestationPolicyFromEnv: default ketat, override eksplisit', () => {
   assert.deepEqual(relaxed.blockedAaguids, ['aaaa-1', 'bbbb-2']);
   assert.equal(relaxed.requireUserVerification, false);
   assert.equal(relaxed.requireSingleDevice, false);
+  assert.equal(relaxed.requireVerifiedChain, false);
+  assert.deepEqual(relaxed.trustedAttestationRoots, ['aa:bb', 'cc:dd']);
+  assert.equal(relaxed.requireTpmAikEku, false);
 });
 
 test('verifyNewAccountAttestation: `none` sah secara kripto tapi ditolak kebijakan', async () => {
@@ -359,4 +439,256 @@ test('challenge attestation: sekali pakai (store → consume → gagal)', async 
   assert.equal(await consumeAttestationChallenge(redis, 'tidak-pernah-ada'), false, 'challenge tak dikenal ditolak');
   assert.equal(await consumeAttestationChallenge(redis, ''), false, 'challenge kosong ditolak tanpa menyentuh Redis');
   assert.equal(evalCalls, 3);
+});
+
+// ---------------------------------------------------------------------------
+// Attestation `packed` dengan rantai X.509 sungguhan (fixture openssl)
+// ---------------------------------------------------------------------------
+//
+// Yang diuji di sini bukan struktur buatan: sertifikatnya DER nyata (root CA →
+// leaf), kuncinya ECDSA P-256 nyata, tanda tangannya ECDSA nyata atas
+// `authenticatorData || clientDataHash`, dan verifikasinya lewat
+// `@simplewebauthn/server` yang sama dengan produksi. Yang tidak bisa
+// dibangkitkan di sini (dan karena itu tetap residual jujur): kunci privat
+// benar-benar berada di dalam silikon perangkat.
+
+const FIXTURE_DIR = new URL('./fixtures/webauthn/', import.meta.url);
+const readFixture = (name: string): Uint8Array => new Uint8Array(readFileSync(new URL(name, FIXTURE_DIR)));
+const aikLeafDer = readFixture('leaf-aik.der');
+const plainLeafDer = readFixture('leaf-plain.der');
+const rootCaDer = readFixture('root-ca.der');
+const aikKey = crypto.createPrivateKey(readFileSync(new URL('leaf-aik.key.pem', FIXTURE_DIR)));
+const plainLeafKey = crypto.createPrivateKey(readFileSync(new URL('leaf-plain.key.pem', FIXTURE_DIR)));
+const ROOT_FINGERPRINT = new crypto.X509Certificate(Buffer.from(rootCaDer)).fingerprint256;
+
+/** Attestation `packed` sungguhan: tanda tangan ECDSA oleh kunci leaf. */
+function packedAttestation(opts: {
+  authData: Uint8Array;
+  challenge: string;
+  origin: string;
+  key: crypto.KeyObject;
+  /** `null` = tanpa `x5c` (attestation self). */
+  chain: Uint8Array[] | null;
+  fmt?: string;
+  tamperSignature?: boolean;
+}): Uint8Array {
+  const signed = concat(opts.authData, sha256(clientDataFor(opts.challenge, opts.origin)));
+  const signature = new Uint8Array(crypto.sign('sha256', signed, opts.key));
+  if (opts.tamperSignature) signature[signature.length - 1] ^= 0xff;
+
+  const attStmt: Array<[Uint8Array, Uint8Array]> = [
+    [cborText('alg'), cborNegInt(-7)],
+    [cborText('sig'), cborBytes(signature)],
+  ];
+  if (opts.chain) attStmt.push([cborText('x5c'), cborArray(opts.chain.map(cborBytes))]);
+  return buildAttestationObject({ authData: opts.authData, fmt: opts.fmt ?? 'packed', attStmt });
+}
+
+test('verifyAttestationChain: rantai nyata lolos, pelanggarannya terdeteksi', () => {
+  const ok = verifyAttestationChain([aikLeafDer, rootCaDer]);
+  assert.deepEqual(ok.failures, []);
+  assert.equal(ok.length, 2);
+  assert.equal(ok.linked, true);
+  assert.equal(ok.topSelfSigned, true);
+  assert.equal(ok.withinValidity, true);
+  assert.equal(ok.topFingerprint, ROOT_FINGERPRINT);
+  assert.ok(ok.leafExtendedKeyUsage.includes(TPM_AIK_EKU_OID), 'leaf AIK harus punya EKU TPM');
+
+  // Satu sertifikat = bukan rantai, sekalipun tanda tangannya sah.
+  const single = verifyAttestationChain([aikLeafDer]);
+  assert.ok(single.failures.includes('CHAIN_TOO_SHORT'));
+
+  // Urutan terbalik = tidak tersambung.
+  assert.ok(verifyAttestationChain([rootCaDer, aikLeafDer]).failures.includes('CHAIN_NOT_LINKED'));
+
+  // Masa berlaku dievaluasi terhadap `now` yang diberikan.
+  assert.ok(verifyAttestationChain([aikLeafDer, rootCaDer], { now: new Date('2100-01-01') }).failures.includes('CERTIFICATE_EXPIRED'));
+  assert.ok(
+    verifyAttestationChain([aikLeafDer, rootCaDer], { now: new Date('2000-01-01') }).failures.includes('CERTIFICATE_NOT_YET_VALID')
+  );
+
+  // Root dipin: cocok = lolos, beda = ditolak.
+  const pinnedOk = verifyAttestationChain([aikLeafDer, rootCaDer], { trustedRootFingerprints: [ROOT_FINGERPRINT] });
+  assert.deepEqual(pinnedOk.failures, []);
+  assert.equal(pinnedOk.pinnedRootMatch, true);
+
+  const pinnedBad = verifyAttestationChain([aikLeafDer, rootCaDer], {
+    trustedRootFingerprints: ['AA:BB:CC:DD'],
+  });
+  assert.equal(pinnedBad.pinnedRootMatch, false);
+  assert.ok(pinnedBad.failures.includes('ROOT_NOT_TRUSTED'));
+
+  // Leaf tanpa EKU: rantai tetap sah, tapi EKU-nya kosong.
+  const plain = verifyAttestationChain([plainLeafDer, rootCaDer]);
+  assert.deepEqual(plain.failures, []);
+  assert.deepEqual(plain.leafExtendedKeyUsage, []);
+
+  // DER yang tidak bisa diurai tidak boleh diam-diam dianggap sah.
+  assert.deepEqual(verifyAttestationChain([new Uint8Array([1, 2, 3])]).failures, ['CHAIN_UNPARSEABLE']);
+});
+
+test('verifyNewAccountAttestation: packed + x5c nyata DITERIMA sebagai tier hardware', async () => {
+  const authData = buildAuthData({ rpId: RPID });
+  const attestationObject = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: aikKey,
+    chain: [aikLeafDer, rootCaDer],
+  });
+
+  const result = await verifyNewAccountAttestation({
+    response: buildRegistrationResponse({ attestationObject, challenge: CHALLENGE, origin: ORIGIN }),
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+  });
+
+  assert.equal(result.verified, true, `ditolak: ${result.reason}`);
+  assert.equal(result.tier, 'hardware');
+  assert.equal(result.reason, undefined);
+  assert.equal(result.credentialId, b64url(CREDENTIAL_ID));
+  assert.ok(result.credentialPublicKey && result.credentialPublicKey.length > 0);
+});
+
+test('verifyNewAccountAttestation: root dipin menerima root benar dan menolak root lain', async () => {
+  const authData = buildAuthData({ rpId: RPID });
+  const attestationObject = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: aikKey,
+    chain: [aikLeafDer, rootCaDer],
+  });
+  const response = buildRegistrationResponse({ attestationObject, challenge: CHALLENGE, origin: ORIGIN });
+
+  const trusted = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+    policy: { ...DEFAULT_ATTESTATION_POLICY, trustedAttestationRoots: [ROOT_FINGERPRINT] },
+  });
+  assert.equal(trusted.verified, true, `ditolak: ${trusted.reason}`);
+
+  const untrusted = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+    policy: { ...DEFAULT_ATTESTATION_POLICY, trustedAttestationRoots: ['AA:BB:CC:DD'] },
+  });
+  assert.equal(untrusted.verified, false);
+  assert.equal(untrusted.reason, 'ROOT_NOT_TRUSTED');
+});
+
+test('verifyNewAccountAttestation: tanda tangan diubah / satu sertifikat / rantai tak tersambung ditolak', async () => {
+  const authData = buildAuthData({ rpId: RPID });
+
+  // 1. Tanda tangan diubah → tidak boleh diterima, dalam bentuk apa pun
+  //    (pustaka bisa melempar atau mengembalikan `verified: false`; yang penting
+  //    tidak ada jalur yang meloloskannya).
+  const tampered = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: aikKey,
+    chain: [aikLeafDer, rootCaDer],
+    tamperSignature: true,
+  });
+  let tamperedAccepted = false;
+  try {
+    const tamperedResult = await verifyNewAccountAttestation({
+      response: buildRegistrationResponse({ attestationObject: tampered, challenge: CHALLENGE, origin: ORIGIN }),
+      expectedChallenge: CHALLENGE,
+      expectedOrigin: ORIGIN,
+      expectedRPID: RPID,
+    });
+    tamperedAccepted = tamperedResult.verified;
+  } catch {
+    tamperedAccepted = false;
+  }
+  assert.equal(tamperedAccepted, false, 'tanda tangan yang diubah diterima — ini kegagalan keamanan');
+
+  // 2. Hanya satu sertifikat (self-signed buatan sendiri): tanda tangan sah,
+  //    tapi rantainya tidak membuktikan perangkat apa pun.
+  const singleCert = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: aikKey,
+    chain: [aikLeafDer],
+  });
+  const singleResult = await verifyNewAccountAttestation({
+    response: buildRegistrationResponse({ attestationObject: singleCert, challenge: CHALLENGE, origin: ORIGIN }),
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+  });
+  assert.equal(singleResult.verified, false);
+  assert.equal(singleResult.reason, 'CHAIN_TOO_SHORT');
+
+  // 3. Rantai yang tidak tersambung: dua sertifikat sah, tapi leaf tidak
+  //    ditandatangani sertifikat berikutnya. Pustaka hanya memeriksa leaf
+  //    (subject/C/CA/versi) — penyambungan rantai adalah tanggung jawab kami,
+  //    dan inilah yang membedakannya dari "x5c ada isinya".
+  const unlinked = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: aikKey,
+    chain: [aikLeafDer, plainLeafDer],
+  });
+  const unlinkedResult = await verifyNewAccountAttestation({
+    response: buildRegistrationResponse({ attestationObject: unlinked, challenge: CHALLENGE, origin: ORIGIN }),
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+  });
+  assert.equal(unlinkedResult.verified, false);
+  assert.equal(unlinkedResult.reason, 'CHAIN_NOT_LINKED');
+
+  // Catatan: aturan "fmt tpm wajib ber-EKU AIK" diuji di matriks kebijakan murni
+  // di atas, bukan lewat respons penuh — attestation TPM sungguhan menuntut
+  // struktur `certInfo`/`pubArea` yang hanya bisa dibangkitkan perangkat TPM.
+});
+
+test('verifyNewAccountAttestation: packed self (tanpa x5c) ditolak kecuali operator mengizinkan', async () => {
+  // Kunci kredensial nyata: tanda tangan self-attestation dibuat kunci itu
+  // sendiri, jadi pustaka benar-benar memverifikasinya.
+  const credentialKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const jwk = credentialKey.publicKey.export({ format: 'jwk' }) as { x: string; y: string };
+  const cose = coseEc2P256(
+    new Uint8Array(Buffer.from(jwk.x, 'base64url')),
+    new Uint8Array(Buffer.from(jwk.y, 'base64url'))
+  );
+  const authData = buildAuthData({ rpId: RPID, coseKey: cose });
+  const attestationObject = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: credentialKey.privateKey,
+    chain: null,
+  });
+  const response = buildRegistrationResponse({ attestationObject, challenge: CHALLENGE, origin: ORIGIN });
+
+  const rejected = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+  });
+  assert.equal(rejected.verified, false);
+  assert.equal(rejected.tier, 'self');
+  assert.equal(rejected.reason, 'SELF_ATTESTATION_NOT_ALLOWED');
+
+  const allowed = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+    policy: { ...DEFAULT_ATTESTATION_POLICY, allowSelfAttestation: true },
+  });
+  assert.equal(allowed.verified, true, `ditolak: ${allowed.reason}`);
+  assert.equal(allowed.tier, 'self');
 });

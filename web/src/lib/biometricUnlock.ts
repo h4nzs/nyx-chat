@@ -216,7 +216,7 @@ export async function setupBiometricUnlock(
     optionsJSON: {
       ...rawOptions,
       extensions: { 
-          ...(rawOptions.extensions as Record<string, unknown> || {}),
+          ...(rawOptions.extensions as Record<string, unknown>),
           prf: { eval: { first: salt } } 
       } as unknown // Bypass strict TS check for PRF extension
     } as PublicKeyCredentialCreationOptionsJSON
@@ -266,7 +266,7 @@ export async function unlockWithBiometric(
     optionsJSON: {
       ...rawOptions,
       extensions: { 
-          ...(rawOptions.extensions as Record<string, unknown> || {}),
+          ...(rawOptions.extensions as Record<string, unknown>),
           prf: { eval: { first: salt } } 
       } as unknown // Bypass strict TS check for PRF extension
     } as PublicKeyCredentialRequestOptionsJSON

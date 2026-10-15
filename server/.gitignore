@@ -40,6 +40,10 @@ pids
 *.pid.lock
 *.der
 */*/*.der
+# Fixture attestation WebAuthn (KUNCI UJI) — `tests/webauthnAttestation.test.ts`
+# membaca `.der`-nya, jadi berkas ini HARUS ikut checkout (aturan `*.der` di atas
+# untuk sertifikat runtime `transport_cert.der`, bukan fixture test).
+!tests/fixtures/webauthn/*.der
 
 # Cakupan Kode & Artefak Build
 coverage

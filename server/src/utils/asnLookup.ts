@@ -95,7 +95,7 @@ function parseIpv6(value: string): bigint | null {
   if (halves.length === 2) {
     const missing = 8 - (head.length + tail.length)
     if (missing < 1) return null
-    groups = [...head, ...new Array<number>(missing).fill(0), ...tail]
+    groups = [...head, ...Array.from({ length: missing }, () => 0), ...tail]
   } else {
     if (head.length !== 8) return null
     groups = head

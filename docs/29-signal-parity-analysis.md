@@ -95,7 +95,7 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 | 19 | Burner/ephemeral | burner room (guest, PQ-DR, RAM-only) | tidak ada | **NYX+** |
 | 20 | Cover traffic | T4 opt-in (chaff 1KB/3s + dummy message ber-jitter) | tidak ada (Signal menolak trade-off ini) | **NYX+** |
 | 21 | Negosiasi kapabilitas | tidak ada (opcode + version byte per-payload) | `DeviceCapability`, `ClientRelease`, gRPC/protobuf ter-skema | **SIG+** |
-| 22 | Jaminan rekayasa | 463 vitest + 300 node:test + 17 cargo test + Playwright; fuzz deterministik parser (web & sidecar framing, `docs/30` WS-G(5)); lint hidup (oxlint); tanpa formal method | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
+| 22 | Jaminan rekayasa | 602 vitest + 374 node:test + 31 test Go (`server/kt-query`) + 18 cargo test + 24 Playwright; fuzz deterministik parser (web & sidecar framing, `docs/30` WS-G(5)); lint hidup (oxlint); tanpa formal method | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
 | 23 | Operabilitas/self-host | 1 VPS, pm2, deploy SCP — siapa pun bisa jalankan | butuh FDB/Dynamo/Scylla — praktis tidak self-hostable | **NYX+** |
 | 24 | Ekosistem produk | web + marketing + tenant B2B/subscription | semua platform, stickers, call links, backup, donations | **SIG+** |
 
@@ -501,7 +501,7 @@ manual ke enam spec.
 | 3 | Buang fallback Google STUN | `server/src/routes/keys.ts:590,607,610`, `web/src/lib/webrtc.ts:29` | Tidak ada `google.com` di jalur ICE; kegagalan TURN jadi error eksplisit |
 | 4 | Bucket/`ENC1:` metadata lokal | `web/src/lib/db.ts`, `shadowVaultDb.ts`, `keychainDb.ts` | Tidak ada `lastMessageAt` presisi & `seq` plaintext di IndexedDB |
 | 5 | Nyalakan kembali lint (alias TS 5 untuk lint atau oxlint) | `web/eslint.config.js`, `server/eslint.config.js`, `package.json` | `pnpm -r lint` jalan; sebagian rule blocking di CI |
-| 6 | Test vector lintas-implementasi (DR/sender-key/era) | `web/src/lib/__tests__/`, `server/tests/` | Vektor dari libsignal/SPQR lulus untuk primitif yang identik — **hanya KAT primitif yang landed** (`cryptoKnownAnswer`, `argonKnownAnswer`); vektor ratchet vs oracle libsignal tetap residual (`docs/30` WS-G(6)) |
+| 6 | Test vector lintas-implementasi (DR/sender-key/era) | `web/src/lib/__tests__/`, `server/tests/`, `tools/dr-oracle/` | Vektor dari libsignal/SPQR lulus untuk primitif yang identik. **Landed:** KAT primitif (`cryptoKnownAnswer`, `argonKnownAnswer`) **plus** oracle Go non-libsodium dua arah untuk X3DH/KEM/kdfChain/AEAD (`docs/30` WS-G(6)); **residual:** sender-key chain / skipped key / `SessionRecord` tetap internal |
 | 7 | Capability negotiation di handshake | `packages/shared/src/transport.ts`, sidecar `main.rs`, `web/src/lib/transportClient.ts` | Klien lama tanpa `capabilities` tetap jalan |
 
 **Status implementasi (2026-10-11).** Ketujuhnya sudah landed di branch ini,
@@ -518,22 +518,45 @@ dikerjakan dan diganti KT penuh (§30.3, §30.5).
 | 2 | Verification state ke keychain + hard gate | `web/src/lib/__tests__/peerIdentityTrust.test.ts` | kunci berubah → kirim diblokir sampai konfirmasi; pin lama TIDAK ditimpa dan tersimpan terenkripsi |
 | 3 | Tanpa STUN pihak ketiga | `server/tests/turnIceServers.test.ts` | kegagalan TURN = error eksplisit + kunci `call_no_turn` di 4 bahasa |
 | 4 | Metadata lokal di-bucket / `ENC1:` | `web/src/lib/__tests__/localAtRest.test.ts`, `localOrderKey.test.ts`, `dexieMigration.test.ts` (IndexedDB nyata), `vaultSeqPersistence.test.ts`, `contactStore.test.ts` | `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`isGroup`/`ContactRow.updatedAt`/`ProfileCacheRecord.updatedAt` tidak lagi plaintext, `lastMessageAt` dipotong 15 menit (baris lama plaintext tetap terbaca + di-seal saat unlock) |
-| 5 | Lint hidup lagi | `pnpm run lint` (oxlint, CI blocking pada `error`) | kategori `correctness` masih `warn` (±200 temuan lama, mayoritas `no-unused-vars`) |
+| 5 | Lint hidup lagi | `pnpm run lint` (oxlint, CI blocking pada `error`; kategori `correctness` **`error`** sejak 2026-10-14, 0 error) | sisa 194 `no-unused-vars` yang sengaja tetap `warn` dan dibersihkan bertahap |
 | 6 | KAT lintas-implementasi | `server/tests/cryptoKnownAnswer.test.ts` (RFC 7748/8032/7693/8439/9106 + invarian X-Wing), `web/src/lib/__tests__/argonKnownAnswer.test.ts` | `hash-wasm` tidak mengekspos associated data → tag RFC 9106 §5.3 diikat di server; sisi klien mengunci nilai penengah A/B yang sama |
 | 7 | Negosiasi kapabilitas | `web/src/lib/__tests__/transportCapabilities.test.ts`, `cargo test` di sidecar (`protocol::tests`) | HELLO wajib lewat stream **bidi**; di jalur uni/datagram sidecar mengabaikannya supaya opcode 0x0B tidak pernah muncul di `nyx:upstream:*` |
 
-**Residual setelah audit 2026-10-12 (lihat `docs/30` §30.20 untuk status lengkap):**
-WS-G(4) test perilaku endpoint ✅ (jalur grup lengkap di `utils/groupAccess.ts`),
-WS-G(5) fuzz parser ✅ (web + framing sidecar), WS-G(1) dashboard Grafana ✅,
-WS-F kolom waktu kontak/profil ✅; masih terbuka: WS-E(2) signaling call berbasis
-token, WS-G(6) vektor DR/sender-key vs oracle libsignal, WS-H per-hash-ASN
-(butuh data ASN), WS-A/WS-D.
+**Residual setelah audit 2026-10-12, diperbarui 2026-10-14 (lihat `docs/30`
+§30.20 untuk status lengkap):** WS-G(4) test perilaku endpoint ✅ (jalur grup
+lengkap di `utils/groupAccess.ts`), WS-G(5) fuzz parser ✅ (web + framing
+sidecar), WS-G(1) dashboard Grafana ✅, WS-F kolom waktu kontak/profil ✅,
+WS-G(2) drill alert ✅ (**14** aturan; tiap aturan punya kasus menyala **dan**
+tidak-menyala, dijalankan per-PR oleh `scripts/drill-alerts.sh` + job CI
+`alerts`), WS-G(3) load test ✅ terukur (500 VU: send p95 74,4 ms / fetch p95
+68,8 ms, 0% error), WS-H per-hash-ASN ✅ (`utils/asnLookup.ts` — tabel prefix→ASN
+lokal tanpa layanan pihak ketiga, ambang 100/jam/ASN + burst sybil 25/10 menit
+yang menuntut attestation **bukan** memblokir); **WS-A ✅ dan WS-D ✅
+(2026-10-14)**: KT penuh (penulis + verifier + `server/kt-query` + monitor +
+**auditor/mode 3** + **gossip tree head**) dan SPQR terintegrasi ke jalur pesan
+(detail `docs/33`, `docs/34`); **WS-G(6) 🟡 parsial**: primitif X3DH/KEM/KDF/AEAD
+sudah dibuktikan dua arah terhadap oracle non-libsodium (`tools/dr-oracle`, job
+CI `dr-oracle`), tapi sender-key chain/skipped key/`SessionRecord` libsignal
+tidak — itu tetap internal (`spqrRatchet.test.ts` + crate SPQR); **WS-E gate (1)
+✅ (2026-10-15)**: `web/e2e/call.spec.ts` dijalankan Chrome penuh terhadap
+coturn nyata (kredensial `/api/keys/turn` → dua peer `iceTransportPolicy:'relay'`
+terhubung, pasangan terpilih `relay`↔`relay`), dan job CI `e2e-chrome` kini
+memasang + menjalankan coturn sendiri sehingga gate itu bukan klaim.
+
+Masih terbuka: pengukuran
+false-positive NAT/ASN di lapangan, attestation WebAuthn perangkat keras
+sungguhan, dan kedua gate CI auditor (`cmd/generate-auditing-test-vectors`,
+`cmd/kt-client`) yang binari upstream-nya tidak di-vendor.
 
 Residual jujur:
 
-- Jalur WT nyata (E2E `transport.spec.ts`) **belum** dijalankan: headless Chromium di
-  mesin ini tidak punya WebTransport, jadi HELLO-bidi hanya terverifikasi oleh unit
-  test + `cargo test` sidecar, bukan oleh satu sesi WebTransport sungguhan.
+- Jalur WT nyata (E2E `transport.spec.ts`) **sudah** dijalankan (2026-10-15) dengan
+  `--project=chrome` terhadap sidecar WebTransport sungguhan — dan benar begitu:
+  headless Chromium di mesin ini tidak punya WebTransport, jadi selama spec itu
+  hanya auto-skip, dua bug di dalamnya (assertion tombstone yang tidak pernah
+  cocok, locator `getByText` yang juga mengenai preview sidebar sehingga aksi
+  menggantung) tidak pernah terlihat. Sesi QUIC jarak jauh (WAN, handshake
+  lintas jaringan) tetap tidak diuji di sini.
 - `associatedData` Argon2 tidak tersedia di `hash-wasm`. Kalau nanti ada fitur klien
   yang butuh AD, itu berarti implementasi baru — bukan sekadar menyalakan opsi.
 - Item 2 hanya menutup TOFU lokal; deteksi serangan tetap butuh KT (§5.1).

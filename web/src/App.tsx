@@ -355,6 +355,31 @@ const AppContent = () => {
 
     let cancelled = false;
     let stop: (() => void) | undefined;
+    let stopGossipListener: (() => void) | undefined;
+
+    // [docs/30 §30.5 tahap C] Jangkar gossip dimuat lebih dulu: jalur kirim
+    // menyisipkan `ktG` ke payload ter-seal, dan setelah reload cache RAM kosong
+    // sampai langkah monitor pertama (30 s). Memuat jangkar tersimpan di sini
+    // membuat pesan pertama sesi tetap membawa gossip.
+    void (async () => {
+      try {
+        const { loadStoredAnchor, onKtSplitView } = await import('@lib/ktGossip');
+        await loadStoredAnchor();
+        if (cancelled) return;
+        stopGossipListener = onKtSplitView((record) => {
+          // Split-view: dua klien melihat root BERBEDA untuk ukuran pohon yang
+          // SAMA. Tidak ada penjelasan sah untuk itu (`docs/30` §30.5) — ini
+          // peringatan, bukan blokir: keputusan blokir tetap milik pin identitas.
+          console.warn('[KT] Split-view tree head terdeteksi:', record);
+          toast(i18n.t('chat:banners.kt_split_view', {
+            defaultValue:
+              'Key Transparency: two clients saw different tree heads for the same tree size. This should never happen — verify your contacts.',
+          }), { icon: '⚠️', duration: 10000 });
+        });
+      } catch (error) {
+        console.warn('[KT] Jangkar gossip tidak bisa dimuat:', error);
+      }
+    })();
 
     void (async () => {
       try {
@@ -386,6 +411,7 @@ const AppContent = () => {
     return () => {
       cancelled = true;
       stop?.();
+      stopGossipListener?.();
     };
   }, [user, hasRestoredKeys]);
 

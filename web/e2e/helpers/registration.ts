@@ -93,8 +93,13 @@ export async function registerUser(page: Page, displayName: string, username: st
   await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-  // 1. Trust level verification (muncul setelah registrasi selesai, ~15-20 dtk).
-  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 60000 });
+  // 1. Trust level verification (muncul setelah registrasi selesai, ~15-20 dtk di
+  //    mesin idle). Di mesin dev ini rantai registrasi terukur 40-70 dtk saat box
+  //    sedang sibuk (Argon2 di worker), dan anggaran 60 dtk membuat spec mana pun
+  //    yang kebetulan berjalan paling lambat gagal di sini — gejalanya "Skip for
+  //    now tidak muncul" yang mudah disalahartikan sebagai bug registrasi. Beri
+  //    ruang untuk rentang yang terukur, bukan untuk hang tanpa batas.
+  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 90000 });
   await page.getByRole('button', { name: /Skip for now/i }).click();
 
   // 2. Protocol: Recovery

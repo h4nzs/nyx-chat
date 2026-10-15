@@ -26,7 +26,13 @@ import type { AuthJwtPayload, IDeviceTemplate, IPreKeyBundle } from '@nyx/shared
 import { makeOtpkQuotaGate } from '../utils/otpkQuota.js'
 import { validateEncryptedPrivateKeysPayload, toEncryptedPrivateKeyPatch } from '../utils/encryptedKeysSync.js'
 // [docs/30 WS-G(4)] Pemetaan perangkat → bundle dipakai di 3 jalur; satu util teruji.
-import { toDeviceTemplate, toPublicDeviceBundle } from '../utils/keyBundle.js'
+import {
+  requireBundleDevice,
+  toDeviceTemplate,
+  toPreKeyBundle,
+  toPublicDeviceBundle,
+  type OneTimePreKeyRow,
+} from '../utils/keyBundle.js'
 
 // === Kuota harian konsumsi OTPK per pasangan (requester, target) ===
 // Lua INCR+EXPIRE atomik — pola yang sama dengan limiter lain di repo.
@@ -257,16 +263,7 @@ router.get(
           take: 1
         })
 
-        if (devices.length === 0) {
-          throw new ApiError(404, 'User does not have any active devices.')
-        }
-
-        const device = devices[0];
-        if (!device || !device.signingKey || !device.publicKey) {
-          throw new ApiError(404, 'Device identity not fully initialized.');
-        }
-
-        deviceTemplate = toDeviceTemplate(device);
+        deviceTemplate = toDeviceTemplate(requireBundleDevice(devices));
 
         // Save to Redis
         try {
@@ -289,29 +286,14 @@ router.get(
             LIMIT 1
           )
           RETURNING id, "keyId", "publicKey", "pqPublicKey"
-        `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
+        `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as OneTimePreKeyRow | null);
       } catch (dbError) {
         console.error('[DB] Failed to consume OTPK:', dbError);
       }
 
-      // 4. Combine and return
-      const bundle: IPreKeyBundle = {
-        deviceId: deviceTemplate.id,
-        identityKey: deviceTemplate.identityKey,
-        pqIdentityKey: deviceTemplate.pqIdentityKey,
-        signingKey: deviceTemplate.signingKey,
-        signedPreKey: deviceTemplate.signedPreKey
-      };
-
-      if (otpk) {
-        bundle.oneTimePreKey = {
-          keyId: otpk.keyId,
-          key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
-          pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
-        };
-      }
-
-      res.json(bundle);
+      // 4. Combine and return. OTPK habis ≠ gagal: bundle tetap dikirim tanpa
+      //    `oneTimePreKey` (perilaku lama dipertahankan, kini satu implementasi).
+      res.json(toPreKeyBundle(deviceTemplate, otpk));
     } catch (e: unknown) {
       next(e)
     }
@@ -485,25 +467,10 @@ router.post(
                   LIMIT 1
                 )
                 RETURNING id, "keyId", "publicKey", "pqPublicKey"
-              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
+              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as OneTimePreKeyRow | null);
             } catch (e) {}
 
-            const bundle: IPreKeyBundle = {
-              deviceId: template.id,
-              identityKey: template.identityKey,
-              pqIdentityKey: template.pqIdentityKey,
-              signingKey: template.signingKey,
-              signedPreKey: template.signedPreKey
-            };
-
-            if (otpk) {
-              bundle.oneTimePreKey = {
-                keyId: otpk.keyId,
-                key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
-                pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
-              };
-            }
-            userBundles.push(bundle);
+            userBundles.push(toPreKeyBundle(template, otpk));
           }
           finalResults.set(uid, userBundles);
       }

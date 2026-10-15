@@ -80,7 +80,8 @@
     "identity_changed_action": "Verificar ahora",
     "identity_kt_mismatch": "Alerta de seguridad: la clave contradice el registro público",
     "identity_kt_mismatch_desc": "La clave que envió este servidor no es la registrada en el registro público de Key Transparency. Esto puede indicar un ataque en curso. El envío está en pausa hasta que verifiques el número de seguridad con el contacto por otro canal.",
-    "kt_key_rotation": "Key Transparency: se publicó una rotación de clave de contacto en el registro."
+    "kt_key_rotation": "Key Transparency: se publicó una rotación de clave de contacto en el registro.",
+    "kt_split_view": "Key Transparency: dos clientes vieron cabezas de árbol distintas para el mismo tamaño de árbol. Esto no debería ocurrir nunca — verifica tus contactos antes de confiar en sus claves."
   },
   "status": {
     "signal_lost": "Señal perdida",

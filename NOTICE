@@ -67,9 +67,13 @@ How NYX uses it (unmodified):
     `ktSubject.ts`, `ktMonitoring.ts`, `peerIdentityTrust.ts`. Design/spec: `docs/34`.
 
 Other parts of libsignal were read only as an implementation reference, without
-copying code — e.g. the group sender-key design (`docs/16`). A libsignal-based
-cross-implementation ratchet oracle is planned but **not implemented**
-(`docs/30` WS-G(6), `docs/11` §11.4).
+copying code — e.g. the group sender-key design (`docs/16`). The
+cross-implementation ratchet checks that DO exist (`docs/30` WS-G(6), `docs/11`
+§11.4) are built from a **separate, non-libsodium oracle** (`tools/dr-oracle/`,
+Go: `golang.org/x/crypto`, `github.com/cloudflare/circl`) covering X3DH, the KEM,
+the keyed-BLAKE2b chain and AEAD in both directions; no libsignal code is built
+or shipped for them. A libsignal-based oracle over the full sender-key chain is
+still **not implemented**.
 
 --------------------------------------------------------------------------------
 3. Signal key-transparency-server (Key Transparency log service, Go)

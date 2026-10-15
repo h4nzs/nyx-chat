@@ -75,12 +75,13 @@ jobs:
           JWT_SECRET: ci-jwt-secret-not-for-prod
 
   lint:
-    # [2026-10-11] Lint kini BLOCKING lewat oxlint (Rust; tidak terikat versi TS).
-    # Rule level error = kelas bug/keamanan (no-eval, no-new-func,
-    # no-async-promise-executor, no-unsafe-negation, dll) dan harus 0.
-    # Kategori `correctness` sengaja masih `warn`: ada ±250 temuan lama
-    # (mayoritas no-unused-vars) yang dibersihkan bertahap — jangan naikkan ke
-    # error sebelum angkanya 0, atau CI jadi merah terus dan diabaikan.
+    # [2026-10-11, diperbarui 2026-10-14] Lint BLOCKING lewat oxlint (Rust; tidak
+    # terikat versi TS). Rule level error = kelas bug/keamanan (no-eval,
+    # no-new-func, no-async-promise-executor, no-unsafe-negation, dll) dan harus 0.
+    # Kategori `correctness` **sudah `error`** (gate M7 `docs/30` §30.15 terpenuhi:
+    # `correctness` bersih, 0 error). Sisa temuan adalah `no-unused-vars` yang
+    # sengaja tetap `warn` (194) dan dibersihkan bertahap; jangan naikkan rule itu
+    # ke error sebelum angkanya 0, atau CI jadi merah terus dan diabaikan.
     name: Lint (oxlint — rule error blocking)
     runs-on: ubuntu-latest
     steps:
@@ -96,6 +97,90 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Lint
         run: pnpm run lint
+
+  alerts:
+    # [docs/30 WS-G(2)] DRILL alert (gate): aturan Prometheus harus terbukti bisa
+    # MENYALA, bukan cuma kompilasi. `promtool test rules` menjalankan kasus
+    # sintetis per aturan; lapis kontrak metrik menolak aturan yang merujuk nama
+    # metrik yang tidak dideklarasikan (aturan seperti itu diam selamanya), dan
+    # lapis cakupan menolak aturan baru yang belum punya kasus drill.
+    # Lapis scrape-nyata (`METRICS_URL`) dijalankan di job `e2e` yang sudah punya
+    # Postgres + Redis + API hidup.
+    name: Alerts (drill promtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Drill alert (promtool diunduh skrip sendiri, dipin 3.15.0)
+        run: SKIP_LIVE=1 bash scripts/drill-alerts.sh
+
+  dr-oracle:
+    # [docs/30 WS-G(6)] Vektor lintas-implementasi DR/X3DH. Oracle (`tools/dr-oracle`)
+    # adalah implementasi KEDUA tanpa libsodium (circl + x/crypto). Job ini:
+    #   1. `go vet`/`go test` oracle,
+    #   2. gate DRIFT: vektor ter-commit harus identik dengan hasil regenerasi
+    #      (kalau tidak, NYX dan vektor bisa menyimpang diam-diam),
+    #   3. menjalankan test NYX vs vektor + test interop dua arah (NYX→oracle).
+    name: DR oracle (vektor + interop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/dr-oracle/go.mod
+          cache-dependency-path: tools/dr-oracle/go.sum
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Oracle — build, vet, unit
+        working-directory: tools/dr-oracle
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+      - name: Gate drift vektor (oracle vs berkas ter-commit)
+        working-directory: tools/dr-oracle
+        run: go run . -check
+      - name: Vektor NYX↔oracle + interop dua arah
+        working-directory: web
+        run: pnpm exec vitest run src/lib/__tests__/x3dhOracleVectors.test.ts src/lib/__tests__/x3dhOracleInterop.test.ts
+
+  kt-recovery:
+    # [docs/10 §10.13 · docs/32 §32.7 · docs/34 §34.6b] DRILL pemulihan log KT:
+    # entri ditulis lewat penulis produksi → snapshot terverifikasi → basis data
+    # hidup DIHAPUS → pulih hanya dari arsip → tree size + root harus identik dan
+    # bukti harus tetap lolos `transparency.VerifySearch` (kode upstream yang sama
+    # dengan WASM klien), lalu log harus bisa tumbuh tanpa memutus anchor klien
+    # pra-bencana. Kontrol negatif di akhir memastikan pemeriksanya bisa gagal.
+    name: KT recovery drill (snapshot → bencana → pulih)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/kt-query/go.mod
+          cache-dependency-path: server/kt-query/go.sum
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Go — vet + test kt-query (termasuk pemeriksa nyx-kt-check)
+        working-directory: server/kt-query
+        run: |
+          go vet ./...
+          go test ./...
+      - name: Drill pemulihan dari arsip snapshot
+        run: bash scripts/kt-restore-drill.sh
 
   audit:
     name: Dependency Audit
@@ -164,6 +249,20 @@ jobs:
       - name: Run E2E (spec transport auto-skip bila WebTransport tidak tersedia)
         working-directory: web
         run: pnpm exec playwright test --project=chromium
+      # [docs/30 WS-G(2)] Lapis "scrape nyata" dari drill alert: exporter hidup di
+      # 127.0.0.1:9464 milik proses ini sendiri (Postgres/Redis sudah siap di job
+      # ini). Menolak nama metrik yang terkirim tapi tidak dideklarasikan —
+      # salah tulis nama = aturan tidak pernah menyala tanpa error apa pun.
+      - name: Start API & drill alert terhadap exporter nyata
+        working-directory: server
+        run: |
+          npx tsx src/index.ts > /tmp/nyx-api.live.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:9464/metrics >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:9464/metrics >/dev/null
+          cd .. && PROMTOOL_VERSION=3.15.0 bash scripts/drill-alerts.sh
 
   e2e-chrome:
     name: E2E (Chrome penuh — WebTransport/QUIC aktif)
@@ -191,6 +290,11 @@ jobs:
       CHAT_SECRET: ci-chat-secret
       CORS_ORIGIN: http://localhost:5173
       TRANSPORT_PORT: 33333
+      # [docs/30 §30.9 WS-E(1)] coturn self-host: kredensial HMAC time-limited
+      # yang diterbitkan `/api/keys/turn`. Tanpa ini `e2e/call.spec.ts` skip
+      # dengan alasan tertulis (bukan lulus palsu).
+      TURN_URLS: turn:127.0.0.1:3478?transport=udp
+      TURN_STATIC_AUTH_SECRET: ci-turn-static-auth-secret-not-for-prod
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -226,6 +330,37 @@ jobs:
       - name: Build sidecar
         working-directory: server/transport-sidecar
         run: cargo build --release
+      # [docs/30 §30.9 WS-E gate (1)] gate menerima "E2E call 1:1 di CI chrome
+      # dengan coturn", jadi coturn harus benar-benar berjalan di runner ini:
+      # peer di loopback → `allow-loopback-peers` wajib (produksi memakai IP
+      # publik dan tidak boleh memakainya).
+      - name: Install coturn (TURN self-host untuk e2e/call.spec.ts)
+        run: sudo apt-get update && sudo apt-get install -y coturn
+      - name: Start coturn
+        run: |
+          sudo tee /etc/turnserver.conf >/dev/null <<EOF
+          listening-ip=127.0.0.1
+          relay-ip=127.0.0.1
+          listening-port=3478
+          min-port=49160
+          max-port=49200
+          use-auth-secret
+          static-auth-secret=${TURN_STATIC_AUTH_SECRET}
+          realm=nyx.ci
+          fingerprint
+          no-cli
+          no-tls
+          no-dtls
+          allow-loopback-peers
+          log-file=stdout
+          EOF
+          sudo turnserver -c /etc/turnserver.conf > /tmp/coturn.log 2>&1 &
+          for i in $(seq 1 20); do
+            ss -lun 2>/dev/null | grep -q ':3478' && break
+            sleep 1
+          done
+          ss -lun | grep ':3478'   # gagal keras bila coturn tidak listen
+          tail -5 /tmp/coturn.log
       - name: Start sidecar & ambil cert hash untuk pinning
         working-directory: server
         run: |
@@ -238,6 +373,6 @@ jobs:
           echo "VITE_TRANSPORT_CERT_HASH=$CERT_HASH" >> "$GITHUB_ENV"
           echo "VITE_TRANSPORT_URL=http://localhost:33333" >> "$GITHUB_ENV"
           cat /tmp/sidecar.log
-      - name: Run E2E full (chat + transport specs aktif)
+      - name: Run E2E full (chat + transport + call specs aktif)
         working-directory: web
         run: pnpm exec playwright test --project=chrome

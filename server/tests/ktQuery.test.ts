@@ -22,6 +22,7 @@ import path from 'node:path';
 import {
   KtQueryError,
   fetchKtDistinguished,
+  fetchKtHead,
   fetchKtMonitor,
   fetchKtProof,
   fetchKtPublicConfig,
@@ -227,6 +228,35 @@ test('ktQuery: config publik dibaca sebagai JSON; non-JSON ditolak', async (t) =
     () => fetchKtPublicConfig(),
     (error: unknown) => error instanceof KtQueryError && error.code === 'MALFORMED_RESPONSE'
   );
+});
+
+test('ktQuery: head gossip divalidasi (angka + root 32 byte hex), bukan dipercaya apa adanya', async (t) => {
+  let body = JSON.stringify({ treeSize: 12, timestamp: 1_760_000_000_000, root: 'ab'.repeat(32) });
+  await withAdapter(t, (_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(body);
+  });
+
+  const head = await fetchKtHead();
+  assert.equal(head.treeSize, 12);
+  assert.equal(head.root, 'ab'.repeat(32));
+
+  // Bentuk yang tidak masuk akal ditolak sebagai respons rusak — jangkar gossip
+  // yang salah lebih buruk daripada tidak ada jangkar (klien akan "membuktikan"
+  // split-view terhadap angka yang tidak pernah ada).
+  for (const bad of [
+    { treeSize: 0, timestamp: 1, root: 'ab'.repeat(32) },
+    { treeSize: 1.5, timestamp: 1, root: 'ab'.repeat(32) },
+    { treeSize: 5, timestamp: 1, root: 'ab'.repeat(31) },
+    { treeSize: 5, timestamp: 1, root: 'ZZ'.repeat(32) },
+    { treeSize: 5, timestamp: 1 },
+  ]) {
+    body = JSON.stringify(bad);
+    await assert.rejects(
+      () => fetchKtHead(),
+      (error: unknown) => error instanceof KtQueryError && error.code === 'MALFORMED_RESPONSE'
+    );
+  }
 });
 
 test('ktQuery: hasil terhitung di metrik, termasuk saat nonaktif', async (t) => {

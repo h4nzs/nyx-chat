@@ -80,7 +80,8 @@
     "identity_changed_action": "Verifikasi sekarang",
     "identity_kt_mismatch": "Peringatan Keamanan: Kunci Bertentangan dengan Log Publik",
     "identity_kt_mismatch_desc": "Kunci yang dikirim server ini bukan kunci yang tercatat di log Key Transparency publik. Ini bisa berarti serangan sedang berlangsung. Pengiriman ditahan sampai kamu memverifikasi safety number dengan kontak lewat jalur lain.",
-    "kt_key_rotation": "Key Transparency: rotasi kunci kontak terbit di log publik."
+    "kt_key_rotation": "Key Transparency: rotasi kunci kontak terbit di log publik.",
+    "kt_split_view": "Key Transparency: dua klien melihat tree head berbeda untuk ukuran pohon yang sama. Ini seharusnya tidak pernah terjadi — verifikasi kontakmu sebelum memercayai kuncinya."
   },
   "status": {
     "signal_lost": "Sinyal Hilang",

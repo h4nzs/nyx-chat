@@ -64,6 +64,14 @@ import {
   loadSpqrState,
   saveSpqrState,
 } from '@lib/spqrState';
+// [docs/30 §30.5 tahap C] Gossip tree head KT: field `ktG` di dalam payload
+// ter-seal (tidak menambah apa pun ke sisi server) + pencatatan head peer.
+import {
+  extractTreeHeadField,
+  getLocalAnchor,
+  recordPeerTreeHead,
+  treeHeadField,
+} from '@lib/ktGossip';
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
@@ -431,6 +439,10 @@ async function decryptSpqrMessage(input: {
 
   const plaintext = sodium.to_string(result.plaintext);
   const peerVersion = extractVersionDeclaration(plaintext);
+  // [docs/30 §30.5 tahap C] Sama seperti jalur v1: head gossip peer dicatat dari
+  // plaintext yang sudah lolos AEAD braid. Fail-open (lihat ktGossip).
+  const peerTreeHead = extractTreeHeadField(plaintext);
+  if (peerTreeHead) void recordPeerTreeHead(input.conversationId, peerTreeHead);
   const persisted = attachClientProtocolFields(
     state,
     state,
@@ -1764,7 +1776,12 @@ async function doEncryptMessage(
           senderId: myId,
           senderDeviceKey: myPublicKeyB64,
           ...(state?.KEMr ? { ackKem: state.KEMr } : {}),
-          ...versionDeclaration(spqrSendingEnabled() ? 'v2' : 'v1')
+          ...versionDeclaration(spqrSendingEnabled() ? 'v2' : 'v1'),
+          // [docs/30 §30.5 tahap C / docs/34 §34.5] Jangkar gossip tree head KT:
+          // peer membandingkannya dengan jangkarnya sendiri → split-view terdeteksi
+          // tanpa server tahu, dan tanpa field tambahan di luar payload ter-seal.
+          // Tidak ada jangkar (KT nonaktif / belum disegarkan) → `{}`.
+          ...treeHeadField(getLocalAnchor())
       });
 
       // [docs/33 §33.7 — jalur versi paralel] Versi pengiriman diputuskan per
@@ -2557,6 +2574,11 @@ async function doDecryptMessage(
       // [docs/33 §33.7] Deklarasi versi peer (`ackV`) hanya diterima dari payload
       // yang sudah lolos AEAD — ia yang mengizinkan pengiriman v2 berikutnya.
       const peerVersion = extractVersionDeclaration(decryptedPlaintext);
+      // [docs/30 §30.5 tahap C] Head tree KT peer — hanya dipercaya karena
+      // datang dari payload yang sudah lolos AEAD. Pencatatan fail-open: gossip
+      // adalah sinyal tambahan, bukan syarat pesan bisa dibaca.
+      const peerTreeHead = extractTreeHeadField(decryptedPlaintext);
+      if (peerTreeHead) void recordPeerTreeHead(conversationId, peerTreeHead);
       const persistedState = attachClientProtocolFields(
           result.state,
           state ?? {},

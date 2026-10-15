@@ -13,6 +13,10 @@ import { doubleCsrf } from "csrf-csrf";
 import { env } from "./config.js";
 import path from "path";
 import crypto from "crypto";
+import { prisma } from "./lib/prisma.js";
+import { purgeSealedUserRows } from "./utils/routingIdentity.js";
+import { safeEqualStrings } from "./utils/validate.js";
+import { runCleanup } from "./jobs/cleanup.js";
 
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
@@ -279,22 +283,52 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * Pemeliharaan manual untuk operator (docs/10 §10.13): jalankan **putaran
+ * pembersihan yang sama** dengan cron `systemSweeper` tanpa menunggu jam 00:00.
+ *
+ * Dulu endpoint ini hanya memvalidasi kunci lalu menjawab "Cleanup triggered"
+ * tanpa melakukan apa pun — jawaban sukses untuk pekerjaan yang tidak terjadi.
+ * Sekarang ia memanggil `runCleanup` (satu implementasi dengan cron) dan
+ * mengembalikan hitungan per jenis baris + kegagalan per langkah, jadi operator
+ * bisa membuktikan pekerjaannya benar dari respons, bukan dari asumsi.
+ *
+ * Otorisasi tetap seperti kontrak lama (`x-admin-key` = `CHAT_SECRET`,
+ * perbandingan timing-safe, fail-closed bila rahasia server kosong). Endpoint
+ * berada sebelum middleware CSRF agar tetap bisa dipanggil dari cron/ops
+ * memakai kunci, bukan sesi browser.
+ */
 app.post("/api/admin/cleanup", async (req, res) => {
   const providedKey = req.headers["x-admin-key"];
   const secretKey = process.env.CHAT_SECRET;
 
-  if (!providedKey || typeof providedKey !== 'string' || !secretKey) {
+  if (!secretKey || typeof providedKey !== 'string' || !safeEqualStrings(providedKey, secretKey)) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  const providedBuffer = Buffer.from(providedKey);
-  const secretBuffer = Buffer.from(secretKey);
-
-  if (providedBuffer.length !== secretBuffer.length || !crypto.timingSafeEqual(providedBuffer, secretBuffer)) {
-    return res.status(403).json({ error: "Forbidden" });
+  try {
+    const report = await runCleanup(prisma, {
+      purgeUser: (userId) => purgeSealedUserRows(prisma, userId),
+      log: (message) => console.log(message),
+    });
+    // Kegagalan sebagian dijawab non-2xx: operator harus melihat bahwa ada
+    // langkah yang belum bersih, bukan banner "berhasil" di atas pekerjaan separuh.
+    const status = report.errors.length > 0 ? 500 : 200;
+    res.status(status).json({
+      message: report.errors.length > 0 ? "Cleanup selesai dengan kegagalan sebagian" : "Cleanup selesai",
+      counts: {
+        refreshTokens: report.refreshTokens,
+        sessionKeys: report.sessionKeys,
+        accounts: report.accounts,
+        subscriptions: report.subscriptions,
+        stories: report.stories,
+      },
+      errors: report.errors,
+    });
+  } catch (error) {
+    console.error("[Admin] Cleanup gagal:", error);
+    res.status(500).json({ error: "Cleanup failed" });
   }
-  // TODO: Add actual cleanup logic here
-  res.json({ message: "Cleanup triggered" });
 });
 
 // === CSRF Protection ===

@@ -27,7 +27,7 @@ On PR and push to `main`:
 | `lint` | non-blocking (`continue-on-error`) — typescript-eslint ≠ TS 7 |
 | `audit` | `pnpm audit --prod` |
 | `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip |
-| `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; runs `--project=chrome` (WebTransport active) |
+| `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; **coturn installed & started** (loopback relay, `allow-loopback-peers` only in CI) with `TURN_URLS`/`TURN_STATIC_AUTH_SECRET` in the job env; runs `--project=chrome` (WebTransport + real TURN relay active) |
 
 ## 10.3 Deploy pipeline (`deploy.yml`)
 
@@ -354,10 +354,75 @@ bocor, bukan sekadar performa.
 (lihat docs/11 §11.1c). Per-PR cukup `cargo test` + kampanye pendek vitest.
 
 **Load test relay:** `scripts/load/relay.k6.js` (500 VU, ambang p95 < 200 ms,
-error < 1%). Butuh `NYX_USER`, `NYX_PASS`, `NYX_USERNAME_HASH`,
-`NYX_CONVERSATION_ID`. Skrip ini **menulis** pesan — jalankan hanya ke
-server uji, bukan produksi. Jalur biner WebTransport/WSS diukur terpisah lewat
-harness browser (`docs/11`), karena k6 tidak punya WebTransport.
+error < 1%). Pakai pembungkusnya, `scripts/load/run-relay-load.sh`: ia memeriksa
+API hidup, menyiapkan akun+device+percakapan uji (`server/scripts/load-test-user.ts`,
+idempoten), menjalankan **SMOKE 5 VU lebih dulu** (tanpa langkah ini, kegagalan
+autentikasi/CSRF tampak seperti beban ringan — ditolak cepat tanpa menyentuh DB),
+baru beban penuh. Skrip ini **menulis** pesan — jalankan hanya ke server uji,
+bukan produksi. Terukur 2026-10-14 (500 VU): send p95 74,4 ms, fetch p95 68,8 ms,
+`http_req_failed` 0%. Jalur biner WebTransport/WSS diukur terpisah lewat harness
+browser (`docs/11`), karena k6 tidak punya WebTransport.
 
-**Game day (gate M1):** matikan exporter → `NyxMetricsExporterDown`; isi disk
-sampai <12% → `NyxHostDiskLow`; hentikan sweeper → `NyxSweeperStale`.
+**Drill alert (gate M1) — jalankan sebelum percaya pada aturan apa pun:**
+
+```bash
+scripts/drill-alerts.sh                              # 4 lapis, promtool di-cache
+METRICS_URL=http://127.0.0.1:9464/metrics scripts/drill-alerts.sh
+SKIP_LIVE=1 scripts/drill-alerts.sh                   # tanpa exporter hidup
+```
+
+Empat lapis: config + kompilasi aturan → **`promtool test rules`** (kasus
+menyala **dan** tidak-menyala per aturan) → kontrak metrik (nama `nyx_*` yang
+dirujuk aturan harus ada di `metrics.ts`) → cakupan drill (aturan baru wajib punya
+kasus). Lapis terakhir opsional men-scrape `/metrics` nyata. **Sebuah aturan yang
+merujuk metrik yang salah tulis tidak akan pernah menyala dan tidak menghasilkan
+error apa pun** — itu yang dicegah lapis ketiga. Ini juga jalan per-PR (job CI
+`alerts`, dan versi scrape-nyata di job `e2e`).
+
+Kalau ingin mereproduksi gejalanya dengan tangan: matikan exporter →
+`NyxMetricsExporterDown`; isi disk sampai <12% → `NyxHostDiskLow`; hentikan
+sweeper → `NyxSweeperStale`.
+
+## 10.13 Operasional harian: pembersihan & snapshot log KT (added 2026-10-14)
+
+Dua pekerjaan latar ini berjalan tanpa intervensi, tetapi **keduanya gagal secara
+senyap kalau tidak dipantau** — karena itu metriknya wajib ada di dashboard.
+
+**Pembersihan basis data.** Cron `jobs/systemSweeper.ts` (00:00) dan endpoint
+manual `POST /api/admin/cleanup` (header `x-admin-key` = `CHAT_SECRET`,
+timing-safe) menjalankan **kode yang sama** (`jobs/cleanup.ts`): refresh token
+kadaluarsa/revoked, session key kadaluarsa/basi (> 30 hari), dead-man's switch
+(akun dorman + baris ter-sealnya), langganan jatuh tempo → FREE, story
+kadaluarsa. Setiap langkah diisolasi: satu tabel yang gagal tidak menahan
+langkah lain, dan kegagalannya dilaporkan per langkah.
+
+- Respons endpoint memuat hitungan per jenis + `errors`. **HTTP 500 bila ada
+  langkah gagal** — jangan membaca 200 sebagai "semua bersih".
+- Metrik: `nyx_sweeper_last_run_timestamp_seconds{result}` (alert
+  `NyxSweeperStale`), `nyx_sweeper_deleted_rows_total{kind}`,
+  `nyx_sweeper_duration_seconds`.
+- Jalur manual untuk operator:
+  `curl -sS -X POST -H "x-admin-key: $CHAT_SECRET" https://api.nyx-app.my.id/api/admin/cleanup`
+
+**Snapshot log Key Transparency.** Log KT hanya ada di LevelDB milik
+`nyx-kt-query`. Setel `NYX_KT_SNAPSHOT_DIR` di service itu (mis.
+`/var/lib/nyx/kt-snapshots`) untuk menyalakan arsip harian:
+
+1. Penulisan dijeda (mutex yang sama dengan penulis log), direktori LevelDB
+   disalin, salinan **dibuka ulang** dan tree head + root-nya dibandingkan dengan
+   pohon hidup. Beda → arsip dibuang, langkah dilaporkan gagal, `latest.json`
+   tidak ditulis. Snapshot yang belum terverifikasi tidak pernah diunggah.
+2. Arsip `kt-snapshot-<waktu>Z.tar.gz` + `latest.json`; arsip lokal dipangkas ke
+   `NYX_KT_SNAPSHOT_KEEP` (default 7).
+3. Proses server NYX (`KT_SNAPSHOT_DIR` di `.env`) mengunggah arsip terbaru ke R2
+   tiap 03:30 (`kt-snapshots/<nama arsip>`, kredensial objek hanya di sana),
+   idempoten, dan menghapus objek lebih tua dari **30 hari**.
+
+- Metrik: `nyx_kt_snapshot_upload_total{result}` (alert bila `error` bertambah)
+  dan `nyx_kt_snapshot_deleted_total`.
+- Tanpa `KT_SNAPSHOT_DIR`, job log satu peringatan dan tidak mengunggah apa pun —
+  ini kondisi yang harus terlihat, bukan dianggap normal.
+- **Latihan pemulihan** (belum pernah dijalankan, wajib sebelum mengandalkannya):
+  unduh arsip terbaru, ekstrak, arahkan `-db` ke direktori hasil ekstrak dan
+  jalankan `nyx-kt-query -check`; `GET /healthz` harus melaporkan ukuran pohon
+  yang sama dengan `latest.json`.

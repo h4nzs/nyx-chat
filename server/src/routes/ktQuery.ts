@@ -24,6 +24,7 @@ import { generalLimiter } from '../middleware/rateLimiter.js';
 import {
   KtQueryError,
   fetchKtDistinguished,
+  fetchKtHead,
   fetchKtMonitor,
   fetchKtProof,
   fetchKtPublicConfig,
@@ -160,6 +161,17 @@ router.get('/config', generalLimiter, requireAuth, async (_req, res) => {
   }
   try {
     res.json(await fetchKtPublicConfig());
+  } catch (error) {
+    sendKtError(res, error);
+  }
+});
+
+// === Tree head ringkas (`{treeSize, timestamp, root}`) untuk gossip antar-klien ===
+// Bukan bukti: root di sini hanya untuk **membandingkan** head antar-klien
+// (`docs/30` §30.5 tahap C — deteksi split-view). Verifikasi tetap dari bukti.
+router.get('/head', generalLimiter, requireAuth, async (_req, res) => {
+  try {
+    res.json(await fetchKtHead());
   } catch (error) {
     sendKtError(res, error);
   }

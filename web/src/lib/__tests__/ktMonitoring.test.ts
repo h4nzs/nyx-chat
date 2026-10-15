@@ -372,6 +372,9 @@ describe('monitorKeyTransparency', () => {
         vrfKey: fixture.vrfKey,
       }),
       fetchMonitor,
+      // [docs/30 §30.5 tahap C] Jangkar gossip disegarkan di akhir langkah monitor;
+      // disuntik supaya test ini tetap tanpa jaringan.
+      fetchHead: async () => ({ root: 'aa'.repeat(32), treeSize: 1 }),
       states: [],
     });
 

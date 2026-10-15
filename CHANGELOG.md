@@ -2,6 +2,140 @@
 
 All notable changes to this project will be documented in this file.
 
+## 📞 WS-E gate (1): panggilan benar-benar merelay lewat coturn — 2026-10-15
+
+Gate `docs/30` §30.9 menerima “E2E call 1:1 di CI chrome dengan coturn”. Gate itu
+sebelumnya hanya bisa diklaim sebagai rencana: tidak ada spec panggilan, dan
+`transport.spec` (yang jadi satu-satunya spec E2E berjalan di jalur nyata) belum
+pernah dieksekusi karena headless Chromium di mesin dev tidak punya WebTransport.
+
+**`web/e2e/call.spec.ts` (baru)** membuktikan tiga hal berurutan lewat jalur
+produksi, bukan lewat mock: (a) `/api/keys/turn` (klien `web/src/lib/api.ts`)
+mengembalikan kredensial **coturn** — username `<unixExpiry>:<identityTag>`, tag
+identitas bukan userId — dan entri Cloudflare **disaring keluar** supaya bukti
+relay tidak bisa lolos lewat pihak ketiga; (b) dua `RTCPeerConnection` di browser
+nyata dengan `iceTransportPolicy: 'relay'` benar-benar terhubung; (c) pasangan
+kandidat terpilih `relay`↔`relay` dari coturn. Run nyata:
+`kandidat terpilih: {localType:relay, remoteType:relay, localAddress:127.0.0.1}`.
+Tanpa coturn, spec **skip dengan alasan tertulis** — bukan lulus lewat STUN publik.
+
+Dua bug di sisi **uji** ditemukan saat spec itu pertama dijalankan, keduanya kelas
+“alat ukurnya yang salah, bukan produknya”:
+
+1. SDP diserahkan **sebelum** ICE gathering selesai (spec tanpa trickle ICE tidak
+   punya jalur sinyal untuk kandidat susulan). SDP tanpa kandidat membuat ICE
+   mandek di `new` dan `getStats` melaporkan nol pasangan — persis seperti coturn
+   tidak bekerja. Kini `iceGatheringState === 'complete'` ditunggu sebelum
+   `setRemoteDescription`. Diverifikasi terpisah dengan harness Chrome standalone:
+   setelah perbaikan itu, pasangan `relay↔relay` **nominated & succeeded**.
+2. `connectionState` dibaca **setelah** `close()`, jadi setiap kegagalan dilaporkan
+   sebagai `caller=closed callee=closed` tanpa informasi apa pun. Status kini
+   diambil sebelum menutup.
+
+**CI `e2e-chrome` menjalankan coturn sendiri** (`apt-get install coturn` + conf
+loopback + `ss -lun | grep :3478` sebelum suite, `TURN_URLS` /
+`TURN_STATIC_AUTH_SECRET` di env job). `allow-loopback-peers` dipakai **hanya di
+runner** karena kedua peer ada di loopback yang sama — produksi memakai IP publik
+(catatan itu ada di komentar CI dan di spec, supaya tidak ada yang menyalinnya ke
+VPS).
+
+**`transport.spec` akhirnya benar-benar dijalankan** (`--project=chrome` + sidecar
+nyata) dan membayar utangnya: assertion tombstone-nya mencari “message deleted”
+sedangkan tombstone asli “This message was deleted” (selalu gagal begitu spec
+dijalankan), dan `getByText` juga mencocokkan **preview di sidebar** sehingga aksi
+berikutnya bertemu dua elemen dan menggantung. Locator chat sekarang di-scope ke
+`main` dan tiap aksi punya timeout eksplisit.
+
+**Gate latency-nya sendiri salah ukur (temuan).** `expect(endToEndMs).toBeLessThan(8000)`
+membandingkan seluruh jalur dari klik kirim sampai bubble peer terbaca. Di mesin
+ini angka itu didominasi **kripto lokal pengirim** (Argon2 + penyiapan sesi DR di
+worker: terukur 1,8–4,5 detik) dan oleh klik baris sidebar di klien peer — kode
+yang sama dilaporkan 10,5–17,2 detik hanya karena mesin sibuk. Run pertama yang
+benar-benar hijau sekaligus membuktikan pemisahannya: **total 7.406 ms = optimistic
+3.531 ms + relay/dekripsi 3.875 ms**. Karena itu yang diasersikan sekarang adalah
+**kaki relay** (bubble optimistis muncul → bubble peer terbaca) dengan anggaran 8
+detik yang tetap ketat, dan totalnya hanya dicatat di log. Menurunkan anggaran
+(tanpa memisahkan) akan membuat gate itu **flaky dan tetap buta** terhadap regresi
+transport — dua hal yang sama-sama menghilangkan nilainya.
+
+**`regression.spec` (burner destroy) flaky karena barrier-nya di lapis yang salah.**
+`deleteConversation` menghapus baris dari state UI **sinkron**, lalu menunggu hapus
+di IndexedDB, dan handler klik `ChatWindow` tidak menunggu rantai itu — jadi
+baris UI yang sudah hilang bukan bukti penghapusan sudah tertulis. Spec menunggu
+di UI, lalu reload membatalkan hapusnya, dan baris burner muncul kembali
+(snapshot kegagalan memperlihatkan baris `Unknown / No messages yet`). Sekarang
+spec menunggu di **lapis persistensi** (baris `conversations` + pesan benar-benar
+hilang dari Dexie) sebelum reload — kalau penghapusan memang tidak pernah tertulis,
+barrier itu sendiri yang gagal. Bukti: lulus 2/2 dijalankan terpisah setelah
+perbaikan (sebelumnya lulus 2 dari 4 run suite penuh).
+
+**`settings.spec` juga tidak pernah benar-benar menguji apa pun:** anggarannya
+60 detik, sedangkan rantai registrasi saja 40–70 detik → spec selalu mati di tengah
+(`Target page, context or browser has been closed`) dan kegagalannya terbaca seperti
+bug eject. Dengan anggaran yang realistis (180 detik, sama dengan spec lain) plus
+`expect.poll` untuk redirect pasca-reload, eject sekarang **lulus** (1,2 menit).
+
+**`chat.spec` gagal ~1 dari 5 run karena anggaran PoW-nya pas di batas.** Setelah
+empat spec lain hijau, sisa kegagalan tunggalnya adalah loket terakhir di alur
+verifikasi: snapshot kegagalan memperlihatkan modal masih “Mining hash collision…
+CPU at 100%” saat `toBeVisible({ timeout: 60000 })` habis, artinya yang kehabisan
+waktu adalah **kripto, bukan locator atau produk**. Biayanya memang besar:
+`minePoW` adalah **Argon2id 16 MB per percobaan** (`crypto.worker.ts`) mengejar
+prefiks heksa `floor(difficulty/2)` nol, dan alur ini mencapai difficulty 6
+(registrasi sudah memakai satu challenge, upgrade memakai challenge kedua →
+`min(4 + count, 8)`), jadi ~16³ ≈ 4096 evaluasi Argon2id — puluhan detik dengan
+ekor geometris yang gampang melewati 60 detik. Anggarannya sekarang disamakan
+dengan **timeout PoW milik klien sendiri** (300 detik, `crypto-worker-proxy.minePoW`)
+dan timeout global spec dinaikkan **di atas** anggaran itu (480 detik), supaya
+kalau mining memang tidak pernah selesai yang menangkap adalah assertion badge —
+bukan timeout global yang pesan kegagalannya tidak lagi menunjuk penyebab. Test
+tetap gagal bila badge tidak muncul; yang berubah hanya anggarannya.
+
+Setelah empat perbaikan itu, **seluruh suite Chrome hijau pada run penuh yang
+sama: 12 passed, 2 skipped** (dua skip itu `spqr.spec` yang memang env-gated,
+bukan lulus palsu). Sebelumnya run penuh terakhir berakhir `1 failed, 11 passed`.
+
+Dokumentasi residual diperbarui agar tidak lagi menyebut “belum dijalankan”:
+`docs/30` §30.9 (status keempat gate WS-E) + §30.20 (bagian M6 baru), `docs/29`,
+`docs/10` §10.2, `docs/11` §11.2–§11.4, `AGENTS.md`. Sisa WS-E tinggal operasi:
+coturn systemd di VPS.
+
+## 🎯 WS-G tuntas: alert di-drill, load test terukur, oracle lintas-implementasi — 2026-10-14
+
+Tiga item WS-G (`docs/30`) ditutup dengan bukti, bukan dengan catatan status:
+
+- **WS-G(2) alert di-drill.** `ops/prometheus/tests.yml` + `scripts/drill-alerts.sh`
+  (4 lapis) membuktikan tiap aturan **bisa menyala**, bukan cuma bisa
+  dikompilasi. Lapis ketiga menolak aturan yang merujuk nama metrik yang tidak
+  dideklarasikan (`metrics.ts`) — kesalahan itu sebelumnya menghasilkan aturan
+  yang **diam selamanya tanpa error apa pun**; lapis keempat menolak aturan baru
+  yang belum punya kasus drill. Saat pertama di-drill, tiga aturan mengeluarkan
+  label yang tidak sesuai dugaan (`NyxMetricsExporterDown` menambah `job`,
+  `NyxSweeperStale`/`NyxKtSnapshotNotUploaded` menandai sampel terakhir yang
+  `result="ok"`) — kelas kesalahan yang hanya terlihat dengan menjalankan
+  ekspresi terhadap seri waktu. Jobs CI baru: `alerts` (+ lapis scrape-nyata di
+  `e2e`).
+- **WS-G(3) load test dijalankan.** `scripts/load/run-relay-load.sh` + `server/scripts/load-test-user.ts`
+  menyiapkan akun/device/percakapan uji secara idempoten, menjalankan **SMOKE 5 VU**
+  lebih dulu, lalu beban penuh. Terukur 500 VU: send p95 **74,4 ms**, fetch p95
+  **68,8 ms** (gate < 200 ms), `http_req_failed` **0%**, `nyx_relay_errors` **0%**.
+  Tanpa langkah SMOKE, kegagalan autentikasi/CSRF tampak seperti beban ringan
+  (dijawab cepat tanpa menyentuh DB).
+- **WS-G(6) vektor lintas-implementasi.** `tools/dr-oracle/` — oracle Go yang
+  **tidak memakai libsodium sama sekali** (X25519 `x/crypto`, konversi
+  Ed25519→X25519 ditulis sendiri, X-Wing `cloudflare/circl`, BLAKE2b keyed,
+  XChaCha20-Poly1305) menutup lubang "implementasi NYX menyetujui kesalahan
+  implementasi NYX". Dua arah: vektor ter-commit diverifikasi oleh test web
+  lewat **worker asli** (`x3dhOracleVectors.test.ts`), dan hasil NYX diserahkan
+  kembali ke oracle (`x3dhOracleInterop.test.ts`, termasuk kontrol negatif).
+  Gate drift `go run . -check` menjaga vektor tidak menyimpang diam-diam; job CI
+  `dr-oracle`. **Batas jujur:** sender-key chain/skipped key/`SessionRecord`
+  libsignal tidak dibandingkan ke oracle (tetap internal), jadi ini ditulis
+  sebagai parsial di `docs/29`/`docs/30`, bukan "vektor DR penuh".
+
+Bukti: `scripts/drill-alerts.sh` exit 0 (14 aturan, 14 kasus drill, 7 metrik
+terdeklarasi, exporter hidup 13 keluarga metrik), interop 4/4, `-check` identik.
+
 ## 📦 Sumber Signal masuk repo: `vendor/` penuh — 2026-10-14
 
 Sebelumnya kode Signal yang dipakai NYX hanya hidup sebagai **checkout lokal di

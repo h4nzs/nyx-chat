@@ -80,7 +80,8 @@
     "identity_changed_action": "Verify now",
     "identity_kt_mismatch": "Security Alert: Key Contradicts Public Log",
     "identity_kt_mismatch_desc": "The key this server sent is not the key recorded in the public Key Transparency log. This can mean an attack in progress. Sending is paused until you verify the safety number with the contact through another channel.",
-    "kt_key_rotation": "Key Transparency: a contact key rotation was published in the log."
+    "kt_key_rotation": "Key Transparency: a contact key rotation was published in the log.",
+    "kt_split_view": "Key Transparency: two clients saw different tree heads for the same tree size. This should never happen — verify your contacts before trusting their keys."
   },
   "status": {
     "signal_lost": "Signal Lost",

@@ -164,8 +164,18 @@ test('D9: endpoint block memakai pasangan tag & tetap mengembalikan identitas un
 });
 
 test('D8/D9: dead man’s switch juga membersihkan baris milik user', () => {
+  // Kebijakan auto-destruct hidup di `jobs/cleanup.ts` (dipisah supaya cron dan
+  // `/api/admin/cleanup` menjalankan kode yang sama); pengikatan Prisma nyata
+  // (`purgeSealedUserRows`) ada di pemanggilnya.
+  const cleanup = read('../src/jobs/cleanup.ts');
+  assert.match(cleanup, /await purgeUser\(user\.id\)/, 'auto-destruct membersihkan baris ter-seal sebelum akun dihapus');
+  assert.ok(
+    cleanup.indexOf('await purgeUser(user.id)') < cleanup.indexOf('await db.user.deleteMany({ where: { id: user.id } })'),
+    'urutan benar: bersihkan dulu, baru hapus akun'
+  );
+
   const sweeper = read('../src/jobs/systemSweeper.ts');
-  assert.match(sweeper, /await purgeSealedUserRows\(prisma, u\.id\)/, 'auto-destruct membersihkan Story & BlockedUser');
+  assert.match(sweeper, /purgeUser: \(userId\) => purgeSealedUserRows\(prisma, userId\)/, 'sweeper menyuntik pembersih nyata');
 });
 
 test('D8/D9: nilai NULL/plaintext tidak melempar, tapi juga tidak dikenali', async () => {

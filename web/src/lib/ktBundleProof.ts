@@ -56,6 +56,7 @@ import {
   type KtStateUpdate,
   type KtStoredState,
 } from './ktMonitoring';
+import { getLocalAnchor, storeAnchor, type KtHeadAnchor } from './ktGossip';
 import {
   KT_MODE_CONTACT_MONITORING,
   KtVerificationError,
@@ -124,6 +125,8 @@ export interface KtBundleCheckInput {
 export interface KtBundleDeps {
   hashUsername?: (username: string) => Promise<string>;
   fetchConfig?: () => Promise<KtRemoteConfig>;
+  /** Tree head ringkas untuk gossip (`GET /api/keys/kt/head`). */
+  fetchHead?: () => Promise<KtHeadAnchor>;
   /** Bukti search untuk satu search key (`GET /api/keys/kt/search`). */
   fetchProof?: (query: KtProofQuery) => Promise<KtProof>;
   /** Bukti anchor distinguished (`GET /api/keys/kt/distinguished`). */
@@ -323,6 +326,50 @@ async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
   };
 }
 
+/**
+ * Tree head ringkas dari `/api/keys/kt/head` — **bukan** bukti.
+ *
+ * Root pohon tidak bisa diambil dari byte `FullTreeHead` (root dihitung verifier
+ * saat memverifikasi bukti, `docs/34` §34.2), jadi untuk *membandingkan* head
+ * antar-klien NYX memakai endpoint JSON kecil ini. Angka ini tidak menambah
+ * kepercayaan apa pun: kalu angka ini berbeda dari bukti yang diverifikasi,
+ * verifikasi bukti yang gagal — gossip hanya membandingkan angka antar-klien.
+ */
+async function defaultFetchHead(): Promise<KtHeadAnchor> {
+  const head = await api<{ treeSize: number; timestamp: number; root: string }>('/api/keys/kt/head');
+  const anchor = parseHeadAnchorArg(head);
+  if (!anchor) throw new Error('kt: head layanan tidak sah');
+  return anchor;
+}
+
+function parseHeadAnchorArg(value: unknown): KtHeadAnchor | undefined {
+  const head = value as { treeSize?: unknown; root?: unknown } | null;
+  if (!head || typeof head.treeSize !== 'number' || typeof head.root !== 'string') return undefined;
+  return /^[0-9a-f]{64}$/.test(head.root) && Number.isInteger(head.treeSize) && head.treeSize > 0
+    ? { root: head.root, treeSize: head.treeSize }
+    : undefined;
+}
+
+/**
+ * Segarkan jangkar lokal dari layanan KT lalu persist. Best-effort: dipanggil
+ * setelah verifikasi/monitor berhasil, dan kegagalannya tidak pernah mengubah
+ * verdict apa pun (gossip kehilangan jangkar sampai percobaan berikutnya).
+ */
+export async function refreshKtAnchor(
+  fetchHead: () => Promise<KtHeadAnchor> = defaultFetchHead
+): Promise<KtHeadAnchor | null> {
+  try {
+    const head = await fetchHead();
+    const anchor = parseHeadAnchorArg(head);
+    if (!anchor) return null;
+    await storeAnchor(anchor);
+    return anchor;
+  } catch (error) {
+    defaultLog('kt.head-unavailable', { reason: (error as Error).message });
+    return null;
+  }
+}
+
 async function defaultFetchAnchor(query: { last?: number; distinguished?: number }): Promise<KtProof> {
   const params = new URLSearchParams();
   if (query.last !== undefined) params.set('last', String(query.last));
@@ -462,6 +509,12 @@ export async function checkBundleAgainstKeyTransparency(
       treeSize,
     });
 
+    // [docs/30 §30.5 tahap C] Jangkar gossip: kontak pertama adalah saat paling
+    // mungkin jangkar belum ada (loop monitor baru menyala setelah 30 s), jadi
+    // sekali per percakapan bukti terverifikasi ini sekaligus dipakai untuk
+    // mengambil head ringkas. Kegagalannya tidak mengubah verdict di bawah.
+    if (!getLocalAnchor()) await refreshKtAnchor(deps.fetchHead);
+
     let served: Uint8Array;
     try {
       served = base64UrlToBytes(input.identityKey);
@@ -512,6 +565,8 @@ export interface KtMonitorDeps {
   verifier?: KeyTransparencyVerifier;
   fetchConfig?: () => Promise<KtRemoteConfig>;
   fetchMonitor?: (request: Uint8Array) => Promise<Uint8Array>;
+  /** Tree head ringkas untuk gossip (`GET /api/keys/kt/head`). */
+  fetchHead?: () => Promise<KtHeadAnchor>;
   states?: KtStoredState[];
   now?: Date | number;
 }
@@ -532,13 +587,17 @@ export interface KtMonitorDeps {
 export async function monitorKeyTransparency(deps: KtMonitorDeps = {}): Promise<KtMonitorOutcome> {
   const verifier = deps.verifier ?? (await loadKtVerifier());
   const config = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
-  return await runKtMonitorOnce({
+  const outcome = await runKtMonitorOnce({
     verifier,
     config,
     fetchMonitor: deps.fetchMonitor ?? defaultFetchMonitor,
     states: deps.states,
     now: deps.now,
   });
+  // [docs/30 §30.5 tahap C] Satu langkah monitor = satu titik segar untuk
+  // jangkar gossip (interval 6 jam; satu GET tambahan per langkah, bukan per pesan).
+  await refreshKtAnchor(deps.fetchHead);
+  return outcome;
 }
 
 /** Konfigurasi mode yang dipakai deployment NYX (dipakai test & diagnostik). */

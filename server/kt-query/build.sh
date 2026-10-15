@@ -28,6 +28,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
 OUT="${NYX_KT_BINARY:-$here/nyx-kt-query}"
+# Pemeriksa KT (docs/34 §34.6b): memakai verifier upstream untuk membuktikan
+# bukti yang disajikan layanan benar-benar bisa diverifikasi dari luar, dan
+# protokol auditor upstream untuk TreeSize/Audit. Dipakai scripts/kt-restore-drill.sh.
+CHECK_OUT="${NYX_KT_CHECK_BINARY:-$here/nyx-kt-check}"
 UPSTREAM="${NYX_KT_UPSTREAM:-}"
 
 if [[ -n "$UPSTREAM" ]]; then
@@ -63,4 +67,6 @@ if [[ "${1:-build}" == "test" ]]; then
 fi
 
 go build -o "$OUT" .
+go build -o "$CHECK_OUT" ./cmd/nyx-kt-check
 echo "dibangun: $OUT"
+echo "dibangun: $CHECK_OUT"

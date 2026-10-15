@@ -36,7 +36,9 @@ type updateService struct {
 
 	cfg   *transparency.PrivateConfig
 	store db.TransparencyStore
-	mu    sync.Mutex
+	// mu dibagi dengan `auditorService` (lihat audit.go): `SetAuditorHead` juga
+	// menulis state pohon, jadi keduanya harus antre di kunci yang sama.
+	mu *sync.Mutex
 }
 
 func (s *updateService) Update(ctx context.Context, req *tpb.UpdateRequest) (*tpb.UpdateResponse, error) {

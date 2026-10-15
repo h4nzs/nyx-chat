@@ -34,7 +34,7 @@ vi.mock('@lib/db', () => ({
       where: () => ({
         startsWith: (prefix: string) => ({
           delete: async () => {
-            for (const key of [...rows.keys()]) {
+            for (const key of Array.from(rows.keys())) {
               if (key.startsWith(prefix)) rows.delete(key);
             }
           },
