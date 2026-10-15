@@ -1292,6 +1292,53 @@ export async function sendGroupKeyDistributionPairwise(
   return result;
 }
 
+/**
+ * [R2 2026-10-15] Envelope distribusi sender-key format lama (v0/v1) tidak lagi
+ * dibaca (`docs/04` §4.6, legacy purge). Sebelum ini penolakannya hanya
+ * `console.warn` + `return` — konsekuensinya pengguna kehilangan pesan grup
+ * **tanpa gejala apa pun** yang bisa ditindaklanjuti (pesan tinggal
+ * `waiting_for_key` selamanya, dan itu terlihat seperti bug dekripsi biasa).
+ *
+ * Sekarang kegagalan ini dilaporkan lewat jalur yang sudah ada untuk peringatan
+ * keamanan (`security_key_changed`): pesan sistem di percakapan + toast +
+ * dynamic island, sekali per percakapan per sesi tab. Dedup-nya perlu karena
+ * envelope fulfillment bisa datang berulang (replay offline, reload) dan tanpa
+ * dedup UI akan dibanjiri peringatan yang sama.
+ */
+const legacyGroupKeyReported = new Set<string>();
+
+async function reportLegacyGroupKeyIgnored(conversationId: string, size: number, versionByte: number): Promise<void> {
+  console.warn(`[Crypto] Sender-key distribution envelope legacy (v0/v1) diabaikan (${size} byte, versi 0x${versionByte.toString(16)})`);
+  if (legacyGroupKeyReported.has(conversationId)) return;
+  legacyGroupKeyReported.add(conversationId);
+
+  try {
+    const { t } = await import('i18next');
+    const { useMessageStore } = await import('@store/message');
+    const { default: toast } = await import('react-hot-toast');
+    const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
+
+    const warningText = t('common:security_legacy_group_key');
+    useMessageStore.getState().addSystemMessage(conversationId, warningText);
+    toast.error(warningText, { icon: '⚠️', duration: 8000 });
+    useDynamicIslandStore.getState().addActivity({
+      type: 'notification',
+      sender: { name: 'NYX_SHIELD' },
+      message: warningText,
+      link: `/chat/${conversationId}`
+    }, 8000);
+  } catch (error) {
+    // Pelaporan best-effort: kalau store UI belum siap (mis. dipanggil dari test
+    // atau saat boot), jangan sampai jalur kripto ikut gagal.
+    console.warn('[Crypto] Gagal melaporkan envelope legacy ke UI:', error);
+  }
+}
+
+/** Hanya untuk test: buang dedup pelaporan envelope legacy. */
+export function clearLegacyGroupKeyReportForTests(): void {
+  legacyGroupKeyReported.clear();
+}
+
 export async function handleGroupKeyDistribution(
     conversationId: string,
     encryptedKey: string,
@@ -1335,7 +1382,9 @@ export async function handleGroupKeyDistribution(
   //   [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
   // [2026-10 legacy purge] Reader v1 (36B) & v0 (32B) dihapus.
   if (senderKeyBytes.length !== GROUP_DISTRIBUTION_V2_LEN || senderKeyBytes[0] !== GROUP_DISTRIBUTION_VERSION) {
-      console.warn('[Crypto] Sender-key distribution envelope legacy (v0/v1) diabaikan');
+      // [R2 2026-10-15] Penolakan harus TERLIHAT, bukan senyap: pengguna melihat
+      // pesan sistem + toast, bukan grup yang diam-diam kehilangan pesan.
+      await reportLegacyGroupKeyIgnored(conversationId, senderKeyBytes.length, senderKeyBytes[0] ?? 0);
       return;
   }
   const envelopeChainIdB64 = sodium.to_base64(senderKeyBytes.slice(1, 9), sodium.base64_variants.URLSAFE_NO_PADDING);

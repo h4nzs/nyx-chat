@@ -1,5 +1,6 @@
 import { isPlainObject } from '@utils/typeGuards';
 import { closeDatabaseConnection } from './keychainDb';
+import { clientVersionHeaders } from './clientVersion';
 
 /**
  * NUCLEAR LOCAL WIPE
@@ -14,12 +15,19 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
     // tidak bisa dihapus dari document.cookie — tanpa ini access token tetap valid
     // ~15 menit setelah wipe, sehingga "obliterate" tidak benar-benar total.
     try {
-      const csrfRes = await fetch('/api/csrf-token', { credentials: 'include' });
+      // [R2] Jalur ini tidak lewat `api()`, jadi header versi dikirim eksplisit —
+      // tanpa itu klien terlalu tua tidak bisa mematikan sesinya di server saat
+      // wipe (cookie HttpOnly tetap valid ~15 menit).
+      const csrfRes = await fetch('/api/csrf-token', {
+        credentials: 'include',
+        headers: clientVersionHeaders()
+      });
       const csrfData = await csrfRes.json().catch(() => null) as { csrfToken?: string } | null;
       await fetch('/api/auth/logout-all', {
         method: 'POST',
         credentials: 'include',
         headers: {
+          ...clientVersionHeaders(),
           'CSRF-Token': csrfData?.csrfToken ?? '',
           'x-nyx-installation-id': localStorage.getItem('nyx_installation_id') ?? ''
         }

@@ -4,6 +4,15 @@ Base URL: `https://api.nyx-app.my.id/api`. All request bodies are JSON (limit 1M
 
 Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. Responses are JSON; errors use `{ "error": "..." }`.
 
+**Client version header (R2, 2026-10-15).** Every REST call from the web app sends `x-nyx-client-version: <build version>`. When the operator sets `MIN_CLIENT_VERSION`, a request from an older client is rejected **before CSRF and before any route** with:
+
+```http
+426 Upgrade Required
+{ "error": "CLIENT_TOO_OLD", "message": "...", "clientVersion": "3.0.0", "minimumVersion": "3.1.0" }
+```
+
+The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without** the header always passes (clients shipped before 3.0.0 do not send it) — see `docs/10` §10.14. `GET /health` is never gated.
+
 ---
 
 ## auth — `/api/auth`

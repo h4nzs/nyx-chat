@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Gagal cepat bila artefak WASM (spqr/keytrans) tidak ikut ter-commit:
-      # CI tidak membangunnya (checkout Signal tidak ada di runner — NOTICE),
-      # dan tanpa artefak itu `pnpm run build` pecah di dalam Vite.
-      - name: Guard artefak WASM ter-commit (docs/33 · docs/34)
+      # Gagal cepat bila artefak WASM (spqr/keytrans) tidak ikut ter-commit atau
+      # hash-nya tidak cocok manifest; tanpa artefak itu `pnpm run build` pecah
+      # di dalam Vite.
+      - name: Guard artefak WASM ter-commit + hash manifest (docs/33 · docs/34)
         run: bash scripts/check-wasm-artifacts.sh
       # Gagal cepat bila sumber Signal ter-vendor (vendor/signal, server/kt-query/vendor)
       # hilang/basi/tidak ter-commit — tanpa itu clone bersih tidak bisa dibangun
@@ -54,6 +54,31 @@ jobs:
           JWT_SECRET: ci-jwt-secret-not-for-prod
           CSRF_SECRET: ci-csrf-secret
           VITE_TURNSTILE_SITE_KEY: '1x00000000000000000000AA'
+
+  # [R1 2026-10-15] Provenance artefak WASM: biner yang dikirim ke browser harus
+  # bisa dibuktikan berasal dari `vendor/signal/*` yang tertinjau. Job ini
+  # membangun ULANG kedua artefak dari sumber ter-vendor di root kanonik
+  # (`scripts/wasm-repro-build.sh`) lalu membandingkan hash-nya dengan
+  # `packages/wasm-artifacts.json`. Sebelum ini alasan "CI tak bisa membangun"
+  # berlaku karena sumber Signal tidak ada di runner; sekarang sumber ada di repo,
+  # jadi alasan itu hilang dan verifikasi ini mungkin — dan wajib.
+  wasm:
+    name: WASM reproducible (rebuild dari vendor + bandingkan hash)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Toolchain dipin `packages/*/rust-toolchain.toml` (1.95.0); tindakan ini
+      # menyiapkan rustup + target wasm32 agar `rustup target add` di build.sh
+      # tidak mengunduh dua kali.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          targets: wasm32-unknown-unknown
+      # protoc adalah build-dependency `spqr` & `libsignal-keytrans` (prost-build).
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Rebuild dari vendor + verifikasi hash manifest
+        run: bash scripts/wasm-repro-build.sh --verify
 
   unit:
     name: Unit Tests

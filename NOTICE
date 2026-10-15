@@ -108,8 +108,15 @@ Notes for redistribution
   the pinned commit listed above (plus this repository's thin wrappers).
 * Rebuilding the artifacts needs no external checkout: the pinned sources are in
   `vendor/signal/` and `server/kt-query/vendor/` (see each `build.sh` and
-  `README.md`). CI does not rebuild the WASM artifacts — it uses the committed
-  ones — but it does build `kt-query` from the vendored module.
+  `README.md`). CI builds `kt-query` from the vendored module **and rebuilds both
+  WASM artifacts** on every push, comparing their SHA-256 against
+  `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`, job
+  `wasm`). That is the correspondence proof for the AGPL binaries shipped in
+  `packages/*/dist/`: the committed `.wasm` files are byte-identical to what the
+  pinned sources in this repository produce with the pinned toolchain
+  (`1.95.0`, `packages/*/rust-toolchain.toml`), built at the canonical root
+  `/tmp/nyx-wasm-repro` (cargo's unit hash embeds the package path, so the build
+  directory has to be fixed — see the long comment in `scripts/wasm-repro-build.sh`).
 * Keep this file together with `LICENSE` in any redistribution.
 
 Pins are recorded here and in `docs/30` §30.2; repository layout and root-policy

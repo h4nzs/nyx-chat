@@ -104,6 +104,26 @@ Sifat yang dijaga:
 - **Bentuk tidak sah dilewati** — mis. `usernameHash` bukan 32 byte
   (`updatedAtDay` memakai bucket harian `dayBucket()`, presisi detik tidak masuk).
 
+### 32.4b Bentuk identifier yang WAJIB dikirim klien (2026-10-15)
+
+Search key log adalah `0x75 || Argon2id(username)` (32 byte). Server **tidak bisa**
+menurunkannya dari blind index ter-pepper (64 hex = `HMAC(pepper, …)`, satu arah),
+jadi klien harus mengirim bentuk Argon2id-nya. Ini penting khusus di **pemulihan
+akun**, karena pemulihan menukar kunci identitas — tepat peristiwa yang harus
+terlihat di log:
+
+| Yang dikirim klien | Hasil |
+|---|---|
+| Argon2id 32 byte base64url (`hashUsername(username)`) | entri ditulis (keyVersion 2) |
+| Hash ID ter-pepper 64 hex (yang ditampilkan/dibagikan server) | **entri dilewati** — dihitung `nyx_kt_writes_total{result="unsupported_identifier"}` |
+| Bentuk rusak lain (panjang/alfabet salah) | dilewati — `result="invalid"` |
+
+Klien sudah menormalkan masukan halaman pemulihan
+(`resolveRecoveryIdentifierInput`): hash ID dikirim apa adanya, sedangkan username
+di-hash Argon2id lebih dulu. Dua hasil "dilewati" itu sengaja **dipisah** di
+metrik supaya pemulihan yang kehilangan jejak log terlihat sebagai kejadian
+sendiri, bukan tercampur dengan input cacat.
+
 ## 32.5 Env
 
 | Var | Arti | Default |
@@ -122,7 +142,7 @@ kunci snapshot ada di box, sama seperti catatan `docs/30` §30.5.
 
 | Metrik | Arti |
 |---|---|
-| `nyx_kt_writes_total{result="ok"\|"error"\|"invalid"}` | penulisan log per hasil |
+| `nyx_kt_writes_total{result="ok"\|"error"\|"invalid"\|"unsupported_identifier"}` | penulisan log per hasil (`unsupported_identifier` = identifier bukan bentuk Argon2id 32 byte, mis. hash ID ter-pepper — §32.4b) |
 | `nyx_kt_last_success_timestamp_seconds` | Unix timestamp penulisan sukses terakhir (lag) |
 
 Alert (`ops/prometheus/alerts.yml`):

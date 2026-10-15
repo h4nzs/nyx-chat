@@ -194,3 +194,21 @@ groups:
         annotations:
           summary: "Unggahan snapshot log KT gagal"
           description: "Kredensial R2, bucket, atau berkas arsip bermasalah. Arsip lokal tetap ada (dipangkas 7), tetapi riwayat panjang di R2 berhenti bertambah."
+
+      # [R11 2026-10-15] Guard anti-abuse default-nya `off`, jadi deployment
+      # produksi yang lupa menyalakannya tampak 100% sehat: tidak ada error,
+      # tidak ada penolakan — hanya saja tidak ada perlindungan sama sekali.
+      # Gauge diset saat boot (server/src/index.ts), jadi ini alarm keadaan
+      # konfigurasi, bukan alarm performa.
+      #
+      # `== 0` (bukan `absent`): deployment dev/tanpa exporter tidak punya seri
+      # ini, dan itu memang bukan persoalan produksi — alarm tidak boleh menyala
+      # hanya karena metriknya tidak ada.
+      - alert: NyxAbuseGuardDisabled
+        expr: nyx_abuse_guard_enabled == 0
+        for: 15m
+        labels:
+          severity: high
+        annotations:
+          summary: "Guard anti-abuse ({{ $labels.guard }}) OFF di deployment ini"
+          description: "Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 \u00a710.13."

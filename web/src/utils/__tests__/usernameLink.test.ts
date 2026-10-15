@@ -14,6 +14,7 @@ import {
   buildUsernameLink,
   isValidUsernameHash,
   parseUsernameHashSegment,
+  resolveRecoveryIdentifierInput,
 } from '../usernameLink';
 
 const BASE64_HASH = 'A'.repeat(USERNAME_HASH_BASE64URL_LENGTH); // 43 char base64url
@@ -56,5 +57,30 @@ describe('usernameLink: buildUsernameLink', () => {
 
   it('menolak hashId tidak sah (tidak ada link rusak yang tersebar)', () => {
     expect(() => buildUsernameLink('https://nyx-app.my.id', 'rusak')).toThrow(/tidak sah/);
+  });
+});
+
+describe('resolveRecoveryIdentifierInput (jalur pemulihan akun)', () => {
+  it('hash ID dikirim apa adanya — server punya kandidat untuk keduanya', () => {
+    expect(resolveRecoveryIdentifierInput(BASE64_HASH)).toEqual({ kind: 'hash-id', value: BASE64_HASH });
+    expect(resolveRecoveryIdentifierInput(HEX_HASH)).toEqual({ kind: 'hash-id', value: HEX_HASH });
+  });
+
+  it('username diperlakukan sebagai username (harus di-hash Argon2id dulu oleh pemanggil)', () => {
+    expect(resolveRecoveryIdentifierInput('han')).toEqual({ kind: 'username', value: 'han' });
+    // Panjang 43 tapi alfabetnya salah (mis. memuat spasi/'!') bukan hash ID.
+    expect(resolveRecoveryIdentifierInput('A'.repeat(42) + '!')).toEqual({
+      kind: 'username',
+      value: 'A'.repeat(42) + '!',
+    });
+  });
+
+  it('trim spasi di tepi — pengguna menempel hash ID dengan spasi tetap bekerja', () => {
+    expect(resolveRecoveryIdentifierInput(`  ${HEX_HASH}  `)).toEqual({ kind: 'hash-id', value: HEX_HASH });
+    expect(resolveRecoveryIdentifierInput('  han  ')).toEqual({ kind: 'username', value: 'han' });
+  });
+
+  it('string kosong → username kosong (bukan hash ID kosong yang dikirim ke server)', () => {
+    expect(resolveRecoveryIdentifierInput('   ')).toEqual({ kind: 'username', value: '' });
   });
 });

@@ -211,6 +211,7 @@
   "added_to_group": "Has sido añadido a \"{{groupName}}\"",
   "user_unbanned": "¡Usuario @{{username}} desbaneado!",
   "security_key_changed": "La clave de seguridad de {{name}} ha cambiado. Es posible que desee verificar su identidad.",
+  "security_legacy_group_key": "Se ignoró una clave de grupo en formato antiguo. Recarga NYX para actualizar: pueden faltar mensajes de grupo hasta que todos se actualicen.",
   "uploading_to_cloud": "Subiendo a la nube...",
   "avatar_uploaded": "¡Avatar subido! (Se requiere actualizar el perfil)",
   "user_blocked": "Usuario bloqueado",

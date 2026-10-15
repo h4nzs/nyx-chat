@@ -63,6 +63,14 @@ membacanya:
 - **Bukti peer (in-band, otentikasi AEAD):** payload ter-seal membawa `ackV: 2`
   (= "versi ratchet yang bisa SAYA buka"). Pengirim baru memakai v2 setelah
   melihat `ackV: 2` dari peer. Klien lama tidak pernah menerima header v2.
+- **Apa yang "beku" — dan apa yang tidak (nuansa penting).** Yang beku adalah
+  **header wire** v1 (`{ kemPk, ct, n, pn }`) dan primitifnya: klien lama tetap
+  membacanya apa adanya. Yang **tidak** beku adalah **isi payload ter-seal**:
+  jalur v1 sekarang membawa field tambahan (`ackV`, `ktG`, `ackKem`) yang hanya
+  diabaikan klien lama — aditif dan tidak terlihat server. Konsekuensinya:
+  payload mendekati batas blok padding 8 KiB bisa naik ke blok berikutnya, jadi
+  ukuran paket per pesan boleh berubah tanpa perubahan protokol. Yang dilarang
+  tetap sama: mengubah header v1, primitif, atau padding.
 - **Header (versi baru, bukan tambalan):**
   - v1: `{ kemPk, ct, n, pn }` — tanpa penanda versi (§4.5).
   - v2: `{ v: 2, b: [frame…] }` — `b` = satu atau lebih frame braid (base64url,
@@ -92,7 +100,7 @@ membacanya:
 
 - **Sender state** `{ CK, N, initialCK, chainId, metadataKey, ... }` per conversation; **receiver state** one per `(conversation, senderDeviceKey)` carrying `{CK, N, eraCK, chainId, metadataKey, skippedKeys, signingKey}` — both live in IndexedDB `groupSenderStates` / `groupReceiverStates`, **encrypted at rest** (`ENC1:` prefix in `keychainDb.ts`). Era changes archive the old receiver state (max 5, `#era_<chainId>` ids).
 - **Era identity:** `chainId` is a RANDOM 64-bit value minted with each era (`group_init_sender_key` returns `{senderKeyB64, chainIdB64, metadataKeyB64}`) — not derived from the chain key. The `metadataKey` (256-bit) takes group metadata **out of the chain**: metadata v2 = `{v:2, kind:'group_metadata', chainId, ct (XChaCha), signature, senderDeviceKey}` (**`senderId` dihapus 2026-10-09**, docs/28 Tier 4: field itu memuat userId penulis dan tidak pernah dipakai reader — routing lewat `chainId`, verifikasi tanda tangan hanya atas byte `ct`; blob v1 — yang dulu membawa `senderId` — tidak lagi ditulis/dibaca, 2026-10).
-- `group_ratchet_encrypt` / `group_ratchet_decrypt` / `group_decrypt_skipped` handle the ratchet (skipped message keys live **inside the receiver record**, `sender_message_keys` style). Distribution goes through the single `sendGroupSenderKeyDistribution` path: envelope v2 `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]` sealed per device via `pq_box_seal`, relayed by `group:fulfilled_key` (client-side fan-out; server is blind). v1/v0 envelopes and wrappers remain readable (version byte / shape detection).
+- `group_ratchet_encrypt` / `group_ratchet_decrypt` / `group_decrypt_skipped` handle the ratchet (skipped message keys live **inside the receiver record**, `sender_message_keys` style). Distribution goes through the single `sendGroupSenderKeyDistribution` path: envelope v2 `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]` sealed per device via `pq_box_seal`, relayed by `group:fulfilled_key` (client-side fan-out; server is blind). **v1 (36 B) and v0 (32 B) envelopes are no longer readable** — `handleGroupKeyDistribution` accepts only the 77-byte v2 shape and any other length/version byte is dropped **with a warning + a system message + toast in the UI** ([2026-10 legacy purge], `docs/30`; see `docs/29` §5.5). Clients that predate v2 therefore cannot join a new era and their users see it, instead of silently losing group messages. Two mechanisms keep that from staying invisible: a new service worker **forces one page reload per tab per session** (the page otherwise keeps running the old bundle), and the server can refuse too-old clients outright with `426 CLIENT_TOO_OLD` when the operator sets `MIN_CLIENT_VERSION` (`docs/10` §10.14, `docs/12`).
 
 ## 4.7 Burner protocol (PQ-DR)
 
@@ -113,7 +121,7 @@ IndexedDB keychain values are wrapped: `"ENC1:" + base64url(worker_encrypt_sessi
 
 ## 4.10 Traffic cover
 
-- Every user message is padded to **8192 bytes** before encryption (`PADDING_BLOCK_SIZE`) to defeat size analysis — jalur v2 memakai padding yang sama (hanya penghasil message key yang berbeda).
+- Every user message is padded to **8192 bytes** before encryption (`PADDING_BLOCK_SIZE`) to defeat size analysis — jalur v2 memakai padding yang sama (hanya penghasil message key yang berbeda). Field payload baru yang aditif (`ackV`/`ktG`/`ackKem`, §4.5.1) ikut masuk ke blok yang sudah dipad ini, bukan ke header wire.
 - Idle WebTransport connections emit 1000-byte random datagrams every ~3s (`CHAFF` opcode 0x00 — ignored by the sidecar). Real frames are never delayed by chaff.
 
 ## 4.11 Worker operation catalog (48 ops)

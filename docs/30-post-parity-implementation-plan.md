@@ -673,7 +673,10 @@ Sebuah item dianggap selesai hanya bila **semuanya** benar:
 2. `docs/` terkait diperbarui: `03` (security model), `04` (crypto protocol),
    `09` (database), `10` (deploy/ops), `12` (API reference), `14` (auth/identity),
    `16` (groups), `18` (realtime transport) — plus dokumen baru saat workstream-nya
-   mulai: `31-backup-format.md`, `32-key-transparency.md`, `33-multi-device.md`.
+   mulai: `31-backup-format.md`, `32-key-transparency-kt.md`,
+   `33-spqr-wasm.md`, `34-key-transparency-verifier.md`.
+   (Rujukan lama `32-key-transparency.md` / `33-multi-device.md` tidak pernah ada
+   dengan nama itu — multi-device adalah non-goal permanen, `docs/29` §29.6.)
 3. Audit privasi lulus: `privacy-dump-audit.ts` + aturan `docs/28` untuk kolom
    baru; tidak ada secret/identitas baru di Redis tanpa `identityTag`.
 4. Gerbang kapabilitas: klien lama tetap jalan (tanpa perubahan perilaku),

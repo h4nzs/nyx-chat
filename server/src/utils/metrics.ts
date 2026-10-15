@@ -410,3 +410,48 @@ export const SWEEPER_DELETED = defineCounter(
   'Baris yang dihapus sweeper sistem, per jenis',
   ['kind']
 );
+
+/**
+ * [R6 2026-10-15] Pemanggilan pemeliharaan manual `POST /api/admin/cleanup`,
+ * per hasil. Endpoint ini **destruktif** (menghancurkan akun dorman), jadi
+ * pemanggilannya — termasuk yang DITOLAK — harus terlihat di dashboard tanpa
+ * membaca log. Labelnya hanya enum (`ok`/`partial`/`error`/`forbidden`/
+ * `rate_limited`), tanpa IP atau rahasia.
+ */
+export const ADMIN_CLEANUP = defineCounter(
+  'nyx_admin_cleanup_total',
+  'Pemanggilan pemeliharaan manual /api/admin/cleanup, per hasil',
+  ['result']
+);
+
+/**
+ * [R11 2026-10-15] Apakah guard anti-abuse menyala **saat proses ini boot**.
+ *
+ * Kenapa perlu metrik, bukan cuma log: `ABUSE_REGISTRATION_GUARD` dan
+ * `ABUSE_REQUIRE_ATTESTATION` default-nya `off`, jadi deployment produksi yang
+ * lupa menyalakannya tampak sehat sepenuhnya (tidak ada error, tidak ada
+ * penolakan) — hanya tidak ada perlindungan. Gauge ini membuat keadaan itu bisa
+ * di-alert (`ops/prometheus/alerts.yml`) alih-alih bergantung pada ingatan
+ * operator. Nilai 1 = menyala, 0 = off.
+ */
+export const ABUSE_GUARD_ENABLED = defineGauge(
+  'nyx_abuse_guard_enabled',
+  'Guard anti-abuse registrasi menyala (1) atau off (0), per guard',
+  ['guard']
+);
+
+/**
+ * [R2 2026-10-15] Permintaan API yang ditolak karena versi klien di bawah
+ * `MIN_CLIENT_VERSION` (HTTP 426), per alasan.
+ *
+ * Kenapa perlu: klien lama yang tertinggal di cache service worker/PWA adalah
+alasan utama penolakan ini terjadi massal — dan tanpa metrik, satu-satunya
+jejaknya adalah keluhan pengguna. Labelnya enum (`too-old`), tanpa identitas.
+ * Gerbangnya sendiri mati bila `MIN_CLIENT_VERSION` tidak diset, jadi seri
+ * datar di sini berarti "tidak ada yang ditolak", bukan "tidak ada yang tua".
+ */
+export const CLIENT_VERSION_REJECTED = defineCounter(
+  'nyx_client_version_rejected_total',
+  'Permintaan API yang ditolak karena versi klien di bawah minimum, per alasan',
+  ['result']
+);

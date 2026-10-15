@@ -3,7 +3,8 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { FiKey, FiUpload, FiShield } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
-import { recoverAccountWithSignature, restoreFromPhrase } from '@lib/crypto-worker-proxy';
+import { hashUsername, recoverAccountWithSignature, restoreFromPhrase } from '@lib/crypto-worker-proxy';
+import { resolveRecoveryIdentifierInput } from '@utils/usernameLink';
 import { saveEncryptedKeys } from '@lib/keyStorage';
 import { useAuthStore } from '@store/auth';
 import { api } from '@lib/api';
@@ -63,8 +64,18 @@ export default function RestorePage() {
           // --- MODE A: ACCOUNT RECOVERY (FORGOT PASSWORD / NOT LOGGED IN) ---
           const timestamp = Date.now();
 
+          // 0. Bentuk identifier yang dikirim ke server HARUS kanonik:
+          //    hash ID dikirim apa adanya, username di-hash Argon2id dulu.
+          //    Selain memperbaiki lookup, ini yang membuat server bisa menulis
+          //    entri Key Transparency pemulihan (log berkunci Argon2id 32 byte;
+          //    hash ID ter-pepper 64 hex membuat entri DILEWATI — `docs/32`).
+          const parsedIdentifier = resolveRecoveryIdentifierInput(identifier);
+          const effectiveIdentifier = parsedIdentifier.kind === 'hash-id'
+            ? parsedIdentifier.value
+            : await hashUsername(parsedIdentifier.value);
+
           // 1. Fetch Server-side Nonce Challenge
-          const challengeRes = await api<{ nonce: string }>(`/api/auth/recover/challenge?identifier=${encodeURIComponent(identifier)}`, { method: 'GET' });
+          const challengeRes = await api<{ nonce: string }>(`/api/auth/recover/challenge?identifier=${encodeURIComponent(effectiveIdentifier)}`, { method: 'GET' });
           const nonce = challengeRes.nonce;
 
           // 2. Generate keys & Sign Payload locally
@@ -74,7 +85,7 @@ export default function RestorePage() {
             signingPublicKeyB64,
             encryptedPrivateKeys,
             signatureB64
-          } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp, nonce);
+          } = await recoverAccountWithSignature(trimmedPhrase, password, effectiveIdentifier, timestamp, nonce);
 
           if (!encryptedPrivateKeys || !signatureB64 || !encryptionPublicKeyB64 || !pqEncryptionPublicKeyB64 || !signingPublicKeyB64) {
             throw new Error(t('auth:restore.error_payload'));
@@ -91,7 +102,7 @@ export default function RestorePage() {
               'X-Nyx-Installation-Id': installationId
             },
             body: JSON.stringify({
-              identifier,
+              identifier: effectiveIdentifier,
               newPassword: password,
               newEncryptedKeys: encryptedPrivateKeys,
               publicKey: encryptionPublicKeyB64,

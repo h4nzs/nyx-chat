@@ -207,6 +207,7 @@
   "added_to_group": "You've been added to \"{{groupName}}\"",
   "user_unbanned": "User @{{username}} unbanned!",
   "security_key_changed": "The security key for {{name}} has changed. You may want to verify their identity.",
+  "security_legacy_group_key": "A group key in an old format was ignored. Reload NYX to update — group messages may be missing until everyone is up to date.",
   "uploading_to_cloud": "Uploading to Cloud...",
   "avatar_uploaded": "Avatar uploaded! (Profile update required)",
   "user_blocked": "User blocked",

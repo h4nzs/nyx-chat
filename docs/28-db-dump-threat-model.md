@@ -745,3 +745,59 @@ audit source Signal (`~/signal/*`) sebagai tolok ukur "seperti apa ZK yang nyata
 **Apa yang TIDAK diambil:** Signal punya jadwal rilis & audit formal; NYX belum.
 Tabel di dokumen ini menggantikannya sebagai guardrail lokal — bukan pengganti
 audit pihak ketiga.
+
+---
+
+## 28.11 Review eksternal 2026-10-15 — dua temuan yang BELUM ditutup sepenuhnya
+
+Dua temuan dari review menyeluruh (R4/R5 di `reviewer.md`) sengaja **tidak**
+diselesaikan dengan mengubah format, dan dicatat di sini supaya tidak hilang:
+keduanya adalah batas desain yang harus dipahami operator, bukan bug yang bisa
+ditambal tanpa konsekuensi.
+
+### R4 — satu pepper, envelope tanpa versi
+
+`NYX_AT_REST_PEPPER` menurunkan **semua** kunci at-rest. Yang sudah benar (jangan
+dirusak): setiap tujuan sudah dipisah lewat label HMAC —
+
+| Tujuan | Derivasi | Catatan |
+|---|---|---|
+| Blind index | `HMAC(pepper, nilai)` | input berentropi rendah → wajib berkunci |
+| Kunci seal | `HMAC(pepper, "NYX_AT_REST_SEAL_V1")` | domain-separated |
+| Nonce deterministik | `HMAC(pepper, "NYX_AT_REST_SEAL_V1:nonce:" ‖ plaintext)` | tidak pernah sama dengan keluaran di atas |
+| Tag receipt/instalasi | `HMAC(pepper, "receipt:…" / "install:…")` | domain-separated, tak bisa dikorelasikan lintas percakapan |
+
+Yang **belum** ditutup: (a) envelope `base64url(nonce‖ct)` tidak membawa byte
+versi, jadi penambahan format baru tidak bisa dibedakan dari nilai rusak; (b)
+tidak ada jalur rotasi pepper — rotasi berarti re-seal + re-hash seluruh kolom,
+dan lookup lama gagal; (c) satu rahasia untuk dua peran (identifier vs seal).
+
+**Prosedur yang berlaku sekarang (rotasi = operasi pemeliharaan, bukan
+hot-rotate):** simpan pepper di tempat yang ikut di-backup **terpisah dari
+backup DB** (kalau pepper hilang bersamaan DB, tidak ada yang bisa dipulihkan;
+kalau pepper bocor, dump menjadi setara plaintext). Rotasi pepper hanya boleh
+dilakukan dengan **reset akun/DB** sampai ada envelope ber-versi — jangan
+menjalankan rotasi parsial.
+
+### R5 — kandidat lookup "nilai apa adanya" di jalur hidup
+
+`identifierLookupCandidates(v)` = `[HMAC(pepper, v), v]`. Kandidat kedua **bukan**
+toleransi baris legacy; ia dipakai untuk nilai ter-pepper yang di-echo klien:
+
+- tautan berbagi profil (`/u/<hashId>`, `/connect?u=…`) → `/api/users/search`;
+- pemulihan akun & verifikasi identitas (`/restore` mengirim hash ID apa adanya);
+- login yang dikirim dari nilai tersimpan (`restoreNotSynced`).
+
+Konsekuensi yang harus dipahami: siapa pun yang memegang **dump** sudah tahu
+seluruh nilai ter-pepper, dan dapat mengirimkannya kembali ke layanan hidup untuk
+menemukan akun (login tetap butuh kata sandi; pepper tetap melindungi pemetaan
+*username → akun*). Yang tidak boleh disimpulkan: pepper saja sudah cukup untuk
+membuat lookup tidak berguna bagi pemegang dump.
+
+Mitigasi yang berlaku sekarang: rate limit per IP pada semua jalur itu, dan
+pencarian publik dibatasi (sandbox hanya boleh lookup persis,
+`users.ts` `isExactHash`). Perbaikan penuh = **memisahkan "ID untuk dibagikan"
+dari kolom blind index** (kolom `shareId` terpisah + kandidat kedua dibatasi ke
+endpoint pencarian). Belum dikerjakan karena menyentuh skema **dan** klien; kalau
+dikerjakan, urutannya: kolom baru → klien mulai memakai `shareId` untuk tautan →
+hapus kandidat kedua dari jalur auth.

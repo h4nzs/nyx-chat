@@ -207,6 +207,7 @@
   "added_to_group": "Anda telah ditambahkan ke \"{{groupName}}\"",
   "user_unbanned": "Pengguna @{{username}} telah di-unban!",
   "security_key_changed": "Kunci keamanan untuk {{name}} telah berubah. Anda mungkin ingin memverifikasi identitas mereka.",
+  "security_legacy_group_key": "Kunci grup berformat lama diabaikan. Muat ulang NYX untuk memperbarui — pesan grup bisa hilang sampai semua orang memperbarui.",
   "uploading_to_cloud": "Mengunggah ke Cloud...",
   "avatar_uploaded": "Avatar terunggah! (Perbarui profil diperlukan)",
   "user_blocked": "Pengguna diblokir",

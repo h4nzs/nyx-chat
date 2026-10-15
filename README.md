@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.7.0-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="Typescript">
   <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React">
@@ -134,7 +134,7 @@ Because we don't sync history to the cloud, YOU own your data. To ensure maximum
 NYX is an open-source fortress, and we welcome operatives to inspect the walls.
 
   * **Strict Rule:** Do NOT update or touch `libsodium-wrappers` unless upgrading specifically for newer PQC primitives. Cryptographic backward compatibility is our highest priority.
-  * **Linting:** ESLint is currently **non-blocking** repo-wide (typescript-eslint does not yet support TypeScript 7 — the CI lint job runs with `continue-on-error` on purpose). Ensure `pnpm run build` and `npx tsc --noEmit` pass cleanly before opening a PR.
+  * **Linting:** `pnpm run lint` runs **oxlint** per package. Since 2026-10-14 the CI lint job is **blocking on `error`**: every rule at `error` level (the bug/security classes) and the whole `correctness` category must stay at **0 findings**. The old ESLint configs are dead (`typescript-eslint` rejects TypeScript 7) — don't revive them. The remaining ~194 `no-unused-vars` are deliberately kept at `warn` and cleaned up gradually. Ensure `pnpm run build` and `npx tsc --noEmit` pass cleanly before opening a PR (see `AGENTS.md` for the details).
 
 Please check the `CONTRIBUTING.md` and use the provided PR templates.
 

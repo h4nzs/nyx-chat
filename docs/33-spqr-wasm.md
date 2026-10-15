@@ -31,7 +31,7 @@ pesan — jadi chain simetris NYX (XChaCha20-Poly1305) tidak perlu berubah.
 | `packages/spqr-wasm/src/lib.rs` | pembungkus Rust: ABI primitif, entropi disuntik host |
 | `packages/spqr-wasm/build.sh` | build ke `wasm32-unknown-unknown` (tanpa `wasm-pack`), menyalin `Cargo.toml.in` → `Cargo.toml` |
 | `vendor/signal/spqr/` | crate `spqr` **ter-vendor** (pin §30.2), sumber default `build.sh` |
-| `packages/spqr-wasm/dist/spqr.wasm` | **artefak ter-commit** (506,7 KiB) dari sumber ter-vendor itu |
+| `packages/spqr-wasm/dist/spqr.wasm` | **artefak ter-commit** (±507 KiB) dari sumber ter-vendor itu — hash-nya dipin di `packages/wasm-artifacts.json`, dibangun ulang tiap push oleh CI (job `wasm`) |
 | `web/src/lib/spqrRatchet.ts` | pembungkus TS: framing, kode hasil, `SpqrError`, injeksi entropi |
 | `web/src/lib/spqrBench.ts` | harness benchmark (gate §30.8 poin 5) |
 | `web/src/lib/__tests__/spqrRatchet.test.ts` | 10 test properti dengan modul hasil build sungguhan |

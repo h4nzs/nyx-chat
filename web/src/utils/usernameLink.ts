@@ -39,6 +39,35 @@ export function parseUsernameHashSegment(raw: string | undefined | null): string
 }
 
 /**
+ * [2026-10-15] Bentuk identitas yang diketik pengguna di halaman pemulihan.
+ *
+ * Kenapa ini dipisah jadi fungsi murni: halaman pemulihan menerima DUA bentuk
+ * masukan yang berbeda secara kriptografis, dan salah menebaknya membuat akun
+ * tak bisa dipulihkan (bukan sekadar pesan error):
+ *
+ *   - **`hash-id`** — 43 char base64url (Argon2id klien) atau 64 hex (blind
+ *     index ter-pepper yang dikembalikan server). Dikirim apa adanya: server
+ *     sudah punya jalur kandidat untuk keduanya.
+ *   - **`username`** — teks biasa. HARUS di-hash Argon2id dulu di klien
+ *     (`hashUsername`); mengirimnya apa adanya tidak akan pernah cocok.
+ *
+ * Pemilihan bentuk username juga memperbaiki jalur Key Transparency: log KT
+ * berkunci `0x75 || Argon2id(username)` (32 byte), jadi hanya bentuk Argon2id
+ * yang bisa dicatat. Sebelum ini, pengguna yang mengetik username (atau hash ID
+ * ter-pepper) membuat entri KT pemulihan **dilewati** — padahal pemulihan
+ * menukar kunci identitas, tepat peristiwa yang harus terlihat di log.
+ */
+export type RecoveryIdentifierInput =
+  | { kind: 'hash-id'; value: string }
+  | { kind: 'username'; value: string };
+
+export function resolveRecoveryIdentifierInput(raw: string): RecoveryIdentifierInput {
+  const value = (raw ?? '').trim();
+  if (isValidUsernameHash(value)) return { kind: 'hash-id', value };
+  return { kind: 'username', value };
+}
+
+/**
  * Bangun link pendek absolut. Melempar bila hashId tidak sah — mencegah link
  * rusak ikut tersebar.
  */

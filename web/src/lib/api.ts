@@ -2,6 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import toast from 'react-hot-toast'; // Pastikan sudah diinstall
+import { CLIENT_VERSION_HEADER, CLIENT_VERSION_VALUE } from './clientVersion';
 
 // PERBAIKAN: Baca dari Environment Variable
 const envUrl = import.meta.env.VITE_API_URL || "";
@@ -153,6 +154,11 @@ export async function api<T = unknown>(
   const hasInstallationId = Object.keys(userHeaders).some(k => k.toLowerCase() === 'x-nyx-installation-id');
   const headers: Record<string, string> = {
     ...(hasInstallationId ? {} : { 'x-nyx-installation-id': await getClientInstallationId() }),
+    // [R2 2026-10-15] Versi build dikirim di setiap request. Server memakainya
+    // untuk menolak klien yang terlalu tua untuk protokol terkini (426
+    // `CLIENT_TOO_OLD`) — jalur ini yang membuat "klien lama kehilangan kunci
+    // grup tanpa pesan" berubah menjadi pesan yang bisa ditindaklanjuti.
+    [CLIENT_VERSION_HEADER]: CLIENT_VERSION_VALUE,
     ...userHeaders,
   };
 
@@ -202,7 +208,25 @@ export async function api<T = unknown>(
         details = { raw: text };
       }
 
-      // 3. Handle Rate Limit (429) dengan Toast
+      // 3a. [R2 2026-10-15] Klien terlalu tua (426 `CLIENT_TOO_OLD`). Toast-nya
+      // `duration: Infinity` dan satu id: pesan ini tidak boleh lewat begitu saja
+      // (pengguna akan terus kehilangan pesan grup sampai ia memperbarui), tapi
+      // juga tidak boleh menumpuk jadi puluhan toast dari request paralel.
+      if (res.status === 426 && details?.error === 'CLIENT_TOO_OLD') {
+        // Import dinamis (pola yang sama dengan `@store/auth` di `authFetch`):
+        // menarik i18next + backend HTTP-nya ke graf modul `api.ts` ikut menambah
+        // request nyata untuk memuat berkas locale, dan itu mengacaukan pengukuran
+        // request di modul ini (termasuk uji single-flight CSRF). Jalur ini jarang
+        // terpicu, jadi biayanya nol di operasi normal.
+        const { default: i18n } = await import('../i18n');
+        toast.error(i18n.t('errors:client_too_old', { minimum: details.minimumVersion ?? '' }), {
+          id: 'client-too-old',
+          duration: Infinity,
+          icon: '⬆️',
+        });
+      }
+
+      // 3b. Handle Rate Limit (429) dengan Toast
       if (res.status === 429) {
         toast.error(errorMessage, {
           id: 'rate-limit-error', // ID biar gak muncul duplikat toast
@@ -345,6 +369,9 @@ export async function apiUpload<T = unknown>({
       xhr.timeout = UPLOAD_TIMEOUT_MS; // [ROBUSTNESS] upload tak boleh menggantung selamanya
       xhr.setRequestHeader('CSRF-Token', csrfToken);
       xhr.setRequestHeader('x-nyx-installation-id', installationId);
+      // [R2 2026-10-15] Sama seperti jalur `fetch` — upload juga membawa versi
+      // build, supaya klien tua tidak lolos gerbang hanya karena memakai jalur ini.
+      xhr.setRequestHeader(CLIENT_VERSION_HEADER, CLIENT_VERSION_VALUE);
       xhr.upload.onprogress = (e) => {
         const progress = Math.round((e.loaded * 100) / (e.total || 1));
         onUploadProgress(progress);

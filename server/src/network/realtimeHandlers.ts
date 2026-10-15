@@ -606,21 +606,30 @@ export async function handleKeySync(
            // terjebak waiting_for_key sampai pengirim online lagi. Offline catch-up
            // mengenali content '"type":"GROUP_KEY"' dan meng-unseal envelope-nya.
            // [docs/28 Tier 2 — B1] pesan SYSTEM juga partisipan urutan → ikut seq.
-           const groupKeySeq = await reserveMessageSeq(ctx.prisma as unknown as SeqPrismaClient, conversationId).catch(() => 0);
+           // [R7 2026-10-15] reserve + create dalam SATU transaksi, sama seperti
+           // jalur pesan pengguna. Sebelumnya `reserveMessageSeq(...).catch(() => 0)`
+           // bisa MENULIS seq 0 — sentinel "baris legacy/belum di-backfill" menurut
+           // schema — sehingga pesan SYSTEM melompat ke awal riwayat percakapan,
+           // dan kegagalan setelah reservasi meninggalkan lubang seq permanen.
+           // Kalau transaksinya gagal, baris SYSTEM-nya memang tidak tertulis;
+           // itu lebih benar daripada menulisnya dengan urutan bohong.
            // [docs/28 Tier 2 — B3] waktu kasar + expiresAt diturunkan darinya.
            const groupKeyAt = messageTimeBucket();
-           await ctx.prisma.message.create({
-               data: {
+           await ctx.prisma.$transaction(async (tx) => {
+               const seq = await reserveMessageSeq(tx as unknown as SeqPrismaClient, conversationId);
+               await tx.message.create({
+                 data: {
                    conversationId,
                    senderId: await senderIdForStorage({ isGroup: true, userId, senderPseudonym }),
                    type: 'SYSTEM',
-                   seq: groupKeySeq,
+                   seq,
                    createdAt: groupKeyAt,
                    // [docs/28 Tier 4] Device.id target disimpan TER-SEAL; server
                    // membukanya kembali saat relay/catch-up (openMessageForClient).
                    content: await sealSystemContentDeviceKeys(JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) })),
                    expiresAt: new Date(groupKeyAt.getTime() + 7 * 24 * 60 * 60 * 1000)
-               }
+                 }
+               });
            }).catch((e: unknown) => console.warn('[KeySync] Failed to persist group key envelope:', e));
 
            await emitEventToUser(ctx, requesterId, 'session:new_key', emitPayload, targetDeviceId);
@@ -642,23 +651,27 @@ export async function handleKeySync(
 
            // Persist to DB for offline delivery (like messages:distribute_keys)
            // [docs/28 Tier 2 — B1] pesan SYSTEM juga ikut urutan seq.
-           const metaSeq = await reserveMessageSeq(ctx.prisma as unknown as SeqPrismaClient, conversationId).catch(() => 0);
+           // [R7 2026-10-15] Satu transaksi untuk reserve + create (lihat catatan
+           // panjang di cabang GROUP_KEY di atas): jangan pernah menyimpan seq 0.
            // [docs/28 Tier 2 — B3] waktu kasar + expiresAt diturunkan darinya.
            // [docs/28 Tier 2 — B5] id eksplisit TIDAK lagi time-ordered
            // (`msg_sys_meta_<Date.now()>_…` membocorkan waktu) — pakai UUID acak.
            const metaAt = messageTimeBucket();
-           await ctx.prisma.message.create({
-               data: {
+           await ctx.prisma.$transaction(async (tx) => {
+               const seq = await reserveMessageSeq(tx as unknown as SeqPrismaClient, conversationId);
+               await tx.message.create({
+                 data: {
                    id: `sys_meta_${crypto.randomUUID()}`,
                    conversationId,
                    senderId: await senderIdForStorage({ isGroup: true, userId, senderPseudonym }),
                    type: 'SYSTEM',
-                   seq: metaSeq,
+                   seq,
                    createdAt: metaAt,
                    content: JSON.stringify({ type: 'METADATA_UPDATED', encryptedMetadata: safeMetadata }),
                    isViewOnce: false,
                    expiresAt: new Date(metaAt.getTime() + 7 * 24 * 60 * 60 * 1000)
-               }
+                 }
+               });
            });
 
            for (const targetId of targetRecipients) {

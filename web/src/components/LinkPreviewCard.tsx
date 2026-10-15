@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/auth';
+import { clientVersionHeaders } from '../lib/clientVersion';
 
 interface LinkPreviewProps {
   preview: {
@@ -31,7 +32,8 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
       setHasError(false);
       try {
         const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, "").replace(/\/$/, "");
-        const headers: Record<string, string> = {};
+        // [R2] Jalur ini tidak lewat `api()`, jadi header versi dikirim eksplisit.
+        const headers: Record<string, string> = { ...clientVersionHeaders() };
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }

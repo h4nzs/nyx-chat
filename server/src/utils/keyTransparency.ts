@@ -519,8 +519,22 @@ export async function publishKeyTransparencyEntry(
     entry = buildKtLogEntry(input);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'UNKNOWN';
-    incCounter(KT_WRITES, { result: 'invalid' });
-    console.warn(`[KT] Entri log dilewati (keyVersion ${input.keyVersion}): ${reason}`);
+    // [2026-10-15] Dua kegagalan ini punya sebab yang BERBEDA dan operator perlu
+    // membedakannya di dashboard:
+    //   - `KT_USERNAME_HASH_LENGTH_INVALID`: klien mengirim identifier dalam
+    //     bentuk ter-pepper (64 hex) atau bentuk lain yang bukan Argon2id 32 byte.
+    //     Search key log TIDAK bisa diturunkan darinya (server tak punya pepper
+    //     di sisi ini), jadi entri dilewati — dan itu membuat pemulihan akun
+    //     tidak terlihat di log, tepat peristiwa yang harus terlihat. Dihitung
+    //     terpisah supaya kejadiannya kelihatan, bukan tercampur sebagai "invalid".
+    //     Klien sudah diperbaiki (`resolveRecoveryIdentifierInput`); angka ini
+    //     adalah jaring pengaman untuk klien/bundel lama.
+    //   - sisanya: input cacat (panjang kunci salah, base64 rusak).
+    const result = reason === 'KT_USERNAME_HASH_LENGTH_INVALID'
+      ? 'unsupported_identifier'
+      : 'invalid';
+    incCounter(KT_WRITES, { result });
+    console.warn(`[KT] Entri log dilewati (keyVersion ${input.keyVersion}, ${result}): ${reason}`);
     return { ok: false, reason };
   }
 

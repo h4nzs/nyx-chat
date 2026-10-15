@@ -1,0 +1,20 @@
+{
+  "note": "Dibuat scripts/wasm-repro-build.sh --update. Jangan diedit tangan: hash di sini adalah kontrak antara biner yang DI-COMMIT dan sumber ter-vendor yang bisa dibangun ulang (lihat CONTRIBUTING, NOTICE, docs/33 §33.10).",
+  "canonicalRoot": "/tmp/nyx-wasm-repro",
+  "toolchain": "1.95.0",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "artifacts": [
+    {
+      "path": "packages/spqr-wasm/dist/spqr.wasm",
+      "bytes": 518522,
+      "sha256": "ed0ac407beab8b9e0b2b9aa6c07cd796c5d5d2b2bbb1e917a8e480d345b060b1",
+      "source": "vendor/signal/spqr@06959b4708f9b7b1e94d0f8cc835f3958c077e94"
+    },
+    {
+      "path": "packages/keytrans-wasm/dist/keytrans.wasm",
+      "bytes": 299670,
+      "sha256": "4b551a496c7c5463672363d1830046ef79cbd8ce60cdf83e7c74ce5b8aa4cc92",
+      "source": "vendor/signal/libsignal-keytrans@e8cc2dddd578859b4a029c9c94670b24ce2b616a"
+    }
+  ]
+}

@@ -44,5 +44,6 @@
   "registration_attestation_expired": "El desafío de verificación del dispositivo ha caducado. Vuelve a intentar el registro.",
   "registration_attestation_invalid": "No se pudo validar la verificación del dispositivo, así que la cuenta no se creó.",
   "registration_attestation_hardware_required": "Este dispositivo no pudo demostrar que está respaldado por hardware. El registro requiere una atestación de hardware (Touch ID / Windows Hello / llave de seguridad).",
-  "registration_attestation_user_verification": "Confirma con tu PIN o biometría para terminar de crear esta cuenta."
+  "registration_attestation_user_verification": "Confirma con tu PIN o biometría para terminar de crear esta cuenta.",
+  "client_too_old": "Esta versión de NYX es demasiado antigua para seguir funcionando con el servidor (mínimo {{minimum}}). Recarga la página; si sigue igual, cierra y vuelve a abrir la aplicación (PWA) o reinstálala desde el sitio de NYX."
 }

@@ -13,7 +13,7 @@ Before you write any code, understand our architectural boundaries:
 1. **The Core Crypto is Sacred:** Do **NOT** bump, update, or modify `libsodium-wrappers` or its type definitions. Backward compatibility in the Double Ratchet engine is our absolute highest priority.
 2. **Package Manager:** We use `pnpm` exclusively. Do not use `npm` or `yarn`. Do not commit `package-lock.json` or `yarn.lock`.
 3. **Strict State:** We use Zustand v5. Do not return objects in selectors without `useShallow`, or you will trigger infinite render loops.
-4. **Formatting:** We use ESLint v10 (Flat Config). Your code must pass `pnpm run lint` without any warnings.
+4. **Formatting/Linting:** We use **oxlint** (`pnpm run lint`, config in `.oxlintrc.json`). CI is **blocking on `error`** — rules at `error` level and the `correctness` category must stay at 0 findings. ESLint configs are still in the tree but dead (`typescript-eslint` does not support TypeScript 7); do not re-enable them.
 
 ## 🛠️ Development Workflow
 
@@ -26,13 +26,14 @@ Before you write any code, understand our architectural boundaries:
 
 ## 🧾 Third-party attribution & committed artifacts (Signal)
 
-Some subsystems are built around **unmodified Signal code** (AGPL-3.0-only) that is pinned to a commit and consumed as a build-time path dependency — the three components, their commits, and everything that actually lives in this repo are listed in **[`NOTICE`](NOTICE)**. Read it before touching `packages/spqr-wasm/`, `packages/keytrans-wasm/`, or `server/kt-query/`.
+Some subsystems are built around **unmodified Signal code** (AGPL-3.0-only) that is pinned to a commit. Since 2026-10-13 the pinned sources are **vendored inside this repo** (`vendor/signal/`, `server/kt-query/vendor/`), so a clean clone builds everything without any external checkout — the three components, their commits, and everything that actually lives in this repo are listed in **[`NOTICE`](NOTICE)**. Read it before touching `packages/spqr-wasm/`, `packages/keytrans-wasm/`, or `server/kt-query/`.
 
 Rules that keep this setup working:
 
-1. **Never delete, truncate, or hand-edit** `packages/spqr-wasm/dist/spqr.wasm` and `packages/keytrans-wasm/dist/keytrans.wasm`. They are committed on purpose (CI cannot rebuild them: the pinned Signal checkouts do not exist on the runner) and a missing artifact breaks the web build — `crypto.worker.ts` imports `spqr.wasm?url`.
-2. To regenerate an artifact, run the package's `build.sh` against the pinned checkout and commit the result. `bash scripts/check-wasm-artifacts.sh` is the guard CI runs (missing / empty / untracked artifact → red build).
-3. When an upstream pin moves, update **`NOTICE` (commit hash + artifact size) and the pins in `docs/30` §30.2 in the same PR**.
+1. **Never delete, truncate, or hand-edit** `packages/spqr-wasm/dist/spqr.wasm` and `packages/keytrans-wasm/dist/keytrans.wasm`. They are committed on purpose and a missing artifact breaks the web build — `crypto.worker.ts` imports `spqr.wasm?url`.
+2. To regenerate an artifact, run the package's `build.sh` (it builds from `vendor/` by default) and commit the result **together with `packages/wasm-artifacts.json`**. Both builds are path-independent (absolute paths are remapped, toolchain pinned in `rust-toolchain.toml`), so the hash is the same on your machine and in CI.
+3. The guards CI runs: `bash scripts/check-wasm-artifacts.sh` (missing / empty / untracked artifact, or a hash that no longer matches the manifest → red build) and the `wasm` job, which **rebuilds both artifacts from `vendor/` and compares the hashes** — i.e. the committed binary is now provably produced by the pinned sources in this repo.
+4. When an upstream pin moves, update **`NOTICE` (commit hash + artifact size) and the pins in `docs/30` §30.2 in the same PR**.
 
 ## 🕵️ Where We Need Help
 - Auditing the Web Worker crypto implementation (`crypto.worker.ts`).

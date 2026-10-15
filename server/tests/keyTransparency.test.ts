@@ -328,6 +328,55 @@ test('publishKeyTransparencyEntry: bentuk tidak sah tidak ditulis ke log', async
   assert.equal(calls, 1);
 });
 
+/**
+ * [2026-10-15] Konsekuensi jalur PEMULIHAN AKUN.
+ *
+ * Pemulihan menukar kunci identitas — tepat peristiwa yang harus terlihat di
+ * log. Search key log adalah `0x75 || Argon2id(username)` (32 byte), sedangkan
+ * blind index yang dikembalikan server ke klien berbentuk 64 hex (HMAC pepper).
+ * Klien yang mengirim bentuk ter-pepper (bundel lama, atau pemulihan lewat hash
+ * ID) karena itu **tidak bisa** dicatat: server tak punya cara menurunkan search
+ * key dari pepper.
+ *
+ * Test ini mengunci dua hal: (a) bentuk ter-pepper selalu berakhir dengan alasan
+ * `KT_USERNAME_HASH_LENGTH_INVALID` — persis alasan yang dipakai
+ * `publishKeyTransparencyEntry` untuk menghitung metrik `unsupported_identifier`
+ * (jadi kejadiannya TERLIHAT, bukan tercampur dengan input cacat lain);
+ * (b) bentuk Argon2id (setelah klien diperbaiki) benar-benar masuk ke log.
+ */
+test('jalur pemulihan: bentuk ter-pepper dilewati dengan alasan yang bisa dibedakan', async () => {
+  // 64 hex = bentuk yang dikembalikan server (pepperedIdentifier).
+  const peppered = 'a1'.repeat(32);
+  assert.equal(peppered.length, 64);
+
+  let calls = 0;
+  const transport = {
+    async update() {
+      calls++;
+      return new Uint8Array(0);
+    },
+  };
+  const entry = {
+    identityKey: IDENTITY_KEY,
+    pqIdentityKey: PQ_KEY,
+    signingKey: SIGNING_KEY,
+    keyVersion: 2,
+    updatedAtDay: 20_100,
+  };
+
+  const skipped = await publishKeyTransparencyEntry({ usernameHash: peppered, ...entry }, { transport });
+  assert.equal(skipped.ok, false);
+  assert.equal(skipped.reason, 'KT_USERNAME_HASH_LENGTH_INVALID');
+  assert.equal(calls, 0, 'bentuk ter-pepper tidak boleh ditulis ke log');
+
+  // Bentuk Argon2id 32 byte (yang dihitung klien dari username) DITERIMA →
+  // inilah yang membuat pemulihan akun punya jejak di log.
+  clearKtDedupeForTests();
+  const published = await publishKeyTransparencyEntry({ usernameHash: USERNAME_HASH_B64, ...entry }, { transport });
+  assert.equal(published.ok, true, `penulisan KT gagal: ${published.reason ?? 'unknown'}`);
+  assert.equal(calls, 1);
+});
+
 test('live: penulisan nyata ke binary KT (opt-in via KT_SERVER_URL)', { skip: !process.env.KT_SERVER_URL }, async () => {
   clearKtDedupeForTests();
   const usernameHash = new Uint8Array(32);

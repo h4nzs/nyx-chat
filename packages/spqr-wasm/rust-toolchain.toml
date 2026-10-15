@@ -1,0 +1,15 @@
+# [R1 2026-10-15] Toolchain dipin untuk artefak WASM yang DI-COMMIT.
+#
+# Alasannya bukan kerapian: `dist/spqr.wasm` disimpan sebagai biner di repo dan
+# hash-nya diverifikasi di CI (`packages/wasm-artifacts.json` +
+# `scripts/check-wasm-artifacts.sh`). Hash itu hanya berarti kalau semua orang
+# memakai compiler yang sama — rustc minor yang berbeda menghasilkan kode yang
+# berbeda.
+#
+# Kalau versi ini dinaikkan: bangun ulang KEDUA artefak, perbarui manifest hash,
+# lalu jalankan `cargo test` sidecar sekali lagi (bukan bagian artefak, tapi
+# memakai toolchain repo) dalam commit yang sama.
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

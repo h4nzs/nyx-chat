@@ -14,14 +14,19 @@
  *
  * Aturan yang dikodekan di sini:
  *
- *  1. **Kapabilitas hanya dibaca saat sesi DIDIRIKAN.** Percakapan yang sudah
- *     berjalan tidak berubah versi karena kabar kapabilitas yang datang
- *     belakangan (kapabilitas datang dari handshake transport yang
- *     terautentikasi, bukan dari payload pesan — payload pesan tidak sah untuk
- *     memutuskan primitif).
+ *  1. **Keputusan diambil per pengiriman, dari bukti peer — bukan sekali saat
+ *     sesi didirikan.** Ada dua fungsi dan bedanya disengaja:
+ *     `resolveRatchetVersion` (keputusan sesi, dari kapabilitas handshake) dan
+ *     `resolveOutboundRatchetVersion` (**dipakai tiap pengiriman**, menuntut
+ *     deklarasi peer di dalam payload ter-seal `ackV`). Sesi yang sudah v2 tetap
+ *     v2 (sticky) walau kapabilitas transport hilang di tengah sesi — kapal yang
+ *     sama yang melewatkan frame juga yang mengabarkan kapabilitas. Yang tidak
+ *     boleh: mengubah versi karena kabar kapabilitas yang datang belakangan
+ *     pada sesi yang belum pernah memakai v2.
  *  2. **Anti-downgrade.** v2 hanya dipakai bila KEDUA sisi mengiklankan
- *     `spqr-ratchet` **dan** saklar lokal menyala. Peer yang tidak mengiklankan
- *     → v1 (kompatibel penuh), bukan "coba v2 dan berharap".
+ *     `spqr-ratchet`, **peer menyatakan `ackV: 2` di dalam payload ter-seal**, dan
+ *     saklar lokal menyala. Peer yang tidak mengiklankan → v1 (kompatibel
+ *     penuh), bukan "coba v2 dan berharap".
  *  3. **Rollback eksplisit.** Turun dari v2 ke v1 hanya lewat `planRatchetRollback`
  *     (dipanggil sadar oleh pemanggil), dan state v1 **tidak pernah ditimpa**
  *     oleh v2 — itulah yang membuat rollback tidak menghilangkan kemampuan
@@ -54,7 +59,6 @@ export type RatchetWireVersion = 'v1' | 'v2';
  */
 export const SPQR_CAPABILITY: string = CLIENT_CAPABILITIES.SPQR_RATCHET;
 
-/**
 /**
  * Saklar operator: matikan jalur v2 sepenuhnya (kirim selalu v1).
  *

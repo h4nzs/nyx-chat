@@ -61,6 +61,13 @@ ls /root/backups/                       # nightly pg_dumps
 3. Open the app with a **hard reload** (service worker update) — check console for `missingKey` or CSP violations.
 4. Register + send a message between two accounts.
 5. Confirm no `unsafe-eval` CSP errors (Zod jitless must be intact).
+6. [R11] Baca peringatan boot `⚠️  [startup]` di `pm2 logs nyx-api`: guard
+   anti-abuse dan rahasia admin cleanup yang belum diset dilaporkan di sana, dan
+   gauge `nyx_abuse_guard_enabled` harus membuat alert `NyxAbuseGuardDisabled`
+   menyala bila guard memang sengaja dimatikan. Jangan biarkan alert itu menyala
+   tanpa keputusan eksplisit.
+7. [R1] Pastikan job CI `wasm` hijau: biner WASM yang di-deploy terbukti berasal
+   dari `vendor/signal/*` (`scripts/wasm-repro-build.sh --verify`).
 
 ## 10.6 Environment variables (full table)
 
@@ -72,7 +79,10 @@ ls /root/backups/                       # nightly pg_dumps
 | `REDIS_URL` | `redis://127.0.0.1:6379` |
 | `JWT_SECRET` | Token signing (≥32 chars) |
 | `CSRF_SECRET` | CSRF state secret (falls back to JWT_SECRET) |
-| `CHAT_SECRET` | Admin cleanup key |
+| `CHAT_SECRET` | Rahasia umum (masih dipakai beberapa fitur) — **fallback** kunci `/api/admin/cleanup` |
+| `ADMIN_CLEANUP_SECRET` | [R6] Rahasia KHUSUS `/api/admin/cleanup` (endpoint destruktif). Sangat disarankan terpisah dari `CHAT_SECRET`; kosong → pakai `CHAT_SECRET` + peringatan boot |
+| `ADMIN_CLEANUP_IP_ALLOWLIST` | [R6] CSV IP yang boleh memicu `/api/admin/cleanup` (mis. IP operator/VPS). Kosong = tanpa batasan. Diperiksa **sebelum** kunci |
+| `MIN_CLIENT_VERSION` | [R2] Versi klien minimum (mis. `3.0.0`). Klien yang melaporkan versi lebih kecil ditolak `426 CLIENT_TOO_OLD` dengan pesan "perbarui aplikasi" — bukan kehilangan kunci grup secara senyap. Kosong = gerbang mati; klien tanpa header versi selalu lolos (lihat catatan di bawah) |
 | `APP_URL` / `CORS_ORIGIN` | Public API origin / allowed origins |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify |
 | `VAPID_SUBJECT/PUBLIC_KEY/PRIVATE_KEY` | Web Push |
@@ -389,20 +399,26 @@ Dua pekerjaan latar ini berjalan tanpa intervensi, tetapi **keduanya gagal secar
 senyap kalau tidak dipantau** — karena itu metriknya wajib ada di dashboard.
 
 **Pembersihan basis data.** Cron `jobs/systemSweeper.ts` (00:00) dan endpoint
-manual `POST /api/admin/cleanup` (header `x-admin-key` = `CHAT_SECRET`,
-timing-safe) menjalankan **kode yang sama** (`jobs/cleanup.ts`): refresh token
-kadaluarsa/revoked, session key kadaluarsa/basi (> 30 hari), dead-man's switch
-(akun dorman + baris ter-sealnya), langganan jatuh tempo → FREE, story
-kadaluarsa. Setiap langkah diisolasi: satu tabel yang gagal tidak menahan
-langkah lain, dan kegagalannya dilaporkan per langkah.
+manual `POST /api/admin/cleanup` (header `x-admin-key`) menjalankan **kode yang
+sama** (`jobs/cleanup.ts`): refresh token kadaluarsa/revoked, session key
+kadaluarsa/basi (> 30 hari), dead-man's switch (akun dorman + baris ter-sealnya),
+langganan jatuh tempo → FREE, story kadaluarsa. Setiap langkah diisolasi: satu
+tabel yang gagal tidak menahan langkah lain, dan kegagalannya dilaporkan per
+langkah.
 
 - Respons endpoint memuat hitungan per jenis + `errors`. **HTTP 500 bila ada
   langkah gagal** — jangan membaca 200 sebagai "semua bersih".
 - Metrik: `nyx_sweeper_last_run_timestamp_seconds{result}` (alert
   `NyxSweeperStale`), `nyx_sweeper_deleted_rows_total{kind}`,
   `nyx_sweeper_duration_seconds`.
-- Jalur manual untuk operator:
-  `curl -sS -X POST -H "x-admin-key: $CHAT_SECRET" https://api.nyx-app.my.id/api/admin/cleanup`
+- **Endpoint ini destruktif** — sejak 2026-10-15 ia benar-benar menghapus baris
+  (sebelumnya stub yang hanya menjawab "Cleanup triggered"). Pengamanannya:
+  rahasia khusus `ADMIN_CLEANUP_SECRET` (fallback `CHAT_SECRET`), allow-list IP
+  opsional `ADMIN_CLEANUP_IP_ALLOWLIST`, rate limit 5/jam per IP, dan metrik
+  `nyx_admin_cleanup_total{result}` (`ok`/`partial`/`error`/`forbidden`/
+  `rate_limited`) — jadi pemanggilan yang **ditolak** pun terlihat, bukan senyap.
+- Jalur manual untuk operator (rahasia khusus dulu, fallback `CHAT_SECRET`):
+  `curl -sS -X POST -H "x-admin-key: $ADMIN_CLEANUP_SECRET" https://api.nyx-app.my.id/api/admin/cleanup`
 
 **Snapshot log Key Transparency.** Log KT hanya ada di LevelDB milik
 `nyx-kt-query`. Setel `NYX_KT_SNAPSHOT_DIR` di service itu (mis.
@@ -426,3 +442,37 @@ langkah lain, dan kegagalannya dilaporkan per langkah.
   unduh arsip terbaru, ekstrak, arahkan `-db` ke direktori hasil ekstrak dan
   jalankan `nyx-kt-query -check`; `GET /healthz` harus melaporkan ukuran pohon
   yang sama dengan `latest.json`.
+
+## 10.14 Versi klien minimum (`MIN_CLIENT_VERSION`) — added 2026-10-15, R2
+
+Sejak 2026-10-10 envelope distribusi sender-key **v0/v1 tidak lagi dibaca** dan
+metadata grup non-v2 menjadi `null`. Klien yang masih memegang bundel lama
+(cache service worker/PWA) karena itu kehilangan pesan grup — sebelumnya **tanpa
+gejala apa pun**. Dua sisi memperbaikinya:
+
+- **Sisi klien:** drop itu sekarang terlihat (pesan sistem + toast, kunci i18n
+  `common:security_legacy_group_key`) dan service worker baru **memaksa satu kali
+  muat ulang** per tab per sesi, jadi bundel lama tidak bertahan diam-diam.
+- **Sisi server:** gerbang versi klien. Klien mengirim
+  `x-nyx-client-version: <versi build>` di setiap request REST; bila
+  `MIN_CLIENT_VERSION` diset dan versi klien lebih kecil, request ditolak
+  **`426 CLIENT_TOO_OLD`** dengan pesan "perbarui aplikasi" (metrik
+  `nyx_client_version_rejected_total{result="too-old"}`).
+
+Dua kelonggaran yang disengaja — jangan "perbaiki" tanpa alasan kuat:
+
+1. **Kosong = gerbang mati.** Tanpa `MIN_CLIENT_VERSION`, tidak ada yang ditolak.
+2. **Tanpa header versi = lolos (fail-open).** Semua klien yang dirilis sebelum
+   3.0.0 tidak mengirim header ini; menolaknya berarti mematikan basis pengguna
+   yang sudah ada. Konsekuensinya gerbang ini mengikat **mulai 3.0.0**, jadi ia
+   bukan pengganti catatan migrasi/pemberitahuan rilis.
+
+`/api/health` tidak pernah digerbang (probe liveness). Endpoint ops seperti
+`/api/admin/cleanup` dipanggil `curl` tanpa header versi, jadi ia lolos lewat
+jalur `no-header` dan operasi pemeliharaan tidak ikut terkunci.
+
+**Urutan menaikkan angka ini saat rilis breaking berikutnya:** umumkan dulu →
+beri jeda minimal satu siklus rilis (biar PWA pengguna memperbarui diri) → baru
+naikkan `MIN_CLIENT_VERSION` ke versi rilis sebelumnya → pantau
+`nyx_client_version_rejected_total` (lonjakan = masih ada klien lama); turunkan
+kembali ke kosong bila lonjakannya besar dan pesan-pesannya belum sampai.

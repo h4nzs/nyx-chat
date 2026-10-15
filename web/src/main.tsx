@@ -11,6 +11,7 @@ import './index.css';
 import App from './App';
 import { registerServiceWorker } from '@lib/serviceWorkerRegistration';
 import { setAuthFailureHandler } from '@lib/api';
+import { clientVersionHeaders } from '@lib/clientVersion';
 import { useAuthStore } from '@store/auth';
 import { installOtpkMidSessionRefill } from '@utils/crypto';
 
@@ -35,7 +36,8 @@ function initWebMCP(): void {
             required: ['query']
           },
           execute: async (args: { query: string }) => {
-            const response = await fetch('/api/users/search?q=' + encodeURIComponent(args.query), { credentials: 'include' });
+            // [R2] Jalur ini tidak lewat `api()`, jadi header versi dikirim eksplisit.
+            const response = await fetch('/api/users/search?q=' + encodeURIComponent(args.query), { credentials: 'include', headers: clientVersionHeaders() });
             return response.json();
           }
         },
@@ -47,7 +49,7 @@ function initWebMCP(): void {
             properties: {}
           },
           execute: async () => {
-            const response = await fetch('/api/conversations/sync', { credentials: 'include' });
+            const response = await fetch('/api/conversations/sync', { credentials: 'include', headers: clientVersionHeaders() });
             return response.json();
           }
         },
@@ -63,7 +65,7 @@ function initWebMCP(): void {
             required: ['conversationId']
           },
           execute: async (args: { conversationId: string; limit?: number }) => {
-            const response = await fetch('/api/messages/' + encodeURIComponent(args.conversationId), { credentials: 'include' });
+            const response = await fetch('/api/messages/' + encodeURIComponent(args.conversationId), { credentials: 'include', headers: clientVersionHeaders() });
             return response.json();
           }
         },
@@ -75,7 +77,7 @@ function initWebMCP(): void {
             properties: {}
           },
           execute: async () => {
-            const response = await fetch('/api/system/status', { credentials: 'include' });
+            const response = await fetch('/api/system/status', { credentials: 'include', headers: clientVersionHeaders() });
             return response.json();
           }
         }

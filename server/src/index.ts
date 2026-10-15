@@ -20,6 +20,19 @@ async function main() {
 
   startMetricsServer()
 
+  // [R11 2026-10-15] Keadaan konfigurasi anti-abuse dibuat EKSPLISIT: gauge
+  // (alert `NyxAbuseGuardDisabled`) + peringatan boot untuk hal yang diam-diam
+  // berbahaya bila lupa diset (guard registrasi, attestation, rahasia admin
+  // cleanup). Semuanya murni dihitung di `utils/startupSignals.ts`.
+  const { ABUSE_GUARD_ENABLED, setGauge } = await import('./utils/metrics.js')
+  const { abuseGuardStates, startupWarnings } = await import('./utils/startupSignals.js')
+  for (const state of abuseGuardStates(process.env)) {
+    setGauge(ABUSE_GUARD_ENABLED, state.enabled, { guard: state.guard })
+  }
+  for (const warning of startupWarnings(process.env)) {
+    console.warn(`⚠️  [startup] ${warning}`)
+  }
+
   const httpServer = createServer(app)
 
   await initializeRedisBridge()

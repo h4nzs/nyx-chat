@@ -2,6 +2,129 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 3.0.0 — Review menyeluruh: provenance artefak, kegagalan yang tadinya senyap, endpoint destruktif (2026-10-15)
+
+Rilis ini menutup temuan review eksternal + review internal atas seluruh rentang
+sejak `2.7.0`. Perubahan yang **breaking** (legacy purge, kolom DB baru, artefak
+WASM dibangun ulang) sudah masuk sejak rangkaian sebelumnya; entri ini menutup
+celah yang membuatnya sulit dipercaya dan sulit dioperasikan.
+
+### Artefak WASM: dari "ada dan cukup besar" menjadi terbukti berasal dari sumber (R1)
+
+Sebelumnya guard hanya memeriksa `.wasm` **ada, ≥100 KB, dan ter-track**; tidak
+ada satu pun pemeriksaan yang mengaitkan biner itu dengan `vendor/signal/*`.
+Dua percobaan menentukan perbaikannya, dan keduanya dicatat karena mudah dilupakan:
+
+1. build apa adanya → hash **berbeda antar direktori** (rustc menyematkan path absolut);
+2. setelah semua path di-remap ke prefix tetap → **masih berbeda** (51fa0767… vs
+   c1f2c58f…). Perbandingan per-seksi menunjukkan `type/table/memory/data` identik
+   tetapi `func/code/elem/name` berbeda: cargo menurunkan *unit hash* dari
+   **package id**, dan package id path-dependency memuat path absolutnya →
+   disambiguator simbol Rust berubah → urutan link berubah.
+
+Karena itu: `scripts/wasm-repro-build.sh` (build di **root kanonik**, `--update`
+menulis `packages/wasm-artifacts.json`, `--verify` membandingkan hash),
+`rust-toolchain.toml` dipin ke 1.95.0 di kedua paket, remap path di `build.sh`,
+`check-wasm-artifacts.sh` kini memverifikasi **hash** (bukan hanya ukuran), dan
+**job CI `wasm` membangun ulang dari `vendor/` lalu membandingkan hash**.
+Dibuktikan: build dari checkout `/home/ken/nyx-chat` dan dari checkout lain
+(`/tmp/other-checkout`) menghasilkan hash yang sama dengan manifest.
+Alasan lama "CI tak bisa membangun ulang" dicabut dari `NOTICE`, `CONTRIBUTING`,
+dan pesan script.
+
+### Drop yang tadinya senyap kini terlihat (R2)
+
+Envelope distribusi sender-key v0/v1 diabaikan hanya dengan `console.warn` —
+pengguna kehilangan pesan grup tanpa gejala yang bisa ditindaklanjuti. Sekarang
+kegagalan itu muncul sebagai **pesan sistem di percakapan + toast + dynamic
+island** (sekali per percakapan per sesi, i18n di 4 bahasa).
+
+Dua jalur lain menutup sisanya, karena "terlihat di UI" saja tidak menolong
+klien yang bundelnya sudah usang:
+
+1. **Service worker memaksa satu muat ulang per tab per sesi** saat SW baru
+   mengambil alih. `skipWaiting()` + `clientsClaim()` sudah membuat SW baru aktif
+   segera, tetapi halaman tetap menjalankan bundel LAMA sampai dimuat ulang —
+   itulah yang membuat klien pra-3.0.0 bisa bertahan berhari-hari. Penanda
+   `sessionStorage` (bukan variabel modul) mencegah reload berantai.
+2. **Gerbang versi klien di server** (`utils/clientVersion.ts` +
+   `middleware/clientVersion.ts`): klien mengirim `x-nyx-client-version` di
+   setiap request REST (termasuk upload), dan bila `MIN_CLIENT_VERSION` diset,
+   klien yang lebih tua ditolak **`426 CLIENT_TOO_OLD`** dengan pesan yang bisa
+   ditindaklanjuti (toast menetap, i18n 4 bahasa) + metrik
+   `nyx_client_version_rejected_total{result="too-old"}`. Gerbangnya **mati bila
+   env kosong**, dan request **tanpa** header versi selalu lolos — semua klien
+   yang dirilis sebelum 3.0.0 tidak mengirim header itu, jadi menolaknya berarti
+   mematikan basis pengguna yang ada. Urutan menaikkannya ada di `docs/10` §10.14.
+
+### Pemulihan akun kini benar-benar menghasilkan entri log KT (temuan internal baru)
+
+Pemulihan menukar kunci identitas — peristiwa yang justru harus terlihat di log —
+tetapi search key log adalah `0x75 || Argon2id(username)` sementara halaman
+pemulihan mengirim **hash ID ter-pepper (64 hex)**; server tak punya cara
+menurunkannya, jadi entri **dilewati**. Halaman pemulihan sekarang menormalkan
+masukan (`resolveRecoveryIdentifierInput`): hash ID dikirim apa adanya, username
+di-hash Argon2id lebih dulu — sehingga lookup tetap benar **dan** entri KT bisa
+ditulis. Penolakan bentuk ter-pepper kini dihitung terpisah sebagai
+`nyx_kt_writes_total{result="unsupported_identifier"}` supaya kejadiannya
+terlihat di dashboard, dan label/placeholder diperjelas di 4 bahasa.
+
+### `/api/admin/cleanup` tidak lagi dijaga satu rahasia umum (R6)
+
+Sejak endpoint itu benar-benar menghapus baris (termasuk akun dorman),
+kebijakannya dipindah ke fungsi murni ber-test (`utils/adminCleanupAuth.ts`) dan
+dikeraskan: `ADMIN_CLEANUP_SECRET` (fallback `CHAT_SECRET`), allow-list IP
+opsional, rate limit 5/jam per IP, plus metrik `nyx_admin_cleanup_total{result}`
+(`ok`/`partial`/`error`/`forbidden`/`rate_limited`) — pemanggilan yang **ditolak**
+pun terlihat, bukan senyap. Kedua env baru itu didokumentasikan di template
+(`.env.example` + `server/.env.example`, dengan uji yang menahannya) supaya
+operator tidak diam-diam jatuh ke `CHAT_SECRET`.
+
+### `seq` pesan SYSTEM selalu dalam satu transaksi (R7)
+
+`reserveMessageSeq(...).catch(() => 0)` bisa menulis `seq: 0` (sentinel "baris
+legacy") sehingga pesan SYSTEM melompat ke awal riwayat, dan kegagalan setelah
+reservasi meninggalkan lubang `seq`. GROUP_KEY & METADATA_UPDATED kini
+reserve+create dalam satu transaksi — tidak pernah menulis urutan bohong.
+
+### Guard anti-abuse yang OFF kini berbunyi (R11)
+
+Gauge `nyx_abuse_guard_enabled{guard}` diset saat boot, aturan alert
+`NyxAbuseGuardDisabled` ditambahkan **beserta kasus drill-nya**, dan peringatan
+boot menyebut guard/rahasia yang belum diset (`utils/startupSignals.ts`, murni &
+teruji). `docs/10` diperbarui: checklist post-deploy + tabel env + pengamanan
+endpoint cleanup.
+
+### Dokumen yang menyimpang dari kode
+
+`README` (lint: oxlint **blocking**, bukan ESLint non-blocking), `CONTRIBUTING`
+(ESLint v10 → oxlint; "build-time path dependency"/"CI tidak bisa rebuild" →
+ter-vendor + hash diverifikasi), `docs/04` §4.6 ("v1/v0 tetap terbaca" → memang
+ditolak), nuansa "header beku vs payload aditif" (`ackV`/`ktG`/`ackKem`),
+`docs/30` §30.19 (rujukan dokumen yang tidak pernah ada), header
+`spqrNegotiation.ts` (keputusan per pengiriman, bukan hanya saat sesi didirikan),
+dan `/**` ganda. Versi dinaikkan ke **3.0.0** (breaking: legacy purge + kolom baru).
+
+### Yang SENGAJA belum ditutup (dipertahankan apa adanya, dicatat di `docs/28` §28.11)
+
+`R4` (envelope seal tanpa byte versi → belum ada jalur rotasi pepper) dan `R5`
+(kandidat lookup "nilai apa adanya" dipakai tautan berbagi/pemulihan). Keduanya
+butuh perubahan skema **dan** klien; mengerjakannya setengah jalan lebih berbahaya
+daripada mencatatnya dengan rencana urutan yang jelas. `R8` (memecah
+`utils/crypto.ts`) juga tidak dikerjakan: aturan maintainer melarang memecah file
+kripto, dan file utilitas ini terikat pada jalur yang sedang diverifikasi.
+
+### Langkah operator (breaking)
+
+1. Ekspor kunci issuer lama **sebelum** `prisma db push` (bila belum).
+2. `prisma db push`; set `NYX_AT_REST_PEPPER` + `GROUP_ISSUER_KEY_PKCS8` di
+   `/root/nyx-app/.env` (fallback dev tidak berlaku di production).
+3. Set `ADMIN_CLEANUP_SECRET` + `ADMIN_CLEANUP_IP_ALLOWLIST` (opsional tapi
+   disarankan); aktifkan `ABUSE_REGISTRATION_GUARD=on` setelah `shadow` bila
+   belum — alert `NyxAbuseGuardDisabled` akan mengingatkan.
+4. Pastikan bundle klien diperbarui (hard reload) — klien pra-v2 tidak bisa lagi
+   mengikuti era kunci grup baru, dan sekarang itu terlihat di UI.
+
 ## 📞 WS-E gate (1): panggilan benar-benar merelay lewat coturn — 2026-10-15
 
 Gate `docs/30` §30.9 menerima “E2E call 1:1 di CI chrome dengan coturn”. Gate itu

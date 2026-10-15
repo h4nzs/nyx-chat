@@ -442,3 +442,54 @@ tests:
               summary: 'Unggahan snapshot log KT gagal'
               description: 'Kredensial R2, bucket, atau berkas arsip bermasalah. Arsip lokal tetap ada (dipangkas 7), tetapi riwayat panjang di R2 berhenti bertambah.'
 
+  # ==========================================================================
+  # [R11 2026-10-15] Guard anti-abuse OFF saat boot
+  # ==========================================================================
+
+  - name: 'NyxAbuseGuardDisabled: menyala saat guard registrasi OFF'
+    interval: 30s
+    input_series:
+      - series: 'nyx_abuse_guard_enabled{guard="registration"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxAbuseGuardDisabled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              guard: registration
+              alertname: NyxAbuseGuardDisabled
+            exp_annotations:
+              summary: 'Guard anti-abuse (registration) OFF di deployment ini'
+              description: 'Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 §10.13.'
+
+  - name: 'NyxAbuseGuardDisabled: menyala saat hanya attestation yang OFF'
+    interval: 30s
+    input_series:
+      - series: 'nyx_abuse_guard_enabled{guard="registration"}'
+        values: '1x60'
+      - series: 'nyx_abuse_guard_enabled{guard="attestation"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxAbuseGuardDisabled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              guard: attestation
+              alertname: NyxAbuseGuardDisabled
+            exp_annotations:
+              summary: 'Guard anti-abuse (attestation) OFF di deployment ini'
+              description: 'Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 §10.13.'
+
+  - name: 'NyxAbuseGuardDisabled: tidak menyala saat kedua guard menyala'
+    interval: 30s
+    input_series:
+      - series: 'nyx_abuse_guard_enabled{guard="registration"}'
+        values: '1x60'
+      - series: 'nyx_abuse_guard_enabled{guard="attestation"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxAbuseGuardDisabled
+        exp_alerts: []

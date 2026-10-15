@@ -15,8 +15,9 @@ import path from "path";
 import crypto from "crypto";
 import { prisma } from "./lib/prisma.js";
 import { purgeSealedUserRows } from "./utils/routingIdentity.js";
-import { safeEqualStrings } from "./utils/validate.js";
+import { authorizeAdminCleanup } from "./utils/adminCleanupAuth.js";
 import { runCleanup } from "./jobs/cleanup.js";
+import { ADMIN_CLEANUP, incCounter } from "./utils/metrics.js";
 
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
@@ -36,7 +37,8 @@ import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
 import subscriptionsRouter from "./routes/subscriptions.js";
 import webpush from "web-push";
-import { generalLimiter } from "./middleware/rateLimiter.js";
+import { adminCleanupLimiter, generalLimiter } from "./middleware/rateLimiter.js";
+import { clientVersionGate } from "./middleware/clientVersion.js";
 import { cfAwareClientIp } from "./utils/clientIp.js";
 import { reportRoutes } from "./routes/reports.js";
 import systemRouter from "./routes/system.js";
@@ -276,6 +278,14 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // === SECURITY & STABILITY ===
 app.use("/api", generalLimiter);
 
+// [R2 2026-10-15] Gerbang versi klien. Dipasang SEBELUM CSRF dan sebelum router
+// mana pun: klien yang terlalu tua ditolak lebih awal (HTTP 426 +
+// `CLIENT_TOO_OLD`), jadi ia mendapat pesan "perbarui" yang jelas alih-alih
+// perilaku setengah jalan (mis. kehilangan kunci grup tanpa error). Gerbang mati
+// bila `MIN_CLIENT_VERSION` tidak diset, dan klien yang tidak mengirim header
+// versi tetap lolos — lihat `utils/clientVersion.ts` untuk alasan lengkapnya.
+app.use("/api", clientVersionGate(() => ({ minimumVersion: process.env.MIN_CLIENT_VERSION })));
+
 app.use((req, res, next) => {
   res.setTimeout(30000, () => {
     res.status(408).send({ error: "Request Timeout" });
@@ -293,16 +303,31 @@ app.use((req, res, next) => {
  * mengembalikan hitungan per jenis baris + kegagalan per langkah, jadi operator
  * bisa membuktikan pekerjaannya benar dari respons, bukan dari asumsi.
  *
- * Otorisasi tetap seperti kontrak lama (`x-admin-key` = `CHAT_SECRET`,
- * perbandingan timing-safe, fail-closed bila rahasia server kosong). Endpoint
- * berada sebelum middleware CSRF agar tetap bisa dipanggil dari cron/ops
- * memakai kunci, bukan sesi browser.
+ * Otorisasi: `x-admin-key` (perbandingan timing-safe, fail-closed bila rahasia
+ * server kosong). [R6 2026-10-15] Kebijakannya dipindah ke fungsi murni
+ * `utils/adminCleanupAuth.ts` supaya bisa diuji, dan dikeraskan karena endpoint
+ * ini destruktif: rahasia TERPISAH (`ADMIN_CLEANUP_SECRET`, fallback
+ * `CHAT_SECRET` untuk kompatibilitas), allow-list IP OPSIONAL
+ * (`ADMIN_CLEANUP_IP_ALLOWLIST`), rate limit khusus (`adminCleanupLimiter`,
+ * 5/jam), plus metrik + log audit. Endpoint tetap berada sebelum middleware CSRF
+ * agar bisa dipanggil dari cron/ops memakai kunci, bukan sesi browser.
  */
-app.post("/api/admin/cleanup", async (req, res) => {
-  const providedKey = req.headers["x-admin-key"];
-  const secretKey = process.env.CHAT_SECRET;
+app.post("/api/admin/cleanup", adminCleanupLimiter, async (req, res) => {
+  const decision = authorizeAdminCleanup(
+    { providedKey: req.headers["x-admin-key"], clientIp: cfAwareClientIp(req) },
+    {
+      cleanupSecret: process.env.ADMIN_CLEANUP_SECRET,
+      chatSecret: process.env.CHAT_SECRET,
+      ipAllowlist: process.env.ADMIN_CLEANUP_IP_ALLOWLIST,
+    }
+  );
 
-  if (!secretKey || typeof providedKey !== 'string' || !safeEqualStrings(providedKey, secretKey)) {
+  if (!decision.ok) {
+    // Dua kelas berbeda supaya operator bisa membedakan "salah kunci" dari
+    // "konfigurasi belum lengkap" — tanpa mencatat IP atau nilai kunci ke metrik.
+    const result = decision.reason === 'secret-not-configured' ? 'error' : 'forbidden';
+    incCounter(ADMIN_CLEANUP, { result });
+    console.warn(`[Admin] cleanup ditolak (${decision.reason})`);
     return res.status(403).json({ error: "Forbidden" });
   }
 
@@ -314,6 +339,12 @@ app.post("/api/admin/cleanup", async (req, res) => {
     // Kegagalan sebagian dijawab non-2xx: operator harus melihat bahwa ada
     // langkah yang belum bersih, bukan banner "berhasil" di atas pekerjaan separuh.
     const status = report.errors.length > 0 ? 500 : 200;
+    incCounter(ADMIN_CLEANUP, { result: report.errors.length > 0 ? 'partial' : 'ok' });
+    console.log(
+      `[Admin] cleanup manual selesai (rahasia ${decision.dedicatedSecret ? 'khusus' : 'CHAT_SECRET'}): ` +
+      `refreshTokens=${report.refreshTokens} sessionKeys=${report.sessionKeys} accounts=${report.accounts} ` +
+      `subscriptions=${report.subscriptions} stories=${report.stories} errors=${report.errors.length}`
+    );
     res.status(status).json({
       message: report.errors.length > 0 ? "Cleanup selesai dengan kegagalan sebagian" : "Cleanup selesai",
       counts: {
@@ -326,6 +357,7 @@ app.post("/api/admin/cleanup", async (req, res) => {
       errors: report.errors,
     });
   } catch (error) {
+    incCounter(ADMIN_CLEANUP, { result: 'error' });
     console.error("[Admin] Cleanup gagal:", error);
     res.status(500).json({ error: "Cleanup failed" });
   }
