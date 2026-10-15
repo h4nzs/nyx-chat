@@ -4,7 +4,7 @@
 > **31 test Go**, semuanya hijau; bukti yang disajikannya diverifikasi verifier
 > libsignal yang sebenarnya lewat modul WASM
 > (`web/src/lib/__tests__/keyTransparency.test.ts`). Lihat `docs/32` §32.8,
-> `docs/34` §34.6c, dan `docs/10` §10.11.
+> `docs/34` §34.6c, dan `docs/10` §10.15 (deploy/ops service ini).
 
 ## Kenapa ada
 

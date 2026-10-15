@@ -55,8 +55,8 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 
 | Workflow | Purpose |
 |---|---|
-| `ci.yml` | Build + unit tests + non-blocking lint + `pnpm audit --prod` + E2E (Postgres/Redis service containers) |
-| `deploy.yml` | On push to `main`: build web + server + Rust sidecar, zip, SCP to VPS, pm2 restart `nyx-api`/`nyx-sidecar`, overwrite `server/.env` with `/root/nyx-app/.env` |
+| `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit (web+server) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → drill pemulihan log KT (`kt-recovery`) → `pnpm audit --prod` → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata) |
+| `deploy.yml` | On push to `main`: guard → build web + marketing + server + Rust sidecar + `nyx-kt-query` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd `nyx-kt-query` dari `ops/systemd/` dan restart+verifikasi **bila unit sudah `enabled`** (gagal ⇒ deploy merah) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
 | `codeql.yml` | Static security analysis |
 | `gemini-dispatch.yml` | Route issues/PRs to the Gemini agent |
 | `gemini-invoke.yml` | Invoke the agent for a task |
@@ -95,3 +95,19 @@ The `.well-known` endpoints themselves are documented in `22-backend-reference.m
 | `web/src/types/declarations.d.ts` | Global/module declarations |
 | `web/src/vite-env.d.ts` | Vite client type reference (generated) |
 | `web/src/SetupTests.ts` | Vitest setup: mocks `localStorage` and `Web Worker` + Buffer polyfill |
+
+## 25.9 `ops/` — konfigurasi & unit operasional
+
+| File | Purpose |
+|---|---|
+| `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback (`nyx-api` :9464 + exporter node/postgres/redis). Sidecar Rust dan `nyx-kt-query` **belum** punya exporter, jadi entry-nya dikomentari supaya tidak memicu `up == 0` palsu |
+| `ops/prometheus/alerts.yml` | 15 aturan alert (relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, cleanup admin, versi klien, disk/swap/exporter) |
+| `ops/prometheus/tests.yml` | Kasus uji `promtool test rules` — tiap aturan punya kasus MENYALA dan TIDAK MENYALA; dijalankan `scripts/drill-alerts.sh` (job CI `alerts` + versi scrape-nyata di job `e2e`) |
+| `ops/grafana/dashboards/nyx-overview.json` | Dashboard Grafana (impor manual, ambang disamakan dengan `alerts.yml`); bukan teks PromQL di dokumen |
+| `ops/systemd/nyx-kt-query.service` | Unit systemd layanan log Key Transparency — satu proses (flock LevelDB), `ProtectSystem=strict` + `ReadWritePaths` |
+| `ops/systemd/nyx-kt-query.env.example` | Template `EnvironmentFile` (alamat baca/tulis/auditor loopback + setelan snapshot) |
+| `ops/systemd/README.md` | Runbook pemasangan pertama, verifikasi, rollback (`.prev`), dan tabel troubleshooting |
+
+Hanya `ops/systemd/` yang ikut dikirim `deploy.yml` (unit disalin ke VPS).
+Konfigurasi Prometheus/Grafana dan coturn tetap pemasangan manual — `docs/10`
+§10.11/§10.12/§10.15.

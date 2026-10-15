@@ -14,6 +14,8 @@ web/dist
 # Keep environment variables out of version control
 .env
 **/.env
+# Env file unit systemd NYX (template: `ops/systemd/nyx-kt-query.env.example`)
+ops/systemd/nyx-kt-query.env
 *.log
 **/.env.local
 **/*/.env

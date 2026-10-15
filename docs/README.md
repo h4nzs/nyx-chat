@@ -46,7 +46,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 |---|---|
 | [08-webtransport-sidecar.md](08-webtransport-sidecar.md) | Rust sidecar, protocol framing, opcodes, deployment |
 | [09-database.md](09-database.md) | Prisma schema, indexes, backup, migration |
-| [10-deployment-ops.md](10-deployment-ops.md) | CI/CD, VPS runbook, env vars, post-deploy checklist |
+| [10-deployment-ops.md](10-deployment-ops.md) | CI/CD, VPS runbook, env vars, post-deploy checklist, semua service prod (KT `nyx-kt-query`, coturn, observability) |
 | [11-testing.md](11-testing.md) | Unit tests, E2E, environment limitations |
 | [13-troubleshooting.md](13-troubleshooting.md) | Known errors and their fixes |
 | [26-group-privacy-blueprint.md](26-group-privacy-blueprint.md) | Group metadata hardening blueprint: sender pseudonyms, pairwise key distribution, blinded membership & receipts — **T1–T4 fully implemented (2026-09-26)** | Design record & residual leaks |

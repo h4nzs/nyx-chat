@@ -52,6 +52,8 @@ scrape_configs:
     static_configs:
       - targets: ['127.0.0.1:9121']
 
-# [docs/30 WS-A] Saat KT berjalan (proses `nyx-kt`), tambahkan job-nya di sini
-# beserta alert lag log KT. Jangan mengekspos port gRPC KT ke publik: hanya
-# `nyx-api` (loopback) yang boleh menulis/membaca log.
+# [docs/30 WS-A · docs/10 §10.15] Proses log KT sekarang bernama `nyx-kt-query`
+# dan **belum mengekspos /metrics** — jangan menambahkan job scrape sebelum
+# exporter-nya ada (target mati = `up == 0` palsu). Saat ditambahkan, ikuti pola
+# yang sama: hanya loopback, dan port KT (baca :8085, tulis :8081, auditor :8082)
+# tidak pernah dibuka ke publik.

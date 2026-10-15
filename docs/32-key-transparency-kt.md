@@ -80,7 +80,8 @@ sebagai unary gRPC lewat `node:http2`:
 
 Alasan tidak memakai `@grpc/grpc-js`: satu unary call dengan tiga field tidak
 sebanding dengan menambah dependensi gRPC/protobuf di server yang harus tetap
-kecil (VPS 1 core/1 GB, `docs/10`).
+kecil (kebiasaan dari era VPS 1 core/1 GB — spesifikasi sekarang di `docs/10`
+§10.1).
 
 `consistency` **selalu dikirim** (boleh kosong) karena server menolak `nil` —
 temuan ini datang dari test live, bukan dari dokumen.

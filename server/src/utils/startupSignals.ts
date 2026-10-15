@@ -80,7 +80,7 @@ export function startupWarnings(env: AbuseGuardEnv): string[] {
   if (isProd) {
     if (guardMode === 'off') {
       warnings.push(
-        'ABUSE_REGISTRATION_GUARD tidak menyala di production: tidak ada batas burst pendaftaran per IP/instalasi/ASN. Set `on` (atau `shadow` dulu untuk mengukur) — lihat docs/10 §10.13.'
+        'ABUSE_REGISTRATION_GUARD tidak menyala di production: tidak ada batas burst pendaftaran per IP/instalasi/ASN. Set `on` (atau `shadow` dulu untuk mengukur) — lihat docs/10 §10.6.'
       )
     } else if (guardMode === 'shadow') {
       warnings.push(

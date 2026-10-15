@@ -62,7 +62,7 @@ Test klien ada di `web/src/lib/__tests__/keyTransparency.test.ts` (18 test,
 fixture bukti nyata dari binary Go `key-transparency-server`). Regenerasi fixture:
 
 ```bash
-# jalankan kt-server (test service di :8081, lihat docs/10 §10.12)
+# jalankan nyx-kt-query (test service di :8081, lihat docs/10 §10.15)
 KT_SERVER_URL=http://127.0.0.1:8081 KT_CONFIG_FILE=/tmp/nyx-kt-run/test_config.yaml \
   pnpm --filter nyx-server run kt:fixtures
 ```

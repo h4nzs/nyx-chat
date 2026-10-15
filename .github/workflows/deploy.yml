@@ -83,6 +83,19 @@ jobs:
           cd server/transport-sidecar
           cargo build --release
 
+      # Binary layanan log Key Transparency (`nyx-kt-query`, Go) — dibangun dari
+      # `vendor/`, jadi tidak ada unduhan saat build (repo upstream Signal privat).
+      # Deploy yang mengirim binary-nya supaya pembaruan layanan KT bukan lagi
+      # langkah manual: unit + catatan pemasangan ada di `ops/systemd/`.
+      - name: 🐹 Setup Go (nyx-kt-query)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/kt-query/go.mod
+          cache-dependency-path: server/kt-query/go.sum
+
+      - name: 🐹 Build nyx-kt-query (Go, dari vendor)
+        run: bash server/kt-query/build.sh
+
       # --- PHASE 5: PACKAGING ---
       - name: 🗜️ Prepare Artifacts for Deploy
         run: |
@@ -111,6 +124,22 @@ jobs:
           # Bawa binary Rust
           mkdir -p deploy_package/server/transport-sidecar/target/release
           cp server/transport-sidecar/target/release/transport-sidecar deploy_package/server/transport-sidecar/target/release/
+
+          # Bawa binary Go layanan log KT (`nyx-kt-query` + pemeriksa `nyx-kt-check`)
+          # dan seluruh `ops/systemd/` (unit + template EnvironmentFile + catatan
+          # pemasangan), supaya VPS tidak perlu menyalin manual dari repo.
+          #
+          # Guard: unit systemd dan langkah deploy harus menunjuk path binary yang
+          # SAMA. Kalau tidak, deploy akan menyalin binary ke satu tempat sementara
+          # unit menjalankan tempat lain — dan kegagalannya hanya terlihat sebagai
+          # "nyx-kt-query gagal start" di VPS, bukan di sini.
+          [ -x server/kt-query/nyx-kt-query ] || { echo "::error::binary nyx-kt-query tidak terbangun (build.sh gagal?)"; exit 1; }
+          grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-query ' ops/systemd/nyx-kt-query.service \
+            || { echo "::error::ops/systemd/nyx-kt-query.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-query — samakan unit dengan langkah deploy"; exit 1; }
+          mkdir -p deploy_package/server/kt-query
+          cp server/kt-query/nyx-kt-query server/kt-query/nyx-kt-check deploy_package/server/kt-query/
+          mkdir -p deploy_package/ops
+          cp -r ops/systemd deploy_package/ops/
           
           cd deploy_package
           zip -r ../nyx-deploy.zip .
@@ -150,6 +179,13 @@ jobs:
             # 2. Siapkan direktori utama (Jika belum ada)
             TARGET_DIR="/root/nyx-app"
             mkdir -p $TARGET_DIR
+
+            # Simpan binary KT dari deploy sebelumnya untuk rollback cepat — harus
+            # SEBELUM zip menimpanya (ops/systemd/README.md).
+            if [ -f "$TARGET_DIR/server/kt-query/nyx-kt-query" ]; then
+                cp -f "$TARGET_DIR/server/kt-query/nyx-kt-query" "$TARGET_DIR/server/kt-query/nyx-kt-query.prev"
+            fi
+
             rm -rf $TARGET_DIR/server/dist
             rm -rf $TARGET_DIR/server/src
             rm -rf $TARGET_DIR/web
@@ -219,4 +255,39 @@ jobs:
               --cwd $TARGET_DIR/server
               
             pm2 save --force
+
+            # 8. LAYANAN LOG KT (`nyx-kt-query`) — systemd, bukan pm2: ia memegang
+            #    flock LevelDB sehingga harus satu proses dan hidup di luar cluster
+            #    nyx-api (ops/systemd/README.md). Binary + unit datang bersama zip;
+            #    pemasangan pertama (config + kunci log + `systemctl enable`) tetap
+            #    manual karena kunci log tidak boleh lahir dari CI.
+            echo "🔏 Deploying Key Transparency service (nyx-kt-query)..."
+            KT_DIR="$TARGET_DIR/server/kt-query"
+            KT_BIN="$KT_DIR/nyx-kt-query"
+            if [ -f "$KT_BIN" ]; then
+                chmod +x "$KT_BIN" "$KT_DIR/nyx-kt-check" 2>/dev/null || true
+            fi
+            if [ -f "$TARGET_DIR/ops/systemd/nyx-kt-query.service" ]; then
+                install -m 644 "$TARGET_DIR/ops/systemd/nyx-kt-query.service" /etc/systemd/system/nyx-kt-query.service
+                systemctl daemon-reload
+            fi
+            if systemctl is-enabled --quiet nyx-kt-query 2>/dev/null; then
+                if [ ! -x "$KT_BIN" ]; then
+                    echo "::error::binary nyx-kt-query tidak ada di $KT_BIN — layanan log KT tidak bisa dijalankan"
+                    exit 1
+                fi
+                systemctl restart nyx-kt-query
+                sleep 2
+                if systemctl is-active --quiet nyx-kt-query; then
+                    echo "✅ nyx-kt-query aktif — log KT hidup"
+                    curl -fsS --max-time 5 http://127.0.0.1:8085/healthz; echo
+                else
+                    systemctl status nyx-kt-query --no-pager -l || true
+                    echo "::error::nyx-kt-query gagal start setelah deploy — log KT berhenti (kunci identitas baru tidak ter-audit)"
+                    exit 1
+                fi
+            else
+                echo "ℹ️  nyx-kt-query.service belum di-enable — pemasangan pertama ada di ops/systemd/README.md"
+            fi
+
             echo "✅ Deployment Success!"

@@ -6,11 +6,16 @@
 |---|---|---|
 | Web app | `https://app.nyx-app.my.id` | Static build in `/var/www/nyx-web` (nginx) |
 | API | `https://api.nyx-app.my.id` → `localhost:4000` | pm2 `nyx-api` (cluster) |
-| WebTransport | `https://rt.nyx-app.my.id:33333` | pm2 `nyx-sidecar` (Rust) |
+| WebTransport | `https://rt.nyx-app.my.id:33333` | pm2 `nyx-sidecar` (Rust, satu fork) |
 | Marketing | `https://nyx-app.my.id` | `/var/www/nyx-marketing` |
-| DB | `127.0.0.1:5432/nyx_app` (user `nyx`) | Local PostgreSQL 17 on the VPS |
+| Key Transparency | `127.0.0.1:8085` (HTTP baca), `127.0.0.1:8081` (gRPC tulis), `127.0.0.1:8082` (gRPC auditor) | binary Go `nyx-kt-query` + LevelDB miliknya — **satu-satunya** pemilik log KT; binary + unit systemd dikirim `deploy.yml` (config + kunci log tetap owner ops, §10.15) |
+| DB | `127.0.0.1:5432/nyx_app` (user `nyx`) | Local PostgreSQL 18 on the VPS (versi prod terkonfirmasi dari dump — `docs/28` §28.7) |
 | Redis | `127.0.0.1:6379` | pub/sub bridge + caches |
-| Storage | Cloudflare R2 | Encrypted blobs |
+| Storage | Cloudflare R2 | Encrypted blobs + arsip snapshot KT (`kt-snapshots/`) |
+| TURN (WebRTC) | coturn `:3478/udp+tcp`, `:5349/tls` + rentang relay | **primer** untuk kredensial `/api/keys/turn`; Cloudflare TURN hanya cadangan; prosesnya systemd = owner ops (§10.9) |
+| Observability | NYX `127.0.0.1:9464`; Prometheus (default `:9090`); exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
+
+`deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, dan binary + unit systemd `nyx-kt-query`**. Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `web/nginx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
 
 VPS: Debian 13, **4 core / 8GB RAM / 4GB swap** (upgraded 2026-10 from 1 core / 1GB RAM), `vm.swappiness=10`, PostgreSQL re-tuned for the larger box (see §10.11). The principle from docs/26 §26.9 still applies: the upgrade buys margin for privacy features, not bloat.
 
@@ -22,21 +27,27 @@ On PR and push to `main`:
 
 | Job | Content |
 |---|---|
-| `build` | frozen-lockfile install → prisma generate → `pnpm run build` |
+| `build` | gate cepat `scripts/check-wasm-artifacts.sh` + `scripts/check-vendor.sh` → Go build/vet/test `server/kt-query` **dari vendor** → frozen-lockfile install → prisma generate → `pnpm run build` |
+| `wasm` | [R1] bangun ULANG `packages/spqr-wasm` + `packages/keytrans-wasm` dari `vendor/signal/*` lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
 | `unit` | `pnpm run test` — seluruh test server (`node:test` + `tsx`) dan web (vitest). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
 | `lint` | **BLOCKING** — `pnpm run lint` = `oxlint src` per paket (ESLint dihapus 2026-10-15). Nol temuan untuk rule level `error` + kategori `correctness`; `no-unused-vars` sengaja `warn` |
+| `alerts` | `SKIP_LIVE=1 scripts/drill-alerts.sh` — drill aturan Prometheus 4 lapis (§10.12); aturan yang merujuk metrik tak terdeklarasi ditolak di sini |
+| `dr-oracle` | [WS-G(6)] `tools/dr-oracle` (Go, implementasi kedua tanpa libsodium): vet/test + gate drift vektor ter-commit + test NYX↔oracle & interop dua arah |
+| `kt-recovery` | [§10.13] drill pemulihan log KT end-to-end (`scripts/kt-restore-drill.sh`) + `go vet`/`go test` `kt-query` |
 | `audit` | `pnpm audit --prod` |
-| `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip |
+| `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip; setelah suite, `nyx-api` dinyalakan dan drill alert dijalankan terhadap exporter nyata (`METRICS_URL`) |
 | `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; **coturn installed & started** (loopback relay, `allow-loopback-peers` only in CI) with `TURN_URLS`/`TURN_STATIC_AUTH_SECRET` in the job env; runs `--project=chrome` (WebTransport + real TURN relay active) |
 
 ## 10.3 Deploy pipeline (`deploy.yml`)
 
 Push to `main` triggers:
 
-1. Install (frozen lockfile) → assert secrets → build shared → web → marketing → server (incl. `prisma generate`) → Rust sidecar (`cargo build --release`).
-2. Package: workspace files + builds + sidecar binary → `nyx-deploy.zip`.
-3. SCP to VPS (`root@…`) → unzip to `/root/nyx-app` (overwrite).
-4. On VPS: `pnpm install --frozen-lockfile` → **copy `/root/nyx-app/.env` → `server/.env`** (prod secrets live only on the VPS) → `prisma generate` → `prisma db push` (consent env, `|| true`) → deploy web/marketing to `/var/www/…` → reload nginx → pm2 restart `nyx-api` + `nyx-sidecar` → `pm2 save`.
+- **Guards (gagal cepat, sebelum install):** `scripts/check-wasm-artifacts.sh` (artefak WASM ter-commit + cocok hash manifest `packages/wasm-artifacts.json`) dan `scripts/check-vendor.sh` (sumber Signal ter-vendor cocok pin `NOTICE`) — tanpa keduanya, clone bersih tidak bisa dibangun ulang.
+1. Install (frozen lockfile) → assert secrets (`VITE_TURNSTILE_SITE_KEY` — satu-satunya yang di-assert hari ini) → build shared → web → marketing → server (incl. `prisma generate`) → Rust sidecar (`cargo build --release`) → binary layanan log KT (`bash server/kt-query/build.sh`, dari vendor; §10.15).
+2. Package ke `nyx-deploy.zip`: manifest root + `packages/shared` (+ `dist`) + `web/dist` + `marketing/dist` + `server/{src,dist,package.json,tsconfig.json,prisma}` + binary sidecar + `server/kt-query/{nyx-kt-query,nyx-kt-check}` + `ops/systemd/`. **Tidak** ikut: `web/nginx.conf`, `ops/{prometheus,grafana}`, `scripts/`, `docker-compose.yml`.
+3. SCP to VPS (`root@…`) → `pm2 stop nyx-api nyx-sidecar` → binary KT lama disimpan sebagai `nyx-kt-query.prev` (rollback cepat) → unzip ke `/root/nyx-app` (menimpa; `server/{src,dist}`, `web/`, `marketing/` dihapus lebih dulu).
+4. On VPS: `pnpm install --frozen-lockfile` → **copy `/root/nyx-app/.env` → `server/.env`** (prod secrets live only on the VPS) → `prisma generate` → `prisma db push` (consent env, `|| true`) → deploy web/marketing to `/var/www/…` → reload nginx → `pm2 delete` + `pm2 start` `nyx-api` (`-i max`, `--max-old-space-size=1024`) dan `nyx-sidecar` → `pm2 save --force`.
+5. Layanan log KT (§10.15): binary di-`chmod +x`, unit `/etc/systemd/system/nyx-kt-query.service` disegarkan dari `ops/systemd/` + `systemctl daemon-reload`. Kalau unit **`enabled`**: `systemctl restart nyx-kt-query` → tunggu 2 s → `is-active` + `curl 127.0.0.1:8085/healthz`; gagal ⇒ deploy berhenti **merah** (log KT mati = kunci identitas baru tidak ter-audit). Kalau belum `enabled`: hanya pesan informatif — pemasangan pertama ada di `ops/systemd/README.md`.
 
 > ⚠ Any change to `.env` on the VPS will be **overwritten from `/root/nyx-app/.env`** on the next deploy. Edit the root file, not `server/.env`.
 
@@ -49,9 +60,13 @@ pm2 list                                # nyx-api (cluster), nyx-sidecar (fork)
 pm2 logs nyx-api --lines 100 --nostream # API logs
 pm2 restart nyx-api                     # restart after .env change
 systemctl status postgresql redis-server
+systemctl status nginx coturn            # reverse proxy + TURN primer (bila sudah dipasang)
 pg_isready && redis-cli ping
 free -m                                 # RAM pressure watch
 ls /root/backups/                       # nightly pg_dumps
+curl -s 127.0.0.1:9464/metrics | head    # exporter metrik NYX (loopback, §10.12)
+curl -s 127.0.0.1:8085/healthz           # layanan KT: {treeSize,timestamp} (§10.15)
+ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10.13)
 ```
 
 ## 10.5 Post-deploy checklist
@@ -68,46 +83,95 @@ ls /root/backups/                       # nightly pg_dumps
    tanpa keputusan eksplisit.
 7. [R1] Pastikan job CI `wasm` hijau: biner WASM yang di-deploy terbukti berasal
    dari `vendor/signal/*` (`scripts/wasm-repro-build.sh --verify`).
+8. [§10.15] Layanan KT hidup: `systemctl is-active nyx-kt-query` → `active`, lalu
+   `curl -s http://127.0.0.1:8085/healthz` → `{treeSize,timestamp}`, dan
+   `/api/keys/kt/*` menjawab bukti (bukan 503 `KT_QUERY_DISABLED`). Health check
+   penuh `nyx-kt-query -check` membuka LevelDB, jadi **hentikan service dulu**
+   (`systemctl stop`, lalu `start`) — beda tree head dengan `latest.json` terakhir
+   berarti basis data dan arsip tidak sinkron.
+9. [§10.12] `curl -s http://127.0.0.1:9464/metrics` hidup, dan
+   `nyx_metrics_rejected_total` tetap **0**.
 
 ## 10.6 Environment variables (full table)
 
 ### Server (`/root/nyx-app/.env`)
 
+**Wajib di production.** `config.ts` memperingatkan var wajib yang kosong (`PORT`, `CORS_ORIGIN`, `JWT_SECRET`) dan **menolak boot** bila `JWT_SECRET` kosong / bernilai `dev-secret`; `NYX_AT_REST_PEPPER` melempar error begitu dipakai tanpa nilai di produksi, dan issuer key gagal-tertutup saat kredensial grup diminta:
+
 | Var | Purpose |
 |---|---|
-| `DATABASE_URL` / `DIRECT_URL` | `postgres://nyx:<pw>@127.0.0.1:5432/nyx_app` |
-| `REDIS_URL` | `redis://127.0.0.1:6379` |
-| `JWT_SECRET` | Token signing (≥32 chars) |
-| `CSRF_SECRET` | CSRF state secret (falls back to JWT_SECRET) |
+| `DATABASE_URL` | `postgres://nyx:<pw>@127.0.0.1:5432/nyx_app` (PostgreSQL lokal, plaintext — `server/src/lib/prisma.ts` menambahkan `sslmode=require` **hanya** untuk host non-lokal) |
+| `DIRECT_URL` | (opsional) URL untuk `prisma db push`; `prisma.config.ts` memakai `DIRECT_URL \|\| DATABASE_URL` |
+| `PORT` | Port Express (default `4000`) — ikut daftar env wajib `config.ts` |
+| `CORS_ORIGIN` | Origin yang diizinkan, dipisah koma (default produksi `https://app.nyx-app.my.id`) |
+| `JWT_SECRET` | Token signing (≥32 chars). Produksi menolak boot bila kosong / bernilai `dev-secret` |
+| `CSRF_SECRET` | CSRF state secret. Kosong di produksi → jatuh ke `JWT_SECRET` + peringatan boot (isolasi lebih lemah) |
+| `NYX_AT_REST_PEPPER` | [docs/28 Tier 0] Pepper hash identifier at-rest + kunci seal deterministik. **Wajib**: `utils/atRestSecrets.ts` melempar error di produksi tanpa ini; bocor = dump DB bisa dibalik |
+| `GROUP_ISSUER_KEY_PKCS8` | [docs/28 Tier 0.1] Private key issuer blind RSA grup (base64 PKCS#8). Wajib di produksi (fail-closed) karena kunci keanggotaan grup **tidak** disimpan di DB. Buat: `pnpm --filter nyx-server run issuer-key:generate` |
+| `GROUP_ISSUER_KEY_VERSION` | Versi kunci issuer (default `1`); naikkan untuk rotasi — row publik dibuat otomatis |
+| `NODE_ENV` | `production` |
+
+**Perilaku & fitur** (kosong = fitur mati / degradasi yang terlihat):
+
+| Var | Purpose |
+|---|---|
+| `HOST` | Interface bind, default `127.0.0.1` (`server/src/index.ts`) — cloudflared satu host; jangan buka tanpa alasan |
+| `APP_URL` | Origin publik API (dipakai pada tautan/redirect) |
+| `REDIS_URL` | `redis://127.0.0.1:6379` — bridge pub/sub, rate limit, presence |
 | `CHAT_SECRET` | Rahasia umum (masih dipakai beberapa fitur) — **fallback** kunci `/api/admin/cleanup` |
-| `ADMIN_CLEANUP_SECRET` | [R6] Rahasia KHUSUS `/api/admin/cleanup` (endpoint destruktif). Sangat disarankan terpisah dari `CHAT_SECRET`; kosong → pakai `CHAT_SECRET` + peringatan boot |
-| `ADMIN_CLEANUP_IP_ALLOWLIST` | [R6] CSV IP yang boleh memicu `/api/admin/cleanup` (mis. IP operator/VPS). Kosong = tanpa batasan. Diperiksa **sebelum** kunci |
-| `MIN_CLIENT_VERSION` | [R2] Versi klien minimum (mis. `3.0.0`). Klien yang melaporkan versi lebih kecil ditolak `426 CLIENT_TOO_OLD` dengan pesan "perbarui aplikasi" — bukan kehilangan kunci grup secara senyap. Kosong = gerbang mati; klien tanpa header versi selalu lolos (lihat catatan di bawah) |
-| `APP_URL` / `CORS_ORIGIN` | Public API origin / allowed origins |
-| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify |
-| `VAPID_SUBJECT/PUBLIC_KEY/PRIVATE_KEY` | Web Push |
-| `R2_ACCOUNT_ID/ACCESS_KEY_ID/SECRET_ACCESS_KEY/BUCKET_NAME/PUBLIC_DOMAIN` | Cloudflare R2 |
-| `BACKUP_KEY_SECRET` | Rahasia HMAC kunci objek backup R2 (fallback `JWT_SECRET`; harus STABIL — lihat `docs/31` §31.6b) |
-| `CF_ACCOUNT_ID/CF_TURN_KEY_ID/CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) — **cadangan** sejak WS-E(1) |
-| `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. Lihat `docs/30` §30.9 |
-| `ABUSE_REGISTRATION_GUARD` | `on` = aktifkan guard burst registrasi per sumber (IP ter-HMAC) & per instalasi; default off (no-op). Lihat `docs/30` §30.12 |
-| `SUPABASE_URL/SUPABASE_SERVICE_KEY` | (legacy, optional) |
-| `NOWPAYMENTS_API_KEY/IPN_SECRET` | Payments (crypto-only) |
+| `ADMIN_CLEANUP_SECRET` | [R6] Rahasia KHUSUS `/api/admin/cleanup` (endpoint destruktif). Sangat disarankan terpisah dari `CHAT_SECRET`; kosong → `CHAT_SECRET` + peringatan boot |
+| `ADMIN_CLEANUP_IP_ALLOWLIST` | [R6] CSV IP yang boleh memicu `/api/admin/cleanup`. Kosong = tanpa batasan IP. Diperiksa **sebelum** kunci |
+| `BACKUP_KEY_SECRET` | HMAC kunci objek backup R2 (fallback `JWT_SECRET` + peringatan; harus **STABIL** — rotasi JWT_SECRET akan membuat backup awan lama tak ditemukan, `docs/31` §31.6b) |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PUBLIC_DOMAIN` | Cloudflare R2: blob terenkripsi + arsip snapshot KT |
+| `UPLOAD_DIR` | Direktori fallback upload lokal bila tidak memakai bucket R2 (default `uploads`) |
+| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify (register/PoW) |
+| `VAPID_SUBJECT` / `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web Push |
+| `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. `docs/30` §30.9 |
+| `ICE_STUN_URLS` | STUN milik operator (opsional, dipisah koma). Kosong = **tidak ada** STUN pihak ketiga; kegagalan TURN jadi 503/502 yang terlihat (`docs/29` §5.7) |
+| `CF_ACCOUNT_ID` / `CF_TURN_KEY_ID` / `CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) — **cadangan** sejak WS-E(1) |
+| `KT_SERVER_URL` / `KT_TIMEOUT_MS` | gRPC test-update log KT; samakan dengan `-write-addr` `nyx-kt-query` (`http://127.0.0.1:8081`). Kosong = penulisan log nonaktif (`docs/32` §32.8) |
+| `KT_QUERY_URL` / `KT_QUERY_TIMEOUT_MS` | Layanan baca KT (`http://127.0.0.1:8085`). Kosong = `/api/keys/kt/*` menjawab 503 `KT_QUERY_DISABLED` dan klien jatuh ke TOFU (metrik `result="disabled"`) |
+| `KT_SNAPSHOT_DIR` | Direktori arsip milik `nyx-kt-query`; diisi = unggahan harian 03:30 ke R2 + retensi 30 hari (§10.13) |
+| `MIN_CLIENT_VERSION` | [R2] Versi klien minimum (mis. `3.0.0`). Klien dengan versi lebih kecil ditolak `426 CLIENT_TOO_OLD` + pesan "perbarui aplikasi" — bukan kehilangan kunci grup secara senyap. Kosong = gerbang mati; klien **tanpa** header versi selalu lolos (§10.14) |
+| `METRICS_HOST` / `METRICS_PORT` | Exporter metrik loopback (default `127.0.0.1:9464`; `0` = mati) — §10.12 |
+| `ABUSE_REGISTRATION_GUARD` | `on` \| `shadow` \| `off`. `on` = guard burst registrasi (per IP ter-HMAC, per instalasi, per ASN) **menahan**; `shadow` = evaluasi penuh tapi tidak menahan siapa pun (mengukur false-positive NAT lewat `nyx_registration_guard_observed_total`); default `off` (no-op). `docs/30` §30.12 |
+| `ABUSE_REQUIRE_ATTESTATION` | `on` = SEMUA akun baru wajib attestation perangkat keras. Heuristik burst sybil per-ASN tetap meminta attestation walau ini `off` |
+| `ABUSE_ATTESTATION_FORMATS` / `ABUSE_ATTESTATION_BLOCKED_AAGUIDS` / `ABUSE_ATTESTATION_ROOTS` | Kebijakan attestation: format yang diterima, AAGUID yang diblokir, fingerprint root yang dipercaya |
+| `ABUSE_ATTESTATION_ALLOW_SELF` / `ABUSE_ATTESTATION_ALLOW_NONE` / `ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN` / `ABUSE_ATTESTATION_ALLOW_NO_AIK_EKU` | Pelonggaran verifikasi (self/none = bukan bukti perangkat; rantai x5c tak diverifikasi; EKU AIK TPM tidak diwajibkan). Semuanya **hanya untuk test** |
+| `ASN_DB_FILE` | Tabel `prefix,asn` LOKAL (ekspor GeoLite2-ASN). Kosong = lapisan ASN nonaktif; IP mentah tidak pernah disimpan, yang masuk Redis hanya nilai ter-pepper |
+| `NOWPAYMENTS_API_KEY` / `NOWPAYMENTS_IPN_SECRET` | Payments (crypto-only) |
 | `DISCORD_REPORT_WEBHOOK_URL` | Abuse reports |
-| `RESEND_API_KEY` | Email (optional) |
-| `TRANSPORT_PORT` | Sidecar port (33333) |
-| `METRICS_HOST` / `METRICS_PORT` | Exporter metrik loopback (default `127.0.0.1:9464`; `0` = mati) — lihat §10.12 |
-| `NODE_ENV` | production |
 
-### Web (`web/.env` → build-time `VITE_*`)
+> Catatan: `RESEND_API_KEY` dan `SUPABASE_URL/SUPABASE_SERVICE_KEY` yang dulu ada di tabel ini **sudah tidak ada di kode** (tidak ada pemakaian `process.env.*`-nya maupun di `.env.example`) — jangan diset lagi.
 
-`VITE_API_URL`, `VITE_TRANSPORT_URL`, `VITE_TRANSPORT_CERT_HASH` (dev pinning), `VITE_TURNSTILE_SITE_KEY`, `VITE_VAPID_PUBLIC_KEY`, `INDEXNOW_API_KEY`.
+### `nyx-sidecar` (env proses Rust, `docs/08` §8.2)
+
+`JWT_SECRET` (harus sama dengan API — token AUTH diverifikasi di sidecar), `REDIS_URL`, `TRANSPORT_PORT` (default `33333`, **UDP**), opsional `PROD_CERT_PATH` / `PROD_KEY_PATH` (sertifikat CA di produksi; tanpa keduanya sidecar membuat self-signed dan mencetak hash-nya).
+
+### `nyx-kt-query` (env proses log KT, §10.15)
+
+`KT_CONFIG_FILE` (config YAML berisi kunci log + `db.file`), `NYX_KT_QUERY_ADDR` (default `127.0.0.1:8085`), `NYX_KT_WRITE_ADDR` (`127.0.0.1:8081`), `NYX_KT_AUDITOR_ADDR` (`127.0.0.1:8082`), `NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL` (`24h`), `NYX_KT_SNAPSHOT_KEEP` (`7`). Semua alamat = loopback; tidak ada port KT yang boleh publik.
+
+### Web (`web/.env` → build-time `VITE_*`, disuntik `deploy.yml` dari secrets)
+
+| Var | Purpose |
+|---|---|
+| `VITE_API_URL` | Origin REST API |
+| `VITE_TRANSPORT_URL` | Origin WebTransport; kosong = diturunkan dari `VITE_API_URL` (http→https) |
+| `VITE_TRANSPORT_CERT_HASH` | Pin sertifikat sidecar untuk **dev/localhost** (produksi memakai trust CA `rt.nyx-app.my.id`) |
+| `VITE_TURNSTILE_SITE_KEY` | Situs Turnstile — satu-satunya secret yang di-assert `deploy.yml` |
+| `VITE_VAPID_PUBLIC_KEY` | Kunci publik Web Push |
+| `VITE_APP_SECRET` | Secret aplikasi klien (diambil dari secrets CI saat build) |
+| `VITE_WSS_TRANSPORTS` | Transports socket.io untuk fallback WSS (mis. `websocket` di belakang LB tanpa sticky) — §10.10 |
+| `VITE_SPQR_FORCE_V1` / `VITE_SPQR_FORCE_V2` | Kill switch operator jalur ratchet v2 / override uji-E2E (`docs/33` §33.10) |
+| `INDEXNOW_API_KEY` | Ping IndexNow setelah build |
 
 ## 10.7 Secrets policy
 
-- `.env` files are gitignored; `.env.example` (root) and `server/.env.example` are the templates.
-- GitHub Actions secrets: `VPS_HOST/PORT/USER/PASSWORD`, `VITE_*`, `INDEXNOW_API_KEY`, `CI_DATABASE_URL` (optional).
+- `.env` files are gitignored; `.env.example` (root) and `server/.env.example` are the templates — setiap var di §10.6 punya komentarnya di sana.
+- GitHub Actions secrets: `VPS_HOST/PORT/USER/PASSWORD`, `VITE_API_URL`, `VITE_TRANSPORT_URL`, `VITE_TURNSTILE_SITE_KEY` (di-assert saat deploy), `VITE_APP_SECRET`, `VITE_VAPID_PUBLIC_KEY`, `INDEXNOW_API_KEY`, `CI_DATABASE_URL` (optional). `VITE_TRANSPORT_CERT_HASH` **bukan** secret deploy — ia di-parse dari banner sidecar hanya di job `e2e-chrome` dan untuk dev lokal.
 - Do not commit: DB passwords (VPS: `/root/.nyx_db_pass`), VAPID private keys, R2 secret keys, sidecar private keys (`*.der`).
+- Kunci yang **wajib** ada hanya di `.env` produksi (bukan di DB, bukan di backup): `NYX_AT_REST_PEPPER`, `GROUP_ISSUER_KEY_PKCS8`, dan config YAML `nyx-kt-query` (kunci `signing-key`/`vrf-key`/`prefix-key`/`opening-key` log KT). Bocornya pepper = identifier at-rest bisa dibalik; bocornya issuer key = keanggotaan grup bisa dipalsukan; bocornya kunci log KT = log bisa ditulis oleh pihak lain.
 
 ## 10.8 Rollback
 
@@ -187,16 +251,26 @@ IP (`103.169.207.156`). The mitigation is to make that knowledge worthless:
      `ss -tlnp | grep 4000` → `127.0.0.1:4000`).
    - nginx: both server blocks now `listen 127.0.0.1:3000;` (cloudflared connects
      over loopback, unaffected). Verify after sync: `ss -tlnp | grep 3000`.
-   - Result: the ONLY public socket left is the QUIC sidecar on `:33333`, which is
-     designed for direct P2P (JWT auth + client-side cert-hash pinning).
+   - Result: satu-satunya soket publik yang tersisa adalah QUIC sidecar di
+     `:33333` — dirancang untuk P2P langsung (auth JWT + pinning cert-hash di klien)
+     — plus listener coturn begitu TURN primer dipasang, yang memang **harus**
+     dapat dijangkau publik supaya panggilan bisa direlay.
 2. **Firewall default-deny inbound** (owner ops on the VPS):
    ```bash
    ufw default deny incoming
    ufw allow 22/tcp          # or restrict to your admin IP(s)
    ufw allow 33333/udp       # WebTransport sidecar (QUIC)
+   # Bila coturn berjalan (TURN primer, §10.6 / docs/30 §30.9): TURN memang harus
+   # bisa dijangkau dari internet — samakan rentang relay dengan min-port/max-port
+   # di turnserver.conf (CI memakai 49160-49200; instalasi umum 49152-65535).
+   ufw allow 3478/udp
+   ufw allow 3478/tcp
+   ufw allow 5349/tcp
+   ufw allow 49152:65535/udp
    ufw enable && ufw status verbose
    ```
-   cloudflared egress (:7844 outbound) is unaffected.
+   cloudflared egress (:7844 outbound) is unaffected. Port Prometheus/exporter dan
+   `nyx-kt-query` **tidak** pernah dibuka: semuanya loopback (§10.12, §10.15).
 3. ~~Front `rt.` with Tunnel/Spectrum~~ — not feasible today (no CF WebTransport
    proxying); revisit if Cloudflare ships it or budget allows Spectrum.
 
@@ -330,11 +404,15 @@ pernah identitas.** Yang menegakkan itu bukan disiplin penulis kode, melainkan
 
 **Endpoint.** `GET /metrics` dilayani oleh HTTP listener terpisah yang hanya
 bind loopback (`METRICS_HOST=127.0.0.1`, `METRICS_PORT=9464`; `0` = mati) —
-**bukan** route Express, karena nginx mem-proxy semua path ke `nyx-api`. Jangan
-membuka port ini ke internet, dan jangan menambah relabel Prometheus yang
-menyuntikkan header/query ke label.
+**bukan** route Express: jalur publik ke Express (`/api`, `/uploads`,
+`/.well-known` lewat nginx, dan `api.*` yang bahkan melewati nginx) sengaja tidak
+pernah membawa endpoint metrik. Lihat juga temuan `ops/prometheus/` (job scrape
+`nyx-api` → `127.0.0.1:9464`). Jangan membuka port ini ke internet, dan jangan
+menambah relabel Prometheus yang menyuntikkan header/query ke label.
 
-**Metrik yang tersedia hari ini:**
+**Metrik yang tersedia hari ini** (daftar ini harus sama dengan
+`server/src/utils/metrics.ts` — aturan alert yang merujuk metrik tak terdeklarasi
+akan ditolak lapis kontrak metrik di `scripts/drill-alerts.sh`):
 
 | Metrik | Arti |
 |---|---|
@@ -342,7 +420,17 @@ menyuntikkan header/query ke label.
 | `nyx_security_blocks_total{op,reason}` | Blokir keamanan sesi/perangkat (`device_inactive`, `session_revoked`, `identity_missing`, `hardware_mismatch`) |
 | `nyx_sweeper_duration_seconds{result}` | Durasi putaran sweeper |
 | `nyx_sweeper_last_run_timestamp_seconds{result}` | Kapan sweeper terakhir selesai (termasuk yang gagal) |
-| `nyx_sweeper_deleted_rows_total{kind}` | Baris dibersihkan (`refresh_token`, `session_key`, `account`, `story`) |
+| `nyx_sweeper_deleted_rows_total{kind}` | Baris dibersihkan (`refresh_token`, `session_key`, `account`, `subscription`, `story`) |
+| `nyx_backup_ops_total{op,result}` | Operasi endpoint backup R2 (presign/unduh/hapus) per hasil — `docs/31` |
+| `nyx_kt_writes_total{result}` | Penulisan entri log KT, per hasil |
+| `nyx_kt_last_success_timestamp_seconds` | Unix timestamp penulisan log KT terakhir yang **berhasil** (lag = selisihnya) |
+| `nyx_kt_queries_total{result}` | Permintaan bukti lewat `/api/keys/kt/*`; `result="disabled"` = `KT_QUERY_URL` kosong (klien jatuh ke TOFU) |
+| `nyx_kt_snapshot_upload_total{result}` | Unggahan arsip snapshot KT ke R2 (§10.13) |
+| `nyx_kt_snapshot_deleted_total{result}` | Arsip snapshot KT yang dihapus karena retensi |
+| `nyx_registration_guard_observed_total{action,reason}` | Hasil evaluasi guard registrasi (mode `shadow` = keputusan hipotetis) |
+| `nyx_admin_cleanup_total{result}` | Pemanggilan `/api/admin/cleanup` — termasuk yang DITOLAK (`forbidden`, `rate_limited`) |
+| `nyx_abuse_guard_enabled{guard}` | 1 = guard menyala saat boot, 0 = off (alert `NyxAbuseGuardDisabled`) |
+| `nyx_client_version_rejected_total{result}` | Request ditolak karena versi klien < `MIN_CLIENT_VERSION` (§10.14) |
 | `nyx_metrics_rejected_total{reason}` | Harus **selalu 0** di produksi; >0 = ada kode yang mencoba mengirim identitas ke metrik |
 
 **Pemasangan (ops di VPS):** Prometheus + Grafana + exporter
@@ -406,6 +494,14 @@ langganan jatuh tempo → FREE, story kadaluarsa. Setiap langkah diisolasi: satu
 tabel yang gagal tidak menahan langkah lain, dan kegagalannya dilaporkan per
 langkah.
 
+**Pembersihan pesan (tiap menit).** `jobs/messageSweeper.ts` berjalan
+`* * * * *` dengan `noOverlap`: menghapus pesan yang sudah lewat `expiresAt`
+**dan** semua pesan yang lebih tua dari **14 hari** (retensi tetap, bukan
+pengaturan per-pesan), lalu memberi tahu klien lewat event
+`message:deleted_batch` supaya barisnya hilang dari UI tanpa menunggu reload.
+Job ini tidak muncul di metrik sweeper harian — kalau retensi macet, satu-satunya
+gejala adalah tabel `Message` yang tumbuh.
+
 - Respons endpoint memuat hitungan per jenis + `errors`. **HTTP 500 bila ada
   langkah gagal** — jangan membaca 200 sebagai "semua bersih".
 - Metrik: `nyx_sweeper_last_run_timestamp_seconds{result}` (alert
@@ -421,7 +517,7 @@ langkah.
   `curl -sS -X POST -H "x-admin-key: $ADMIN_CLEANUP_SECRET" https://api.nyx-app.my.id/api/admin/cleanup`
 
 **Snapshot log Key Transparency.** Log KT hanya ada di LevelDB milik
-`nyx-kt-query`. Setel `NYX_KT_SNAPSHOT_DIR` di service itu (mis.
+`nyx-kt-query` (§10.15). Setel `NYX_KT_SNAPSHOT_DIR` di service itu (mis.
 `/var/lib/nyx/kt-snapshots`) untuk menyalakan arsip harian:
 
 1. Penulisan dijeda (mutex yang sama dengan penulis log), direktori LevelDB
@@ -438,10 +534,16 @@ langkah.
   dan `nyx_kt_snapshot_deleted_total`.
 - Tanpa `KT_SNAPSHOT_DIR`, job log satu peringatan dan tidak mengunggah apa pun —
   ini kondisi yang harus terlihat, bukan dianggap normal.
-- **Latihan pemulihan** (belum pernah dijalankan, wajib sebelum mengandalkannya):
-  unduh arsip terbaru, ekstrak, arahkan `-db` ke direktori hasil ekstrak dan
-  jalankan `nyx-kt-query -check`; `GET /healthz` harus melaporkan ukuran pohon
-  yang sama dengan `latest.json`.
+- **Latihan pemulihan.** Sejak 2026-10-14 drill ini **otomatis di CI** (job
+  `kt-recovery`, `scripts/kt-restore-drill.sh`): entri ditulis lewat penulis
+  produksi → snapshot terverifikasi → **basis data hidup dihapus** → pulih hanya
+  dari arsip → tree size **dan** root harus identik dengan pra-bencana, bukti lama
+  tetap lolos verifier upstream (`nyx-kt-check`, memakai `transparency.VerifySearch`
+  yang sama dengan WASM klien), log bisa tumbuh tanpa memutus anchor klien lama,
+  dan kontrol negatif membuktikan pemeriksanya bisa gagal. Yang **tetap manual**
+  (jalankan sebelum mengandalkan arsip R2): unduh arsip terbaru dari R2, ekstrak,
+  arahkan `-db` ke direktori hasil ekstrak dan jalankan `nyx-kt-query -check`;
+  `GET /healthz` harus melaporkan ukuran pohon yang sama dengan `latest.json`.
 
 ## 10.14 Versi klien minimum (`MIN_CLIENT_VERSION`) — added 2026-10-15, R2
 
@@ -476,3 +578,85 @@ beri jeda minimal satu siklus rilis (biar PWA pengguna memperbarui diri) → bar
 naikkan `MIN_CLIENT_VERSION` ke versi rilis sebelumnya → pantau
 `nyx_client_version_rejected_total` (lonjakan = masih ada klien lama); turunkan
 kembali ke kosong bila lonjakannya besar dan pesan-pesannya belum sampai.
+
+## 10.15 Layanan Key Transparency (`nyx-kt-query`) — added 2026-10-15
+
+Log KT tidak ada di Postgres dan tidak di R2: ia hidup di LevelDB yang **dimiliki
+satu proses** — `server/kt-query/` (Go), dijalankan sebagai `nyx-kt-query`. Dua
+alasan bentuknya begitu (query service upstream tidak bisa melayani nilai log NYX;
+LevelDB menolak dibuka dua proses) ada di `server/kt-query/README.md` — baca itu
+sebelum menyentuh service ini.
+
+**Bangun** (dari vendor, tanpa jaringan dan tanpa checkout upstream; artefaknya
+**tidak** ikut `deploy.yml`):
+
+```bash
+server/kt-query/build.sh          # → server/kt-query/nyx-kt-query + nyx-kt-check
+server/kt-query/build.sh test     # go vet + go test
+```
+
+**Jalankan** (semua listener loopback; config YAML berisi kunci log + `db.file`):
+
+```bash
+nyx-kt-query \
+  -config /etc/nyx/kt/test_config.yaml \
+  -read-addr 127.0.0.1:8085 \
+  -write-addr 127.0.0.1:8081 \
+  -auditor-addr 127.0.0.1:8082 \
+  -distinguished 1m \
+  -snapshot-dir /var/lib/nyx/kt-snapshots
+```
+
+Flag/env lengkap (`-config`/`KT_CONFIG_FILE`, `-read-addr`/`NYX_KT_QUERY_ADDR`,
+`-write-addr`/`NYX_KT_WRITE_ADDR`, `-auditor-addr`/`NYX_KT_AUDITOR_ADDR`,
+`-snapshot-dir`/`NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL`,
+`NYX_KT_SNAPSHOT_KEEP`, `-check`) ada di `server/kt-query/README.md`; sisi server
+NYX memakai `KT_SERVER_URL` (tulis, `:8081`) dan `KT_QUERY_URL` (baca, `:8085`).
+
+Perannya hari ini:
+
+- **Satu-satunya penulis log** — protokolnya tetap
+  `KeyTransparencyTestService.Update`, jadi `server/src/utils/keyTransparency.ts`
+  tidak berubah.
+- **Penyaji bukti** untuk `/api/keys/kt/*` (proxy loopback dari Express) →
+  verifikasi di klien WASM (`docs/34`).
+- **Pembuat arsip snapshot terverifikasi** yang diunggah server NYX ke R2 (§10.13).
+- **Layanan auditor pihak ketiga** di listener terpisah (`:8082`) — kodenya siap,
+  tetapi **belum ada auditor nyata yang beroperasi** (`server/kt-query/README.md`
+  "Sisa yang jujur").
+
+**Deploy: otomatis, dengan satu langkah sekali-saja.** Unit-nya ada di repo
+(`ops/systemd/nyx-kt-query.service` + template `nyx-kt-query.env.example` +
+`ops/systemd/README.md`), jadi sejak 2026-10-15:
+
+| Bagian | Siapa yang mengerjakan |
+|---|---|
+| Build binary dari vendor (`nyx-kt-query` + `nyx-kt-check`) | `deploy.yml` (CI) |
+| Salin binary + `ops/systemd/` ke VPS, segarkan unit, `daemon-reload` | `deploy.yml` |
+| Restart + verifikasi (`is-active`, `/healthz`) bila unit `enabled`; gagal ⇒ deploy merah | `deploy.yml` |
+| Simpan binary sebelumnya sebagai `nyx-kt-query.prev` | `deploy.yml` |
+| Pemasangan pertama: direktori, kunci log + config YAML, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
+| Isi `KT_SERVER_URL` / `KT_QUERY_URL` / `KT_SNAPSHOT_DIR` di `/root/nyx-app/.env`, lalu `pm2 restart nyx-api` | **owner ops, sekali** |
+
+Aturan yang tidak boleh dilanggar:
+
+1. **systemd, bukan pm2, dan hanya satu proses.** Service ini memegang flock
+   LevelDB; dua proses (mis. satu di pm2 + satu di systemd) mati dengan
+   `resource temporarily unavailable`.
+2. Jangan pernah membuka `:8081`/`:8085`/`:8082` ke publik: hanya `nyx-api`
+   lewat loopback yang boleh menulis/membaca (§10.9 step 2).
+3. Config YAML + kunci log hidup di `/etc/nyx/kt/` (mode `0600`, §10.7) —
+   **tidak** di repo dan **tidak** di DB. Jangan regenerate setelah produksi:
+   kunci itu identitas log, dan menggantinya membuat semua bukti lama tak bisa
+   diverifikasi klien.
+4. `-check` membuka basis data ⇒ hentikan service dulu (§10.5 butir 8).
+5. Kalau `db.file`/`-snapshot-dir` tidak di dalam `ReadWritePaths` unit
+   (`/var/lib/nyx/kt`, `/var/lib/nyx/kt-snapshots`), service mati dengan
+   "read-only file system" — tambahkan path-nya di unit, jangan melepas
+   hardening-nya.
+6. Service ini belum mengekspos `/metrics`; `ops/prometheus/prometheus.yml`
+   menyiapkan tempatnya (dikomentari) supaya tidak memicu `up == 0` palsu —
+   jangan menyalakannya sebelum exporter-nya ada.
+7. Pin upstream naik = `scripts/vendor-signal.sh` + `go mod vendor`
+   (`server/kt-query/README.md`); vendor-nya ikut di-commit dan dibuktikan bisa
+   dibangun oleh job CI `build` serta dipakai ulang oleh job `kt-recovery`.

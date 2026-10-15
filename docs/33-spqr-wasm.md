@@ -108,9 +108,9 @@ test-nya = menjatuhkan chunk.
 
 Interpretasi (yang menentukan desain integrasi):
 
-- **CPU murah**: 0,1–0,3 ms per langkah di mesin dev. Di VPS 1 core kelas
-  `nyx-api` ini masih orde puluhan kali lebih cepat daripada anggaran enkripsi
-  per pesan, jadi ratchet PQ bukan hambatan CPU.
+- **CPU murah**: 0,1–0,3 ms per langkah di mesin dev. Di VPS produksi (4 core,
+  `docs/10` §10.1) ini masih orde puluhan kali lebih cepat daripada anggaran
+  enkripsi per pesan, jadi ratchet PQ bukan hambatan CPU.
 - **Wire kecil, state besar.** Pesan braid hanya 37 B di steady state (chunk
   erasure dikirim saat dibutuhkan), tetapi **state 3,8 KiB di-rewrite setiap
   langkah**. Konsekuensi arsitektur: state wajib disimpan di keychain ter-seal

@@ -65,21 +65,24 @@ flowchart TB
             SC[nyx-sidecar<br/>Rust WebTransport]
         end
         RD[(Redis)]
-        PG[(PostgreSQL 17<br/>local)]
+        PG[(PostgreSQL 18<br/>local)]
+        KT[nyx-kt-query<br/>KT log: LevelDB]
         NG --> API2
         WT[WebTransport server :33333] --> SC
         API2 <-->|pg / Prisma 7 adapter| PG
         API2 <-->|pub/sub + cache| RD
         SC <-->|nyx:upstream / nyx:downstream| RD
+        API2 <-->|KT tulis :8081 · baca :8085| KT
     end
 
     CF[Cloudflare<br/>CDN / Turnstile / R2] --- NG
-    R2[(Cloudflare R2<br/>encrypted blobs)] <--> API2
+    R2[(Cloudflare R2<br/>encrypted blobs + arsip snapshot KT)] <--> API2
 ```
 
 - **API is a blind relay.** All message content, profiles, and keys are encrypted client-side. The server never holds plaintext.
 - **Realtime path:** browser → QUIC → Rust sidecar → Redis pub/sub → Node (`redisBridge`) → Prisma → Redis → sidecar → recipient.
 - **REST path:** browser → Cloudflare → nginx → Express → Prisma/Redis (auth, keys, uploads, sync, admin).
+- **Key Transparency:** `nyx-kt-query` (Go) is the single owner of the KT log (LevelDB + verified daily snapshots); `nyx-api` writes entries over loopback gRPC (`:8081`), proxies proof reads for `/api/keys/kt/*` (`:8085`), and uploads the newest snapshot to R2 — see `docs/10` §10.13/§10.15.
 
 ## 1.3 Dependency boundaries (verified)
 
