@@ -13,12 +13,14 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
+  FiPackage
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import BackupRestoreModal from '../components/BackupRestoreModal';
+import BackupExportModal from '../components/BackupExportModal';
 import { api } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
 import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
@@ -182,6 +184,9 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
+  // [docs/31 §31.6b] Ekspor arsip ber-frame ber-kunci recovery phrase — jalur
+  // manual yang dulu tidak punya pintu masuk UI (hanya ada fungsi transport-nya).
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const handleDeleteAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -992,6 +997,19 @@ export default function SettingsPage() {
                    <FiDatabase size={18} />
                    {t('settings:data.restore_backup')}
                  </button>
+                 <button 
+                   onClick={() => setShowExportModal(true)}
+                   className="
+                     col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiPackage size={18} />
+                   {t('settings:data.export_backup')}
+                 </button>
                  <input 
                     type="file" 
                     ref={vaultInputRef} 
@@ -1203,6 +1221,7 @@ export default function SettingsPage() {
       {/* MODALS */}
       {showReportModal && <ReportBugModal onClose={() => setShowReportModal(false)} />}
       <BackupRestoreModal isOpen={showRestoreModal} onClose={() => setShowRestoreModal(false)} />
+      <BackupExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} />
       
       {avatarCropTarget && (
         <ImageCropperModal

@@ -32,6 +32,10 @@ OUT="${NYX_KT_BINARY:-$here/nyx-kt-query}"
 # bukti yang disajikan layanan benar-benar bisa diverifikasi dari luar, dan
 # protokol auditor upstream untuk TreeSize/Audit. Dipakai scripts/kt-restore-drill.sh.
 CHECK_OUT="${NYX_KT_CHECK_BINARY:-$here/nyx-kt-check}"
+# Auditor pihak ketiga (docs/30 §30.5 tahap C, mode 3): proses yang memverifikasi
+# aliran update lalu mengirim `SetAuditorHead`. Diport dari implementasi auditor
+# referensi Signal; tanpa proses ini log hanya berjalan `ContactMonitoring`.
+AUDITOR_OUT="${NYX_KT_AUDITOR_BINARY:-$here/nyx-kt-auditor}"
 UPSTREAM="${NYX_KT_UPSTREAM:-}"
 
 if [[ -n "$UPSTREAM" ]]; then
@@ -68,5 +72,7 @@ fi
 
 go build -o "$OUT" .
 go build -o "$CHECK_OUT" ./cmd/nyx-kt-check
+go build -o "$AUDITOR_OUT" ./cmd/nyx-kt-auditor
 echo "dibangun: $OUT"
 echo "dibangun: $CHECK_OUT"
+echo "dibangun: $AUDITOR_OUT"

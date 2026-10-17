@@ -13,6 +13,8 @@ import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // [docs/28 Tier 1.5 / D14] key cache Redis memakai tag, bukan userId asli.
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
+// [docs/30 §30.5 WS-A] Rotasi kunci identitas → entri log KT (verifikasi kepemilikan identifier).
+import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js'
 // [docs/30 §30.9 WS-E(1)] coturn self-host: kredensial TURN time-limited (HMAC).
 import {
   buildTurnIceServers,
@@ -69,6 +71,11 @@ router.post(
       // yang diupload. Opsional di skema agar client lama tidak rusak; handler
       // tetap menimpa kolom device setiap kali field dikirim.
       encryptedPrivateKeys: z.string().min(1).max(100_000).optional(),
+      // [docs/30 §30.5 WS-A] Identifier mentah Argon2id (base64url 32 byte) —
+      // dibutuhkan HANYA untuk menulis entri log saat kunci identitas berubah
+      // (server tak bisa menurunkan search key dari identifier ter-pepper).
+      // Opsional: klien lama tetap jalan, rotasinya tidak tercatat (`no_identifier`).
+      usernameHash: z.string().regex(base64UrlRegex, 'Invalid identifier format').optional(),
       signedPreKey: z.object({
         key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
         pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format'),
@@ -94,8 +101,16 @@ router.post(
         identityKey: identityKeyB64,
         pqIdentityKey,
         signedPreKey,
-        signingKey
+        signingKey,
+        usernameHash
       } = req.body;
+
+      // [docs/30 §30.5 WS-A] Material identitas SEBELUM update — dasar keputusan
+      // "kunci benar-benar berubah" (upload ulang bundle yang sama bukan rotasi).
+      const previousIdentity = await prisma.device.findUnique({
+        where: { id: deviceId },
+        select: { publicKey: true, signingKey: true }
+      });
 
       // [Temuan #2] Validasi ulang payload encrypted keys (defense in depth;
       // zod sudah memvalidasi bentuknya). Client lama tanpa field → undefined
@@ -144,6 +159,24 @@ router.post(
           }
         });
       });
+
+      // [docs/30 §30.5 WS-A] Rotasi kunci identitas WAJIB terlihat di log.
+      // Fire-and-forget: latensi/keberhasilan upload bundle tidak bergantung pada
+      // log (kegagalannya fail-visible lewat `nyx_kt_writes_total{result}`).
+      if (
+        identityKeysChanged(previousIdentity, {
+          identityKey: Buffer.from(identityKeyB64, 'base64url'),
+          signingKey: Buffer.from(signingKey, 'base64url')
+        })
+      ) {
+        void publishIdentityKeyChange({
+          userId: authUser.id,
+          usernameHash,
+          identityKey: Buffer.from(identityKeyB64, 'base64url'),
+          pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
+          signingKey: Buffer.from(signingKey, 'base64url')
+        });
+      }
 
       res.status(201).json({ message: 'Pre-key bundle updated successfully.' });
 

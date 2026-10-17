@@ -12,6 +12,8 @@
  * per-request agar counter selalu == 1 dan difficulty terkunci di minimum.
  */
 
+import { pepperedIdentifier } from './atRestSecrets.js';
+
 export interface PowIdentityInput {
   userId?: string;
   instId?: string | string[];
@@ -22,6 +24,21 @@ export interface PowIdentityInput {
 export interface PowIdentity {
   primaryId: string;
   prefix: 'pow:user' | 'pow:inst' | 'pow:fp' | 'pow:ip';
+}
+
+/**
+ * [docs/30 §30.12 WS-H] Key counter redis untuk identitas PoW.
+ *
+ * Sebelumnya key-nya `blake2b(primaryId)` **tanpa kunci**, dipotong 16 hex.
+ * Untuk identitas berentropi rendah itu bukan perlindungan: ruang IPv4 hanya
+ * 2^32, jadi siapa pun yang memegang snapshot Redis bisa mengenumerasi seluruh
+ * ruang alamat dan mencocokkan hash-nya — tepat kelas kesalahan yang sudah
+ * dihindari di blind index lain (`utils/atRestSecrets.ts`: "hash TANPA kunci =
+ * bisa dienumerasi"). Kini HMAC pepper dengan domain terpisah, jadi key tetap
+ * deterministik (counter idempoten) tetapi tidak bisa dibalik tanpa pepper.
+ */
+export function powRateKey(identity: Pick<PowIdentity, 'prefix' | 'primaryId'>): string {
+  return pepperedIdentifier(`${identity.prefix}:${identity.primaryId}`);
 }
 
 const firstValue = (v?: string | string[] | null): string | undefined => {

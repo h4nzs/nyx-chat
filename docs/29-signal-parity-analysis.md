@@ -283,19 +283,28 @@ tetap plaintext**: `id`, `isGroup`, `lastMessageAt`, `seq`, `updatedAt`
 > **[2026-10-12 — WS-F] Sebagian besar sudah ditutup:** `lastMessageAt`
 di-bucket 15 menit (bucket yang sama dengan server), `seq`/`senderId`/
 `repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`Conversation.isGroup`
-Ter-seal `ENC1:` di tempat, urutan pesan memakai skema dua lapis
+ter-seal `ENC1:` di tempat, urutan pesan memakai skema dua lapis
 (`orderBucketMs` plaintext + `createdAtSealed`), pencarian lewat indeks
 in-memory saat vault terbuka, dan `ContactRow.updatedAt` /
-`ProfileCacheRecord.updatedAt` di-seal di rel migrasi unlock. Yang masih
-plaintext: `id` (primary key — tidak bisa dienkripsi tanpa mematikan indeks),
-`ContentRecord.orderBucketMs` (indeks sengaja: granularitasnya sudah
-terpublikasi di server) dan `Conversation.lastMessageAt` (bucket). Artinya
-siapa pun yang memegang profil browser (atau backup profil, atau device
-tercuri) bisa melihat **pola aktivitas**: kapan chat ramai, berapa pesan,
-percakapan mana yang aktif — walau isinya tidak terbaca. Ini kontras dengan
-`docs/28` yang justru berjuang membucket `lastMessageAt` **di sisi server**
-(`temporalBucket.ts`) — jadi aneh kalau sisi klien membiarkannya presisi.
-OPFS sudah benar (hanya blob terenkripsi, `opfsStorage.ts`).
+`ProfileCacheRecord.updatedAt` di-seal di rel migrasi unlock. OPFS sudah benar
+(hanya blob terenkripsi, `opfsStorage.ts`).
+>
+> **[2026-10-16 — status setelah verifikasi gate `docs/30` §30.10] Yang masih
+plaintext (dan memang tidak bisa dihilangkan):** `id` (primary key —
+tidak bisa dienkripsi tanpa mematikan indeks), `orderBucketMs` /
+`Conversation.lastMessageAt` (indeks; granularitasnya **sudah** terpublikasi di
+server `temporalBucket.ts`, docs/28 B3/B4) dan `offlineQueue.timestamp` (kolom
+indeks `orderBy('timestamp')` pada antrean kirim yang sementara). Yang **tidak**
+lagi plaintext sejak verifikasi: `sentAt` dan `pqDrSessionsV2.lastActivity`
+(keduanya ms presisi → kini `ENC1:`); sebelumnya dua kolom itu lolos dari daftar
+"sisa" dan praktis membatalkan gate "jam tidak terbaca".
+>
+> Artinya penyerang yang memegang profil browser (atau backup profil, atau
+device tercuri) hanya melihat **pola aktivitas sampai presisi bucket 15 menit**
+(berapa pesan per bucket/percakapan) — bukan jam per pesan. Isi pesan tetap
+tidak terbaca. Ini kontras dengan `docs/28` yang justru berjuang membucket
+`lastMessageAt` **di sisi server** (`temporalBucket.ts`) — jadi aneh kalau sisi
+klien membiarkannya presisi.
 
 **Signal:** SQLCipher mengenkripsi seluruh DB + FTS5 untuk pencarian (dan
 ekstensi SQLCipher-nya sendiri).
@@ -318,6 +327,28 @@ version byte di payload" — pola yang sudah terbukti rapuh di jalur sender-key
 (docs/16: lima invariant era harus ditambal berulang kali karena routing antar
 versi). Tambahan `protocolVersion` + `capabilities` (server mengabaikan yang tak
 dikenal) adalah perubahan kecil dengan nilai besar.
+
+**Status implementasi (2026-10-16):** negosiasi berjalan di **kedua** transport,
+sebab satu transport saja tidak cukup — klien di jaringan yang memblokir QUIC
+memakai WSS, dan di sanalah kapabilitas dulu tidak pernah ada:
+
+| Transport | Klien → relay | Relay → klien | Kode |
+|---|---|---|---|
+| WebTransport (sidecar) | frame `HELLO` (opcode `0x0B`) di stream **bidi** | frame `HELLO` balasan, irisan kapabilitas | `server/transport-sidecar/src/protocol.rs` |
+| WSS (socket.io) | `handshake.auth.capabilities` (array string pendek) | event `capabilities`, irisan kapabilitas | `server/src/realtime/gateway.ts` + `server/src/utils/transportCapability.ts` |
+
+Aturan yang sama di kedua jalur: klien **lama** yang tidak mengirim apa pun =
+legacy (daftar kosong), bentuk cacat **tidak** memutus koneksi, irisan dihitung
+klien **dan** server (server tidak boleh mengaktifkan kapabilitas yang belum
+diiklankan klien), dan nama kapabilitas hidup di satu tempat —
+`SERVER_CAPABILITIES` di `packages/shared/src/transport.ts`.
+
+Kenapa ini menentukan untuk ratchet v2 (braid SPQR, `docs/33` §33.7): klien hanya
+mengirim v2 bila relay **aktif** mengiklankan `spqr-ratchet`. Sebelum gateway WSS
+ikut menegosiasikan, semua klien di jalur WSS selalu dilihat sebagai legacy — jadi
+jalur v2 praktis tidak pernah terpakai walau kedua peer sudah saling menyatakan
+mampu lewat `ackV` (bukti peer itu in-band dan tetap satu-satunya syarat
+sesungguhnya). Rollout-nya bisa diukur: `nyx_wss_capability_total{capability}`.
 
 ### 5.7 Calls
 
@@ -475,6 +506,15 @@ Lihat §5.5. Bucket/`ENC1:`-kan `lastMessageAt`, `seq`, `updatedAt`, `isGroup`
 (`localAtRest.ts` + skema urutan `localOrderKey.ts` + migrasi unlock
 `migrateAtRestSealing`); sisa plaintext hanya primary key dan bucket indeks yang
 memang harus bisa di-range-scan (§5.5).
+
+**Status 2026-10-16 (verifikasi gate `docs/30` §30.10):** klaim "sisa plaintext
+hanya primary key dan bucket indeks" di atas ternyata **belum lengkap** —
+`Message.sentAt` dan `pqDrSessionsV2.lastActivity` (dua-duanya ms presisi) masih
+plaintext dan membuat "jam" tetap terbaca dari IndexedDB. Keduanya kini ter-seal
+`ENC1:` (writer + migrasi unlock + pembaca; baris lama tetap terbaca) dan ada
+**pemindai baris mentah** yang menjaganya (`dexieMigration.test.ts`, dengan
+kontrol negatif). Sisa yang disengaja plaintext hanya `id`, kolom bucket indeks,
+dan `offlineQueue.timestamp`.
 
 ### 7.4 ESLint tidak berjalan sama sekali — **MEDIUM (selesai 2026-10-15)**
 

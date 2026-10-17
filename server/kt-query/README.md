@@ -101,6 +101,7 @@ nyx-kt-query \
 | `-snapshot-dir` | `NYX_KT_SNAPSHOT_DIR` | — | direktori arsip snapshot; kosong = snapshot nonaktif |
 | `-snapshot-interval` | `NYX_KT_SNAPSHOT_INTERVAL` | `24h` | jeda antar snapshot |
 | `-snapshot-keep` | `NYX_KT_SNAPSHOT_KEEP` | `7` | jumlah arsip terakhir yang disimpan lokal |
+| `-metrics-addr` | `NYX_KT_METRICS_ADDR` | `127.0.0.1:9467` | exporter `/metrics` — **wajib loopback** (alamat non-loopback ditolak saat start); `0` = mati |
 | `-check` | — | — | buka basis data, bangun pohon, lalu keluar (health check deploy) |
 
 Sisi server NYX diarahkan lewat `KT_QUERY_URL` (mis.
@@ -171,12 +172,62 @@ upstream apa adanya:
 `SetAuditorHead` menulis state pohon, jadi ia memakai mutex yang sama dengan
 penulisan update biasa — tidak ada dua penulis state yang berjalan bersamaan.
 
-**Sisa:** auditor nyata belum dioperasikan (belum ada proses yang mengirim tanda
-tangan), dan gate CI vektor `cmd/generate-auditing-test-vectors` / interop
-`cmd/kt-client` tidak dijalankan (keduanya `package main` di repo upstream, tidak
-ter-vendor). Yang bisa dibuktikan sekarang ada di `audit_test.go`: verifier
-upstream **menolak** bukti mode 3 tanpa auditor head, menerimanya setelah
-`SetAuditorHead`, dan menolak tanda tangan yang diubah.
+### Auditor nyata: `cmd/nyx-kt-auditor`
+
+Proses yang memverifikasi aliran update dan mengirim tanda tangan itu ada di repo
+ini: `server/kt-query/cmd/nyx-kt-auditor` (Go, unit
+`ops/systemd/nyx-kt-auditor.service`). Ia **tidak** menyentuh LevelDB — hanya gRPC
+loopback (`TreeSize`/`Audit`/`SetAuditorHead`) plus `GET /config` untuk mengambil
+kunci publik log. Kunci privat auditor dibaca dari berkas seed ed25519 hex
+(mode 0600); nama auditor dikirim di metadata `x-nyx-auditor-name`.
+
+```bash
+# pemasangan: cetak baris `api.auditors` untuk config log (tanpa salin manual)
+nyx-kt-auditor -name <nama> -key-file /etc/nyx/kt/auditor.key -print-public-key
+# cek config layanan + koneksi (tidak menyentuh state)
+nyx-kt-auditor -name <nama> -key-file /etc/nyx/kt/auditor.key -check
+# drill/verifikasi: proses semua update, kirim SATU tree head, keluar
+nyx-kt-auditor -name <nama> -key-file /etc/nyx/kt/auditor.key -once
+```
+
+Logika verifikasinya adalah **port baris-per-baris** dari auditor referensi Signal
+(`signalapp/key-transparency-auditor`, Java, AGPL-3.0): `CondensedPrefixTree`
+(`prefix_tree.go`) dan `CondensedLogTree` (`log_tree.go`), plus runner yang
+mengikuti urutan `Auditor.auditKeyTransparencyService` (verifikasi root prefix →
+tambah daun log → kirim tree head saat jatuh tempo → **baru** simpan state). Yang
+memakai kode upstream apa adanya: penyusunan tanda tangan tree head
+(`transparency.SignNewAuditorHead`).
+
+Yang membuktikannya bekerja, dalam tiga lapis:
+
+1. **Vektor resmi Signal** (`testdata/katie_test_vectors.pb`, salinan apa adanya
+dari repo auditor referensi): 10 update `should_succeed` diterima dengan root hash
+pohon log cocok **setiap langkah**, lima vektor `should_fail` ditolak
+(`first proof type must be newTree`, `newTree` untuk pohon tidak kosong,
+`differentKey`/`sameKey` tidak cocok root lama, `sameKey` untuk update palsu), dan
+`signature_input` + tanda tangan tree head cocok byte-per-byte (`vectors_test.go`).
+2. **Test unit** port dari `CondensedLogTreeTest`/`CondensedPrefixTreeTest`
+   (`log_tree_test.go`, `prefix_tree_test.go`) + state bertanda tangan
+   (`state_test.go`) + irama/penghentian runner (`runner_test.go`).
+3. **Jalur hidup**: `go test ./...` di direktori ini adalah gate yang sama yang
+dijalankan CI, dan `-once` terhadap layanan yang berjalan adalah langkah
+pemasangan yang bisa diulang operator.
+
+Catatan migrasi (ditemukan saat mengaktifkan mode 3 pada log yang sudah berisi
+entri): tree head yang **tersimpan** ditandatangani saat log masih mode 1, jadi
+sampai satu update berikutnya menulis head mode 3, klien gagal dengan
+`provided auditor public key does not match set of known auditor public keys` —
+bukan error konfigurasi, hanya satu siklus update (di deployment NYX, kunci
+`distinguished` berotasi tiap menit). Setelah itu kegagalan yang muncul adalah yang
+benar: `auditor tree head not provided even though auditing is required` sampai
+auditor pertama mengirim `SetAuditorHead`.
+
+**Sisa yang jujur:** interop `cmd/kt-client` upstream tetap tidak dijalankan
+(`package main`, tidak ter-vendor); perannya sudah diambil `nyx-kt-check`
+(`verify-search`/`tree-size`/`audit`) dan runner auditor di atas. Verifikasi
+lintas-implementasi terhadap auditor Java (dua proses, satu log) belum pernah
+dijalankan — port ini diuji terhadap vektor dan perilaku yang sama, bukan dengan
+menjalankan kedua implementasi berdampingan.
 
 ## Snapshot harian → R2
 
@@ -196,6 +247,32 @@ tidak dipasang di proses log.
 **Sisa:** dijalankan di VPS (direktori + kredensial) dan membuktikan pemulihan
 dari arsip ke basis data yang bisa melayani bukti.
 
+## Metrik (`metrics.go`, job scrape `nyx-kt-query`)
+
+Proses ini **fail-open**: bila ia mati, registrasi dan rotasi kunci tetap sukses —
+hanya tanpa jejak audit. Tidak ada satu pun error di aplikasi yang menunjuk ke
+sini, jadi sebelum `metrics.go` ada, kegagalannya benar-benar tidak terlihat.
+Exporter ditulis tangan (tanpa dependency baru — modul ini ter-vendor penuh,
+§32.8) dan hanya didengar di loopback (`-metrics-addr`/`NYX_KT_METRICS_ADDR`,
+default `127.0.0.1:9467`).
+
+Yang diukur: tulisan per hasil (`ok`/`duplicate`/`invalid`/`error`), baca per
+operasi (`search`, `distinguished`, `monitor`, `config`, `head`, `health`),
+percobaan snapshot lokal, ukuran pohon, umur proses, plus dua **gauge kunci**:
+
+- `nyx_kt_query_snapshot_last_timestamp_seconds` — snapshot lokal terakhir yang
+tersimpan **dan terverifikasi**. Hanya lahir setelah snapshot pertama sukses,
+jadi aturannya memakai `absent_over_time` (bukan `== 0`).
+- `nyx_kt_query_distinguished_timestamp_seconds` — nilai anchor yang tersimpan,
+dibaca dari log saat start **dan ditulis ulang setiap putaran `runDistinguished`
+yang berhasil**. Kalau gauge ini hanya di-set sekali saat start, alert "anchor
+basi" akan menyala palsu setelah setiap restart — itu sebabnya `updateDistinguished`
+mempublikasikan nilai yang benar-benar ditulis, bukan mengandalkan pembacaan awal.
+
+Aturan label sama seperti dua exporter lain (deklarasi dulu, nilai label hanya
+dari enum); nilai di luar tabel ditolak dan dihitung di
+`nyx_kt_query_metrics_rejected_total` (harus selalu 0).
+
 ## Sisa yang jujur
 
 - **Loop monitor klien sudah jalan** (2026-10-14): ABI WASM punya
@@ -204,6 +281,11 @@ dari arsip ke basis data yang bisa melayani bukti.
 - **Gossip tree head** memakai `GET /head` (`web/src/lib/ktGossip.ts`); dua klien
   yang melihat root berbeda untuk ukuran pohon yang sama melaporkan split-view.
   Verifikasi lintas-klien nyata (dua browser) belum dijalankan.
-- **Auditor pihak ketiga belum dioperasikan** (kode siap, lihat di atas).
+- **Auditor pihak ketiga sudah dioperasikan** (lihat "Auditor nyata" di atas),
+  dengan satu catatan penting: ia berjalan **di host yang sama** dengan log, jadi
+  ia membuktikan konsistensi riwayat (deteksi penulisan ulang/penyisipan), bukan
+  independensi organisasi. Auditor di mesin/operator lain masih mungkin — protokolnya
+  sama (`x-nyx-auditor-name` + kunci publik di `api.auditors`), tetapi untuk
+  deployment yang menghadap internet, auditor sebaiknya benar-benar pihak ketiga.
 - **Klaim `docs/32` §32.1 berubah**: upstream `kt-server` tidak lagi dijalankan
   sebagai penulis — layanan ini yang memilikinya (alasan di atas).

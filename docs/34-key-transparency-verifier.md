@@ -63,6 +63,20 @@ dengan kunci publik log yang diturunkan dari seed config kt-server → nilai
 kembali harus sama dengan nilai yang ditulis. Terukur saat pembuatan fixture:
 `tree = 63 → 64`, `vrf_proof = 80 B`.
 
+Dua jebakan saat **meregenerasi** fixture (ditemukan 2026-10-17, saat
+memverifikasi ulang interop terhadap binary pin `30b7a2a40604` yang dibangun
+lokal):
+
+1. `VERIFY_NOW` di `keyTransparency.test.ts` dipatok ke waktu fixture lama.
+   Tree head baru berumur “sekarang”, jadi verifikasi menolaknya bila `now` uji
+   tertinggal lebih dari 24 jam (batas verifier upstream) — gejalanya muncul
+   sebagai error proof, bukan pesan “waktu”. Regenerasi fixture **wajib**
+   memperbarui konstanta itu.
+2. `kt-fixtures.ts` menulis `mode: 1` (ContactMonitoring) apa adanya. Jalankan
+   `kt-server` **tanpa** blok `api.auditors` — peta kosong (`auditors: {}`) pun
+   membuat `TreeConfig()` memilih ThirdPartyAuditing (`auditorConfigs != nil`),
+   sehingga fixture-nya tidak cocok dengan `mode` yang ditulis.
+
 ## 34.4 Yang diuji (12 test dasar + 6 dari jalur baca NYX)
 
 | Properti | Hasil |
@@ -104,14 +118,25 @@ Residual lain yang tercatat jujur:
 1. **Mode `ContactMonitoring` (mode 1) tidak memverifikasi tanda tangan auditor.**
    Byte di dalam slot tanda tangan auditor yang tidak dipakai mode ini tidak
    diperiksa; untuk menjadikannya bermakna, deployment harus memakai mode 3
-   (third-party auditing) + `SetAuditorHead`.
+   (third-party auditing) + `SetAuditorHead`. **Ditutup 2026-10-16:** log NYX (self-host)
+   berjalan mode 3 dengan auditor nyata (`cmd/nyx-kt-auditor`, §34.6c), jadi auditor
+   head benar-benar ada dan diperiksa verifier.
 2. **`condense_update` mengandalkan kompatibilitas wire** antara server
    `transparency.proto` dan `signal.keytrans` (field 1–4 sama). Itu diuji lewat
    fixture nyata, tetapi kalau server mengubah tata letak field, test ini yang
    akan menangkapnya.
-3. **`keyVersion` masih konstanta alur** (1 registrasi, 2 pemulihan) seperti
-   dicatat `docs/32` §32.7 — cukup untuk dedupe & mendeteksi perubahan, belum
-   cukup untuk menyimpulkan urutan versi dari log saja.
+3. **`keyVersion` masih label alur** (registrasi / pemulihan / rotasi, lihat
+   `docs/32` §32.7) — cukup untuk dedupe & mendeteksi perubahan, belum cukup
+   untuk menyimpulkan urutan versi dari log saja. Sisi penulisnya **sudah
+   lengkap** sejak 2026-10-17: tiga jalur rotasi (`POST /keys/prekey-bundle`,
+   `PUT /users/me/keys`, re-sync kunci `POST /auth/login`) menulis entri via
+   `utils/ktIdentityLog.ts`, sehingga verifier tidak lagi melihat `mismatch`
+   untuk rotasi yang sah pada perangkat yang sudah mengirim identifier mentah
+   (klien lama tetap dilewati → `no_identifier`). Deteksi perubahan kunci
+   **tidak** bergantung pada byte `keyVersion` itu: `ktMonitoring` memakai
+   `greatest_version()` = `PrefixProof.counter` pohon prefix KT (siapa pun yang
+   menulis, counter naik) — `vendor/signal/libsignal-keytrans/src/lib.rs:385` +
+   `verify.rs:982`.
 4. **Ukuran proof tumbuh dengan pohon** (fixture sudah 53–62 KB untuk pohon 64
    entri). Ini biaya bandwidth nyata: verifikasi harus memakai *condensed*
    response (dua pembacaan: 3 condensed + 1 tree head dalam protokol Signal)
@@ -193,8 +218,14 @@ Perilaku yang berubah (dan patut diingat):
    `ktBundleProof`.
 
 Verifikasi: `peerIdentityTrust.test.ts` (+5 test: mismatch kontak pertama,
-penerimaan user, TTL konfirmasi, sumber `kt` di daftar pending, unknown-subject)
-dan `ktSubject.test.ts` (8 test: prioritas sumber + fail-open).
+penerimaan user, TTL konfirmasi, sumber `kt` di daftar pending, unknown-subject),
+`ktSubject.test.ts` (8 test: prioritas sumber + fail-open), dan — ditambahkan
+2026-10-17 — `ktBundleProof.test.ts` (5 test integrasi yang memanggil
+`checkBundleAgainstKeyTransparency` dengan bukti `search-v1.pb` dari kt-server
+sungguhan + verifier WASM; yang dipalsukan hanya batas jaringan). Test terakhir
+mengunci hal yang sebelumnya hanya diuji lewat primitif: `confirmed` + state
+tersimpan, `mismatch` untuk bundle MITM, `unverifiable` saat `vrf_proof` diubah,
+`unavailable` + backoff, dan `unknown-subject` tanpa panggilan jaringan.
 
 ## 34.6b Loop monitor (landed 2026-10-14)
 
@@ -225,16 +256,15 @@ menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
    Catatan: loop baru punya data setelah verifikasi search pertama berhasil, dan
    verifikasi itu butuh username peer (§34.6a poin 3), jadi profil peer harus
    pernah terdekripsi.
-3. ~~**Auditor + gossip**~~ — **landed 2026-10-14**: auditor pihak ketiga
-   dilayani `server/kt-query/audit.go` (mode 3, `TreeSize`/`Audit`/`SetAuditorHead`
-   lewat verifikasi upstream) dan gossip tree head hidup di `ktGossip.ts`
-   (§34.6c). Dua sisa yang jujur: (a) **auditor belum dioperasikan** — belum ada
-   proses auditor yang mengirim `SetAuditorHead`, jadi tanda tangan auditor di
-   bukti masih tidak diperiksa siapa pun di lapangan (`§34.5` residual 1 tetap
-   berlaku sampai ada auditor); (b) gate CI `cmd/generate-auditing-test-vectors`
-   dan interop `cmd/kt-client` **tidak dijalankan** (keduanya `package main` di
-   repo upstream, tidak di-vendor) — jalur auditor dibuktikan `audit_test.go`
-   dengan verifier upstream yang sama.
+3. ~~**Auditor + gossip**~~ — **landed 2026-10-14**, dan auditor **dioperasikan
+   2026-10-16**: auditor pihak ketiga dilayani `server/kt-query/audit.go` (mode 3,
+   `TreeSize`/`Audit`/`SetAuditorHead` lewat verifikasi upstream), proses auditornya
+   adalah `server/kt-query/cmd/nyx-kt-auditor` (port Go dari auditor referensi
+   Signal, unit `ops/systemd/nyx-kt-auditor.service`), dan gossip tree head hidup di
+   `ktGossip.ts` (§34.6c). Sisa yang jujur: interop `cmd/kt-client` upstream tetap
+   tidak dijalankan (`package main`, tidak di-vendor) — perannya diambil
+   `nyx-kt-check`; pelaksanaan dua auditor (Java referensi vs port ini) berdampingan
+   juga belum; dan auditor berjalan di host yang sama dengan log.
 4. **Degradasi terlihat** — bila KT mati: klien jalan dengan TOFU; verdict-nya
    tersimpan di baris pin (`ktLastVerdict`) dan setiap permintaan bukti dihitung
    di `nyx_kt_queries_total{result="disabled"|"error"}`. **Tidak ada banner**
@@ -267,6 +297,22 @@ terkonfigurasi ditolak lebih awal (`PermissionDenied`). `audit_test.go`
 menunjukkan inti mode 3: verifier upstream **menolak** bukti "auditor tree head not
 provided" sebelum ada head, dan **menerima** sesudahnya; tanda tangan yang diubah,
 kunci penyerang, dan mode bukan third-party semuanya ditolak.
+
+**Auditor nyatanya (2026-10-16).** Proses yang mengirim `SetAuditorHead` ada di
+repo ini, bukan di pihak ketiga: `server/kt-query/cmd/nyx-kt-auditor` (Go) — port
+baris-per-baris `org.signal.keytransparency.audit.{Auditor,CondensedPrefixTree,
+CondensedLogTree}` dari `signalapp/key-transparency-auditor` (AGPL-3.0, auditor
+referensi Signal). Ia mengambil `/config` untuk kunci publik log, memverifikasi
+aliran `Audit` (root prefix tree lama harus cocok sebelum update diterima, daun
+pohon log ditambahkan, root dihitung ulang), menandatangani tree head dengan
+`transparency.SignNewAuditorHead` upstream, lalu menyimpan state bertanda tangan
+ed25519 — **hanya setelah** `SetAuditorHead` sukses, dan **berhenti menandatangani**
+saat menemukan inkonsistensi. Yang membuktikannya: vektor resmi Signal
+(`testdata/katie_test_vectors.pb`) — 10 update sukses (root hash pohon log cocok
+tiap langkah), lima vektor gagal, tanda tangan byte-per-byte — plus test unit
+pohon/state/runner, dan jalur hidup di self-host (mode 3: bukti ditolak sebelum
+head auditor pertama, diterima sesudahnya). Detail: `server/kt-query/README.md`,
+`docs/30` §30.5 tahap C.
 
 **Gossip tree head.** Split-view (log menyajikan pohon berbeda ke klien berbeda)
 tidak bisa dideteksi satu klien sendirian — masing-masing konsisten dengan

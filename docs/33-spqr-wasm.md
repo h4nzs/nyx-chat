@@ -171,6 +171,12 @@ epoch berikutnya sepakat setelah chunk hilang), bukan pernyataan terpisah
 
 ## 33.7 Integrasi jalur pesan (landed 2026-10-14 — lihat §33.10)
 
+> **Diverifikasi ulang 2026-10-17 (baris M8 `docs/30`):** tiga poin "Sisa" di
+> bawah memang sudah tertutup, dan kini punya penjaga yang bisa dijalankan di
+> mesin tanpa Postgres/Redis: `web/src/lib/__tests__/spqrMessagePath.test.ts`.
+> Yang **tetap** tidak bisa dijalankan di mesin ini adalah E2E-nya sendiri
+> (guardrail `reset-test-env.ts`, lihat §33.10 "Batas yang jujur").
+
 Rencana §30.8 poin 2–3 menuntut langkah `KEMs/KEMr` di
 `web/src/workers/crypto.worker.ts` diganti dengan braid SPQR, **dipilih lewat
 kapabilitas** `spqr-ratchet` (sudah dideklarasikan di
@@ -198,19 +204,37 @@ di §33.10):
    diuji end-to-end.
 4. **Gerbang verifikasi.** Tanpa E2E (klien↔klien nyata lewat sidecar + Redis),
    perubahan header tidak bisa dibuktikan tidak regresi — dan `docs/30` §30.1
-   melarang menyentuh jalur kripto beku tanpa itu. Lingkungan mesin ini juga
-   tidak punya Postgres/Redis untuk menjalankan E2E.
+   melarang menyentuh jalur kripto beku tanpa itu. (Catatan 2026-10-17:
+   Postgres/Redis di mesin ini **ada** — `pg_isready` menerima koneksi dan
+   Redis menjawab `PONG`; yang memblokir E2E adalah guardrail `NODE_ENV`,
+   lihat §33.10 "Batas yang jujur".)
 
 Titik-titik di atas dulu membuat WS-D berhenti di batas yang bisa diverifikasi
 statis + unit test. Semuanya kini tertutup (§33.10) dengan versi wire baru,
 bukan tambalan pada jalur beku.
+
+**Poin 3 dituntaskan untuk kedua transport (2026-10-16).** Kapabilitas
+`spqr-ratchet` dulu hanya bisa datang dari sidecar WebTransport — sehingga klien
+yang terpaksa memakai WSS (jaringan memblokir QUIC, kasus yang justru banyak)
+**selalu** dilihat sebagai legacy dan jalur v2 praktis tidak pernah terpakai,
+walau kedua peer sudah saling menyatakan mampu lewat `ackV`. Sekarang jalur WSS
+menegosiasikan kapabilitasnya sendiri: klien mengiklankan daftarnya di
+`handshake.auth.capabilities`, gateway membalas event `capabilities` berisi
+irisan dengan `SERVER_CAPABILITIES`, dan klien menutup kedua jalur lewat satu
+fungsi (`finishCapabilityNegotiation`) supaya dua transport tidak bisa menyimpang
+soal "kapan negosiasi selesai". Rincian + tabel paritas: `docs/29` §5.6.
+
+Catatan penting yang tetap berlaku: kapabilitas relay hanyalah **gerbang
+rollout**. Yang mengizinkan pengiriman v2 tetap bukti peer in-band (`ackV` di
+payload ter-seal, otentikasi AEAD) — relay tidak pernah tahu versi peer mana pun,
+dan tidak boleh diberi wewenang itu.
 
 ## 33.9 Prasyarat integrasi yang sudah landed (2026-10-14)
 
 Dua hal yang §33.7 sebut sebagai penahan integrasi sudah dikerjakan **di luar**
 jalur kripto beku, jadi bisa diuji tanpa E2E:
 
-### `web/src/lib/spqrNegotiation.ts` — keputusan versi (murni, 9 test)
+### `web/src/lib/spqrNegotiation.ts` — keputusan versi (murni, 21 test)
 
 Aturan yang dikodekan, semuanya konsekuensi dari kesalahan transisi yang mahal:
 
@@ -221,10 +245,12 @@ Aturan yang dikodekan, semuanya konsekuensi dari kesalahan transisi yang mahal:
    yang terautentikasi**, bukan dari payload pesan.
 2. **Anti-downgrade:** v2 hanya bila KEDUA sisi mengiklankan `spqr-ratchet`.
    Peer legacy → v1, bukan "coba v2 dan berharap".
-3. **Saklar tunggal `SPQR_INTEGRATION_ENABLED = false`** menentukan apakah klien
-   mengiklankan kapabilitas (`advertisedCapabilities()`). Tetap `false` sampai
-   jalur v2 benar-benar bisa memproses pesan: kapabilitas tanpa implementasi
-   membuat peer memilih versi yang tidak bisa kita baca.
+3. **Saklar tunggal `SPQR_INTEGRATION_ENABLED`** menentukan apakah klien
+   mengiklankan kapabilitas (`advertisedCapabilities()`). Nilainya **kini
+   `true`** (jalur v2 sudah bisa memproses pesan, §33.10); alasan saklar ini ada
+   tetap berlaku sebagai satu-satunya tempat "boleh mengiklankan" diputuskan —
+   kapabilitas tanpa implementasi membuat peer memilih versi yang tidak bisa
+   kita baca.
 4. **Rollback eksplisit:** `planRatchetRollback('v2')` → `{ version: 'v1',
    preservedVersion: 'v2' }`. Pemanggil WAJIB mempertahankan state v2 (jendela
    baca pesan lama); modul ini tidak menghapus apa pun.
@@ -291,7 +317,7 @@ ini bukan sekadar pembungkus IndexedDB:
    klien lama tidak pernah menerima header yang tak bisa dibacanya.
 
 Keputusan ada di `spqrNegotiation.resolveOutboundRatchetVersion` (murni,
-idempoten, 6 test): v2 hanya bila ketiganya terpenuhi; sesi yang sudah v2
+idempoten, 7 test): v2 hanya bila ketiganya terpenuhi; sesi yang sudah v2
 **sticky** (kapabilitas yang hilang saat reconnect tidak menurunkan versi),
 dan rollback mengembalikan `preservedVersion: 'v2'` supaya pemanggil tidak
 menghapus state braid.
@@ -319,8 +345,17 @@ menghapus state braid.
   `SpqrSessionError`.
 - `web/src/lib/__tests__/spqrWire.test.ts` (8 test): round-trip header, header v1
   tidak pernah dianggap v2, batas parse, `ackV`.
-- `spqrNegotiation.test.ts` (18 test) + update `transportCapabilities.test.ts`:
+- `spqrNegotiation.test.ts` (21 test) + update `transportCapabilities.test.ts`:
   aturan v2 lengkap + paritas sidecar Rust.
+- **`spqrMessagePath.test.ts` (8 test, ditambahkan 2026-10-17)** — menutup jarak
+  antara unit test modul tunggal dan E2E: rangkaian **jalur pesan** yang
+  sesungguhnya (v1 dulu → `ackV: 2` dari peer → v2 `{v:2,b:[…]}` tanpa
+  `kemPk`/`n`/`pn` → peer membukanya lewat braid nyata + XChaCha20 nyata →
+  rollback mempertahankan state braid sementara pesan v2 peer tetap terbaca),
+  plus **guard sumber** yang mengunci urutan panggilan di `utils/crypto.ts`,
+  ketiga op worker, dan proxy-nya. Alasannya ada: E2E tidak bisa dijalankan di
+  setiap mesin (lihat batas di bawah), sedangkan tiga hal yang dulu tercatat
+  sebagai "Sisa" (§33.7) hanya dijaga E2E.
 - `cargo test` sidecar: `server_advertises_spqr_ratchet_as_deployment_switch`.
 - **E2E** `web/e2e/spqr.spec.ts` (Chrome nyata, server + 2 klien): pesan v1 lebih
   dulu → peer menyatakan mampu → pesan berikutnya v2 → **peer membaca plaintext**
@@ -340,6 +375,12 @@ menghapus state braid.
 
 ### Batas yang jujur
 
+- **E2E tidak bisa dijalankan di semua mesin:** `web/e2e/global.setup.ts`
+  memanggil `server/scripts/reset-test-env.ts`, dan skrip itu **menolak**
+  (exit 1) bila `NODE_ENV=production` — mesin yang `server/.env`-nya
+  `NODE_ENV=production` (termasuk mesin kerja repo ini, diverifikasi
+  2026-10-17 tanpa menyentuh data) tidak bisa menjalankan spec mana pun. Jangan
+  dilewati dengan mengubah `.env`; jalankan dengan env test terpisah.
 - Gate §30.8 poin 1 **tertutup pada pin yang sama** (§33.6): 57 test internal
   crate lulus (`cargo +nightly test --release --lib`, HEAD `06959b4708f9`,
   exit 0); stable tidak bisa mengompilasinya (`assert_matches` unstable).

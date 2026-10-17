@@ -1,0 +1,98 @@
+# Copyright (c) 2026 [han]. All rights reserved.
+# This file is part of NYX, licensed under the AGPL-3.0.
+# For commercial licensing, contact [admin@nyx-app.my.id].
+#
+# [docs/10 §10.12 · §10.16] Routing Alertmanager untuk metrik NYX.
+#
+# Berkas ini sengaja **tanpa rahasia**: receiver-nya menunjuk relay loopback
+# (`ops/alertmanager/ntfy-relay.mjs`), dan topik ntfy-nya hidup di
+# EnvironmentFile relay (`alertmanager.env`, 0600) — bukan di sini. Karena itu
+# berkas ini AMAN masuk repo dan disalin apa adanya ke VPS
+# (`install -m 644 ops/alertmanager/alertmanager.yml <dir conf>`), sama seperti
+# `ops/prometheus/prometheus.yml`.
+#
+# Kenapa receiver-nya relay, bukan langsung ntfy: Alertmanager tidak punya
+# receiver ntfy (0.34.1: `field ntfy_configs not found`), dan payload
+# `webhook_configs` (JSON v4) bukan bentuk pesan yang bisa dibaca ntfy. Relay
+# menerjemahkannya — lihat komentar di `ntfy-relay.mjs`.
+#
+# Cakupan: SEMUA aturan di `ops/prometheus/alerts.yml` (34 aturan). Berjalan
+# tanpa Alertmanager berarti aturan-aturan itu hanya terlihat di UI /alerts.
+
+global:
+  # Alert yang tidak punya EndsAt dianggap selesai setelah ini.
+  resolve_timeout: 5m
+
+route:
+  receiver: ntfy
+  # `severity` masuk group_by supaya critical dan warning tidak tercampur dalam
+  # satu notifikasi (satu grup = satu pesan).
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  # 4 jam: cukup jarang untuk tidak jadi kebisingan, cukup sering untuk tidak
+  # melupakan alarm yang menyala berhari-hari (mis. guard OFF).
+  repeat_interval: 4h
+  routes:
+    # Peristiwa keamanan (kebocoran identitas ke metrik, riwayat log KT tidak
+    # konsisten) tidak boleh menunggu grup: `group_wait: 0s` mengirim seketika.
+    - matchers:
+        - severity="critical"
+      receiver: ntfy
+      group_wait: 0s
+      repeat_interval: 1h
+    # `high` = jalan buntu operasional (exporter/proses mati, snapshot tidak
+    # naik). Dikirim lebih cepat daripada `warning`, diulang lebih sering.
+    - matchers:
+        - severity="high"
+      receiver: ntfy
+      group_wait: 1m
+      repeat_interval: 2h
+
+inhibit_rules:
+  # Proses/exporter mati membuat SEMUA alarm berbasis metriknya tidak bisa
+  # dipercaya: nilai yang "diam" tidak lagi berarti "sehat". Satu notifikasi
+  # "exporter mati" jauh lebih berguna daripada sepuluh alarm turunan.
+  # Empat "proses/exporter ini mati" masuk daftar sumber, bukan hanya dua: tiap
+  # proses punya alarm turunan yang berbasis metriknya sendiri (`NyxKtQueryDown`
+  # → snapshot/anchor basi; `NyxTransportSidecarDown` → auth/frame spike), dan
+  # semuanya tidak bisa dipercaya saat sumber datanya hilang.
+  - source_matchers:
+      - alertname=~"NyxMetricsExporterDown|NyxKtAuditorDown|NyxKtQueryDown|NyxTransportSidecarDown"
+    target_matchers:
+      - severity=~"high|warning"
+    # Tanpa `equal`, pasangan mana pun dihambat (label pembeda tidak diperlukan:
+    # sumbernya literally "tidak ada data").
+    equal: []
+  # Restart berulang menjelaskan tree head yang basi — jangan kirim keduanya
+  # sebagai dua masalah berbeda. (Yang TIDAK dihambat: `…Restarting` sendiri dan
+  # `…RoundFailing`, karena keduanya butuh tindakan berbeda.)
+  - source_matchers:
+      - alertname="NyxKtAuditorRestarting"
+    target_matchers:
+      - alertname="NyxKtAuditorHeadStale"
+    equal: []
+  # Alasannya sama untuk sidecar: restart berulang sudah menjelaskan lonjakan
+  # auth-gagal/frame-dibuang (sesi terputus → klien handshake ulang), jadi dua
+  # notifikasi untuk satu sebab hanya menambah kebisingan.
+  - source_matchers:
+      - alertname="NyxTransportSidecarRestarting"
+    target_matchers:
+      - alertname=~"NyxTransportAuthFailuresSpike|NyxTransportMalformedFramesSpike"
+    equal: []
+
+receivers:
+  - name: ntfy
+    webhook_configs:
+      # Relay loopback (unit `nyx-ntfy-relay`). Loopback, bukan jaringan: isi
+      # alert memetakan infrastruktur NYX (job, port, umur snapshot).
+      # Port 9095 sengaja BUKAN 9094 — 9094/tcp dipakai Alertmanager sendiri
+      # sebagai listener gossip HA (lihat README: pemasangan pertama gagal start
+      # `bind: address already in use` karena bentrok itu).
+      - url: 'http://127.0.0.1:9095/'
+        # Kabar "sudah pulih" juga harus sampai — tanpa ini, operator tidak tahu
+        # kapan boleh berhenti memeriksa.
+        send_resolved: true
+        # 0 = kirim semua alert dalam grup; relay yang meringkas (>5 alert jadi
+        # hitungan, lihat MAX_ALERTS_PER_MESSAGE di ntfy-relay.mjs).
+        max_alerts: 0

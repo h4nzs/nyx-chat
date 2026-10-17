@@ -380,7 +380,32 @@ tests:
         alertname: NyxKeyTransparencyStalled
         exp_alerts: []
 
-  - name: 'NyxKtSnapshotNotUploaded: menyala saat tidak ada unggahan sukses 36 jam'
+  # [drill 2026-10-16] Empat kasus di bawah menggantikan versi
+  # `increase(nyx_kt_snapshot_upload_total{result="ok"}) == 0`. Yang diuji sekarang
+  # adalah UMUR arsip terbaru yang ada di R2, dan dua kasus terakhir adalah
+  # regresi eksplisit untuk alarm palsu 2026-10-16 (restart + jalur idempoten).
+  - name: 'NyxKtSnapshotNotUploaded: menyala saat arsip terbaru di R2 > 36 jam'
+    interval: 30s
+    input_series:
+      # Jam uji promtool berjalan dari 0, jadi nilai negatif = arsip sudah tua
+      # (`time() - max(...)` = 205400 < 129600 tidak akan menyala → dipakai -200000).
+      - series: 'nyx_kt_snapshot_remote_latest_timestamp_seconds'
+        values: '-200000x400'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtSnapshotNotUploaded
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtSnapshotNotUploaded
+            exp_annotations:
+              summary: 'Arsip snapshot log KT di R2 tidak lebih baru dari 36 jam'
+              description: 'Umur arsip terbaru di R2 melewati 36 jam. Cek KT_SNAPSHOT_DIR di server NYX (cron 03:30 + log "[KtSnapshot]"), NYX_KT_SNAPSHOT_DIR/NYX_KT_SNAPSHOT_INTERVAL di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan segar di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13).'
+
+  # Tanpa cabang `absent_over_time`, instance yang belum pernah bisa membaca R2
+  # (kredensial salah sejak awal / bucket kosong) tidak punya seri sama sekali →
+  # `time() - max(...)` atas vektor kosong = kosong → aturan diam selamanya.
+  - name: 'NyxKtSnapshotNotUploaded: menyala saat gauge belum pernah ada (R2 tak terbaca)'
     interval: 30s
     input_series:
       - series: 'up{job="nyx-api"}'
@@ -391,35 +416,32 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: high
-              # `absent_over_time` mewarisi label dari matcher kesetaraan.
-              result: ok
               alertname: NyxKtSnapshotNotUploaded
             exp_annotations:
-              summary: 'Snapshot log KT tidak diunggah ke R2 selama 36 jam'
-              description: 'Cek KT_SNAPSHOT_DIR di server NYX, NYX_KT_SNAPSHOT_DIR di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13).'
+              summary: 'Arsip snapshot log KT di R2 tidak lebih baru dari 36 jam'
+              description: 'Umur arsip terbaru di R2 melewati 36 jam. Cek KT_SNAPSHOT_DIR di server NYX (cron 03:30 + log "[KtSnapshot]"), NYX_KT_SNAPSHOT_DIR/NYX_KT_SNAPSHOT_INTERVAL di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan segar di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13).'
 
-  - name: 'NyxKtSnapshotNotUploaded: menyala saat counter datar (cron mati, seri ada)'
+  - name: 'NyxKtSnapshotNotUploaded: tidak menyala saat arsip R2 masih segar'
     interval: 30s
     input_series:
-      - series: 'nyx_kt_snapshot_upload_total{result="ok"}'
-        values: '3x400'
+      - series: 'nyx_kt_snapshot_remote_latest_timestamp_seconds'
+        values: '0x400'
     alert_rule_test:
       - eval_time: 90m
         alertname: NyxKtSnapshotNotUploaded
-        exp_alerts:
-          - exp_labels:
-              severity: high
-              result: ok
-              alertname: NyxKtSnapshotNotUploaded
-            exp_annotations:
-              summary: 'Snapshot log KT tidak diunggah ke R2 selama 36 jam'
-              description: 'Cek KT_SNAPSHOT_DIR di server NYX, NYX_KT_SNAPSHOT_DIR di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13).'
+        exp_alerts: []
 
-  - name: 'NyxKtSnapshotNotUploaded: tidak menyala saat unggahan harian sukses'
+  - name: 'NyxKtSnapshotNotUploaded: tidak menyala saat counter unggahan datar (regresi restart/idempoten)'
     interval: 30s
     input_series:
+      # Skenario alarm palsu 2026-10-16: proses nyx-api baru restart (label-child
+      # `{result="ok"}` belum lahir lagi) sehingga counter tampak datar/basi,
+      # padahal arsip terbaru di R2 masih segar. Aturan lama menyala di sini;
+      # aturan ini TIDAK boleh.
       - series: 'nyx_kt_snapshot_upload_total{result="ok"}'
-        values: '0+1x400'
+        values: '5x400'
+      - series: 'nyx_kt_snapshot_remote_latest_timestamp_seconds'
+        values: '0x400'
     alert_rule_test:
       - eval_time: 90m
         alertname: NyxKtSnapshotNotUploaded
@@ -461,7 +483,7 @@ tests:
               alertname: NyxAbuseGuardDisabled
             exp_annotations:
               summary: 'Guard anti-abuse (registration) OFF di deployment ini'
-              description: 'Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 §10.13.'
+              description: 'Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 §10.16.'
 
   - name: 'NyxAbuseGuardDisabled: menyala saat hanya attestation yang OFF'
     interval: 30s
@@ -480,7 +502,7 @@ tests:
               alertname: NyxAbuseGuardDisabled
             exp_annotations:
               summary: 'Guard anti-abuse (attestation) OFF di deployment ini'
-              description: 'Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 §10.13.'
+              description: 'Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 §10.16.'
 
   - name: 'NyxAbuseGuardDisabled: tidak menyala saat kedua guard menyala'
     interval: 30s
@@ -492,4 +514,907 @@ tests:
     alert_rule_test:
       - eval_time: 20m
         alertname: NyxAbuseGuardDisabled
+        exp_alerts: []
+
+  # ==========================================================================
+  # nyx-kt-auditor — auditor pihak ketiga log KT (mode 3)
+  #
+  # Kasus di sini sengaja memisahkan empat kegagalan yang berbeda artinya:
+  # mati (up == 0), hidup tapi macet (tanpa putaran), putaran gagal, dan tree
+  # head ditolak. Salah menggabungkan keempatnya berarti operator tidak tahu apa
+  # yang harus dilakukan saat alarm menyala.
+  # ==========================================================================
+
+  - name: 'NyxKtAuditorDown: menyala saat auditor tidak bisa di-scrape'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NyxKtAuditorDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: nyx-kt-auditor
+              alertname: NyxKtAuditorDown
+            exp_annotations:
+              summary: 'Auditor log KT tidak bisa di-scrape (proses mati?)'
+              description: 'Prometheus gagal scrape auditor selama 10 menit. unit nyx-kt-auditor (systemd) + journalctl -u nyx-kt-auditor; cek juga NYX_KT_AUDITOR_METRICS_ADDR.'
+
+  - name: 'NyxKtAuditorDown: tidak menyala saat exporter auditor hidup'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NyxKtAuditorDown
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorRoundStalled: menyala saat putaran terakhir basi'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x100'
+      - series: 'nyx_kt_auditor_last_round_timestamp_seconds'
+        values: '-100000x100'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKtAuditorRoundStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtAuditorRoundStalled
+            exp_annotations:
+              summary: 'Auditor log KT hidup tetapi tidak ada putaran audit selesai >10 menit'
+              description: 'Prosesnya masih bisa di-scrape, jadi ini bukan kematian proses. Lihat journalctl -u nyx-kt-auditor (blokir gRPC tanpa timeout?) dan pastikan NYX_KT_QUERY_URL + NYX_KT_AUDITOR_ADDR menunjuk log yang benar.'
+
+  # Seri timestamp belum pernah ada (proses baru yang belum menyelesaikan satu
+  # putaran pun). Tanpa `absent()`, `time() - max(...)` atas vektor kosong =
+  # kosong → aturan diam, persis saat paling gawat.
+  - name: 'NyxKtAuditorRoundStalled: menyala walau timestamp putaran belum pernah ada'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x100'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKtAuditorRoundStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtAuditorRoundStalled
+            exp_annotations:
+              summary: 'Auditor log KT hidup tetapi tidak ada putaran audit selesai >10 menit'
+              description: 'Prosesnya masih bisa di-scrape, jadi ini bukan kematian proses. Lihat journalctl -u nyx-kt-auditor (blokir gRPC tanpa timeout?) dan pastikan NYX_KT_QUERY_URL + NYX_KT_AUDITOR_ADDR menunjuk log yang benar.'
+
+  - name: 'NyxKtAuditorRoundStalled: tidak menyala saat putaran berjalan normal'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x100'
+      - series: 'nyx_kt_auditor_last_round_timestamp_seconds'
+        values: '1000000000x100'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKtAuditorRoundStalled
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorRoundFailing: menyala saat putaran gagal'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_rounds_total{result="error"}'
+        values: '0+1x100'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NyxKtAuditorRoundFailing
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxKtAuditorRoundFailing
+            exp_annotations:
+              summary: 'Putaran audit log KT gagal (tidak bisa diverifikasi)'
+              description: 'Auditor tidak bisa menyelesaikan putaran: cek nyx-kt-query hidup, KT_SERVER_URL/NYX_KT_QUERY_URL, dan NYX_KT_AUDITOR_ADDR. Selama ini berlangsung, tidak ada bukti baru yang diperiksa.'
+
+  - name: 'NyxKtAuditorRoundFailing: tidak menyala saat semua putaran bersih'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_rounds_total{result="ok"}'
+        values: '0+1x100'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NyxKtAuditorRoundFailing
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorProofInconsistent: menyala saat auditor menemukan riwayat tidak konsisten'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_rounds_total{result="inconsistent"}'
+        values: '0+1x100'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NyxKtAuditorProofInconsistent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              result: inconsistent
+              alertname: NyxKtAuditorProofInconsistent
+            exp_annotations:
+              summary: 'Auditor menemukan riwayat log KT TIDAK KONSISTEN (tanda tangan dihentikan)'
+              description: 'Bukti dari layanan log tidak cocok dengan pandangan auditor (errInvalidProof). Auditor berhenti menandatangani — perilaku yang benar. Perlakukan sebagai insiden: periksa journalctl -u nyx-kt-auditor ("TIDAK KONSISTEN"), state auditor, dan apakah log dipulihkan dari snapshot/backup yang berbeda.'
+
+  - name: 'NyxKtAuditorProofInconsistent: tidak menyala pada riwayat yang sah'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_rounds_total{result="ok"}'
+        values: '0+1x100'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NyxKtAuditorProofInconsistent
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorHeadRejected: menyala saat tree head ditolak layanan log'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_head_sends_total{result="error"}'
+        values: '0+1x100'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKtAuditorHeadRejected
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxKtAuditorHeadRejected
+            exp_annotations:
+              summary: 'Tree head auditor ditolak/tidak sampai ke layanan log'
+              description: 'SetAuditorHead gagal: pastikan log berjalan mode 3 (api.auditors terisi, /config → mode=3), nama auditor di NYX_KT_AUDITOR_NAME sama dengan yang di config, dan kunci publiknya cocok (nyx-kt-auditor -print-public-key).'
+
+  - name: 'NyxKtAuditorHeadRejected: tidak menyala saat tree head diterima'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_head_sends_total{result="ok"}'
+        values: '0+1x100'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKtAuditorHeadRejected
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorHeadStale: menyala saat head terakhir >6 jam'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x200'
+      - series: 'nyx_kt_auditor_tree_size'
+        values: '5x200'
+      - series: 'nyx_kt_auditor_last_head_timestamp_seconds'
+        values: '-100000x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxKtAuditorHeadStale
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtAuditorHeadStale
+            exp_annotations:
+              summary: 'Tree head auditor belum diperbarui >6 jam'
+              description: 'Ada entri yang bisa ditandatangani (tree_size > 0) tetapi tidak ada tree head yang diterima log selama 6 jam. Cek journalctl -u nyx-kt-auditor (cari "tree head DIKIRIM") dan NYX_KT_AUDITOR_SIGNATURE_INTERVAL. Klien menolak auditor head yang lebih tua dari 7 hari (docs/34 §34.5).'
+
+  # Deployment sepi (belum ada satu entri pun) TIDAK boleh alarm: tidak ada yang
+  # bisa ditandatangani, jadi head yang "basi" bukan kegagalan auditor.
+  - name: 'NyxKtAuditorHeadStale: tidak menyala saat belum ada entri untuk ditandatangani'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x200'
+      - series: 'nyx_kt_auditor_tree_size'
+        values: '0x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxKtAuditorHeadStale
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorHeadStale: tidak menyala saat head segar'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x200'
+      - series: 'nyx_kt_auditor_tree_size'
+        values: '5x200'
+      - series: 'nyx_kt_auditor_last_head_timestamp_seconds'
+        values: '1000000000x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxKtAuditorHeadStale
+        exp_alerts: []
+
+  # [drill 2026-10-16] Regresi untuk alarm PALSU yang pasti terjadi: proses BARU
+  # belum pernah mengirim tree head (kiriman pertama memang menunggu irama tanda
+  # tangan), jadi `absent(last_head)` bernilai 1. Tanpa penjaga umur proses,
+  # aturan ini menyala 30 menit setelah SETIAP restart auditor.
+  - name: 'NyxKtAuditorHeadStale: tidak menyala pada proses muda yang belum pernah kirim head'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x200'
+      - series: 'nyx_kt_auditor_tree_size'
+        values: '5x200'
+      - series: 'nyx_kt_auditor_uptime_seconds'
+        values: '1800x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxKtAuditorHeadStale
+        exp_alerts: []
+
+  # Sisi lain: proses yang sudah lama berjalan (>2 jam, yaitu 2× irama tanda
+  # tangan default) dan tetap belum pernah berhasil mengirim head = kegagalan
+  # nyata, bukan masa tunggu.
+  - name: 'NyxKtAuditorHeadStale: menyala saat proses lama belum pernah kirim head'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x200'
+      - series: 'nyx_kt_auditor_tree_size'
+        values: '5x200'
+      - series: 'nyx_kt_auditor_uptime_seconds'
+        values: '10800x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxKtAuditorHeadStale
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtAuditorHeadStale
+            exp_annotations:
+              summary: 'Tree head auditor belum diperbarui >6 jam'
+              description: 'Ada entri yang bisa ditandatangani (tree_size > 0) tetapi tidak ada tree head yang diterima log selama 6 jam. Cek journalctl -u nyx-kt-auditor (cari "tree head DIKIRIM") dan NYX_KT_AUDITOR_SIGNATURE_INTERVAL. Klien menolak auditor head yang lebih tua dari 7 hari (docs/34 §34.5).'
+
+  # Pasangan dari penjaga umur di atas: proses yang crash-loop selalu berumur
+  # muda, jadi `…HeadStale` tidak melihatnya. Dua bentuk restart diuji terpisah.
+  - name: 'NyxKtAuditorRestarting: menyala saat up berulang kali turun'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x60 0x4 1x20 0x4 1x20 0x4 1x200'
+    alert_rule_test:
+      # 90m: jendela 1 jam memuat dua blok mati (indeks 84..87 dan 108..111) =
+      # empat transisi 1↔0, dan ekspresinya sudah benar >10m (`for`).
+      - eval_time: 90m
+        alertname: NyxKtAuditorRestarting
+        exp_alerts:
+          - exp_labels:
+              job: nyx-kt-auditor
+              severity: high
+              alertname: NyxKtAuditorRestarting
+            exp_annotations:
+              summary: 'Auditor log KT berulang kali restart dalam 1 jam terakhir'
+              description: 'Proses auditor start ulang ≥2 kali dalam 1 jam (lihat journalctl -u nyx-kt-auditor -n 200). Auditor yang start ulang terus tidak pernah sampai irama tanda tangan (NYX_KT_AUDITOR_SIGNATURE_INTERVAL), jadi tidak ada tree head baru yang diterima log meski `up` terlihat sehat pada saat scrape — dan alert `…HeadStale` buta terhadapnya karena umur prosesnya selalu muda.'
+
+  # Restart CEPAT (kurang dari satu irama scrape): `up` tidak pernah terlihat 0,
+  # tetapi umur proses turun antar-scrape — itulah satu-satunya jejaknya.
+  - name: 'NyxKtAuditorRestarting: menyala saat umur proses turun antar-scrape'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x300'
+      - series: 'nyx_kt_auditor_uptime_seconds'
+        values: '1000+30x20 30+30x20 30+30x20 630+30x100'
+    alert_rule_test:
+      # Dua penurunan (indeks 20 dan 40) ada di dalam jendela 1 jam.
+      - eval_time: 40m
+        alertname: NyxKtAuditorRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtAuditorRestarting
+            exp_annotations:
+              summary: 'Auditor log KT berulang kali restart dalam 1 jam terakhir'
+              description: 'Proses auditor start ulang ≥2 kali dalam 1 jam (lihat journalctl -u nyx-kt-auditor -n 200). Auditor yang start ulang terus tidak pernah sampai irama tanda tangan (NYX_KT_AUDITOR_SIGNATURE_INTERVAL), jadi tidak ada tree head baru yang diterima log meski `up` terlihat sehat pada saat scrape — dan alert `…HeadStale` buta terhadapnya karena umur prosesnya selalu muda.'
+
+  # Satu restart per jam = operasi normal (deploy), bukan loop. Ambangnya sengaja
+  # tidak menyala di sini supaya alert ini tidak diabaikan operator.
+  - name: 'NyxKtAuditorRestarting: tidak menyala pada satu restart per jam'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x300'
+      - series: 'nyx_kt_auditor_uptime_seconds'
+        values: '1000+30x40 30+30x200'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: NyxKtAuditorRestarting
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorRestarting: tidak menyala saat auditor sehat'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-auditor"}'
+        values: '1x300'
+      - series: 'nyx_kt_auditor_uptime_seconds'
+        values: '100+30x300'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtAuditorRestarting
+        exp_alerts: []
+
+  - name: 'NyxKtAuditorMetricsIdentityLeakAttempt: menyala pada penolakan label identitas'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_metrics_rejected_total{reason="label_value"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtAuditorMetricsIdentityLeakAttempt
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              reason: label_value
+              alertname: NyxKtAuditorMetricsIdentityLeakAttempt
+            exp_annotations:
+              summary: 'Ada percobaan mencatat metrik auditor dengan label identitas'
+              description: 'nyx_kt_auditor_metrics_rejected_total naik (reason=label_value). Ada kode baru di cmd/nyx-kt-auditor yang mencoba mengirim nama/ID/IP ke metrik; pemanggilnya harus diperbaiki (metrics.go akan selalu menolak nilainya).'
+
+  - name: 'NyxKtAuditorMetricsIdentityLeakAttempt: tidak menyala saat penjaga tetap 0'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_auditor_metrics_rejected_total{reason="label_value"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtAuditorMetricsIdentityLeakAttempt
+        exp_alerts: []
+
+  # ==========================================================================
+  # nyx-transport — proses transport WebTransport (`nyx-sidecar`, Rust)
+  #
+  # Grup ini menutup satu-satunya jalur kegagalan yang benar-benar SENYAP di
+  # NYX: klien yang tidak bisa handshake WebTransport turun ke WSS tanpa error
+  # (`web/src/lib/transportMode.ts`). Karena itu kasus "tidak menyala" di sini
+  # sama pentingnya dengan kasus "menyala": alarm palsu pada sidecar yang cuma
+  # di-restart sekali (deploy) akan membuat aturan ini diabaikan operator.
+  # ==========================================================================
+
+  - name: 'NyxTransportSidecarDown: menyala saat sidecar tidak bisa di-scrape'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-sidecar"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NyxTransportSidecarDown
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              job: nyx-sidecar
+              alertname: NyxTransportSidecarDown
+            exp_annotations:
+              summary: 'Sidecar WebTransport tidak bisa di-scrape (proses mati?)'
+              description: 'Prometheus gagal scrape sidecar selama 10 menit. Aplikasi TIDAK ikut mati: klien otomatis jatuh ke WSS, jadi gejalanya hanya latensi. Cek `systemctl --user status nyx-sidecar` / pm2 nyx-sidecar, journalctl, dan TRANSPORT_METRICS_ADDR (default 127.0.0.1:9465).'
+
+  - name: 'NyxTransportSidecarDown: tidak menyala saat exporter sidecar hidup'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NyxTransportSidecarDown
+        exp_alerts: []
+
+  - name: 'NyxTransportSidecarRestarting: menyala saat up berulang kali turun'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x60 0x4 1x20 0x4 1x20 0x4 1x200'
+    alert_rule_test:
+      # 90m: jendela 1 jam memuat dua blok mati = empat transisi 1↔0.
+      - eval_time: 90m
+        alertname: NyxTransportSidecarRestarting
+        exp_alerts:
+          - exp_labels:
+              job: nyx-sidecar
+              severity: high
+              alertname: NyxTransportSidecarRestarting
+            exp_annotations:
+              summary: 'Sidecar WebTransport berulang kali restart dalam 1 jam terakhir'
+              description: 'Proses sidecar start ulang ≥2 kali dalam 1 jam. Setiap start ulang memutus semua sesi WebTransport aktif (klien mundur ke WSS sampai handshake berikutnya). Lihat journalctl -u nyx-sidecar dan cek TLS/cert hash atau batas memori (OOM killer).'
+
+  # Restart CEPAT: `up` tidak pernah terlihat 0, satu-satunya jejaknya adalah
+  # umur proses yang TURUN antar-scrape (`resets`). Sidecar yang di-restart
+  # lebih cepat dari interval scrape tetap memutus semua sesi.
+  - name: 'NyxTransportSidecarRestarting: menyala saat umur proses turun antar-scrape'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x300'
+      - series: 'nyx_transport_uptime_seconds'
+        values: '1000+30x20 30+30x20 30+30x20 630+30x100'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxTransportSidecarRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxTransportSidecarRestarting
+            exp_annotations:
+              summary: 'Sidecar WebTransport berulang kali restart dalam 1 jam terakhir'
+              description: 'Proses sidecar start ulang ≥2 kali dalam 1 jam. Setiap start ulang memutus semua sesi WebTransport aktif (klien mundur ke WSS sampai handshake berikutnya). Lihat journalctl -u nyx-sidecar dan cek TLS/cert hash atau batas memori (OOM killer).'
+
+  - name: 'NyxTransportSidecarRestarting: tidak menyala pada satu restart per jam'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x300'
+      - series: 'nyx_transport_uptime_seconds'
+        values: '1000+30x40 30+30x200'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: NyxTransportSidecarRestarting
+        exp_alerts: []
+
+  - name: 'NyxTransportAuthFailuresSpike: menyala saat auth gagal berulang'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_auth_failures_total{reason="ticket_invalid"}'
+        values: '0+6x200'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxTransportAuthFailuresSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              reason: ticket_invalid
+              alertname: NyxTransportAuthFailuresSpike
+            exp_annotations:
+              summary: 'Autentikasi WebTransport gagal berulang (ticket_invalid)'
+              description: 'Lebih dari 50 kegagalan auth dalam 15 menit. `ticket_invalid`/`bwh_invalid` biasanya berarti JWT_SECRET sidecar tidak sama dengan server (atau ticket kedaluwarsa karena jam mesin meleset), bukan serangan.'
+
+  - name: 'NyxTransportAuthFailuresSpike: tidak menyala pada laju gagal normal'
+    interval: 30s
+    input_series:
+      # 1 gagal / 30s = 30 gagal per 15 menit (di bawah ambang 50).
+      - series: 'nyx_transport_auth_failures_total{reason="ticket_invalid"}'
+        values: '0+1x200'
+      - series: 'nyx_transport_auth_failures_total{reason="bwh_invalid"}'
+        values: '0+1x200'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxTransportAuthFailuresSpike
+        exp_alerts: []
+
+  - name: 'NyxTransportMalformedFramesSpike: menyala saat frame tidak sah'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_rejected_frames_total{reason="malformed"}'
+        values: '0+4x200'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxTransportMalformedFramesSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              reason: malformed
+              alertname: NyxTransportMalformedFramesSpike
+            exp_annotations:
+              summary: 'Frame WebTransport dibuang karena tidak sah (malformed)'
+              description: 'Ada klien/probe yang mengirim frame tidak sesuai protokol (opcode & path harus sinkron dengan packages/shared/src/transport.ts). Kalau ini muncul tepat setelah deploy, curigai perubahan protokol yang tidak sinkron antara web dan sidecar.'
+
+  # CHAFF (opcode 0x00 dari klien sehat) adalah traffic-cover yang NORMAL dan
+  # mungkin jauh lebih ramai dari traffic nyata. Kalau kategori itu ikut
+  # dihitung, aturan ini akan menyala terus di deployment yang sehat.
+  - name: 'NyxTransportMalformedFramesSpike: tidak menyala saat hanya chaff'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_rejected_frames_total{reason="chaff"}'
+        values: '0+200x200'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxTransportMalformedFramesSpike
+        exp_alerts: []
+
+  # ==========================================================================
+  # Latensi jalur (WebTransport vs WSS)
+  #
+  # Rangkaian seri di bawah sengaja HANYA memuat bucket yang dibutuhkan untuk
+  # memaku kuantil, tetapi tetap konsisten sebagai histogram kumulatif
+  # (le=0,25 = 0 lalu le=1 = N berarti SEMUA observasi di atas 250 ms). Nilai
+  # p95-nya karena itu bisa dihitung tangan:
+  #
+  #   semua di le=1  → 0,25 + 0,95 × (1 − 0,25)      = 0,9625 s
+  #   semua di le=0,005, bucket bawahnya 0,001 = 0
+  #                  → 0,001 + 0,95 × (0,005 − 0,001) = 0,0048 s
+  #
+  # Ambang aturannya 0,25 s dan perbandingan antar jalur — dua-duanya TIDAK
+  # diubah oleh drill ini; yang divariasikan hanya distribusi serinya.
+  # ==========================================================================
+
+  - name: 'NyxTransportIngressSlow: menyala saat p95 hop sidecar > 250 ms'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.25"}'
+        values: '0x200'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="1"}'
+        values: '0+1x200'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x200'
+      - series: 'nyx_transport_ingress_seconds_count'
+        values: '0+1x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxTransportIngressSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxTransportIngressSlow
+            exp_annotations:
+              summary: 'Ingress WebTransport lambat (p95 > 250 ms)'
+              description: 'p95 hop sidecar (frame diterima → diteruskan ke Redis) melewati 250 ms padahal normalnya sub-milidetik. Jalur cepatnya masih HIDUP (alerts `…Down` diam), jadi ini satu-satunya peringatan sebelum klien mulai mundur ke WSS. Cek: beban event loop sidecar (chaff/traffic-cover yang membanjir), latensi Redis lokal, dan CPU host (1 core: satu proses yang menyerobot CPU cukup untuk ini).'
+
+  - name: 'NyxTransportIngressSlow: tidak menyala saat hop sidecar sehat'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.001"}'
+        values: '0x200'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.005"}'
+        values: '0+1x200'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x200'
+      - series: 'nyx_transport_ingress_seconds_count'
+        values: '0+1x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxTransportIngressSlow
+        exp_alerts: []
+
+  - name: 'NyxTransportSlowerThanWss: menyala saat jalur cepat kalah dari fallback'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.25"}'
+        values: '0x400'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="1"}'
+        values: '0+1x400'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x400'
+      - series: 'nyx_transport_ingress_seconds_count'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="0.001"}'
+        values: '0x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="0.01"}'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: NyxTransportSlowerThanWss
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxTransportSlowerThanWss
+            exp_annotations:
+              summary: 'Jalur WebTransport lebih lambat daripada fallback WSS (p95)'
+              description: 'p95 ingress WebTransport melewati p95 ingress WSS selama 30 menit, padahal span WSS memuat pekerjaan lebih banyak (rate limit + pemeriksaan perangkat + publish). Artinya keunggulan jalur cepat sudah hilang, dan klien yang jatuh ke WSS tidak akan merasakan kerugian apa pun — sehingga tidak ada yang mengeluh sampai sidecar benar-benar mati. Cek CPU host, latensi Redis lokal, dan jumlah sesi WT aktif.'
+
+  - name: 'NyxTransportSlowerThanWss: tidak menyala saat jalur cepat benar-benar lebih cepat'
+    interval: 30s
+    input_series:
+      # Dibailk dari kasus sebelumnya: jalur cepat 0,0048 s, fallback 0,0096 s.
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.001"}'
+        values: '0x400'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.005"}'
+        values: '0+1x400'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x400'
+      - series: 'nyx_transport_ingress_seconds_count'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="0.001"}'
+        values: '0x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="0.01"}'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: NyxTransportSlowerThanWss
+        exp_alerts: []
+
+  # Histogram yang dirender bernilai 0 sejak proses hidup (tanpa satu pun
+  # observasi) adalah KEADAAN NORMAL instalasi baru — dan justru bentuk yang
+  # menghasilkan angka paling menyesatkan kalau tidak dijaga: kuantil atas
+  # histogram kosong bukan 0, melainkan NaN, dan `rate(..._count[15m])` = 0.
+  # Kedua aturan latensi WAJIB diam di sini; kalau tidak, setiap instalasi baru
+  # (dan setiap restart sidecar sebelum ada trafik) akan memicu alarm "jalur
+  # cepat lambat" yang tidak berarti apa pun.
+  - name: 'NyxTransportIngressSlow: tidak menyala saat histogram masih kosong (nol observasi)'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_ingress_seconds_bucket{le="0.001"}'
+        values: '0x200'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="1"}'
+        values: '0x200'
+      - series: 'nyx_transport_ingress_seconds_bucket{le="+Inf"}'
+        values: '0x200'
+      - series: 'nyx_transport_ingress_seconds_count'
+        values: '0x200'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxTransportIngressSlow
+        exp_alerts: []
+
+  # Tanpa trafik WebTransport (histogramnya belum pernah menerima satu pun
+  # observasi) perbandingan apa pun tidak berarti: `histogram_quantile` atas
+  # vektor kosong mengembalikan kosong, dan penjaga lajunya menahan aturan ini.
+  # Inilah keadaan instalasi baru — dan alarm palsu di sini akan langsung
+  # mengajari operator untuk mengabaikan aturan ini.
+  - name: 'NyxTransportSlowerThanWss: tidak menyala tanpa trafik WebTransport'
+    interval: 30s
+    input_series:
+      - series: 'nyx_wss_ingress_seconds_bucket{le="0.001"}'
+        values: '0x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="0.01"}'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_bucket{le="+Inf"}'
+        values: '0+1x400'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: NyxTransportSlowerThanWss
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: NyxTransportIngressSlow
+        exp_alerts: []
+
+  # --------------------------------------------------------------------------
+  # Jalur cepat BERHENTI dipakai (bukan melambat, bukan mati).
+  #
+  # Sesi pernah > 0 lalu nol, prosesnya masih hidup, dan WSS masih melayani →
+  # itulah satu-satunya bentuk penurunan yang tidak menghasilkan error apa pun
+  # di server maupun klien. Tiga kasus "tidak menyala" di bawah menjaga tiga
+  # penjaganya satu per satu: instalasi yang memang belum memakai WT (selalu
+  # nol), sidecar yang mati (itu urusan `…SidecarDown`), dan server yang sepi
+  # (WSS tidak melayani jadi tidak ada yang perlu diberitahukan).
+  # --------------------------------------------------------------------------
+  - name: 'NyxTransportUnused: menyala saat sesi WT habis sementara WSS melayani'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_active_sessions'
+        values: '5x80 0x120'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0+1x200'
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: NyxTransportUnused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxTransportUnused
+            exp_annotations:
+              summary: 'Jalur WebTransport berhenti dipakai; fallback WSS yang melayani'
+              description: 'Sesi WebTransport pernah ada, lalu habis, sementara jalur WSS terus menerima trafik — dan prosesnya sendiri masih hidup. Keunggulan jalur cepat hilang tanpa satu pun error: klien sudah mundur ke WSS. Turun ke WSS bukan kegagalan (itu desainnya), jadi yang perlu dicari sebabnya: apakah handshake mulai gagal (lihat `nyx_transport_connections_total{result}`), auth menolak (panel auth gagal), atau WT tidak lagi terjangkau dari jaringan klien — dan perlu diingat CSP/`VITE_TRANSPORT_URL` memengaruhi ini.'
+
+  - name: 'NyxTransportUnused: tidak menyala pada instalasi yang memang belum memakai WT'
+    interval: 30s
+    input_series:
+      # Sesi SELALU nol sejak proses lahir — bukan penurunan, dan alarm di sini
+      # akan menyala di setiap instalasi baru (host ini salah satunya, selama WT
+      # belum terjangkau dari publik).
+      - series: 'nyx_transport_active_sessions'
+        values: '0x200'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0+1x200'
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: NyxTransportUnused
+        exp_alerts: []
+
+  - name: 'NyxTransportUnused: tidak menyala saat sidecar sendiri mati'
+    interval: 30s
+    input_series:
+      - series: 'nyx_transport_active_sessions'
+        values: '5x80 0x120'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0+1x200'
+      - series: 'up{job="nyx-sidecar"}'
+        values: '0x200'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: NyxTransportUnused
+        exp_alerts: []
+
+  - name: 'NyxTransportUnused: tidak menyala saat WSS juga tidak melayani apa pun'
+    interval: 30s
+    input_series:
+      # Sesi WT habis dan tidak ada trafik di jalur mana pun: server memang sepi,
+      # bukan jalur cepatnya yang ditinggalkan.
+      - series: 'nyx_transport_active_sessions'
+        values: '5x80 0x120'
+      - series: 'nyx_wss_ingress_seconds_count'
+        values: '0x200'
+      - series: 'up{job="nyx-sidecar"}'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: NyxTransportUnused
+        exp_alerts: []
+
+  # ==========================================================================
+  # nyx-kt-query — proses LOG Key Transparency (Go, pemilik LevelDB)
+  #
+  # Kasus yang paling penting di sini bukan "menyala", melainkan dua regresi:
+  #
+  #  1. Semua label child lahir bernilai 0 di awal proses (metrics.go merender
+  #     enum), jadi counter yang DATAR harus berarti "tidak ada kegagalan" —
+  #     bukan "serinya hilang setelah restart". Aturan di sisi TS sudah pernah
+  #     salah karena ini (lihat NyxKtSnapshotNotUploaded).
+  #  2. Gauge anchor `distinguished` ditulis ulang setiap putaran yang berhasil,
+  #     jadi restart TIDAK boleh membuat alarm "anchor basi" menyala.
+  # ==========================================================================
+
+  - name: 'NyxKtQueryDown: menyala saat proses log tidak bisa di-scrape'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-query"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtQueryDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: nyx-kt-query
+              alertname: NyxKtQueryDown
+            exp_annotations:
+              summary: 'Proses log Key Transparency (nyx-kt-query) tidak bisa di-scrape'
+              description: 'Proses log mati/terputus. Registrasi & rotasi kunci TIDAK gagal (fail-open), tetapi tidak ada jejak audit baru — dan auditor akan mulai gagal membaca. Cek `systemctl --user status nyx-kt-query`, journalctl, leveldb, dan NYX_KT_METRICS_ADDR (default 127.0.0.1:9467).'
+
+  - name: 'NyxKtQueryDown: tidak menyala saat exporter proses log hidup'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-query"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtQueryDown
+        exp_alerts: []
+
+  - name: 'NyxKtQueryWriteFailing: menyala saat penulisan log error'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_writes_total{result="error"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtQueryWriteFailing
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxKtQueryWriteFailing
+            exp_annotations:
+              summary: 'Penulisan ke log KT ditolak sisi log sendiri'
+              description: '`Update` gagal DI DALAM proses log (bukan di jaringan antara nyx-api dan log — itu NyxKeyTransparencyWriteFailing). Penyebab tersering: leveldb penuh/read-only, atau token penerbit tidak cocok dengan issuer key log. Selama ini berlangsung, kunci baru tidak punya entri audit.'
+
+  - name: 'NyxKtQueryWriteFailing: tidak menyala saat counter error datar (label child pra-0)'
+    interval: 30s
+    input_series:
+      # Inilah bentuk eksposisi proses yang baru hidup: label child sudah ada
+      # (rendered enum), nilainya 0. Tidak ada kegagalan di sini.
+      - series: 'nyx_kt_query_writes_total{result="error"}'
+        values: '0x40'
+      - series: 'nyx_kt_query_writes_total{result="ok"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtQueryWriteFailing
+        exp_alerts: []
+
+  - name: 'NyxKtQuerySnapshotStalled: menyala saat snapshot terakhir basi'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_snapshot_last_timestamp_seconds'
+        values: '-200000x200'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtQuerySnapshotStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtQuerySnapshotStalled
+            exp_annotations:
+              summary: 'Snapshot lokal log KT tidak dibuat >48 jam'
+              description: '`nyx-kt-query` belum menyelesaikan satu pun putaran snapshot dalam 48 jam (irama normal 24 jam). Cek NYX_KT_SNAPSHOT_DIR / NYX_KT_SNAPSHOT_INTERVAL, ruang disk, dan log proses (`snapshot`). Tanpa arsip lokal, `NyxKtSnapshotNotUploaded` di grup nyx-host juga akan menyusul — tetapi akar masalahnya di sini, bukan di kredensial R2.'
+
+  # Tanpa cabang `absent_over_time`, proses yang belum pernah snapshot sama
+  # sekali (irama mati sejak boot) tidak punya seri → `time() - max(...)` atas
+  # vektor kosong = kosong → aturan diam selamanya.
+  - name: 'NyxKtQuerySnapshotStalled: menyala walau gauge snapshot belum pernah ada'
+    interval: 30s
+    input_series:
+      - series: 'up{job="nyx-kt-query"}'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtQuerySnapshotStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtQuerySnapshotStalled
+            exp_annotations:
+              summary: 'Snapshot lokal log KT tidak dibuat >48 jam'
+              description: '`nyx-kt-query` belum menyelesaikan satu pun putaran snapshot dalam 48 jam (irama normal 24 jam). Cek NYX_KT_SNAPSHOT_DIR / NYX_KT_SNAPSHOT_INTERVAL, ruang disk, dan log proses (`snapshot`). Tanpa arsip lokal, `NyxKtSnapshotNotUploaded` di grup nyx-host juga akan menyusul — tetapi akar masalahnya di sini, bukan di kredensial R2.'
+
+  - name: 'NyxKtQuerySnapshotStalled: tidak menyala saat snapshot segar'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_snapshot_last_timestamp_seconds'
+        values: '0x200'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxKtQuerySnapshotStalled
+        exp_alerts: []
+
+  - name: 'NyxKtQueryDistinguishedStalled: menyala saat anchor berhenti berputar'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_distinguished_timestamp_seconds'
+        values: '-5000x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxKtQueryDistinguishedStalled
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxKtQueryDistinguishedStalled
+            exp_annotations:
+              summary: 'Anchor `distinguished` di log KT tidak berputar >30 menit'
+              description: 'Timestamp anchor `distinguished` tidak lagi maju (irama normal 1 menit, dari `api.distinguished` di config log). Gauge-nya ditulis ulang setiap putaran yang BERHASIL, jadi seri yang diam berarti loop-nya berhenti atau penulisannya gagal terus — cek journalctl -u nyx-kt-query (cari "kunci distinguished") dan `api.distinguished` di config. Catatan cakupan: seri ini tidak ada pada deployment yang sengaja mematikan anchor (`distinguished: 0`), dan aturan ini tidak menyala untuk kasus itu.'
+
+  # Regresi restart: anchor yang baru saja ditulis ulang bernilai ≈ waktu eval.
+  # Kalau gauge ini hanya di-set SEKALI saat start, kasus ini akan menyala palsu
+  # setelah `for: 15m` — persis alarm palsu yang ingin dihindari.
+  - name: 'NyxKtQueryDistinguishedStalled: tidak menyala saat anchor baru ditulis'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_distinguished_timestamp_seconds'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxKtQueryDistinguishedStalled
+        exp_alerts: []
+
+  - name: 'NyxKtQueryMetricsIdentityLeakAttempt: menyala pada penolakan label identitas'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_metrics_rejected_total{reason="unknown_label_value"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtQueryMetricsIdentityLeakAttempt
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              reason: unknown_label_value
+              alertname: NyxKtQueryMetricsIdentityLeakAttempt
+            exp_annotations:
+              summary: 'Ada percobaan mencatat metrik log KT dengan label identitas'
+              description: 'nyx_kt_query_metrics_rejected_total naik (reason=unknown_label_value). Kode baru di server/kt-query mencoba mengirim nilai berbentuk identitas ke metrik; pemanggilnya harus diperbaiki (metrics.go akan selalu menolaknya).'
+
+  - name: 'NyxKtQueryMetricsIdentityLeakAttempt: tidak menyala saat penjaga tetap 0'
+    interval: 30s
+    input_series:
+      - series: 'nyx_kt_query_metrics_rejected_total{reason="unknown_label_value"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxKtQueryMetricsIdentityLeakAttempt
         exp_alerts: []

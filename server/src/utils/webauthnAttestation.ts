@@ -18,12 +18,14 @@
  *      fido-u2f/self) — termasuk aturan bentuk sertifikat attestation
  *      (OU/O/C/CN, `basicConstraints`, versi).
  *   2. **Verifikasi rantai kami** (`verifyAttestationChain`, X.509 lewat
- *      `node:crypto`): rantai `x5c` harus benar-benar bisa dipercaya — minimal
- *      dua sertifikat, tersambung tanda tangan sungguhan, masih berlaku, leaf
- *      bukan CA, puncak self-signed, dan (bila operator memin root) fingerprint
- *      puncak harus cocok. **Kenapa wajib:** tanpa ini, sertifikat self-signed
- *      buatan penyerang naik ke tier "hardware" — `x5c` yang ada isinya saja
- *      tidak membuktikan perangkat apa pun.
+ *      `node:crypto`): rantai `x5c` harus tersambung tanda tangan sungguhan,
+ *      masih berlaku, dan leaf bukan CA; lalu harus **berakhir di anchor yang
+ *      dipercaya** — root yang dipin (ikut di `x5c` maupun tidak; bentuk nyata
+ *      TPM/Apple/YubiKey berhenti di intermediate) atau, tanpa pin sama sekali,
+ *      puncak self-signed dari rantai minimal dua sertifikat. **Kenapa wajib:**
+ *      tanpa ini, sertifikat self-signed buatan penyerang naik ke tier
+ *      "hardware" — `x5c` yang ada isinya saja tidak membuktikan perangkat apa
+ *      pun.
  *   3. **Kebijakan NYX** (fungsi murni `evaluateAttestationPolicy`) menentukan
  *      apakah bukti itu cukup: format harus termasuk allowlist (default:
  *      format perangkat keras), rantai wajib terverifikasi, attestation
@@ -40,6 +42,7 @@
  */
 
 import { X509Certificate } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
 
 import { verifyRegistrationResponse } from '@simplewebauthn/server';
 import { decodeAttestationObject } from '@simplewebauthn/server/helpers';
@@ -64,9 +67,11 @@ export interface AttestationPolicy {
   /** Format yang boleh membuktikan perangkat keras. */
   allowedFormats: string[];
   /**
-   * Wajibkan rantai `x5c` benar-benar bisa dipercaya: minimal dua sertifikat,
-   * tersambung tanda tangan, masih berlaku, leaf bukan CA, dan puncak rantai
-   * self-signed (atau cocok dengan root yang dipin). Default **on**.
+   * Wajibkan rantai `x5c` benar-benar bisa dipercaya: tersambung tanda tangan,
+   * masih berlaku, leaf bukan CA, dan berakhir di anchor yang dipin
+   * (`trustedAttestationRootCerts`/`trustedAttestationRoots`) — atau, bila
+   * operator belum memin apa pun, puncak self-signed dari rantai minimal dua
+   * sertifikat. Default **on**.
    *
    * Kenapa ini bukan kemewahan: tanpa pemeriksaan ini, siapa pun bisa membuat
    * sertifikat self-signed sendiri dan masuk tier "hardware" — `x5c` yang ada
@@ -79,6 +84,17 @@ export interface AttestationPolicy {
    * NYX belum mem-vendor root FIDO/TPM, jadi root uji/pabrikan tidak dipin).
    */
   trustedAttestationRoots: string[];
+  /**
+   * Sertifikat root (DER) yang dipercaya, untuk **membangun jalur** `x5c` yang
+   * tidak menyertakan root. Ini bentuk umum attestation nyata: TPM/Windows
+   * Hello, Android Key Attestation, packed YubiKey, dan `apple` sering mengirim
+   * `x5c = leaf + intermediate` saja, dengan root hidup di trust store vendor.
+   *
+   * Fingerprint saja tidak cukup di sini: untuk memverifikasi tanda tangan
+   * sertifikat puncak kita butuh **kunci publik** root-nya, bukan hanya namanya.
+   * `ABUSE_ATTESTATION_ROOTS_FILE` memuat sertifikat PEM yang mengisi daftar ini.
+   */
+  trustedAttestationRootCerts: Uint8Array[];
   /** Wajibkan EKU AIK TPM pada `fmt: 'tpm'` (default on). */
   requireTpmAikEku: boolean;
   /**
@@ -103,6 +119,7 @@ export const DEFAULT_ATTESTATION_POLICY: AttestationPolicy = {
   allowedFormats: [...HARDWARE_ATTESTATION_FORMATS],
   requireVerifiedChain: true,
   trustedAttestationRoots: [],
+  trustedAttestationRootCerts: [],
   requireTpmAikEku: true,
   allowSelfAttestation: false,
   allowNoneAttestation: false,
@@ -119,12 +136,51 @@ const listFromEnv = (raw: string | undefined, fallback: string[]): string[] => {
     .filter((v) => v.length > 0);
 };
 
+interface CachedRootFile {
+  mtimeMs: number;
+  size: number;
+  certs: Uint8Array[];
+}
+
+const rootFileCache = new Map<string, CachedRootFile>();
+
+/**
+ * Baca bundle root attestation dari berkas PEM (satu atau beberapa sertifikat).
+ *
+ * Hasil di-cache per path + mtime supaya tidak di-parse ulang di setiap
+ * pendaftaran; mengganti berkas (deploy root baru) otomatis terbaca lagi.
+ * Berkas yang tidak ada / tidak berisi sertifikat **melempar** — lebih baik
+ * pendaftaran gagal dengan 500 yang terlihat daripada kebijakan diam-diam
+ * kehilangan anchor dan menerima rantai yang tidak dipercaya.
+ */
+export function loadAttestationRootCerts(file: string): Uint8Array[] {
+  let stat: ReturnType<typeof statSync>;
+  try {
+    stat = statSync(file);
+  } catch {
+    throw new Error(`ABUSE_ATTESTATION_ROOTS_FILE tidak bisa dibaca: ${file}`);
+  }
+  const cached = rootFileCache.get(file);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.certs;
+
+  const pem = readFileSync(file, 'utf8');
+  const blocks = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? [];
+  if (blocks.length === 0) {
+    throw new Error(`ABUSE_ATTESTATION_ROOTS_FILE tidak memuat sertifikat PEM: ${file}`);
+  }
+  const certs = blocks.map((block) => new Uint8Array(new X509Certificate(block).raw));
+  rootFileCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, certs });
+  return certs;
+}
+
 /** Kebijakan dari env (operator bisa melonggarkan tanpa deploy kode). */
 export function attestationPolicyFromEnv(env: NodeJS.ProcessEnv = process.env): AttestationPolicy {
+  const rootsFile = (env.ABUSE_ATTESTATION_ROOTS_FILE ?? '').trim();
   return {
     allowedFormats: listFromEnv(env.ABUSE_ATTESTATION_FORMATS, [...HARDWARE_ATTESTATION_FORMATS]),
     requireVerifiedChain: env.ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN !== 'on',
     trustedAttestationRoots: listFromEnv(env.ABUSE_ATTESTATION_ROOTS, []),
+    trustedAttestationRootCerts: rootsFile ? loadAttestationRootCerts(rootsFile) : [],
     requireTpmAikEku: env.ABUSE_ATTESTATION_ALLOW_NO_AIK_EKU !== 'on',
     allowSelfAttestation: env.ABUSE_ATTESTATION_ALLOW_SELF === 'on',
     allowNoneAttestation: env.ABUSE_ATTESTATION_ALLOW_NONE === 'on',
@@ -255,6 +311,15 @@ export interface AttestationChainEvidence {
   topFingerprint: string | null;
   /** Puncak cocok dengan root yang dipin operator; `null` bila operator tidak memin apa pun. */
   pinnedRootMatch: boolean | null;
+  /**
+   * Bagaimana rantai mencapai anchor yang dipercaya:
+   *   - `pinned-root`: puncak sama dengan root yang dipin ATAU ditandatangani
+   *     root yang dipin (root tidak ikut di `x5c`) — ini bentuk perangkat nyata;
+   *   - `self-signed`: tanpa pin, puncak menandatangani dirinya sendiri (mode
+   *     lama; hanya membuktikan konsistensi internal, bukan identitas vendor);
+   *   - `null`: tidak ada anchor.
+   */
+  anchoredBy: 'self-signed' | 'pinned-root' | null;
   /** EKU sertifikat daun (OID). */
   leafExtendedKeyUsage: string[];
   /** Kode kegagalan (kosong = lolos). */
@@ -268,15 +333,22 @@ const normalizeFingerprint = (value: string): string => value.trim().toUpperCase
  *
  * Aturan (tiap pelanggaran menambah satu kode ke `failures`):
  *
- *   1. `CHAIN_TOO_SHORT` — satu sertifikat self-signed bukan rantai: itu hanya
- *      "saya menandatangani diri saya sendiri", dan bisa dibuat siapa pun.
+ *   1. `CHAIN_TOO_SHORT` — rantai satu sertifikat yang **tidak** dipin: itu
+ *      hanya "saya menandatangani diri saya sendiri", dan bisa dibuat siapa pun.
  *   2. `CHAIN_UNPARSEABLE` — ada DER yang tidak bisa dibaca.
  *   3. `CERTIFICATE_NOT_YET_VALID` / `CERTIFICATE_EXPIRED` — masa berlaku.
  *   4. `CHAIN_NOT_LINKED` — sertifikat ke-i tidak ditandatangani kunci sertifikat ke-(i+1).
  *   5. `LEAF_IS_CA` — leaf mengaku CA (sertifikat attestation tidak pernah begitu).
- *   6. `TOP_NOT_SELF_SIGNED` — puncak rantai tidak self-signed.
- *   7. `ROOT_NOT_TRUSTED` — puncak ada, tapi fingerprint-nya tidak ada di daftar
- *      root yang dipin operator (hanya diperiksa bila operator memin sesuatu).
+ *   6. `TOP_NOT_SELF_SIGNED` — puncak tidak self-signed **dan** operator tidak
+ *      memin root yang bisa menutup jalur.
+ *   7. `ROOT_NOT_TRUSTED` — operator memin root, tapi rantai tidak berakhir di
+ *      salah satunya (fingerprint puncak beda dan tidak ada root yang
+ *      menandatangani puncak).
+ *   8. `PINNED_ROOT_UNPARSEABLE` — DER di `trustedRootCerts` bukan sertifikat.
+ *
+ * Jalur yang ditangani: `x5c` boleh berhenti di intermediate (bentuk umum
+ * perangkat nyata) asalkan root-nya dipin lewat `trustedRootCerts`; root yang
+ * ikut di `x5c` juga diterima bila fingerprint/DER-nya dipin.
  *
  * Tidak ada kripto yang ditulis ulang di sini: parsing DER, verifikasi tanda
  * tangan, basicConstraints, masa berlaku, dan fingerprint semuanya dari
@@ -284,7 +356,12 @@ const normalizeFingerprint = (value: string): string => value.trim().toUpperCase
  */
 export function verifyAttestationChain(
   chainDers: Uint8Array[],
-  options: { now?: Date; trustedRootFingerprints?: string[] } = {}
+  options: {
+    now?: Date;
+    trustedRootFingerprints?: string[];
+    /** Root (DER) yang boleh mengakhiri jalur walau tidak ikut di `x5c`. */
+    trustedRootCerts?: Uint8Array[];
+  } = {}
 ): AttestationChainEvidence {
   const now = options.now ?? new Date();
   const trusted = (options.trustedRootFingerprints ?? []).map(normalizeFingerprint);
@@ -301,12 +378,21 @@ export function verifyAttestationChain(
       withinValidity: false,
       topFingerprint: null,
       pinnedRootMatch: null,
+      anchoredBy: null,
       leafExtendedKeyUsage: [],
       failures: ['CHAIN_UNPARSEABLE'],
     };
   }
 
-  if (certificates.length < 2) failures.push('CHAIN_TOO_SHORT');
+  const pinnedCerts: X509Certificate[] = [];
+  for (const der of options.trustedRootCerts ?? []) {
+    try {
+      pinnedCerts.push(new X509Certificate(Buffer.from(der)));
+    } catch {
+      failures.push('PINNED_ROOT_UNPARSEABLE');
+    }
+  }
+  const hasPins = trusted.length > 0 || pinnedCerts.length > 0;
 
   const withinValidity = certificates.every((cert) => {
     const from = cert.validFromDate.getTime();
@@ -344,11 +430,36 @@ export function verifyAttestationChain(
   } catch {
     topSelfSigned = false;
   }
-  if (!topSelfSigned) failures.push('TOP_NOT_SELF_SIGNED');
-
   const topFingerprint = top.fingerprint256;
-  const pinnedRootMatch = trusted.length > 0 ? trusted.includes(normalizeFingerprint(topFingerprint)) : null;
-  if (pinnedRootMatch === false) failures.push('ROOT_NOT_TRUSTED');
+  const topFingerprintNormalized = normalizeFingerprint(topFingerprint);
+
+  // Anchor bisa berupa: (a) puncak yang persis dipin (fingerprint atau DER),
+  // (b) root yang dipin MENANDATANGANI puncak — root tidak ikut di `x5c`, atau
+  // (c) puncak self-signed ketika operator tidak memin apa pun (mode lama).
+  const exactPin =
+    hasPins &&
+    (trusted.includes(topFingerprintNormalized) ||
+      pinnedCerts.some((pinned) => Buffer.from(pinned.raw).equals(Buffer.from(top.raw))));
+  const issuedByPinnedRoot = pinnedCerts.some(
+    (pinned) => pinned.ca && top.checkIssued(pinned) && top.verify(pinned.publicKey)
+  );
+  // Mode lama (tanpa pin) hanya boleh mengandalkan puncak self-signed bila
+  // rantainya benar-benar berisi minimal dua sertifikat. Satu sertifikat
+  // self-signed tanpa pin hanyalah "saya menandatangani diri saya sendiri".
+  const anchoredBy: 'self-signed' | 'pinned-root' | null =
+    exactPin || issuedByPinnedRoot
+      ? 'pinned-root'
+      : topSelfSigned && !hasPins && certificates.length >= 2
+        ? 'self-signed'
+        : null;
+
+  // Satu sertifikat hanya sah bila operator mem-pin-nya secara eksplisit (atau
+  // root yang dipin menandatanganinya). Tanpa itu, "rantai" satu cert hanyalah
+  // klaim yang bisa dibuat siapa pun.
+  if (certificates.length < 2 && anchoredBy === null) failures.push('CHAIN_TOO_SHORT');
+  if (anchoredBy === null) {
+    failures.push(hasPins ? 'ROOT_NOT_TRUSTED' : 'TOP_NOT_SELF_SIGNED');
+  }
 
   return {
     length: certificates.length,
@@ -356,7 +467,8 @@ export function verifyAttestationChain(
     topSelfSigned,
     withinValidity,
     topFingerprint,
-    pinnedRootMatch,
+    pinnedRootMatch: hasPins ? anchoredBy === 'pinned-root' : null,
+    anchoredBy,
     leafExtendedKeyUsage: leaf.toLegacyObject().ext_key_usage ?? [],
     failures,
   };
@@ -428,7 +540,10 @@ export async function verifyNewAccountAttestation(input: {
     hasCertificateChain: chainDers !== null && chainDers.length > 0,
     certificateChain:
       chainDers && chainDers.length > 0
-        ? verifyAttestationChain(chainDers, { trustedRootFingerprints: policy.trustedAttestationRoots })
+        ? verifyAttestationChain(chainDers, {
+            trustedRootFingerprints: policy.trustedAttestationRoots,
+            trustedRootCerts: policy.trustedAttestationRootCerts,
+          })
         : null,
   };
   const verdict = evaluateAttestationPolicy(evidence, policy);

@@ -58,7 +58,8 @@
     "sessions": "Sessões Ativas",
     "export_vault": "Exportar Cofre",
     "import_vault": "Importar Cofre",      "transfer": "Transferir para Novo Dispositivo (QR)",
-      "restore_backup": "Restaurar de Arquivo .nyxbak"
+      "restore_backup": "Restaurar de Arquivo .nyxbak",
+      "export_backup": "Backup Criptografado (.nyxbak)"
   },
   "support": {
     "push_notif": "Notificações Push",

@@ -1,4 +1,23 @@
 {
+  "backup_export": {
+    "title": "Crear copia cifrada",
+    "warning": "El archivo se cifra con tu frase de recuperación. Sin esa frase, nadie puede abrirlo — nosotros tampoco.",
+    "phrase_note": "La clave se deriva de tu frase de recuperación (Argon2id). Nunca vemos la frase ni el contenido del archivo.",
+    "cloud_label": "Guardar también una copia cifrada en la nube",
+    "cloud_hint": "Objeto opaco (uno por cuenta, las subidas se sobrescriben). Puede recuperarse desde el modal de restauración.",
+    "phrase_required": "Se requiere la frase de recuperación para cifrar la copia.",
+    "reading_phrase": "Leyendo la frase de recuperación...",
+    "creating": "Creando el archivo... {{percent}}%",
+    "uploading": "Subiendo a la nube...",
+    "working": "Creando...",
+    "create_button": "Crear y descargar copia",
+    "success": "Copia creada: {{records}} registros · {{size}}",
+    "result_summary": "{{records}} registros · {{frames}} fragmentos · {{size}}",
+    "result_cloud": "También guardada en la nube.",
+    "failed": "No se pudo crear la copia.",
+    "upload_success": "Copia cifrada guardada en la nube.",
+    "upload_failed": "Falló la subida a la nube; el archivo local sigue guardado."
+  },
   "backup_restore": {
     "title": "Restaurar desde archivo de copia",
     "warning": "Restaurar un archivo sobrescribe los datos locales de este dispositivo.",
@@ -13,7 +32,13 @@
     "restoring": "Restaurando...",
     "success": "Bóveda restaurada: {{records}} registros · {{size}}",
     "failed": "Restauración fallida: el archivo puede estar dañado.",
-    "wrong_phrase": "Frase de recuperación incorrecta o archivo dañado."
+    "wrong_phrase": "Frase de recuperación incorrecta o archivo dañado.",
+    "cloud_button": "Obtener de la nube",
+    "cloud_fetching": "Obteniendo de la nube...",
+    "cloud_source": "Copia en la nube",
+    "cloud_missing": "No hay copia en la nube para esta cuenta.",
+    "cloud_forbidden": "Las cuentas sandbox no pueden almacenar blobs en la nube.",
+    "cloud_failed": "No se pudo obtener la copia de la nube."
   },
   "add_participant": {
     "title": "Añadir participante",

@@ -13,16 +13,33 @@
 #                                 (untuk ambang yang mudah salah) kasus TIDAK
 #                                 MENYALA. Lapis inilah yang menemukan aturan
 #                                 "dead" (mis. `A and B` dengan label tak sepadan).
-#   4. Kontrak metrik + cakupan — setiap metrik `nyx_*` yang dirujuk aturan harus
-#                                 benar-benar dideklarasikan, dan setiap aturan
-#                                 harus punya kasus drill.
+#   4. Kontrak metrik + cakupan — setiap metrik `nyx_*` yang dirujuk aturan
+#                                 ATAU PANEL DASHBOARD harus benar-benar
+#                                 dideklarasikan, dan setiap aturan harus punya
+#                                 kasus drill. (Panel yang merujuk metrik salah
+#                                 tulis hanya menampilkan "No data", bukan error
+#                                 — jadi salah tulis di sana tidak pernah ketahuan
+#                                 tanpa lapis ini.)
 #
-# Opsional (bila API NYX hidup): scrape `/metrics` nyata dan pastikan tidak ada
-# nama metrik yang belum dideklarasikan (salah tulis nama = aturan diam).
+# Empat sumber deklarasi (semuanya di-repo, bukan hasil runtime):
+#   - `server/src/utils/metrics.ts`                          → metrik nyx-api
+#   - `server/kt-query/cmd/nyx-kt-auditor/metrics.go`        → metrik auditor KT
+#   - `server/kt-query/metrics.go`                           → metrik proses log KT
+#   - `server/transport-sidecar/src/metrics.rs`              → metrik sidecar WT
+# Aturan yang merujuk metrik di luar keempatnya TIDAK akan pernah menyala, dan
+# tanpa lapis ini kesalahan itu tidak mengeluarkan error apa pun.
+#
+# Opsional (bila exporter hidup): scrape `/metrics` nyata dari tiap exporter dan
+# pastikan tidak ada nama metrik yang belum dideklarasikan (salah tulis nama =
+# aturan diam). Setiap exporter yang tidak menjawab DILEWATI dengan catatan —
+# bukan dihitung lulus.
 #
 # Pemakaian:
 #   scripts/drill-alerts.sh
 #   METRICS_URL=http://127.0.0.1:9464/metrics scripts/drill-alerts.sh
+#   AUDITOR_METRICS_URL=http://127.0.0.1:9466/metrics scripts/drill-alerts.sh
+#   KT_QUERY_METRICS_URL=http://127.0.0.1:9467/metrics scripts/drill-alerts.sh
+#   SIDECAR_METRICS_URL=http://127.0.0.1:9465/metrics scripts/drill-alerts.sh
 #   SKIP_LIVE=1 scripts/drill-alerts.sh          # lompati lapis live
 #
 # promtool: dipakai dari PATH bila ada; kalau tidak, diunduh (versi dipin) ke
@@ -37,12 +54,19 @@ ALERTS="$PROM_DIR/alerts.yml"
 TESTS="$PROM_DIR/tests.yml"
 CONFIG="$PROM_DIR/prometheus.yml"
 METRICS_TS="$ROOT/server/src/utils/metrics.ts"
+AUDITOR_METRICS_GO="$ROOT/server/kt-query/cmd/nyx-kt-auditor/metrics.go"
+KT_QUERY_METRICS_GO="$ROOT/server/kt-query/metrics.go"
+SIDECAR_METRICS_RS="$ROOT/server/transport-sidecar/src/metrics.rs"
+DASHBOARD="$ROOT/ops/grafana/dashboards/nyx-overview.json"
 
 # Versi promtool dipin supaya drill deterministik (aturan format lama tetap sah
 # di versi baru, tapi kita tidak ingin perilaku uji berubah tanpa sadar).
 PROMTOOL_VERSION="${PROMTOOL_VERSION:-3.15.0}"
 CACHE_DIR="$ROOT/.cache/promtool"
 METRICS_URL="${METRICS_URL:-http://127.0.0.1:9464/metrics}"
+AUDITOR_METRICS_URL="${AUDITOR_METRICS_URL:-http://127.0.0.1:9466/metrics}"
+KT_QUERY_METRICS_URL="${KT_QUERY_METRICS_URL:-http://127.0.0.1:9467/metrics}"
+SIDECAR_METRICS_URL="${SIDECAR_METRICS_URL:-http://127.0.0.1:9465/metrics}"
 
 fail() { echo "❌ $*" >&2; exit 1; }
 ok() { echo "✅ $*"; }
@@ -99,14 +123,42 @@ referenced="$(
     | sed -E 's/_(bucket|count|sum)$//' \
     | sort -u
 )"
-declared="$(grep -oE "'nyx_[a-z0-9_]+'" "$METRICS_TS" | tr -d "'" | sort -u)"
+# Sisi server: nama metrik ditulis sebagai string berkutip satu. Sisi Go
+# (auditor + proses log): lewat `defineCounter("…")`/`defineGauge("…")`. Sisi
+# Rust (sidecar): lewat `name: "…"` pada `METRIC_DEFS`. Semuanya sengaja
+# berpola, supaya nama di dalam komentar/help tidak ikut terbaca sebagai
+# deklarasi.
+declared_ts="$(grep -oE "'nyx_[a-z0-9_]+'" "$METRICS_TS" | tr -d "'" || true)"
+declared_go="$(grep -oE 'define(Counter|Gauge)\("nyx_[a-z0-9_]+' "$AUDITOR_METRICS_GO" | grep -oE 'nyx_[a-z0-9_]+' || true)"
+declared_go_query="$(grep -oE 'define(Counter|Gauge)\("nyx_[a-z0-9_]+' "$KT_QUERY_METRICS_GO" | grep -oE 'nyx_[a-z0-9_]+' || true)"
+declared_rs="$(grep -oE 'name: "nyx_[a-z0-9_]+' "$SIDECAR_METRICS_RS" | grep -oE 'nyx_[a-z0-9_]+' || true)"
+declared="$(printf '%s\n%s\n%s\n%s\n' "$declared_ts" "$declared_go" "$declared_go_query" "$declared_rs" \
+  | grep -v '^$' | sort -u)"
 
 missing="$(comm -23 <(echo "$referenced") <(echo "$declared") || true)"
 if [[ -n "$missing" ]]; then
   echo "$missing" | sed 's/^/   - /' >&2
   fail "aturan merujuk metrik yang TIDAK dideklarasikan (aturan ini tidak akan pernah menyala)"
 fi
-ok "semua $(echo "$referenced" | wc -l) metrik nyx_* yang dirujuk aturan sudah dideklarasikan di metrics.ts"
+ok "semua $(echo "$referenced" | wc -l) metrik nyx_* yang dirujuk aturan sudah dideklarasikan (metrics.ts + metrics.go ×2 + metrics.rs)"
+
+# Kontrak yang sama untuk dashboard: panel yang merujuk metrik salah tulis TIDAK
+# error, hanya menampilkan "No data" — dan "No data" di produksi paling sering
+# dibaca sekadar sebagai "sedang sepi". Hanya nilai `expr` yang dibaca (bukan
+# deskripsi panel), supaya nama metrik yang cuma disebut di dokumentasi panel
+# tidak dianggap sebagai query.
+dash_referenced="$(
+  grep '"expr"' "$DASHBOARD" \
+    | grep -oE 'nyx_[a-z0-9_]+' \
+    | sed -E 's/_(bucket|count|sum)$//' \
+    | sort -u
+)"
+dash_missing="$(comm -23 <(echo "$dash_referenced") <(echo "$declared") || true)"
+if [[ -n "$dash_missing" ]]; then
+  echo "$dash_missing" | sed 's/^/   - /' >&2
+  fail "dashboard merujuk metrik yang TIDAK dideklarasikan (panel itu akan menampilkan 'No data' selamanya)"
+fi
+ok "semua $(echo "$dash_referenced" | wc -l) metrik nyx_* yang dirujuk panel dashboard sudah dideklarasikan"
 
 # Setiap aturan WAJIB punya kasus drill — aturan baru tanpa drill = aturan yang
 # belum dibuktikan pernah menyala.
@@ -124,10 +176,23 @@ echo "── 4/4 scrape nyata (opsional) ──"
 if [[ "${SKIP_LIVE:-0}" == "1" ]]; then
   echo "⏭️  dilewati (SKIP_LIVE=1)"
 else
-  body="$(curl -fsS --max-time 5 "$METRICS_URL" 2>/dev/null || true)"
-  if [[ -z "$body" ]]; then
-    echo "⏭️  exporter tidak menjawab di $METRICS_URL — lapis ini dilewati (bukan lulus palsu)."
-  else
+  # Empat exporter dipisah: kalau nyx-api hidup dan auditor mati, lapis ini tetap
+  # memeriksa yang hidup — "salah satu tidak menjawab" bukan alasan melewatkan
+  # yang lain (itu justru kasus yang ingin terlihat).
+  label_and_urls=(
+    "nyx-api:$METRICS_URL"
+    "nyx-kt-auditor:$AUDITOR_METRICS_URL"
+    "nyx-kt-query:$KT_QUERY_METRICS_URL"
+    "nyx-sidecar:$SIDECAR_METRICS_URL"
+  )
+  for entry in "${label_and_urls[@]}"; do
+    label="${entry%%:*}"
+    url="${entry#*:}"
+    body="$(curl -fsS --max-time 5 "$url" 2>/dev/null || true)"
+    if [[ -z "$body" ]]; then
+      echo "⏭️  exporter $label tidak menjawab di $url — dilewati (bukan lulus palsu)."
+      continue
+    fi
     live_names="$(
       echo "$body" | grep -E '^# TYPE ' | awk '{print $3}' \
         | sed -E 's/_(bucket|count|sum)$//' | sort -u
@@ -135,10 +200,10 @@ else
     undeclared="$(comm -23 <(echo "$live_names") <(echo "$declared") || true)"
     if [[ -n "$undeclared" ]]; then
       echo "$undeclared" | sed 's/^/   - /' >&2
-      fail "exporter mengirim metrik yang tidak dideklarasikan (salah tulis nama = aturan diam)"
+      fail "exporter $label mengirim metrik yang tidak dideklarasikan (salah tulis nama = aturan diam)"
     fi
-    ok "exporter hidup: $(echo "$live_names" | wc -l) keluarga metrik ter-scrape, semuanya terdeklarasi"
-  fi
+    ok "exporter $label hidup: $(echo "$live_names" | wc -l) keluarga metrik ter-scrape, semuanya terdeklarasi"
+  done
 fi
 
 echo

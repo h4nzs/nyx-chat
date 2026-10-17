@@ -9,7 +9,7 @@ import { newJti, refreshExpiryDate, signAccessToken, verifyJwt, signTransportTic
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { clearAuthCookies, isEphemeralGuestSubject, revokeFamily } from '../utils/sessionUtils.js'
-import { resolvePowIdentity } from '../utils/powIdentity.js'
+import { powRateKey, resolvePowIdentity } from '../utils/powIdentity.js'
 import { cfAwareClientIp } from '../utils/clientIp.js'
 import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
@@ -40,7 +40,13 @@ import {
 } from '@simplewebauthn/server'
 import { isoBase64URL } from '@simplewebauthn/server/helpers'
 // [docs/30 §30.5 WS-A] Jejak kunci identitas di log Key Transparency.
-import { publishKeyTransparencyEntry } from '../utils/keyTransparency.js'
+import {
+  KT_KEY_VERSION_RECOVERY,
+  KT_KEY_VERSION_REGISTRATION,
+  publishKeyTransparencyEntry
+} from '../utils/keyTransparency.js'
+// [docs/30 §30.5 WS-A] Rotasi kunci identitas di jalur login → entri log KT.
+import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js'
 // [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru (gerbang sybil).
 import {
   attestationPolicyFromEnv,
@@ -409,7 +415,7 @@ async (req, res, next) => {
       identityKey: Buffer.from(publicKey, 'base64url'),
       pqIdentityKey: Buffer.from(pqPublicKey ?? '', 'base64url'),
       signingKey: Buffer.from(signingKey, 'base64url'),
-      keyVersion: 1,
+      keyVersion: KT_KEY_VERSION_REGISTRATION,
       updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
     });
     const tokens = await issueTokens(user, deviceId, req)
@@ -485,6 +491,13 @@ router.post('/login', authLimiter, zodValidate({
         });
       }
       
+      // [docs/30 §30.5 WS-A] Material identitas SEBELUM update — dasar keputusan
+      // "kunci benar-benar berubah": login normal mengirim kunci yang SAMA, jadi
+      // hanya regenerasi kunci lokal yang menghasilkan entri log.
+      const previousIdentity = device
+        ? { publicKey: device.publicKey, signingKey: device.signingKey }
+        : null;
+
       if (device) {
           device = await prisma.device.update({
               where: { id: device.id },
@@ -517,6 +530,25 @@ router.post('/login', authLimiter, zodValidate({
       }
       activeDeviceId = device.id;
       activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
+
+      // [docs/30 §30.5 WS-A] Kunci identitas yang berubah di jalur login WAJIB
+      // terlihat di log. Kepemilikan identifier di sini terbukti oleh login itu
+      // sendiri: `usernameHash` dari body dipakai `identifierLookupCandidates`
+      // untuk menemukan akun ini, dan password sudah diverifikasi di atas.
+      if (
+        identityKeysChanged(previousIdentity, {
+          identityKey: Buffer.from(publicKey, 'base64url'),
+          signingKey: Buffer.from(signingKey, 'base64url'),
+        })
+      ) {
+        void publishIdentityKeyChange({
+          userId: user.id,
+          usernameHash,
+          identityKey: Buffer.from(publicKey, 'base64url'),
+          pqIdentityKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
+          signingKey: Buffer.from(signingKey, 'base64url'),
+        });
+      }
 
     } else {
       if (explicitDeviceId) {
@@ -841,7 +873,7 @@ router.post('/recover', authLimiter, zodValidate({
       identityKey: Buffer.from(publicKey, 'base64url'),
       pqIdentityKey: Buffer.from(pqPublicKey ?? '', 'base64url'),
       signingKey: Buffer.from(signingKey, 'base64url'),
-      keyVersion: 2,
+      keyVersion: KT_KEY_VERSION_RECOVERY,
       updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
     });
 
@@ -941,9 +973,11 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     if (!identity) {
       throw new ApiError(400, 'Cannot determine client identifier for PoW challenge.');
     }
-    const { primaryId, prefix } = identity;
-    const stableHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(String(primaryId)), null)).slice(0, 16);
-    const rateKey = `${prefix}:${stableHash}`;
+    // [docs/30 §30.12 WS-H] Key = HMAC pepper (`powRateKey`), bukan hash tanpa
+    // kunci dari identitas mentah: cabang `pow:ip`/`pow:fp` memakai nilai
+    // berentropi rendah, dan hash tanpa kunci bisa dienumerasi dari snapshot
+    // Redis. Bentuk key tetap deterministik, jadi counter tetap idempoten.
+    const rateKey = powRateKey(identity);
 
     // INCR+EXPIRE atomik (Lua)
     let count = Number(await redisClient.eval(`

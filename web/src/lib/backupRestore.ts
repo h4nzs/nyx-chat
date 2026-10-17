@@ -51,6 +51,17 @@ import {
 export type BackupProgress = (done: number, total: number) => void;
 
 /**
+ * Normalisasi recovery phrase sebelum dipakai sebagai KDF input: `trim` +
+ * `lowercase`. Satu implementasi supaya **export dan restore tidak bisa
+ * menyimpang** — arsip yang dibuat dari phrase "Legal Winner Thank  " dan
+ * direstore dengan "legal winner thank" harus membuka kunci yang sama.
+ * (`deriveBackupKey` menambahkan normalisasi NFKD di atas ini.)
+ */
+export function normalizeBackupPhrase(phrase: string): string {
+  return phrase.trim().toLowerCase();
+}
+
+/**
  * Kontrak penyimpanan yang dibutuhkan restore/build. Implementasi nyata ada di
  * `readTablesFromDexie`/`writeTablesToDexie`; test memakai objek sederhana.
  */
@@ -218,7 +229,11 @@ export async function openFramedBackupWithPhrase(
   opts: OpenBackupWithPhraseOptions
 ): Promise<RestoreBackupReport> {
   const { salt } = readBackupHeader(opts.bytes);
-  const key = await deriveBackupKey(opts.phrase, salt, opts.params ?? BACKUP_KDF_PARAMS);
+  const key = await deriveBackupKey(
+    normalizeBackupPhrase(opts.phrase),
+    salt,
+    opts.params ?? BACKUP_KDF_PARAMS
+  );
   return restoreFramedBackup({
     store: opts.store,
     bytes: opts.bytes,

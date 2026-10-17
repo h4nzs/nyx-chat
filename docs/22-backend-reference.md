@@ -36,7 +36,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | File | Middleware |
 |---|---|
 | `auth.ts` | `requireAuth` (cookie `at` / Bearer; JTI blacklist; ban cache; sets `req.user`/`req.deviceId`), `requireAdmin`, `verifyAuth` |
-| `rateLimiter.ts` | `generalLimiter` (300/15m), `authLimiter` (20/h), `uploadLimiter` (20/h) — RedisStore, key from `req.ip` |
+| `rateLimiter.ts` | `generalLimiter` (300/15m), `authLimiter` (20/h), `uploadLimiter` (20/h) — RedisStore, key = `clientIpTag(req)` (HMAC pepper atas alamat klien, **bukan** IP mentah — `docs/30` §30.12 WS-H) |
 | `tenantAuth.ts` | `requireTenantAuth` (validates `x-nyx-engine-key`) |
 
 ## 22.4 Network bridge (`network/redisBridge.ts`, 803 L)

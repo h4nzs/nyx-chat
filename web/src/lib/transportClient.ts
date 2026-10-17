@@ -6,6 +6,7 @@ import {
   encodeTransportHello,
   negotiateCapabilities,
   parseTransportHello,
+  sanitizeCapabilityList,
   TransportOpCode,
 } from '@nyx/shared';
 import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from '@nyx/shared';
@@ -278,18 +279,37 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       transports: rawTransports.length > 0 ? rawTransports : ['websocket', 'polling'],
       path: '/socket.io',
       reconnection: true,
+      // [docs/29 §5.6 · docs/33 §33.7] Kapabilitas diiklankan lewat handshake;
+      // gateway WSS membalas event `capabilities` (irisan dengan
+      // SERVER_CAPABILITIES). Sebelum ini jalur WSS selalu "legacy", sehingga
+      // jalur ratchet v2 (braid SPQR) tidak pernah dipakai di sini walau kedua
+      // peer sudah saling menyatakan mampu in-band (`ackV`).
+      auth: { capabilities: ANNOUNCED_CLIENT_CAPABILITIES },
     });
     this.socket = socket;
 
     socket.on('connect', () => {
       this.connected = true;
-      // Jalur WSS (socket.io) tidak punya HELLO: tandai negosiasi SELESAI tanpa
-      // kapabilitas supaya state tidak menggantung "pending" selamanya, dan
-      // tetap emit supaya pelanggan event tidak menunggu selamanya.
-      this.clearHelloTimer();
-      resetCapabilityState(true);
-      this.emit('capabilities', []);
+      // Jalur WSS punya negosiasinya sendiri sekarang: JANGAN langsung menandai
+      // legacy. Tunggu balasan gateway dengan batas waktu yang sama seperti
+      // HELLO sidecar; server lama yang tidak membalas = legacy (bukan error).
+      this.startWssCapabilityNegotiation();
       this.emit('connect');
+    });
+
+    // Balasan kapabilitas dari gateway WSS (`server/src/realtime/gateway.ts`).
+    socket.on('capabilities', (caps: unknown) => {
+      const parsed = sanitizeCapabilityList(caps);
+      if (!parsed) {
+        console.warn('[Transport] Balasan kapabilitas WSS tidak sah — diabaikan (mode legacy).');
+        return;
+      }
+      // Irisan di sisi klien juga: server TIDAK boleh mengaktifkan kapabilitas
+      // yang tidak kita iklankan (pertahanan terhadap server/konfigurasi salah).
+      this.finishCapabilityNegotiation(
+        negotiateCapabilities(ANNOUNCED_CLIENT_CAPABILITIES, parsed),
+        'wss'
+      );
     });
 
     socket.on('disconnect', (reason: string) => {
@@ -300,6 +320,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     // Tangkap semua event masuk dan teruskan ke TransportEvents.
     socket.onAny((eventName: string, ...args: any[]) => {
       if (eventName === 'connect' || eventName === 'disconnect') return;
+      // Balasan kapabilitas bukan data pesan — jangan di-map ke event
+      // TransportEvents (paralel dengan HELLO yang transport-local di jalur WT).
+      if (eventName === 'capabilities') return;
       this.handleIncomingWss(eventName, args[0]);
     });
   }
@@ -451,6 +474,43 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     }, HELLO_ACK_TIMEOUT_MS);
   }
 
+  /**
+   * [docs/29 §5.6 · docs/33 §33.7] Negosiasi kapabilitas jalur WSS.
+   *
+   * Klien sudah mengiklankan daftarnya di `handshake.auth.capabilities`, jadi di
+   * sini yang dilakukan hanya menunggu balasan gateway — dengan batas waktu yang
+   * sama seperti jalur WT. Tanpa batas waktu, klien yang bicara dengan gateway
+   * lama akan menggantung "pending" selamanya dan (lebih buruk) tidak pernah
+   * mengunci keputusan versi ratchet.
+   */
+  private startWssCapabilityNegotiation(): void {
+    this.clearHelloTimer();
+    resetCapabilityState(false);
+    this.helloTimer = setTimeout(() => {
+      this.helloTimer = null;
+      console.info('[Transport] Gateway WSS tidak membalas kapabilitas — jalan dalam mode legacy (tanpa kapabilitas).');
+      this.finishCapabilityNegotiation([], 'wss');
+    }, HELLO_ACK_TIMEOUT_MS);
+  }
+
+  /**
+   * Menutup satu negosiasi kapabilitas (`wt` lewat HELLO sidecar, `wss` lewat
+   * balasan gateway) dan mengumumkan hasilnya. Satu tempat supaya dua transport
+   * tidak bisa menyimpang soal "kapan negosiasi dianggap selesai".
+   */
+  private finishCapabilityNegotiation(agreed: string[], source: 'wt' | 'wss'): void {
+    negotiatedCapabilities = agreed;
+    capabilityNegotiationDone = true;
+    this.clearHelloTimer();
+    // Versi protokol hanya datang dari HELLO sidecar; gateway WSS tidak punya
+    // versi protokol (handshake socket.io sudah punya framing-nya sendiri).
+    const protocol = negotiatedProtocolVersion > 0 ? ` protokol v${negotiatedProtocolVersion}` : '';
+    console.info(
+      `[Transport] Kapabilitas ${source}${protocol} dinegosiasikan: ${agreed.length > 0 ? agreed.join(', ') : '—'}`
+    );
+    this.emit('capabilities', agreed);
+  }
+
   /** Balasan HELLO dari sidecar: simpan irisan kapabilitas yang disepakati. */
   private handleCapabilityHelloReply(payload: BinaryPayload): void {
     const parsed = parseTransportHello(payload);
@@ -461,12 +521,8 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     // Irisan di sisi klien juga: server TIDAK boleh mengaktifkan kapabilitas yang
     // tidak kita iklankan (pertahanan terhadap server/konfigurasi salah).
     const agreed = negotiateCapabilities(ANNOUNCED_CLIENT_CAPABILITIES, parsed.caps);
-    negotiatedCapabilities = agreed;
     negotiatedProtocolVersion = parsed.v;
-    capabilityNegotiationDone = true;
-    this.clearHelloTimer();
-    console.info(`[Transport] Kapabilitas dinegosiasikan (protokol v${parsed.v}): ${agreed.length > 0 ? agreed.join(', ') : '—'}`);
-    this.emit('capabilities', agreed);
+    this.finishCapabilityNegotiation(agreed, 'wt');
   }
 
   private clearHelloTimer(): void {

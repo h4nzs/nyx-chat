@@ -273,6 +273,23 @@ export function renderMetricsText(): string {
     lines.push(`# TYPE ${def.name} ${def.type}`);
     if (def.type === 'histogram') {
       const buckets = def.buckets!;
+      // Histogram TANPA label dan TANPA observasi tetap dirender sebagai deret
+      // bernilai 0 ("nol pengamatan"), bukan hilang. Aturannya sama dengan
+      // exporter sidecar Rust (`HISTOGRAM_DEFS` di metrics.rs): dashboard lalu
+      // menampilkan 0 alih-alih "No data", dan `rate(..._count[5m]) > 0` bisa
+      // dipakai sebagai penjaga "ada trafik" tanpa bergantung pada keberadaan
+      // seri. Untuk histogram BERLABEL ini tidak mungkin dilakukan (nilai label
+      // tidak diketahui sebelum observasi pertama), jadi jalur itu dibiarkan
+      // tetap "No data" sampai ada sampel — dan itu memang artinya.
+      if (state.series.size === 0 && def.labelNames.length === 0) {
+        for (const bound of buckets) {
+          lines.push(formatSample(`${def.name}_bucket`, { le: String(bound) }, 0));
+        }
+        lines.push(formatSample(`${def.name}_bucket`, { le: '+Inf' }, 0));
+        lines.push(formatSample(`${def.name}_sum`, {}, 0));
+        lines.push(formatSample(`${def.name}_count`, {}, 0));
+        continue;
+      }
       for (const series of state.series.values()) {
         for (let i = 0; i < buckets.length; i++) {
           lines.push(
@@ -322,6 +339,34 @@ export const SECURITY_BLOCKS = defineCounter(
   'nyx_security_blocks_total',
   'Operasi yang diblokir pemeriksaan keamanan sesi/perangkat',
   ['op', 'reason']
+);
+
+/**
+ * [docs/10 §10.12] Latensi ingress jalur **WSS** (fallback): dari event
+ * socket.io diterima gateway sampai handler-nya selesai (validasi + rate limit +
+ * pemeriksaan perangkat + publish ke `nyx:downstream`).
+ *
+ * Kenapa ini ada: jalur WebTransport punya angkanya sendiri
+ * (`nyx_transport_ingress_seconds`, diukur di sidecar). Tanpa pembanding di sisi
+ * WSS, "jalur cepat lambat" hanya bisa dibandingkan dengan ambang mutlak yang
+ * berbeda-beda per host. Dengan dua angka ini, pertanyaannya jadi faktual:
+ * **apakah jalur cepat masih lebih cepat daripada jalur cadangannya?**
+ *
+ * Cakupannya sengaja TIDAK identik dengan sisi WebTransport — span WSS memuat
+ * pekerjaan yang di jalur WT terjadi setelah hop sidecar (Node tetap memproses
+ * `nyx:upstream:<op>` dengan handler yang sama). Karena itu aturan alertnya hanya
+ * menyala ketika jalur cepat benar-benar lebih lambat daripada jalur cadangan
+ * yang pekerjaannya LEBIH BANYAK — arah yang salah untuk alarm palsu.
+ *
+ * Bucket-nya WAJIB sama dengan `INGRESS_BUCKETS` di
+ * `server/transport-sidecar/src/metrics.rs`: dua histogram dengan pembagian
+ * bucket berbeda menghasilkan p95 yang tidak sebanding, dan itu membuat seluruh
+ * perbandingannya bohong tanpa satu pun error.
+ */
+export const WSS_INGRESS_SECONDS = defineHistogram(
+  'nyx_wss_ingress_seconds',
+  'Latensi ingress jalur WSS: dari event socket.io diterima sampai handler selesai (validasi + rate limit + publish)',
+  [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
 );
 
 /** Durasi satu putaran sweeper (detik). */
@@ -389,6 +434,24 @@ export const KT_SNAPSHOT_DELETED = defineCounter(
 );
 
 /**
+ * [drill 2026-10-16 · docs/10 §10.13] Unix timestamp arsip snapshot log KT
+ * terbaru yang **benar-benar ada di R2** (umur = now − nilai ini).
+ *
+ * Kenapa ukurannya umur arsip di R2, bukan jumlah unggahan: counter
+ * `nyx_kt_snapshot_upload_total` hanya naik saat ada arsip BARU, sehingga dua
+ * keadaan yang sehat menghasilkan seri datar — jalur idempoten
+ * (`skipped: already-uploaded`) dan restart proses NYX (label-child prom-client
+ * lahir kembali hanya pada `.inc()` pertama). Alert berbasis `increase(counter)
+ * == 0` karena itu menyala palsu setelah restart; nilainya di sini diturunkan
+ * dari daftar objek R2, jadi restart tidak mengubah kebenarannya dan jalur
+ * idempoten tetap memutakhirkan metrik ini.
+ */
+export const KT_SNAPSHOT_REMOTE_LATEST = defineGauge(
+  'nyx_kt_snapshot_remote_latest_timestamp_seconds',
+  'Unix timestamp arsip snapshot log Key Transparency terbaru yang ada di R2'
+);
+
+/**
  * [docs/30 §30.12 WS-H] Hasil evaluasi guard registrasi, per tindakan + alasan.
  *
  * `would_*` adalah **mode shadow** (`ABUSE_REGISTRATION_GUARD=shadow`): guard
@@ -438,6 +501,26 @@ export const ABUSE_GUARD_ENABLED = defineGauge(
   'nyx_abuse_guard_enabled',
   'Guard anti-abuse registrasi menyala (1) atau off (0), per guard',
   ['guard']
+);
+
+/**
+ * [docs/29 §5.6 · docs/33 §33.7] Kapabilitas hasil negosiasi jalur **WSS**,
+ * per kapabilitas (`capability="none"` = klien mengiklankan sesuatu yang tidak
+ * dikenal gateway).
+ *
+ * Kenapa perlu: `spqr-ratchet` (ratchet v2, braid SPQR) hanya dipakai kalau
+ * relay yang aktif mengiklankannya. Sebelum ini, jalur WSS tidak pernah bisa
+ * mengiklankannya, jadi satu-satunya cara tahu "berapa klien yang bisa v2"
+ * adalah menebak. Seri datar di sini berarti tidak ada klien yang mengiklankan
+ * apa pun (mis. semua masih klien lama) — bukan "semua sudah v2".
+ *
+ * Labelnya hanya enum dari `SERVER_CAPABILITIES` (nama kapabilitas pendek,
+ * tanpa versi klien/ID perangkat).
+ */
+export const WSS_CAPABILITY = defineCounter(
+  'nyx_wss_capability_total',
+  'Kapabilitas transport hasil negosiasi jalur WSS, per kapabilitas',
+  ['capability']
 );
 
 /**

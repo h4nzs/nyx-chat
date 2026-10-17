@@ -26,6 +26,9 @@ import { adminCleanupConfigWarnings } from './adminCleanupAuth.js'
 export interface AbuseGuardEnv {
   ABUSE_REGISTRATION_GUARD?: string | undefined
   ABUSE_REQUIRE_ATTESTATION?: string | undefined
+  ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN?: string | undefined
+  ABUSE_ATTESTATION_ROOTS?: string | undefined
+  ABUSE_ATTESTATION_ROOTS_FILE?: string | undefined
   ADMIN_CLEANUP_SECRET?: string | undefined
   ADMIN_CLEANUP_IP_ALLOWLIST?: string | undefined
   CHAT_SECRET?: string | undefined
@@ -80,7 +83,7 @@ export function startupWarnings(env: AbuseGuardEnv): string[] {
   if (isProd) {
     if (guardMode === 'off') {
       warnings.push(
-        'ABUSE_REGISTRATION_GUARD tidak menyala di production: tidak ada batas burst pendaftaran per IP/instalasi/ASN. Set `on` (atau `shadow` dulu untuk mengukur) — lihat docs/10 §10.6.'
+        'ABUSE_REGISTRATION_GUARD tidak menyala di production: tidak ada batas burst pendaftaran per IP/instalasi/ASN. Set `on` (atau `shadow` dulu untuk mengukur) — checklist docs/10 §10.16, tabel env-nya §10.6.'
       )
     } else if (guardMode === 'shadow') {
       warnings.push(
@@ -90,6 +93,21 @@ export function startupWarnings(env: AbuseGuardEnv): string[] {
     if ((env.ABUSE_REQUIRE_ATTESTATION ?? '').trim().toLowerCase() !== 'on') {
       warnings.push(
         'ABUSE_REQUIRE_ATTESTATION tidak menyala di production: akun baru tidak wajib attestation perangkat. Attestation tetap dipicu heuristik burst sybil per-ASN bila ASN_DB_FILE diisi.'
+      )
+    }
+  }
+
+  // [docs/30 §30.12 WS-H] Kebijakan rantai attestation: dua keadaan yang mudah
+  // salah dan tidak menghasilkan error sampai ada user sungguhan yang mendaftar.
+  const attestationOn = (env.ABUSE_REQUIRE_ATTESTATION ?? '').trim().toLowerCase() === 'on'
+  if (attestationOn) {
+    if ((env.ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN ?? '').trim().toLowerCase() === 'on') {
+      warnings.push(
+        'ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN=on: verifikasi rantai attestation DIMATIKAN. Sertifikat self-signed buatan siapa pun dapat masuk tier "hardware". Set `off` + pin root vendor di ABUSE_ATTESTATION_ROOTS_FILE (docs/10 §10.16).'
+      )
+    } else if (!(env.ABUSE_ATTESTATION_ROOTS ?? '').trim() && !(env.ABUSE_ATTESTATION_ROOTS_FILE ?? '').trim()) {
+      warnings.push(
+        'Rantai attestation diperiksa ketat tapi belum ada root yang dipin: rantai perangkat nyata yang `x5c`-nya berhenti di intermediate (TPM/Apple/YubiKey) akan ditolak. Isi ABUSE_ATTESTATION_ROOTS_FILE dengan root vendor (docs/10 §10.16).'
       )
     }
   }

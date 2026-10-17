@@ -68,6 +68,52 @@ export function resolveRecoveryIdentifierInput(raw: string): RecoveryIdentifierI
 }
 
 /**
+ * [docs/30 §30.13 WS-I] Urai tautan berbagi yang dipindai/ditempel pengguna.
+ *
+ * Dua bentuk diterima, karena QR dan tautan lama **sudah beredar** dan tidak
+ * boleh berhenti bekerja:
+ *
+ *   1. **Bentuk pendek (WS-I)** — `/u/<hashId>` → hanya `u` yang diteruskan ke
+ *      alur `/connect`. hashId harus sah menurut aturan bentuk yang sama dengan
+ *      server, jadi segmen sampah tidak pernah menjadi request pencarian.
+ *   2. **Bentuk lama** — `/connect?u=…&i=…&p=…` → query string diteruskan APA
+ *      ADANYA (termasuk `i`/`p`), dengan aturan penerimaan lama (`u.length > 10`)
+ *      supaya scan tidak berubah perilaku untuk link yang sudah tersebar.
+ *
+ * Mengembalikan query string siap-pakai untuk `/connect`, atau `null` bila
+ * tautan bukan tautan berbagi NYX (atau rusak).
+ */
+export function parseProfileShareLink(raw: string): string | null {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null; // bukan URL (mis. teks biasa) — pemindai tetap berjalan
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+
+  const short = url.pathname.match(/^\/u\/([^/]+)\/?$/);
+  if (short) {
+    let segment: string;
+    try {
+      segment = decodeURIComponent(short[1] ?? '');
+    } catch {
+      return null; // escape rusak
+    }
+    return isValidUsernameHash(segment) ? `?u=${encodeURIComponent(segment)}` : null;
+  }
+
+  if (/\/connect\/?$/.test(url.pathname)) {
+    const u = url.searchParams.get('u');
+    return typeof u === 'string' && u.length > 10 ? url.search : null;
+  }
+
+  return null;
+}
+
+/**
  * Bangun link pendek absolut. Melempar bila hashId tidak sah — mencegah link
  * rusak ikut tersebar.
  */

@@ -5,26 +5,35 @@
 /**
  * [docs/30 WS-C fase 4 / docs/31 §31.6c] Restore berkas `.nyxbak` manual.
  *
- * Jalur ini tidak butuh perangkat lama sama sekali: pengguna memilih berkas
- * arsip dan mengetik recovery phrase-nya. Kunci arsip diturunkan dari phrase
- * (Argon2id 128 MB) via `openFramedBackupWithPhrase`, jadi berkas tetap bisa
- * dibuka di perangkat pengganti mana pun tanpa server.
+ * Dua sumber arsip, satu jalur kunci (recovery phrase):
+ *   - **Berkas** yang dipilih pengguna (`.nyxbak` hasil "Buat Backup" / transfer).
+ *   - **Awan** (`downloadCloudBackup` → `/api/backup/download-url`), supaya
+ *     perangkat pengganti tanpa perangkat lama tetap bisa menarik arsipnya.
+ * Keduanya memakai kunci turunan phrase, jadi tidak ada kunci yang perlu
+ * dikirim lewat kanal lain.
  *
- * Validasi header (`readBackupFile`) dijalankan **sebelum** phrase disentuh,
- * sehingga berkas asing/terpotong ditolak lebih awal dan tidak memicu KDF mahal.
+ * Validasi header (`readBackupFile` / `readBackupHeader` di jalur awan)
+ * dijalankan **sebelum** phrase disentuh, sehingga berkas asing/terpotong
+ * ditolak lebih awal dan tidak memicu KDF mahal.
  */
 import { useEffect, useRef, useState } from 'react';
-import { FiFile, FiShield, FiUpload } from 'react-icons/fi';
+import { FiCloud, FiFile, FiShield, FiUpload } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
 import ModalBase from './ui/ModalBase';
 import { Spinner } from './Spinner';
 import { getSodium } from '@lib/sodiumInitializer';
+import { ApiError } from '@lib/api';
 import { libsodiumBackupCrypto } from '@lib/backupFormat';
 import { libsodiumBackupValueCodec } from '@lib/backupPayload';
-import { formatBackupSize, liveBackupStore, openFramedBackupWithPhrase } from '@lib/backupRestore';
-import { readBackupFile } from '@lib/backupTransport';
+import {
+  formatBackupSize,
+  liveBackupStore,
+  normalizeBackupPhrase,
+  openFramedBackupWithPhrase
+} from '@lib/backupRestore';
+import { downloadCloudBackup, readBackupFile } from '@lib/backupTransport';
 
 interface BackupRestoreModalProps {
   isOpen: boolean;
@@ -39,6 +48,7 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
   const [phrase, setPhrase] = useState('');
   const [error, setError] = useState('');
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isFetchingCloud, setIsFetchingCloud] = useState(false);
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,6 +61,7 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
       setError('');
       setProgress(0);
       setIsRestoring(false);
+      setIsFetchingCloud(false);
     }
   }, [isOpen]);
 
@@ -69,6 +80,35 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
       setBytes(null);
       setFileName(null);
       setError(t('modals:backup_restore.invalid_file', 'Bukan berkas backup NYX yang sah.'));
+    }
+  };
+
+  /**
+   * Ambil arsip dari R2 (`/api/backup/download-url` → GET URL presigned). Header
+   * divalidasi di dalam `downloadCloudBackup`, jadi arsip rusak ditolak sebelum
+   * phrase/KDF. 404 = belum pernah ada backup awan — dibedakan dari error lain
+   * supaya pesannya tidak menyesatkan.
+   */
+  const handleFetchCloud = async () => {
+    if (isRestoring || isFetchingCloud) return;
+    setIsFetchingCloud(true);
+    setError('');
+    try {
+      const downloaded = await downloadCloudBackup();
+      setBytes(downloaded);
+      setFileName(t('modals:backup_restore.cloud_source', 'Salinan awan'));
+    } catch (err) {
+      setBytes(null);
+      setFileName(null);
+      if (err instanceof ApiError && err.status === 404) {
+        setError(t('modals:backup_restore.cloud_missing', 'Tidak ada backup awan untuk akun ini.'));
+      } else if (err instanceof ApiError && err.status === 403) {
+        setError(t('modals:backup_restore.cloud_forbidden', 'Akun sandbox tidak boleh menyimpan blob di awan.'));
+      } else {
+        setError(t('modals:backup_restore.cloud_failed', 'Gagal mengambil backup dari awan.'));
+      }
+    } finally {
+      setIsFetchingCloud(false);
     }
   };
 
@@ -94,7 +134,9 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
       const report = await openFramedBackupWithPhrase({
         store,
         bytes,
-        phrase: phrase.trim().toLowerCase(),
+        // Aturan normalisasi yang SAMA dengan jalur export (`normalizeBackupPhrase`)
+        // supaya arsip buatan "Buat Backup" selalu bisa dibuka di sini.
+        phrase: normalizeBackupPhrase(phrase),
         crypto,
         codec,
         onProgress: (done, total) => setProgress(Math.round((done / total) * 100)),
@@ -147,7 +189,7 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isRestoring}
+            disabled={isRestoring || isFetchingCloud}
             className="
               w-full flex items-center gap-3 p-4 rounded-xl text-left
               bg-bg-main text-text-primary
@@ -158,6 +200,28 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
             <FiFile size={18} className={bytes ? 'text-emerald-500' : 'text-text-secondary'} />
             <span className="font-mono text-xs truncate">
               {fileName ?? t('modals:backup_restore.choose_file', 'Pilih berkas...')}
+            </span>
+          </button>
+          {/* Sumber alternatif: arsip yang diunggah ke R2 (satu objek per akun). */}
+          <button
+            type="button"
+            onClick={handleFetchCloud}
+            disabled={isRestoring || isFetchingCloud}
+            data-testid="backup-restore-cloud"
+            className="
+              w-full flex items-center gap-3 p-4 rounded-xl text-left
+              bg-bg-main text-text-primary
+              shadow-neu-concave active:shadow-neu-pressed
+              hover:brightness-110 transition-all disabled:opacity-60
+            "
+          >
+            {isFetchingCloud
+              ? <Spinner size="sm" className="text-accent" />
+              : <FiCloud size={18} className="text-accent" />}
+            <span className="font-mono text-xs">
+              {isFetchingCloud
+                ? t('modals:backup_restore.cloud_fetching', 'Mengambil dari awan...')
+                : t('modals:backup_restore.cloud_button', 'Ambil dari awan')}
             </span>
           </button>
           <input

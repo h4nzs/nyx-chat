@@ -51,6 +51,24 @@ export const KT_USERNAME_HASH_BYTES = 32;
 /** Versi format nilai log NYX. */
 export const KT_VALUE_VERSION = 1;
 
+/**
+ * **Label alur** `keyVersion` di dalam nilai log v1 (byte ke-2), bukan penghitung
+ * rotasi (`docs/32` §32.7 poin 2). Tiga nilai yang dipakai NYX:
+ *
+ *   - `KT_KEY_VERSION_REGISTRATION` — pendaftaran akun (`POST /auth/register`).
+ *   - `KT_KEY_VERSION_RECOVERY` — pemulihan akun (`POST /auth/recover`).
+ *   - `KT_KEY_VERSION_ROTATION` — kunci identitas berubah di luar kedua alur itu:
+ *     upload bundle (`POST /keys/prekey-bundle`), `PUT /users/me/keys`, dan
+ *     re-sync kunci saat login (`POST /auth/login`) — lihat `utils/ktIdentityLog.ts`.
+ *
+ * Perubahan kunci tetap TERtulis walau labelnya sama: idempotensi dedupe
+ * memakai `(searchKey, keyVersion, digest nilai)`, jadi dua rotasi berturut-turut
+ * (nilai berbeda) selalu menghasilkan dua entri.
+ */
+export const KT_KEY_VERSION_REGISTRATION = 1;
+export const KT_KEY_VERSION_RECOVERY = 2;
+export const KT_KEY_VERSION_ROTATION = 3;
+
 /** Bentuk kanonik nilai log v1 (byte). */
 export const KT_VALUE_V1_BYTES =
   1 + // version

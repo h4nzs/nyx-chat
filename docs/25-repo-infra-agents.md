@@ -100,9 +100,11 @@ The `.well-known` endpoints themselves are documented in `22-backend-reference.m
 
 | File | Purpose |
 |---|---|
-| `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback (`nyx-api` :9464 + exporter node/postgres/redis). Sidecar Rust dan `nyx-kt-query` **belum** punya exporter, jadi entry-nya dikomentari supaya tidak memicu `up == 0` palsu |
-| `ops/prometheus/alerts.yml` | 15 aturan alert (relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, cleanup admin, versi klien, disk/swap/exporter) |
+| `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback: `nyx-api` :9464, sidecar Rust :9465, auditor KT :9466, log KT :9467, + exporter node/postgres/redis. Blok `alerting:` menunjuk Alertmanager `127.0.0.1:9093` |
+| `ops/prometheus/alerts.yml` | 35 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query`, `nyx-kt-auditor`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
 | `ops/prometheus/tests.yml` | Kasus uji `promtool test rules` — tiap aturan punya kasus MENYALA dan TIDAK MENYALA; dijalankan `scripts/drill-alerts.sh` (job CI `alerts` + versi scrape-nyata di job `e2e`) |
+| `ops/alertmanager/` | `alertmanager.yml` (tanpa rahasia: receiver = relay loopback), `ntfy-relay.mjs` (Alertmanager → ntfy, prioritas dari `severity`, `--self-test`), `ntfy-relay.env.example` (topik + token, 0600 di VPS) |
+| `server/src/utils/transportLatency.ts` | Pembungkus pengukuran ingress jalur WSS (`nyx_wss_ingress_seconds`); dipisah dari `gateway.ts` supaya bagian yang bisa salah (satu observasi per pengerjaan, error tidak dihitung, satuan detik) bisa diuji tanpa soket |
 | `ops/grafana/dashboards/nyx-overview.json` | Dashboard Grafana (impor manual, ambang disamakan dengan `alerts.yml`); bukan teks PromQL di dokumen |
 | `ops/systemd/nyx-kt-query.service` | Unit systemd layanan log Key Transparency — satu proses (flock LevelDB), `ProtectSystem=strict` + `ReadWritePaths` |
 | `ops/systemd/nyx-kt-query.env.example` | Template `EnvironmentFile` (alamat baca/tulis/auditor loopback + setelan snapshot) |

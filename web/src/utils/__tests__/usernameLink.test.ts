@@ -13,6 +13,7 @@ import {
   USERNAME_HASH_HEX_LENGTH,
   buildUsernameLink,
   isValidUsernameHash,
+  parseProfileShareLink,
   parseUsernameHashSegment,
   resolveRecoveryIdentifierInput,
 } from '../usernameLink';
@@ -57,6 +58,60 @@ describe('usernameLink: buildUsernameLink', () => {
 
   it('menolak hashId tidak sah (tidak ada link rusak yang tersebar)', () => {
     expect(() => buildUsernameLink('https://nyx-app.my.id', 'rusak')).toThrow(/tidak sah/);
+  });
+});
+
+/**
+ * [docs/30 §30.13 WS-I] Tautan yang dipindai/ditempel: satu parser untuk dua
+ * bentuk, dan segmen tak sah TIDAK pernah menjadi request pencarian.
+ */
+describe('parseProfileShareLink', () => {
+  it('link pendek WS-I → hanya `u` diteruskan (tanpa i/p)', () => {
+    expect(parseProfileShareLink(`https://nyx-app.my.id/u/${BASE64_HASH}`)).toBe(`?u=${BASE64_HASH}`);
+    expect(parseProfileShareLink(`https://app.nyx-app.my.id/u/${HEX_HASH}/`)).toBe(`?u=${HEX_HASH}`);
+    expect(parseProfileShareLink(`http://localhost:5173/u/${BASE64_HASH}`)).toBe(`?u=${BASE64_HASH}`);
+  });
+
+  it('link pendek hasil buildUsernameLink selalu bisa diurai kembali (roundtrip)', () => {
+    const link = buildUsernameLink('https://nyx-app.my.id', BASE64_HASH);
+    expect(parseProfileShareLink(link)).toBe(`?u=${BASE64_HASH}`);
+  });
+
+  it('segmen hash tak sah ditolak di klien (tidak ada lookup sampah)', () => {
+    expect(parseProfileShareLink('https://nyx-app.my.id/u/rusak')).toBeNull();
+    expect(parseProfileShareLink(`https://nyx-app.my.id/u/${'A'.repeat(42)}`)).toBeNull();
+    expect(parseProfileShareLink(`https://nyx-app.my.id/u/${'AB'.repeat(32).toUpperCase()}`)).toBeNull();
+    expect(parseProfileShareLink('https://nyx-app.my.id/u/')).toBeNull();
+    expect(parseProfileShareLink(`https://nyx-app.my.id/u/${BASE64_HASH}/extra`)).toBeNull();
+  });
+
+  it('QR lama `/connect?u=…&i=…&p=…` diteruskan apa adanya (tautan beredar tetap hidup)', () => {
+    const legacy = `https://nyx-app.my.id/connect?u=${BASE64_HASH}&i=user-1&p=${encodeURIComponent('cipher+text')}`;
+    expect(parseProfileShareLink(legacy)).toBe(`?u=${BASE64_HASH}&i=user-1&p=${encodeURIComponent('cipher+text')}`);
+  });
+
+  it('QR lama dengan `u` terlalu pendek / tanpa `u` ditolak (aturan lama dipertahankan)', () => {
+    expect(parseProfileShareLink('https://nyx-app.my.id/connect?u=pendek')).toBeNull();
+    expect(parseProfileShareLink('https://nyx-app.my.id/connect?i=user-1')).toBeNull();
+  });
+
+  it('host tidak dipatok (self-host/custom domain) — yang difollow tetap hashId saja', () => {
+    // Sengaja tanpa allow-list host: deployment self-host memakai domain sendiri,
+    // dan yang diteruskan ke `/connect` hanyalah hashId — tidak ada permintaan
+    // jaringan ke host yang tertulis di QR.
+    expect(parseProfileShareLink(`https://nyx.example.org/u/${BASE64_HASH}`)).toBe(`?u=${BASE64_HASH}`);
+  });
+
+  it('bukan tautan berbagi / bukan URL → null (pemindai lanjut, tidak error)', () => {
+    expect(parseProfileShareLink('https://nyx-app.my.id/chat')).toBeNull();
+    expect(parseProfileShareLink('cuma teks biasa')).toBeNull();
+    expect(parseProfileShareLink('')).toBeNull();
+    expect(parseProfileShareLink('  ')).toBeNull();
+  });
+
+  it('skema non-http(s) ditolak, termasuk escape persen yang rusak', () => {
+    expect(parseProfileShareLink(`javascript:alert(1)//u/${BASE64_HASH}`)).toBeNull();
+    expect(parseProfileShareLink(`https://nyx-app.my.id/u/%E0%A4%A`)).toBeNull();
   });
 });
 

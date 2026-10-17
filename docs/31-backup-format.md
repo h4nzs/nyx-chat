@@ -1,9 +1,12 @@
 # 31 — Format Backup Ber-frame (spesifikasi)
 
-> **Status: FASE 1–5 SELESAI.** Bentuk byte arsip: `web/src/lib/backupFormat.ts`
+> **Status: FASE 1–5 SELESAI, jalur manual + R2 terjangkau UI.** Bentuk byte
+> arsip: `web/src/lib/backupFormat.ts`
 > (13 test kripto). Pengaitan payload Keychain: `web/src/lib/backupPayload.ts`
 > (12 test kripto) — §31.6a. Transport `.nyxbak` manual + R2:
-> `web/src/lib/backupTransport.ts` dan `/api/backup/*` (10 + 11 test) — §31.6b.
+> `web/src/lib/backupTransport.ts` dan `/api/backup/*` (10 + 11 test), plus
+> tombol Buat/Ambil di Settings (`BackupExportModal`) dan penghapusan objek awan
+> saat wipe — §31.6b.
 > Orkestrasi restore perangkat pengganti lewat `migration:*`:
 > `web/src/lib/backupRestore.ts` (10 test) — §31.6c. Harness benchmark 10k
 > pesan: `web/src/lib/backupBench.ts` — §31.6d (angka terukur, bukan asumsi).
@@ -205,13 +208,39 @@ dikenal, tipe nilai tak didukung, dan arsip tanpa catatan.
 (magic/versi/panjang) sebelum data menyentuh kunci. Berkas asing/terpotong
 ditolak lebih awal.
 
+**Pintu masuk UI (2026-10-16).** Sebelum ini fungsi-fungsi tersebut punya **nol
+pemanggil**: arsip hanya lahir dari alur QR (`MigrationSendPage`, kunci acak yang
+di-seal ke penerima), sehingga jalur berkas ber-kunci-phrase tidak punya sumber
+berkas sama sekali. Sekarang dua tombol di modul Data → Settings menutupnya:
+
+| Komponen | Peran |
+|---|---|
+| `web/src/components/BackupExportModal.tsx` (tombol “Encrypted Backup (.nyxbak)”) | Ambil recovery phrase (auto-unlock key, atau prompt password) → salt acak 16 byte → `deriveBackupKey(normalizeBackupPhrase(phrase), salt)` → `createFramedBackup({ …, salt })` (salt yang sama ditulis di header) → `startBackupFileDownload`. Opsional: unggah byte yang **sama** via `uploadBackupToCloud` |
+| `BackupRestoreModal` (tombol “Restore from .nyxbak File”) | Dua sumber: berkas pilihan pengguna **atau** `downloadCloudBackup()` (404 dibedakan sebagai “tidak ada backup awan”). Keduanya masuk jalur `openFramedBackupWithPhrase` yang sama |
+
+`normalizeBackupPhrase` (`trim` + `lowercase`, satu implementasi di
+`backupRestore.ts`) dipakai jalur export **dan** restore, jadi arsip yang dibuat
+di satu tempat tidak bisa gagal dibuka karena beda aturan normalisasi.
+
+**Hapus saat akun dihapus.** `DELETE /api/users/me` (langkah 1b di
+`server/src/routes/users.ts`) menurunkan kunci objek lewat
+`deriveBackupObjectKey(env.backupKeySecret, userId)` lalu menghapusnya. Ini tidak
+opsional: kunci objek sengaja **tidak** memuat userId, jadi filter lampiran
+berbasis prefix `${userId}-` tidak pernah bisa menyapunya.
+
+**Hapus saat wipe.** `executeLocalWipe` memanggil `deleteCloudBackup()` **sebelum**
+`/api/auth/logout-all` (endpoint `DELETE` butuh sesi hidup; setelah logout objek di
+R2 tidak bisa dihapus lagi). Kegagalannya best-effort dan tidak menghentikan wipe
+lokal. Dikunci oleh `web/src/lib/__tests__/nukeCloudBackup.test.ts` (urutan +
+“gagal hapus tetap lanjut”).
+
 **Jalur R2 (opsional).** Endpoint di `server/src/routes/backup.ts`:
 
 | Metode | Path | Peran |
 |---|---|---|
 | `POST` | `/api/backup/presign` | URL PUT presigned; body `{ size, urlTtl? }`; `uploadLimiter` (20/jam) |
 | `POST` | `/api/backup/download-url` | URL GET presigned untuk restore; `generalLimiter` |
-| `DELETE` | `/api/backup` | Hapus objek backup akun (bagian alur nuke) |
+| `DELETE` | `/api/backup` | Hapus objek backup akun — dipanggil `executeLocalWipe` sebelum `logout-all` (bagian alur nuke) |
 
 **Kunci objek tanpa userId.** `deriveBackupObjectKey(secret, userId)` =
 `backups/<HMAC-SHA256(secret, "nyx:backup:<userId>")>.nyxbak` (64 hex).
@@ -246,8 +275,9 @@ PUT byte identik, presign gagal → PUT tidak jalan, 404 → `ApiError(404)`).
 - Bucket R2 dipakai bersama. Agar objek backup benar-benar privat, operator harus
   memastikan prefix `backups/` tidak disajikan domain publik R2 (atau memakai
   bucket terpisah) — lihat `docs/10`.
-- Belum ada endpoint cek-kebenaran (`HEAD`); UI restore fase 4 bisa memakai
-  `download-url` + 404 sebagai sinyal "tidak ada backup".
+- Belum ada endpoint cek-kebenaran (`HEAD`); UI restore memakai `download-url`
+  + 404 sebagai sinyal "tidak ada backup" (sudah dipakai, lihat tombol "Ambil
+  dari awan").
 - Presigned PUT tidak membatasi ukuran objek; klien yang nakal bisa mengunggah
   lebih besar dari kuota. Isinya tetap opaque, tetapi ini bisa ditegakkan di
   bucket policy.
@@ -295,6 +325,9 @@ transaksi); format ukuran.
 
 **Batasan yang jujur:**
 
+- Backup awan bersifat **opt-in**: kotak centang di modal Buat (default mati),
+  karena akun sandbox ditolak 403 di `/api/backup/presign`. Berkas lokal selalu
+  dibuat lebih dulu — kegagalan unggah tidak pernah membatalkan backup yang sah.
 - `restoreFramedBackup` masih memuat semua frame hasil `parseBackupArchive` dan
   catatan hasil dekode di memori sebelum menulis (penulisan harus satu
   transaksi). Manfaat streaming format karena itu belum penuh; pengukuran puncak
@@ -304,7 +337,9 @@ transaksi); format ukuran.
   bukan "bersihkan semua").
 - **Jalur berkas manual** (pemilih berkas + prompt recovery phrase) sudah
   dipasang: `web/src/components/BackupRestoreModal.tsx`, dibuka dari tombol
-  "Restore from .nyxbak File" di modul Data → Settings. Alurnya: `readBackupFile`
+  "Restore from .nyxbak File" di modul Data → Settings (sumbernya berkas
+  `.nyxbak` dari tombol "Encrypted Backup (.nyxbak)" atau salinan awan).
+  Alurnya: `readBackupFile`
   (validasi header **sebelum** phrase disentuh) → `openFramedBackupWithPhrase`
   (KDF 128 MB, sekali) → hapus `deviceId` + bersihkan `identityKeys` (bootstrap
   identitas baru, sama seperti "Import Vault") → reload. Diuji di

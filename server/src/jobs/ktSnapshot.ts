@@ -42,7 +42,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { env } from '../config.js';
 import { deleteR2Files, listR2Objects, putR2Object } from '../utils/r2.js';
-import { incCounter, KT_SNAPSHOT_UPLOAD, KT_SNAPSHOT_DELETED } from '../utils/metrics.js';
+import {
+  incCounter,
+  setGauge,
+  KT_SNAPSHOT_UPLOAD,
+  KT_SNAPSHOT_DELETED,
+  KT_SNAPSHOT_REMOTE_LATEST,
+} from '../utils/metrics.js';
 
 /** Prefix objek di R2; satu tempat untuk semua arsip log KT. */
 export const KT_SNAPSHOT_PREFIX = 'kt-snapshots/';
@@ -134,6 +140,29 @@ export function expiredKtSnapshotKeys(
   return expired;
 }
 
+/**
+ * Stempel waktu (detik) arsip snapshot TERBARU yang terlihat di R2. `null` =
+ * tidak ada satu pun objek yang stempel waktunya bisa dibaca.
+ *
+ * Dipakai untuk metrik kesegaran salinan di luar VPS
+ * (`nyx_kt_snapshot_remote_latest_timestamp_seconds`, dasar alert
+ * `NyxKtSnapshotNotUploaded`): nilainya berasal dari ISI R2, bukan dari memori
+ * proses, jadi restart NYX tidak membuat alarm menyala palsu — dan jalur
+ * idempoten (arsip sudah ada) tetap memutakhirkannya. Urutan sumber sama dengan
+ * retensi di bawah: `lastModified` menang, stempel di nama berkas sebagai
+ * cadangan.
+ */
+export function newestKtSnapshotRemoteSeconds(objects: KtSnapshotRemoteObject[]): number | null {
+  let newest = 0;
+  for (const object of objects) {
+    const stamp = object.lastModified?.getTime() ?? timestampFromKey(object.key);
+    // Stempel yang tidak terbaca bukan bukti kesegaran: dilewati, bukan dianggap 0.
+    if (stamp === null || !Number.isFinite(stamp)) continue;
+    if (stamp > newest) newest = stamp;
+  }
+  return newest > 0 ? Math.floor(newest / 1000) : null;
+}
+
 /** `kt-snapshots/kt-snapshot-20261014T030000Z.tar.gz` → waktu UTC. */
 function timestampFromKey(key: string): number | null {
   const match = /kt-snapshot-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(key);
@@ -195,6 +224,11 @@ export async function uploadLatestKtSnapshot(deps: KtSnapshotDeps = {}): Promise
 
     if (remote.some((object) => object.key === key)) {
       outcome.skipped = 'already-uploaded';
+      // Terlihat di dashboard sebagai `result="skipped"`. Tanpa ini, hari yang
+      // "tidak ada yang diunggah karena sudah ada" tidak berbeda dari
+      // "uploader tidak jalan" — dan justru itu yang membuat pola
+      // `increase(...{result="ok"}) == 0` menyesatkan.
+      incCounter(KT_SNAPSHOT_UPLOAD, { result: 'skipped' });
     } else {
       const body = await readBinaryFile(join(dir, manifest.file));
       await putObject(key, body);
@@ -204,6 +238,11 @@ export async function uploadLatestKtSnapshot(deps: KtSnapshotDeps = {}): Promise
       // Objek baru harus ikut dipertimbangkan retensi berikutnya.
       remote = [...remote, { key, lastModified: now() }];
     }
+
+    // Kesegaran salinan di luar VPS diukur dari apa yang ADA di R2 — termasuk
+    // saat unggahan hari ini dilewati karena arsipnya sudah ada di sana.
+    const newestRemote = newestKtSnapshotRemoteSeconds(remote);
+    if (newestRemote !== null) setGauge(KT_SNAPSHOT_REMOTE_LATEST, newestRemote);
 
     if (remote.length > 0) {
       const expired = expiredKtSnapshotKeys(remote, now(), keepDays);

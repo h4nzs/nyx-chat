@@ -110,11 +110,30 @@ function main(): void {
     const root = makeCert(work, { name: 'root-ca', cn: 'NYX Test Attestation Root', ca: true });
     const issuer = { cert: join(work, root.der.replace(/\.der$/, '.crt')), key: join(work, root.key) };
 
+    // Intermediate CA: rantai perangkat nyata (Android/YubiKey/Apple/TPM) sering
+    // dikirim sebagai leaf + intermediate, dengan root TIDAK ikut di `x5c`.
+    const intermediate = makeCert(
+      work,
+      { name: 'intermediate-ca', cn: 'NYX Test Attestation Intermediate', ca: true },
+      issuer
+    );
+    const intermediateIssuer = {
+      cert: join(work, intermediate.der.replace(/\.der$/, '.crt')),
+      key: join(work, intermediate.key),
+    };
+
     // Leaf ber-EKU AIK TPM: bentuk yang dipakai attestation `tpm` (dan `packed` TPM).
     const aik = makeCert(
       work,
       { name: 'leaf-aik', cn: 'NYX Test AIK', ou: 'Authenticator Attestation', eku: TPM_AIK_EKU_OID },
       issuer
+    );
+
+    // Leaf yang ditandatangani intermediate — dipakai test jalur 3 tingkat.
+    const chained = makeCert(
+      work,
+      { name: 'leaf-chained', cn: 'NYX Test Chained Leaf', ou: 'Authenticator Attestation', eku: TPM_AIK_EKU_OID },
+      intermediateIssuer
     );
     // Leaf tanpa EKU: dipakai test negatif "fmt tpm tanpa EKU AIK".
     const plain = makeCert(
@@ -124,11 +143,12 @@ function main(): void {
     );
 
     mkdirSync(OUT_DIR, { recursive: true });
-    for (const name of ['root-ca', 'leaf-aik', 'leaf-plain']) {
+    for (const name of ['root-ca', 'intermediate-ca', 'leaf-aik', 'leaf-plain', 'leaf-chained']) {
       writeFileSync(join(OUT_DIR, `${name}.der`), readFileSync(join(work, `${name}.der`)));
     }
     writeFileSync(join(OUT_DIR, 'leaf-aik.key.pem'), readFileSync(join(work, 'leaf-aik.key')));
     writeFileSync(join(OUT_DIR, 'leaf-plain.key.pem'), readFileSync(join(work, 'leaf-plain.key')));
+    writeFileSync(join(OUT_DIR, 'leaf-chained.key.pem'), readFileSync(join(work, 'leaf-chained.key')));
 
     // Fingerprint dihitung Node (API yang sama dengan verifikasi di produksi),
     // bukan dari keluaran teks openssl.
@@ -144,7 +164,9 @@ function main(): void {
         `| Berkas | Isi |`,
         `|---|---|`,
         `| \`root-ca.der\` | root CA uji (\`basicConstraints=CA:TRUE\`) — pengganti root TPM/FIDO |`,
+        `| \`intermediate-ca.der\` | intermediate CA uji — rantai nyata sering berhenti di sini (root tidak ikut x5c) |`,
         `| \`leaf-aik.der\` | leaf \`OU=Authenticator Attestation\` dengan EKU AIK TPM \`${TPM_AIK_EKU_OID}\` |`,
+        `| \`leaf-chained.der\` | leaf yang ditandatangani intermediate (test jalur 3 tingkat) |`,
         `| \`leaf-plain.der\` | leaf \`OU=Authenticator Attestation\` tanpa EKU (test negatif fmt \`tpm\`) |`,
         `| \`leaf-*.key.pem\` | kunci ECDSA P-256 pasangan leaf (untuk menandatangani attestation di test) |`,
         '',

@@ -2,6 +2,9 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import {
   BACKUP_DEFAULT_URL_TTL,
   BACKUP_FILE_EXTENSION,
@@ -92,4 +95,39 @@ test('ukuran pecahan dipotong ke bilangan bulat', () => {
   const decision = validateBackupUpload(1234.9, 300, 'FREE')
   assert.equal(decision.ok, true)
   if (decision.ok) assert.equal(decision.size, 1234)
+})
+
+/**
+ * Wiring penghapusan objek backup. Kunci objek sengaja TIDAK memuat userId, jadi
+ * filter lampiran yang berbasis prefix `${userId}-` (routes/users.ts) tidak
+ * pernah bisa menyapu objek ini: tanpa pemanggilan eksplisit, salinan terenkripsi
+ * tetap tinggal di R2 setelah akun/device dihapus. Test kontrak source (pola yang
+ * sama dengan `deliveryTokens`/`redisIdentity`): murah, dan gagal kalau wiring-nya
+ * dihapus saat refactor.
+ */
+test('akun dihapus → objek backup awan ikut dihapus (sebelum baris user dihapus)', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const users = readFileSync(path.join(here, '../src/routes/users.ts'), 'utf8')
+  const backupRoute = readFileSync(path.join(here, '../src/routes/backup.ts'), 'utf8')
+
+  assert.match(
+    users,
+    /deriveBackupObjectKey\(env\.backupKeySecret, userId\)/,
+    'DELETE /me harus menurunkan kunci objek backup akun'
+  )
+  assert.match(
+    users,
+    /deleteR2Files\(\[backupKey\]\)/,
+    'DELETE /me harus menghapus objek backup (bukan hanya lampiran)'
+  )
+
+  const cleanupIndex = users.indexOf('deleteR2Files([backupKey])')
+  const deleteUserIndex = users.indexOf('prisma.user.delete({ where: { id: userId } })')
+  assert.ok(cleanupIndex >= 0 && deleteUserIndex >= 0, 'kedua langkah harus ada')
+  assert.ok(cleanupIndex < deleteUserIndex, 'hapus backup sebelum baris user dihapus')
+
+  // Route DELETE /api/backup memakai penurunan kunci yang sama (satu tempat).
+  assert.match(backupRoute, /router\.delete\('\/', requireAuth, generalLimiter/)
+  assert.match(backupRoute, /deriveBackupObjectKey\(env\.backupKeySecret, userId\)/)
+  assert.match(backupRoute, /await deleteR2File\(key\)/)
 })

@@ -1,9 +1,9 @@
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
+import rateLimit from 'express-rate-limit'
 import { env } from '../config.js'
 import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
 import { Request, Response, NextFunction } from 'express';
-import { cfAwareClientIp } from '../utils/clientIp.js'
+import { clientIpTag } from '../utils/clientIp.js'
 import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 
 // Secure IP Extractor: prioritas pada CF-Connecting-IP — melalui edge/tunnel
@@ -11,10 +11,12 @@ import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 // dipalsukan), sedangkan X-Forwarded-For membawa entri palsu di posisi depan
 // sehingga req.ip (hasil trust proxy) bisa jatuh ke entri terkontrol penyerang
 // bila trafik tidak melewati lapisan nginx yang menormalkan XFF.
-const secureKeyGenerator = (req: Request): string => {
-  // Lempar teks IP (string) tersebut ke polisi library biar di-format dengan aman
-  return ipKeyGenerator(cfAwareClientIp(req));
-};
+//
+// [docs/30 §30.12 WS-H] Yang di-key bukan alamatnya, melainkan **tag HMAC
+// pepper** dari alamat itu (`clientIpTag`): `RedisStore` menulis
+// `rl:general:<key>` ke Redis, jadi IP mentah di sini = daftar alamat klien di
+// snapshot Redis (melanggar kriteria audit "tidak ada IP di DB/Redis").
+const secureKeyGenerator = (req: Request): string => clientIpTag(req);
 
 // Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)
 const skipRules = (req: Request) => {

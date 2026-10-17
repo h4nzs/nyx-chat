@@ -1,4 +1,23 @@
 {
+  "backup_export": {
+    "title": "Criar Backup Criptografado",
+    "warning": "O arquivo é criptografado com sua frase de recuperação. Sem essa frase, ninguém pode abri-lo — nem nós.",
+    "phrase_note": "A chave é derivada da sua frase de recuperação (Argon2id). Nunca vemos a frase nem o conteúdo do arquivo.",
+    "cloud_label": "Salvar também uma cópia criptografada na nuvem",
+    "cloud_hint": "Objeto opaco (um por conta, um novo envio sobrescreve). Pode ser recuperado no modal de restauração.",
+    "phrase_required": "A frase de recuperação é necessária para criptografar o backup.",
+    "reading_phrase": "Lendo a frase de recuperação...",
+    "creating": "Montando o arquivo... {{percent}}%",
+    "uploading": "Enviando para a nuvem...",
+    "working": "Criando...",
+    "create_button": "Criar e baixar backup",
+    "success": "Backup criado: {{records}} registros · {{size}}",
+    "result_summary": "{{records}} registros · {{frames}} frames · {{size}}",
+    "result_cloud": "Também salvo na nuvem.",
+    "failed": "Não foi possível criar o backup.",
+    "upload_success": "Cópia criptografada salva na nuvem.",
+    "upload_failed": "Falha no envio para a nuvem; o arquivo local continua salvo."
+  },
   "backup_restore": {
     "title": "Restaurar de Arquivo de Backup",
     "warning": "Restaurar um arquivo sobrescreve os dados locais deste dispositivo.",
@@ -13,7 +32,13 @@
     "restoring": "Restaurando...",
     "success": "Cofre restaurado: {{records}} registros · {{size}}",
     "failed": "Restauração falhou: o arquivo pode estar corrompido.",
-    "wrong_phrase": "Frase de recuperação incorreta ou arquivo corrompido."
+    "wrong_phrase": "Frase de recuperação incorreta ou arquivo corrompido.",
+    "cloud_button": "Buscar da nuvem",
+    "cloud_fetching": "Buscando da nuvem...",
+    "cloud_source": "Cópia na nuvem",
+    "cloud_missing": "Não há backup na nuvem para esta conta.",
+    "cloud_forbidden": "Contas sandbox não podem armazenar blobs na nuvem.",
+    "cloud_failed": "Não foi possível buscar o backup da nuvem."
   },
   "add_participant": {
     "title": "Adicionar Participante",

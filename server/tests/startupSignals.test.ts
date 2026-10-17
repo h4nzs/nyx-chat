@@ -78,9 +78,54 @@ test('startupWarnings: konfigurasi lengkap → tanpa peringatan', () => {
     NODE_ENV: 'production',
     ABUSE_REGISTRATION_GUARD: 'on',
     ABUSE_REQUIRE_ATTESTATION: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'off',
+    ABUSE_ATTESTATION_ROOTS_FILE: '/etc/nyx/attestation-roots.pem',
     ADMIN_CLEANUP_SECRET: 'khusus',
     ADMIN_CLEANUP_IP_ALLOWLIST: '10.0.0.1',
     CHAT_SECRET: 'umum',
   });
   assert.deepEqual(warnings, []);
+});
+
+test('startupWarnings: attestation ketat tanpa root dipin diperingatkan (perangkat nyata akan ditolak)', () => {
+  const warnings = startupWarnings({
+    NODE_ENV: 'production',
+    ABUSE_REGISTRATION_GUARD: 'on',
+    ABUSE_REQUIRE_ATTESTATION: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'off',
+    ADMIN_CLEANUP_SECRET: 'khusus',
+    ADMIN_CLEANUP_IP_ALLOWLIST: '10.0.0.1',
+    CHAT_SECRET: 'umum',
+  });
+  assert.equal(warnings.some((w) => w.includes('belum ada root yang dipin')), true);
+
+  // Fingerprint saja tetap dianggap "ada pin" (cukup untuk root yang ikut di
+  // x5c / sertifikat self-signed yang dipin persis); keterbatasannya untuk
+  // jalur tanpa root dijelaskan di ops/attestation/README.md, bukan diperingatkan
+  // sebagai konfigurasi kosong.
+  const fpOnly = startupWarnings({
+    NODE_ENV: 'production',
+    ABUSE_REGISTRATION_GUARD: 'on',
+    ABUSE_REQUIRE_ATTESTATION: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'off',
+    ABUSE_ATTESTATION_ROOTS: 'AA:BB:CC:DD',
+    ADMIN_CLEANUP_SECRET: 'khusus',
+    ADMIN_CLEANUP_IP_ALLOWLIST: '10.0.0.1',
+    CHAT_SECRET: 'umum',
+  });
+  assert.equal(fpOnly.some((w) => w.includes('belum ada root yang dipin')), false);
+});
+
+test('startupWarnings: verifikasi rantai yang dimatikan diperingatkan sebagai lubang keamanan', () => {
+  const warnings = startupWarnings({
+    NODE_ENV: 'production',
+    ABUSE_REGISTRATION_GUARD: 'on',
+    ABUSE_REQUIRE_ATTESTATION: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'on',
+    ADMIN_CLEANUP_SECRET: 'khusus',
+    ADMIN_CLEANUP_IP_ALLOWLIST: '10.0.0.1',
+    CHAT_SECRET: 'umum',
+  });
+  assert.equal(warnings.some((w) => w.includes('verifikasi rantai attestation DIMATIKAN')), true);
+  assert.equal(warnings.some((w) => w.includes('belum ada root yang dipin')), false);
 });

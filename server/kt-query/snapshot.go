@@ -222,8 +222,13 @@ func (s *snapshotter) run(ctx context.Context, interval time.Duration) {
 			return
 		case <-timer.C:
 			if _, err := s.runOnce(ctx); err != nil {
-				// Terlihat di log operator; langkah berikutnya tetap dijadwalkan.
+				// Terlihat di log operator DAN di metrik: snapshot yang berhenti
+				// dibuat = jalur pemulihan log yang hilang (docs/10 §10.13), dan
+				// itu satu-satunya hal yang tidak terlihat dari proses lain.
+				queryMetrics.snapshotFailed()
 				s.logf("snapshot gagal: %v", err)
+			} else {
+				queryMetrics.snapshotStored(s.nowFn())
 			}
 			timer.Reset(interval)
 		}

@@ -1,4 +1,23 @@
 {
+  "backup_export": {
+    "title": "Buat Backup Terenkripsi",
+    "warning": "Arsip dienkripsi dengan recovery phrase Anda. Tanpa phrase itu, berkas ini tidak bisa dibuka siapa pun — termasuk kami.",
+    "phrase_note": "Kunci diturunkan dari recovery phrase (Argon2id). Kami tidak pernah melihat phrase atau isi arsip.",
+    "cloud_label": "Simpan juga salinan terenkripsi di awan",
+    "cloud_hint": "Objek opaque (satu per akun, unggahan berikutnya menimpa). Bisa diambil kembali dari modal Restore.",
+    "phrase_required": "Recovery phrase diperlukan untuk mengenkripsi backup.",
+    "reading_phrase": "Membaca recovery phrase...",
+    "creating": "Membuat arsip... {{percent}}%",
+    "uploading": "Mengunggah ke awan...",
+    "working": "Membuat...",
+    "create_button": "Buat & Unduh Backup",
+    "success": "Backup dibuat: {{records}} catatan · {{size}}",
+    "result_summary": "{{records}} catatan · {{frames}} frame · {{size}}",
+    "result_cloud": "Tersimpan juga di awan.",
+    "failed": "Backup gagal dibuat.",
+    "upload_success": "Salinan terenkripsi tersimpan di awan.",
+    "upload_failed": "Gagal mengunggah ke awan; berkas lokal tetap tersimpan."
+  },
   "backup_restore": {
     "title": "Restore dari Berkas Backup",
     "warning": "Memulihkan arsip akan menimpa data lokal di perangkat ini.",
@@ -13,7 +32,13 @@
     "restoring": "Memulihkan...",
     "success": "Brankas dipulihkan: {{records}} catatan · {{size}}",
     "failed": "Restore gagal: arsip mungkin rusak.",
-    "wrong_phrase": "Recovery phrase salah atau arsip rusak."
+    "wrong_phrase": "Recovery phrase salah atau arsip rusak.",
+    "cloud_button": "Ambil dari awan",
+    "cloud_fetching": "Mengambil dari awan...",
+    "cloud_source": "Salinan awan",
+    "cloud_missing": "Tidak ada backup awan untuk akun ini.",
+    "cloud_forbidden": "Akun sandbox tidak boleh menyimpan blob di awan.",
+    "cloud_failed": "Gagal mengambil backup dari awan."
   },
   "add_participant": {
     "title": "Tambah Peserta",

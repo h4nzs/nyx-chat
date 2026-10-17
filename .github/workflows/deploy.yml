@@ -134,10 +134,13 @@ jobs:
           # unit menjalankan tempat lain — dan kegagalannya hanya terlihat sebagai
           # "nyx-kt-query gagal start" di VPS, bukan di sini.
           [ -x server/kt-query/nyx-kt-query ] || { echo "::error::binary nyx-kt-query tidak terbangun (build.sh gagal?)"; exit 1; }
+          [ -x server/kt-query/nyx-kt-auditor ] || { echo "::error::binary nyx-kt-auditor tidak terbangun (build.sh gagal?)"; exit 1; }
           grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-query ' ops/systemd/nyx-kt-query.service \
             || { echo "::error::ops/systemd/nyx-kt-query.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-query — samakan unit dengan langkah deploy"; exit 1; }
+          grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-auditor' ops/systemd/nyx-kt-auditor.service \
+            || { echo "::error::ops/systemd/nyx-kt-auditor.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-auditor — samakan unit dengan langkah deploy"; exit 1; }
           mkdir -p deploy_package/server/kt-query
-          cp server/kt-query/nyx-kt-query server/kt-query/nyx-kt-check deploy_package/server/kt-query/
+          cp server/kt-query/nyx-kt-query server/kt-query/nyx-kt-check server/kt-query/nyx-kt-auditor deploy_package/server/kt-query/
           mkdir -p deploy_package/ops
           cp -r ops/systemd deploy_package/ops/
           
@@ -265,7 +268,7 @@ jobs:
             KT_DIR="$TARGET_DIR/server/kt-query"
             KT_BIN="$KT_DIR/nyx-kt-query"
             if [ -f "$KT_BIN" ]; then
-                chmod +x "$KT_BIN" "$KT_DIR/nyx-kt-check" 2>/dev/null || true
+                chmod +x "$KT_BIN" "$KT_DIR/nyx-kt-check" "$KT_DIR/nyx-kt-auditor" 2>/dev/null || true
             fi
             if [ -f "$TARGET_DIR/ops/systemd/nyx-kt-query.service" ]; then
                 install -m 644 "$TARGET_DIR/ops/systemd/nyx-kt-query.service" /etc/systemd/system/nyx-kt-query.service
@@ -288,6 +291,36 @@ jobs:
                 fi
             else
                 echo "ℹ️  nyx-kt-query.service belum di-enable — pemasangan pertama ada di ops/systemd/README.md"
+            fi
+
+            # 9. AUDITOR PIHAK KETIGA (`nyx-kt-auditor`) — juga systemd, dan
+            #    sengaja terpisah dari penulis log: ia hanya bicara lewat gRPC
+            #    loopback. Kalau unit belum `enabled`, deploy tidak menyentuhnya
+            #    (mode 3 belum diaktifkan di config log; lihat ops/systemd/README.md).
+            echo "🧾 Deploying Key Transparency auditor (nyx-kt-auditor)..."
+            AUDITOR_BIN="$KT_DIR/nyx-kt-auditor"
+            if [ -f "$TARGET_DIR/ops/systemd/nyx-kt-auditor.service" ]; then
+                install -m 644 "$TARGET_DIR/ops/systemd/nyx-kt-auditor.service" /etc/systemd/system/nyx-kt-auditor.service
+                systemctl daemon-reload
+            fi
+            if systemctl is-enabled --quiet nyx-kt-auditor 2>/dev/null; then
+                if [ ! -x "$AUDITOR_BIN" ]; then
+                    echo "::error::binary nyx-kt-auditor tidak ada di $AUDITOR_BIN — auditor tidak bisa dijalankan"
+                    exit 1
+                fi
+                # Urutan penting: layanan log hidup dulu, lalu auditor (ia memanggil
+                # TreeSize/Audit/SetAuditorHead ke :8082).
+                systemctl restart nyx-kt-auditor
+                sleep 2
+                if systemctl is-active --quiet nyx-kt-auditor; then
+                    echo "✅ nyx-kt-auditor aktif — tree head diaudit"
+                else
+                    systemctl status nyx-kt-auditor --no-pager -l || true
+                    echo "::error::nyx-kt-auditor gagal start setelah deploy — log berhenti ditandatangani auditor"
+                    exit 1
+                fi
+            else
+                echo "ℹ️  nyx-kt-auditor.service belum di-enable — mode 3 belum diaktifkan (ops/systemd/README.md)"
             fi
 
             echo "✅ Deployment Success!"

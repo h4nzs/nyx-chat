@@ -29,6 +29,11 @@ import {
   blockedUserTag, purgeSealedUserRows, resolveRoutingUser, routingCandidates,
   type SealedOwnedRowsPrisma
 } from '../utils/routingIdentity.js';
+// [docs/31 §31.6b] Kunci objek backup akun (HMAC tanpa userId) — dihapus saat
+// akun dihapus, lihat langkah 1b di DELETE /me.
+import { deriveBackupObjectKey } from '../utils/backupObject.js';
+// [docs/30 §30.5 WS-A] Rotasi kunci identitas → entri log KT (verifikasi kepemilikan identifier).
+import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js';
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -370,7 +375,10 @@ router.put('/me/keys',
     body: z.object({
       publicKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid public key format.' }),
       pqPublicKey: validateKey(1216),
-      signingKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid signing key format.' })
+      signingKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid signing key format.' }),
+      // [docs/30 §30.5 WS-A] Identifier mentah Argon2id (base64url 32 byte) untuk
+      // entri log saat kunci identitas berubah; opsional (klien lama tetap jalan).
+      usernameHash: z.string().regex(base64UrlRegex, { message: 'Invalid identifier format.' }).optional()
     })
   }),
   async (req, res, next) => {
@@ -382,7 +390,14 @@ router.put('/me/keys',
       const deviceId = authUser.deviceId;
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
-      const { publicKey, pqPublicKey, signingKey, encryptedPrivateKeys } = req.body
+      const { publicKey, pqPublicKey, signingKey, encryptedPrivateKeys, usernameHash } = req.body
+
+      // [docs/30 §30.5 WS-A] Material identitas SEBELUM update — dasar keputusan
+      // "kunci benar-benar berubah" (upload ulang yang sama bukan rotasi).
+      const previousIdentity = await prisma.device.findUnique({
+        where: { id: deviceId },
+        select: { publicKey: true, signingKey: true },
+      })
       // [docs/28 Tier 0 — D7] index fingerprint mentah sebelum disimpan.
       const _fp = req.headers['x-nyx-fingerprint'];
       const fingerprint = typeof _fp === 'string' ? pepperedIdentifier(_fp) : undefined;
@@ -409,6 +424,23 @@ router.put('/me/keys',
         redisClient.del(identityKey('cache:keys:bundle', userId)),
         redisClient.del(identityKey('cache:keys:public', userId))
       ]).catch((e: unknown) => console.warn('[Keys] Failed to invalidate key cache:', e))
+
+      // [docs/30 §30.5 WS-A] Rotasi kunci identitas WAJIB terlihat di log —
+      // fire-and-forget, tidak pernah menggagalkan respons.
+      if (
+        identityKeysChanged(previousIdentity, {
+          identityKey: Buffer.from(publicKey, 'base64url'),
+          signingKey: Buffer.from(signingKey, 'base64url'),
+        })
+      ) {
+        void publishIdentityKeyChange({
+          userId,
+          usernameHash,
+          identityKey: Buffer.from(publicKey, 'base64url'),
+          pqIdentityKey: Buffer.from(pqPublicKey, 'base64url'),
+          signingKey: Buffer.from(signingKey, 'base64url'),
+        })
+      }
 
       res.status(200).json({ message: 'Keys updated successfully.' })
     } catch (error) { next(error) }
@@ -456,6 +488,17 @@ router.delete('/me', zodValidate({
       if (userFileKeys.length > 0) {
         await deleteR2Files(userFileKeys).catch(err => console.error('[R2] Cleanup failed:', err))
       }
+    }
+
+    // 1b. [docs/31 §31.6b] Hapus objek backup awan milik akun.
+    // Attachment punya prefix `${userId}-` sehingga ikut daftar `fileKeys`,
+    // tetapi kunci backup sengaja TIDAK memuat userId (HMAC) — jadi ia tidak
+    // akan pernah tercakup filter di atas dan harus dihapus eksplisit. Tanpa
+    // langkah ini salinan terenkripsi tetap tinggal di R2 setelah akun dihapus.
+    {
+      const { deleteR2Files } = await import('../utils/r2.js')
+      const backupKey = deriveBackupObjectKey(env.backupKeySecret, userId)
+      await deleteR2Files([backupKey]).catch(err => console.error('[R2] Backup cleanup failed:', err))
     }
 
     // 2. Bersihkan tabel milik user yang TIDAK lagi punya FK cascade

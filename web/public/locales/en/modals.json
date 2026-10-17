@@ -1,4 +1,23 @@
 {
+  "backup_export": {
+    "title": "Create Encrypted Backup",
+    "warning": "The archive is encrypted with your recovery phrase. Without that phrase nobody can open this file — including us.",
+    "phrase_note": "The key is derived from your recovery phrase (Argon2id). We never see the phrase or the archive contents.",
+    "cloud_label": "Also store an encrypted copy in the cloud",
+    "cloud_hint": "Opaque object (one per account, a new upload overwrites it). Can be pulled back from the Restore modal.",
+    "phrase_required": "A recovery phrase is required to encrypt the backup.",
+    "reading_phrase": "Reading recovery phrase...",
+    "creating": "Building the archive... {{percent}}%",
+    "uploading": "Uploading to the cloud...",
+    "working": "Creating...",
+    "create_button": "Create & Download Backup",
+    "success": "Backup created: {{records}} records · {{size}}",
+    "result_summary": "{{records}} records · {{frames}} frames · {{size}}",
+    "result_cloud": "Also stored in the cloud.",
+    "failed": "Could not create the backup.",
+    "upload_success": "Encrypted copy stored in the cloud.",
+    "upload_failed": "Cloud upload failed; the local file is still saved."
+  },
   "backup_restore": {
     "title": "Restore from Backup File",
     "warning": "Restoring an archive overwrites the local data on this device.",
@@ -13,7 +32,13 @@
     "restoring": "Restoring...",
     "success": "Vault restored: {{records}} records · {{size}}",
     "failed": "Restore failed: the archive may be corrupted.",
-    "wrong_phrase": "Wrong recovery phrase or corrupted archive."
+    "wrong_phrase": "Wrong recovery phrase or corrupted archive.",
+    "cloud_button": "Fetch from the cloud",
+    "cloud_fetching": "Fetching from the cloud...",
+    "cloud_source": "Cloud copy",
+    "cloud_missing": "No cloud backup for this account.",
+    "cloud_forbidden": "Sandbox accounts cannot store blobs in the cloud.",
+    "cloud_failed": "Could not fetch the backup from the cloud."
   },
   "add_participant": {
     "title": "Add Participants",

@@ -102,6 +102,12 @@ class NyxShadowVaultProxy {
       await db.pqDrSessionsV2.put({
         ...record,
         id,
+        // [docs/30 WS-F] waktu aktivitas sesi juga presisi (ms) → di-seal di
+        // tempat seperti `sentAt`/`seq`; pembaca membukanya (`openLocalNumber`).
+        // Baris lama berbentuk string envelope → jangan disegel dua kali.
+        lastActivity: typeof record.lastActivity === 'number'
+          ? (await sealLocalNumber(record.lastActivity)) ?? record.lastActivity
+          : record.lastActivity,
         state: encryptedState as unknown as PqDrSessionRecord['state'] 
       });
     } catch (e) {
@@ -123,8 +129,13 @@ class NyxShadowVaultProxy {
       const records = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).toArray();
       if (records.length === 0) return undefined;
 
-      records.sort((a, b) => b.lastActivity - a.lastActivity);
-      return records[0] ? this.decryptPqDrSession(records[0]) : undefined;
+      // [docs/30 WS-F] `lastActivity` ter-seal → urutkan lewat nilai yang dibuka,
+      // bukan pengurangan string (baris lama plaintext tetap terbaca).
+      const instants = await Promise.all(records.map((r) => openLocalNumber(r.lastActivity)));
+      const newest = records
+        .map((record, i) => ({ record, at: instants[i] ?? 0 }))
+        .sort((a, b) => b.at - a.at)[0];
+      return newest ? this.decryptPqDrSession(newest.record) : undefined;
     } catch (e) {
       console.error("Failed to get PQ-DR session:", e);
       return undefined;
@@ -137,6 +148,9 @@ class NyxShadowVaultProxy {
         if (decryptedStateStr) {
           return {
             ...record,
+            // Bentuk yang dijanjikan tipe: `lastActivity` angka (bukan envelope),
+            // supaya pemanggil tidak perlu tahu soal seal di tempat.
+            lastActivity: (await openLocalNumber(record.lastActivity)) ?? 0,
             state: JSON.parse(decryptedStateStr)
           };
         }
@@ -263,6 +277,20 @@ class NyxShadowVaultProxy {
       }
       if (sealedProfiles.length > 0) await db.profileCache.bulkPut(sealedProfiles);
       updated += sealedProfiles.length;
+
+      // [docs/30 WS-F] `pqDrSessionsV2.lastActivity` — waktu aktivitas per sesi
+      // PQ-DR, presisi ms. Sama polanya dengan kolom waktu di atas: di-seal di
+      // tempat, baris lama angka plaintext tetap terbaca pembacanya.
+      const sessions = await db.pqDrSessionsV2.toArray();
+      const sealedSessions = [];
+      for (const session of sessions) {
+        if (typeof session.lastActivity !== 'number') continue;
+        const sealed = await sealLocalNumber(session.lastActivity);
+        if (!sealed) continue; // vault terkunci
+        sealedSessions.push({ ...session, lastActivity: sealed });
+      }
+      if (sealedSessions.length > 0) await db.pqDrSessionsV2.bulkPut(sealedSessions);
+      updated += sealedSessions.length;
     } catch (e) {
       console.error('[ShadowVault] At-rest sealing migration failed:', e);
     }
@@ -341,6 +369,17 @@ class NyxShadowVaultProxy {
       const sealed = await sealLocalNumber(next.seq);
       if (sealed) {
         next.seq = sealed;
+        changed = true;
+      }
+    }
+
+    // [docs/30 WS-F] `sentAt` presisi (ms) baris lama: sama seperti `seq`, ia
+    // hanya bisa ditutup dengan menulis ulang baris — jadi migrasi unlock yang
+    // mengerjakannya, tanpa menunggu pesan berikutnya ditimpa.
+    if (typeof next.sentAt === 'number' && Number.isFinite(next.sentAt)) {
+      const sealed = await sealLocalNumber(next.sentAt);
+      if (sealed) {
+        next.sentAt = sealed;
         changed = true;
       }
     }
@@ -495,7 +534,13 @@ class NyxShadowVaultProxy {
           fileMeta: encryptedFileMeta || existing?.fileMeta,
           expiresAt: expiresAtRaw,
           // [docs/28 Tier 2 — B2] waktu presisi dari ciphertext (bukan milik server).
-          sentAt: m.sentAt ?? existing?.sentAt,
+          // [docs/30 WS-F] presisinya di-seal (`ENC1:`) — kolom ini ms per pesan,
+          // jadi plaintext = pola aktivitas yang gate §30.10 poin 1 larang.
+          // Nilai tanpa `sentAt` baru mempertahankan baris lama APA ADANYA
+          // (sudah ter-seal atau angka legacy) — bukan membuka lipatannya.
+          sentAt: m.sentAt
+            ? (await sealLocalNumber(m.sentAt)) ?? m.sentAt
+            : existing?.sentAt,
           // [docs/28 Tier 2 — B1] seq disimpan agar kursor paginasi SERVER tetap
           // presisi setelah reload (bukan jatuh ke ISO-date legacy). Baris yang
           // belum pernah di-ACK (pending) belum punya seq → undefined.
@@ -665,7 +710,9 @@ class NyxShadowVaultProxy {
           isDeletedLocal,
           expiresAt: expiresAtMs !== null ? new Date(expiresAtMs).toISOString() : undefined,
           // [docs/28 Tier 2 — B2] pulihkan waktu presisi untuk tampilan.
-          sentAt: typeof r.sentAt === 'number' ? r.sentAt : undefined,
+          // [docs/30 WS-F] dibuka dari envelope `ENC1:` (baris lama berbentuk
+          // angka plaintext tetap terbaca).
+          sentAt: (await openLocalNumber(r.sentAt)) ?? undefined,
           // [docs/28 Tier 2 — B1] pulihkan seq → kursor paginasi server tetap
           // presisi setelah reload (fetch-older tidak mengulang halaman).
           // [docs/29 §5.5] dibuka dari envelope `ENC1:` (baris lama berbentuk

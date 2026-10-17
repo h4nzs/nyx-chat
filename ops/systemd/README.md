@@ -7,13 +7,17 @@ systemd. Repo ini mengirim unit-nya, jadi pembaruan binary tidak lagi manual.
 |---|---|
 | `nyx-kt-query.service` | Unit systemd untuk layanan log Key Transparency (`server/kt-query`, Go) |
 | `nyx-kt-query.env.example` | Template `EnvironmentFile` (alamat loopback + setelan snapshot) |
-| `nyx-kt-query` (binary) | Dibangun CI dari `server/kt-query` (vendor) dan ditaruh `deploy.yml` di `/root/nyx-app/server/kt-query/` |
+| `nyx-kt-auditor.service` | Unit systemd untuk **auditor pihak ketiga** (mode 3, `server/kt-query/cmd/nyx-kt-auditor`, Go) |
+| `nyx-kt-auditor.env.example` | Template `EnvironmentFile` auditor (nama, kunci, state, irama tanda tangan) |
+| `nyx-kt-query` / `nyx-kt-auditor` (binary) | Dibangun CI dari `server/kt-query` (vendor) dan ditaruh `deploy.yml` di `/root/nyx-app/server/kt-query/` |
 
 Yang **otomatis** sejak unit ini ada di repo (`.github/workflows/deploy.yml`, docs/10 §10.3):
 build binary dari vendor → masuk `nyx-deploy.zip` → disalin ke
 `/root/nyx-app/server/kt-query/` (+ unit disegarkan ke `/etc/systemd/system/`) →
-`systemctl restart nyx-kt-query` **bila unit sudah `enabled`**. Sebelum restart,
-binary lama disimpan sebagai `nyx-kt-query.prev` untuk rollback cepat.
+`systemctl restart nyx-kt-query` **bila unit sudah `enabled`**, lalu
+`systemctl restart nyx-kt-auditor` **bila unit auditor sudah `enabled`** (urutan itu
+penting: auditor memanggil `TreeSize`/`Audit`/`SetAuditorHead` ke layanan log).
+Sebelum restart, binary lama disimpan sebagai `nyx-kt-query.prev` untuk rollback cepat.
 
 Yang **tetap sekali saja / manual** (di bawah): direktori, kunci log + config YAML,
 `EnvironmentFile`, `systemctl enable`, dan pengisian `KT_*` di `/root/nyx-app/.env`.
@@ -63,6 +67,79 @@ systemctl daemon-reload
 systemctl enable --now nyx-kt-query
 ```
 
+## Auditor pihak ketiga (mode 3)
+
+Log berjalan **mode 1** (`ContactMonitoring`) selama `api.auditors` kosong: bukti
+memuat byte tanda tangan auditor, tetapi nol auditor head berarti tidak ada yang
+memeriksanya (`docs/34` §34.5). Menambah entri `api.auditors` menyalakan mode 3 —
+dan sejak itu klien **mewajibkan** auditor head: sampai auditor pertama mengirim
+`SetAuditorHead`, verifikasi klien gagal dengan `auditor tree head not provided
+even though auditing is required`. Karena itu urutannya: siapkan auditor dulu,
+baru aktifkan mode 3.
+
+Pemasangan pertama (di VPS, sebagai root):
+
+```bash
+# 1. Direktori state auditor (ReadWritePaths unit) + direktori kunci
+install -d -m 700 /etc/nyx/kt /var/lib/nyx/kt-auditor
+
+# 2. Kunci auditor — HANYA SEKALI. Kunci ini yang menandatangani tree head;
+#    menggantinya berarti entri `api.auditors` harus diperbarui dan state lama
+#    (bertanda tangan kunci lama) ditolak saat dimuat.
+umask 077
+openssl rand -hex 32 > /etc/nyx/kt/auditor.key
+chmod 600 /etc/nyx/kt/auditor.key
+
+# 3. Baris `api.auditors` yang harus masuk config log — dicetak alat itu sendiri
+#    supaya kunci publik tidak pernah disalin dengan tangan.
+/root/nyx-app/server/kt-query/nyx-kt-auditor \
+  -name nyx-primary-auditor -key-file /etc/nyx/kt/auditor.key -print-public-key
+
+# 4. Tambahkan ke /etc/nyx/kt/test_config.yaml (dan simpan bersama kunci log):
+#      api:
+#        auditors:
+#          nyx-primary-auditor: <hex dari langkah 3>
+#    lalu restart layanan log → mode 3.
+systemctl restart nyx-kt-query
+
+# 5. EnvironmentFile + unit auditor
+install -m 600 /root/nyx-app/ops/systemd/nyx-kt-auditor.env.example /etc/nyx/kt/nyx-kt-auditor.env
+#    isi NYX_KT_AUDITOR_NAME (harus sama dengan langkah 4) bila berbeda dari contoh
+install -m 644 /root/nyx-app/ops/systemd/nyx-kt-auditor.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now nyx-kt-auditor
+```
+
+Verifikasi auditor:
+
+```bash
+systemctl status nyx-kt-auditor --no-pager
+journalctl -u nyx-kt-auditor -n 50 --no-pager     # cari "tree head DIKIRIM treeSize=..."
+
+# Mode 3 terlihat dari layanan baca (tanpa menyentuh basis data):
+/root/nyx-app/server/kt-query/nyx-kt-check config -url http://127.0.0.1:8085
+#   mode=3 … auditorKeys=1
+
+# Bukti mode 3 yang diverifikasi **verifier upstream** (kode yang sama dengan WASM
+# klien): butuh satu usernameHash yang benar-benar terdaftar di log.
+/root/nyx-app/server/kt-query/nyx-kt-check verify-search \
+  -url http://127.0.0.1:8085 -hash <base64url 32 byte usernameHash>
+```
+
+Catatan operasional:
+
+- Auditor boleh mati tanpa mematikan log: bukti lama tetap dilayani, hanya tanda
+  tangan baru yang berhenti. Klien menolak auditor head yang lebih tua dari **7
+  hari** (`timeAuditorMaxBehind` upstream), jadi jangan pasang irama tanda tangan
+  lebih panjang dari 24 jam.
+- Bila auditor menemukan inkonsistensi, ia berhenti menandatangani (log
+  `TIDAK KONSISTEN — tree head tidak dikirim`) dan **tidak** menyimpan state;
+  restart tidak membuatnya melompat melewati update yang gagal.
+- State auditor ada di `NYX_KT_AUDITOR_STATE_FILE` (default
+  `/var/lib/nyx/kt-auditor/state.json`, mode 0600, bertanda tangan). Menghapusnya
+  = auditor mengaudit ulang dari posisi 0, bukan bencana, tetapi ia akan kehilangan
+  posisi terakhir yang sudah ia tandatangani.
+
 ## Verifikasi
 
 ```bash
@@ -91,6 +168,12 @@ pm2 restart nyx-api
 # Bukti sisi server sudah memakai KT (bukan jatuh ke TOFU):
 curl -s 127.0.0.1:9464/metrics | grep '^nyx_kt_queries_total'
 curl -s https://api.nyx-app.my.id/health   # probe liveness tetap hijau
+
+# Bukti proses log KT sendiri mengekspos metrik (job scrape `nyx-kt-query`):
+curl -s 127.0.0.1:9467/metrics | grep -E '^nyx_kt_query_(tree_size|distinguished_timestamp)'
+# `NYX_KT_METRICS_ADDR` default 127.0.0.1:9467; `0` = exporter mati (dan alarm
+# `NyxKtQueryDown` menyala — itu memang disengaja: proses tanpa metrik = proses
+# yang kegagalannya tidak terlihat).
 ```
 
 Tidak ada port yang perlu dibuka di firewall: ketiga listener loopback
@@ -120,13 +203,17 @@ Tidak ada port yang perlu dibuka di firewall: ketiga listener loopback
 | Klien jatuh ke TOFU | `KT_QUERY_URL` kosong di `.env` server, atau service mati — cek `nyx_kt_queries_total{result="disabled"}` |
 | Alert snapshot menyala | `KT_SNAPSHOT_DIR` (server) ≠ `NYX_KT_SNAPSHOT_DIR` (unit), arsip belum pernah dibuat, atau kredensial R2 |
 | `distinguished` tidak maju | `api.distinguished` kosong di config YAML (unit tidak mengoper `-distinguished`); cek log `[kt-query]` saat start |
+| Alert `NyxKtQueryDown` menyala | Proses log mati/terputus. Registrasi **tetap** jalan (fail-open), jadi tidak ada error di aplikasi — cek `systemctl status nyx-kt-query`, `NYX_KT_METRICS_ADDR`, dan `curl -s 127.0.0.1:9467/metrics` |
+| Alert `NyxKtQuerySnapshotStalled` menyala | Snapshot lokal tidak dibuat >48 jam padahal `NYX_KT_SNAPSHOT_DIR` diisi — cek ruang disk + log `snapshot` di journal (arsip dibuat proses yang sama, jadi restart yang terlalu sering juga menutup jalannya) |
 
 ## Yang masih belum otomatis (jujur)
 
 - Pemasangan pertama di atas (kunci + config + `enable`) — sengaja manual: kunci log
   tidak boleh lahir dari CI.
-- Auditor pihak ketiga nyata belum dioperasikan (`NYX_KT_AUDITOR_ADDR` menganggur
-  sampai ada proses yang memanggil `SetAuditorHead`; `docs/34` §34.5).
+- Auditor pihak ketiga: prosesnya sudah ada (`nyx-kt-auditor`, unit di direktori
+  ini), tetapi **memasangnya tetap langkah manual** karena kunci auditor tidak boleh
+  lahir dari CI — sama seperti kunci log. Selama `api.auditors` belum diisi, log
+  tetap mode 1 dan auditor akan menolak start dengan pesan jelas.
 - Latihan pemulihan arsip **dari R2** masih langkah manual (§10.13); versi otomatisnya
   (dari arsip lokal) sudah jalan di CI sebagai job `kt-recovery`.
 - coturn dan tumpukan observability (`ops/prometheus`, `ops/grafana`) tetap owner ops

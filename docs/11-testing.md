@@ -23,6 +23,23 @@ cd server && pnpm exec tsx --test tests/mappers.test.ts
 cd web && npx vitest run src/utils/__tests__/sanitize.test.ts
 ```
 
+### Test penulisan Key Transparency itu opt-in (jangan diubah)
+
+Dua test menulis entri **sungguhan** ke log KT (`keyTransparency.test.ts` dan
+`ktIdentityLog.test.ts`). Keduanya sengaja **skip** kecuali diminta eksplisit:
+
+```bash
+cd server && NYX_KT_LIVE_WRITE=1 KT_SERVER_URL=http://127.0.0.1:18081 \
+  pnpm exec tsx --test tests/ktIdentityLog.test.ts
+```
+
+Gate-nya **bukan** keberadaan `KT_SERVER_URL`, dan jangan pernah dikembalikan ke
+sana: `server/.env` selalu mengisi variabel itu dan `src/config.ts` memuat dotenv,
+jadi gate lama membuat `pnpm test` menulis entri uji ke log yang sedang
+dikonfigurasi. Itu terjadi 2026-10-17 (dua entri orphan masuk log self-host
+`127.0.0.1:8081`; log KT append-only, jadi tidak bisa dihapus). Guard-nya ada di
+`ktIdentityLog.test.ts` (`guard: penulisan live hanya dengan opt-in eksplisit`).
+
 ## 11.1b Backup benchmark harness (WS-C fase 5)
 
 The framed-backup export/import path has a dedicated benchmark harness that reports
@@ -116,7 +133,7 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 
 **Important quirks:**
 - `workers: 1` (serial) — the suite is flaky in parallel against one local server.
-- `e2e/global.setup.ts` wipes the local DB + Redis (`server/scripts/reset-test-env.ts`). Never run against a valuable database.
+- `e2e/global.setup.ts` wipes the local DB + Redis (`server/scripts/reset-test-env.ts`). Never run against a valuable database. **Failure mode worth knowing (2026-10-17):** if `server/.env` has `NODE_ENV=production`, the reset script refuses (exit 1, `DANGER: Attempted to wipe database in non-local/production environment!`) and Playwright aborts before the first spec — every E2E run on such a machine is impossible, and the message looks like a setup bug. Run E2E with a test env (`NODE_ENV` not `production`), don't edit `.env` around the guard.
 - Registration helpers walk the full onboarding modal chain (Proof of Trust → Recovery → Secure Phrase → Verify Sequence ×2 close → System Init). They live in `e2e/helpers/registration.ts` (WS-G(7)) — import `registerUser` (or `registerUserViaBiometric` for the Settings spec); do not copy them back into specs.
 - **Quick Tour hanya ter-mount SETELAH bootstrap selesai** (`Chat.tsx` mensyaratkan `!isBootstrapping && user.hasCompletedOnboarding === false`), dan setelah registrasi `isBootstrapping` masih `true` sampai ada reload halaman. Artinya `dismissOnboardingTour(page)` di `registerUser` tidak menemukan apa pun untuk spec yang tidak pernah reload — dan sebaliknya spec yang **melakukan reload** (`page.goto`, `page.reload`) melihat tour muncul lalu: overlay `fixed inset-0`-nya menolak klik berikutnya (`subtree intercepts pointer events`). Jadi: panggil `dismissOnboardingTour(page)` SETELAH setiap navigasi penuh, bukan hanya sekali setelah registrasi. Klik `×` menandai onboarding selesai di server, jadi tour tidak kembali setelah reload berikutnya.
 - **State burner host hidup HANYA di RAM** (`useBurnerStore.activeSessions`). `page.goto('/chat/<roomId>')` me-reload halaman → DR host hilang → komposer host terkunci di "Waiting for guest to establish secure connection..." (lampiran tak bisa dikirim), dan baris conversation-nya bisa belum terbaca lagi karena persistensi ke IndexedDB bersifat fire-and-forget. Buka room burner lewat **baris sidebar (navigasi in-app)**, tunggu preview pesan guest muncul (bukti `burner:receive` sudah menginisialisasi DR host), baru berinteraksi — lihat `e2e/regression.spec.ts` (`openBurnerChatOnHost`).
@@ -175,6 +192,15 @@ yang masih unstable (`error[E0658]`).
   mutasi acak — yang dibutuhkan vektor bukti nyata yang dimutasi terarah
   (`vrf_proof`/`opening`/`tree_size` diubah). Sebagian sudah ada sebagai test
   penolakan di `keyTransparency.test.ts`; fuzzing proporsional masih TODO.
+- Key Transparency: penulis log **diverifikasi** (11 test di
+  `server/tests/keyTransparency.test.ts` + **8 test** di
+  `server/tests/ktIdentityLog.test.ts` untuk jalur rotasi, plus satu penulisan
+  nyata ke binary Go `key-transparency-server`). Yang **belum** ada test perilaku
+  end-to-end: handler route rotasi (`/keys/prekey-bundle`, `/users/me/keys`,
+  `/login`) tidak dijalankan dengan Prisma/Redis — yang diuji adalah modul penulis
+  + guard sumber bahwa ketiga jalur memanggilnya (`docs/32` §32.7 poin 2), dan
+  sisi klien (penyimpanan identifier ter-seal + pelampirannya di body bundle)
+  lewat `web/src/lib/__tests__/ktIdentifierStorage.test.ts`.
 - No test for the biometric (WebAuthn) login path (needs a real authenticator).
 - Payment webhooks are only unit-tested indirectly (HMAC compare helper).
 - Crypto worker internals are exercised through E2E flows, not unit tests (worker is monolithic by design).

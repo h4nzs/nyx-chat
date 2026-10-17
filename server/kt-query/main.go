@@ -87,6 +87,8 @@ func main() {
 		"jeda antar snapshot (dipakai bila -snapshot-dir diisi)")
 	snapshotKeep := flag.Int("snapshot-keep", envInt("NYX_KT_SNAPSHOT_KEEP", defaultSnapshotKeep),
 		"jumlah arsip snapshot terakhir yang disimpan di -snapshot-dir")
+	metricsAddr := flag.String("metrics-addr", envOr("NYX_KT_METRICS_ADDR", "127.0.0.1:9467"),
+		"alamat exporter /metrics (loopback WAJIB; \"0\" = matikan)")
 	checkOnly := flag.Bool("check", false, "buka database + bangun pohon, lalu keluar (health check deploy)")
 	flag.Parse()
 
@@ -136,6 +138,23 @@ func main() {
 	mu := &sync.Mutex{}
 	updates := &updateService{cfg: config, store: store, mu: mu}
 	go updates.runDistinguished(ctx, interval)
+
+	// [docs/30 WS-G(7)] Metrik proses log (loopback). Dinyalakan sebelum listener
+	// lain supaya kegagalan start-nya kelihatan sebagai `up == 0`, bukan senyap.
+	if _, err := startQueryMetrics(ctx, *metricsAddr, queryMetrics, log.Printf); err != nil {
+		// BUKAN alasan mematikan log: penulisan tetap fail-open (docs/32), dan
+		// alert `NyxKtQueryDown` (up == 0) yang menutup kasus ini.
+		log.Printf("[kt-query] metrik TIDAK aktif: %v", err)
+	}
+
+	// Nilai awal dua metrik yang bisa dibaca langsung dari log: ukuran pohon dan
+	// umur anchor `distinguished`. Keduanya BERTAHAN setelah restart (dibaca dari
+	// basis data), jadi alert "anchor basi" tidak menyala hanya karena proses baru
+	// hidup — beda dengan metrik yang lahir dari peristiwa runtime.
+	queryMetrics.setTreeSize(head.TreeSize)
+	if timestamp, ok := updates.distinguishedTimestamp(); ok {
+		queryMetrics.setDistinguishedTimestamp(timestamp)
+	}
 
 	// [docs/10 §10.13] Salinan harian log KT: penulisan dijeda, direktori disalin,
 	// salinan diverifikasi terhadap tree head hidup, lalu diarsipkan. Pengunggahan

@@ -1,4 +1,6 @@
 import type { Request } from 'express';
+import { ipKeyGenerator } from 'express-rate-limit';
+import { pepperedIdentifier } from './atRestSecrets.js';
 
 /**
  * IP klien yang tahan pemalsuan pada topologi Cloudflare (proxy maupun tunnel).
@@ -16,4 +18,28 @@ export function cfAwareClientIp(req: Pick<Request, 'headers' | 'ip'>): string {
   if (typeof cfIp === 'string' && cfIp.trim() !== '') return cfIp;
   if (req.ip && req.ip !== 'unknown') return req.ip;
   return 'unknown';
+}
+
+/**
+ * [docs/30 §30.12 WS-H] Key rate-limit untuk klien: **tag HMAC pepper**, bukan
+ * alamat IP.
+ *
+ * Kenapa: `express-rate-limit` + `RedisStore` menulis `${prefix}${key}` ke Redis,
+ * jadi keyGenerator yang mengembalikan IP mentah berarti snapshot Redis memuat
+ * daftar alamat klien (dan riwayatnya selama TTL 15 menit–1 jam). Itu bertentangan
+ * dengan kriteria audit WS-H: "tidak ada IP di DB/Redis".
+ *
+ * Yang di-HMAC adalah keluaran `ipKeyGenerator` (bukan IP mentah) supaya
+ * normalisasi IPv6 bawaannya tetap dipakai — perilaku pembatasan tidak berubah
+ * (IP sama → tag sama → counter sama), hanya bentuk key-nya. Operator yang ingin
+ * menelusuri satu alamat tetap bisa menghitung tag itu sendiri dari pepper
+ * (`pepperedIdentifier('clientip:' + ipKeyGenerator(alamat))`), jadi daya lihat ops
+ * tidak hilang — hanya tidak lagi terbaca oleh pemegang snapshot Redis.
+ *
+ * Konsekuensi yang disengaja: rotasi pepper (atau deploy pertama setelah
+ * perubahan ini) menyetel ulang counter rate-limit. Itu wajar — counter memang
+ * ber-TTL pendek.
+ */
+export function clientIpTag(req: Pick<Request, 'headers' | 'ip'>): string {
+  return pepperedIdentifier(`clientip:${ipKeyGenerator(cfAwareClientIp(req))}`);
 }

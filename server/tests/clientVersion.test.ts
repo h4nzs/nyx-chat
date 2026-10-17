@@ -11,6 +11,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import type { AddressInfo } from 'node:net';
 
@@ -163,6 +166,74 @@ test('middleware: /health tidak pernah digerbang (probe harus tetap bisa memangg
   // Endpoint admin/cleanup dipanggil alat ops (curl) tanpa header versi → lolos
   // lewat jalur `no-header`, jadi operasi pemeliharaan tidak ikut terkunci.
   assert.equal(runGate({ path: '/admin/cleanup', method: 'POST', headers: {} }, '99.0.0').nextCalled, true);
+});
+
+// --- Kontrak CORS: setiap header klien WAJIB di-whitelist -------------------
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * Baca daftar `allowedHeaders` middleware CORS dari `server/src/app.ts`.
+ *
+ * Sengaja dibaca dari sumber (bukan dari objek yang diekspor): daftarnya hidup
+ * di dalam literal konfigurasi yang tidak diekspor, dan berpindah ke "dibaca
+ * dari instance CORS" akan menuntut app.ts bisa diimpor tanpa Postgres/Redis —
+ * hal yang justru tidak boleh dibutuhkan unit test (AGENTS: unit test server
+ * tidak boleh butuh Postgres/Redis). Membaca teksnya membuat regresi ini
+ * tertangkap tanpa menyalakan apa pun.
+ */
+function readAllowedHeaders(): string[] {
+  const appSrc = readFileSync(path.join(repoRoot, 'server', 'src', 'app.ts'), 'utf8');
+  const lines = appSrc.split('\n');
+  const start = lines.findIndex((line) => /allowedHeaders:\s*\[/.test(line));
+  assert.ok(start !== -1, 'blok `allowedHeaders` tidak ditemukan di server/src/app.ts');
+
+  // Dipindai baris demi baris, bukan dengan satu regex "sampai `]` pertama":
+  // komentar di dalam array boleh memuat `[`/`]` (mis. `// [FIX …]`) dan `,`,
+  // dan pemindai yang berhenti di `]` pertama akan diam-diam membaca daftar
+  // yang terpotong — tepat jenis kegagalan yang membuat uji ini tidak berguna.
+  const headers: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\]/.test(line)) break;
+    if (line.trim().startsWith('//')) continue;
+    for (const match of line.matchAll(/\/\/[^\n]*|"([^"]*)"|'([^']*)'/g)) {
+      const value = match[1] ?? match[2];
+      if (value !== undefined) headers.push(value.toLowerCase());
+    }
+  }
+  assert.ok(headers.length > 0, 'daftar `allowedHeaders` terbaca kosong — pemindai tidak menemukan satu pun header');
+  return headers;
+}
+
+/**
+ * Kenapa ini diuji di sini, bukan di uji HTTP biasa: kegagalannya **tidak
+ * kelihatan dari server**. `curl` mengabaikan CORS, jadi preflight yang kurang
+ * satu header tetap tampak sehat di semua probe ops — tetapi di browser setiap
+ * request lintas-origin (app.nyx-app.my.id → api.nyx-app.my.id) diblokir, dan
+ * halaman yang sudah dimuat hanya menampilkan callback gagal. Persis itulah
+ * bug yang ditemukan saat self-host 2026-10-15: `x-nyx-client-version` dikirim
+ * klien di SETIAP request, tapi tidak ada di daftar putih.
+ */
+test('CORS: allowedHeaders memuat setiap header yang dikirim klien web', () => {
+  const allowed = readAllowedHeaders();
+
+  for (const header of [CLIENT_VERSION_HEADER, 'x-nyx-installation-id', 'x-csrf-token']) {
+    assert.ok(
+      allowed.includes(header),
+      `"${header}" hilang dari allowedHeaders (server/src/app.ts) → preflight OPTIONS gagal dan browser memblokir SEMUA request API dari origin app`
+    );
+  }
+});
+
+test('CORS: nama header versi di klien web == yang dibaca server', () => {
+  const webSrc = readFileSync(path.join(repoRoot, 'web', 'src', 'lib', 'clientVersion.ts'), 'utf8');
+  const literal = /CLIENT_VERSION_HEADER\s*=\s*'([^']+)'/.exec(webSrc);
+  assert.ok(literal, 'CLIENT_VERSION_HEADER tidak ditemukan di web/src/lib/clientVersion.ts');
+  assert.equal(literal[1], CLIENT_VERSION_HEADER);
+  // Header yang benar-benar dikirim (dipakai `api()`/`apiUpload()` dan jalur
+  // fetch mandiri) harus lolos preflight — bukan cuma dibaca middleware.
+  assert.equal(readAllowedHeaders().includes(literal[1]), true);
 });
 
 /**

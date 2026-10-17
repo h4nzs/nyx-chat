@@ -43,14 +43,24 @@ export const CLIENT_CAPABILITIES = {
 export type ClientCapability = (typeof CLIENT_CAPABILITIES)[keyof typeof CLIENT_CAPABILITIES];
 
 /**
- * Kapabilitas yang dipahami relay (sidecar) saat ini.
+ * Kapabilitas yang dipahami **relay deployment ini**, dipakai oleh DUA relay:
+ *
+ *  - sidecar WebTransport (`server/transport-sidecar`, balasan HELLO bidi), dan
+ *  - gateway WSS Node (`server/src/realtime/gateway.ts`, balasan event
+ *    `capabilities` setelah `handshake.auth.capabilities`).
+ *
+ * Keduanya harus mengiklankan daftar yang SAMA: klien memilih versi ratchet dari
+ * hasil negosiasi, jadi dua relay yang berbeda pendapat berarti perilaku pesan
+ * berubah hanya karena transport-nya jatuh ke WSS (`docs/33` §33.7).
  *
  * `spqr-ratchet` masuk di sini sebagai **saklar deployment**: relay yang
  * mengiklankannya berarti "deployment ini melewatkan frame jalur v2 tanpa
- * mengubahnya". Ia bukan janji tentang peer (relay tidak tahu versi peer mana
- * pun) — bukti kemampuan peer tetap datang in-band (`ackV` di payload
- * ter-seal, `docs/04`). Menghapusnya dari daftar ini = kill switch setingkat
- * deployment: semua klien kembali ke jalur v1 walau kliennya baru.
+ * mengubahnya" (kedua relay meneruskan payload E2EE apa adanya — di WSS,
+ * `content` disimpan sebagai string opaque). Ia bukan janji tentang peer (relay
+ * tidak tahu versi peer mana pun) — bukti kemampuan peer tetap datang in-band
+ * (`ackV` di payload ter-seal, `docs/04`). Menghapusnya dari daftar ini = kill
+ * switch setingkat deployment: semua klien kembali ke jalur v1 walau kliennya
+ * baru.
  */
 export const SERVER_CAPABILITIES: readonly string[] = [
   CLIENT_CAPABILITIES.HELLO_V1,
@@ -72,6 +82,29 @@ export const HELLO_MAX_VERSION = 65535;
 /** Payload HELLO/ACK: UTF-8 JSON `{"v":1,"caps":[...]}`. */
 export function encodeTransportHello(hello: TransportHello): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({ v: hello.v, caps: hello.caps }));
+}
+
+/**
+ * Validasi daftar kapabilitas yang datang dari JARINGAN — dipakai jalur WT
+ * (payload HELLO `{v,caps}`) **dan** jalur WSS (`handshake.auth.capabilities`
+ * di socket.io). Payload ini datang dari klien mana pun, jadi batas anti-DoS-nya
+ * bagian dari kontrak, bukan detail implementasi.
+ *
+ * Mengembalikan `null` bila bentuknya tidak sah (bukan array, ada elemen bukan
+ * string, panjang elemen di luar batas, terlalu banyak elemen) — pemanggil
+ * memperlakukannya sebagai **legacy** (daftar kosong), bukan error fatal: klien
+ * lama tidak pernah mengirim field ini. Duplikat dibuang, urutan dipertahankan.
+ */
+export function sanitizeCapabilityList(raw: unknown): string[] | null {
+  if (!Array.isArray(raw) || raw.length > HELLO_MAX_CAPS) return null;
+
+  const clean: string[] = [];
+  for (const cap of raw) {
+    if (typeof cap !== 'string') return null;
+    if (cap.length === 0 || cap.length > HELLO_MAX_CAP_LENGTH) return null;
+    if (!clean.includes(cap)) clean.push(cap);
+  }
+  return clean;
 }
 
 /**
@@ -102,14 +135,9 @@ export function parseTransportHello(raw: Uint8Array | string): TransportHello | 
 
   const { v, caps } = parsed as { v?: unknown; caps?: unknown };
   if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > HELLO_MAX_VERSION) return null;
-  if (!Array.isArray(caps) || caps.length > HELLO_MAX_CAPS) return null;
+  const clean = sanitizeCapabilityList(caps);
+  if (clean === null) return null;
 
-  const clean: string[] = [];
-  for (const cap of caps) {
-    if (typeof cap !== 'string') return null;
-    if (cap.length === 0 || cap.length > HELLO_MAX_CAP_LENGTH) return null;
-    if (!clean.includes(cap)) clean.push(cap);
-  }
   return { v, caps: clean };
 }
 

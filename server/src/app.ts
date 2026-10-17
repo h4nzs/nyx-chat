@@ -8,7 +8,7 @@ import logger from "morgan";
 import cors from "cors";
 import helmet from "helmet";
 import mime from "mime";
-import { rateLimit, ipKeyGenerator } from "express-rate-limit";
+import { rateLimit } from "express-rate-limit";
 import { doubleCsrf } from "csrf-csrf";
 import { env } from "./config.js";
 import path from "path";
@@ -39,7 +39,7 @@ import subscriptionsRouter from "./routes/subscriptions.js";
 import webpush from "web-push";
 import { adminCleanupLimiter, generalLimiter } from "./middleware/rateLimiter.js";
 import { clientVersionGate } from "./middleware/clientVersion.js";
-import { cfAwareClientIp } from "./utils/clientIp.js";
+import { cfAwareClientIp, clientIpTag } from "./utils/clientIp.js";
 import { reportRoutes } from "./routes/reports.js";
 import systemRouter from "./routes/system.js";
 import wellKnownRouter from "./routes/wellKnown.js";
@@ -228,6 +228,14 @@ const corsMiddleware = cors({
     "x-csrf-token",
     "x-nyx-fingerprint",
     "x-nyx-installation-id",
+    // [SELF-HOST FIX 2026-10-15] Klien web mengirim header versi build ini di
+    // SETIAP request REST (`web/src/lib/clientVersion.ts`, dikonsumsi
+    // `middleware/clientVersion.ts`). Karena app dan API beda origin
+    // (app.nyx-app.my.id → api.nyx-app.my.id), preflight OPTIONS memeriksa
+    // daftar ini: tanpa whitelist, browser memblokir SEMUA panggilan API dengan
+    // "Request header field x-nyx-client-version is not allowed by
+    // Access-Control-Allow-Headers" — halaman jadi kosong tanpa pesan jelas.
+    "x-nyx-client-version",
     "x-group-token",
     // [BUGFIX CORS 2026-10-02] Header capability/ blind-auth WAJIB di-whitelist
     // — tanpa ini preflight OPTIONS gagal dan SEMUA request ber-header ini
@@ -254,8 +262,9 @@ if (isProd) {
       standardHeaders: true,
       legacyHeaders: false,
       validate: { trustProxy: false },
-      // Keying tahan-palsu sama seperti limiter /api (CF-Connecting-IP dulu).
-      keyGenerator: (req) => ipKeyGenerator(cfAwareClientIp(req))
+      // Keying tahan-palsu sama seperti limiter /api (CF-Connecting-IP dulu),
+      // dan sama-sama **tag HMAC** — bukan alamat klien (docs/30 §30.12 WS-H).
+      keyGenerator: (req) => clientIpTag(req)
     })
   );
 }

@@ -13,7 +13,7 @@
 | Redis | `127.0.0.1:6379` | pub/sub bridge + caches |
 | Storage | Cloudflare R2 | Encrypted blobs + arsip snapshot KT (`kt-snapshots/`) |
 | TURN (WebRTC) | coturn `:3478/udp+tcp`, `:5349/tls` + rentang relay | **primer** untuk kredensial `/api/keys/turn`; Cloudflare TURN hanya cadangan; prosesnya systemd = owner ops (§10.9) |
-| Observability | NYX `127.0.0.1:9464`; Prometheus (default `:9090`); exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
+| Observability | NYX `127.0.0.1:9464`, sidecar `:9465`, auditor KT `:9466`, log KT `:9467`; Prometheus (default `:9090`); Alertmanager `:9093` + relay ntfy `:9095`; exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | semuanya loopback; konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
 
 `deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, dan binary + unit systemd `nyx-kt-query`**. Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `web/nginx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
 
@@ -146,11 +146,11 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 
 ### `nyx-sidecar` (env proses Rust, `docs/08` §8.2)
 
-`JWT_SECRET` (harus sama dengan API — token AUTH diverifikasi di sidecar), `REDIS_URL`, `TRANSPORT_PORT` (default `33333`, **UDP**), opsional `PROD_CERT_PATH` / `PROD_KEY_PATH` (sertifikat CA di produksi; tanpa keduanya sidecar membuat self-signed dan mencetak hash-nya).
+`JWT_SECRET` (harus sama dengan API — token AUTH diverifikasi di sidecar), `REDIS_URL`, `TRANSPORT_PORT` (default `33333`, **UDP**), opsional `PROD_CERT_PATH` / `PROD_KEY_PATH` (sertifikat CA di produksi; tanpa keduanya sidecar membuat self-signed dan mencetak hash-nya), `TRANSPORT_METRICS_ADDR` (default `127.0.0.1:9465`; **wajib loopback** — alamat non-loopback ditolak saat start; `0` = exporter mati).
 
 ### `nyx-kt-query` (env proses log KT, §10.15)
 
-`KT_CONFIG_FILE` (config YAML berisi kunci log + `db.file`), `NYX_KT_QUERY_ADDR` (default `127.0.0.1:8085`), `NYX_KT_WRITE_ADDR` (`127.0.0.1:8081`), `NYX_KT_AUDITOR_ADDR` (`127.0.0.1:8082`), `NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL` (`24h`), `NYX_KT_SNAPSHOT_KEEP` (`7`). Semua alamat = loopback; tidak ada port KT yang boleh publik.
+`KT_CONFIG_FILE` (config YAML berisi kunci log + `db.file`), `NYX_KT_QUERY_ADDR` (default `127.0.0.1:8085`), `NYX_KT_WRITE_ADDR` (`127.0.0.1:8081`), `NYX_KT_AUDITOR_ADDR` (`127.0.0.1:8082`), `NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL` (`24h`), `NYX_KT_SNAPSHOT_KEEP` (`7`), `NYX_KT_METRICS_ADDR` (default `127.0.0.1:9467`; wajib loopback, `0` = mati). Semua alamat = loopback; tidak ada port KT yang boleh publik.
 
 ### Web (`web/.env` → build-time `VITE_*`, disuntik `deploy.yml` dari secrets)
 
@@ -432,19 +432,170 @@ akan ditolak lapis kontrak metrik di `scripts/drill-alerts.sh`):
 | `nyx_abuse_guard_enabled{guard}` | 1 = guard menyala saat boot, 0 = off (alert `NyxAbuseGuardDisabled`) |
 | `nyx_client_version_rejected_total{result}` | Request ditolak karena versi klien < `MIN_CLIENT_VERSION` (§10.14) |
 | `nyx_metrics_rejected_total{reason}` | Harus **selalu 0** di produksi; >0 = ada kode yang mencoba mengirim identitas ke metrik |
+| `nyx_wss_capability_total{capability}` | Kapabilitas hasil negosiasi jalur WSS (socket.io), per kapabilitas — `none` = klien mengiklankan sesuatu yang tak dikenal gateway (`docs/29` §5.6). Seri datar = tidak ada klien yang mengiklankan apa pun, bukan "semua sudah v2" |
+| `nyx_wss_ingress_seconds` (histogram) | Latensi ingress jalur **WSS**: dari event socket.io diterima sampai handler selesai (validasi + rate limit + perangkat + publish). Pembanding `nyx_transport_ingress_seconds` — lihat "Latensi jalur" di bawah. Rendah tanpa label → tetap dirender (bernilai 0) sejak boot, jadi `rate(..._count[15m])` = **0**, bukan "No data" |
 
-**Pemasangan (ops di VPS):** Prometheus + Grafana + exporter
-node/postgres/redis di host yang sama; scrape config &
-alert: `ops/prometheus/prometheus.yml`, `ops/prometheus/alerts.yml`; dashboard
-Grafana: `ops/grafana/dashboards/nyx-overview.json` (impor manual: Grafana →
-Dashboards → Import, pilih datasource Prometheus). Alertmanager tidak
-di-commit (berisi token notifikasi).
+**Metrik auditor log KT** (`server/kt-query/cmd/nyx-kt-auditor/metrics.go`, exporter
+loopback terpisah di `NYX_KT_AUDITOR_METRICS_ADDR`, default `127.0.0.1:9466`) —
+scrape config-nya job `nyx-kt-auditor`. Aturan privasinya sama (deklarasi dulu,
+label enum, penolakan dihitung):
+
+| Metrik | Arti |
+|---|---|
+| `nyx_kt_auditor_rounds_total{result}` | Putaran audit selesai: `ok` / `error` (layanan log tak menjawab) / `inconsistent` (**peristiwa keamanan**) |
+| `nyx_kt_auditor_updates_verified_total` | Update log yang berhasil diverifikasi (detak log) |
+| `nyx_kt_auditor_head_sends_total{result}` | Pengiriman tree head bertanda tangan, per hasil; `error` = `SetAuditorHead` ditolak/mati |
+| `nyx_kt_auditor_tree_size` | Ukuran pohon menurut auditor (sudah diverifikasi) |
+| `nyx_kt_auditor_head_tree_size` | Ukuran pohon pada tree head terakhir yang **DITERIMA** log (selisihnya = belum ditandatangani) |
+| `nyx_kt_auditor_last_round_timestamp_seconds` | Putaran audit terakhir selesai (hasil apa pun) |
+| `nyx_kt_auditor_last_consistent_timestamp_seconds` | Putaran terakhir yang seluruh buktinya konsisten |
+| `nyx_kt_auditor_last_head_timestamp_seconds` | Tree head terakhir yang diterima log — **tidak ada** sebelum kiriman pertama berhasil |
+| `nyx_kt_auditor_uptime_seconds` | Umur proses: pembeda "proses baru (head pertama masih menunggu irama)" dari "proses lama yang tak pernah menandatangani" |
+| `nyx_kt_auditor_metrics_rejected_total{reason}` | Penjaga privasi sisi auditor; harus **selalu 0** |
+
+**Metrik proses LOG KT** (`server/kt-query/metrics.go`, exporter loopback terpisah
+di `NYX_KT_METRICS_ADDR`, default `127.0.0.1:9467`) — job `nyx-kt-query`. Ini
+proses yang **menulis** riwayat, bukan yang mengauditnya: kegagalannya fail-open
+(registrasi tetap sukses tanpa jejak audit), jadi tidak ada satu pun error di
+aplikasi yang menunjuk kemari:
+
+| Metrik | Arti |
+|---|---|
+| `nyx_kt_query_writes_total{result}` | Penulisan entri oleh proses log sendiri; `ok`, `duplicate` (idempoten, **bukan** kegagalan), `invalid` (permintaan klien salah), `error` (pohon/basis data gagal) |
+| `nyx_kt_query_reads_total{op,result}` | Operasi baca (`search`, `distinguished`, `monitor`, `config`, `head`, `health`); `not_found` dipisah dari `invalid`/`error` karena "belum ada di log" adalah jawaban sah |
+| `nyx_kt_query_snapshot_total{result}` | Percobaan snapshot lokal; `ok` = arsip tersimpan **dan** terverifikasi |
+| `nyx_kt_query_snapshot_last_timestamp_seconds` | Arsip lokal terverifikasi terakhir — **tidak ada** sebelum snapshot pertama (karena itu aturannya memakai `absent_over_time`) |
+| `nyx_kt_query_distinguished_timestamp_seconds` | Timestamp anchor `distinguished` yang tersimpan; ditulis ulang setiap putaran yang berhasil, jadi seri yang diam = loop berhenti (§10.15) |
+| `nyx_kt_query_tree_size` | Ukuran pohon menurut proses log |
+| `nyx_kt_query_uptime_seconds` | Umur proses (pembeda restart cepat) |
+| `nyx_kt_query_metrics_rejected_total{reason}` | Penjaga privasi sisi log; harus **selalu 0** |
+
+**Metrik sidecar WebTransport** (`server/transport-sidecar/src/metrics.rs`,
+`TRANSPORT_METRICS_ADDR`, default `127.0.0.1:9465`) — job `nyx-sidecar`. "Aplikasi
+hidup" tidak berarti jalur ini hidup: klien yang gagal handshake **turun ke WSS
+secara senyap** (`web/src/lib/transportMode.ts`), jadi tanpa metrik ini sidecar
+boleh mati berhari-hari tanpa satu pun error di mana pun:
+
+| Metrik | Arti |
+|---|---|
+| `nyx_transport_connections_total{result}` | Handshake masuk: `accepted` / `rejected` / `failed` |
+| `nyx_transport_auth_total{method}` | Sesi terautentikasi (`ticket` / `bwh`) |
+| `nyx_transport_auth_failures_total{reason}` | Gagal auth (`ticket_invalid`, `token_too_large`, `bwh_invalid`, `no_identifier`) |
+| `nyx_transport_session_kicks_total` | Sesi lama diputus aturan satu-perangkat-aktif |
+| `nyx_transport_rejected_frames_total{reason}` | Frame dibuang sebelum diteruskan (`chaff` = traffic-cover normal, bukan anomali) |
+| `nyx_transport_relay_published_total{path}` | Frame yang **berhasil** diteruskan ke `nyx:upstream` (`bidi` / `uni` / `datagram`) |
+| `nyx_transport_downstream_total{result}` | Pesan `nyx:downstream` (`delivered` / `no_session` / `dropped`) |
+| `nyx_transport_bytes_total{direction}` | Byte payload per arah (`in` / `out`) |
+| `nyx_transport_active_sessions` | Sesi WebTransport aktif saat scrape |
+| `nyx_transport_uptime_seconds` | Umur proses (restart terlihat dari nilai yang turun) |
+| `nyx_transport_ingress_seconds` (histogram) | Latensi ingress jalur **WebTransport**: dari frame klien utuh diterima sampai diteruskan ke Redis (`nyx:upstream`). Hop inilah satu-satunya bagian ingress yang dimiliki sidecar — lihat "Latensi jalur" di bawah |
+
+Tidak ada `…metrics_rejected_total` di sisi sidecar: semua nilai label di sana
+**bertipe enum** (bukan string bebas), jadi nilai berbentuk identitas tidak bisa
+masuk by construction — berbeda dari dua exporter lain yang menerima string dari
+pemanggil. Yang tetap berlaku sama: nama metrik wajib dideklarasikan lebih dulu,
+sehingga salah tulis nama ketahuan dari lapis kontrak `scripts/drill-alerts.sh`.
+
+**Catatan penting soal `increase()` dan restart** (akar satu alarm palsu nyata,
+2026-10-16): `prom-client` (nyx-api) **baru membuat label child saat `.inc()`
+pertama**, jadi setelah restart seri `{result="ok"}` bisa hilang dari eksposisi —
+dan `increase()` atas seri yang tak ada = 0, sehingga pola
+`increase(counter) == 0` menyala palsu. Kedua exporter Go/Rust di atas tidak
+punya sifat itu: keduanya merender **seluruh** nilai enum bernilai 0 sejak awal
+proses (`ALL` di `metrics.rs`, tabel nilai di `metrics.go`). Karena itu aturan
+untuk keduanya boleh memakai `increase(...) > 0` ("ada kegagalan **baru**") tanpa
+takut restart, dan justru itulah bentuk yang dipakai. Untuk metrik yang memang
+hanya lahir dari peristiwa (nyx-api), polanya diganti **gauge yang diturunkan
+dari kenyataan luar** (mis. daftar objek R2, `…_remote_latest_timestamp_seconds`)
+— bukan counter, lihat §10.13.
+
+**Pemasangan (ops di VPS).** Prometheus + Grafana + exporter node/postgres/redis
+di host yang sama (`nyx-api` :9464, sidecar :9465, auditor KT :9466, log KT
+:9467 — semuanya **loopback**). Alertmanager juga di-commit, tetapi **tanpa
+rahasia**: `ops/alertmanager/alertmanager.yml` hanya menunjuk relay loopback,
+dan topik ntfy hidup di EnvironmentFile 0600 di VPS (§10.12 sub-bagian
+notifikasi).
+Semua listener **loopback**: nginx tidak mem-proxy `/metrics`, `:9090`, maupun
+`:3001` — jangan menambahkan route untuk itu.
+
+```bash
+# 1. Prometheus — config + aturan dari repo (bukan diedit di server)
+install -d -m 755 /etc/prometheus /var/lib/prometheus
+install -m 644 ops/prometheus/prometheus.yml /etc/prometheus/
+install -m 644 ops/prometheus/alerts.yml    /etc/prometheus/
+promtool check config /etc/prometheus/prometheus.yml   # WAJIB: menolak config/aturan rusak
+promtool test rules ops/prometheus/tests.yml           # kasus menyala + tidak-menyala
+prometheus --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus --web.listen-address=127.0.0.1:9090 \
+  --storage.tsdb.retention.time=15d --storage.tsdb.retention.size=2GB
+
+# 2. Grafana — port 3001, karena 127.0.0.1:3000 sudah dipakai nyx-nginx.
+#    Datasource + dashboard DIPROVISIKAN dari berkas (tanpa impor manual):
+#      conf/custom.ini                     → http_addr=127.0.0.1, http_port=3001, path
+#      provisioning/datasources/prometheus.yml → uid `prometheus` (WAJIB sama dengan
+#                                                datasource.uid di JSON dashboard)
+#      provisioning/dashboards/nyx.yml     → provider folder NYX, muat ulang 60 s
+#      dashboards/nyx-overview.json        → SALINAN ops/grafana/dashboards/
+#    Password admin + secret key cookie lewat GF_SECURITY_ADMIN_PASSWORD /
+#    GF_SECURITY_SECRET_KEY (EnvironmentFile 0600), bukan di berkas config.
+
+# 3. Exporter host: node_exporter :9100, postgres_exporter :9187, redis_exporter :9121
+#    (job `node`/`postgres`/`redis` sudah ada di prometheus.yml; tanpa exporter ini
+#     target-nya `up == 0` dan alert host/Redis menyala tanpa sebab nyata)
+```
+
+Verifikasi pemasangan (yang dibuktikan di sini: scrape **nyata**, bukan sekadar
+proses hidup):
+
+```bash
+curl -s 127.0.0.1:9090/-/ready                       # "Prometheus Server is Ready."
+curl -s 127.0.0.1:9090/api/v1/targets | grep -o '"health":"[a-z]*"' | sort | uniq -c
+curl -s 127.0.0.1:9090/api/v1/rules   | grep -o '"name":"nyx[^"]*"' | wc -l   # 35 aturan
+curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-auditor"}'
+curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-query"}'
+curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-sidecar"}'
+# Semua target harus `up` — target yang mati TIDAK menyalakan alarm lain (aturan
+# yang bergantung padanya "diam" karena tidak ada data), jadi `up` diperiksa eksplisit.
+curl -s 127.0.0.1:9090/api/v1/targets | python3 -c 'import json,sys; [print(t["labels"]["job"], t["health"]) for t in json.load(sys.stdin)["data"]["activeTargets"]]'
+curl -s 127.0.0.1:9090/api/v1/alertmanagers   # activeAlertmanagers TIDAK boleh kosong
+curl -s 127.0.0.1:9093/-/ready                # "Alertmanager is Ready."
+# Grafana (basic auth: admin + GF_SECURITY_ADMIN_PASSWORD)
+curl -s -u admin:"$GF_SECURITY_ADMIN_PASSWORD" 127.0.0.1:3001/api/health
+curl -s -u admin:"$GF_SECURITY_ADMIN_PASSWORD" \
+  127.0.0.1:3001/api/datasources/uid/prometheus/health    # "Successfully queried…"
+curl -s -u admin:"$GF_SECURITY_ADMIN_PASSWORD" '127.0.0.1:3001/api/search?type=dash-db'
+```
+
+**Pemasangan tanpa root** (dev/self-host, diverifikasi 2026-10-16): berkas dan
+aturan yang **sama**, hanya path-nya di bawah `$HOME` — biner di
+`~/nyx-selfhost/{prometheus,grafana}/bin`, config di `…/prometheus/conf`, data di
+`…/prometheus/data`, unit `systemd --user`. Langkah lengkap + catatan lingkupnya
+ada di `~/nyx-selfhost/README.md`; intinya identik dengan blok di atas.
 
 **Dashboard yang di-commit** memakai metrik yang sama dengan alert — ambang di
 panel dijaga identik dengan `alerts.yml` supaya tidak ada dua kebenaran. Panel
 `nyx_metrics_rejected_total` (harus 0) dan `Redis key ter-evict` sengaja diberi
 warna merah pada nilai > 0: keduanya berarti jaminan privasi/rate-limit sudah
-bocor, bukan sekadar performa.
+bocor, bukan sekadar performa. Sejak 2026-10-16 dashboard punya baris **Key
+Transparency (auditor mode 3 + log nyx-kt-query)**: auditor hidup, umur tree head
+terakhir **dan** umur proses (batang kedua — pembeda "proses baru" dari "tak
+pernah menandatangani"), penjaga label identitas auditor, posisi pohon
+(diverifikasi vs head yang diterima), tulis/baca log KT, putaran audit + head per
+hasil, snapshot KT, dan umur tulis KT sukses terakhir. Sejak 2026-10-17 ada dua
+baris lagi, sejajar dengan aturan alertnya: **Transport WebTransport
+(`nyx-sidecar`)** — sidecar hidup, sesi aktif + handshake per hasil, auth gagal
+per alasan, frame dibuang selain chaff — dan **Log KT: prosesnya sendiri
+(`nyx-kt-query`)** — proses hidup, tulisan per hasil, baca per operasi, umur
+snapshot lokal, umur anchor `distinguished`, plus panel **ukuran pohon: pandangan
+log vs auditor** (selisih yang melebar = auditor tertinggal, padahal itu satu-
+satunya hal yang membuat log KT punya jaminan auditas).
+
+Dua panel lama diperbaiki judulnya karena menyesatkan: "Eksporter metrik hidup"
+kini menampilkan `up{job=~"nyx-.*"}` (keempat proses, bukan hanya nyx-api), dan
+panel "Tulis/baca log KT" yang memakai `nyx_kt_writes_total`/`nyx_kt_queries_total`
+kini berjudul **"… dari sisi API (nyx-api)"** — metrik itu milik server, sedangkan
+yang PROSES log tulis ada di baris barunya. Dua hal berbeda: satu mengukur apa yang
+dikirim server, satu mengukur apa yang benar-benar diterima log.
 
 **Fuzz parser (gate §30.11 butir 4) — bukan bagian deploy, jalankan nightly:**
 `pnpm --filter nyx-web run fuzz:parsers:hour` dan
@@ -471,15 +622,149 @@ SKIP_LIVE=1 scripts/drill-alerts.sh                   # tanpa exporter hidup
 
 Empat lapis: config + kompilasi aturan → **`promtool test rules`** (kasus
 menyala **dan** tidak-menyala per aturan) → kontrak metrik (nama `nyx_*` yang
-dirujuk aturan harus ada di `metrics.ts`) → cakupan drill (aturan baru wajib punya
-kasus). Lapis terakhir opsional men-scrape `/metrics` nyata. **Sebuah aturan yang
-merujuk metrik yang salah tulis tidak akan pernah menyala dan tidak menghasilkan
-error apa pun** — itu yang dicegah lapis ketiga. Ini juga jalan per-PR (job CI
-`alerts`, dan versi scrape-nyata di job `e2e`).
+dirujuk aturan **atau panel dashboard** harus ada **di salah satu dari empat
+sumber deklarasi**: `server/src/utils/metrics.ts`,
+`server/kt-query/cmd/nyx-kt-auditor/metrics.go`, `server/kt-query/metrics.go`,
+`server/transport-sidecar/src/metrics.rs`) → cakupan drill (aturan baru wajib
+punya kasus). Lapis terakhir opsional men-scrape `/metrics` nyata dari keempat
+exporter. Kontrak untuk dashboard ditambahkan bersama panel baris transport/log
+(2026-10-17): panel dengan nama metrik salah tulis **tidak** menghasilkan error
+apa pun, hanya "No data" — dan "No data" di produksi paling sering dibaca
+sekadar sebagai "sedang sepi". **Sebuah aturan yang merujuk metrik yang
+salah tulis tidak akan pernah menyala dan tidak menghasilkan error apa pun** —
+itu yang dicegah lapis ketiga. Ini juga jalan per-PR (job CI `alerts`, dan versi
+scrape-nyata di job `e2e`).
+
+Kelompok `nyx-transport` (6 aturan) dan `nyx-kt-query` (5 aturan) ditambahkan
+2026-10-17, saat kedua proses itu akhirnya punya exporter — justru keduanya
+adalah kelas kegagalan **senyap**: sidecar yang mati hanya membuat klien turun ke
+WSS, dan proses log yang mati hanya menghilangkan jejak audit (fail-open).
+Keduanya berbagi dua aturan bentuk sama: `…Down` (proses/exporter hilang) dan
+`…Restarting` (`changes(up[1h]) > 2` **atau** `resets(uptime[1h]) > 1`, karena
+restart yang lebih cepat dari satu irama scrape tidak pernah terlihat sebagai
+`up == 0`).
+
+**Latensi jalur: WebTransport vs WSS (`…IngressSlow` + `…SlowerThanWss` + `…Unused`).**
+Jalur cepat yang **melambat** tidak menghasilkan satu pun error: klien tidak tahu
+ia sedang memakai jalur yang seharusnya lebih cepat, sidecar tetap `up`, dan
+`…Down` diam — sampai handshake-nya gagal dan semua klien mundur ke WSS. Dua
+aturan menutup jendela itu dengan dua histogram dari dua proses berbeda:
+
+| Jalur | Metrik | Titik awal → titik akhir |
+|---|---|---|
+| WebTransport | `nyx_transport_ingress_seconds` (sidecar :9465) | frame klien utuh diterima → diteruskan ke Redis (`nyx:upstream`) |
+| WSS | `nyx_wss_ingress_seconds` (nyx-api :9464) | event socket.io diterima → handler selesai (validasi + rate limit + perangkat + publish) |
+
+Cakupan keduanya **tidak identik, dan itu disengaja**: pekerjaan yang di jalur WSS
+ada di dalam span-nya (rate limit, pemeriksaan perangkat) justru terjadi di proses
+Node SETELAH hop yang diukur di sidecar. Jadi span WSS memuat lebih banyak
+pekerjaan, dan aturan pembandingnya (`NyxTransportSlowerThanWss`, p95 WT > p95 WSS
+selama 30 menit) hanya menyala ketika jalur cepat benar-benar sudah kehilangan
+keunggulannya — arah yang salah untuk alarm palsu. Aturan `NyxTransportIngressSlow`
+(250 ms) adalah jaring terakhir yang tidak bergantung pembanding.
+
+Yang membuat perbandingan ini sah: **bucket kedua histogram wajib sama**
+(`INGRESS_BUCKETS` di `server/transport-sidecar/src/metrics.rs` ↔
+`WSS_INGRESS_SECONDS` di `server/src/utils/metrics.ts`). p95 dari dua histogram
+dengan pembagian bucket berbeda tidak sebanding, dan itu tidak memunculkan error
+apa pun — hanya perbandingan yang bohong. Keduanya juga **dirender bernilai 0
+sejak proses hidup** (nol observasi), jadi panel laju menampilkan 0 dan penjaga
+`rate(..._count[15m]) > 0` bekerja seperti yang dimaksud; kuantilnya sendiri
+bernilai NaN sampai ada sampel pertama (`histogram_quantile` atas histogram kosong
+memang tidak punya jawaban) — dan `NaN > ambang` bernilai salah, jadi tidak ada
+alarm dari data yang belum ada.
+
+Bentuk penurunan **ketiga** ditangkap `NyxTransportUnused`: sesi WT **pernah ada
+lalu habis** sementara WSS terus melayani dan prosesnya masih `up`. Di sini tidak
+ada yang melambat dan tidak ada yang mati — yang hilang adalah pemakaiannya, dan
+keempat aturan transport lain (handshake, auth, frame, latensi) tetap diam;
+fallback memang dirancang berjalan senyap, jadi tidak ada satu pun keluhan yang
+muncul sampai seseorang kebetulan membuka dashboard. Penjaganya
+`max_over_time(nyx_transport_active_sessions[1h]) > 0`: instalasi yang memang belum
+pernah memakai jalur cepat (host ini salah satunya selama WT belum terjangkau dari
+publik) tidak ikut berteriak, karena "selalu nol sejak awal" bukan penurunan.
+
+Kelompok `nyx-kt-auditor` (8 aturan) memisahkan kelas kegagalan yang tindakannya
+berbeda: proses mati (`…Down`), hidup tapi tak maju (`…RoundStalled`), layanan log
+tak terhubung (`…RoundFailing`), riwayat tidak konsisten (`…ProofInconsistent` —
+insiden keamanan), head ditolak (`…HeadRejected`), dan dua pasangan yang saling
+menutup: `…HeadStale` + `…Restarting`. Pasangan itu lahir dari drill 2026-10-16:
+cabang "belum pernah ada tree head" pada `…HeadStale` **menyala 30 menit setelah
+setiap restart** (head pertama memang menunggu irama tanda tangan), jadi
+sekarang cabang itu dijaga `nyx_kt_auditor_uptime_seconds > 2 jam`; sementara
+proses yang start ulang terus (umurnya selalu muda, jadi `…HeadStale` buta)
+ditangkap `…Restarting` lewat `changes(up[1h])` **atau**
+`resets(nyx_kt_auditor_uptime_seconds[1h])` — sinyal kedua untuk restart yang
+lebih cepat dari satu irama scrape. Aturan yang menyala setiap deploy akan
+berakhir diabaikan, dan itu sama saja dengan tidak ada aturan.
 
 Kalau ingin mereproduksi gejalanya dengan tangan: matikan exporter →
 `NyxMetricsExporterDown`; isi disk sampai <12% → `NyxHostDiskLow`; hentikan
 sweeper → `NyxSweeperStale`.
+
+**Notifikasi: Alertmanager → relay loopback → ntfy (ditambahkan 2026-10-17).**
+Sampai blok `alerting:` ada di `prometheus.yml`, semua aturan di atas hanya
+terlihat di UI `/alerts`: tidak ada yang diberi tahu, dan alarm yang tidak pernah
+sampai sama saja dengan tidak ada. Blok itu menunjuk Alertmanager di loopback
+(`127.0.0.1:9093`); dari sana notifikasi melewati `ops/alertmanager/ntfy-relay.mjs`
+(127.0.0.1:9095) ke topik ntfy.
+
+Kenapa relay, bukan receiver ntfy langsung: Alertmanager 0.34.1 tidak punya
+receiver `ntfy` (`amtool check-config` → `field ntfy_configs not found`), dan
+payload `webhook_configs` (JSON v4) bukan bentuk pesan yang terbaca di aplikasi
+ntfy. Relay menerjemahkan payload itu → judul + pesan + prioritas (skala ntfy
+1–5 dari label `severity`: `critical`→5, `high`→4, `warning`→3, `resolved`→2,
+jadi kabar "sudah pulih" tetap terlihat tetapi tidak berkedip seperti alarm).
+Yang **tidak** dikirim ke mana pun: topik dan token tidak pernah dicetak log
+(`ntfy-relay.mjs` hanya mencatat panjang topik), dan isi alert hanya enum NYX
+(job, severity, port, umur snapshot) — bukan identitas pengguna.
+
+```bash
+# 1. Biner + config (config TANPA rahasia — aman di-commit, disalin apa adanya)
+install -m 644 ops/alertmanager/alertmanager.yml <conf-dir>/alertmanager.yml
+amtool check-config <conf-dir>/alertmanager.yml          # WAJIB sebelum start
+
+# 2. Topik ntfy di EnvironmentFile 0600 (BUKAN di config, jangan di repo)
+install -m 600 ops/alertmanager/ntfy-relay.env.example \
+                ~/nyx-selfhost/alertmanager/ntfy-relay.env   # lalu isi NTFY_TOPIC
+
+# 3. Dua unit systemd: nyx-alertmanager (:9093) + nyx-ntfy-relay (:9095).
+#    Port relay sengaja 9095, BUKAN 9094: 9094/tcp dipakai Alertmanager sebagai
+#    listener gossip HA — memakai 9094 membuat prosesnya gagal start
+#    (`listen tcp 0.0.0.0:9094: bind: address already in use`, terlihat 2026-10-17).
+#    Cluster gossip juga dimatikan (`--cluster.listen-address=`) karena ini satu
+#    instance tanpa HA — gossip hanya menambah port dan peringatan.
+
+# 4. Verifikasi (bukan hanya "proses hidup")
+node ops/alertmanager/ntfy-relay.mjs --self-test          # format pesan, tanpa jaringan
+curl -s 127.0.0.1:9093/-/ready                            # "Alertmanager is Ready."
+curl -s 127.0.0.1:9090/api/v1/alertmanagers               # activeAlertmanagers terisi
+amtool alert add alertname=NyxChannelTest severity=critical \
+  --alertmanager.url=http://127.0.0.1:9093                # uji ujung-ke-ujung
+```
+
+Langkah 4 terakhir adalah satu-satunya bukti yang benar: alert uji harus benar-
+benar sampai ke perangkat. Jurnal relay mencatat `terkirim: "1 firing: …"`
+untuk setiap kiriman yang diterima ntfy, jadi kegagalan jaringan tidak bisa
+menyamar sebagai "sudah dikirim".
+
+Aturan routing & peredaman yang dipakai (`ops/alertmanager/alertmanager.yml`):
+`critical` dikirim seketika (`group_wait: 0s`, ulang tiap 1 jam), `high` setelah
+1 menit (ulang tiap 2 jam), sisanya 30 detik (ulang tiap 4 jam) — `repeat_interval`
+sengaja tidak lebih lama dari itu supaya alarm yang menyala berhari-hari (mis.
+guard OFF) tidak terlupakan. Empat inhibit rule mencegah notifikasi turunan yang
+menyesatkan: (a) proses/exporter yang mati (`NyxMetricsExporterDown`,
+`NyxKtAuditorDown`, `NyxKtQueryDown`, `NyxTransportSidecarDown`) meredam semua
+alarm `high`/`warning` berbasis metriknya — nilai yang "diam" tidak lagi berarti
+"sehat"; (b) `…Restarting` meredam `…HeadStale` (auditor) dan lonjakan
+auth/frame (sidecar), karena keduanya gejala dari satu sebab yang sama.
+
+**Residual yang disadari:** topik ntfy default memakai server publik `ntfy.sh`,
+jadi judul+ringkasan alert melewati pihak ketiga (tidak ada identitas pengguna di
+dalamnya, dan topik bisa diset ke instance sendiri lewat `NTFY_URL`). Satu server
+ntfy yang mati juga berarti notifikasi berhenti tanpa alarm — itu sebabnya
+`up{job="prometheus"}` tidak dipakai sebagai alarm (Prometheus yang mati tidak
+bisa mengalarmkan dirinya sendiri).
 
 ## 10.13 Operasional harian: pembersihan & snapshot log KT (added 2026-10-14)
 
@@ -621,9 +906,13 @@ Perannya hari ini:
 - **Penyaji bukti** untuk `/api/keys/kt/*` (proxy loopback dari Express) →
   verifikasi di klien WASM (`docs/34`).
 - **Pembuat arsip snapshot terverifikasi** yang diunggah server NYX ke R2 (§10.13).
-- **Layanan auditor pihak ketiga** di listener terpisah (`:8082`) — kodenya siap,
-  tetapi **belum ada auditor nyata yang beroperasi** (`server/kt-query/README.md`
-  "Sisa yang jujur").
+- **Layanan auditor pihak ketiga** di listener terpisah (`:8082`), dan auditor
+  nyatanya `nyx-kt-auditor` (`server/kt-query/cmd/nyx-kt-auditor`, unit
+  `ops/systemd/nyx-kt-auditor.service`). Log berjalan **mode 3** begitu
+  `api.auditors` diisi: klien mewajibkan auditor head yang segar, dan auditor yang
+  berhenti > 7 hari membuat klien menolak head (jadi prosesnya bagian dari
+  ketersediaan verifikasi kunci, bukan hiasan). Pemasangan ada di
+  `ops/systemd/README.md`.
 
 **Deploy: otomatis, dengan satu langkah sekali-saja.** Unit-nya ada di repo
 (`ops/systemd/nyx-kt-query.service` + template `nyx-kt-query.env.example` +
@@ -631,11 +920,13 @@ Perannya hari ini:
 
 | Bagian | Siapa yang mengerjakan |
 |---|---|
-| Build binary dari vendor (`nyx-kt-query` + `nyx-kt-check`) | `deploy.yml` (CI) |
+| Build binary dari vendor (`nyx-kt-query` + `nyx-kt-check` + `nyx-kt-auditor`) | `deploy.yml` (CI) |
 | Salin binary + `ops/systemd/` ke VPS, segarkan unit, `daemon-reload` | `deploy.yml` |
 | Restart + verifikasi (`is-active`, `/healthz`) bila unit `enabled`; gagal ⇒ deploy merah | `deploy.yml` |
+| Restart `nyx-kt-auditor` setelah `nyx-kt-query` hidup (bila unit auditor `enabled`) | `deploy.yml` |
 | Simpan binary sebelumnya sebagai `nyx-kt-query.prev` | `deploy.yml` |
 | Pemasangan pertama: direktori, kunci log + config YAML, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
+| Pemasangan pertama auditor (mode 3): kunci auditor, entri `api.auditors`, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
 | Isi `KT_SERVER_URL` / `KT_QUERY_URL` / `KT_SNAPSHOT_DIR` di `/root/nyx-app/.env`, lalu `pm2 restart nyx-api` | **owner ops, sekali** |
 
 Aturan yang tidak boleh dilanggar:
@@ -654,9 +945,87 @@ Aturan yang tidak boleh dilanggar:
    (`/var/lib/nyx/kt`, `/var/lib/nyx/kt-snapshots`), service mati dengan
    "read-only file system" — tambahkan path-nya di unit, jangan melepas
    hardening-nya.
-6. Service ini belum mengekspos `/metrics`; `ops/prometheus/prometheus.yml`
-   menyiapkan tempatnya (dikomentari) supaya tidak memicu `up == 0` palsu —
-   jangan menyalakannya sebelum exporter-nya ada.
+6. Sejak 2026-10-17 service ini mengekspos `/metrics` di loopback
+   (`NYX_KT_METRICS_ADDR`, default `127.0.0.1:9467`, job scrape `nyx-kt-query`).
+   Alamat non-loopback ditolak saat start. Sebelum itu, entry di
+   `prometheus.yml` sengaja dikomentari supaya tidak memicu `up == 0` palsu —
+   pola yang sama berlaku untuk exporter baru apa pun: tambahkan job scrape
+   **bersamaan** dengan exporter-nya hidup.
 7. Pin upstream naik = `scripts/vendor-signal.sh` + `go mod vendor`
    (`server/kt-query/README.md`); vendor-nya ikut di-commit dan dibuktikan bisa
    dibangun oleh job CI `build` serta dipakai ulang oleh job `kt-recovery`.
+
+## 10.16 Guard anti-abuse registrasi (WS-H) — menyalakan & memantau (added 2026-10-16)
+
+Pendaftaran massal (sybil) ditahan berlapis **tanpa PII**: tidak ada IP mentah
+yang disimpan, tidak ada CAPTCHA baru, tidak ada ML atas data pribadi. Semua
+lapisan default **mati**, jadi deployment produksi yang lupa menyalakannya
+tampak sehat — karena itu §10.16 ini ada, dan kenapa boot-nya berisik.
+
+**Menyalakan (urutan yang disarankan).**
+
+1. **Ukur dulu, jangan blokir:** `ABUSE_REGISTRATION_GUARD=shadow`. Guard
+   menghitung **semua** lapisan persis seperti mode `on`, tetapi tidak menahan
+   siapa pun; keputusan hipotetisnya terlihat di
+   `nyx_registration_guard_observed_total{action="would_block"|"would_attest"|"allowed"}`
+   + log `[RegistrationGuard][shadow]` (hanya angka counter, tanpa identitas).
+   Yang diukur: berapa pengguna **sah** yang akan tertahan (mis. kantor ber-NAT
+   besar yang ramai dalam 10 menit).
+2. **Isi tabel ASN:** `ASN_DB_FILE=/etc/nyx/asn-blocks.csv` (ekspor
+   `GeoLite2-ASN-Blocks-IPv4/6.csv`, dua kolom pertama `network,asn_number`).
+   Tanpa berkas ini lapisan per-ASN dilewati (fail-open) dan `would_attest`
+   tidak pernah bisa menyala — jadi mode shadow tanpa ASN bukan pengukuran penuh.
+3. **Nyalakan:** `ABUSE_REGISTRATION_GUARD=on`. Batas: sumber (IP ter-HMAC)
+   20/jam, instalasi 10/jam, ASN **100/jam** (akun ke-100 ditahan) → `429
+   REGISTRATION_BURST_LIMIT`; burst ASN ≥25/10 menit → **wajib attestation
+   perangkat** (`428 ATTESTATION_REQUIRED`), bukan blokir.
+4. **Attestation (opsional, paling keras):** `ABUSE_REQUIRE_ATTESTATION=on`
+   mewajibkan attestation perangkat untuk **semua** akun baru. Kebijakan
+   format/root/AAGUID lewat `ABUSE_ATTESTATION_*` (§10.6). Longgarkan hanya untuk
+   test — `ALLOW_NONE`/`ALLOW_SELF` membuat lapisan ini tidak membuktikan
+   perangkat apa pun.
+5. **Root perangkat nyata (wajib untuk `packed`/`tpm`/`android-key`/`apple`):**
+   `x5c` dari TPM/Windows Hello, Android Key Attestation, YubiKey, dan Apple
+   biasanya berhenti di **intermediate** — root-nya tidak ikut. Dengan
+   `ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN=off` (default), rantai seperti itu
+   ditolak kecuali root-nya dipin:
+
+   ```bash
+   # kumpulkan root vendor yang sudah diverifikasi (FIDO MDS3 / halaman vendor)
+   node scripts/attestation-roots.mjs bundle --out /etc/nyx/attestation-roots.pem \
+     fido-root.pem yubico-root.der apple-root.pem
+   # lalu set ABUSE_ATTESTATION_ROOTS_FILE=/etc/nyx/attestation-roots.pem
+   # (fingerprint ABUSE_ATTESTATION_ROOTS hanya cukup untuk root yang ikut di x5c)
+   ```
+
+   Detail alur, sumber sertifikat, dan rotasinya: `ops/attestation/README.md`.
+   Boot akan memperingatkan bila attestation ketat menyala tanpa root dipin,
+   atau bila `ALLOW_UNVERIFIED_CHAIN=on` (itu menerima self-signed buatan siapa
+   pun sebagai "hardware").
+6. `TURNSTILE_SECRET_KEY` tetap wajib (pendaftaran menolak tanpa token sah).
+
+**Memantau.** Gauge `nyx_abuse_guard_enabled{guard="registration"|"attestation"}`
+(1 = menahan; mode `shadow` dihitung **0** karena ia tidak menahan) + alert
+`NyxAbuseGuardDisabled`. Peringatan boot (`utils/startupSignals.ts`) menyebut
+lingkungan produksi tanpa guard/attestation. Riwayat keputusan guard:
+`nyx_registration_guard_observed_total`; blokirnya: `nyx_security_blocks_total`
++ `nyx_relay_errors_total{result}`.
+
+**Rollback.** Kembalikan env ke `off` lalu restart `nyx-api` — tidak ada state
+yang perlu dibersihkan. Counter guard ber-TTL (1 jam / 10 menit) dan key-nya
+adalah **HMAC pepper** dari IP/ASN/instalasi, bukan nilai mentah.
+
+**Yang tidak boleh diregresikan.** Semua key Redis yang menyebut klien harus
+tetap ter-pepper: `regburst:src|inst|asn|asnfast`, `pow:user|inst|fp|ip`
+(`powRateKey`), dan key limiter `express-rate-limit` (`clientIpTag`). Snapshot
+Redis karena itu tidak bisa dipakai untuk mengenumerasi alamat pengguna —
+mengganti salah satunya kembali ke IP mentah = membatalkan kriteria audit WS-H
+(`docs/30` §30.12).
+
+**Sisa yang disadari:** pengukuran false-positive lapangan (langkah 1) butuh
+trafik produksi nyata. Attestation browser sudah diuji E2E (2026-10-17) dengan
+authenticator platform virtual Chromium pada kebijakan ketat + sertifikat uji
+dipin: `428` → upacara WebAuthn → `201` dengan `isVerified` + baris
+`Authenticator`. Yang **belum** dibuktikan: kunci privat di dalam silikon
+sungguhan (TPM/SE/Titan) dan rantai vendor nyata — keduanya butuh perangkat fisik
++ bundle root dari `ops/attestation/README.md`, bukan kode baru.

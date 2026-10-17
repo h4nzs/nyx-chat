@@ -99,12 +99,39 @@ How NYX uses it (unmodified upstream packages):
     `server/src/utils/keyTransparency.ts` (`docs/32`).
 
 --------------------------------------------------------------------------------
+4. Signal key-transparency-auditor (third-party auditor reference implementation)
+--------------------------------------------------------------------------------
+Upstream:      https://github.com/signalapp/key-transparency-auditor
+Pinned commit: 13a9126a63081c189de8422bb2e7dca770adec9f  (2026-08-18, "Update to Java 26")
+License:       AGPL-3.0-only (upstream `LICENSE`)
+
+How NYX uses it:
+  * `server/kt-query/cmd/nyx-kt-auditor/` — a **Go port** (not a copy) of the
+    auditor-side verification in
+    `org.signal.keytransparency.audit.{Auditor, CondensedPrefixTree, CondensedLogTree}`
+    plus its proof records (`NewTreeProof`, `DifferentKeyProof`, `SameKeyProof`).
+    `prefix_tree.go` and `log_tree.go` keep the upstream function names and
+    operation order so they can be compared line by line with the Java source;
+    no upstream Java file is vendored or compiled, and nothing here re-implements
+    the log-side crypto (that stays in the vendored `keytransparency` module, §3).
+  * `server/kt-query/cmd/nyx-kt-auditor/testdata/katie_test_vectors.pb` — copied
+    verbatim from the same repository's test resources (AGPL-3.0 `LICENSE` placed
+    beside it; provenance and SHA-256 in `testdata/README.md`). Those vectors were
+    generated upstream by `key-transparency-server`'s
+    `cmd/generate-auditing-test-vectors`. The Go tests verify the port against
+    them (10 `should_succeed` updates with per-step log roots, 5 `should_fail`
+    sequences, and the tree-head signature byte-for-byte).
+  * `ops/systemd/nyx-kt-auditor.service` + `nyx-kt-auditor.env.example` — unit and
+    environment template for running that binary next to `nyx-kt-query`.
+
+--------------------------------------------------------------------------------
 Notes for redistribution
 --------------------------------------------------------------------------------
 * Because the pinned upstream sources are AGPL-3.0, every distributed copy of the
   compiled artifacts above (`packages/spqr-wasm/dist/spqr.wasm`,
   `packages/keytrans-wasm/dist/keytrans.wasm`) and of the `kt-query` binary is a
-  distribution of AGPL-3.0 code. Corresponding source is the upstream repository at
+  distribution of AGPL-3.0 code. The same applies to the `nyx-kt-auditor` binary,
+  which contains the Go port of §4 (AGPL-3.0). Corresponding source is the upstream repository at
   the pinned commit listed above (plus this repository's thin wrappers).
 * Rebuilding the artifacts needs no external checkout: the pinned sources are in
   `vendor/signal/` and `server/kt-query/vendor/` (see each `build.sh` and

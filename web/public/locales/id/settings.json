@@ -58,7 +58,8 @@
     "sessions": "Sesi Aktif",
     "export_vault": "Ekspor Brankas",
     "import_vault": "Impor Brankas",      "transfer": "Transfer ke Perangkat Baru (QR)",
-      "restore_backup": "Pulihkan dari Berkas .nyxbak"
+      "restore_backup": "Pulihkan dari Berkas .nyxbak",
+      "export_backup": "Backup Terenkripsi (.nyxbak)"
   },
   "support": {
     "push_notif": "Notifikasi Push",

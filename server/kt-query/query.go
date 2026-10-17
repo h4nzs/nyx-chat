@@ -79,13 +79,65 @@ type queryServer struct {
 
 func (qs *queryServer) routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", qs.handleHealth)
-	mux.HandleFunc("/head", qs.handleHead)
-	mux.HandleFunc("/config", qs.handleConfig)
-	mux.HandleFunc("/search", qs.handleSearch)
-	mux.HandleFunc("/distinguished", qs.handleDistinguished)
-	mux.HandleFunc("/monitor", qs.handleMonitor)
+	// [docs/30 WS-G(7)] Setiap operasi baca dihitung lewat SATU pembungkus, dan
+	// hasilnya disimpulkan dari kode status respons. Alternatifnya (memanggil
+	// metrik di tiap cabang error) punya puluhan tempat yang bisa terlupa — dan
+	// cabang yang terlupa adalah cabang yang paling jarang diuji.
+	mux.Handle("/healthz", observeRead(readOpHealth, http.HandlerFunc(qs.handleHealth)))
+	mux.Handle("/head", observeRead(readOpHead, http.HandlerFunc(qs.handleHead)))
+	mux.Handle("/config", observeRead(readOpConfig, http.HandlerFunc(qs.handleConfig)))
+	mux.Handle("/search", observeRead(readOpSearch, http.HandlerFunc(qs.handleSearch)))
+	mux.Handle("/distinguished", observeRead(readOpDistinguished, http.HandlerFunc(qs.handleDistinguished)))
+	mux.Handle("/monitor", observeRead(readOpMonitor, http.HandlerFunc(qs.handleMonitor)))
 	return mux
+}
+
+// statusRecorder mengingat kode status supaya hasil baca bisa diklasifikasikan
+// tanpa menyentuh satu pun handler.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	if r.status == 0 {
+		r.status = status
+	}
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(payload []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(payload)
+}
+
+// observeRead mencatat satu operasi baca beserta hasilnya.
+//
+// `not_found` dipisah dari `invalid`: "search key belum ada di log" adalah
+// jawaban sah (docs/34 §34.6), sedangkan `invalid`/`error` menandakan ada yang
+// salah — dan keduanya harus bisa dibedakan operator tanpa membuka log.
+func observeRead(op string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorder := &statusRecorder{ResponseWriter: w}
+		next.ServeHTTP(recorder, r)
+
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		result := readResultOK
+		switch {
+		case status == http.StatusNotFound:
+			result = readErrorNotFound
+		case status == http.StatusBadRequest || status == http.StatusMethodNotAllowed:
+			result = readErrorInvalid
+		case status >= 500:
+			result = readErrorError
+		}
+		queryMetrics.read(op, result)
+	})
 }
 
 func (qs *queryServer) handleHealth(w http.ResponseWriter, r *http.Request) {

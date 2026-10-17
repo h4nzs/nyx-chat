@@ -8,9 +8,9 @@
 > search/monitor/distinguished — dan **proxy-nya** di `/api/keys/kt/*`. Sisi
 > **verifier klien** ada di `packages/keytrans-wasm` + `web/src/lib/keyTransparency.ts`
 > dan sudah memverifikasi bukti dari jalur produksi ini (`docs/34`). Yang
-> **belum**: pemanggilan verifier di jalur bundle, loop monitor otomatis, dan
-> auditor/`SetAuditorHead` (`docs/34` §34.6). Selama itu berjalan, log menyediakan
-> **bukti inklusi + jejak audit**, bukan jaminan anti-rollback/anti-MITM penuh.
+> **belum**: pemanggilan verifier di jalur bundle dan loop monitor otomatis
+> (`docs/34` §34.6). Auditor/`SetAuditorHead` **sudah dioperasikan** sejak
+> 2026-10-16 (`server/kt-query/cmd/nyx-kt-auditor`, mode 3) — lihat §32.4 poin 4.
 
 Pin referensi (§30.2): `key-transparency-server` commit `30b7a2a40604`,
 `libsignal/rust/keytrans` `e8cc2dddd578`.
@@ -143,8 +143,14 @@ kunci snapshot ada di box, sama seperti catatan `docs/30` §30.5.
 
 | Metrik | Arti |
 |---|---|
-| `nyx_kt_writes_total{result="ok"\|"error"\|"invalid"\|"unsupported_identifier"}` | penulisan log per hasil (`unsupported_identifier` = identifier bukan bentuk Argon2id 32 byte, mis. hash ID ter-pepper — §32.4b) |
+| `nyx_kt_writes_total{result="ok"\|"error"\|"invalid"\|"unsupported_identifier"\|"no_identifier"\|"identifier_mismatch"}` | penulisan log per hasil (`unsupported_identifier` = identifier bukan bentuk Argon2id 32 byte, mis. hash ID ter-pepper — §32.4b; `no_identifier` = klien lama tidak melampirkan identifier di jalur rotasi; `identifier_mismatch` = identifier bukan milik akun pemanggil — §32.7 poin 2) |
 | `nyx_kt_last_success_timestamp_seconds` | Unix timestamp penulisan sukses terakhir (lag) |
+
+`unsupported_identifier`/`identifier_mismatch`/`no_identifier` sengaja dipisah dari
+`invalid`: yang pertama = bentuk identifier tidak bisa dipakai (klien lama / hash ID
+ter-pepper), yang kedua = identifier sah tapi **bukan milik akun pemanggil**
+(percobaan menulis ke search key orang lain — lihat §32.7 poin 2), yang ketiga =
+klien rotasi tidak melampirkan identifier sama sekali.
 
 Alert (`ops/prometheus/alerts.yml`):
 `NyxKeyTransparencyWriteFailing` (ada error dalam 15 menit) dan
@@ -160,16 +166,76 @@ dalam 1 jam). Keduanya tidak menyala pada instance sepi.
    dan **loop monitor** yang otomatis (`verify_monitor` + `monitorStep` + endpoint
    server), plus temuan penting di `docs/34` §34.5: tanpa anchor yang tersimpan,
    perubahan `search`/tree head tidak terdeteksi — jadi monitor bukan opsional.
-2. **`keyVersion` masih konstanta alur** (1 registrasi, 2 pemulihan), bukan
-   penghitung yang naik per rotasi kunci. Cukup untuk dedupe, belum cukup untuk
-   menyimpulkan urutan versi dari log saja.
+2. **`keyVersion` masih label alur**, bukan penghitung yang naik otomatis per
+   rotasi kunci. Tiga label: **registrasi**, **pemulihan**, **rotasi**
+   (`KT_KEY_VERSION_*` di `keyTransparency.ts`) — jadi tidak ada lagi angka sihir,
+   tetapi log belum bisa dipakai untuk menyimpulkan urutan versi sendiri.
+   Penghitung nyata tidak diadakan karena format nilai v1 hanya menyediakan satu
+   byte dan nilainya harus bertahan antar-restart (butuh kolom DB baru —
+   perubahan skema, `docs/28`).
+
+   **Jalur rotasi SUDAH menulis ke log (2026-10-17).** Tiga jalur yang menimpa
+   `Device.publicKey` — `POST /keys/prekey-bundle` (`routes/keys.ts`),
+   `PUT /users/me/keys` (`routes/users.ts`), dan re-sync kunci
+   `POST /auth/login` (`routes/auth.ts`) — memakai `utils/ktIdentityLog.ts`:
+
+   - **Penyaring:** entri hanya ditulis bila material identitas benar-benar
+     berubah (`identityKeysChanged`). Upload ulang bundle yang sama (auto-heal,
+     login biasa) tidak menghasilkan entri — dedupe saja tidak cukup, karena
+     dedupe-nya berumur 10 menit.
+   - **Identifier dari klien:** server tidak bisa menurunkan search key dari
+     identifier ter-pepper yang tersimpan (§32.4b), jadi klien melampirkan
+     identifier **mentah** (Argon2id 32 byte, base64url) pada upload bundle;
+     disimpan ter-seal `ENC1:` scoped per user (`web/src/lib/keyStorage.ts`).
+   - **Kepemilikan diverifikasi:** `identifierLookupCandidates(kiriman)` harus
+     memuat `User.usernameHash` milik pemanggil. Tanpa ini, siapa pun yang login
+     bisa menulis entri ke search key akun lain (log = ruang publik). Ditolaknya
+     terlihat: `nyx_kt_writes_total{result="identifier_mismatch"}`.
+   - **Klien lama** yang tidak mengirim identifier: dilewati dengan alasan
+     `no_identifier` (bukan menulis entri salah) — jadi celah ini tinggal di
+     perangkat yang belum diperbarui, dan operasinya melihatnya di metrik.
+   - Jalur yang tetap tidak menulis log: device dummy iframe B2B
+     (`routes/engine.ts`, akun tenant dengan kunci dummy).
+   - **Sisa yang disadari:** pembandingnya adalah baris `Device`, bukan entri log.
+     Jadi rotasi yang terjadi **sebelum** perbaikan ini (log sudah memuat kunci
+     lama, `Device` sudah memuat kunci baru) tidak "sembuh" oleh upload berikutnya
+     yang mengirim kunci yang sama — log baru ikut tersinkron saat kunci berubah
+     lagi atau lewat pemulihan. Memperbaikinya butuh pembacaan entri log di sisi
+     server sebelum menulis (bandingkan kunci log vs kunci bundle), dan itu
+     keputusan terpisah.
+
+   Yang **tidak** pernah bergantung pada byte `keyVersion`: deteksi perubahan
+   kunci. `ktMonitoring` memakai `MonitoringData.greatest_version()` =
+   `PrefixProof.counter` **pohon prefix KT** (naik pada setiap penulisan, terlepas
+   dari byte `keyVersion` NYX) — bukti kode:
+   `vendor/signal/libsignal-keytrans/src/lib.rs:385`, `verify.rs:982`
+   (`VersionExtractor` mengambil `counter` dari `ProofStep.prefix`), dan proto
+   `transparency.PrefixProof.counter`.
+
+   Penjaga runnable: `server/tests/keyTransparency.test.ts` (`wiring: registrasi …
+   + pemulihan …`, `wiring: jalur yang menimpa Device.publicKey …`) dan
+   `server/tests/ktIdentityLog.test.ts` (**10 test**: kepemilikan identifier,
+   `no_identifier`, label rotasi, penyaring `identityKeysChanged`, guard sumber
+   tiga jalur rotasi, dan guard gate opt-in test live).
+
+   **Uji tulis live itu opt-in** (`NYX_KT_LIVE_WRITE=1` + `KT_SERVER_URL`) — lihat
+   `docs/11` §11.1. 2026-10-17 gate lama (`skip: !process.env.KT_SERVER_URL`)
+   membuat `pnpm test` menulis dua entri uji ke log self-host
+   (`127.0.0.1:8081`) karena `.env` selalu mengisi variabel itu; log KT
+   append-only, jadi entri orphan itu tetap ada dan hanya bisa dijelaskan, bukan
+   dihapus.
 3. **Update service = test service.** Signal memakai alur provisioning sendiri
    untuk menulis log; NYX memakai endpoint test yang disediakan repo (dan
    melabelinya sebagai test di log server). Alternatif jangka panjang: penulis
    gRPC internal terpisah dengan otorisasi sendiri.
-4. **Rantai audit/auditor belum dipasang.** `SetAuditorHead` + auditor pihak
-   ketiga (atau auditor self-host terpisah) belum dijalankan; tanpa auditor,
-   "log" masih bisa di-rewrite oleh operator.
+4. ~~**Rantai audit/auditor belum dipasang.**~~ **Sudah (2026-10-16).**
+   `SetAuditorHead` dilayani `server/kt-query` (`:8082`) dan proses auditor nyata
+   ada di repo ini: `cmd/nyx-kt-auditor` (port Go dari auditor referensi Signal,
+   diuji terhadap vektor resmi + unit systemd `ops/systemd/nyx-kt-auditor.*`).
+   Log berjalan **mode 3**: begitu `api.auditors` diisi, verifier upstream
+   mewajibkan auditor head yang segar — jadi "log" tidak lagi bisa di-rewrite oleh
+   operator tanpa ketahuan auditor. Batas jujurnya: auditor ini berjalan di host
+   yang sama dengan log (independensi **proses**, bukan organisasi).
 5. **`/recover` dengan identifier ter-pepper** tidak bisa menurunkan search key
    (server tidak bisa membalik pepper) → entri dilewati dengan peringatan. Klien
    yang mengirim Argon2id mentah 32 byte aman.
@@ -263,10 +329,12 @@ Keputusan desain yang penting untuk pembaca berikutnya:
    dan penjadwal `startKtMonitorLoop` berjalan di app shell — lihat `docs/34`
    §34.6b. Catatan: loop hanya punya data setelah verifikasi search pertama
    berhasil (butuh username peer).
-2. **Auditor pihak ketiga belum dioperasikan** — kode sudah ada dan teruji
-   (`server/kt-query/audit.go`, mode 3, `SetAuditorHead`), tetapi belum ada proses
-   auditor yang mengirim tanda tangannya, jadi byte auditor di bukti masih tidak
-   diperiksa di lapangan (`docs/34` §34.6 poin 3).
+2. ~~**Auditor pihak ketiga belum dioperasikan.**~~ **Sudah 2026-10-16**
+   (`server/kt-query/cmd/nyx-kt-auditor` + unit systemd; mode 3 aktif, `/config`
+   melaporkan `mode=3` + kunci auditor). Sisa jujurnya: auditor berjalan di host
+   yang sama dengan log, dan interop dua implementasi (Java referensi vs port ini)
+   berdampingan belum dijalankan — yang dibuktikan adalah kecocokan dengan vektor
+   resmi + jalur hidup di self-host.
 3. **`keyVersion` masih konstanta alur** (§32.7 poin 2).
 4. ~~**Snapshot LevelDB → R2**~~ **Sudah ada (2026-10-14)**: `kt-query/snapshot.go`
    membuat arsip harian **terverifikasi** (tree head + root salinan dibandingkan

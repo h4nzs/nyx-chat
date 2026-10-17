@@ -35,6 +35,7 @@ import {
   averageFrameBytes,
   createFramedBackup,
   formatBackupSize,
+  normalizeBackupPhrase,
   openFramedBackupWithPhrase,
   readTablesFromDexie,
   restoreFramedBackup,
@@ -222,6 +223,45 @@ describe('backupRestore: jalur berkas manual (recovery phrase)', () => {
 
     // `built` (kunci acak) tetap valid sebagai arsip — hanya jalur kuncinya beda.
     expect(built.size).toBeGreaterThan(0);
+  });
+
+  /**
+   * [docs/31 §31.6b] Kontrak yang membuat tombol "Buat Backup" dan modal restore
+   * saling cocok: jalur export menurunkan kunci dari `normalizeBackupPhrase(phrase)`
+   * dan menulis salt-nya ke header; jalur restore menormalkan phrase dengan aturan
+   * yang SAMA. Test ini memakai phrase yang belum rapi (huruf besar + spasi) di
+   * kedua sisi — kalau salah satu sisi berhenti menormalkan, arsip yang sah akan
+   * ditolak "Autentikasi frame gagal".
+   */
+  it('export (phrase dinormalkan) → restore dengan phrase yang belum rapi tetap terbuka', async () => {
+    const messyPhrase = `  ${PHRASE.toUpperCase()}  `;
+    const salt = sodium.randombytes_buf(16);
+    const exportKey = await (await import('../backupFormat')).deriveBackupKey(
+      normalizeBackupPhrase(messyPhrase),
+      salt,
+      TEST_KDF
+    );
+
+    const builtFromExport = await createFramedBackup({
+      store: memoryStore(sampleRecords()),
+      key: exportKey,
+      crypto: cryptoBackend,
+      codec,
+      salt,
+    });
+
+    const target = memoryStore();
+    const report = await openFramedBackupWithPhrase({
+      store: target,
+      bytes: builtFromExport.bytes,
+      phrase: messyPhrase, // sengaja TIDAK rapi — normalisasi harus terjadi di dalam
+      crypto: cryptoBackend,
+      codec,
+      params: TEST_KDF,
+    });
+
+    expect(report.records).toBe(7);
+    expect(target.data.messages).toHaveLength(1);
   });
 });
 

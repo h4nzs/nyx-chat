@@ -58,7 +58,8 @@
     "sessions": "Active Sessions",
     "export_vault": "Export Vault",
     "import_vault": "Import Vault",      "transfer": "Transfer to New Device (QR)",
-      "restore_backup": "Restore from .nyxbak File"
+      "restore_backup": "Restore from .nyxbak File",
+      "export_backup": "Encrypted Backup (.nyxbak)"
   },
   "support": {
     "push_notif": "Push Notifications",

@@ -11,4 +11,5 @@
 //! `packages/shared/src/transport.ts`.
 
 pub mod fuzz;
+pub mod metrics;
 pub mod protocol;

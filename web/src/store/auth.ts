@@ -17,7 +17,7 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, setAutoUnlockIdentity } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, setAutoUnlockIdentity, saveKtIdentifier, getKtIdentifier, clearKtIdentifier } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy";
 import { getBrowserFingerprint } from "@utils/fingerprint";
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto";
@@ -85,10 +85,17 @@ export async function setupAndUploadPreKeyBundle() {
     // identitas LAMA, dan login blind di device baru mengadopsi bundle basi itu.
     const encryptedPrivateKeys = await getEncryptedKeys();
 
+    // [docs/30 §30.5 WS-A] Identifier mentah ikut dikirim HANYA agar server bisa
+    // menulis entri log bila kunci identitas ini berbeda dari yang tercatat
+    // (server tak bisa menurunkan search key dari identifier ter-pepper). Tanpa
+    // nilai ini rotasi tetap jalan, hanya tidak tercatat (`no_identifier`).
+    const ktIdentifier = await getKtIdentifier();
+
     const bundle = {
       identityKey: identityKeyB64,
       pqIdentityKey: pqIdentityKeyB64,
       signingKey: sodium.to_base64(signingPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+      ...(ktIdentifier ? { usernameHash: ktIdentifier } : {}),
       ...(encryptedPrivateKeys ? { encryptedPrivateKeys } : {}),
       signedPreKey: {
         key: sodium.to_base64(signedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
@@ -564,6 +571,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           loginGeneration: get().loginGeneration + 1,
         });
         localStorage.setItem("user", JSON.stringify(res.user));
+        // [docs/30 §30.5 WS-A] Identifier mentah disimpan ter-seal (scoped per
+        // user) agar upload bundle bisa melampirkannya — lihat keyStorage.
+        await saveKtIdentifier(usernameHash, res.user.id);
 
         try {
           // [FIX] Identity Persistence
@@ -709,6 +719,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         // [FIX #5] identitas harus ter-set SEBELUM menulis auto-unlock key —
         // di register, user belum ada di store/localStorage saat titik ini.
         setAutoUnlockIdentity(res.user.id);
+        // [docs/30 §30.5 WS-A] Simpan identifier mentah untuk lampiran log di
+        // upload bundle berikutnya. userId eksplisit: `pendingIdentity` di atas
+        // milik auto-unlock key dan tidak boleh dikonsumsi oleh pemanggil lain.
+        await saveKtIdentifier(usernameHash, res.user.id);
         await saveEncryptedKeys(encryptedPrivateKeys);
         await saveDeviceAutoUnlockKey(password);
         await setDeviceAutoUnlockReady(true);
@@ -754,6 +768,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
         // sesi unlock akun lain di tab yang sama tidak terganggu.
         await clearKeys();
+        // [docs/30 §30.5 WS-A] Identifier mentah ikut dibuang saat logout (slot
+        // user ini saja). `lockApp` sengaja TIDAK menghapusnya: vault terkunci
+        // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
+        // user membuka kunci tanpa login ulang.
+        await clearKtIdentifier();
         localStorage.removeItem('user');
         
         set({ user: null, accessToken: null, hasRestoredKeys: false });

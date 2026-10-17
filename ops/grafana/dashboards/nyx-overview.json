@@ -1,14 +1,21 @@
 {
-  "__comment": "[docs/27 §27.7 + docs/30 WS-G(1)] Dashboard Grafana NYX (event-only). Semua panel memakai metrik yang sudah dideklarasikan di server/src/utils/metrics.ts atau exporter host standar (node/postgres/redis) — TIDAK ada label identitas (userId/IP/usernameHash), jadi dashboard ini tidak bisa dipakai membangun profil pengguna. Query sengaja disamakan dengan ops/prometheus/alerts.yml supaya ambang di panel dan ambang alert tidak menyimpang. Impor: Grafana → Dashboards → Import → unggah file ini (datasource uid 'prometheus' atau pilih ulang).",
+  "__comment": "[docs/27 §27.7 + docs/30 WS-G(1)] Dashboard Grafana NYX (event-only). Semua panel memakai metrik yang sudah dideklarasikan di server/src/utils/metrics.ts, server/kt-query/cmd/nyx-kt-auditor/metrics.go, server/kt-query/metrics.go, server/transport-sidecar/src/metrics.rs, atau exporter host standar (node/postgres/redis) — TIDAK ada label identitas (userId/IP/usernameHash), jadi dashboard ini tidak bisa dipakai membangun profil pengguna. Query sengaja disamakan dengan ops/prometheus/alerts.yml supaya ambang di panel dan ambang alert tidak menyimpang. Pemasangan: dashboard ini diprovisikan dari berkas (docs/10 §10.12) — datasource WAJIB ber-uid 'prometheus'; impor manual (Grafana → Dashboards → Import) hanya jalur cadangan.",
   "uid": "nyx-overview",
   "title": "NYX — Privasi, Relay & Kesehatan Host",
   "description": "Observability tanpa telemetry (docs/30 §30.11 WS-G). Baca bersama docs/10 §10.12.",
-  "tags": ["nyx", "self-host", "docs30-ws-g"],
+  "tags": [
+    "nyx",
+    "self-host",
+    "docs30-ws-g"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 5,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "editable": true,
   "graphTooltip": 1,
   "panels": [
@@ -16,30 +23,55 @@
       "id": 1,
       "type": "row",
       "title": "Penjaga privasi (harus selalu 0)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "id": 2,
       "type": "stat",
       "title": "Percobaan label identitas ke metrik (15m)",
       "description": "nyx_metrics_rejected_total > 0 = ada kode baru yang mencoba mengirim userId/hash/IP ke metrik. Nilai wajib 0; alert NyxMetricsIdentityLeakAttempt menyala pada nilai > 0.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "colorMode": "background",
         "graphMode": "area",
         "textMode": "auto"
@@ -47,8 +79,11 @@
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(increase(nyx_metrics_rejected_total[15m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(nyx_metrics_rejected_total[15m])) or vector(0)",
           "legendFormat": "rejected"
         }
       ]
@@ -58,15 +93,46 @@
       "type": "timeseries",
       "title": "Blokir keamanan sesi/perangkat (per alasan)",
       "description": "device_inactive = device non-aktif masih mengirim; session_revoked = device di-kick mencoba connect; hardware_mismatch; identity_missing. Lonjakan = indikasi kloning sesi / klien perlu re-auth setelah deploy (alert NyxSecurityBlocksSpike).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 1 },
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 20, "lineWidth": 2 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 6,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (reason) (rate(nyx_security_blocks_total[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(nyx_security_blocks_total[5m])) or vector(0)",
           "legendFormat": "{{reason}}"
         }
       ]
@@ -74,21 +140,61 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Eksporter metrik hidup",
-      "description": "up{job=\"nyx-api\"} == 0 → alert NyxMetricsExporterDown; kehilangan seluruh visibilitas (alarm buta).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 4, "x": 15, "y": 1 },
+      "title": "Eksporter metrik hidup (4 proses NYX)",
+      "description": "up{job=~\"nyx-.*\"} untuk keempat exporter loopback: nyx-api :9464, nyx-sidecar :9465, nyx-kt-auditor :9466, nyx-kt-query :9467. Target yang mati TIDAK menyalakan alarm lain (metriknya tidak ada → aturan yang bergantung padanya hanya \"diam\"), jadi setiap exporter punya alarm `…Down` sendiri dan panel ini adalah ringkasannya.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 15,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red", "index": 0 }, "1": { "text": "UP", "color": "green", "index": 1 } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
           ]
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "up{job=\"nyx-api\"}", "legendFormat": "nyx-api" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=~\"nyx-.*\"}",
+          "legendFormat": "{{job}}"
+        }
       ]
     },
     {
@@ -96,40 +202,114 @@
       "type": "stat",
       "title": "Redis key ter-evict (15m)",
       "description": "Redis meng-evict key = rate-limit/presence bisa hilang (alert NyxRedisEvictingRateLimits). Namespace rate-limit harus noeviction (docs/10 §10.11).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 5, "x": 19, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
       "targets": [
-        { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "sum(increase(redis_evicted_keys_total[15m]))", "legendFormat": "evicted" }
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(redis_evicted_keys_total[15m]))",
+          "legendFormat": "evicted"
+        }
       ]
     },
     {
       "id": 6,
       "type": "row",
       "title": "Relay & transport",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      }
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "Operasi relay per hasil",
       "description": "nyx_relay_ops_total{result}: accepted / blocked (keamanan) / unhandled (opcode tak dikenal) / error. Hanya enum pendek — tidak ada userId.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (result) (rate(nyx_relay_ops_total[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_relay_ops_total[5m])) or vector(0)",
           "legendFormat": "{{result}}"
         }
       ]
@@ -139,15 +319,46 @@
       "type": "timeseries",
       "title": "Operasi relay per opcode (top 10)",
       "description": "Opcode transport (docs/18). Distribusi ini yang dipakai memutuskan kapabilitas/mana yang masih dipakai klien lama.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10, "lineWidth": 1 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "topk(10, sum by (op) (rate(nyx_relay_ops_total{result=\"accepted\"}[5m])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(10, sum by (op) (rate(nyx_relay_ops_total{result=\"accepted\"}[5m]))) or vector(0)",
           "legendFormat": "{{op}}"
         }
       ]
@@ -157,15 +368,46 @@
       "type": "timeseries",
       "title": "Operasi endpoint backup (presign/unduh/hapus)",
       "description": "nyx_backup_ops_total{op,result} — docs/31 §31.6 fase 3. Tanpa identitas; kunci objek memakai HMAC tanpa userId.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 15, "lineWidth": 2 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (op, result) (rate(nyx_backup_ops_total[15m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (op, result) (rate(nyx_backup_ops_total[15m])) or vector(0)",
           "legendFormat": "{{op}} / {{result}}"
         }
       ]
@@ -174,27 +416,69 @@
       "id": 10,
       "type": "row",
       "title": "Sweeper sistem (kebersihan data & dead-man switch)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      }
     },
     {
       "id": 11,
       "type": "stat",
       "title": "Umur putaran sweeper terakhir",
       "description": "time() - nyx_sweeper_last_run_timestamp_seconds. >26 jam → alert NyxSweeperStale (token/session key/story kedaluwarsa menumpuk, dead-man switch tidak tereksekusi).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 19 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 19
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 90000 }, { "color": "red", "value": 93600 }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 90000
+              },
+              {
+                "color": "red",
+                "value": 93600
+              }
+            ]
+          }
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "textMode": "auto" },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "time() - max(nyx_sweeper_last_run_timestamp_seconds)",
           "legendFormat": "umur"
         }
@@ -205,20 +489,54 @@
       "type": "timeseries",
       "title": "Durasi sweeper (p50/p95)",
       "description": "Dari histogram nyx_sweeper_duration_seconds. p95 > 120s → alert NyxSweeperSlow (biasanya indeks hilang / tabel membengkak).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 9, "x": 6, "y": 19 },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 9,
+        "x": 6,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.5, sum(rate(nyx_sweeper_duration_seconds_bucket[1h])) by (le))",
           "legendFormat": "p50"
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "histogram_quantile(0.95, sum(rate(nyx_sweeper_duration_seconds_bucket[7d])) by (le))",
           "legendFormat": "p95 (7d)"
         }
@@ -229,15 +547,46 @@
       "type": "timeseries",
       "title": "Baris dibersihkan sweeper (per jenis)",
       "description": "nyx_sweeper_deleted_rows_total{kind}: refresh_token / session_key / account / story. Lonjakan tiba-tiba = retensi agresif atau data nyasar.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 9, "x": 15, "y": 19 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 20, "lineWidth": 1 } }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 9,
+        "x": 15,
+        "y": 19
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (kind) (increase(nyx_sweeper_deleted_rows_total[24h]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (kind) (increase(nyx_sweeper_deleted_rows_total[24h])) or vector(0)",
           "legendFormat": "{{kind}}"
         }
       ]
@@ -246,20 +595,43 @@
       "id": 14,
       "type": "row",
       "title": "Host (VPS 1 core / ~1 GB RAM + swap)",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      }
     },
     {
       "id": 15,
       "type": "timeseries",
       "title": "Disk tersisa (%)",
       "description": "<12% → alert NyxHostDiskLow. Sumber: Postgres + Redis AOF + log pm2.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 27 },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 27
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}",
           "legendFormat": "avail"
         }
@@ -270,19 +642,40 @@
       "type": "timeseries",
       "title": "RAM terpakai (%) + swap",
       "description": ">90% → alert NyxHostMemoryPressure. Argon2id 64MB/login + fan-out grup adalah puncak wajar; swap harus tetap ~0.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 27 },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 27
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
           "legendFormat": "RAM"
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "(node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes",
           "legendFormat": "swap"
         }
@@ -293,13 +686,29 @@
       "type": "timeseries",
       "title": "Koneksi Postgres",
       "description": "postgres_exporter. VPS kecil: naikkan pool hanya bila disk/CPU ikut longgar.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 27 },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 27
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "pg_stat_database_numbackends{datname=~\"nyx.*\"}",
           "legendFormat": "{{datname}}"
         }
@@ -310,28 +719,1489 @@
       "type": "timeseries",
       "title": "Redis memori & klien terhubung",
       "description": "redis_exporter. Key rate-limit harus selamat dari eviksi (panel 'Redis key ter-evict').",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 27 },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 27
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "redis_memory_used_bytes",
           "legendFormat": "memori"
         },
         {
           "refId": "B",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "redis_connected_clients",
           "legendFormat": "klien"
         }
       ]
+    },
+    {
+      "id": 19,
+      "type": "row",
+      "title": "Key Transparency (auditor mode 3 + log nyx-kt-query)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Auditor KT hidup",
+      "description": "up{job=\"nyx-kt-auditor\"} == 0 → alert NyxKtAuditorDown. Tanpa auditor yang menandatangani, log KT hanya berjalan ContactMonitoring — tidak ada error di aplikasi sampai auditor head basi >7 hari dan klien mulai menolak bukti (docs/34 §34.5).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"nyx-kt-auditor\"}",
+          "legendFormat": "nyx-kt-auditor"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Umur tree head auditor terakhir",
+      "description": "time() - max(nyx_kt_auditor_last_head_timestamp_seconds), plus umur proses (bar kedua). Ambang panel = ambang alert NyxKtAuditorHeadStale (5 jam kuning / 6 jam merah, alert for 30m). \"Umur head\" hanya lahir setelah kiriman head pertama diterima log — head pertama memang menunggu irama tanda tangan (NYX_KT_AUDITOR_SIGNATURE_INTERVAL, default 1 jam), dan itulah sebabnya panel ini menampilkan umur PROSES juga: proses muda tanpa head = normal, proses >2 jam tanpa head = kegagalan (aturan yang sama dipakai alert).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 4,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 18000
+              },
+              {
+                "color": "red",
+                "value": 21600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(nyx_kt_auditor_last_head_timestamp_seconds)",
+          "legendFormat": "umur head"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(nyx_kt_auditor_uptime_seconds)",
+          "legendFormat": "umur proses"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Metrik auditor berlabel identitas (15m)",
+      "description": "increase(nyx_kt_auditor_metrics_rejected_total[15m]) harus SELALU 0 → alert NyxKtAuditorMetricsIdentityLeakAttempt. Ini penjaga privasi sisi auditor (cermin panel nyx-api): ada kode baru yang mencoba mengirim nama/ID/IP ke time series, dan metrics.go selalu menolaknya.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 9,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(nyx_kt_auditor_metrics_rejected_total[15m])) or vector(0)",
+          "legendFormat": "ditolak"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Posisi pohon auditor (belum ditandatangani vs head terakhir)",
+      "description": "nyx_kt_auditor_tree_size (pandangan auditor) vs nyx_kt_auditor_head_tree_size (head terakhir yang DITERIMA log). Jarak antar keduanya adalah update terverifikasi yang belum ditandatangani (batas praktisnya NYX_KT_AUDITOR_SIGNATURE_PAGE_SIZE); jarak yang terus melebar = head tidak sampai ke log.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 11,
+        "x": 13,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 0,
+            "lineWidth": 2,
+            "drawStyle": "line"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(nyx_kt_auditor_tree_size)",
+          "legendFormat": "diverifikasi auditor"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(nyx_kt_auditor_head_tree_size)",
+          "legendFormat": "head diterima log"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Tulis/baca log KT dari sisi API (nyx-api)",
+      "description": "Sisi API: nyx_kt_writes_total{result} = penulisan entri ke log KT yang DILAKUKAN server NYX (kegagalan tidak memblokir registrasi, jadi hanya terlihat di sini) → alert NyxKeyTransparencyWriteFailing; nyx_kt_queries_total{result} = pembacaan bukti oleh klien. Metrik PROSES log-nya sendiri ada di baris \"Log KT: prosesnya sendiri (nyx-kt-query)\" — dua hal berbeda: satu mengukur apa yang dikirim server, satu mengukur apa yang diterima/ditulis proses log.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_writes_total[5m])) or vector(0)",
+          "legendFormat": "tulis {{result}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_queries_total[5m])) or vector(0)",
+          "legendFormat": "baca {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Putaran audit & head auditor per hasil",
+      "description": "nyx_kt_auditor_rounds_total{result}: ok / error (layanan log tidak menjawab) / inconsistent (riwayat tidak konsisten = peristiwa keamanan) / skipped_unchanged. nyx_kt_auditor_head_sends_total{result}: error = SetAuditorHead ditolak (mode bukan 3 / kunci tidak terdaftar).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 8,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_auditor_rounds_total[5m])) or vector(0)",
+          "legendFormat": "putaran {{result}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_auditor_head_sends_total[5m])) or vector(0)",
+          "legendFormat": "head {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Snapshot log KT (unggah/hapus) per hasil",
+      "description": "nyx_kt_snapshot_upload_total{result}: result=\"skipped\" = arsip sudah ada di R2 (jalur idempoten), jadi seri \"ok\" yang datar TIDAK berarti gagal — dan sejak restart nyx-api seri itu bahkan belum ada sampai unggahan berikutnya. Kesegaran salinan di luar VPS dibaca dari panel \"Umur arsip snapshot KT terbaru di R2\" (nyx_kt_snapshot_remote_latest_timestamp_seconds, ambang alert NyxKtSnapshotNotUploaded 36 jam). nyx_kt_snapshot_deleted_total = pemangkasan arsip lokal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 14,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_snapshot_upload_total[5m])) or vector(0)",
+          "legendFormat": "unggah {{result}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_snapshot_deleted_total[5m])) or vector(0)",
+          "legendFormat": "hapus {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "Umur tulis KT sukses terakhir",
+      "description": "time() - max(nyx_kt_last_success_timestamp_seconds). Ambang panel = ambang alert NyxKeyTransparencyStalled (1 jam): ada percobaan tulis gagal TANPA satu pun sukses berarti binary KT mati atau endpoint salah, dan kunci identitas baru tidak ter-audit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 19,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1800
+              },
+              {
+                "color": "red",
+                "value": 3600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(nyx_kt_last_success_timestamp_seconds)",
+          "legendFormat": "umur"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Umur arsip snapshot KT terbaru di R2",
+      "description": "time() - max(nyx_kt_snapshot_remote_latest_timestamp_seconds): umur arsip terbaru yang BENAR-BENAR ada di R2. Ambang panel = ambang alert NyxKtSnapshotNotUploaded (36 jam). Nilainya diambil dari daftar objek R2, bukan dari counter unggahan — counter itu datar baik saat arsip dilewati (result=\"skipped\") maupun sesaat setelah nyx-api restart. \"No data\" di sini berarti daftar R2 belum pernah bisa dibaca (kredensial/bucket) atau belum ada objek sama sekali, dan itu sendiri kondisi yang harus diperiksa.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 129600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(nyx_kt_snapshot_remote_latest_timestamp_seconds)",
+          "legendFormat": "umur arsip R2"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "Transport WebTransport (nyx-sidecar)",
+      "collapsed": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "panels": []
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Sidecar WebTransport hidup",
+      "description": "up{job=\"nyx-sidecar\"} == 0 → alert NyxTransportSidecarDown. Aplikasi TIDAK ikut mati: klien yang gagal handshake turun ke WSS secara SENYAP (web/src/lib/transportMode.ts), jadi tanpa panel ini kegagalannya hanya terasa sebagai latensi — tidak ada error di server maupun klien.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": {
+            "type": "value",
+            "options": {
+              "0": {
+                "text": "DOWN",
+                "color": "red",
+                "index": 0
+              },
+              "1": {
+                "text": "UP",
+                "color": "green",
+                "index": 1
+              }
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"nyx-sidecar\"}",
+          "legendFormat": "nyx-sidecar"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Sesi WebTransport aktif & handshake per hasil",
+      "description": "nyx_transport_active_sessions (sesi saat scrape) + nyx_transport_connections_total{result} (accepted/rejected/failed). \"rejected\" yang naik sementara \"accepted\" datar = handshake ditolak sebelum auth (TLS/cert hash tidak cocok dengan VITE_TRANSPORT_CERT_HASH).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 4,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(nyx_transport_active_sessions)",
+          "legendFormat": "sesi aktif"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_transport_connections_total[5m]))",
+          "legendFormat": "handshake {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Auth WebTransport gagal per alasan",
+      "description": "nyx_transport_auth_failures_total{reason} → alert NyxTransportAuthFailuresSpike (>50 per 15 menit per alasan). ticket_invalid/bwh_invalid biasanya berarti JWT_SECRET sidecar ≠ server, bukan serangan. Semua label child lahir 0 sejak awal proses, jadi seri yang datar berarti \"tidak ada kegagalan\" — bukan \"metrik hilang setelah restart\".",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 7,
+        "x": 11,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(nyx_transport_auth_failures_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "Frame WT dibuang selain chaff (15m)",
+      "description": "sum(increase(nyx_transport_rejected_frames_total{reason!=\"chaff\"}[15m])) → alert NyxTransportMalformedFramesSpike (>25). \"chaff\" SENGAJA dikecualikan: itu traffic-cover normal (opcode 0x00) dan biasanya jauh lebih ramai dari traffic nyata. Nilai di sini > 0 = klien/probe mengirim frame tidak sesuai protokol.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(nyx_transport_rejected_frames_total{reason!=\"chaff\"}[15m])) or vector(0)",
+          "legendFormat": "dibuang"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "row",
+      "title": "Log KT: prosesnya sendiri (nyx-kt-query)",
+      "collapsed": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "panels": []
+    },
+    {
+      "id": 35,
+      "type": "stat",
+      "title": "Proses log KT hidup",
+      "description": "up{job=\"nyx-kt-query\"} == 0 → alert NyxKtQueryDown. Proses ini FAIL-OPEN: registrasi & rotasi kunci tetap sukses tanpanya — hanya tanpa jejak audit — jadi tidak ada satu pun error di aplikasi yang menunjuk ke sini. Beda dari panel \"Tulis/baca log KT dari sisi API\": panel itu mengukur nyx-api, panel ini proses log-nya.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": {
+            "type": "value",
+            "options": {
+              "0": {
+                "text": "DOWN",
+                "color": "red",
+                "index": 0
+              },
+              "1": {
+                "text": "UP",
+                "color": "green",
+                "index": 1
+              }
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "up{job=\"nyx-kt-query\"}",
+          "legendFormat": "nyx-kt-query"
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Tulisan proses log per hasil",
+      "description": "nyx_kt_query_writes_total{result} → alert NyxKtQueryWriteFailing pada result=\"error\". \"duplicate\" = update yang sama diulang (idempoten, BUKAN kegagalan); \"invalid\" = permintaan klien salah; \"error\" = pohon/basis data gagal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 4,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(nyx_kt_query_writes_total[5m]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "Baca log per operasi (top 6)",
+      "description": "nyx_kt_query_reads_total{op,result}: search/distinguished/monitor/config/head/health. \"not_found\" dipisah dari \"error\" — \"search key belum ada di log\" adalah jawaban SAH yang harus bisa dibedakan klien dari layanan mati (docs/34 §34.6).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 9,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "topk(6, sum by (op) (rate(nyx_kt_query_reads_total{result=\"ok\"}[5m])))",
+          "legendFormat": "ok {{op}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(nyx_kt_query_reads_total{result=~\"error|invalid\"}[5m]))",
+          "legendFormat": "error+invalid"
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "type": "stat",
+      "title": "Umur snapshot lokal terverifikasi",
+      "description": "time() - max(nyx_kt_query_snapshot_last_timestamp_seconds) → ambang panel = ambang alert NyxKtQuerySnapshotStalled (24 jam kuning / 48 jam merah). Snapshot dibuat PROSES YANG SAMA pada irama NYX_KT_SNAPSHOT_INTERVAL dan tidak dilihat klien mana pun, jadi berhentinya hanya terlihat di sini. \"No data\" = belum pernah ada snapshot sukses sejak arsip ada.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 14,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 172800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(nyx_kt_query_snapshot_last_timestamp_seconds)",
+          "legendFormat": "umur snapshot"
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "type": "stat",
+      "title": "Umur anchor distinguished",
+      "description": "time() - max(nyx_kt_query_distinguished_timestamp_seconds) → ambang panel = ambang alert NyxKtQueryDistinguishedStalled (10 menit kuning / 30 menit merah; irama normal 1 menit). Gauge ini ditulis ulang setiap putaran runDistinguished yang BERHASIL, jadi restart tidak membuatnya basi — seri yang diam berarti loop-nya benar-benar berhenti.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 19,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 600
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - max(nyx_kt_query_distinguished_timestamp_seconds)",
+          "legendFormat": "umur anchor"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Ukuran pohon: pandangan log vs auditor",
+      "description": "max(nyx_kt_query_tree_size) (pandangan proses log) vs max(nyx_kt_auditor_tree_size) (yang sudah DIPERIKSA auditor). Selisih yang melebar = auditor tertinggal/tidak bisa membaca log; auditor yang tidak maju padahal log tumbuh berarti jaminan auditas diam-diam berhenti bertambah (docs/34 §34.5).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(nyx_kt_query_tree_size)",
+          "legendFormat": "log (nyx-kt-query)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(nyx_kt_auditor_tree_size)",
+          "legendFormat": "auditor (terverifikasi)"
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "type": "row",
+      "title": "Latensi jalur: WebTransport vs WSS",
+      "collapsed": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 84
+      },
+      "panels": []
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "p95 ingress per jalur",
+      "description": "p95 dua hop yang berbeda proses, dijaga agar tetap bisa dibandingkan. WebTransport = `nyx_transport_ingress_seconds` (sidecar :9465): dari frame klien utuh diterima sampai diteruskan ke Redis. WSS = `nyx_wss_ingress_seconds` (nyx-api :9464): dari event socket.io diterima sampai handler selesai (validasi + rate limit + pemeriksaan perangkat + publish). Span WSS memuat pekerjaan LEBIH BANYAK — di jalur WT pekerjaan itu terjadi setelah hop yang diukur di sidecar — jadi bila garis WT melewati garis WSS, jalur cepatnya sudah kehilangan keunggulan (alert NyxTransportSlowerThanWss). Garis merah = ambang NyxTransportIngressSlow (250 ms). \"No data\" di sini berarti jalur itu belum menerima satu pun observasi dalam 15 menit (histogram tanpa sampel tidak punya kuantil) — bukan nol detik.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(nyx_transport_ingress_seconds_bucket[15m])))",
+          "legendFormat": "WT p95 (sidecar)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(nyx_wss_ingress_seconds_bucket[15m])))",
+          "legendFormat": "WSS p95 (nyx-api)"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Trafik ingress per jalur (frame/detik)",
+      "description": "sum(rate(..._count[15m])) per jalur. Panel inilah yang menjawab \"berapa klien benar-benar memakai jalur cepat\" — dan karena `_count` selalu ada (dirender 0 sejak proses hidup), nilainya 0, bukan \"No data\". Dua pola yang penting: (a) WT 0 sementara WSS > 0 = tidak ada satu pun klien di WebTransport (jalur cepat tidak dipakai, cek klien/firewall UDP), (b) WT tadinya > 0 lalu jatuh ke 0 TANPA p95 naik = klien berhenti mencoba jalur cepat — pola inilah yang dijaga aturan `NyxTransportUnused`, sedangkan pola (a) sengaja tidak memicu apa pun (selalu nol sejak awal bukan kemunduran).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(nyx_transport_ingress_seconds_count[15m]))",
+          "legendFormat": "WT (frame/s)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(nyx_wss_ingress_seconds_count[15m]))",
+          "legendFormat": "WSS (event/s)"
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "type": "timeseries",
+      "title": "Rasio p95: WT ÷ WSS",
+      "description": "WT p95 ÷ WSS p95 → alert NyxTransportSlowerThanWss menyala pada nilai > 1 selama 30 menit (kedua jalur wajib punya trafik; tanpa itu panel ini kosong dan aturannya diam). Di bawah 1 berarti jalur cepat masih lebih cepat daripada fallback yang pekerjaannya lebih banyak. Angka ini sengaja dipakai, bukan ambang milidetik: ia tidak bergantung pada kecepatan CPU host yang bisa berbeda antara mesin uji dan produksi.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 16,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(nyx_transport_ingress_seconds_bucket[15m])))) / (histogram_quantile(0.95, sum by (le) (rate(nyx_wss_ingress_seconds_bucket[15m]))))",
+          "legendFormat": "WT ÷ WSS"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "p50/p95/p99 jalur WebTransport",
+      "description": "Distribusi lengkap hop sidecar (bucket sama dengan WSS: INGRESS_BUCKETS di metrics.rs ↔ WSS_INGRESS_SECONDS di metrics.ts). Yang dicari bukan p95 saja: p50 yang bergeser berarti SEMUA frame melambat (proses/CPU umum), sedangkan p50 datar dengan p99 naik berarti hanya sebagian kecil yang tertahan (Redis/lock) — dua penyebab yang berbeda tindakannya.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 85
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(nyx_transport_ingress_seconds_bucket[15m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(nyx_transport_ingress_seconds_bucket[15m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(nyx_transport_ingress_seconds_bucket[15m])))",
+          "legendFormat": "p99"
+        }
+      ]
     }
   ],
-  "annotations": { "list": [] },
-  "templating": { "list": [] },
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
   "links": [
-    { "title": "docs/10 §10.12 — Observability tanpa telemetry", "type": "link", "url": "https://github.com/h4nzs/nyx-chat/blob/main/docs/10-deployment-ops.md", "targetBlank": true }
+    {
+      "title": "docs/10 §10.12 — Observability tanpa telemetry",
+      "type": "link",
+      "url": "https://github.com/h4nzs/nyx-chat/blob/main/docs/10-deployment-ops.md",
+      "targetBlank": true
+    }
   ]
 }

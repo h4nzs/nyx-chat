@@ -27,18 +27,52 @@ global:
 rule_files:
   - alerts.yml
 
+# [docs/10 §10.12 · §10.16] Alertmanager di loopback yang sama.
+#
+# Tanpa blok ini Prometheus tetap mengevaluasi 34 aturan di `alerts.yml`, tetapi
+# hasilnya hanya muncul di UI `/alerts` — tidak ada yang diberi tahu. Ini residual
+# yang ditutup 2026-10-17 (§6c README self-host): `up{job="prometheus"}` tidak
+# dipakai sebagai alarm karena Prometheus yang mati tidak bisa mengalarmkan
+# dirinya sendiri, dan Alertmanager adalah satu-satunya hal yang berdiri di
+# antara "aturan menyala" dan "operator tahu".
+#
+# Alertmanager → relay loopback → ntfy (`ops/alertmanager/`). Port 9093 tidak
+# pernah dibuka keluar; nginx tidak mem-proxy-nya.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['127.0.0.1:9093']
+      timeout: 10s
+
 scrape_configs:
   # Aplikasi NYX (Express + bridge + sweeper). Exporter: METRICS_PORT (default 9464).
   - job_name: nyx-api
     static_configs:
       - targets: ['127.0.0.1:9464']
 
-  # Sidecar WebTransport (Rust) — belum mengekspos /metrics; entry disiapkan
-  # supaya saat exporter-nya ditambah (docs/30 WS-G lanjutan) tidak perlu ubah
-  # topologi. Comment dulu agar tidak memicu up==0 palsu.
-  # - job_name: nyx-sidecar
-  #   static_configs:
-  #     - targets: ['127.0.0.1:9465']
+  # Auditor pihak ketiga log Key Transparency (`nyx-kt-auditor`, Go, mode 3).
+  # Exporter `/metrics` di loopback (NYX_KT_AUDITOR_METRICS_ADDR, default 9466).
+  #
+  # Job ini di-scrape TERPISAH dari nyx-api karena kegagalannya tidak setara:
+  # nyx-api yang mati = aplikasi mati (terlihat di mana-mana), sedangkan auditor
+  # yang mati hanya terlihat di sini — klien baru menolak auditor head yang basi
+  # setelah 7 hari (docs/34 §34.5), dan itu berarti log KT kehilangan jaminan
+  # auditasnya tanpa satu pun error di aplikasi.
+  - job_name: nyx-kt-auditor
+    static_configs:
+      - targets: ['127.0.0.1:9466']
+
+  # Sidecar WebTransport (Rust). Exporter `/metrics` di loopback
+  # (TRANSPORT_METRICS_ADDR, default 127.0.0.1:9465) — ditambahkan 2026-10-17
+  # bersama modul `server/transport-sidecar/src/metrics.rs`.
+  #
+  # Kenapa ini penting meski aplikasi "tetap jalan": klien yang tidak bisa
+  # handshake jatuh ke WSS secara SENYAP (`web/src/lib/transportMode.ts`), jadi
+  # tanpa job ini tidak ada satu pun sinyal bahwa jalur cepatnya mati — tidak ada
+  # error di server, tidak ada error di klien, hanya latensi yang lebih buruk.
+  - job_name: nyx-sidecar
+    static_configs:
+      - targets: ['127.0.0.1:9465']
 
   - job_name: node
     static_configs:
@@ -52,8 +86,25 @@ scrape_configs:
     static_configs:
       - targets: ['127.0.0.1:9121']
 
-# [docs/30 WS-A · docs/10 §10.15] Proses log KT sekarang bernama `nyx-kt-query`
-# dan **belum mengekspos /metrics** — jangan menambahkan job scrape sebelum
-# exporter-nya ada (target mati = `up == 0` palsu). Saat ditambahkan, ikuti pola
-# yang sama: hanya loopback, dan port KT (baca :8085, tulis :8081, auditor :8082)
-# tidak pernah dibuka ke publik.
+  # Proses **log** KT (`nyx-kt-query`, pemilik LevelDB). Exporter `/metrics` di
+  # loopback (NYX_KT_METRICS_ADDR, default 127.0.0.1:9467) — ditambahkan
+  # 2026-10-17 bersama `server/kt-query/metrics.go`.
+  #
+  # Job terpisah dari `nyx-kt-auditor` karena yang diukur berbeda kelas: auditor
+  # mengukur "apakah riwayat ini bisa dipercaya", sedangkan proses log mengukur
+  # "apakah tulisan masuk, apakah snapshot lokal tetap dibuat, apakah anchor
+  # `distinguished` tetap berputar". Kegagalan proses ini juga **fail-open**
+  # (registrasi tetap jalan, hanya tanpa jejak audit) sehingga tanpa metrik ia
+  # tidak terlihat di mana pun.
+  - job_name: nyx-kt-query
+    static_configs:
+      - targets: ['127.0.0.1:9467']
+
+# Catatan pembedaan yang mudah tertukar: `nyx-kt-query` = proses log (pemilik
+# LevelDB, membawa 3 listener: baca :8085, tulis gRPC :8081, auditor gRPC :8082),
+# `nyx-kt-auditor` = proses auditor pihak ketiga. Terpisahnya job scrape di atas
+# membuat kegagalan salah satunya tidak menyamar sebagai kegagalan yang lain.
+#
+# Semua port metrik (9464 API, 9465 sidecar, 9466 auditor, 9467 log KT) hanya
+# didengar di loopback dan tidak pernah dibuka ke jaringan — nginx juga tidak
+# mem-proxy-nya.

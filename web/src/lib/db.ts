@@ -35,7 +35,11 @@ export interface DecryptedMessageRecord {
   fileMeta?: string;
   expiresAt?: string | number | null;
   // [docs/28 Tier 2 — B2] waktu kirim presisi (dari ciphertext).
-  sentAt?: number;
+  // [docs/30 WS-F] di-seal DI TEMPAT (`ENC1:`, pola yang sama dengan `seq`):
+  // presisi ms = pola aktivitas per pesan, jadi tidak boleh plaintext di
+  // IndexedDB. Tidak ada indeks yang memakainya; baris lama berbentuk angka
+  // plaintext tetap terbaca lewat `openLocalNumber`.
+  sentAt?: number | string;
   // [docs/28 Tier 2 — B1] seq per-conversation (urutan & kursor paginasi SERVER).
   // Tanpa ini, setelah reload `oldestMessage.seq` hilang → fetch-older jatuh ke
   // kursor ISO-date legacy yang bisa mengulang sebagian halaman.
@@ -52,7 +56,10 @@ export interface PqDrSessionRecord {
   peerDeviceId: string | null;
   version: number;
   negotiationStatus: 'INITIATED' | 'ESTABLISHED' | 'FAILED';
-  lastActivity: number;
+  // [docs/30 WS-F] waktu aktivitas sesi PQ-DR di-seal (`ENC1:`) — presisi ms
+  // per sesi mengungkap kapan sebuah kontak terakhir diajak bicara. Baris lama
+  // berbentuk angka plaintext tetap terbaca lewat `openLocalNumber`.
+  lastActivity: number | string;
 }
 
 // --- Interfaces for OfflineQueue ---

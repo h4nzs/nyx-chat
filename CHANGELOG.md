@@ -2,6 +2,625 @@
 
 All notable changes to this project will be documented in this file.
 
+## ⏱️ Latensi jalur WebTransport vs WSS terukur — penurunan jalur cepat terlihat sebelum sidecar mati (2026-10-17)
+
+Sisa WS-G yang sebelumnya hanya bisa dijawab dengan "sidecar hidup": jalur cepat
+yang **MELAMBAT** tidak menghasilkan satu pun error. Klien tidak tahu ia sedang
+memakai jalur yang seharusnya lebih cepat, sidecar tetap `up`, dan alert
+`NyxTransportSidecarDown` diam — sampai handshake-nya gagal dan semua klien mundur
+ke WSS. Dua histogram baru menutup jendela itu.
+
+**Dua titik ukur, dua proses.** `nyx_transport_ingress_seconds` (sidecar Rust,
+`:9465`) mengukur hop yang benar-benar dimiliki sidecar: dari frame klien utuh
+diterima sampai Redis menerimanya di `nyx:upstream:<opcode>` — diukur di ketiga
+jalur masuk (bidi, uni, datagram), hanya saat publish berhasil, dan timer-nya
+dimulai setelah pembacaan selesai (waktu tunggu klien bukan bagian dari latensi
+server). `nyx_wss_ingress_seconds` (nyx-api, `:9464`) mengukur padanannya di jalur
+cadangan: dari event socket.io diterima sampai handler selesai, termasuk validasi,
+rate limit, pemeriksaan perangkat, dan publish ke `nyx:downstream`.
+
+Cakupan keduanya **tidak identik dan itu disengaja**: pekerjaan yang di jalur WSS
+masuk span-nya justru terjadi di proses Node SETELAH hop yang diukur sidecar. Jadi
+span WSS memuat lebih banyak pekerjaan, dan aturan pembandingnya hanya menyala
+ketika jalur cepat benar-benar sudah kehilangan keunggulannya.
+
+**Tanpa dependency baru di kedua sisi.** Sisi Rust mendapat dukungan histogram
+minimal di `metrics.rs` (bucket kumulatif + `_sum`/`_count`, jumlah disimpan
+sebagai mikrodetik `u64` supaya penjumlahannya tanpa kunci dan tanpa galat
+pembulatan; nilai NaN/negatif DIBUANG, bukan dijepit — satu `NaN` yang lolos akan
+meracuni p95 selamanya). Sisi TS memakai `defineHistogram` yang sudah ada, dengan
+pembungkus `server/src/utils/transportLatency.ts` yang dipisah dari `gateway.ts`
+supaya bagian yang bisa salah bisa diuji tanpa soket.
+
+**Bucket wajib sama, dan itu diuji.** `INGRESS_BUCKETS` (metrics.rs) ↔
+`WSS_INGRESS_SECONDS` (metrics.ts) memakai batas yang identik: p95 dari dua
+histogram dengan pembagian bucket berbeda tidak sebanding, dan itu tidak
+memunculkan error apa pun — hanya perbandingan yang bohong. Keduanya juga
+dirender bernilai 0 sejak proses hidup (tanpa observasi), jadi panel laju
+menampilkan **0**, bukan "No data", dan penjaga `rate(..._count[15m]) > 0` bekerja
+seperti yang dimaksud.
+
+**Tiga aturan baru (32 → 35), semuanya `warning`:**
+
+- `NyxTransportIngressSlow` — p95 hop sidecar > 250 ms (normalnya sub-milidetik)
+  selama 15 menit. Jaring terakhir tanpa pembanding: berarti event loop kelaparan,
+  Redis lambat, atau chaff membanjiri jalur baca.
+- `NyxTransportSlowerThanWss` — p95 jalur cepat > p95 jalur cadangan selama 30
+  menit, dengan trafik di KEDUA jalur. Inilah "penurunan jalur cepat" dalam bentuk
+  paling faktual, dan sengaja dipakai alih-alih ambang milidetik karena tidak
+  bergantung pada kecepatan CPU host.
+- `NyxTransportUnused` — sesi WT pernah ada lalu habis sementara WSS terus
+  melayani, dan prosesnya masih `up`: jalur cepatnya **tidak melambat dan tidak
+  mati, hanya berhenti dipakai**. Keempat aturan transport lain diam semua di
+  keadaan ini (handshake bisa saja sukses, frame sah, auth bersih), jadi tanpa
+  aturan ini penurunannya hanya terlihat oleh orang yang kebetulan membuka
+  dashboard. Penjaga `max_over_time(nyx_transport_active_sessions[1h]) > 0`
+  membuat instalasi yang memang belum pernah memakai jalur cepat — termasuk
+  mesin ini, selama WT belum terjangkau dari publik — tetap diam, karena
+  "selalu nol sejak awal" bukan penurunan.
+
+**Verifikasi.** `cargo test` 18 lulus (termasuk dua uji histogram: deret nol tanpa
+observasi, dan semantik bucket kumulatif + `_sum` dalam detik), suite server
+**455 test (453 lulus, 2 skip opt-in)**, `tsc --noEmit` bersih, `promtool test
+rules` lulus dengan **10 kasus baru** — termasuk dua yang khusus menjaga alarm
+palsu di keadaan nyata mesin ini: histogram kosong (nol observasi, kuantil = NaN)
+dan tanpa trafik WebTransport sama sekali. Enam kasus baru itu memakai nilai p95
+yang dihitung tangan dari distribusi bucket-nya (mis. semua observasi di `le="1"`
+→ p95 = 0,9625 s), bukan ambang yang digeser agar lulus.
+
+**Dashboard: satu baris + empat panel baru** — "Latensi jalur: WebTransport vs WSS"
+(p95 per jalur dengan garis ambang 250 ms, laju ingress per jalur untuk melihat
+jalur mana yang benar-benar dipakai klien, rasio WT÷WSS, dan p50/p95/p99 jalur
+cepat). Dokumen: `docs/10` §10.12, `docs/23` §23.2, `docs/25`, `AGENTS.md`.
+
+**Batas yang jujur.** Tanpa telemetry klien, yang bisa diukur adalah **hop sisi
+server**, bukan latensi yang dirasakan klien (RTT jaringan tidak masuk ke angka
+mana pun — itu batas yang sudah berlaku untuk seluruh sistem ini). Dan di mesin
+ini kedua histogram masih tanpa sampel karena belum ada klien yang terhubung: panel
+p95 akan menampilkan "No data" (NaN, bukan 0) sampai ada trafik nyata — itulah
+sebabnya aturan latensi dijaga penjaga laju, dan sebabnya kasus drill "histogram
+kosong" ada.
+
+## 📊 Dua proses senyap akhirnya bisa dilihat: exporter `nyx-sidecar` + `nyx-kt-query`, dan notifikasi Alertmanager → ntfy (2026-10-17)
+
+Tiga residual WS-G yang selama ini tercatat di `~/nyx-selfhost/README.md` §6c
+ditutup sekaligus. Ketiganya punya akar yang sama: **kegagalan yang tidak
+menghasilkan error di mana pun**.
+
+**1. `nyx-sidecar` (Rust) tidak punya `/metrics`.** Klien yang gagal handshake
+WebTransport tidak error — ia turun ke WSS secara senyap
+(`web/src/lib/transportMode.ts`), jadi sidecar boleh mati berhari-hari dan yang
+hilang hanya latensi. `server/transport-sidecar/src/metrics.rs` (baru) menambah
+10 keluarga `nyx_transport_*` (koneksi/handshake, auth per metode + alasan gagal,
+kick perangkat, frame yang dibuang, relay terkirim per jalur, downstream, byte
+per arah, sesi aktif, umur proses) dan eksposisi teks Prometheus 0.0.4 **tanpa
+dependency baru**. Nilai label semuanya enum bertipe, jadi tidak ada string bebas
+yang bisa menyelundupkan identitas — dan karena renderer menuliskan **seluruh**
+nilai enum (bernilai 0 sejak scrape pertama), `increase()` tetap bermakna lintas
+restart. Listener wajib loopback: alamat non-loopback ditolak saat start.
+
+**2. `nyx-kt-query` (Go) tidak punya `/metrics`.** Proses ini **fail-open**: kalau
+ia mati, registrasi dan rotasi kunci tetap sukses, hanya tanpa jejak audit —
+tidak ada satu pun error di aplikasi yang menunjuk ke sana.
+`server/kt-query/metrics.go` (baru) menambah 8 keluarga `nyx_kt_query_*` (tulisan
+per hasil, baca per operasi, percobaan snapshot, ukuran pohon, umur proses, dua
+gauge kunci, penjaga privasi) di `NYX_KT_METRICS_ADDR` (default
+`127.0.0.1:9467`).
+
+**3. Tidak ada yang memberi tahu operator.** `prometheus.yml` sekarang punya blok
+`alerting:` → Alertmanager `127.0.0.1:9093`; Alertmanager (0.34.1) **tidak punya
+receiver ntfy**, jadi `ops/alertmanager/` berisi config **tanpa rahasia**
+(receiver = relay loopback) + `ntfy-relay.mjs` (payload JSON v4 → pesan ntfy,
+prioritas dari `severity`, `--self-test`). Topik + token hidup di EnvironmentFile
+0600 di VPS, tidak di repo. Port relay 9095 (bukan 9094: itu listener gossip
+Alertmanager sendiri — memakainya membuat proses gagal start).
+
+**Aturan alert: 23 → 32** dalam 5 grup (`nyx-app`, `nyx-transport`,
+`nyx-kt-query`, `nyx-kt-auditor`, `nyx-host`). Sembilan aturan baru memisahkan
+kelas kegagalan yang tindakannya berbeda: `…Down` (proses/exporter hilang),
+`…Restarting` untuk kedua proses baru (`changes(up[1h]) > 2` **atau**
+`resets(uptime[1h]) > 1`, karena restart lebih cepat dari satu irama scrape tidak
+pernah terlihat `up == 0`), lonjakan auth/frame di sidecar (dengan
+`reason="chaff"` sengaja **dikecualikan** — itu traffic-cover normal), tulisan log
+KT yang error, snapshot lokal yang berhenti dibuat, dan anchor `distinguished`
+yang berhenti berputar.
+
+**Cacat yang ditemukan saat menulis aturan itu.** Gauge
+`nyx_kt_query_distinguished_timestamp_seconds` awalnya hanya di-set **sekali saat
+start**: alert "anchor basi" (ambang 30 menit) karena itu akan menyala **palsu di
+setiap restart** sekaligus tetap buta terhadap loop yang benar-benar berhenti —
+persis kelas kesalahan yang sudah pernah terjadi di sisi TS (alarm palsu snapshot
+2026-10-16). `updateDistinguished` sekarang mempublikasikan nilai yang
+**benar-benar ditulis** pada setiap putaran yang berhasil, dan ada kasus drill
+khusus untuk regresi ini.
+
+**Verifikasi (dijalankan, bukan diasumsikan).** `go vet` + `go test ./...`
+bersih (termasuk `metrics_test.go` baru); `cargo` + unit test exporter sidecar;
+`promtool check config`/`check rules` → 32 aturan; `promtool test rules` → semua
+kasus menyala **dan** tidak-menyala lulus (20 kasus baru, termasuk regresi label
+child pra-0 dan restart cepat); `scripts/drill-alerts.sh` sekarang membaca
+**empat** sumber deklarasi metrik (`metrics.ts`, dua `metrics.go`, `metrics.rs`)
+dan menolak aturan yang merujuk metrik tak terdeklarasi. Di mesin ini: keempat job
+`up` (`9464`/`9465`/`9466`/`9467`), Alertmanager aktif di Prometheus, dan
+notifikasi ujung-ke-ujung terbukti (alert uji masuk, berikut `resolved`-nya).
+
+**Dokumentasi.** `docs/10` §10.12 (tabel metrik dua exporter baru + seluruh
+sub-bagian notifikasi), `docs/23` §23.2 (metrics sidecar), `server/kt-query/README.md`
+(env + metrik), `ops/systemd/README.md` (verifikasi + gejala), `docs/25`, `AGENTS.md`,
+`~/nyx-selfhost/README.md` §6c.
+
+**Sisa yang jujur.** `nyx_kt_snapshot_remote_latest_timestamp_seconds` masih
+kosong di mesin ini (belum ada satu pun arsip di R2 — jalur unggahnya sudah
+dikonfigurasi, cron 03:30 belum berjalan sejak itu), jadi
+`NyxKtSnapshotNotUploaded` menyala dan itu **benar**; ia hilang setelah satu
+putaran unggah sukses.
+
+## 🔁 Rotasi kunci identitas kini tertulis di log KT — celah "log memuat kunci lama" ditutup (2026-10-17)
+
+Sisa WS-A sebelumnya: tiga jalur menimpa `Device.publicKey` **tanpa** entri log
+(`POST /keys/prekey-bundle`, `PUT /users/me/keys`, re-sync kunci
+`POST /auth/login`). Akibatnya, setelah rotasi yang sah, log masih memuat kunci
+LAMA: peer memverifikasi bundle → verdict `mismatch` (kunci tersaji ≠ kunci log)
+→ `peerIdentityTrust` menyimpannya sebagai `ktMismatch` + `pendingKey` → gate
+kirim menutup sampai user menerima "perubahan kunci" yang sebenarnya rotasi biasa.
+
+**Kenapa tidak bisa diperbaiki sepihak di server.** Search key log =
+`0x75 || Argon2id(raw)`, sedangkan yang tersimpan di DB adalah identifier
+ter-pepper (`pepperedIdentifier`) yang tidak bisa dibalik tanpa pepper. Jadi
+server **tidak bisa** menurunkan search key sendiri — nilai mentahnya harus
+datang dari klien, dan justru itu yang membuat verifikasi kepemilikan wajib.
+
+**Server — `server/src/utils/ktIdentityLog.ts` (baru).** `publishIdentityKeyChange`
+menulis entri rotasi dengan aturan yang eksplisit:
+
+- **Kepemilikan diverifikasi:** `identifierLookupCandidates(kiriman)` harus memuat
+  `User.usernameHash` pemanggil. Tanpa ini, siapa pun yang sudah login bisa
+  menulis entri ke search key **akun lain** (log = ruang publik, vektor
+  poisoning). Ditolak → `nyx_kt_writes_total{result="identifier_mismatch"}`.
+- **Penyaring rotasi:** `identityKeysChanged` membandingkan material sebelum vs
+  sesudah — upload ulang bundle yang sama (auto-heal, login biasa) tidak menulis
+  entri. Dedupe lama saja tidak cukup (umurnya 10 menit).
+- **Fail-visible, tidak pernah menahan respons:** fire-and-forget (`void`) di
+  ketiga jalur, dan alasan kegagalan bisa dibedakan — `no_identifier` (klien lama
+  tidak melampirkan identifier), `invalid` (kunci wajib tidak lengkap),
+  `identifier_mismatch`, `ok`.
+- **Label alur, bukan angka sihir:** `KT_KEY_VERSION_REGISTRATION` /
+  `_RECOVERY` / `_ROTATION` menggantikan literal `keyVersion: 1`/`2` di
+  `routes/auth.ts`. Format nilai log tetap beku (`docs/32`); yang berubah hanya
+  konstanta penamaannya.
+- Jalur yang **sengaja** tidak menulis log: device dummy iframe B2B
+  (`routes/engine.ts`) — akun tenant, kunci dummy, tanpa identifier Argon2id.
+
+**Klien — identifier ter-seal, scoped per user.** `keyStorage` menyimpan
+identifier mentah sebagai envelope `ENC1:` (masterSeed) dengan slot per user
+(`nyx_kt_identifier:<userId>`), diisi saat login & register, dibuang saat logout,
+**tidak** dibuang saat `lockApp` (vault terkunci hanya membuat pembacaan gagal).
+`setupAndUploadPreKeyBundle` melampirkan `usernameHash` pada body bundle hanya
+bila nilainya ada — klien lama/terkunci tetap jalan, servernya mencatat
+`no_identifier`.
+
+**Verifikasi.** `server/tests/ktIdentityLog.test.ts` (baru, 8 test): kepemilikan
+identifier (tolak + metrik), nilai yang benar-benar ditulis (keyVersion rotasi,
+kunci cocok, hanya material publik), `no_identifier`, kunci tidak lengkap,
+no-op tanpa `KT_SERVER_URL`, penyaring `identityKeysChanged`, dan guard sumber
+ketiga jalur. Guard lama diperbarui ke konstanta label. Web:
+`src/lib/__tests__/ktIdentifierStorage.test.ts` (7 test) — penyimpanan ter-seal
+(bukan plaintext), scoping antar-akun, clear hanya slot sendiri, dan wiring store
+(`login`/`register` menyimpan, `logout` membersihkan, body bundle melampirkan).
+Suite: **server 445 test (444 lulus, 1 live opt-in skip)**, **web 684 test lulus**,
+`tsc --noEmit` bersih di kedua paket.
+
+**Insiden kecil yang tercatat jujur — dan penyebab + penutupnya.** Test live
+pertama untuk jalur rotasi memakai gate `skip: !process.env.KT_SERVER_URL`. Gate
+itu tampak benar tapi salah di repo ini: `server/.env` **selalu** mengisi
+`KT_SERVER_URL`, dan `src/config.ts` (`import 'dotenv/config'`) memuatnya begitu
+sebuah modul menarik `atRestSecrets` — sehingga saat suite penuh dijalankan,
+test "live" itu benar-benar jalan dan **menulis dua entri uji ke log self-host**
+(`127.0.0.1:8081`, `nyx-kt-query`). Log KT append-only, jadi entri itu tidak bisa
+dihapus. Dampaknya: dua entri *orphan* di pohon (search key acak 32 byte, kunci
+dummy 0x77/0x22/0x33, `keyVersion` rotasi, bucket hari ini) — tidak menunjuk akun
+mana pun, jadi tidak mengubah verdict verifikasi siapa pun; yang bertambah hanya
+ukuran pohon (+2) dan kehadirannya di snapshot/auditor. Perbaikannya: gate
+menjadi **opt-in eksplisit** (`NYX_KT_LIVE_WRITE=1` + `KT_SERVER_URL`) untuk
+kedua test live, ditambah guard `guard: penulisan live hanya dengan opt-in
+eksplisit` yang menggagalkan suite bila ada yang mengembalikannya ke gate lama.
+Verifikasi ulang: suite penuh men-*skip* keduanya (445 lulus, 2 skip, 0 gagal) dan
+jalur live-nya lulus saat diminta eksplisit ke instance terisolasi
+(`127.0.0.1:18081`).
+
+**Sisa yang tidak ikut ditutup:** pembanding rotasi adalah baris `Device`, bukan
+entri log. Rotasi yang terjadi sebelum perubahan ini (log memuat kunci lama,
+`Device` memuat kunci baru) tidak tersinkron oleh upload berikutnya yang mengirim
+kunci sama; log baru ikut benar saat kunci berubah lagi atau lewat pemulihan.
+Memperbaikinya = membaca entri log di sisi server sebelum menulis (keputusan
+terpisah, dicatat `docs/32` §32.7 poin 2).
+
+**Diperbarui:** `docs/30` (§30.5 poin 2 + blok status + baris WS-A), `docs/32`
+(§32.7 poin 2 + tabel metrik), `docs/34` residual poin 3, `docs/11` (§11.1 gate
+live + §11.4), `docs/12` (field `usernameHash?` di dua endpoint).
+
+## 🔐 Verifikasi WS-A: penulis log KT terbukti menulis — dan sisa "keyVersion konstanta" ternyata dua kali lebih besar (2026-10-17)
+
+Baris WS-A `docs/30` mencatat sisa tunggal: *`keyVersion` masih konstanta alur*.
+Dua hal diperiksa: (1) apakah penulis benar-benar terpasang & bekerja, dan
+(2) apa arti sisa itu bagi deteksi. Hasilnya: penulis **terbukti** bekerja, dan
+sisanya **dua sisi** — yang kedua lebih berdampak daripada yang tertulis.
+
+**Bukti bahwa penulis jalan (bukan klaim dokumen).** `keyTransparency.test.ts`
+11 test lulus (10 jalan + 1 live opt-in), termasuk **satu penulisan nyata** ke
+binary Go `key-transparency-server` yang dijalankan terisolasi
+(`127.0.0.1:18081`, LevelDB sendiri di `/tmp` — log self-host tidak disentuh):
+ukuran pohon bertambah setelah `Update`. Temuan lama yang masih berlaku: server
+menolak `consistency = nil`, jadi field itu selalu dikirim (boleh kosong).
+
+**Guard baru 1 — wiring dua situs.** Tidak ada test yang menjaga *bentuk*
+pemanggilan di `routes/auth.ts`. Sekarang dikunci: tepat **dua** situs penulisan
+(registrasi `keyVersion: 1`, pemulihan `keyVersion: 2`), keduanya fire-and-forget
+(`void`, bukan `await`), keduanya berada **setelah** tulisan DB terdekat (nested
+create di registrasi, `prisma.$transaction` di pemulihan) dan **sebelum** respons,
+dan presisi waktunya bucket harian (`Math.floor(dayBucket()/86_400_000)`) — bukan
+detik/milidetik yang akan membocorkan jam pendaftaran ke log publik.
+
+**Guard baru 2 — invariant daftar jalur penulis kunci.** Scan seluruh
+`server/src` menemukan **lima** tempat dengan pola tulis `publicKey: Buffer.from(…)`:
+`routes/auth.ts` (2 situs tertulis di atas), **`routes/keys.ts`
+(`POST /keys/prekey-bundle`)**, **`routes/users.ts` (`PUT /users/me/keys`)**, dan
+**`routes/engine.ts`** (device dummy iframe B2B) — ketiganya **tidak menulis log**;
+sisanya `network/realtimeHandlers.ts` (pencarian `where: { publicKey: … }`, bukan
+penulisan). Test mengunci daftar itu, jadi jalur penulis baru atau jalur yang
+mulai menulis log akan menggagalkan test dan memaksa dokumen diperbarui.
+
+**Kenapa sisi kedua itu penting.** Setelah rotasi kunci lewat salah satu dari tiga
+jalur tadi, log masih memuat kunci LAMA: peer yang memverifikasi bundle
+mendapat verdict `mismatch` (kunci tersaji ≠ kunci log), `peerIdentityTrust`
+menyimpannya sebagai `ktMismatch` + `pendingKey`, dan gate kirim menutup sampai
+user menerimanya — padahal yang terjadi adalah rotasi yang sah. Server tidak bisa
+memperbaikinya sendiri: yang tersimpan di DB adalah identifier ter-pepper,
+sedangkan search key log butuh Argon2id mentah 32 byte, jadi klien harus
+mengirimkannya bersama upload bundle.
+
+**Yang justru TIDAK terpengaruh: deteksi perubahan kunci.** `ktMonitoring`
+memakai `MonitoringData.greatest_version()`, yaitu `PrefixProof.counter` pohon
+prefix KT (naik pada **setiap** penulisan, apa pun isi byte `keyVersion` NYX) —
+diverifikasi di kode vendored: `vendor/signal/libsignal-keytrans/src/lib.rs:385`,
+`verify.rs:982`, dan proto `transparency.PrefixProof.counter`. Jadi residual ini
+bukan lubang deteksi, melainkan lubang *kelengkapan penulis*.
+
+**Diperbarui:** `docs/30` (§30.5 poin 2 + baris WS-A), `docs/32` §32.7 poin 2,
+`docs/34` residual poin 3, `docs/11` §11.4. **Tidak diubah:** `server/src` —
+verifikasi ini tidak menyentuh jalur kripto/penulisan.
+
+## 🧬 Verifikasi WS-D: tiga "Sisa" prasyarat SPQR sudah tertutup — dan kini ada penjaganya (2026-10-17)
+
+Baris M8 `docs/30` masih mencatat empat "Sisa" untuk WS-D (*versi wire baru di
+header DR + ack + pemanggilan modul negosiasi/state dari jalur pesan + verifikasi
+E2E*). `docs/33` §33.7/§33.10 mencatat ketiganya landed 2026-10-14. Yang benar:
+ketiganya **memang sudah dipanggil jalur pesan** — dan satu-satunya bukti yang
+ada selama ini adalah E2E `web/e2e/spqr.spec.ts`, yang **tidak bisa dijalankan**
+di mesin ini.
+
+**Temuan 1 — E2E tidak bisa dijalankan di mesin ini, dan itu bukan soal
+layanan.** Postgres menerima koneksi dan Redis menjawab `PONG`, tetapi
+`web/e2e/global.setup.ts` → `server/scripts/reset-test-env.ts` berhenti sendiri
+dengan `DANGER: Attempted to wipe database in non-local/production environment!`
+(exit 1) karena `server/.env` di mesin ini `NODE_ENV=production`. Guardrail itu
+**benar** (tidak boleh dilewati dengan mengubah `.env`), jadi seluruh suite
+Playwright — termasuk dua spec SPQR — mustahil berjalan di sini. Akibatnya klaim
+"integrasi jalur pesan" hanya bersandar pada hasil E2E 2026-10-14.
+
+**Temuan 2 — tidak ada penjaga yang bisa dijalankan untuk tiga hal itu.** Wire v2,
+`ackV`, dan pemanggilan op worker hanya diuji lewat unit test modul tunggal
+(`spqrWire`/`spqrNegotiation`/`spqrState`/`spqrSession`) — tak satu pun menyentuh
+komposisinya, dan tak ada yang menjaga **urutan** panggilan di `utils/crypto.ts`
+(header v2 harus diparse sebelum state machine v1; tanpa itu sebuah pesan v2 bisa
+dibaca sebagai v1).
+
+**Perbaikan (tanpa menyentuh jalur kripto beku).** Test baru
+`web/src/lib/__tests__/spqrMessagePath.test.ts` — **8 test**, modul nyata + WASM
+nyata + libsodium nyata:
+
+1. **Perilaku:** v1 dulu (peer belum menyatakan; wire benar-benar v1) → peer
+   menulis `ackV: 2` di payload ter-seal → pengiriman berikutnya v2
+   (`{v:2,b:[…]}`, tanpa `kemPk`/`n`/`pn`) → peer **membuka plaintext itu**
+   (braid + XChaCha20 sungguhan) → berlaku dua arah. Rollback: keputusan kembali
+   v1 dengan `preservedVersion: 'v2'`, state braid dipertahankan, dan pesan v2
+   dari peer tetap terbaca. Keputusan v2 tanpa akar braid → wire tetap v1
+   (fallback), percobaan v2 diulang pada pesan berikutnya.
+2. **Guard sumber:** mengunci impor modul negosiasi/wire/state di `utils/crypto.ts`,
+   urutan `parseSpqrHeader` **sebelum** `worker_dr_ratchet_decrypt` dan sebelum
+   pemeriksaan skipped-key, dua tempat `extractVersionDeclaration` →
+   `peerAckRatchetVersion`, `saveSpqrState` di kirim & terima, `deleteSpqrState`
+   pada sesi baru, `flushSpqrState`, guard fail-closed "sesi tanpa state braid",
+   ketiga op worker (`spqr_ratchet_init/encrypt/decrypt`) + proxy-nya, dan paritas
+   padding/AEAD v2 dengan v1 (8 KB + nonce 24 B + XChaCha20-Poly1305).
+
+**Koreksi dokumen (drift yang ditemukan saat membandingkan klaim dengan kode):**
+`spqrNegotiation.test.ts` bukan 9 test (`docs/33` §33.9) atau 18 (§33.10),
+melainkan **21** (4 `advertisedCapabilities`, 5 `resolveRatchetVersion`, 2
+`planRatchetRollback`, 7 `resolveOutboundRatchetVersion`, 3 kill switch runtime);
+§33.9 masih menulis `SPQR_INTEGRATION_ENABLED = false` padahal nilainya `true`;
+dan baris M8 `docs/30` masih mencantumkan "Sisa" yang sudah selesai.
+
+Verifikasi yang dijalankan: `bash scripts/check-wasm-artifacts.sh` exit 0
+(`spqr.wasm` 518.522 B + `keytrans.wasm` 299.670 B, hash cocok manifest);
+suite SPQR + kapabilitas + `drProtocol` **98/98 lulus di 7 berkas**;
+`spqrMessagePath.test.ts` **8/8**; web `npx tsc --noEmit` **0**.
+
+**Batas jujur:** E2E `spqr.spec.ts` (termasuk rollback dua klien nyata) **tidak
+dijalankan** dalam verifikasi ini — blocked oleh guardrail `NODE_ENV` di atas.
+Test baru ini menjaga rantai panggilan yang E2E buktikan, bukan menggantikannya.
+
+## 🔗 Verifikasi WS-I: tautan `/u/<hashId>` tak punya produsen & tak bisa dipindai (2026-10-16)
+
+Gate `docs/30` §30.13 terdengar sudah selesai (route `/u/:hashId` ada, validasi
+bentuk sama dengan server), tetapi diperiksa dari sisi **pengguna** fiturnya tidak
+bisa dipakai sama sekali:
+
+**Temuan 1 — tidak ada yang menghasilkan tautannya.** `ShareProfileModal` masih
+membangun `/connect?u=<hashId>&i=<userId>&p=<profil terenkripsi>`: userId mentah
+ikut beredar di dalam QR/tautan, dan karena tidak ada kode lain yang menulis
+`/u/`, halaman WS-I hanya bisa dibuka oleh orang yang mengetik hashId-nya sendiri.
+
+**Temuan 2 — pemindai QR menolaknya.** `ScanQRModal` hanya menerima tautan
+berbentuk `/connect?u=…`, jadi QR berisi `/u/<hashId>` (bentuk yang justru
+dituju WS-I) diabaikan tanpa pesan.
+
+**Perbaikan.** `ShareProfileModal` memakai `buildUsernameLink` dari
+`utils/usernameLink.ts`: QR dan tombol salin kini menunjuk URL yang **sama**
+(`/u/<hashId>`), hanya memuat hashId; hashId tak berbentuk sah membuat modal tidak
+render (sebelumnya `buildUsernameLink` bisa melempar saat render). Sisi konsumen:
+`parseProfileShareLink()` baru menjadi **satu** parser untuk dua bentuk —
+`/u/<hashId>` divalidasi dengan aturan yang sama seperti server, dan
+`/connect?u=…&i=…&p=…` diteruskan **apa adanya** supaya QR yang sudah beredar
+tidak mati. `ScanQRModal` memakai parser itu, jadi perilaku pemindaian lama tidak
+berubah (host sengaja tidak dipatok: deployment self-host memakai domain sendiri,
+dan yang diteruskan hanya hashId).
+
+Tidak ada perubahan pada kontrak server: `/api/users/search` tetap pencocokan
+**persis** (`identifierLookupCandidates`, tanpa prefix), di bawah `generalLimiter`
+dan wajib terautentikasi — jadi klaim "tanpa enumerasi" tetap seperti semula.
+
+Verifikasi: web `npx tsc --noEmit` 0, `pnpm --filter nyx-web run build` exit 0,
+`vitest` **669/669 (78 file)**; test baru: `usernameLink.test.ts` (+8, termasuk
+roundtrip `buildUsernameLink` → `parseProfileShareLink`),
+`shareProfileModal.test.tsx` (3: QR hanya hashId, tombol salin = QR, hash tak sah
+= tanpa QR) dan `scanQrModal.test.tsx` (4: link pendek diterima + kamera berhenti,
+64 hex diterima, QR lama utuh, non-NYX/segmen rusak diabaikan). **Sisa jujur:**
+tidak ada E2E kamera/`/connect` nyata — suite Playwright butuh Postgres + Redis
+lokal yang belum tersedia di mesin ini.
+
+## 🕵️ Verifikasi WS-H: alamat klien masih tersimpan di key Redis (2026-10-16)
+
+Gate `docs/30` §30.12 menuntut dua hal yang mudah diklaim tanpa diuji: akun ke-100
+dari satu ASN dalam satu jam ditahan, dan audit "tidak ada IP di DB/Redis".
+Bagian pertama memang sudah benar (guard burst + attestation, diuji sebagai
+perilaku). Bagian kedua **gagal**: dua tempat menyimpan wakil klien di Redis.
+
+**Temuan 1 — key rate-limit memuat alamat mentah.** Ketiga limiter API memakai
+`ipKeyGenerator(cfAwareClientIp(req))` sebagai key, dan `RedisStore` menulis
+`rl:general:<ip>` / `rl:auth:<ip>` / `rl:upload:<ip>` dengan TTL 15 menit–1 jam.
+Artinya snapshot Redis (atau `MONITOR`/AOF) berisi daftar alamat klien beserta
+riwayatnya — persis yang dilarang kriteria audit dan bertolak belakang dengan
+cara repo ini sudah menangani userId di key (`identityTag`).
+
+**Temuan 2 — counter PoW memakai hash tanpa kunci.** `/pow/challenge` membentuk
+key dari `blake2b(primaryId)` **tanpa kunci**, dipotong 16 hex
+(`pow:user|inst|fp|ip`). Untuk identitas berentropi rendah itu bukan
+perlindungan: ruang IPv4 hanya 2^32, jadi pemegang snapshot bisa mengenumerasi
+seluruh ruang dan mencocokkan hash-nya. Alasan yang sama sudah tertulis di
+`utils/atRestSecrets.ts` ("hash TANPA kunci = bisa dienumerasi") — aturan itu
+kini dipakai konsisten di key Redis.
+
+**Perbaikan.** `clientIpTag()` (`utils/clientIp.ts`) = HMAC pepper atas alamat
+yang **sudah** dinormalkan `ipKeyGenerator` (normalisasi IPv6 bawaan tetap
+terpakai), dipasang di ketiga limiter + limiter non-API; `powRateKey()`
+(`utils/powIdentity.ts`) = HMAC pepper domain-separated, dipakai
+`/pow/challenge`. Semantik pembatasan tidak berubah (klien sama → tag sama →
+counter sama); operator tetap bisa menghitung tag dari pepper kalau perlu
+menelusuri satu alamat. Konsekuensi yang disengaja: bentuk key berubah → counter
+lama berhenti dipakai (TTL-nya pendek, jadi wajar).
+
+**Koreksi rujukan ops.** Alert `NyxAbuseGuardDisabled` menyuruh operator membaca
+"checklist lengkap di docs/10 §10.13" — §10.13 adalah pembersihan & snapshot KT.
+Checklist WS-H kini ada di **§10.16** (menyalakan bertahap: `shadow` untuk
+mengukur → isi `ASN_DB_FILE` → `on`; rollback; daftar key yang tidak boleh
+kembali ke IP mentah), dan rujukan alert + peringatan boot diarahkan ke sana.
+
+**Dua kegagalan suite server yang lama juga ditutup — keduanya kelas "test
+bergantung `.env` mesin", bukan perilaku produk:** `atRestSecrets` meng-assert
+cabang dev-fallback padahal `.env` di mesin ini `NODE_ENV=production` (kini
+mode-aware: production wajib fail-closed), dan `ktSnapshot` mengharap
+`KT_SNAPSHOT_DIR` kosong padahal `.env` self-host mengisinya (kini env dibersihkan
+selama test). Mesin dengan `.env` produksi terisi sebelumnya **tidak bisa**
+memperoleh suite server hijau.
+
+Verifikasi: server `tsc --noEmit` 0, `pnpm --filter nyx-server run test`
+**434/435 lulus (1 skip = live KT opt-in), exit 0** (+5 test: `ipKey` 3,
+`powIdentity` 2).
+
+## 🧪 Verifikasi gate WS-F: dua kolom waktu presisi masih bocor di IndexedDB (2026-10-16)
+
+Verifikasi ulang `docs/30` §30.10 menemukan bahwa klaim "sisa plaintext hanya
+primary key dan bucket indeks" belum lengkap — dan gate-nya sendiri
+("inspeksi IndexedDB tidak memperlihatkan pola aktivitas: jumlah pesan per hari,
+**jam**, grup/1:1") belum punya bukti otomatis sama sekali, hanya pemeriksaan
+per-kolom di test.
+
+**Temuan.** `Message.sentAt` (ms presisi per pesan, ditulis `upsertMessages` dan
+dibaca `parseRecordsToMessages`) dan `pqDrSessionsV2.lastActivity` (ms per sesi
+PQ-DR) masih plaintext. Keduanya terbaca di baris mentah, jadi "jam" per pesan —
+persis yang diminta gate untuk hilang — masih bisa dipulihkan dari profil browser
+yang dicuri, walau `createdAt` sudah dipindah ke lapis ter-seal. Waktu presisi itu
+tidak perlu ada di disk: ia hanya dipakai di memori untuk tampilan dan tie-break
+urutan.
+
+**Perbaikan** mengikuti pola `seq`/`expiresAt` yang sudah ada (seal di tempat,
+tanpa mengubah format wire): writer menyegel (`upsertMessages`, `savePqDrSession`),
+migrasi unlock menutup baris lama (`sealLegacyStructFields` + loop baru di
+`migrateAtRestSealing`), pembaca membuka (`openLocalNumber`) — termasuk
+`getPqDrSession`, yang kini memilih sesi terbaru lewat nilai yang **dibuka**,
+bukan pengurangan string. Baris lama berbentuk angka plaintext tetap terbaca, jadi
+perangkat user yang sudah ada tidak perlu di-reset.
+
+**Bukti (bukan asumsi).** Pemindai baris mentah baru di
+`web/src/lib/__tests__/dexieMigration.test.ts` (`findActivityLeaks`) menyapu
+**semua tabel Dexie** di atas **IndexedDB nyata + Dexie nyata** dan menolak:
+ISO non-bucket, epoch-ms non-bucket, boolean `isGroup`/`isDeletedLocal`/`isViewOnce`,
+serta kolom yang seharusnya `ENC1:` tapi masih plaintext. Ada **kontrol negatif**
+(baris bocor buatan → ≥5 temuan) supaya "bersih" tidak bisa berarti "pemindai
+buta", dan dump ter-redaksi dicetak sebagai bahan inspeksi manual. Gate lain juga
+diukur: urutan pesan identik setelah **reload** dan setelah **wipe + restore
+arsip mentah** (baris pra-v9, lalu `normalizeOrderIndex`), pencarian **10k pesan = 3,98–4,03 ms/query**
+(hangat), 3,4–4,3 ms (dingin) — gate < 100 ms.
+
+**Batas jujur.** Yang tetap terbaca adalah granularitas **bucket 15 menit** dan
+jumlah baris per bucket/percakapan (inheren pada penyimpanan pesan, dan sudah
+terpublikasi di server `docs/28` B3/B4), plus `offlineQueue.timestamp` yang
+merupakan kolom indeks `orderBy('timestamp')` pada antrean kirim sementara. Gate
+yang benar adalah "tidak ada presisi di bawah bucket", bukan "nol pola aktivitas".
+
+Verifikasi: web `tsc` 0, `vitest` **654/654 (76 file)** — 17 di antaranya
+`dexieMigration` (11 lama + 6 baru), build web exit 0.
+
+## 🔐 Jalur backup `.nyxbak` akhirnya tersambung dari UI (2026-10-16)
+
+WS-C sudah ditandai selesai sampai fase 5, tetapi verifikasi end-to-end menemukan
+tiga sambungan yang belum ada pemanggilnya. Ketiganya ditutup di sini.
+
+**1. Tidak ada cara membuat berkas `.nyxbak`.** `startBackupFileDownload` punya
+nol pemanggil: arsip hanya lahir dari alur QR (`MigrationSendPage`, kunci acak
+yang di-seal ke penerima), sehingga `BackupRestoreModal` — yang membuka arsip
+dengan kunci turunan recovery phrase — tidak pernah punya sumber berkas. Modul
+transport fase 3 lengkap tetapi tidak terjangkau. Kini ada
+`BackupExportModal` (tombol “Encrypted Backup (.nyxbak)”) yang mengambil recovery
+phrase (auto-unlock key atau prompt password), membuat salt acak 16 byte,
+menurunkan kunci dengan `deriveBackupKey`, membangun arsip dengan salt yang sama
+(sehingga tersimpan di header), lalu mengunduh byte-nya. Normalisasi phrase
+(`normalizeBackupPhrase`) dipakai jalur export dan restore sekaligus, jadi tidak
+ada dua aturan yang bisa menyimpang.
+
+**2. Jalur awan R2 tidak pernah dipanggil.** `uploadBackupToCloud`,
+`downloadCloudBackup`, dan `deleteCloudBackup` semuanya nol pemanggil: tidak ada
+cara mengunggah, tidak ada cara mengambil kembali, dan — yang paling penting —
+`executeLocalWipe` tidak pernah menghapus objek backup, sehingga objek opaque di
+R2 **selamat** dari wipe walau cookie HttpOnly sudah dimatikan. Sekarang unggah
+opt-in dari modal export, tombol “Ambil dari awan” di modal restore
+(`download-url` + 404 sebagai sinyal “tidak ada backup”), dan hapus objek di
+`executeLocalWipe` **sebelum** `/api/auth/logout-all` — endpoint DELETE butuh
+sesi hidup, jadi urutannya diuji sebagai kontrak, bukan diserahkan ke kebetulan.
+Lubang yang sama ditutup di server: `DELETE /api/users/me` sekarang ikut
+menghapus objek backup. Kuncinya sengaja tidak memuat userId, jadi filter
+lampiran berbasis prefix `${userId}-` tidak pernah bisa menyapunya — tanpa
+langkah eksplisit itu, salinan terenkripsi tetap tinggal di R2 setelah akun
+dihapus.
+
+**3. Kontrak tipe bersama menyesatkan.** `packages/shared/src/socket.ts` masih
+mengetikkan `migration:chunk` sebagai `chunk: ArrayBuffer` di kedua arah,
+sementara klien mengirim/membaca base64url (transport men-serialize payload
+dengan JSON, jadi `ArrayBuffer` mentah menjadi `{}`). Klien memakai map event
+sendiri sehingga compiler tidak pernah menangkap perbedaan itu — tipe mati yang
+menyesatkan kini diselaraskan. Entri lama `migration:chunk/start/ack` di
+`KNOWN_WT_ONLY` (`gatewayParity.test.ts`) ikut dihapus karena gateway WSS sudah
+meneruskannya; daftar itu hanya berguna kalau isinya benar-benar belum punya rute.
+
+Verifikasi: web `tsc` 0, server `tsc` 0, `vitest` **647/647** (76 file, termasuk
+4 test modal export + 2 test urutan wipe), `gatewayParity` 10/10 dan shared
+rebuild bersih. Dua kegagalan di suite server (`atRestSecrets`, `ktSnapshot`) ada
+sebelum perubahan ini dan hanya butuh env (`NYX_AT_REST_PEPPER` / `KT_SNAPSHOT_DIR`).
+
+## 🔀 Ratchet v2 akhirnya terpakai di jalur WSS juga (2026-10-16)
+
+Jalur ratchet v2 (braid SPQR) sudah lama landed, tetapi punya satu syarat yang
+membuatnya praktis tidak pernah menyala: relay harus mengiklankan kapabilitas
+`spqr-ratchet`. Kapabilitas itu **hanya** datang dari sidecar WebTransport (HELLO
+bidi) — sementara klien di jaringan yang memblokir QUIC memakai **WSS**, dan di
+sana negosiasi tidak ada sama sekali. Akibatnya `negotiatedCapabilities` selalu
+kosong di jalur WSS dan `resolveOutboundRatchetVersion` tidak pernah memilih v2,
+walau **kedua peer sudah saling menyatakan mampu in-band** (`ackV` di payload
+ter-seal, otentikasi AEAD). Fitur yang sudah selesai jadi tidak terpakai oleh
+justru mayoritas pengguna.
+
+**Perbaikannya bukan menambah fitur, melainkan menutup jalur kedua.** Gateway WSS
+kini menegosiasikan kapabilitas dengan aturan yang identik dengan HELLO sidecar:
+klien mengiklankan daftarnya di `handshake.auth.capabilities`, gateway membalas
+event `capabilities` berisi irisan dengan `SERVER_CAPABILITIES`, dan batas
+parse-nya satu implementasi bersama di `packages/shared`
+(`sanitizeCapabilityList`, dipakai **juga** oleh parser HELLO — dua batas yang
+disalin ulang cepat atau lambat menyimpang). Klien menutup kedua jalur lewat satu
+fungsi (`finishCapabilityNegotiation`) supaya tidak ada dua logika "kapan
+negosiasi selesai".
+
+Yang **tidak** berubah, dan sengaja: klien lama yang tidak mengirim apa pun tetap
+legacy (daftar kosong, koneksi tidak pernah gagal karena field cacat); balasan
+hanya dikirim ke klien yang mengiklankan (klien lama tidak mengenal event baru
+ini); irisan tetap dihitung di kedua sisi; dan bukti kemampuan peer tetap in-band
+— relay tidak pernah diberi wewenang menentukan versi.
+
+Rollout-nya kini terukur: `nyx_wss_capability_total{capability}` (`none` = klien
+mengiklankan sesuatu yang tak dikenal gateway), sehingga "berapa klien yang bisa
+v2" tidak lagi ditebak dari selera. Verifikasi: 5 test server baru (bentuk input
+jaringan, irisan, jejak metrik), test wiring klien yang dikunci ke jalur baru ini,
+dan spec E2E `web/e2e/spqr.spec.ts` yang sekarang **berjalan tanpa WebTransport**
+(project `chromium` biasa) — amplop v2 di server dibuktikan di jalur WSS, sementara
+project `chrome` tetap membuktikannya di jalur WT.
+
+## 📈 Auditor KT: dari kotak hitam menjadi terukur — exporter, 8 aturan, dashboard (2026-10-16)
+
+Auditor pihak ketiga (`server/kt-query/cmd/nyx-kt-auditor`, port dari auditor
+referensi Signal) sudah menandatangani tree head — log berjalan **mode 3** —
+tetapi sampai hari ini satu-satunya jejaknya ada di journal. Kegagalannya karena
+itu **tidak terlihat sampai terlambat**: tanpa tanda tangan baru, log tetap
+melayani bukti (aplikasi sehat, tidak ada error di klien), dan yang barulah gagal
+adalah verifikasi klien setelah auditor head melewati batas 7 hari upstream.
+
+**Exporter loopback auditor (`cmd/nyx-kt-auditor/metrics.go`, `127.0.0.1:9466`).**
+Sepuluh metrik tanpa dependency baru, dengan aturan privasi yang sama seperti
+sisi server (`metrics.ts`): deklarasi wajib lebih dulu, label hanya enum, nilai
+label berbentuk UUID/hex-panjang/base64url/IP/email **ditolak** dan hitungannya
+expose di `nyx_kt_auditor_metrics_rejected_total`. Yang membuat pemeriksaan luar
+mungkin: `head_sends_total{result}` (kiriman ditolak vs diterima),
+`rounds_total{result}` (`inconsistent` = peristiwa keamanan),
+`tree_size` vs `head_tree_size` (pekerjaan yang belum ditandatangani), dan
+`uptime_seconds`.
+
+**8 aturan alert** (`ops/prometheus/alerts.yml`, grup `nyx-kt-auditor`) yang
+memisahkan kelas kegagalan menurut tindakannya. Drill menemukan dua cacat nyata
+yang keduanya membuat aturan mati secara praktis:
+
+1. `…HeadStale` memakai `absent(last_head)` tanpa penjaga umur proses — head
+   pertama memang menunggu irama tanda tangan (≤1 jam), jadi aturan itu **menyala
+   30 menit setelah setiap restart**. Ditutup dengan `nyx_kt_auditor_uptime_seconds`
+   (metrik ke-10, yang juga mencegah "proses baru" dianggap "tak pernah
+   menandatangani").
+2. Celah pasangan kelas-pertama: proses yang start ulang terus selalu berumur
+   muda, jadi penjaga umur di atas justru membutakannya. Aturan `…Restarting`
+   menutupnya dengan dua sinyal — `changes(up[1h]) > 2` (restart yang terlihat
+   mati di scrape) **atau** `resets(nyx_kt_auditor_uptime_seconds[1h]) > 1`
+   (restart lebih cepat dari satu irama scrape) — dan ambangnya sengaja tidak
+   menyala pada satu restart per jam (deploy), supaya alarm tidak diabaikan.
+
+**Dashboard.** Baris baru di `ops/grafana/dashboards/nyx-overview.json`: auditor
+hidup, umur tree head **dan** umur proses, penjaga label identitas auditor,
+posisi pohon (diverifikasi vs head diterima), tulis/baca log KT, putaran audit +
+head per hasil, snapshot, dan umur tulis KT sukses terakhir. Ambang di panel
+sengaja identik dengan ambang alert.
+
+**Drill.** `promtool test rules` kini punya kasus **tidak-menyala** untuk
+kedua cacat di atas (proses muda tanpa head; satu restart per jam), dan lapis
+kontrak metrik `scripts/drill-alerts.sh` membaca deklarasi dari `metrics.ts`
+**dan** `metrics.go` auditor. Total 23 aturan, semuanya punya kasus drill.
+
+**Harness (self-host tanpa root).** Pemakaian tanpa root diuji penuh: Prometheus
+3.15 di `~/nyx-selfhost/prometheus` (`conf/` = salinan `ops/prometheus`, unit
+`systemd --user`), Grafana 13.2 di `~/nyx-selfhost/grafana` (`conf/custom.ini`
+loopback **:3001** karena :3000 dipakai nginx, datasource uid `prometheus` +
+dashboard NYX **diprovisikan dari berkas**, jadi tidak ada impor manual). Verifikasi
+bukan "proses hidup": scrape `up{job="nyx-kt-auditor"} == 1`, sampel
+`nyx_kt_auditor_*` nyata, 23 aturan termuat tanpa error, dan Grafana menjawab
+`Successfully queried the Prometheus API`. Batasnya dicatat: exporter
+`node`/`postgres`/`redis` belum dipasang di mesin dev (tiga job `up == 0`), dan
+tanpa Alertmanager aturan yang menyala hanya terlihat di UI Prometheus.
+
 ## 🔒 3.0.0 — Review menyeluruh: provenance artefak, kegagalan yang tadinya senyap, endpoint destruktif (2026-10-15)
 
 Rilis ini menutup temuan review eksternal + review internal atas seluruh rentang

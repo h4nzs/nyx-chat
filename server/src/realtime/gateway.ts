@@ -36,6 +36,12 @@ import { env } from '../config.js';
 import { TransportOpCode } from '@nyx/shared';
 import type { AuthPayload } from '../types/auth.js';
 import {
+  negotiateWssCapabilities,
+  parseAnnouncedCapabilities,
+  recordWssCapabilities,
+} from '../utils/transportCapability.js';
+import { measureWssIngress } from '../utils/transportLatency.js';
+import {
   sendToUser,
   sendToDevice,
   broadcastToUsers,
@@ -242,6 +248,13 @@ export function attachWssGateway(httpServer: HttpServer): void {
       return next(new Error('unauthorized'));
     }
     socket.data.user = payload;
+    // [docs/29 §5.6 / docs/33 §33.7] Kapabilitas klien WSS dibaca dari handshake
+    // dan TIDAK pernah menggagalkan koneksi: bentuk cacat = legacy (`[]`).
+    // Nilai mentah disimpan apa adanya karena validasi/irisan terjadi di
+    // `utils/transportCapability.ts` (satu tempat, bisa diuji tanpa socket).
+    socket.data.announcedCapabilities = parseAnnouncedCapabilities(
+      socket.handshake.auth?.capabilities
+    );
     next();
   });
 
@@ -252,6 +265,22 @@ export function attachWssGateway(httpServer: HttpServer): void {
     const key = `${userId}:${deviceId}`;
     registerSocketInRegistry(sockets, key, socket);
 
+    // [docs/29 §5.6 · docs/33 §33.7] Balasan kapabilitas jalur WSS — pasangan
+    // dari HELLO bidi sidecar. Hanya dikirim bila klien mengiklankan sesuatu:
+    // klien lama tidak punya listener untuk event ini (mengirimnya berarti
+    // menambah perilaku baru yang tidak diminta ke klien yang sudah rilis).
+    //
+    // Kenapa ini bukan kosmetik: hasilnya dipakai klien untuk memutuskan versi
+    // ratchet (`resolveOutboundRatchetVersion`). Tanpa balasan ini, klien di
+    // jalur WSS selalu dianggap legacy → jalur v2 (braid SPQR) tidak pernah
+    // dipakai walau kedua peer sudah saling menyatakan mampu in-band.
+    const announced = socket.data.announcedCapabilities ?? [];
+    if (announced.length > 0) {
+      const agreed = negotiateWssCapabilities(announced);
+      socket.emit('capabilities', agreed);
+      recordWssCapabilities(agreed);
+    }
+
     socket.on('disconnect', () => {
       removeSocketFromRegistry(sockets, key, socket);
     });
@@ -261,11 +290,17 @@ export function attachWssGateway(httpServer: HttpServer): void {
     // handle*) tidak lagi menjadi unhandledRejection → node ≥15 membunuh
     // PROSES untuk satu klien yang men-trigger error infra. Error di-log +
     // koneksi klien bermasalah diputus — sisanya user & instance tetap hidup.
+    // [docs/10 §10.12] Setiap event masuk diukur durasinya
+    // (`nyx_wss_ingress_seconds`) — pembanding jalur cepat
+    // (`nyx_transport_ingress_seconds` di sidecar). Tanpa angka ini, "jalur
+    // WebTransport melambat" hanya bisa dibandingkan dengan ambang mutlak yang
+    // berbeda-beda per host; dengan keduanya, pertanyaannya jadi faktual:
+    // apakah jalur cepat masih lebih cepat daripada jalur cadangannya?
     const guardedOn = (event: string, handler: (...args: unknown[]) => Promise<void>) => {
       socket.on(event, (...args: unknown[]) => {
         const maybeCb = args[args.length - 1];
         void (async () => {
-          await handler(...args);
+          await measureWssIngress(() => handler(...args));
         })().catch((err) => {
           console.error(`[WS-Gateway] Handler ${event} gagal untuk user ${userId}:`, err);
           if (typeof maybeCb === 'function') {

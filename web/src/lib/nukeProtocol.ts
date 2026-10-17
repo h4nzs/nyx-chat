@@ -11,6 +11,20 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
   try {
     console.warn("INITIATING NUCLEAR LOCAL WIPE...");
 
+    // 0.0a Hapus objek backup awan milik akun (best-effort).
+    // WAJIB sebelum sesi dimatikan: endpoint `DELETE /api/backup` butuh sesi
+    // hidup (cookie HttpOnly), jadi setelah `logout-all` di langkah 0.0 objek
+    // itu tidak bisa dihapus lagi dan tetap tinggal di R2 — blob-nya opaque,
+    // tetapi "wipe menyeluruh" yang meninggalkan salinan di awan adalah klaim
+    // yang menyesatkan. Gagal (offline / belum pernah upload / akun sandbox)
+    // tidak menghentikan wipe lokal.
+    try {
+      const { deleteCloudBackup } = await import('./backupTransport');
+      await deleteCloudBackup();
+    } catch (_e) {
+      // Tidak ada backup awan / sesi sudah mati / offline — lanjutkan wipe.
+    }
+
     // 0.0 Matikan sesi di SERVER dulu (best-effort). Cookie `at`/`rt` HttpOnly
     // tidak bisa dihapus dari document.cookie — tanpa ini access token tetap valid
     // ~15 menit setelah wipe, sehingga "obliterate" tidak benar-benar total.

@@ -167,8 +167,14 @@ export interface ServerToClientEvents {
     "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;
 
     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
+    // [docs/31 §31.6c] `chunk` = base64url dari potongan arsip `.nyxbak`.
+    // BUKAN `ArrayBuffer`: transport men-serialize payload dengan JSON, jadi
+    // `ArrayBuffer` mentah menjadi `{}` dan bagian isi hilang. Tipe ini dulu
+    // masih `ArrayBuffer` (sisa desain lama) dan karena klien memakai map event
+    // sendiri di `transportClient.ts` perbedaan itu tidak terdeteksi compiler —
+    // tipe yang menyesatkan, sampai diselaraskan di sini.
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string }) => void;
-    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
+    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: string }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:deleted_remotely': (payload: { messageId: string; conversationId: string; deletedBy: string }) => void;
     "burner:receive": (payload: { roomId: string; ciphertext: string }) => void;
@@ -206,9 +212,10 @@ export interface ClientToServerEvents {
     "webrtc:secure_signal": (payload: { to: string; type: string; payload: string }) => void;
     
     // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
+    // Lihat catatan `ServerToClientEvents`: `chunk` adalah base64url (string).
     "migration:join": (roomId: string) => void;
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string }) => void;
-    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
+    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: string }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
     'message:view_once_opened': (payload: { messageId: string; conversationId: string }) => void;

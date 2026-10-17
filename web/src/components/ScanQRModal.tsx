@@ -4,10 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 // Type-only import: tidak ikut ke bundle (html5-qrcode di-load lazy di runtime)
 import type { Html5Qrcode } from 'html5-qrcode';
+import { parseProfileShareLink } from '@utils/usernameLink';
 
 interface Props {
   onClose: () => void;
-  onScanSuccess: (hash: string) => void;
+  /** Query string siap tempel ke `/connect` (mis. `?u=<hashId>`). */
+  onScanSuccess: (connectQuery: string) => void;
 }
 
 export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
@@ -30,22 +32,19 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
-          try {
-            // Looking for .../connect?u=HASH&...
-            const url = new URL(decodedText);
-            const u = url.searchParams.get('u');
-            if (u && u.length > 10) {
-              if (scannerRef.current) {
-                await scannerRef.current.stop();
-              }
-              // Pass the full search query string (e.g., ?u=...&i=...&p=...)
-              onScanSuccess(url.search);
-            } else {
-              // Not a valid connect link but keep scanning
-            }
-          } catch (e) {
-            // Not a valid URL, ignore
+          // [docs/30 §30.13 WS-I] Satu parser untuk kedua bentuk tautan berbagi:
+          //   - `/u/<hashId>` (link pendek WS-I, hanya memuat hashId);
+          //   - `/connect?u=…&i=…&p=…` (QR lama yang sudah beredar — termasuk
+          //     `i`/`p` — tetap diterima apa adanya).
+          // Memakai parser yang sama dengan halaman `/u/:hashId` membuat aturan
+          // bentuk hashId tidak bercabang: segmen tak sah tidak pernah jadi
+          // request pencarian, dan QR non-NYX diabaikan tanpa menghentikan kamera.
+          const connectQuery = parseProfileShareLink(decodedText);
+          if (!connectQuery) return; // bukan tautan berbagi NYX — lanjut memindai
+          if (scannerRef.current) {
+            await scannerRef.current.stop();
           }
+          onScanSuccess(connectQuery);
         },
         () => {} // Ignore scan failures (frame missed)
       ).catch(err => {

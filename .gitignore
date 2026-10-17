@@ -14,8 +14,13 @@ web/dist
 # Keep environment variables out of version control
 .env
 **/.env
-# Env file unit systemd NYX (template: `ops/systemd/nyx-kt-query.env.example`)
+# Salinan cadangan env (dibuat manual saat mengubah kredensial) juga berisi rahasia.
+.env.bak*
+**/.env.bak*
+# Env file unit systemd NYX (template: `ops/systemd/nyx-kt-query.env.example`,
+# `ops/systemd/nyx-kt-auditor.env.example`)
 ops/systemd/nyx-kt-query.env
+ops/systemd/nyx-kt-auditor.env
 *.log
 **/.env.local
 **/*/.env
@@ -71,6 +76,9 @@ server/kt-query/kt-query
 # `build.sh` juga menghasilkan CLI audit (`nyx-kt-check`) — biner, bukan sumber
 # (sumbernya `cmd/nyx-kt-check/`).
 server/kt-query/nyx-kt-check
+# dan auditor pihak ketiga (`nyx-kt-auditor`) — biner, bukan sumber
+# (sumbernya `cmd/nyx-kt-auditor/`).
+server/kt-query/nyx-kt-auditor
 
 # Oracle DR lintas-implementasi (`tools/dr-oracle`, docs/30 WS-G(6)): sumber Go
 # di-commit, binernya tidak (`go build`/`go build ./...` meninggalkannya di sini).

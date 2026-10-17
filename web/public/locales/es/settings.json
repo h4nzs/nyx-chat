@@ -58,7 +58,8 @@
     "sessions": "Sesiones activas",
     "export_vault": "Exportar bóveda",
     "import_vault": "Importar bóveda",      "transfer": "Transferir a nuevo dispositivo (QR)",
-      "restore_backup": "Restaurar desde archivo .nyxbak"
+      "restore_backup": "Restaurar desde archivo .nyxbak",
+      "export_backup": "Copia cifrada (.nyxbak)"
   },
   "support": {
     "push_notif": "Notificaciones Push",

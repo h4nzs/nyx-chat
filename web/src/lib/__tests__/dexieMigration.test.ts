@@ -90,7 +90,8 @@ const legacyRows: LegacyRow[] = [
   { id: 'b1', conversationId: 'c2', content: null, createdAt: new Date(B0).toISOString(), senderId: 'u3', isDeletedLocal: true },
 ];
 
-import { openLocalNumber } from '../localAtRest';
+import { LOCAL_TIME_BUCKET_MS, openLocalNumber } from '../localAtRest';
+import { openOrderInstant } from '../localOrderKey';
 
 let NyxDatabase: typeof import('../db')['NyxDatabase'];
 let shadowVault: typeof import('../shadowVaultDb')['shadowVault'];
@@ -291,5 +292,353 @@ describe('pembaca vault di atas IndexedDB nyata', () => {
     const page = await shadowVault.getMessagesByConversation('c3', 10);
     expect(page.map((m) => m.id)).toEqual(['restored1']);
     expect(page[0]!.isDeletedLocal).toBe(true);
+  });
+});
+
+// ─── Gate docs/30 §30.10 poin (1): inspeksi IndexedDB mentah ────────────────
+//
+// Gate-nya bukan "kolom X ter-seal" (itu diuji di atas), melainkan properti
+// yang bisa dibaca penyerang yang memegang profil browser: apakah pola aktivitas
+// (jam per pesan, grup/1:1, presisi waktu) terbaca dari baris MENTAH. Pemindai
+// di bawah sengaja menolak granularitas apa pun yang lebih halus dari yang
+// sudah diterima desain (bucket 15 menit — paritas server, docs/28 Tier 2 B3).
+
+type RawRow = { table: string; key: unknown; value: unknown };
+
+/** Kolom yang HARUS berupa envelope `ENC1:` (atau kosong) di baris mentah. */
+const SEALED_FIELDS = new Set([
+  'senderId',
+  'sentAt',
+  'seq',
+  'expiresAt',
+  'repliedToId',
+  'updatedAt',
+  'lastActivity',
+  'keyVersion',
+  'treeSize',
+]);
+
+/** Kolom boolean yang HARUS ter-seal (bukan `true`/`false`). */
+const SEALED_FLAGS = new Set(['isGroup', 'isDeletedLocal', 'isViewOnce', 'isPinned', 'isArchived']);
+
+const isSealedValue = (value: unknown): boolean =>
+  typeof value === 'string' && value.startsWith('ENC1:');
+
+/** Rentang angka yang hanya masuk akal sebagai epoch-ms. */
+const isEpochMs = (value: number): boolean => value > 1_000_000_000_000 && value < 10_000_000_000_000;
+
+/**
+ * Kumpulkan kebocoran aktivitas dari baris MENTAH (bukan dari objek domain).
+ * Mengembalikan daftar deskripsi — kosong berarti tidak ada yang terbaca.
+ */
+function findActivityLeaks(rows: readonly RawRow[]): string[] {
+  const leaks: string[] = [];
+
+  const scan = (table: string, key: unknown, path: string, value: unknown): void => {
+    const where = `${table}[${String(key)}].${path}`;
+
+    if (typeof value === 'string') {
+      const iso = value.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
+      if (iso) {
+        const ms = Date.parse(iso[0]);
+        if (!Number.isFinite(ms) || ms % LOCAL_TIME_BUCKET_MS !== 0) {
+          leaks.push(`${where} = waktu presisi (${value})`);
+        }
+      }
+      const field = path.split('.').pop() ?? '';
+      if (SEALED_FIELDS.has(field) && !isSealedValue(value)) {
+        leaks.push(`${where} = plaintext (${JSON.stringify(value).slice(0, 40)})`);
+      }
+      return;
+    }
+
+    if (typeof value === 'number') {
+      const field = path.split('.').pop() ?? '';
+      if (SEALED_FIELDS.has(field)) {
+        leaks.push(`${where} = angka plaintext (${value})`);
+      } else if (isEpochMs(value) && value % LOCAL_TIME_BUCKET_MS !== 0) {
+        leaks.push(`${where} = epoch-ms presisi (${value})`);
+      }
+      return;
+    }
+
+    if (typeof value === 'boolean') {
+      const field = path.split('.').pop() ?? '';
+      if (SEALED_FLAGS.has(field)) leaks.push(`${where} = boolean plaintext (${value})`);
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, i) => scan(table, key, `${path}[${i}]`, item));
+      return;
+    }
+
+    if (value && typeof value === 'object') {
+      for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+        scan(table, key, path ? `${path}.${childKey}` : childKey, childValue);
+      }
+    }
+  };
+
+  for (const row of rows) scan(row.table, row.key, '', row.value);
+  return leaks;
+}
+
+/** Dump baris mentah dalam bentuk ter-redaksi (bahan inspeksi manual). */
+function redactedDump(rows: readonly RawRow[]): string {
+  const shape = (value: unknown): string => {
+    if (value === null || value === undefined) return String(value);
+    if (typeof value === 'string') {
+      const colon = value.indexOf(':');
+      return colon > 0 ? `${value.slice(0, colon + 1)}…(len ${value.length})` : `str(${value})`;
+    }
+    if (typeof value === 'number') {
+      return value % LOCAL_TIME_BUCKET_MS === 0 && isEpochMs(value)
+        ? `bucket@${new Date(value).toISOString()}`
+        : `num(${value})`;
+    }
+    if (typeof value === 'boolean') return `bool(${value})`;
+    if (Array.isArray(value)) return `array(${value.length})`;
+    if (typeof value === 'object') {
+      return `{${Object.entries(value as Record<string, unknown>)
+        .map(([k, v]) => `${k}: ${shape(v)}`)
+        .join(', ')}}`;
+    }
+    return typeof value;
+  };
+
+  return rows.map((row) => `  ${row.table}[${String(row.key)}] ${shape(row.value)}`).join('\n');
+}
+
+async function readAllRawRows(): Promise<RawRow[]> {
+  const rows: RawRow[] = [];
+  for (const table of dbInstance.tables) {
+    for (const value of await table.toArray()) {
+      rows.push({ table: table.name, key: (value as { id?: unknown }).id ?? '', value });
+    }
+  }
+  return rows;
+}
+
+describe('gate docs/30 §30.10 (1) — pola aktivitas tidak terbaca dari IndexedDB', () => {
+  // Aktivitas "nyata" buatan: dua percakapan (grup + 1:1) dan pesan tersebar di
+  // dua hari, semuanya lewat jalur tulis produksi (bukan `put` mentah).
+  const HARI_1 = B0 - 26 * 60 * MIN; // hari sebelumnya
+  const freshMessages = [
+    {
+      id: 'act1',
+      conversationId: 'grup-1',
+      content: 'halo dunia',
+      createdAt: new Date(HARI_1 + 7 * MIN + 321).toISOString(),
+      senderId: 'u1',
+      sentAt: HARI_1 + 7 * MIN + 321,
+      seq: 11,
+      isViewOnce: false,
+    },
+    {
+      id: 'act2',
+      conversationId: 'grup-1',
+      content: 'halo dunia',
+      createdAt: new Date(HARI_1 + 46 * MIN + 999).toISOString(),
+      senderId: 'u2',
+      sentAt: HARI_1 + 46 * MIN + 999,
+      seq: 12,
+      isDeletedLocal: true,
+    },
+    {
+      id: 'act3',
+      conversationId: 'satu-satu',
+      content: 'rahasia proyek alpha',
+      createdAt: new Date(B0 + 3 * MIN + 7).toISOString(),
+      senderId: 'u1',
+      sentAt: B0 + 3 * MIN + 7,
+      seq: 13,
+    },
+  ];
+
+  it('pemindai tidak buta: baris mentah yang bocor TERTANGKAP (kontrol negatif)', () => {
+    const leaks = findActivityLeaks([
+      {
+        table: 'messages',
+        key: 'bocor',
+        value: {
+          createdAt: '2026-10-11T10:07:43.512Z',
+          orderBucketMs: B0,
+          sentAt: B0 + 1234,
+          senderId: 'u1',
+          seq: 7,
+        },
+      },
+      { table: 'conversations', key: 'grup', value: { isGroup: true } },
+      { table: 'pqDrSessionsV2', key: 's1', value: { lastActivity: B0 + 4242 } },
+    ]);
+
+    // Waktu presisi, sentAt/seq/senderId plaintext, boolean grup, aktivitas sesi.
+    expect(leaks.length).toBeGreaterThanOrEqual(5);
+    expect(leaks.some((l) => l.includes('createdAt'))).toBe(true);
+    expect(leaks.some((l) => l.includes('sentAt'))).toBe(true);
+    expect(leaks.some((l) => l.includes('isGroup'))).toBe(true);
+    expect(leaks.some((l) => l.includes('lastActivity'))).toBe(true);
+    // …dan bucket yang sudah kasar TIDAK dilaporkan (tidak ada false positive).
+    expect(leaks.some((l) => l.includes('orderBucketMs'))).toBe(false);
+  });
+
+  it('menulis aktivitas lewat jalur produksi', async () => {
+    await shadowVault.saveConversation({
+      id: 'grup-1',
+      isGroup: true,
+      participants: [{ id: 'u1', name: 'A' }],
+      lastMessageAt: new Date(B0 + 3 * MIN + 7).toISOString(),
+    } as never);
+    await shadowVault.saveConversation({
+      id: 'satu-satu',
+      isGroup: false,
+      participants: [{ id: 'u2', name: 'B' }],
+      lastMessageAt: new Date(HARI_1).toISOString(),
+    } as never);
+
+    await shadowVault.upsertMessages(freshMessages as never);
+    await shadowVault.savePqDrSession({
+      conversationId: 'grup-1',
+      peerDeviceId: 'dev-1',
+      version: 1,
+      negotiationStatus: 'ESTABLISHED',
+      lastActivity: B0 + 11 * MIN + 13,
+      state: { Ns: 0 } as never,
+    } as never);
+
+    // Migrasi unlock: baris yang belum tersentuh jalur tulis (legacy) ikut ditutup.
+    await shadowVault.migrateAtRestSealing();
+  });
+
+  it('setelah jalur tulis + migrasi: tidak ada jam/tanggal presisi, tidak ada grup/1:1 terbaca', async () => {
+    const rows = await readAllRawRows();
+    expect(rows.length).toBeGreaterThan(0);
+
+    const leaks = findActivityLeaks(rows);
+    expect(leaks).toEqual([]);
+
+    // Bukti positif (bukan cuma "pemindai bilang bersih"): kolom yang diuji
+    // benar-benar ada dan bentuknya seperti yang dijanjikan.
+    const rawMessages = rows
+      .filter((r) => r.table === 'messages')
+      .map((r) => r.value as Record<string, unknown>);
+    const act1 = rawMessages.find((m) => m.id === 'act1')!;
+    expect(typeof act1.orderBucketMs).toBe('number');
+    expect(act1.orderBucketMs).toBe(Math.floor((HARI_1 + 7 * MIN + 321) / BUCKET) * BUCKET);
+    expect(act1.createdAt).toBeNull();
+    expect(String(act1.sentAt).startsWith('ENC1:')).toBe(true);
+    expect(String(act1.senderId).startsWith('ENC1:')).toBe(true);
+    expect(String(act1.isViewOnce).startsWith('ENC1:')).toBe(true);
+
+    const rawConvs = rows
+      .filter((r) => r.table === 'conversations')
+      .map((r) => r.value as Record<string, unknown>);
+    for (const conv of rawConvs) {
+      expect(typeof conv.isGroup).not.toBe('boolean');
+      const bucket = Date.parse(String(conv.lastMessageAt));
+      expect(bucket % BUCKET).toBe(0);
+    }
+
+    const rawSessions = rows
+      .filter((r) => r.table === 'pqDrSessionsV2')
+      .map((r) => r.value as Record<string, unknown>);
+    expect(rawSessions).toHaveLength(1);
+    expect(String(rawSessions[0]!.lastActivity).startsWith('ENC1:')).toBe(true);
+
+    // Presisi tetap dapat dipulihkan pembaca (seal ≠ hilang).
+    const page = await shadowVault.getMessagesByConversation('grup-1', 10);
+    const act1Read = page.find((m) => m.id === 'act1')!;
+    expect(act1Read.sentAt).toBe(HARI_1 + 7 * MIN + 321);
+    expect(act1Read.createdAt).toBe(new Date(HARI_1 + 7 * MIN + 321).toISOString());
+    expect(act1Read.seq).toBe(11);
+
+    // Dump ter-redaksi: bahan inspeksi manual yang bisa dibaca ulang di CI.
+    console.log('inspeksi IndexedDB mentah (redacted):\n' + redactedDump(rows.slice(0, 12)));
+  });
+
+  it('sesi PQ-DR terbaru tetap terpilih walau `lastActivity` ter-seal', async () => {
+    await shadowVault.savePqDrSession({
+      conversationId: 'satu-satu',
+      peerDeviceId: 'dev-lama',
+      version: 1,
+      negotiationStatus: 'ESTABLISHED',
+      lastActivity: B0,
+      state: { Ns: 1 } as never,
+    } as never);
+    await shadowVault.savePqDrSession({
+      conversationId: 'satu-satu',
+      peerDeviceId: 'dev-baru',
+      version: 1,
+      negotiationStatus: 'ESTABLISHED',
+      lastActivity: B0 + 9 * MIN,
+      state: { Ns: 2 } as never,
+    } as never);
+
+    const chosen = await shadowVault.getPqDrSession('satu-satu');
+    expect(chosen?.peerDeviceId).toBe('dev-baru');
+    expect(typeof chosen?.lastActivity).toBe('number');
+    expect(chosen?.lastActivity).toBe(B0 + 9 * MIN);
+  });
+});
+
+// ─── Gate docs/30 §30.10 poin (2): urutan pesan setelah reload & wipe ───────
+
+describe('gate docs/30 §30.10 (2) — urutan tetap benar setelah reload & wipe', () => {
+  const CONV = 'c1';
+
+  it('urutan halaman identik setelah koneksi ditutup dan DB dibuka ulang', async () => {
+    const before = (await shadowVault.getMessagesByConversation(CONV, 50)).map((m) => m.id);
+    expect(before.length).toBeGreaterThan(1);
+
+    dbInstance.close();
+    dbInstance = new NyxDatabase();
+    await dbInstance.open();
+
+    const after = (await shadowVault.getMessagesByConversation(CONV, 50)).map((m) => m.id);
+    expect(after).toEqual(before);
+  });
+
+  it('wipe (DB dihapus) + restore baris mentah arsip → indeks diperbaiki, urutan & presisi utuh', async () => {
+    const archived = (await shadowVault.getMessagesByConversation(CONV, 50)).map((m) => ({ id: m.id, createdAt: m.createdAt }));
+    expect(archived.length).toBeGreaterThan(1);
+
+    // Arsip SQL snapshots: baris diambil APA ADANYA, lalu ditulis sebagai bentuk
+    // klien pra-v9 (createdAt plaintext, tanpa bucket) — persis seperti restore
+    // `.nyxbak`/impor JSON yang sudah ada.
+    const snapshot = await dbInstance.messages.toArray();
+    const legacyShape: Record<string, unknown>[] = [];
+    for (const row of snapshot) {
+      const instant = await openOrderInstant(row);
+      legacyShape.push({
+        id: row.id,
+        conversationId: row.conversationId,
+        content: row.content,
+        senderId: row.senderId,
+        isDeletedLocal: row.isDeletedLocal,
+        isViewOnce: row.isViewOnce,
+        seq: row.seq,
+        sentAt: row.sentAt,
+        createdAt: instant !== null ? new Date(instant).toISOString() : null,
+      });
+    }
+
+    // Wipe: DB dihapus seluruhnya (profil bersih), lalu dibuka lagi kosong.
+    dbInstance.close();
+    await Dexie.delete(DB_NAME);
+    dbInstance = new NyxDatabase();
+    await dbInstance.open();
+
+    // Restore menulis baris arsip mentah — tanpa bucket, jadi belum terlihat…
+    await dbInstance.messages.bulkPut(legacyShape as never);
+    await expect(shadowVault.getMessagesByConversation(CONV, 10)).resolves.toHaveLength(0);
+
+    // …sampai perbaikan indeks berjalan (jalur restore yang sama dengan produksi).
+    expect(await shadowVault.normalizeOrderIndex()).toBeGreaterThan(0);
+    const restored = await shadowVault.getMessagesByConversation(CONV, 50);
+    expect(restored.map((m) => m.id)).toEqual(archived.map((m) => m.id));
+    for (const expected of archived) {
+      expect(restored.find((m) => m.id === expected.id)?.createdAt).toBe(expected.createdAt);
+    }
   });
 });

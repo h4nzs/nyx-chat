@@ -29,6 +29,7 @@ import {
   encodeTransportHello,
   negotiateCapabilities,
   parseTransportHello,
+  sanitizeCapabilityList,
   supportsCapability,
 } from '@nyx/shared';
 
@@ -58,6 +59,35 @@ describe('kontrak HELLO/ACK', () => {
     expect(parseTransportHello(JSON.stringify({ v: 1, caps: Array(HELLO_MAX_CAPS + 1).fill('c') }))).toBeNull();
     // Payload kelewat besar ditolak sebelum JSON.parse.
     expect(parseTransportHello(new Uint8Array(5000))).toBeNull();
+  });
+
+  it('sanitize daftar kapabilitas jaringan (jalur WT HELLO dan WSS handshake)', () => {
+    // Bentuk sah: duplikat dibuang, urutan dipertahankan, array kosong valid.
+    expect(sanitizeCapabilityList(['hello-v1', 'spqr-ratchet', 'hello-v1'])).toEqual([
+      'hello-v1',
+      'spqr-ratchet',
+    ]);
+    expect(sanitizeCapabilityList([])).toEqual([]);
+
+    // Bentuk tak sah → null (pemanggil memperlakukannya legacy, bukan error).
+    expect(sanitizeCapabilityList(undefined)).toBeNull();
+    expect(sanitizeCapabilityList(null)).toBeNull();
+    expect(sanitizeCapabilityList('hello-v1')).toBeNull();
+    expect(sanitizeCapabilityList({ caps: ['hello-v1'] })).toBeNull();
+    expect(sanitizeCapabilityList([1, 2])).toBeNull();
+    expect(sanitizeCapabilityList([''])).toBeNull();
+    expect(sanitizeCapabilityList(['a'.repeat(HELLO_MAX_CAP_LENGTH + 1)])).toBeNull();
+    expect(sanitizeCapabilityList(Array(HELLO_MAX_CAPS + 1).fill('c'))).toBeNull();
+  });
+
+  it('parseTransportHello memakai sanitize yang sama (satu batas, dua jalur)', () => {
+    // Regresi: batas parse tidak boleh disalin ulang di parser (dua implementasi
+    // = dua batas yang bisa menyimpang).
+    expect(parseTransportHello(JSON.stringify({ v: 1, caps: Array(HELLO_MAX_CAPS + 1).fill('c') }))).toBeNull();
+    expect(parseTransportHello(JSON.stringify({ v: 1, caps: ['ok', 'ok'] }))).toEqual({
+      v: 1,
+      caps: ['ok'],
+    });
   });
 
   it('irisan kapabilitas: deterministik, urut klien, tak dikenal tidak masuk', () => {
@@ -191,5 +221,55 @@ describe('wiring klien', () => {
     const mode = webFile('src/lib/transportMode.ts');
     expect(mode).toMatch(/\[TransportOpCode\.HELLO\]: \{ kind: 'noop' \}/);
     expect(client).toMatch(/resetCapabilityState\(true\)/);
+  });
+
+  it('[docs/33 §33.7] jalur WSS menegosiasikan kapabilitas — bukan lagi selalu legacy', () => {
+    // Klien mengiklankan kapabilitas di handshake socket.io…
+    expect(client).toMatch(/auth: \{ capabilities: ANNOUNCED_CLIENT_CAPABILITIES \}/);
+    // …menunggu balasan gateway (`capabilities`) dan bisa jatuh ke legacy
+    // (server lama) — dua jalur, satu cara menutup negosiasi.
+    expect(client).toMatch(/socket\.on\('capabilities'/);
+    expect(client).toMatch(/startWssCapabilityNegotiation\(\)/);
+    expect(client).toMatch(/Gateway WSS tidak membalas kapabilitas/);
+    expect(client).toMatch(/finishCapabilityNegotiation\([^)]*'wss'\)/);
+    // Balasan kapabilitas BUKAN data pesan: tidak boleh di-map ke TransportEvents.
+    expect(client).toMatch(/if \(eventName === 'capabilities'\) return;/);
+    // Irisan dilakukan di klien juga (server tidak boleh mengaktifkan kapabilitas
+    // yang tidak kita iklankan) — pakai helper bersama, bukan logika lokal.
+    expect(client).toMatch(/negotiateCapabilities\(ANNOUNCED_CLIENT_CAPABILITIES, parsed\)/);
+    expect(client).toMatch(/sanitizeCapabilityList\(caps\)/);
+    // Satu tempat yang menutup negosiasi untuk KEDUA transport.
+    expect(client).toMatch(/private finishCapabilityNegotiation\(agreed: string\[\], source: 'wt' \| 'wss'\)/);
+  });
+
+  it('[docs/29 §5.6] gateway WSS memakai helper negosiasi yang sama dengan aturan relay', () => {
+    const gateway = repoFile('server/src/realtime/gateway.ts');
+    const helper = repoFile('server/src/utils/transportCapability.ts');
+
+    // Helper: satu sumber untuk parse + irisan, memakai konstanta @nyx/shared
+    // (bukan daftar kapabilitas yang disalin ulang di server).
+    expect(helper).toContain('sanitizeCapabilityList');
+    expect(helper).toMatch(/negotiateCapabilities\(parseAnnouncedCapabilities\(raw\), SERVER_CAPABILITIES\)/);
+
+    // Gateway: kapabilitas dibaca di handshake (auth), TIDAK pernah menggagalkan
+    // koneksi (klien lama harus tetap bisa konek), lalu dibalas sebagai irisan.
+    expect(gateway).toMatch(/socket\.handshake\.auth\?\.capabilities/);
+    expect(gateway).toMatch(/socket\.emit\('capabilities', agreed\)/);
+    expect(gateway).toMatch(/negotiateWssCapabilities\(announced\)/);
+    // Balasan hanya untuk klien yang mengiklankan: klien lama tidak kenal event ini.
+    expect(gateway).toMatch(/if \(announced\.length > 0\)/);
+    // Tidak ada jalur yang memutus koneksi karena kapabilitas cacat.
+    const useBlock = gateway.slice(gateway.indexOf('io.use((socket, next)'), gateway.indexOf("io.on('connection'"));
+    expect(useBlock).not.toMatch(/capabilit[\s\S]{0,40}next\(new Error/);
+  });
+
+  it('kapabilitas WSS terlihat di metrik (rollout v2 bisa diukur, bukan ditebak)', () => {
+    const metrics = repoFile('server/src/utils/metrics.ts');
+    const helper = repoFile('server/src/utils/transportCapability.ts');
+    expect(metrics).toMatch(/defineCounter\(\s*'nyx_wss_capability_total'/);
+    expect(metrics).toContain("['capability']");
+    expect(helper).toMatch(/incCounter\(WSS_CAPABILITY, \{ capability \}\)/);
+    // Klien yang mengiklankan sesuatu yang tak dikenal tetap terlihat.
+    expect(helper).toMatch(/capability: 'none'/);
   });
 });

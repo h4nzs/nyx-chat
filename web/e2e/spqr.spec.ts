@@ -15,11 +15,18 @@
 //
 // Prasyarat jalur v2 aktif di lingkungan ini — spec SKIP dengan alasan tertulis
 // bila tidak:
-//   - CI `e2e-chrome`: sidecar WebTransport mengiklankan `spqr-ratchet`
-//     (`SERVER_CAPABILITIES`) → kapabilitas dinegosiasikan seperti biasa; atau
-//   - lokal tanpa sidecar: jalankan dev server dengan override uji
-//     `VITE_SPQR_FORCE_V2=1 pnpm --filter nyx-web dev` (override hanya dihormati
-//     di build DEV, lihat `spqrNegotiation.resolveSpqrCapabilityOverride`).
+//   - jalur WebTransport (project `chrome` + sidecar): sidecar mengiklankan
+//     `spqr-ratchet` lewat HELLO bidi; ATAU
+//   - jalur WSS (project `chromium` biasa, tanpa sidecar): gateway Node
+//     mengiklankan `spqr-ratchet` lewat balasan event `capabilities`
+//     (`server/src/realtime/gateway.ts` → `utils/transportCapability.ts`).
+//     Inilah yang membuat spec ini berjalan TANPA WebTransport sekaligus
+//     membuktikan paritas kedua transport.
+//
+// Spec hanya SKIP bila **deployment** mematikannya (kapabilitas dihapus dari
+// `SERVER_CAPABILITIES`), atau `VITE_SPQR_FORCE_V1=1` (kill switch operator).
+// Override uji `VITE_SPQR_FORCE_V2=1` masih dipakai, tetapi kini hanya untuk
+// lingkungan yang tidak punya salah satu relay di atas.
 import { test, expect, Page } from '@playwright/test';
 import {
   registerUser,
@@ -64,6 +71,30 @@ async function readSpqrEnv(page: Page): Promise<SpqrEnv> {
       killSwitchKey: neg.SPQR_RUNTIME_KILL_SWITCH_KEY,
     };
   })) as SpqrEnv;
+}
+
+/**
+ * Kapabilitas hasil negosiasi SETELAH login.
+ *
+ * Kenapa harus menunggu: negosiasi berjalan di atas koneksi transport yang baru
+ * ada setelah sesi terautentikasi, dan balasan gateway datang satu putaran
+ * setelah `connect` (jalur WT: HELLO bidi). Membaca nilainya sebelum itu
+ * membuat spec salah SKIP sendirinya — kegagalan yang tidak bisa dibedakan dari
+ * "deployment memang mematikan jalur v2".
+ */
+async function waitForCapabilities(page: Page, timeoutMs = 15000): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  let caps: string[] = [];
+  while (Date.now() < deadline) {
+    caps = (await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const tc = await import('/src/lib/transportClient.ts');
+      return tc.getNegotiatedCapabilities();
+    })) as string[];
+    if (caps.length > 0) return caps;
+    await page.waitForTimeout(250);
+  }
+  return caps;
 }
 
 /**
@@ -118,10 +149,7 @@ test.describe('Ratchet v2 (braid SPQR)', () => {
     // Penjaga sinkronisasi: kunci kill switch di spec ini harus sama dengan
     // konstanta aplikasi (kill switch runtime DEV tidak bisa diimpor di sini).
     expect(env.killSwitchKey).toBe(KILL_SWITCH_KEY);
-    test.skip(
-      !env.enabled || !(env.override || env.caps.includes('spqr-ratchet')),
-      `jalur v2 tidak aktif di lingkungan ini (${JSON.stringify(env)})`
-    );
+    test.skip(!env.enabled, `integrasi jalur v2 dimatikan (${JSON.stringify(env)})`);
 
     const usernameA = `sqra_${Date.now()}`;
     const usernameB = `sqrb_${Date.now()}`;
@@ -131,6 +159,14 @@ test.describe('Ratchet v2 (braid SPQR)', () => {
     const contextB = await browser.newContext();
     const pageB = await contextB.newPage();
     await registerUser(pageB, 'Bob SPQR', usernameB);
+
+    // Kapabilitas baru bisa dibaca setelah sesi hidup: jalur WT lewat HELLO
+    // sidecar, jalur WSS lewat balasan gateway (dua-duanya asinkron).
+    const caps = await waitForCapabilities(page);
+    test.skip(
+      !(env.override || caps.includes('spqr-ratchet')),
+      `relay tidak mengiklankan spqr-ratchet (ternegosiasi: ${JSON.stringify(caps)})`
+    );
 
     // Alice membuka percakapan dengan Bob (username persis → lolos gerbang
     // pencarian sandbox tanpa PoW).

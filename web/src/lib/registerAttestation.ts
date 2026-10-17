@@ -77,7 +77,19 @@ export function attestationErrorKey(error: unknown): string {
     message.includes('SELF_ATTESTATION_NOT_ALLOWED') ||
     message.includes('ATTESTATION_FORMAT_NOT_ALLOWED') ||
     message.includes('SYNCED_AUTHENTICATOR_NOT_ALLOWED') ||
-    message.includes('AAGUID_BLOCKED')
+    message.includes('AAGUID_BLOCKED') ||
+    // Kegagalan rantai: sertifikat ada, tapi jalurnya tidak berakhir di anchor
+    // yang dipercaya (root belum dipin, rantai tidak tersambung, kedaluwarsa).
+    message.includes('CHAIN_TOO_SHORT') ||
+    message.includes('CHAIN_NOT_LINKED') ||
+    message.includes('CHAIN_UNPARSEABLE') ||
+    message.includes('TOP_NOT_SELF_SIGNED') ||
+    message.includes('ROOT_NOT_TRUSTED') ||
+    message.includes('PINNED_ROOT_UNPARSEABLE') ||
+    message.includes('CERTIFICATE_EXPIRED') ||
+    message.includes('CERTIFICATE_NOT_YET_VALID') ||
+    message.includes('LEAF_IS_CA') ||
+    message.includes('TPM_AIK_EKU_MISSING')
   ) {
     return 'registration_attestation_hardware_required';
   }

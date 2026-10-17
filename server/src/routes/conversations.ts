@@ -34,18 +34,11 @@ import {
   upsertMembership, deleteMembership, type MembershipPrisma
 } from '../utils/routingIdentity.js'
 import type { Conversation } from '@nyx/shared'
-
-const ConversationSchema = z.object({
-  id: z.string().optional(),
-  isGroup: z.boolean().optional(),
-  encryptedMetadata: z.string().nullable().optional(),
-})
-
-// [T3b] Delivery tokens: creator issues one opaque token per invited member.
-// Server stores (conversationId, token) — it cannot link token → identity
-// beyond the routing-only row it is told to create. TOKEN-FIRST: discovery
-// adalah possession token, bukan join userId (26.8.1 trigger #1 tertutup).
-const DeliveryTokenSchema = z.string().regex(DELIVERY_TOKEN_RE)
+// [BUGFIX 2026-10-16] Skema body pembuatan percakapan dipindah ke
+// `utils/conversationSchemas.ts`: `zodValidate` mengganti `req.body` dengan
+// hasil parse, dan skema lokal (non-passthrough) di sini dulu membuang
+// `adminSecretHash` sebelum handler membacanya → SETIAP pembuatan grup 400.
+import { createConversationBodySchema } from '../utils/conversationSchemas.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -313,22 +306,7 @@ router.get('/sync', async (req, res, next) => {
 })
 
 // CREATE a new conversation (Opaque Mailbox)
-const initialSessionSchema = z.object({
-  sessionId: z.string(),
-  initialKeysPerDevice: z.record(z.string(), z.string()), 
-  initiatorCiphertextsPerDevice: z.record(z.string(), z.string()) 
-});
-
-router.post('/', zodValidate({
-  body: ConversationSchema.pick({ isGroup: true, encryptedMetadata: true }).extend({
-    userIds: z.array(z.string()).min(1),
-    initialSession: initialSessionSchema.optional(),
-    // [T3b] Map userId -> delivery token, issued client-side by the creator.
-    // NOTE Zod 4: argumen pertama z.record = schema KEY (userId), jadi harus
-    // string biasa — DeliveryTokenSchema hanya untuk VALUE (token 22-char).
-    deliveryTokens: z.record(z.string().min(1), DeliveryTokenSchema).optional(),
-  })
-}), async (req, res, next) => {
+router.post('/', zodValidate({ body: createConversationBodySchema }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const creatorId = req.user.id

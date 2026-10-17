@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   DEVICE_AUTO_UNLOCK_KEY: 'nyx_device_auto_unlock_key',
   DEVICE_AUTO_UNLOCK_READY: 'nyx_device_auto_unlock_ready',
   PANIC_HASH: 'nyx_panic_hash',
+  KT_IDENTIFIER: 'nyx_kt_identifier',
 };
 
 // Helper for KV operations
@@ -206,6 +207,60 @@ const consumeScopedKey = (base: string): string => {
   }
   const uid = getActiveUserId() ?? 'anon';
   return `${base}:${uid}`;
+};
+
+/**
+ * [docs/30 §30.5 WS-A] Identifier mentah akun aktif (Argon2id 32 byte, base64url)
+ * — **bukan** nilai ter-pepper yang di-echo server.
+ *
+ * Dipakai hanya untuk melampirkan bukti kepemilikan saat upload bundle
+ * (`POST /keys/prekey-bundle`): tanpa nilai ini server tidak bisa menurunkan
+ * search key log (DB hanya menyimpan identifier ter-pepper), sehingga rotasi
+ * kunci identitas tidak tercatat dan peer melihat `mismatch` (kunci tersaji ≠
+ * kunci log) — `docs/32` §32.7 poin 2.
+ *
+ * Disimpan ter-seal `ENC1:` (masterSeed) di `kvStore`, **scoped per user**: akun
+ * lain di tab/browser yang sama tidak boleh mewarisi identifier ini (search key
+ * salah = entri log ditolak server, atau lebih buruk: tertulis untuk akun lain).
+ * Saat vault terkunci, `decryptValueAtRest` mengembalikan null → pemanggil hanya
+ * kehilangan lampiran identifier (server mencatat `no_identifier`), bukan gagal.
+ */
+const ktIdentifierSlot = (scope: string) => `${STORAGE_KEYS.KT_IDENTIFIER}:${scope}`;
+
+/** Slot identifier dibaca TANPA mengkonsumsi `pendingIdentity` (lihat save). */
+const ktIdentifierScope = (): string => getActiveUserId() ?? 'anon';
+
+// Impor dinamis (bukan statis): `keychainDb` menyentuh store auth + crypto worker,
+// sedangkan `keyStorage` dipakai jalur registrasi/login yang sensitif urutan.
+const sealAtRest = async (value: string): Promise<string> =>
+  (await import('./keychainDb')).encryptValueAtRest(value);
+const openAtRest = async (value: string): Promise<string | null> =>
+  (await import('./keychainDb')).decryptValueAtRest(value);
+
+/**
+ * Simpan identifier akun.
+ *
+ * `userId` opsional dan **disarankan** di jalur register: di titik itu user belum
+ * ada di store/localStorage, dan `pendingIdentity` milik auto-unlock key tidak
+ * boleh dikonsumsi lebih dulu (kalau dikonsumsi, auto-unlock key justru tertulis
+ * ke slot `anon` — regresi [FIX #5]).
+ */
+export const saveKtIdentifier = async (usernameHash: string, userId?: string): Promise<void> => {
+  if (!usernameHash) return;
+  await set(ktIdentifierSlot(userId ?? ktIdentifierScope()), await sealAtRest(usernameHash));
+};
+
+/** Baca identifier akun aktif; `undefined` bila belum ada atau vault terkunci. */
+export const getKtIdentifier = async (): Promise<string | undefined> => {
+  const stored = await get<unknown>(ktIdentifierSlot(ktIdentifierScope()));
+  if (typeof stored !== 'string' || stored.length === 0) return undefined;
+  const plain = await openAtRest(stored);
+  return plain && plain.length > 0 ? plain : undefined;
+};
+
+/** Hapus identifier akun aktif (logout). Slot akun lain tidak tersentuh. */
+export const clearKtIdentifier = async (): Promise<void> => {
+  await del(ktIdentifierSlot(ktIdentifierScope()));
 };
 
 export const saveDeviceAutoUnlockKey = async (key: string) => {

@@ -224,7 +224,9 @@ argon2id({ password: username.toLowerCase(), salt: SALT, ...ARGON_INDEX_CONFIG }
 Salt **statis** + parameter ada di bundel klien (publik) ⇒ satu rainbow table
 berlaku global untuk semua deployment. Entropi username manusia rendah ⇒ dump
 ditambah kamus username → deanonymisasi. `usernameHash` juga beredar di link
-undangan (`?u=<usernameHash>`, `web/src/components/ShareProfileModal.tsx:33`).
+undangan (`/u/<usernameHash>` — dibangun `buildUsernameLink` di
+`web/src/utils/usernameLink.ts`, dipakai `ShareProfileModal`; tautan lama
+`/connect?u=…` tetap diterima sebagai pembaca).
 
 **Referensi Signal (dicek di `~/signal`):** plaintext username **tidak pernah**
 disimpan; server menyimpan `username_hash` 32 byte dan membuktikan pengetahuan
@@ -341,6 +343,19 @@ hanya graph "device X punya sesi di conversation C" — layak dicatat, bukan pri
    hanya mengirim `join`/`leave` ke klien yang berlangganan. Registry hidup
    **hanya di memori** (tidak ada artefak untuk di-dump).
 Guard: `tests/redisIdentity.test.ts` (7) + `tests/presencePeers.test.ts` (6).
+
+**[2026-10-16, verifikasi `docs/30` §30.12 WS-H] Redis juga tidak memuat
+**alamat klien** lagi.** Audit menemukan dua tempat yang lolos dari aturan ini:
+key limiter `express-rate-limit` (`rl:general:<ip>`, `rl:auth:<ip>`,
+`rl:upload:<ip>`, TTL 15 mnt–1 jam) menyimpan alamat mentah, dan counter
+`/pow/challenge` menyimpan `blake2b` **tanpa kunci** dari identitas dipotong 16
+hex (`pow:ip` — ruang IPv4 hanya 2^32, jadi bisa dienumerasi dari snapshot).
+Keduanya kini tag HMAC pepper (`utils/clientIp.ts` `clientIpTag`,
+`utils/powIdentity.ts` `powRateKey`); normalisasi IPv6 tetap dari
+`ipKeyGenerator`, jadi semantik pembatasan tidak berubah. Guard:
+`tests/ipKey.test.ts` + `tests/powIdentity.test.ts`. Checklist ops: `docs/10`
+§10.16.
+
 **Perubahan produk yang disengaja:** status online kini lazy — perlu diminta
 per-kontak, bukan otomatis untuk semua orang (kontras dengan Signal, yang bahkan
 tidak mengekspos presence 'online/last seen' sama sekali).
@@ -640,7 +655,7 @@ Mem-bucket kolom ini langsung merusak urutan/scroll-history/jam.
 | Fase | Cakupan | Catatan risiko |
 |---|---|---|
 | B1 ✅ | **Mendarat.** `Conversation.messageSeq` (counter) + `Message.seq` + index `[conversationId, seq(sort: Desc)]`. Increment atomik lewat Prisma `increment` di dalam transaksi (util `utils/messageSequence.ts` → `reserveMessageSeq`), dipakai di 4 titik create (REST, WT `chat_message`, SYSTEM fulfilled_key & metadata_updated). Kursor paginasi pindah ke `seq` (`parseMessageCursor` menerima seq **atau** ISO date legacy); urutan utama `seq`, `createdAt` jadi tie-break baris legacy; mapper mengirim `seq` hanya >0. Klien ikut mengurutkan dengan `seq` (fallback createdAt). Test: `tests/messageSequence.test.ts` (6) | **Backfill baris lama belum dijalankan** (tak ada Postgres di mesin dev) — baris pra-B1 tetap seq=0 dan urut via createdAt; catatan backfill ada di bawah |
-| B2 ✅ | **Mendarat.** Waktu kirim presisi dikirim di dalam plaintext (`sentAt`), bukan kolom server. Send: `store/message.ts` menyuntik `sentAt: Date.now()` ke objek JSON terenkripsi; decrypt: `captureSentAt()` di `messagePipeline.ts` (jalur self-decrypt + `stripProfileKey`) menyalin ke `Message.sentAt` **lalu menghapus field** (wajib — logika collapse `Object.keys(parsed).length === 1`). Tampilan memakai `sentAt` (bubble, jendela edit, ChatList, search) dengan fallback `createdAt`; `sentAt` dipersist lokal. Test: `web/src/lib/__tests__/sentAtCapture.test.ts` (5) | Format beku (`ENCRYPT_DATA`/amplop/padding/opcode) TIDAK tersentuh. **Butuh verifikasi E2E** dekripsi nyata |
+| B2 ✅ | **Mendarat.** Waktu kirim presisi dikirim di dalam plaintext (`sentAt`), bukan kolom server. Send: `store/message.ts` menyuntik `sentAt: Date.now()` ke objek JSON terenkripsi; decrypt: `captureSentAt()` di `messagePipeline.ts` (jalur self-decrypt + `stripProfileKey`) menyalin ke `Message.sentAt` **lalu menghapus field** (wajib — logika collapse `Object.keys(parsed).length === 1`). Tampilan memakai `sentAt` (bubble, jendela edit, ChatList, search) dengan fallback `createdAt`; `sentAt` dipersist lokal. Test: `web/src/lib/__tests__/sentAtCapture.test.ts` (5) | Format beku (`ENCRYPT_DATA`/amplop/padding/opcode) TIDAK tersentuh. **Butuh verifikasi E2E** dekripsi nyata. **[2026-10-16]** Persistensi lokal `sentAt` kini **ter-seal `ENC1:`** (`docs/30` WS-F): presisi ms per pesan tidak lagi plaintext di IndexedDB — ciphertext tetap satu-satunya bentuk `sentAt` yang meninggalkan perangkat |
 | B3 ✅ | **Mendarat.** `Message.createdAt` dipotong 15 menit (`messageTimeBucket`) di semua jalur create (REST, WT chat_message, 2 SYSTEM) dan `expiresAt` **diturunkan dari waktu kasar yang sama** (kalau tidak, `expiresAt − TTL` membocorkan createdAt). `Conversation.lastMessageAt` ikut waktu kasar yang sama. Vault lokal memakai `sentAt` presisi sebagai indeks bila ada. Test: `tests/temporalBucket.test.ts` | Toleransi TTL sweeper ≤1 bucket (15 mnt). `MessageStatus.updatedAt` **juga** dikasar: `@updatedAt` dihapus & nilainya ditulis eksplisit (`messageTimeBucket()`) di kedua jalur receipt |
 | B4 ✅ | **Mendarat.** `User.lastActiveAt` → `lastActiveDay` (bucket **hari**, UTC) + index disesuaikan; ditulis di `user.create` (auth & engine) dan `issueTokens` (updateMany no-op bila hari sama) — sekaligus memperbaiki bug DMS yang dulu memakai nilai basi. `Device.lastActiveAt` di-bucket **15 menit** (`deviceActivityBucket`) di semua jalur write, dengan tie-break deterministik `[{lastActiveAt desc},{createdAt desc}]` di semua pembaca. Util: `utils/temporalBucket.ts`. Test: `tests/temporalBucket.test.ts` (10) | Pemilihan device "terbaru" kini seri dalam 1 bucket → tie-break `createdAt`; perilaku DMS berubah (kini benar-benar mengikuti aktivitas) |
 | B5 ✅ | **Mendarat.** `Message.id` → `@default(uuid())` (non-time-ordered); id `cuid()` lama tetap valid (opaque bagi klien). Id eksplisit SYSTEM metadata `msg_sys_meta_<Date.now()>_…` diganti `sys_meta_<randomUUID>`. Guard di `tests/temporalBucket.test.ts`. **Tuntas untuk SEMUA model ber-default PK**: User, Conversation, Device, Tenant, MessageStatus, SessionKey, RefreshToken, PushSubscription, OneTimePreKey, UserHiddenConversation, BlockedUser semuanya `@default(uuid())` — tak ada `cuid()` tersisa di schema (D11). Validator `keys.ts` (dulu `.cuid()`) dilonggarkan agar user lama (cuid) & baru (uuid) sama-sama lolos | `Authenticator.id`/`CredentialIssuerKey.keyVersion` memang PK eksplisit (bukan id acak) |

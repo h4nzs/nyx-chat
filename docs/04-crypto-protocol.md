@@ -57,9 +57,14 @@ Jalur **v1 di atas tetap beku dan tetap satu-satunya default**. v2 hidup
 berdampingan (`docs/33` §33.10) dan hanya dipakai bila **peer membuktikan** bisa
 membacanya:
 
-- **Deployment gate (transport):** sidecar mengiklankan `spqr-ratchet` di
-  `SERVER_CAPABILITIES` + klien mengiklankannya di HELLO. Ini hanya berarti
-  "deployment ini melewatkan frame v2", bukan jaminan tentang peer.
+- **Deployment gate (transport):** relay mengiklankan `spqr-ratchet` di
+  `SERVER_CAPABILITIES`, klien mengiklankannya juga, dan keduanya bertemu lewat
+  negosiasi — **di kedua transport**: sidecar WebTransport lewat HELLO bidi,
+  gateway WSS lewat balasan event `capabilities` atas
+  `handshake.auth.capabilities` (`server/src/utils/transportCapability.ts`).
+  Ini hanya berarti "deployment ini melewatkan frame v2", bukan jaminan tentang
+  peer — dan karena kedua relay memakai `SERVER_CAPABILITIES` yang sama, perilaku
+  pesan tidak berubah hanya karena transport jatuh ke WSS.
 - **Bukti peer (in-band, otentikasi AEAD):** payload ter-seal membawa `ackV: 2`
   (= "versi ratchet yang bisa SAYA buka"). Pengirim baru memakai v2 setelah
   melihat `ackV: 2` dari peer. Klien lama tidak pernah menerima header v2.

@@ -12,9 +12,12 @@
  *     `openFramedBackupWithPhrase` dengan byte arsip persis seperti yang dibaca.
  *  4. Setelah sukses: deviceId dihapus + kunci identitas lokal dibersihkan
  *     (bootstrap identitas baru), lalu sukses di-toast.
+ *  5. Sumber alternatif awan: `downloadCloudBackup` → byte-nya dipakai jalur
+ *     restore yang sama; 404 (belum ada backup) dibedakan dari error lain.
  *
  * Semua modul berat (libsodium, Dexie, arsip) dipalsukan — yang diuji adalah
  * wiring UI, bukan kripto (itu sudah diuji di `backupRestore.test.ts`).
+ * `normalizeBackupPhrase` sengaja REAL: normalisasi itulah kontrak antar jalur.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -37,17 +40,23 @@ vi.mock('../ui/ModalBase', () => ({
 }));
 
 const readBackupFile = vi.fn();
+const downloadCloudBackup = vi.fn();
 vi.mock('@lib/backupTransport', () => ({
   readBackupFile: (...args: unknown[]) => readBackupFile(...args),
+  downloadCloudBackup: (...args: unknown[]) => downloadCloudBackup(...args),
 }));
 
 const openFramedBackupWithPhrase = vi.fn();
 const liveBackupStore = vi.fn();
-vi.mock('@lib/backupRestore', () => ({
-  openFramedBackupWithPhrase: (...args: unknown[]) => openFramedBackupWithPhrase(...args),
-  liveBackupStore: (...args: unknown[]) => liveBackupStore(...args),
-  formatBackupSize: () => '1.00 KB',
-}));
+vi.mock('@lib/backupRestore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lib/backupRestore')>();
+  return {
+    ...actual,
+    openFramedBackupWithPhrase: (...args: unknown[]) => openFramedBackupWithPhrase(...args),
+    liveBackupStore: (...args: unknown[]) => liveBackupStore(...args),
+    formatBackupSize: () => '1.00 KB',
+  };
+});
 
 vi.mock('@lib/sodiumInitializer', () => ({ getSodium: vi.fn(async () => ({})) }));
 vi.mock('@lib/backupFormat', () => ({ libsodiumBackupCrypto: vi.fn(() => ({})) }));
@@ -57,6 +66,7 @@ const identityKeysClear = vi.fn();
 vi.mock('@lib/db', () => ({ db: { identityKeys: { clear: (...a: unknown[]) => identityKeysClear(...a) } } }));
 
 import toast from 'react-hot-toast';
+import { ApiError } from '@lib/api';
 import BackupRestoreModal from '../BackupRestoreModal';
 
 const RESTORE_KEY = 'modals:backup_restore.restore_button';
@@ -134,6 +144,38 @@ describe('BackupRestoreModal', () => {
     await waitFor(() => expect(identityKeysClear).toHaveBeenCalledTimes(1));
     expect(localStorage.getItem('deviceId')).toBeNull();
     expect(toast.success).toHaveBeenCalledTimes(1);
+  });
+
+  it('ambil dari awan → byte arsip dari R2 dipakai jalur restore yang sama', async () => {
+    const cloudBytes = new Uint8Array([0x4e, 0x59, 0x58, 0x42, 9]);
+    downloadCloudBackup.mockResolvedValue(cloudBytes);
+    openFramedBackupWithPhrase.mockResolvedValue({ records: 5, size: 12, tables: {}, frameCount: 1, formatVersion: 1 });
+
+    render(<BackupRestoreModal isOpen onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId('backup-restore-cloud'));
+
+    await waitFor(() => expect(downloadCloudBackup).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('modals:backup_restore.cloud_source')).toBeTruthy());
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'legal winner thank' } });
+    fireEvent.click(restoreButton());
+
+    await waitFor(() => expect(openFramedBackupWithPhrase).toHaveBeenCalledTimes(1));
+    expect((openFramedBackupWithPhrase.mock.calls[0]![0] as { bytes: Uint8Array }).bytes).toBe(cloudBytes);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+  });
+
+  it('awan tanpa backup (404) → pesan khusus, restore tidak dijalankan', async () => {
+    downloadCloudBackup.mockRejectedValue(new ApiError(404, 'No cloud backup found'));
+
+    render(<BackupRestoreModal isOpen onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId('backup-restore-cloud'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe('modals:backup_restore.cloud_missing');
+    });
+    expect(restoreButton()).toBeDisabled();
+    expect(openFramedBackupWithPhrase).not.toHaveBeenCalled();
   });
 
   it('phrase salah → error tampil, tanpa klaim sukses', async () => {

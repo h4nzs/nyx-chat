@@ -31,6 +31,13 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { WSS_KEYS_SYNC_EVENTS } from '../src/realtime/gateway.js';
+import { CLIENT_CAPABILITIES, SERVER_CAPABILITIES } from '@nyx/shared';
+import {
+  negotiateWssCapabilities,
+  parseAnnouncedCapabilities,
+  recordWssCapabilities,
+} from '../src/utils/transportCapability.js';
+import { renderMetricsText, resetMetricsForTests } from '../src/utils/metrics.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const handlersSource = readFileSync(
@@ -82,14 +89,16 @@ test('setiap case handleKeySync bisa dicapai dari WSS ATAU di-dokumentasikan seb
   // (bukan derived KEY_SYNC) atau belum dipakai client WSS sama sekali.
   //  - message:ack_delivered  → jalur fixed ACK (gateway socket.on terpisah).
   //  - message:deleted        → WT-only; unsend di WSS lewat message:unsend.
-  //  - migration:chunk/start/ack → WT-only (transfer vault device-to-device
-  //                             butuh through-put stream; WSS fallback belum).
+  //
+  // `migration:chunk/start/ack` DULU ada di daftar ini ("WSS fallback belum"),
+  // tetapi gateway sekarang meneruskannya (`WSS_KEYS_SYNC_EVENTS` memuatnya) dan
+  // transfer perangkat lewat WSS sudah punya jalurnya. Entri lama dihapus supaya
+  // daftar ini tetap berarti: apa pun yang tercantum = BENAR-BENAR belum ada
+  // rutenya. Kalau salah satu event migration dicebut dari gateway tanpa sengaja,
+  // test pertama di file ini gagal (`missing` tidak kosong) — bukan test ini.
   const KNOWN_WT_ONLY = new Set([
     'message:ack_delivered',
     'message:deleted',
-    'migration:chunk',
-    'migration:start',
-    'migration:ack',
   ]);
 
   const handled = new Set(extractHandledKeySyncEvents(handlersSource));
@@ -136,6 +145,74 @@ test('gateway mendaftarkan event KEY_SYNC via loop atas WSS_KEYS_SYNC_EVENTS (su
       `'${guarded}' harus terdaftar via guardedOn (guard unhandledRejection)`
     );
   }
+});
+
+// ============================================================================
+// [docs/29 §5.6 · docs/33 §33.7] Negosiasi kapabilitas jalur WSS
+// ============================================================================
+//
+// Jalur WT menegosiasikan kapabilitas lewat HELLO bidi di sidecar; jalur WSS
+// (fallback yang dipakai klien di jaringan yang memblokir QUIC) harus setara,
+// karena tanpa itu `negotiatedCapabilities` selalu kosong di WSS dan jalur
+// ratchet v2 (braid SPQR) tidak pernah dipakai walau kedua peer sudah saling
+// menyatakan mampu in-band. Yang diuji di sini: logika murninya (bentuk input
+// dari jaringan + irisan) dan jejaknya di metrik — bukan hanya wiring.
+
+test('kapabilitas WSS: klien legacy (tanpa field) = daftar kosong, bukan error', () => {
+  assert.deepEqual(parseAnnouncedCapabilities(undefined), []);
+  assert.deepEqual(parseAnnouncedCapabilities(null), []);
+  assert.deepEqual(parseAnnouncedCapabilities([]), []);
+  assert.deepEqual(negotiateWssCapabilities(undefined), []);
+});
+
+test('kapabilitas WSS: bentuk cacat ditolak sebagai legacy (satu klien cacat tidak memutus handshake)', () => {
+  // Payload ini datang dari klien mana pun → batasnya bagian kontrak.
+  for (const bad of ['spqr-ratchet', 42, { caps: ['x'] }, [1], [''], ['a'.repeat(65)], Array(33).fill('c')]) {
+    assert.deepEqual(parseAnnouncedCapabilities(bad), [], `bentuk cacat lolos: ${JSON.stringify(bad)}`);
+  }
+});
+
+test('kapabilitas WSS: irisan dengan SERVER_CAPABILITIES (klien tak bisa mengaktifkan yang tak ada)', () => {
+  assert.deepEqual(
+    parseAnnouncedCapabilities(['hello-v1', CLIENT_CAPABILITIES.SPQR_RATCHET, 'hello-v1']),
+    ['hello-v1', CLIENT_CAPABILITIES.SPQR_RATCHET],
+    'duplikat dibuang, urutan klien dipertahankan'
+  );
+  assert.deepEqual(
+    negotiateWssCapabilities(['kt-lite', CLIENT_CAPABILITIES.SPQR_RATCHET]),
+    [CLIENT_CAPABILITIES.SPQR_RATCHET],
+    'kapabilitas tak dikenal server tidak pernah masuk hasil'
+  );
+  // Sumber kebenaran tunggal untuk kedua relay: daftar yang disepakati selalu
+  // subset `SERVER_CAPABILITIES` (sidecar Rust memakai konstanta yang sama).
+  assert.deepEqual(negotiateWssCapabilities([...SERVER_CAPABILITIES]), [...SERVER_CAPABILITIES]);
+  assert.deepEqual(negotiateWssCapabilities(['multi-device']), [], 'kapabilitas yang tidak ada tidak diiklankan');
+});
+
+test('kapabilitas WSS terlihat di metrik: per kapabilitas, dan "none" bila tak ada yang cocok', () => {
+  resetMetricsForTests();
+  recordWssCapabilities([]);
+  recordWssCapabilities([CLIENT_CAPABILITIES.SPQR_RATCHET]);
+  recordWssCapabilities([CLIENT_CAPABILITIES.HELLO_V1, CLIENT_CAPABILITIES.SPQR_RATCHET]);
+
+  const text = renderMetricsText();
+  const value = (capability: string): number => {
+    const match = text.match(new RegExp(`nyx_wss_capability_total\\{capability="${capability}"\\} (\\d+)`));
+    return match ? Number.parseInt(match[1]!, 10) : 0;
+  };
+  assert.equal(value('none'), 1, 'koneksi tanpa kapabilitas yang cocok tercatat sebagai none');
+  assert.equal(value(CLIENT_CAPABILITIES.SPQR_RATCHET), 2, 'rollout spqr-ratchet harus terukur');
+  assert.equal(value(CLIENT_CAPABILITIES.HELLO_V1), 1);
+  resetMetricsForTests();
+});
+
+test('gateway WSS membalas kapabilitas hasil irisan (paritas dengan HELLO sidecar)', () => {
+  // Wiring diperiksa dari source: balasan hanya untuk klien yang mengiklankan,
+  // dan irisan dihitung helper yang sama (tidak ada daftar kapabilitas lokal).
+  assert.match(gatewaySource, /socket\.emit\('capabilities', agreed\)/);
+  assert.match(gatewaySource, /if \(announced\.length > 0\)/);
+  assert.match(gatewaySource, /recordWssCapabilities\(agreed\)/);
+  assert.doesNotMatch(gatewaySource, /'spqr-ratchet'/, 'nama kapabilitas hidup di @nyx/shared');
 });
 
 test('gateway meneruskan msgId ke handleKeySync (paritas ACK dengan jalur WT)', () => {

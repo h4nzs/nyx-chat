@@ -13,7 +13,7 @@
 |---|---|---|
 | `requireAuth` | `middleware/auth.ts` | Cookie/Bearer JWT, Redis JTI blacklist, ban check (Redis cache 15m, invalidated on ban/unban) |
 | `requireAdmin` | `middleware/auth.ts` | Role gate |
-| `generalLimiter`/`authLimiter`/`uploadLimiter` | `middleware/rateLimiter.ts` | RedisStore; key from `req.ip` (never trust `cf-connecting-ip` alone) |
+| `generalLimiter`/`authLimiter`/`uploadLimiter` | `middleware/rateLimiter.ts` | RedisStore; key = `clientIpTag(req)` — **HMAC pepper** dari alamat klien (CF-Connecting-IP dulu, lalu `ipKeyGenerator`), bukan alamat mentah → key Redis tidak menyimpan IP (`docs/30` §30.12 WS-H) |
 | `tenantAuth` | `middleware/tenantAuth.ts` | B2B tenant API key gate (engine routes) |
 | CSRF | `app.ts` | `csrf-csrf`, state keyed per `x-nyx-installation-id` |
 

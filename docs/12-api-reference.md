@@ -39,7 +39,7 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 |---|---|---|
 | GET | `/me` | Own profile (opaque encryptedProfile) |
 | PUT | `/me` | Update `{encryptedProfile?, autoDestructDays?}` → returns updated user + emits `user:updated` |
-| PUT | `/me/keys` | Update device public keys (invalidates key caches) |
+| PUT | `/me/keys` | Update device public keys (invalidates key caches). `usernameHash?` = identifier mentah Argon2id untuk entri log KT saat kunci berubah (`docs/32` §32.7) |
 | POST | `/me/complete-onboarding` | Set `hasCompletedOnboarding` |
 | POST | `/me/logout` | Revoke own refresh token, clear cookies |
 | DELETE | `/me` | Delete account (+ R2 files `{fileKeys}`) → KICK |
@@ -82,7 +82,7 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/prekey-bundle` | Upload own bundle (identity/pq/signing + signed prekeys + OTPK) — also carries `encryptedPrivateKeys?` to keep the server's device copy in sync ([temuan #2]) |
+| POST | `/prekey-bundle` | Upload own bundle (identity/pq/signing + signed prekeys + OTPK) — also carries `encryptedPrivateKeys?` to keep the server's device copy in sync ([temuan #2]) and `usernameHash?` (identifier mentah) so a key rotation is written to the KT log (`docs/30` §30.5 WS-A) |
 | GET | `/prekey-bundle/:userId` | Fetch a user's bundle (Redis-cached 1h) |
 | POST | `/prekey-bundles` | Batch fetch (≤50 users) |
 | POST | `/public-keys` | Batch public keys (≤50 users) |
@@ -130,8 +130,10 @@ Backup ber-frame terenkripsi (`.nyxbak`) — lihat `docs/31`. Server hanya melih
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/presign` | Presigned PUT URL (`uploadLimiter`); body `{ size, urlTtl? }`; kuota FREE 100 MB / SUBSCRIBER 500 MB; butuh akun terverifikasi |
-| POST | `/download-url` | Presigned GET URL (`generalLimiter`); body `{ urlTtl? }` |
-| DELETE | `/` | Hapus objek backup akun (`generalLimiter`) |
+| POST | `/download-url` | Presigned GET URL (`generalLimiter`); body `{ urlTtl? }` — dipakai tombol "Ambil dari awan" di modal restore (404 = belum ada backup) |
+| DELETE | `/` | Hapus objek backup akun (`generalLimiter`) — dipanggil `executeLocalWipe` SEBELUM `/api/auth/logout-all`, karena endpoint ini butuh sesi hidup |
+
+Objek backup juga dihapus saat akun dihapus (`DELETE /api/users/me`, langkah 1b): kuncinya tidak memuat userId, sehingga filter lampiran berbasis prefix `${userId}-` tidak pernah mencakupnya.
 
 Batasan yang jujur: kuota ditegakkan terhadap `size` yang **diklaim klien** (sama seperti `/api/uploads/presigned`); penegakan keras ada di kebijakan bucket/lifecycle R2. Rotasi `BACKUP_KEY_SECRET`/`JWT_SECRET` membuat backup awan lama tidak bisa ditemukan lagi.
 

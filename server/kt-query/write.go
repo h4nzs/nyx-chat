@@ -43,12 +43,15 @@ type updateService struct {
 
 func (s *updateService) Update(ctx context.Context, req *tpb.UpdateRequest) (*tpb.UpdateResponse, error) {
 	if req == nil || len(req.SearchKey) == 0 {
+		queryMetrics.write(writeResultInvalid)
 		return nil, status.Error(codes.InvalidArgument, "search key wajib ada")
 	}
 	if req.Consistency == nil {
+		queryMetrics.write(writeResultInvalid)
 		return nil, status.Error(codes.InvalidArgument, "consistency wajib ada")
 	}
 	if err := ctx.Err(); err != nil {
+		queryMetrics.write(writeResultCancelled)
 		return nil, status.Error(codes.DeadlineExceeded, err.Error())
 	}
 
@@ -57,6 +60,7 @@ func (s *updateService) Update(ctx context.Context, req *tpb.UpdateRequest) (*tp
 
 	tree, err := transparency.NewTree(s.cfg, s.store)
 	if err != nil {
+		queryMetrics.write(writeResultError)
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 
@@ -65,14 +69,24 @@ func (s *updateService) Update(ctx context.Context, req *tpb.UpdateRequest) (*tp
 		// Upstream menjawab `(nil, nil)` untuk update duplikat: penulis yang
 		// mengulang entri (mis. setelah restart) harus idempoten, bukan error.
 		if errors.Is(err, tr.ErrDuplicateUpdate) {
+			queryMetrics.write(writeResultDuplicate)
 			return nil, nil
 		}
 		var invalidArgument *commonerrors.ErrInvalidArgument
 		if errors.As(err, &invalidArgument) {
+			queryMetrics.write(writeResultInvalid)
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
+		queryMetrics.write(writeResultError)
 		log.Printf("[kt-query] update gagal: %v", err)
 		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	// Ukuran pohon setelah tulisan sukses — dibaca dari head, bukan dari respons:
+	// respons hanya dibuat bila klien memintanya (`ReturnUpdateResponse`).
+	queryMetrics.write(writeResultOK)
+	if head := tree.GetTransparencyTreeHead(); head != nil {
+		queryMetrics.setTreeSize(head.TreeSize)
 	}
 
 	// Sama seperti upstream: respons bukti hanya dibuat bila diminta.
@@ -109,13 +123,29 @@ func (s *updateService) distinguishedTimestamp() (time.Time, bool) {
 }
 
 // updateDistinguished menulis ulang kunci `distinguished` dengan waktu sekarang.
+//
+// Nilai yang ditulis juga dipublikasikan ke
+// `nyx_kt_query_distinguished_timestamp_seconds`. Ini bukan hiasan: kalau gauge
+// itu hanya di-set sekali saat start, alert "anchor basi" akan menyala PALSU
+// setelah setiap restart (seri lama tertinggal di jendela evaluasi) sekaligus
+// tetap buta terhadap loop yang benar-benar berhenti — kelas kesalahan yang sama
+// dengan yang sudah pernah terjadi di sisi TS (lihat aturan NyxKtSnapshot-
+// NotUploaded di ops/prometheus/alerts.yml).
 func (s *updateService) updateDistinguished(ctx context.Context) error {
+	now := time.Now()
 	_, err := s.Update(ctx, &tpb.UpdateRequest{
 		SearchKey:   []byte(DistinguishedSearchKey),
-		Value:       []byte(strconv.FormatInt(time.Now().Unix(), 10)),
+		Value:       []byte(strconv.FormatInt(now.Unix(), 10)),
 		Consistency: &tpb.Consistency{},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// Duplikat juga sampai di sini (`Update` mengembalikan nil untuk
+	// `ErrDuplicateUpdate`): nilainya memang sudah tersimpan, jadi seri ini tetap
+	// jujur tentang apa yang ada di log.
+	queryMetrics.setDistinguishedTimestamp(now)
+	return nil
 }
 
 // nextDistinguishedDelay meniru `distinguished()` upstream: kalau belum ada

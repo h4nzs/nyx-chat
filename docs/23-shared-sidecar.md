@@ -40,6 +40,7 @@ Lib + binaries on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoken`, 
 | `src/protocol.rs` | **pure** protocol: opcode + HELLO constants, `parse_transport_hello`, `negotiate_capabilities`, `hello_reply_frame/payload`, `classify_inbound`, `parse_inbound_frame`, `reference_forward` |
 | `src/fuzz.rs` | deterministic campaign (xorshift64) over framing + HELLO, incl. differential check |
 | `src/bin/fuzz-framing.rs` | runner: `NYX_FUZZ_SECONDS` / `NYX_FUZZ_ITERS` / `NYX_FUZZ_SEED`, exit 1 on finding |
+| `src/metrics.rs` | `nyx_transport_*` counters/gauges + Prometheus 0.0.4 text exposition on a **loopback** listener (`TRANSPORT_METRICS_ADDR`, default `127.0.0.1:9465`; non-loopback is rejected at startup, `0` = off) |
 
 ### Startup
 1. **TLS cert**: prod → `PROD_CERT_PATH`/`PROD_KEY_PATH`; dev → persistent self-signed DER (`transport_cert.der`/`transport_key.der`), SAN localhost/127.0.0.1, 10-day validity. Prints the **SHA-256 cert hash** → paste into `web/.env` as `VITE_TRANSPORT_CERT_HASH`.
@@ -57,6 +58,45 @@ Lib + binaries on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoken`, 
 
 ### Hardcoded opcodes (must stay in sync with `packages/shared/src/transport.ts`)
 `0x00` (chaff/ignore), `0x0A` (handshake + ACK), `0x07` (KICK), `99` (disconnect). All other opcodes are passed through opaquely.
+
+### Metrics (`src/metrics.rs`, scrape job `nyx-sidecar`)
+Why it exists: a sidecar that cannot be reached is **invisible** — clients silently
+fall back to WSS (`web/src/lib/transportMode.ts`), so there is no error anywhere to
+notice, only worse latency. `METRIC_DEFS` declares every `nyx_transport_*` family
+up front (`docs/30` WS-G(6)); label values come from fixed enums (`ConnectionOutcome`,
+`AuthMethod`, `AuthFailure`, `RejectReason`, `Path`, `DownstreamOutcome`,
+`Direction`), so unlike the TS exporter there is no free-form label to validate —
+identity-shaped values cannot get in by construction. A useful side effect: the
+renderer walks the full enum lists, so every label child exists (at 0) from the
+first scrape — `increase()` stays meaningful across restarts, which is exactly what
+`prom-client` on the API side cannot promise.
+
+`reason="chaff"` on `nyx_transport_rejected_frames_total` counts opcode `0x00`
+(traffic cover) and is deliberately excluded from the malformed-frame alert:
+chaff is normal and often far noisier than real traffic.
+
+`HISTOGRAM_DEFS` carries the one histogram: `nyx_transport_ingress_seconds`, from
+a complete client frame being received to Redis accepting it on
+`nyx:upstream:<opcode>`. It is the only ingress hop the sidecar actually owns —
+the work Node does (rate limit, device check, DB, fan-out) happens *after* it, and
+the WSS path measures that same span separately as `nyx_wss_ingress_seconds`
+(`server/src/utils/transportLatency.ts`). The two are compared by an alert, so the
+bucket boundaries must stay identical on both sides (`INGRESS_BUCKETS` here ↔
+`WSS_INGRESS_SECONDS` in `metrics.ts`); two histograms with different buckets
+yield p95 values that cannot be compared, and nothing errors when that happens.
+Unlike `prom-client` on the TS side, every bucket is rendered at 0 from process
+start (`_count` = 0), so `rate(..._count[5m])` is a real **0** rather than a
+gap — `histogram_quantile` over zero observations is still NaN, which is what
+"no samples yet" honestly means.
+
+A third transport rule watches **usage** instead of latency: `NyxTransportUnused`
+fires when `nyx_transport_active_sessions` was above zero within the last hour but
+stayed at zero for the last 15 minutes while the sidecar itself is still `up` and
+the WSS path is still serving. Abandoning the fast path produces no error at all —
+clients fall back exactly as designed, so handshake, auth and frame checks all stay
+silent, and without this rule the only trace is the dashboard nobody is watching.
+The one-hour lookback is what keeps it quiet on deployments that never used
+WebTransport in the first place: "always zero" is not a degradation.
 
 ## 23.3 Files to know
 

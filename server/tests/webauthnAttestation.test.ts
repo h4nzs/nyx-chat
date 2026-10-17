@@ -28,7 +28,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   ATTESTATION_CHALLENGE_TTL_SECONDS,
@@ -40,6 +42,7 @@ import {
   consumeAttestationChallenge,
   evaluateAttestationPolicy,
   hasCertificateChain,
+  loadAttestationRootCerts,
   storeAttestationChallenge,
   verifyAttestationChain,
   verifyNewAccountAttestation,
@@ -456,8 +459,11 @@ const FIXTURE_DIR = new URL('./fixtures/webauthn/', import.meta.url);
 const readFixture = (name: string): Uint8Array => new Uint8Array(readFileSync(new URL(name, FIXTURE_DIR)));
 const aikLeafDer = readFixture('leaf-aik.der');
 const plainLeafDer = readFixture('leaf-plain.der');
+const chainedLeafDer = readFixture('leaf-chained.der');
+const intermediateDer = readFixture('intermediate-ca.der');
 const rootCaDer = readFixture('root-ca.der');
 const aikKey = crypto.createPrivateKey(readFileSync(new URL('leaf-aik.key.pem', FIXTURE_DIR)));
+const chainedKey = crypto.createPrivateKey(readFileSync(new URL('leaf-chained.key.pem', FIXTURE_DIR)));
 const plainLeafKey = crypto.createPrivateKey(readFileSync(new URL('leaf-plain.key.pem', FIXTURE_DIR)));
 const ROOT_FINGERPRINT = new crypto.X509Certificate(Buffer.from(rootCaDer)).fingerprint256;
 
@@ -580,6 +586,166 @@ test('verifyNewAccountAttestation: root dipin menerima root benar dan menolak ro
   });
   assert.equal(untrusted.verified, false);
   assert.equal(untrusted.reason, 'ROOT_NOT_TRUSTED');
+});
+
+test('verifyAttestationChain: x5c tanpa root diterima bila root-nya dipin (bentuk perangkat nyata)', () => {
+  // TPM/Windows Hello, Android Key Attestation, packed YubiKey, dan `apple`
+  // sering mengirim x5c = leaf (+ intermediate) saja; root hidup di trust store
+  // vendor. Jalur harus tetap bisa dibangun dari root yang dipin operator.
+  const leafOnly = verifyAttestationChain([aikLeafDer], { trustedRootCerts: [rootCaDer] });
+  assert.deepEqual(leafOnly.failures, []);
+  assert.equal(leafOnly.anchoredBy, 'pinned-root');
+  assert.equal(leafOnly.pinnedRootMatch, true);
+
+  // Fingerprint root saja TIDAK cukup kalau root tidak ikut x5c: tanpa kunci
+  // publik root, tanda tangan leaf tidak bisa diverifikasi. Jangan diterima
+  // hanya karena operator menyebut nama fingerprint.
+  const fingerprintOnly = verifyAttestationChain([aikLeafDer], {
+    trustedRootFingerprints: [ROOT_FINGERPRINT],
+  });
+  assert.ok(fingerprintOnly.failures.includes('CHAIN_TOO_SHORT'));
+  assert.equal(fingerprintOnly.pinnedRootMatch, false);
+
+  // Sertifikat yang dipin tapi bukan penerbit (dan bukan CA) tidak boleh
+  // mengakhiri jalur.
+  const wrongRoot = verifyAttestationChain([aikLeafDer], { trustedRootCerts: [plainLeafDer] });
+  assert.ok(wrongRoot.failures.includes('ROOT_NOT_TRUSTED'));
+
+  // Satu sertifikat yang dipin persis adalah trust anchor eksplisit → tidak
+  // lagi kena CHAIN_TOO_SHORT. Fixture root di sini CA:TRUE, jadi status
+  // LEAF_IS_CA tetap muncul (memang bukan leaf); bentuk CA:FALSE yang dipakai
+  // authenticator virtual diuji E2E di lingkungan dev.
+  const singlePinned = verifyAttestationChain([rootCaDer], {
+    trustedRootFingerprints: [ROOT_FINGERPRINT],
+  });
+  assert.equal(singlePinned.anchoredBy, 'pinned-root');
+  assert.equal(singlePinned.length, 1);
+  assert.equal(singlePinned.failures.includes('CHAIN_TOO_SHORT'), false);
+  assert.equal(singlePinned.failures.includes('ROOT_NOT_TRUSTED'), false);
+  assert.deepEqual(singlePinned.failures, ['LEAF_IS_CA']);
+});
+
+test('verifyAttestationChain: jalur 3 tingkat (leaf→intermediate) dengan root dipin', () => {
+  // Bentuk Android/YubiKey/Apple/TPM: x5c berhenti di intermediate, root tidak
+  // ikut. Jalur dibangun dengan kunci publik root yang dipin.
+  const ok = verifyAttestationChain([chainedLeafDer, intermediateDer], {
+    trustedRootCerts: [rootCaDer],
+  });
+  assert.deepEqual(ok.failures, []);
+  assert.equal(ok.anchoredBy, 'pinned-root');
+  assert.equal(ok.length, 2);
+
+  // Tanpa pin, rantai berhenti di intermediate → tidak ada anchor.
+  assert.ok(
+    verifyAttestationChain([chainedLeafDer, intermediateDer]).failures.includes('TOP_NOT_SELF_SIGNED')
+  );
+
+  // Root lain yang dipin tidak boleh menutup jalur ini.
+  assert.ok(
+    verifyAttestationChain([chainedLeafDer, intermediateDer], {
+      trustedRootCerts: [plainLeafDer],
+    }).failures.includes('ROOT_NOT_TRUSTED')
+  );
+
+  // Rantai lengkap (root ikut) + fingerprint root juga sah.
+  const full = verifyAttestationChain([chainedLeafDer, intermediateDer, rootCaDer], {
+    trustedRootFingerprints: [ROOT_FINGERPRINT],
+  });
+  assert.deepEqual(full.failures, []);
+  assert.equal(full.anchoredBy, 'pinned-root');
+});
+
+test('verifyNewAccountAttestation: rantai perangkat nyata (root tidak ikut x5c) diterima', async () => {
+  const authData = buildAuthData({ rpId: RPID });
+  const attestationObject = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: chainedKey,
+    chain: [chainedLeafDer, intermediateDer],
+  });
+  const response = buildRegistrationResponse({ attestationObject, challenge: CHALLENGE, origin: ORIGIN });
+
+  const accepted = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+    policy: { ...DEFAULT_ATTESTATION_POLICY, trustedAttestationRootCerts: [rootCaDer] },
+  });
+  assert.equal(accepted.verified, true, `ditolak: ${accepted.reason}`);
+  assert.equal(accepted.tier, 'hardware');
+
+  const rejected = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+  });
+  assert.equal(rejected.verified, false);
+  assert.equal(rejected.reason, 'TOP_NOT_SELF_SIGNED');
+});
+
+test('verifyNewAccountAttestation: root dipin menutup jalur walau x5c tanpa root', async () => {
+  const authData = buildAuthData({ rpId: RPID });
+  const attestationObject = packedAttestation({
+    authData,
+    challenge: CHALLENGE,
+    origin: ORIGIN,
+    key: aikKey,
+    // Bentuk perangkat nyata: hanya leaf, root tidak dikirim.
+    chain: [aikLeafDer],
+  });
+  const response = buildRegistrationResponse({ attestationObject, challenge: CHALLENGE, origin: ORIGIN });
+
+  const accepted = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+    policy: { ...DEFAULT_ATTESTATION_POLICY, trustedAttestationRootCerts: [rootCaDer] },
+  });
+  assert.equal(accepted.verified, true, `ditolak: ${accepted.reason}`);
+  assert.equal(accepted.tier, 'hardware');
+
+  // Tanpa root yang dipin, bentuk yang sama tetap ditolak.
+  const rejected = await verifyNewAccountAttestation({
+    response,
+    expectedChallenge: CHALLENGE,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RPID,
+  });
+  assert.equal(rejected.verified, false);
+  assert.equal(rejected.reason, 'CHAIN_TOO_SHORT');
+});
+
+test('attestationPolicyFromEnv: ABUSE_ATTESTATION_ROOTS_FILE dibaca sebagai root DER', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nyx-attest-roots-'));
+  try {
+    const pemPath = join(dir, 'roots.pem');
+    writeFileSync(pemPath, new crypto.X509Certificate(Buffer.from(rootCaDer)).toString());
+
+    const policy = attestationPolicyFromEnv({
+      ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'off',
+      ABUSE_ATTESTATION_ROOTS_FILE: pemPath,
+    });
+    assert.equal(policy.requireVerifiedChain, true);
+    assert.equal(policy.trustedAttestationRootCerts.length, 1);
+    assert.deepEqual(new Uint8Array(policy.trustedAttestationRootCerts[0]!), rootCaDer);
+
+    // Berkas hilang = konfigurasi rusak, bukan "tidak ada root".
+    assert.throws(
+      () => attestationPolicyFromEnv({ ABUSE_ATTESTATION_ROOTS_FILE: join(dir, 'tidak-ada.pem') }),
+      /ABUSE_ATTESTATION_ROOTS_FILE tidak bisa dibaca/
+    );
+
+    // Berkas tanpa sertifikat PEM juga harus terlihat sebagai kesalahan.
+    const emptyPath = join(dir, 'kosong.pem');
+    writeFileSync(emptyPath, '# bukan sertifikat\n');
+    assert.throws(() => loadAttestationRootCerts(emptyPath), /tidak memuat sertifikat PEM/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('verifyNewAccountAttestation: tanda tangan diubah / satu sertifikat / rantai tak tersambung ditolak', async () => {

@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+import { env } from '../src/config.js';
 import {
   clearAtRestSecretCacheForTests,
   credentialTokenMatches,
@@ -140,12 +141,24 @@ test('contract: pepper produksi wajib env, bukan turunan DB', () => {
   assert.match(src, /env\.nodeEnv === 'production'[\s\S]*throw new Error/, 'production tanpa pepper = fail-closed');
   assert.doesNotMatch(src, /prisma/i, 'helper ini TIDAK boleh menyentuh DB (kalau tidak, pepper bocor lewat dump)');
 
-  // Provider yang di-assert: nilai default dev hanya untuk non-production.
+  // Provider yang di-assert bergantung mode proses — dan mode itu datang dari
+  // `.env` yang di-load `config.ts` (mesin dev self-host bisa memakai
+  // NODE_ENV=production yang terisi). Meng-assert cabang dev di lingkungan
+  // produksi hanyalah test yang bohong; yang dikunci adalah **cabang yang benar
+  // untuk mode yang sedang berjalan**.
   const prev = process.env.NYX_AT_REST_PEPPER;
   delete process.env.NYX_AT_REST_PEPPER;
   clearAtRestSecretCacheForTests();
   try {
-    assert.equal(typeof getAtRestPepper(), 'string');
+    if (env.nodeEnv === 'production') {
+      assert.throws(
+        () => getAtRestPepper(),
+        /NYX_AT_REST_PEPPER/,
+        'production tanpa pepper = fail-closed (bukan pepper turunan dev)'
+      );
+    } else {
+      assert.equal(typeof getAtRestPepper(), 'string', 'non-production: fallback dev agar onboarding tidak putus');
+    }
   } finally {
     if (prev !== undefined) process.env.NYX_AT_REST_PEPPER = prev;
     clearAtRestSecretCacheForTests();
