@@ -76,7 +76,8 @@ type TransportEvents = {
   
   // Messages
   'message:new': [payload: BinaryPayload];
-  'message:updated': [data: Partial<RawServerMessage> & { id: string, conversationId: string }];
+  // (event `message:updated` dihapus: TIDAK ada emitter di server — lihat
+  // packages/shared/src/socket.ts.)
   'message:deleted': [data: { conversationId: string; id: string }];
   // [GAP 2026-10-18] Event yang benar-benar dikirim server, kini punya listener
   // di socketListeners: unsend peer, hapus massal (auto-delete sweeper), dan
@@ -96,7 +97,8 @@ type TransportEvents = {
   // (event `conversation:participants_added` dihapus: TIDAK ada emitter di server
   // — keanggotaan baru sampai lewat `conversation:updated` + refresh metadata.)
   'conversation:participant_removed': [data: { conversationId: string; userId: string }];
-  'conversation:participant_updated': [data: { conversationId: string; userId: string; role: 'ADMIN' | 'MEMBER' | 'admin' | 'member' }];
+  // (event `conversation:participant_updated` dihapus: TIDAK ada emitter di
+  // server; perubahan peran sampai lewat `conversation:updated`.)
   // [T1 FIX 2026-09-28] Perubahan keanggotaan (add/kick/leave) — pemicu refresh
   // metadata + rotasi kunci pasif di member non-admin.
   'group:participants_changed': [data: { conversationId: string }];
@@ -122,7 +124,6 @@ type TransportEvents = {
   // pernah di-emit siapa pun). Listener-nya ada di socketListeners.
   'session:request_key': [data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey?: string; requesterPqPublicKey?: string; requesterDeviceId?: string }];
   'session:new_key': [data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string }];
-  'session:fulfill_request': [data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string }];
   'group:fulfill_key_request': [data: { conversationId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string; requesterDeviceId?: string }];
   'group:key_request_failed': [data: { conversationId: string; reason: string }];
   'session:request_key_failed': [data: { sessionId: string; targetId: string; reason: string }];

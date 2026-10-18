@@ -58,6 +58,14 @@ tanpa `targetId` sehingga server selalu menjawab `session:request_key_failed`
 `auth:request_linking_qr` dan `messages:distribute_keys` sengaja DIPERTAHANKAN
 dengan catatan eksplisit (guard migrasi / kontrak tanpa pemanggil klien).
 
+Sapuan residual berikutnya menemukan sisa kelas yang sama: `message:updated`,
+`conversation:participant_updated`, `presence:init`, `presence:user_joined`,
+`presence:user_left`, dan `conversation:join` diklaim di kontrak tetapi tidak
+punya emitter di server maupun pemanggil di klien — semuanya dihapus (beserta
+listener `message:updated` / `conversation:participant_updated` di
+`socketListeners.ts`), sehingga `ServerToClientEvents`/`ClientToServerEvents`
+kembali hanya memuat nama yang benar-benar dipakai.
+
 Semua lubang itu kini dikunci test: paritas source di `tests/gatewayParity.test.ts`
 (bucket rate limit tidak boleh kembali ke gateway; kedua opcode sinyal harus punya
 rute keluar; KICK tetap dipetakan ke `force_logout`), perilaku bucket per-jalur di

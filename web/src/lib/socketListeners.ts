@@ -261,10 +261,8 @@ export function initSocketListeners() {
     }
   });
 
-  transportClient.on('message:updated', (data: Partial<RawServerMessage> & { id: string, conversationId: string }) => {
-    useMessageStore.getState().updateMessage(data.conversationId, data.id, data as Partial<Message>);
-  });
-
+  // (listener `message:updated` dihapus: server tidak pernah meng-emit event itu;
+  // edit pesan tiba sebagai `message:new` ulang / aksi store langsung.)
   transportClient.on('message:deleted', (data: { conversationId: string; id: string }) => {
     useMessageStore.getState().updateMessage(data.conversationId, data.id, { isDeletedLocal: true, content: null });
   });
@@ -362,9 +360,8 @@ export function initSocketListeners() {
     })();
   });
 
-  transportClient.on('conversation:participant_updated', (data: { conversationId: string; userId: string; role: 'ADMIN' | 'MEMBER' | 'admin' | 'member' }) => {
-    useConversationStore.getState().updateParticipantRole(data.conversationId, data.userId, data.role.toUpperCase() as 'ADMIN' | 'MEMBER');
-  });
+  // (listener `conversation:participant_updated` dihapus: tidak ada emitter di
+  // server — peran berubah lewat `conversation:updated` + metadata terenkripsi.)
 
   // 3. USERS
   transportClient.on('user:updated', (user: Partial<User>) => {

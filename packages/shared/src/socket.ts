@@ -87,7 +87,9 @@ export interface ServerToClientEvents {
     disconnect: (reason: string) => void;
     "error": (payload: { message?: string, error?: string }) => void; // Added
     "message:new": (message: RawServerMessage) => void; // Must be RawServerMessage, not the internal Message
-    "message:updated": (message: Partial<RawServerMessage> & { id: string }) => void;
+    // [CLEANUP 2026-10-18] `message:updated` DIHAPUS: tidak ada emitter di server
+    // (edit pesan dikirim ulang sebagai `message:new` setelah diverifikasi, dan
+    // perubahan lokal memakai aksi store langsung).
     "message:deleted": (payload: { conversationId: string; id: string }) => void;
     // [GAP 2026-10-18] `message:viewed` dikirim server (view-once dibuka peer) dan
     // kini punya listener di klien; tiga sequencer masal/expire juga:
@@ -100,7 +102,9 @@ export interface ServerToClientEvents {
     // `newParticipants`) DIHAPUS: tidak ada emitter di server — keanggotaan baru
     // sampai lewat `conversation:updated` + refresh metadata terenkripsi.
     "conversation:participant_removed": (payload: { conversationId: string; userId: string }) => void;
-    "conversation:participant_updated": (payload: { conversationId: string; userId: string; role: string }) => void; // Added
+    // [CLEANUP 2026-10-18] `conversation:participant_updated` DIHAPUS: tidak ada
+    // emitter di server — perubahan peran diumumkan lewat `conversation:updated`
+    // + refresh metadata terenkripsi.
     "user:updated": (user: Partial<User> & { id: string }) => void;
     "message:status_updated": (payload: {
         conversationId: string;
@@ -109,9 +113,10 @@ export interface ServerToClientEvents {
         readBy?: string;
         status: 'SENT' | 'DELIVERED' | 'READ';
     }) => void;
-    "presence:init": (onlineUserIds: string[]) => void;
-    "presence:user_joined": (userId: string) => void;
-    "presence:user_left": (userId: string) => void;
+    // [CLEANUP 2026-10-18] `presence:init` / `presence:user_joined` /
+    // `presence:user_left` DIHAPUS: sisa kontrak socket.io lama, tidak pernah
+    // di-emit lagi (presence kini payload opcode PRESENCE `{type:'sync'|'join'|
+    // 'leave'}` — lihat `PresenceSyncPayload` di bawah).
     // [CLEANUP 2026-10-18] `presence:sync` dan `typing:update` TIDAK PERNAH
     // di-emit: keduanya tiba sebagai payload opcode PRESENCE (`{type:'sync'}` /
     // `{type:'typing'}`) dan sudah ditangani klien di jalur itu. Bentuk wire-nya
@@ -191,7 +196,8 @@ export interface ClientToServerEvents {
     "message:mark_as_read": (payload: MarkAsReadPayload) => void;
     "typing:start": (payload: TypingPayload) => void;
     "typing:stop": (payload: TypingPayload) => void;
-    "conversation:join": (conversationId: string) => void;
+    // [CLEANUP 2026-10-18] `conversation:join` DIHAPUS: tidak ada handler di
+    // server dan tidak ada pemanggil di klien (routing memakai keanggotaan di DB).
     "session:request_key": (payload: KeyRequestPayload) => void;
     // [CLEANUP 2026-10-18] `session:request_missing` (dan balasannya
     // `session:key_requested`) DIHAPUS: tidak ada klien yang mengirimnya, dan
