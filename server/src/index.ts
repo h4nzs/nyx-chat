@@ -24,13 +24,36 @@ async function main() {
   // (alert `NyxAbuseGuardDisabled`) + peringatan boot untuk hal yang diam-diam
   // berbahaya bila lupa diset (guard registrasi, attestation, rahasia admin
   // cleanup). Semuanya murni dihitung di `utils/startupSignals.ts`.
-  const { ABUSE_GUARD_ENABLED, setGauge } = await import('./utils/metrics.js')
+  const {
+    ABUSE_GUARD_ENABLED,
+    ATTESTATION_ROOTS_EXPIRED_CERTS,
+    ATTESTATION_ROOTS_NEXT_UPDATE,
+    setGauge,
+  } = await import('./utils/metrics.js')
   const { abuseGuardStates, startupWarnings } = await import('./utils/startupSignals.js')
   for (const state of abuseGuardStates(process.env)) {
     setGauge(ABUSE_GUARD_ENABLED, state.enabled, { guard: state.guard })
   }
   for (const warning of startupWarnings(process.env)) {
     console.warn(`⚠️  [startup] ${warning}`)
+  }
+
+  // [docs/30 §30.12 WS-H] Bundle root attestation juga bisa basi TANPA error:
+  // root kedaluwarsa dan `nextUpdate` MDS yang lewat hanya terlihat saat ada
+  // perangkat baru yang ditolak. Gauge-nya yang membuat alert mungkin, log-nya
+  // yang membuat penyebabnya langsung terbaca. Tanpa ROOTS_FILE, keduanya diam.
+  const { attestationRootsWarnings, readAttestationRootsHealth } = await import(
+    './utils/attestationRootsHealth.js'
+  )
+  const rootsHealth = readAttestationRootsHealth(process.env)
+  if (rootsHealth) {
+    setGauge(ATTESTATION_ROOTS_EXPIRED_CERTS, rootsHealth.expired.length)
+    if (rootsHealth.nextUpdateEpochSeconds !== null) {
+      setGauge(ATTESTATION_ROOTS_NEXT_UPDATE, rootsHealth.nextUpdateEpochSeconds)
+    }
+    for (const warning of attestationRootsWarnings(rootsHealth)) {
+      console.warn(`⚠️  [startup] ${warning}`)
+    }
   }
 
   const httpServer = createServer(app)

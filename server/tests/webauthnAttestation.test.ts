@@ -312,6 +312,36 @@ test('attestationPolicyFromEnv: default ketat, override eksplisit', () => {
   assert.equal(relaxed.requireTpmAikEku, false);
 });
 
+test('attestationPolicyFromEnv: kombinasi passkey tersinkron (Android/iOS) diterima apa adanya', () => {
+  const policy = attestationPolicyFromEnv({
+    ABUSE_ATTESTATION_FORMATS: 'packed,tpm,android-key,apple,fido-u2f,none',
+    ABUSE_ATTESTATION_ALLOW_NONE: 'on',
+    ABUSE_ATTESTATION_ALLOW_SYNCED: 'on',
+  } as NodeJS.ProcessEnv);
+
+  // Bentuk persis yang dikirim Google Password Manager: `fmt: none`,
+  // kredensial tersinkron, tanpa x5c — ditolak sebelum pelonggaran ini.
+  const passkey = {
+    fmt: 'none',
+    aaguid: 'ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4',
+    credentialDeviceType: 'multiDevice',
+    userVerified: true,
+    hasCertificateChain: false,
+    certificateChain: null,
+  };
+  assert.deepEqual(evaluateAttestationPolicy(passkey, policy), { accepted: true, tier: 'none' });
+
+  // `ALLOW_NONE=on` saja tidak cukup: `none` juga harus masuk allowlist format,
+  // dan urutan pemeriksaan membuat kealpaan itu muncul sebagai
+  // ATTESTATION_FORMAT_NOT_ALLOWED (bukan lolos diam-diam).
+  const formatsOnlyHardware = attestationPolicyFromEnv({
+    ABUSE_ATTESTATION_FORMATS: 'packed,tpm,android-key,apple,fido-u2f',
+    ABUSE_ATTESTATION_ALLOW_NONE: 'on',
+    ABUSE_ATTESTATION_ALLOW_SYNCED: 'on',
+  } as NodeJS.ProcessEnv);
+  assert.equal(evaluateAttestationPolicy(passkey, formatsOnlyHardware).reason, 'ATTESTATION_FORMAT_NOT_ALLOWED');
+});
+
 test('verifyNewAccountAttestation: `none` sah secara kripto tapi ditolak kebijakan', async () => {
   const { response } = validNoneAttestation();
 

@@ -16,7 +16,10 @@
     "result_cloud": "También guardada en la nube.",
     "failed": "No se pudo crear la copia.",
     "upload_success": "Copia cifrada guardada en la nube.",
-    "upload_failed": "Falló la subida a la nube; el archivo local sigue guardado."
+    "upload_failed": "Falló la subida a la nube; el archivo local sigue guardado.",
+    "upload_unverified": "Cuenta no verificada — verifica este dispositivo para permitir copias en la nube. El archivo local sigue guardado.",
+    "result_cloud_unverified": "Copia en la nube omitida: cuenta no verificada. Verifica este dispositivo en Ajustes y vuelve a crear la copia.",
+    "result_cloud_failed": "No se pudo subir la copia a la nube — el archivo .nyxbak de este dispositivo sigue siendo válido."
   },
   "backup_restore": {
     "title": "Restaurar desde archivo de copia",

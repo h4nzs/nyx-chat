@@ -29,6 +29,7 @@ flowchart LR
 ## 18.3 Rust sidecar (`server/transport-sidecar/src/main.rs`)
 
 - Terminates WebTransport; **one user = one device** (a new session kicks the previous with `KICK` / "Logged in on another device").
+- **Server-initiated `KICK` (opcode `0x07`) is forwarded as a frame *before* the connection is closed** (payload intact: `{reason?, deviceId?}`) and only then torn down with "Kicked by server". The client maps that payload to the same device-scoped `force_logout` flow the WSS gateway uses (`SESSION_REVOKED`, session revoke, device kick, hardware mismatch → `auth:banned` when the payload carries only a `reason`). Without the frame the WT path could never log a revoked device out immediately — it only saw a generic disconnect reason.
 - Two auth paths: URL `?ticket=` JWT (HS256, 15 s) or the bidi AUTH frame.
 - Three parallel reader loops (bidi / uni-stream / datagram) publish frames to `nyx:upstream:<opcode>`; chaff `0x00` is dropped.
 - Subscribes `nyx:downstream`, frames `[op|len|payload]` back to the target session (datagram vs stream via `is_datagram`).
@@ -37,9 +38,9 @@ flowchart LR
 
 ## 18.4 Redis bridge (`server/src/network/redisBridge.ts`)
 
-- Maps `TransportOpCode` → handlers: `CHAT_MESSAGE` (persist + relay), `KEY_SYNC` (huge event switch), `WEBRTC_SIGNAL`/`WEBRTC_ICE` (relay), `PRESENCE`, `ACK`, `AUTH` (single-device + hardware binding), `99` disconnect.
+- Maps `TransportOpCode` → handlers: `CHAT_MESSAGE` (persist + relay), `KEY_SYNC` (huge event switch), `WEBRTC_SIGNAL`/`WEBRTC_ICE` (`handleWebRtcRelay` in `realtimeHandlers.ts` — shared with the WSS gateway), `PRESENCE`, `ACK`, `AUTH` (single-device + hardware binding), `99` disconnect.
 - `emitEventToUser(userId, event, data)` wraps named events as a `KEY_SYNC` frame `{event, data}` for legacy compatibility — the client re-maps to the event table in `packages/shared/src/socket.ts`.
-- Per-event rate limiting uses the atomic Lua `RATE_LIMIT_LUA`.
+- Per-event rate limiting uses the atomic Lua `RATE_LIMIT_LUA` — **enforced inside the handlers**, not per relay, so the WT and WSS paths share one counter per `(user, bucket)`. Data buckets: `chat_message` 120/min, `message_ack_delivered` 240/min, `presence_update` 30/min (non-subscribe presence), `presence_subscribe` 60/min.
 
 ## 18.5 Presence & typing
 

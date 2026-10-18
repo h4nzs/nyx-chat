@@ -116,6 +116,43 @@ test('startupWarnings: attestation ketat tanpa root dipin diperingatkan (perangk
   assert.equal(fpOnly.some((w) => w.includes('belum ada root yang dipin')), false);
 });
 
+test('startupWarnings: ALLOW_NONE diperingatkan sebagai gerbang tanpa bukti perangkat', () => {
+  const warnings = startupWarnings({
+    NODE_ENV: 'production',
+    ABUSE_REGISTRATION_GUARD: 'on',
+    ABUSE_REQUIRE_ATTESTATION: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'off',
+    ABUSE_ATTESTATION_ALLOW_NONE: 'on',
+    ABUSE_ATTESTATION_ROOTS_FILE: '/etc/nyx/attestation-roots.pem',
+    ADMIN_CLEANUP_SECRET: 'khusus',
+    ADMIN_CLEANUP_IP_ALLOWLIST: '10.0.0.1',
+    CHAT_SECRET: 'umum',
+  });
+
+  assert.equal(warnings.some((w) => w.includes('ABUSE_ATTESTATION_ALLOW_NONE=on')), true);
+  // Peringatan ini tidak boleh menutupi/memicu peringatan rantai: root sudah dipin
+  // dan verifikasi rantai tetap menyala, yang dilonggarkan hanya tier `none`.
+  assert.equal(warnings.some((w) => w.includes('belum ada root yang dipin')), false);
+  assert.equal(warnings.some((w) => w.includes('DIMATIKAN')), false);
+});
+
+test('startupWarnings: ALLOW_UNATTESTED diperingatkan (akun tanpa bukti, sandbox tetap aktif)', () => {
+  const warnings = startupWarnings({
+    NODE_ENV: 'production',
+    ABUSE_REGISTRATION_GUARD: 'on',
+    ABUSE_REQUIRE_ATTESTATION: 'on',
+    ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN: 'off',
+    ABUSE_ATTESTATION_ALLOW_UNATTESTED: 'on',
+    ABUSE_ATTESTATION_ROOTS_FILE: '/etc/nyx/attestation-roots.pem',
+    ADMIN_CLEANUP_SECRET: 'khusus',
+    ADMIN_CLEANUP_IP_ALLOWLIST: '10.0.0.1',
+    CHAT_SECRET: 'umum',
+  });
+
+  assert.equal(warnings.some((w) => w.includes('ABUSE_ATTESTATION_ALLOW_UNATTESTED=on')), true);
+  assert.equal(warnings.some((w) => w.includes('isVerified=false')), true);
+});
+
 test('startupWarnings: verifikasi rantai yang dimatikan diperingatkan sebagai lubang keamanan', () => {
   const warnings = startupWarnings({
     NODE_ENV: 'production',

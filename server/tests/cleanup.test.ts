@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import {
   isDeadManSwitchDue,
   runCleanup,
+  REVOKED_REFRESH_TOKEN_RETENTION_MS,
   STALE_SESSION_KEY_MS,
   type CleanupDb,
 } from '../src/jobs/cleanup.js';
@@ -91,14 +92,20 @@ function makeDb(options: FakeOptions = {}): { db: CleanupDb; rec: Recorder } {
 
 const NOW = new Date('2026-10-14T00:00:00.000Z');
 
-test('runCleanup: refresh token kadaluarsa DAN yang sudah di-revoke dihapus', async () => {
+test('runCleanup: refresh token kedaluwarsa dihapus; revoked hanya setelah masa retensi', async () => {
   const { db, rec } = makeDb({ refreshTokens: 3 });
   const report = await runCleanup(db, { now: NOW });
 
   assert.equal(report.refreshTokens, 3);
+  // [BUGFIX 2026-10-18] Revoked yang masih segar DIPERTAHANKAN: rantai
+  // `replacedById` dibutuhkan untuk membedakan retry benign dari replay token.
   assert.deepEqual(rec.refreshTokenWhere, {
-    OR: [{ expiresAt: { lte: NOW } }, { revokedAt: { not: null } }],
+    OR: [
+      { expiresAt: { lte: NOW } },
+      { revokedAt: { not: null, lt: new Date(NOW.getTime() - REVOKED_REFRESH_TOKEN_RETENTION_MS) } },
+    ],
   });
+  assert.equal(REVOKED_REFRESH_TOKEN_RETENTION_MS, 7 * 24 * 60 * 60 * 1000);
   assert.deepEqual(report.errors, []);
 });
 

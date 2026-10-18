@@ -45,7 +45,7 @@ Lib + binaries on `wtransport 0.7` + `rcgen`, `tokio`, `redis`, `jsonwebtoken`, 
 ### Startup
 1. **TLS cert**: prod → `PROD_CERT_PATH`/`PROD_KEY_PATH`; dev → persistent self-signed DER (`transport_cert.der`/`transport_key.der`), SAN localhost/127.0.0.1, 10-day validity. Prints the **SHA-256 cert hash** → paste into `web/.env` as `VITE_TRANSPORT_CERT_HASH`.
 2. Bind `0.0.0.0:TRANSPORT_PORT` (default 33333, UDP).
-3. Subscribe `nyx:downstream` (reconnect loop 3 s); frames `[op|len(4 BE)|payload]`; `0x07` KICK → `conn.close(1000, "Kicked by server")`; route by `user:device:` prefix or broadcast `user:`.
+3. Subscribe `nyx:downstream` (reconnect loop 3 s); frames `[op|len(4 BE)|payload]`; `0x07` KICK → frame KICK **dikirim dulu** (payload `{reason?, deviceId?}` utuh, supaya klien bisa men-scope force_logout ke device yang benar) lalu `conn.close(1000, "Kicked by server")`; route by `user:device:` prefix or broadcast `user:`.
 
 ### Auth (two paths)
 1. **URL ticket** `?ticket=` (HS256 JWT, 15 s exp).

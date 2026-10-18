@@ -122,6 +122,18 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
   status?: 'SENDING' | 'SENT' | 'FAILED';
   deletedAt?: string | Date | null;
   expiresAt?: string | null;
+  /**
+   * [BUGFIX 2026-10-18] `true` bila pengirim MEMILIH timer auto-delete untuk
+   * pesan ini (1 menit/1 jam/24 jam di menu input).
+   *
+   * `expiresAt` TIDAK cukup untuk menyimpulkan ini: server selalu memberi TTL
+   * store-and-forward (14 hari) dan, pada 1:1, menyingkatnya jadi 24 jam begitu
+   * pesan di-READ — jadi "ada expiresAt" ≠ "pesan menghapus diri". Nilai ini
+   * perjalanan di dalam ciphertext (server tidak melihatnya) lalu dipersist di
+   * vault lokal supaya indikator hitung-mundur hanya muncul untuk pesan yang
+   * memang auto-delete.
+   */
+  autoDelete?: boolean;
   isBlindAttachment?: boolean;
   isViewOnce?: boolean;
   isViewed?: boolean;

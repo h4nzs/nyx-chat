@@ -198,7 +198,10 @@
     "init_failed": "Failed to initialize guest session. Please try again.",
     "upload_failed": "Failed to upload file",
     "session_live": "Session is live. Messages are ephemeral.",
-    "placeholder": "Type an ephemeral message..."
+    "placeholder": "Type an ephemeral message...",
+    "send_failed": "Message could not be sent. Try again.",
+    "offline": "Cannot reach the server. Check your connection.",
+    "session_terminated": "This session has been destroyed by the host."
   },
   "embed": {
     "missing_id": "Missing conversation ID",

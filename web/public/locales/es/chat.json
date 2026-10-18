@@ -198,7 +198,10 @@
     "init_failed": "No se pudo iniciar la sesión de invitado. Inténtalo de nuevo.",
     "upload_failed": "Error al subir el archivo",
     "session_live": "Sesión activa. Los mensajes son efímeros.",
-    "placeholder": "Escribe un mensaje efímero..."
+    "placeholder": "Escribe un mensaje efímero...",
+    "send_failed": "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+    "offline": "No se puede conectar con el servidor. Revisa tu conexión.",
+    "session_terminated": "El host ha destruido esta sesión."
   },
   "embed": {
     "missing_id": "Falta el ID de conversación",

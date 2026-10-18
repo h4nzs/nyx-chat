@@ -16,7 +16,10 @@
     "result_cloud": "Tersimpan juga di awan.",
     "failed": "Backup gagal dibuat.",
     "upload_success": "Salinan terenkripsi tersimpan di awan.",
-    "upload_failed": "Gagal mengunggah ke awan; berkas lokal tetap tersimpan."
+    "upload_failed": "Gagal mengunggah ke awan; berkas lokal tetap tersimpan.",
+    "upload_unverified": "Akun belum terverifikasi — verifikasi perangkat ini dulu agar backup awan diizinkan. Berkas lokal tetap tersimpan.",
+    "result_cloud_unverified": "Salinan awan dilewati: akun belum terverifikasi. Verifikasi perangkat di Pengaturan, lalu buat ulang backup.",
+    "result_cloud_failed": "Salinan awan gagal diunggah — berkas .nyxbak di perangkat ini tetap sah."
   },
   "backup_restore": {
     "title": "Restore dari Berkas Backup",

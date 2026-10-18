@@ -14,13 +14,13 @@ import { deviceInstallationTag, pepperedIdentifier } from '../utils/atRestSecret
 import { identityKey, identityTag, sealIdentity } from '../utils/redisIdentity.js';
 import { notifyPresenceWatchers, clearPresenceSubscriptions } from '../utils/presenceSubscriptions.js';
 import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
-import { handleChatMessage, handleKeySync, handlePresence, type RealtimeContext } from './realtimeHandlers.js';
+import { handleChatMessage, handleKeySync, handlePresence, handleWebRtcRelay, type RealtimeContext } from './realtimeHandlers.js';
 // [docs/30 WS-G] Metrik event-only: label hanya enum pendek (opcode/reason),
 // tidak pernah userId/deviceId — penjaganya ada di utils/metrics.ts.
 import { incCounter, RELAY_OPS, SECURITY_BLOCKS } from '../utils/metrics.js';
-// [docs/30 §30.9 WS-E(2)] Signaling panggilan dialamatkan lewat token relay buram,
+// [docs/30 §30.9 WS-E(2)] Relay panggilan dialamatkan lewat token relay buram,
 // bukan userId — payload relay & `nyx:downstream` tidak lagi memuat identitas.
-import { relayCallSignal } from '../utils/callRelayTokens.js';
+// (Logika relay-nya kini di realtimeHandlers.handleWebRtcRelay, dipakai kedua jalur.)
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -200,10 +200,10 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       await handleChatMessage(realtimeCtx, userId, deviceId, payload as unknown as MessageSendPayload, msgId);
       break;
     case TransportOpCode.WEBRTC_SIGNAL:
-      await handleWebRtcRelay(userId, deviceId, payload as { to?: string, type?: string, payload?: string }, TransportOpCode.WEBRTC_SIGNAL);
+      await handleWebRtcRelay(realtimeCtx, userId, deviceId, payload as { to?: string, type?: string, payload?: string }, TransportOpCode.WEBRTC_SIGNAL);
       break;
     case TransportOpCode.WEBRTC_ICE:
-      await handleWebRtcRelay(userId, deviceId, payload as { to?: string, type?: string, payload?: string }, TransportOpCode.WEBRTC_ICE);
+      await handleWebRtcRelay(realtimeCtx, userId, deviceId, payload as { to?: string, type?: string, payload?: string }, TransportOpCode.WEBRTC_ICE);
       break;
     case TransportOpCode.PRESENCE:
       await handlePresence(realtimeCtx, userId, payload as { event: 'active' | 'away' | 'typing:start' | 'typing:stop', conversationId?: string });
@@ -342,35 +342,12 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   }
 
 /**
- * [docs/30 §30.9 WS-E(2)] Relay panggilan: `to` adalah **token relay**, bukan
- * userId. Token tak dikenal / berbentuk salah → drop (fail-closed) dan dihitung
- * sebagai blokir keamanan; envelope yang diteruskan memuat token pengirim, jadi
- * jalur relay, log, dan pub/sub tidak pernah melihat pasangan userId→userId.
+ * [PARITY 2026-10-18] Logika relay panggilan kini hidup di `realtimeHandlers.ts`
+ * (`handleWebRtcRelay`) supaya gateway WSS memakai jalur yang SAMA — sebelumnya
+ * jalur WSS tidak punya relay sama sekali, jadi sinyal panggilan hilang.
+ * Memori/catatan: `to` = token relay buram, bukan userId (docs/30 §30.9).
+ *
+ * Dipakai jalur WT lewat `handleUpstreamMessage` (lihat switch opcode di atas).
  */
-async function handleWebRtcRelay(
-  fromUserId: string,
-  fromDeviceId: string | null,
-  payload: { to?: string, type?: string, payload?: string },
-  opCode: TransportOpCode
-) {
-  const decision = await relayCallSignal(redisClient, {
-    fromUserId,
-    fromDeviceId: fromDeviceId ?? null,
-    payload,
-  }).catch(() => null);
-
-  if (!decision) {
-    incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'call_token_unknown' });
-    return;
-  }
-
-  await sendJsonToUser(
-    decision.target.userId,
-    opCode,
-    decision.envelope,
-    opCode === TransportOpCode.WEBRTC_ICE,
-    decision.target.deviceId ?? undefined
-  );
-}
 
 

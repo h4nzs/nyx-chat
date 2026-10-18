@@ -272,7 +272,7 @@ export async function authFetch<T>(
     return await api<T>(url, options);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
-      const { useAuthStore } = await import('@store/auth');
+      const { useAuthStore, getLastRefreshFailureKind } = await import('@store/auth');
       const user = useAuthStore.getState().user;
       
       // GUEST users are ephemeral and don't support refresh tokens.
@@ -287,12 +287,24 @@ export async function authFetch<T>(
         if (success) {
           return await api<T>(url, options);
         } else {
-          // Only trigger failure handler if refresh actually failed
-          if (onAuthFailure) await onAuthFailure();
+          // [BUGFIX 2026-10-18] Hanya kegagalan OTORITATIF (401/403 dari
+          // /api/auth/refresh) yang boleh memicu logout. Kegagalan transien
+          // (offline, timeout, 5xx) tidak boleh me-revoke family: dulu satu
+          // gangguan jaringan saat tab resume mematikan sesi di tab lain, dan
+          // tab yang tertinggal lalu memicu deteksi "reuse" +
+          // /login?reason=revoked.
+          if (getLastRefreshFailureKind() !== 'transient') {
+            if (onAuthFailure) await onAuthFailure();
+          } else {
+            console.warn('[Auth] Refresh gagal transien — sesi dipertahankan.');
+          }
         }
       } catch (refreshErr) {
         console.error("Token refresh failed:", refreshErr);
-        if (onAuthFailure) await onAuthFailure();
+        // Import/throw tak terduga di jalur refresh = transien; jangan logout.
+        if (getLastRefreshFailureKind() !== 'transient') {
+          if (onAuthFailure) await onAuthFailure();
+        }
       }
     }
     throw err;

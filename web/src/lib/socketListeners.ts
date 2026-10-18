@@ -10,7 +10,8 @@ import { useConnectionStore } from '../store/connection';
 import { usePresenceStore } from '../store/presence';
 // [docs/28 Tier 1.5 / D14] presence lazy: minta ulang langganan tiap koneksi baru.
 import { resetPresenceSubscriptionCache } from './presenceSubscribe';
-import { RawServerMessageSchema, type RawServerMessage, type Message, type Participant, type User, type BinaryPayload, type Conversation, asMessageId, asConversationId, asUserId } from '@nyx/shared';
+import { isForceLogoutForThisDevice } from './forceLogout';
+import { RawServerMessageSchema, type RawServerMessage, type Message, type User, type BinaryPayload, type Conversation, type SubscriptionTier, asMessageId, asConversationId, asUserId } from '@nyx/shared';
 
 let isInitialized = false;
 
@@ -268,6 +269,36 @@ export function initSocketListeners() {
     useMessageStore.getState().updateMessage(data.conversationId, data.id, { isDeletedLocal: true, content: null });
   });
 
+  // [PARITY/GAP 2026-10-18] Server MENGIRIM keempat event ini, tetapi tidak ada
+  // satu pun listener di klien (grep `web/` = 0 hasil) — jadi efeknya terlihat
+  // "tidak nyata" di UI sampai reload, padahal datanya di server sudah berubah:
+  //   - message:deleted_remotely → peer melakukan unsend (realtimeHandlers
+  //     `message:unsend`); pengirim di sisi ini harus melihat pesannya hilang.
+  //   - message:deleted_batch    → messageSweeper menghapus pesan kedaluwarsa
+  //     (auto-delete / TTL 14 hari) untuk SEMUA penerima sekaligus.
+  //   - message:viewed           → view-once dibuka peer; server MENGHAPUS barisnya
+  //     (`message:view_once_opened`) — sisi pengirim menampilkannya sebagai sudah
+  //     tidak ada, bukan konten yang bisa dibuka lagi.
+  // Semuanya memakai jalur yang sama dengan `message:deleted` (updateMessage +
+  // isDeletedLocal) supaya penyimpanan ter-seal di vault ikut mencatat.
+  transportClient.on('message:deleted_remotely', (data: { conversationId: string; messageId: string; deletedBy?: string }) => {
+    useMessageStore.getState().updateMessage(data.conversationId, data.messageId, { isDeletedLocal: true, content: null });
+  });
+
+  transportClient.on('message:deleted_batch', (data: { conversationId: string; messageIds: string[] }) => {
+    if (!data?.conversationId || !Array.isArray(data.messageIds)) return;
+    const store = useMessageStore.getState();
+    for (const messageId of data.messageIds) {
+      if (typeof messageId === 'string') {
+        store.updateMessage(data.conversationId, messageId, { isDeletedLocal: true, content: null });
+      }
+    }
+  });
+
+  transportClient.on('message:viewed', (data: { conversationId: string; messageId: string }) => {
+    useMessageStore.getState().updateMessage(data.conversationId, data.messageId, { isDeletedLocal: true, content: null });
+  });
+
   transportClient.on('message:status_updated', (data: { conversationId: string; messageId: string; userId: string; status: string }) => {
     useMessageStore.getState().updateMessageStatus(data.conversationId, data.messageId, data.userId, data.status);
   });
@@ -292,12 +323,13 @@ export function initSocketListeners() {
     useConversationStore.getState().updateConversation(data.id, data);
   });
 
-  transportClient.on('conversation:deleted', (data: { id: string }) => {
-    useConversationStore.getState().removeConversation(data.id);
-  });
-
-  transportClient.on('conversation:participants_added', (data: { conversationId: string; participants: Participant[] }) => {
-    useConversationStore.getState().addParticipants(data.conversationId, data.participants);
+  transportClient.on('conversation:deleted', (data: { id: string; reason?: 'removed' | 'hidden' }) => {
+    // [BUGFIX 2026-10-18] `reason: 'removed'` = kick. Riwayat lokal (pesan vault +
+    // kunci era) dipertahankan supaya tetap terbaca bila anggota di-add kembali.
+    // `'hidden'`/tanpa reason (server lama) = hapus lokal seperti biasa.
+    useConversationStore.getState().removeConversation(data.id, {
+      preserveHistory: data.reason === 'removed',
+    });
   });
 
   transportClient.on('conversation:participant_removed', (data: { conversationId: string; userId: string }) => {
@@ -373,7 +405,7 @@ export function initSocketListeners() {
   });
 
   // 5. SECURITY & SESSIONS
-  transportClient.on('force_logout', async (data: { jti: string }) => {
+  transportClient.on('force_logout', async (data: { jti?: string; deviceId?: string; reason?: string }) => {
      const auth = useAuthStore.getState();
      // Guard (a): already logged out / no active session → ignore (stale event).
      if (!auth.accessToken && !auth.user) return;
@@ -381,6 +413,16 @@ export function initSocketListeners() {
      // after this socket connection was established, the force_logout belongs to
      // the old session and must not log out the current one.
      if ((auth.loginGeneration ?? 0) > connectionLoginGeneration) return;
+     // Guard (c) [BUGFIX 2026-10-18]: SCOPE DEVICE. Dulu event ini dikirim tanpa
+     // deviceId ke semua socket milik user, jadi mencabut satu sesi (atau reuse
+     // detection di satu tab) ikut me-logout perangkat lain yang sesinya masih
+     // sah. Server sekarang menyertakan deviceId; abaikan bila bukan device ini.
+     // Bila deviceId tidak ada (server lama), perilaku lama dipertahankan.
+     const localDeviceId = typeof localStorage !== 'undefined' ? localStorage.getItem('deviceId') : null;
+     if (!isForceLogoutForThisDevice(data?.deviceId, localDeviceId)) {
+       console.info('[Auth] force_logout untuk device lain diabaikan');
+       return;
+     }
      // Check if current session is revoked
      const { logout } = auth;
      await logout();
@@ -393,11 +435,18 @@ export function initSocketListeners() {
      window.location.href = `/login?reason=banned&msg=${encodeURIComponent(data.reason)}`;
   });
 
-  // 6. KEY MANAGEMENT
-  transportClient.on('session:request_key_fulfillment', (data: unknown) => {
-    // This is handled in transportClient helpers usually, but we can hook it here if needed
+  // [GAP 2026-10-18] Server meng-emit `subscription_updated` setelah webhook
+  // pembayaran selesai (routes/subscriptions.ts), tetapi klien tidak punya
+  // listener-nya — tier baru baru terlihat setelah refetch profil. Sekarang
+  // `user.subscriptionTier` langsung diperbarui lewat aksi store yang sudah ada
+  // (dipakai juga oleh halaman langganan), jadi batas unggah/grup ikut berubah
+  // tanpa reload.
+  transportClient.on('subscription_updated', (data: { tier?: SubscriptionTier; expiresAt?: string }) => {
+    if (!data?.tier) return;
+    useAuthStore.getState().updateSubscription(data.tier);
   });
 
+  // 6. KEY MANAGEMENT
   transportClient.on('session:new_key', (data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string; senderSigningKey?: string }) => {
     import('../utils/crypto').then(m => m.storeReceivedSessionKey(data))
       .then(() => {
@@ -409,8 +458,24 @@ export function initSocketListeners() {
       .catch(captureAndLog);
   });
   
-  transportClient.on('session:fulfill_request', (data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string }) => {
-    import('../utils/crypto').then(m => m.fulfillKeyRequest(data).catch(captureAndLog));
+  // [GAP 2026-10-18] Nama event yang BENAR dari server adalah `session:request_key`
+  // (realtimeHandlers → emitEventToUser ke target), sedangkan yang didengarkan di
+  // sini dulu `session:fulfill_request` — event yang tidak pernah di-emit siapa pun
+  // (grep server = 0). Akibatnya permintaan kunci sesi 1:1 (mis. lampiran blind)
+  // tidak pernah difulfil walau payload-nya identik. Listener dipindah ke nama
+  // yang sebenarnya; `fulfillKeyRequest` tetap memakai bentuk payload yang sama.
+  transportClient.on('session:request_key', (data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey?: string; requesterPqPublicKey?: string; requesterDeviceId?: string }) => {
+    const { conversationId, sessionId, requesterId, requesterPublicKey, requesterPqPublicKey } = data ?? {};
+    if (typeof conversationId !== 'string' || typeof sessionId !== 'string' || typeof requesterId !== 'string') return;
+    // Server mengirim kedua kunci itu opsional (device peminta bisa belum punya
+    // kunci PQ) — `fulfillKeyRequest` mensyaratkan keduanya untuk mencocokkan
+    // device requester, jadi tanpa itu permintaan dilewati (bukan error).
+    if (typeof requesterPublicKey !== 'string' || typeof requesterPqPublicKey !== 'string') {
+      console.warn('[Session] Permintaan kunci tanpa public key peminta — dilewati.');
+      return;
+    }
+    import('../utils/crypto')
+      .then(m => m.fulfillKeyRequest({ conversationId, sessionId, requesterId, requesterPublicKey, requesterPqPublicKey }).catch(captureAndLog));
   });
 
   transportClient.on('group:fulfill_key_request', (data: { conversationId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string; requesterDeviceId?: string }) => {
@@ -449,7 +514,11 @@ export function initSocketListeners() {
   transportClient.on("burner:terminated", async (payload: { roomId: string }) => {
     const { useBurnerStore } = await import('../store/burner');
     if (payload?.roomId) {
-      useBurnerStore.getState().terminateSession('This secure session has been terminated by the host.');
+      // [BURNER 2026-10-18] `markRoomDestroyed` menulis penanda lokal
+      // (`burned_<roomId>`) + mengosongkan pesan RAM. Tanpa penanda itu, guest
+      // yang me-refresh halaman `/drop` bisa masuk kembali ke room yang sudah
+      // dihancurkan selama status server belum sempat diperiksa.
+      useBurnerStore.getState().markRoomDestroyed(payload.roomId);
       useConversationStore.getState().removeConversation(payload.roomId);
     }
   });

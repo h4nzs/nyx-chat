@@ -139,6 +139,7 @@
     "biometric_initializing": "Initializing biometric scanner...",
     "biometric_scan_now": "Scan fingerprint now to LOCK your vault...",
     "biometric_success": "Biometric active! You can now login without password.",
+    "biometric_enabled_not_verified": "Biometric unlock is active, but this passkey is synced (Google/Apple account) so it does not prove a device. Uploads and broad user search stay locked until you add a device-bound authenticator or security key.",
     "mining_connecting": "Connecting to mining pool...",
     "mining_processing": "Mining cryptographic puzzle... (CPU Intensive)",
     "mining_verifying": "Verifying proof...",

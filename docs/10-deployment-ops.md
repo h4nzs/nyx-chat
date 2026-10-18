@@ -137,7 +137,7 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `ABUSE_REGISTRATION_GUARD` | `on` \| `shadow` \| `off`. `on` = guard burst registrasi (per IP ter-HMAC, per instalasi, per ASN) **menahan**; `shadow` = evaluasi penuh tapi tidak menahan siapa pun (mengukur false-positive NAT lewat `nyx_registration_guard_observed_total`); default `off` (no-op). `docs/30` §30.12 |
 | `ABUSE_REQUIRE_ATTESTATION` | `on` = SEMUA akun baru wajib attestation perangkat keras. Heuristik burst sybil per-ASN tetap meminta attestation walau ini `off` |
 | `ABUSE_ATTESTATION_FORMATS` / `ABUSE_ATTESTATION_BLOCKED_AAGUIDS` / `ABUSE_ATTESTATION_ROOTS` | Kebijakan attestation: format yang diterima, AAGUID yang diblokir, fingerprint root yang dipercaya |
-| `ABUSE_ATTESTATION_ALLOW_SELF` / `ABUSE_ATTESTATION_ALLOW_NONE` / `ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN` / `ABUSE_ATTESTATION_ALLOW_NO_AIK_EKU` | Pelonggaran verifikasi (self/none = bukan bukti perangkat; rantai x5c tak diverifikasi; EKU AIK TPM tidak diwajibkan). Semuanya **hanya untuk test** |
+| `ABUSE_ATTESTATION_ALLOW_SELF` / `ABUSE_ATTESTATION_ALLOW_NONE` / `ABUSE_ATTESTATION_ALLOW_SYNCED` / `ABUSE_ATTESTATION_ALLOW_UNATTESTED` / `ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN` / `ABUSE_ATTESTATION_ALLOW_NO_AIK_EKU` | Pelonggaran verifikasi. `ALLOW_NONE=on` + `ALLOW_SYNCED=on` + `none` di `ABUSE_ATTESTATION_FORMATS` = **mode passkey**: menerima passkey tersinkron Google/Apple (`fmt: none`, `multiDevice`) yang dipakai default di Android/iOS; gate hanya membuktikan authenticator ber-UV. `ALLOW_UNATTESTED=on` = perangkat tanpa authenticator sama sekali boleh mendaftar tanpa bukti (hanya bila permintaan datang dari kebijakan global, bukan dari burst per-ASN). Kedua jalur membuat akun `isVerified=false` (sandbox: upload & pencarian luas tertutup) dan memunculkan peringatan boot. `ALLOW_SELF`/`ALLOW_UNVERIFIED_CHAIN` tetap **hanya untuk test** — keduanya membuat tier "hardware" bisa dipalsukan |
 | `ASN_DB_FILE` | Tabel `prefix,asn` LOKAL (ekspor GeoLite2-ASN). Kosong = lapisan ASN nonaktif; IP mentah tidak pernah disimpan, yang masuk Redis hanya nilai ter-pepper |
 | `NOWPAYMENTS_API_KEY` / `NOWPAYMENTS_IPN_SECRET` | Payments (crypto-only) |
 | `DISCORD_REPORT_WEBHOOK_URL` | Abuse reports |
@@ -428,6 +428,9 @@ akan ditolak lapis kontrak metrik di `scripts/drill-alerts.sh`):
 | `nyx_kt_snapshot_upload_total{result}` | Unggahan arsip snapshot KT ke R2 (§10.13) |
 | `nyx_kt_snapshot_deleted_total{result}` | Arsip snapshot KT yang dihapus karena retensi |
 | `nyx_registration_guard_observed_total{action,reason}` | Hasil evaluasi guard registrasi (mode `shadow` = keputusan hipotetis) |
+| `nyx_attestation_registration_total{result,reason}` | Hasil gerbang attestation saat pendaftaran (`accepted`/`rejected`/`missing`/`challenge_invalid`/`malformed`; `reason` = kode enum pendek, `unmapped` = kode baru yang belum dipetakan) |
+| `nyx_attestation_roots_expired_certs` | Jumlah sertifikat di bundle root attestation yang sudah lewat `validTo` (alert `NyxAttestationRootExpired`) |
+| `nyx_attestation_roots_next_update_timestamp_seconds` | `nextUpdate` FIDO MDS dari metadata bundle root (alert `NyxAttestationRootBundleStale`); seri tidak ada bila metadata tidak ada |
 | `nyx_admin_cleanup_total{result}` | Pemanggilan `/api/admin/cleanup` — termasuk yang DITOLAK (`forbidden`, `rate_limited`) |
 | `nyx_abuse_guard_enabled{guard}` | 1 = guard menyala saat boot, 0 = off (alert `NyxAbuseGuardDisabled`) |
 | `nyx_client_version_rejected_total{result}` | Request ditolak karena versi klien < `MIN_CLIENT_VERSION` (§10.14) |
@@ -981,9 +984,21 @@ tampak sehat — karena itu §10.16 ini ada, dan kenapa boot-nya berisik.
    perangkat** (`428 ATTESTATION_REQUIRED`), bukan blokir.
 4. **Attestation (opsional, paling keras):** `ABUSE_REQUIRE_ATTESTATION=on`
    mewajibkan attestation perangkat untuk **semua** akun baru. Kebijakan
-   format/root/AAGUID lewat `ABUSE_ATTESTATION_*` (§10.6). Longgarkan hanya untuk
-   test — `ALLOW_NONE`/`ALLOW_SELF` membuat lapisan ini tidak membuktikan
-   perangkat apa pun.
+   format/root/AAGUID lewat `ABUSE_ATTESTATION_*` (§10.6).
+
+   Perlu diketahui sebelum menyalakannya: passkey default di Android/iOS adalah
+   **kredensial tersinkron** (`fmt: none`, `multiDevice`) — Chrome/Safari sengaja
+   tidak melampirkan attestation perangkat, dan desktop Linux tidak punya
+   platform authenticator sama sekali. Kebijakan ketat karena itu hanya bisa
+   dipenuhi security key FIDO2 atau perangkat berbiometrik yang membuat
+   kredensial device-bound. Bila mayoritas pengguna memakai passkey, pilih
+   **mode passkey** secara sadar: `ABUSE_ATTESTATION_ALLOW_NONE=on`,
+   `ABUSE_ATTESTATION_ALLOW_SYNCED=on`, dan `none` ditambahkan ke
+   `ABUSE_ATTESTATION_FORMATS`. Gate lalu = "punya authenticator WebAuthn ber-UV"
+   (bukan bukti silikon), sybil resistance bertumpu pada Turnstile +
+   `ABUSE_REGISTRATION_GUARD`, dan akun lewat jalur itu dibuat
+   `isVerified=false` sehingga fitur ber-verifikasi tetap tertutup. `ALLOW_SELF`
+   dan `ALLOW_UNVERIFIED_CHAIN` tetap hanya untuk test.
 5. **Root perangkat nyata (wajib untuk `packed`/`tpm`/`android-key`/`apple`):**
    `x5c` dari TPM/Windows Hello, Android Key Attestation, YubiKey, dan Apple
    biasanya berhenti di **intermediate** — root-nya tidak ikut. Dengan
@@ -991,17 +1006,33 @@ tampak sehat — karena itu §10.16 ini ada, dan kenapa boot-nya berisik.
    ditolak kecuali root-nya dipin:
 
    ```bash
-   # kumpulkan root vendor yang sudah diverifikasi (FIDO MDS3 / halaman vendor)
-   node scripts/attestation-roots.mjs bundle --out /etc/nyx/attestation-roots.pem \
-     fido-root.pem yubico-root.der apple-root.pem
+   # unduh + VERIFIKASI JWS FIDO MDS, lalu ambil root Android & Apple;
+   # filter: hanya CA, hanya yang masih berlaku, entri MDS kompromi dibuang.
+   # Metadata nextUpdate ikut ditulis ke <bundle>.meta.json (dipakai peringatan
+   # boot + alert). Tanpa restart: bundle dibaca ulang berdasarkan mtime.
+   node scripts/attestation-roots.mjs refresh --out /etc/nyx/attestation-roots.pem
+   node scripts/attestation-roots.mjs check --bundle /etc/nyx/attestation-roots.pem
    # lalu set ABUSE_ATTESTATION_ROOTS_FILE=/etc/nyx/attestation-roots.pem
    # (fingerprint ABUSE_ATTESTATION_ROOTS hanya cukup untuk root yang ikut di x5c)
    ```
 
-   Detail alur, sumber sertifikat, dan rotasinya: `ops/attestation/README.md`.
-   Boot akan memperingatkan bila attestation ketat menyala tanpa root dipin,
-   atau bila `ALLOW_UNVERIFIED_CHAIN=on` (itu menerima self-signed buatan siapa
-   pun sebagai "hardware").
+   Rantai JWS MDS diverifikasi terhadap kunci leaf `x5c` (RS256/ES256), dan
+   fingerprint rantainya dipin di metadata (TOFU) — perubahan rantai adalah
+   error kecuali `--accept-new-mds-chain`; `--mds-root <pem>` menutup celah itu
+   dengan anchor GlobalSign yang dipin operator. Sertifikat yang bukan CA dan
+   yang kedaluwarsa **dibuang** (tidak bisa memverifikasi tanda tangan baru),
+   dan seluruh root milik entri MDS berstatus `REVOKED`/
+   `ATTESTATION_KEY_COMPROMISE`/`USER_KEY_*`/`USER_VERIFICATION_BYPASS`
+   dibuang. Detail alur, sumber sertifikat, dan rotasinya:
+   `ops/attestation/README.md`.
+
+   Jalankan `check` (atau `refresh`) berkala — mis. cron mingguan — karena
+   MDS memberi `nextUpdate` yang harus disegarkan sebelum tanggal itu. Boot akan
+   memperingatkan bila attestation ketat menyala tanpa root dipin, bila
+   `ALLOW_UNVERIFIED_CHAIN=on` (menerima self-signed buatan siapa pun sebagai
+   "hardware"), bila metadata bundle tidak ada, bila `nextUpdate` MDS sudah/
+   hampir lewat (≤30 hari), bila bundle memuat root kedaluwarsa, atau bila
+   sha256 bundle berbeda dari yang dicatat metadata (diganti manual).
 6. `TURNSTILE_SECRET_KEY` tetap wajib (pendaftaran menolak tanpa token sah).
 
 **Memantau.** Gauge `nyx_abuse_guard_enabled{guard="registration"|"attestation"}`
@@ -1010,6 +1041,35 @@ tampak sehat — karena itu §10.16 ini ada, dan kenapa boot-nya berisik.
 lingkungan produksi tanpa guard/attestation. Riwayat keputusan guard:
 `nyx_registration_guard_observed_total`; blokirnya: `nyx_security_blocks_total`
 + `nyx_relay_errors_total{result}`.
+
+**Gerbang attestation sendiri** punya empat alert, karena kegagalannya tidak
+pernah terlihat sebagai error server — hanya `403 ATTESTATION_REJECTED: <KODE>`
+per percobaan, atau bundle root yang diam-diam basi:
+
+| Alert | Menyala saat | Tindakan |
+|---|---|---|
+| `NyxAttestationRootNotTrusted` | ada penolakan `reason="root_not_trusted"` (1 jam) | segarkan bundle (`refresh`) atau pin fingerprint vendor; jangan longgarkan `ALLOW_UNVERIFIED_CHAIN` |
+| `NyxAttestationRejectionRateHigh` | >50% dari (accepted+rejected) ditolak selama 30 menit **dan** ≥3 penolakan/jam | kode alasan di body 403: `format_not_allowed`/`synced_authenticator`/`user_verification` = kebijakan vs perangkat; `root_not_trusted`/`certificate_expired` = bundle |
+| `NyxAttestationRootExpired` | `nyx_attestation_roots_expired_certs > 0` selama 1 jam | `refresh` lalu restart `nyx-api` (gauge diisi saat boot) |
+| `NyxAttestationRootBundleStale` | `nextUpdate` MDS di metadata sudah lewat | `refresh` sebelum perangkat baru mulai ditolak `root_not_trusted` |
+
+`nyx_attestation_registration_total{result,reason}` adalah sumber utama untuk
+diagnosis: `reason` hanya kode enum pendek (`root_not_trusted`,
+`certificate_expired`, `synced_authenticator`, …), jadi angka ini aman dipantau
+tanpa memuat identitas siapa pun. Alasan yang belum dipetakan masuk `unmapped`.
+
+**Menjaga bucket tetap segar.** `refresh` menulis metadata berisi `nextUpdate`
+MDS; `check` memperingatkan bila tanggal itu lewat atau bundle memuat root
+kedaluwarsa. Jadwalkan mingguan (contoh):
+
+```bash
+0 4 * * 1 cd /opt/nyx && node scripts/attestation-roots.mjs refresh \
+  --out /etc/nyx/attestation-roots.pem >> /var/log/nyx-roots-refresh.log 2>&1
+```
+
+Bundle dipakai tanpa restart (cache `path + mtime`), tetapi **gauge** dan
+peringatan boot hanya diperbarui saat proses start — restart `nyx-api` setelah
+refresh bila ingin alert ikut segar.
 
 **Rollback.** Kembalikan env ke `off` lalu restart `nyx-api` — tidak ada state
 yang perlu dibersihkan. Counter guard ber-TTL (1 jam / 10 menit) dan key-nya

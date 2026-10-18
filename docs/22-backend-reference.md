@@ -43,9 +43,9 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 
 - Subscribes `nyx:upstream:*`, publishes `nyx:downstream`.
 - Senders: `sendToUser`, `sendJsonToUser`, `emitEventToUser` (wraps named events as `KEY_SYNC {event,data}`), `emitEventToUsers`, `broadcastToUsers`.
-- Opcode handlers: `CHAT_MESSAGE` (`handleChatMessage`), `KEY_SYNC` (`handleKeySync` — big event switch), `WEBRTC_SIGNAL`/`WEBRTC_ICE`, `PRESENCE`, `AUTH` (single-device + hardware binding), `99` disconnect.
-- `handleKeySync` events: `session:request_key`, `session:fulfill_response`, `session:request_missing`, `messages:distribute_keys`, `group:request_key`, `group:fulfilled_key`, `metadata:updated`, `auth:request_linking_qr`, `message:unsend`, `message:view_once_opened`, `push:subscribe`/`unsubscribe`, `burner:*`, `migration:*`, `message:*` status events.
-- `checkRateLimit` (atomic Lua), `isActiveDeviceAllowed` (60 s cache), `sendAck`.
+- Opcode handlers: `CHAT_MESSAGE` (`handleChatMessage`), `KEY_SYNC` (`handleKeySync` — big event switch), `WEBRTC_SIGNAL`/`WEBRTC_ICE` (`handleWebRtcRelay`), `PRESENCE`, `AUTH` (single-device + hardware binding), `99` disconnect.
+- `handleKeySync` events: `session:request_key`, `session:fulfill_response`, `messages:distribute_keys` (explicit ACK error — legacy path removed), `group:request_key`, `group:fulfilled_key`, `metadata:updated`, `auth:request_linking_qr` (no client caller yet), `message:unsend`, `message:view_once_opened`, `push:subscribe`/`unsubscribe`, `burner:*`, `migration:*`, `message:*` status events. (`session:request_missing` was removed: no sender, no listener.)
+- `checkRateLimit` (atomic Lua), `isActiveDeviceAllowed` (60 s cache), `sendAck`. Data buckets live in the handlers (`CHAT_RATE_LIMIT`/`ACK_RATE_LIMIT`/`PRESENCE_RATE_LIMIT`), so the WSS gateway and the WT path share one counter each — see `realtime/gateway.ts` (no local buckets) and `tests/gatewayParity.test.ts`.
 
 ## 22.5 Utilities (`utils/`, 36) & lib (`lib/`, 4)
 
@@ -119,7 +119,8 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 - Constant-time compares for `deleteSecret`, `authSecret`, webhook HMACs.
 - `message:unsend` requires sender ownership or valid `deleteSecret`.
 - 500-recipient cap on broadcast paths; parallelized `Promise.all`.
-- Refresh reuse → full family revocation + `force_logout` (with 5 s benign-concurrency grace).
+- Refresh replay classification (`utils/refreshReplay.ts`): dead family → 401 without alarm; direct-successor retry inside `REFRESH_REPLAY_GRACE_MS` (default 2 min) → benign continuation; genuine replay → family revocation + **device-scoped** `force_logout`.
+- `RefreshToken` revoked rows are retained `REVOKED_REFRESH_TOKEN_RETENTION_MS` (7 d) so the `replacedById` chain survives for replay classification.
 
 ## 22.9 Tests & scripts
 

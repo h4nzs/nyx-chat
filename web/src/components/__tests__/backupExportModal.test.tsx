@@ -96,6 +96,7 @@ vi.mock('@lib/crypto-worker-proxy', () => ({
 }));
 
 import toast from 'react-hot-toast';
+import { ApiError } from '@lib/api';
 import BackupExportModal from '../BackupExportModal';
 
 const ARCHIVE_BYTES = new Uint8Array([0x4e, 0x59, 0x58, 0x42, 1, 2, 3, 4]);
@@ -185,7 +186,48 @@ describe('BackupExportModal', () => {
     expect(startBackupFileDownload).toHaveBeenCalledWith(ARCHIVE_BYTES);
     expect(toastError).toHaveBeenCalled();
     await waitFor(() => expect(screen.getByText(/backup_export.result_summary/)).toBeTruthy());
-    expect(screen.queryByText(/backup_export.result_cloud/)).toBeNull();
+    // Tidak ada klaim "tersimpan di awan" — yang ada justru alasannya gagal.
+    expect(screen.queryByText('modals:backup_export.result_cloud')).toBeNull();
+    expect(screen.getByText(/backup_export.result_cloud_failed/)).toBeTruthy();
+  });
+
+  it('unggah awan ditolak karena akun belum terverifikasi → alasan yang bisa ditindaklanjuti, berkas lokal tetap sah', async () => {
+    // Server menolak backup awan untuk `isVerified=false` (403). Pesan
+    // "gagal unggah" generik menyembunyikan langkah yang harus diambil user —
+    // dan itulah satu-satunya gejala yang terlihat saat verifikasi perangkat
+    // sendiri sedang gagal (bug 500 `excludeCredentials`).
+    uploadBackupToCloud.mockRejectedValue(
+      new ApiError(403, 'SANDBOX_UPLOAD_RESTRICTION: Unverified users cannot store backups.')
+    );
+
+    render(<BackupExportModal isOpen onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId('backup-export-cloud'));
+    fireEvent.click(createButton());
+
+    await waitFor(() => expect(uploadBackupToCloud).toHaveBeenCalledTimes(1));
+    expect(startBackupFileDownload).toHaveBeenCalledWith(ARCHIVE_BYTES);
+    expect(toastError).toHaveBeenCalledWith('modals:backup_export.upload_unverified', expect.anything());
+
+    // Alasannya juga menetap di panel hasil (toast hilang setelah beberapa detik).
+    await waitFor(() =>
+      expect(screen.getByText(/backup_export.result_cloud_unverified/)).toBeTruthy()
+    );
+    expect(screen.queryByText(/backup_export.result_cloud_failed/)).toBeNull();
+    expect(screen.queryByText('modals:backup_export.result_cloud')).toBeNull();
+  });
+
+  it('kegagalan jaringan saat unggah → pesan generik, bukan klaim belum terverifikasi', async () => {
+    uploadBackupToCloud.mockRejectedValue(new ApiError(0, 'Network error during backup upload'));
+
+    render(<BackupExportModal isOpen onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId('backup-export-cloud'));
+    fireEvent.click(createButton());
+
+    await waitFor(() => expect(uploadBackupToCloud).toHaveBeenCalledTimes(1));
+    expect(toastError).toHaveBeenCalledWith('modals:backup_export.upload_failed', expect.anything());
+    await waitFor(() =>
+      expect(screen.getByText(/backup_export.result_cloud_failed/)).toBeTruthy()
+    );
   });
 
   it('prompt password dibatalkan → error phrase_required, tanpa membuat arsip', async () => {

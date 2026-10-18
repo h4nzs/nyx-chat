@@ -2,6 +2,416 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔌 Audit paritas WebTransport ↔ WebSocket: empat lubang ditutup (2026-10-18)
+
+Fallback WSS ada supaya klien di jaringan yang memblokir QUIC mendapat perilaku
+server yang sama. Audit kedua jalur (peta opcode ↔ event, handler, listener, dan
+test paritas yang ada) menemukan empat celah nyata — semuanya karena satu jalur
+memasang sesuatu yang jalur lain tidak:
+
+**1. Rate limit hanya hidup di gateway WSS.** `chat_message` (120/menit),
+`message_ack_delivered` (240/menit), dan `presence_update` (30/menit) dipasang di
+`realtime/gateway.ts` saja, sedangkan jalur WebTransport — transport UTAMA — tidak
+punya limiter apa pun (sidecar Rust tidak punya, dan `handleUpstreamMessage`
+hanya memeriksa active-device). Dampaknya bukan teoretis: satu klien cacat bisa
+membanjiri insert DB + fan-out `sendJsonToUser` lewat jalur cepat. Ketiganya kini
+hidup di handler (`CHAT_RATE_LIMIT`/`ACK_RATE_LIMIT`/`PRESENCE_RATE_LIMIT`) supaya
+KEDUA relay memakai satu penghitung per `(user, bucket)` — dipasang di dua tempat
+justru akan menghitung ganda dan membuat limit efektif separuh. Angka untuk WSS
+tidak berubah, dan subscription presence tetap punya bucket sendiri (60/menit)
+sehingga tidak ikut terkena limit presence umum.
+
+**2. Sinyal panggilan mati total di mode WebSocket.** `WEBRTC_SIGNAL`/`WEBRTC_ICE`
+ditandai `noop` di `OUTGOING_OPCODE_MAP` (sinyal keluar hilang diam-diam) dan
+gateway tidak mendaftarkan event masuknya — jadi di jaringan yang memblokir QUIC
+panggilan tidak pernah bisa tersambung. Arah sebaliknya lebih buruk lagi: envelope
+relay `{from,type,payload}` tidak punya field `event`, sehingga cabang default
+gateway meng-emit-nya sebagai `message:new` dan klien mencoba mem-parse sinyal
+panggilan sebagai pesan chat. Logika relay kini satu tempat
+(`handleWebRtcRelay` di `realtimeHandlers.ts`, dipakai WT lewat `redisBridge` dan
+WSS lewat gateway), event masuk/keluar memakai nama yang sudah ada di kontrak
+shared (`webrtc:secure_signal`), dan klien memetakannya ke `webrtc:signal` yang
+sama seperti jalur WT.
+
+**3. `KICK` tidak pernah sampai sebagai event di jalur WebTransport.** Sidecar
+hanya menutup koneksi ("Kicked by server") tanpa meneruskan payload-nya, padahal
+klien bereaksi pada `force_logout` (`deviceId`/`reason`) — sehingga revoke sesi,
+kick device, dan hardware mismatch me-logout instan di WSS tetapi tidak di WT
+(hanya putus–reconnect sampai REST 401 muncul). Sidecar sekarang mengirim frame
+KICK lebih dulu (stream diselesaikan sebelum close) dan klien memetakan payload
+ke alur yang sama dengan gateway: ada `deviceId` → `force_logout` device-scoped;
+hanya ada `reason` (akun dihapus/ban) → `auth:banned` seperti sebelumnya.
+
+**4. Event yang di-emit server tapi tidak punya listener di klien.**
+`message:deleted_remotely` (unsend peer), `message:deleted_batch` (sweeper
+auto-delete), `message:viewed` (view-once dibuka peer), dan `subscription_updated`
+(webhook pembayaran) kini ditangani — sebelumnya efeknya baru terlihat setelah
+reload/refetch. Alur permintaan kunci sesi 1:1 juga diperbaiki: klien dulu
+mendengarkan `session:fulfill_request`, nama yang TIDAK pernah di-emit siapa pun
+(server memakai `session:request_key`), dan `FileAttachment` mengirim permintaan
+tanpa `targetId` sehingga server selalu menjawab `session:request_key_failed`
+("Opaque Mailbox requires targetId"). Deklarasi mati di `packages/shared/src/socket.ts`
+(`messages:expired`, `reaction:new/deleted`, `presence:sync`, `typing:update`,
+`user:identity_changed`, `conversation:participants_added`, `session:key_requested`,
+`session:fulfill_request`, `session:request_key_fulfillment`) dan case handler
+`session:request_missing` dihapus supaya tipe tidak menjanjikan yang tidak ada;
+`auth:request_linking_qr` dan `messages:distribute_keys` sengaja DIPERTAHANKAN
+dengan catatan eksplisit (guard migrasi / kontrak tanpa pemanggil klien).
+
+Semua lubang itu kini dikunci test: paritas source di `tests/gatewayParity.test.ts`
+(bucket rate limit tidak boleh kembali ke gateway; kedua opcode sinyal harus punya
+rute keluar; KICK tetap dipetakan ke `force_logout`), perilaku bucket per-jalur di
+`tests/realtimeHandlers.test.ts`, peta opcode di `web/src/lib/__tests__/transportMode.test.ts`,
+dan listener baru di `web/src/lib/__tests__/socketListeners.test.ts`.
+
+## ⏱️ Timer auto-delete muncul di SEMUA pesan dan ikut hilang setelah reload (2026-10-18)
+
+Setiap pesan 1:1 menampilkan hitung-mundur merah di bubble-nya walaupun pengirim
+tidak pernah memilih timer, dan pada pesan yang timer-nya benar-benar dipilih
+indikatornya hilang begitu berpindah percakapan. Dua sebab, satu akar:
+`expiresAt` dipakai sebagai penanda auto-delete padahal ia **selalu** terisi di
+jalur 1:1 (TTL store-and-forward server 14 hari, lalu disingkat jadi 24 jam
+begitu pesan di-READ) — dan penanda pilihan pengirim itu sendiri tidak pernah
+ada.
+
+Sekarang pengirim menandai pilihannya di dalam ciphertext (`autoDelete: true`,
+server tidak melihatnya) pada jalur kirim yang sama dengan `sentAt` presisi,
+termasuk bubble optimistik sehingga timernya langsung benar tanpa menunggu echo
+server. Penerima mengambil penanda itu saat dekripsi (`captureAutoDelete()`,
+sepasang dengan `captureSentAt()` — field asing yang tersisa akan merusak
+collapse payload teks dan menampilkan JSON mentah), lalu mempersist-nya di
+ShadowVault sebagai flag ter-seal. Aturannya sama seperti reaksi: kiriman yang
+tidak membawa penanda (salinan server, tombstone parsial) mempertahankan nilai
+lama, jadi timer tidak bisa muncul/hilang sendiri karena pesan ditulis ulang.
+`MessageBubble` hanya menjalankan hitung-mundur bila `autoDelete` benar-benar ada.
+
+## ✅ Centang biru muncul prematur & status baca hilang setelah reload (2026-10-18)
+
+Dua keluhan yang tampak terpisah tetapi punya jalur yang sama. Pertama, bubble
+pengirim berubah jadi “dibaca” padahal penerima belum membuka percakapannya:
+baik `doAddIncomingMessage` (pesan tiba live) maupun
+`loadMessagesForConversation` (sync semua percakapan saat connect)
+me-receipt `READ`. Padahal “baru tiba” bukan “dibaca” — dan pada 1:1 receipt READ
+juga mempersempit TTL ciphertext server jadi 24 jam. Kedua, centang abu/biru di
+bubble pengirim hilang setelah berpindah percakapan dan setelah reload, karena
+`Message.statuses` tidak pernah ikut disimpan (persis bug reaksi: kolom tidak ada
+di daftar tulis `upsertMessages`), jadi peta receipt hanya hidup di memori.
+
+Receipt pesan-tiba sekarang dikirim lewat satu helper (`sendDeliveryReceipts`)
+yang mengemas `messages:mark_delivered` dengan `targets` messageId → pengirim
+asli hasil dekripsi (wire 1:1 sealed-sender menyimpan `NULL`, jadi peta itu
+wajib) dan dipotong per `RECEIPT_CHUNK_SIZE` (= batas batch server). READ kini
+hanya datang dari `ChatWindow`/`MessageItem` saat bubble benar-benar terlihat.
+`statuses` dipersist sebagai kolom struktur ter-seal dengan aturan sama seperti
+reaksi: kiriman tanpa field itu mempertahankan nilai lama, `[]` eksplisit berarti
+“tidak ada receipt”, dan entri rusak hanya di-drop tanpa menggagalkan pembacaan
+baris.
+
+## 🔐 Riwayat grup jadi `waiting_for_key` setelah kick + re-add (2026-10-18)
+
+Gejala: anggota dikeluarkan dari grup (atau keluar) lalu di-add kembali, sebagian
+pesan lama sebelum dia keluar berubah menjadi `waiting_for_key` — padahal pesan
+itu dulu bisa dibaca.
+
+**Penyebab: kick menghapus kunci lokal.** `DELETE /:id/participants/:userId`
+mengirim `conversation:deleted` ke anggota yang dikeluarkan. Klien memperlakukan
+semua event itu sama: `removeConversation` → `shadowVault.deleteConversation()`
++ `deleteConversationKeychain()`, yang menghapus pesan vault **dan seluruh group
+receiver state beserta arsip era + skipped keys**. Saat anggota di-add kembali,
+riwayat di-fetch ulang dari server tetapi tidak ada kunci era lagi untuk
+didekripsi; hanya pesan yang message-key-nya sudah ter-cache yang tetap terbaca
+(itulah kenapa hanya *sebagian* yang rusak). Server hanya mengirim event ini ke
+socket yang online, jadi gejalanya juga “kadang” muncul.
+
+**Perbaikan.** Askah kick kini membawa `reason: 'removed'` (hapus lokal membawa
+`'hidden'`; klien lama mengabaikan field ini). Klien menyembunyikan percakapan
+tetapi mempertahankan pesan ShadowVault dan kunci grup per era, sehingga seluruh
+riwayat sampai pesan terakhir sebelum keluar tetap terbaca setelah anggota
+di-add kembali. Hapus lokal/burner tetap membersihkan riwayat + kunci seperti
+sebelumnya. State yang dipertahankan hanya membuka era saat anggota masih
+menjadi anggota — era pasca-kick tidak pernah didistribusikan kepadanya, jadi
+tidak ada eskalasi akses.
+
+## 👤 Avatar/nama di daftar chat & story tray tidak ikut berubah (2026-10-18)
+
+Satu keluhan dengan dua akar yang saling menutupi: ketika peer mengganti avatar
+atau nama, bubble pesan dan modal info user langsung terlihat baru, tetapi baris
+daftar chat dan story tray tetap memakai profil lama.
+
+**Cache profil menyematkan versi lama.** Participant 1:1 hanya hidup di klien
+(Opaque Mailbox: server tidak mengirim roster), jadi ep (`encryptedProfile`) yang
+baru datang lewat event `user:updated` membentuk key komposit baru. Di titik itu
+`getCacheOnly` masih punya fallback ke alias plain-id — alias itu berisi hasil
+dekripsi ep **lama**, dikembalikan sebagai "cache cepat", lalu `useUserProfile`
+berhenti tanpa pernah mendekripsi ep baru. Sekarang alias hanya dipakai pemanggil
+yang memang tidak punya ep (`hydrateProfileForPlainId`, participant tanpa profil);
+ep baru selalu memaksa dekripsi.
+
+**Snapshot participant tidak pernah di-refresh/dipersist.** Penulisan
+`user:updated` hanya cocok untuk `p.id === user.id` (participant pseudonym grup v2
+dilewati, padahal deteksinya sudah pseudonym-aware), hasilnya tidak ditulis ke
+ShadowVault sehingga hilang lagi setelah reload, dan contact store tidak ikut
+disegarkan. Sekarang pembaruan memakai pencocokan kanonik (pseudonym dipertahankan,
+bukan ditimpa userId asli), dipersist ke vault, langsung mendekripsi profil, dan
+meng-upsert kontak. Dua jalur tambahan menutup kasus event terlewat: saat
+`loadConversations` profil peer diambil dari pengirim pesan terakhir (pesan server
+membawa ep terbaru — sumber yang sama yang membuat bubble selalu segar), dan tiap
+pesan 1:1 masuk menyegarkan participant pengirimnya.
+
+## 🔥 Burner Chat: guest tidak bisa kirim pesan & destroy host tidak sampai (2026-10-18)
+
+Dua keluhan, satu tema: kegagalan burner berhenti di `console.error` dan tidak
+punya jalur pulih.
+
+**Guest tidak bisa mengirim (Enter/klik kirim = diam).** `sendMessage`
+mengembalikan `void`, jadi semua kegagalan tidak terlihat: transport mati hanya
+menumpuk payload di antrean offline, ack tidak pernah datang, dan setelah timeout
+15 detik pun tidak ada apa pun di UI — sementara teks input sudah dikosongkan.
+Pemicu paling sering: sesi guest **tidak punya refresh token** (server sengaja
+tidak mempersist-nya) sedangkan access token hanya 15 menit, sehingga guest yang
+sesi-nya lebih lama terus menyambung dengan token mati; jalur lama hanya meminta
+token baru ketika `user` kosong. Sekarang `ensureBurnerTransport()` memastikan
+transport hidup (token lama → gagal → terbitkan identitas guest baru), `sendMessage`
+mengembalikan `{ok, error}` dan **tidak** mengenkripsi pesan saat transport tidak
+bisa disambungkan (ratchet tidak terbakar oleh pesan yang tidak pernah keluar),
+serta UI menampilkan toast alasan gagal tanpa menghapus teks yang diketik.
+
+**Destroy host tidak sampai ke guest (+ room masih terbuka setelah refresh).**
+Destroy hanya disiarkan sebagai event realtime ke anggota room, dan `destroy`
+sendiri dikirim lalu langsung redirect — navigasi bisa memutus transport sebelum
+payload terkirim. Selain itu membership hilang setiap kali transport putus
+(`handleDisconnect` menyapu semua `burner:room:*`), sehingga destroy berikutnya
+tidak menemukan guest. Perbaikan berlapis: host **menunggu ACK** destroy sebelum
+pindah halaman; server **meng-ACK** `burner:send/reply/destroy` (room terminated
+menjawab `ROOM_TERMINATED`, bukan hening), `burner:join` mengembalikan status room,
+dan pengirim di-`sAdd` ulang ke room (self-heal). Gerbang utamanya tetap: endpoint
+baru `GET /api/burner/:roomId/status` diperiksa saat `/drop` dibuka, ditambah
+penanda lokal `burned_<roomId>` — jadi guest yang me-refresh halaman (atau sedang
+offline saat destroy) tidak lagi masuk ke room yang sudah mati.
+
+## 💬 Preview daftar chat salah / berubah jadi "belum ada pesan" (2026-10-18)
+
+Dua keluhan yang akarnya sama: preview baris terakhir di daftar percakapan.
+
+**"Belum ada pesan" padahal riwayatnya ada.** Banyak pesan internal memang tidak
+punya representasi visual: `CALL_INIT`, `GHOST_SYNC`, `PROFILE_SYNC`, `COVER`,
+`GROUP_KEY`, `UNSEND`, `reaction_remove`, `SYSTEM_KEY_REQUEST`, `STORY_KEY`.
+`withPreview` hanya mengenali empat tipe; sisanya jatuh ke cabang "teks biasa",
+sehingga payload JSON **mentah** dipakai sebagai preview (termasuk
+`{"type":"PROFILE_SYNC","profileKey":…}`). Tipe yang dikenali pun menghasilkan
+`preview: ''`, dan pesan-pesan itu tetap disimpan serta tetap dipakai sebagai
+`lastMessage` — jadi daftar chat menampilkan "No messages yet" untuk percakapan
+yang jelas berisi. Sekarang ada satu aturan di `utils/messagePreview.ts`: hanya
+pesan yang benar-benar terlihat (teks terbaca, lampiran, atau view-once) yang
+boleh menjadi preview; pesan kontrol tidak pernah menggantikannya dan tidak
+menaikkan unread.
+
+**Preview flaky.** Tiga jalur menimpanya secara bergiliran:
+`loadConversations` hanya mengambil **satu** baris terbaru dari vault (kalau baris
+itu kontrol, preview runtuh); hasil sync menimpa seluruh daftar sehingga pesan
+live yang tiba di tengah `await` hilang lagi; dan handle pesan yang tiba
+sebelum `conversation:new` dibuang diam-diam (`if (!conversation) return state`).
+Kini sync memindai jendela baris terbaru lalu memilih yang terlihat
+(`pickPreviewLastMessage`), penggabungan dengan state live menolak menurunkan
+preview yang lebih baru (unread yang bertambah ikut dipertahankan), dan preview
+untuk percakapan yang belum ada disimpan sementara lalu dipasang saat
+percakapannya muncul.
+
+Ikut diperbaiki karena satu akar: menghapus/unsend atau membuka pesan view-once
+**yang sedang menjadi preview** dulu menuliskan nisan ke `lastMessage` (preview
+jadi kosong) atau meninggalkan teks pesan yang sudah dihapus (preview basi).
+Sekarang preview dihitung ulang ke pesan terlihat berikutnya lewat aksi baru
+`forceConversationLastMessage`, dan `null` hanya dipakai bila riwayatnya memang
+habis.
+
+## 🧷 "Internal server error" saat verify biometric + backup awan ditolak (2026-10-18)
+
+Dua keluhan yang ternyata satu rantai. Menekan verifikasi perangkat berakhir dengan
+toast "internal server error", dan membuat `.nyxbak` dengan centang awan berakhir
+dengan toast gagal unggah walau berkas lokalnya sudah tersimpan.
+
+**Penyebab pertama** ada di `GET /api/auth/webauthn/register/options`:
+`excludeCredentials[].id` dikirim sebagai `Buffer` (hasil decode base64url).
+`@simplewebauthn/server` v13 memvalidasi setiap id dengan `isBase64URL()` →
+`trimPadding()` → `input.replace(...)`, dan `Buffer` tidak punya `.replace`, jadi
+setiap akun yang **sudah punya authenticator** — yaitu justru akun yang mencoba
+memverifikasi diri — mendapat `TypeError: input.replace is not a function` dan 500.
+Log produksi 2026-10-18 03:42 mencatat persis error itu. Sekarang id dinormalkan ke
+`Base64URLString` (`utils/webauthnCredentials.ts`): base64url dipakai apa adanya,
+base64 standar dikonversi, baris tak terpakai dibuang tanpa menjatuhkan sisa daftar.
+
+**Penyebab kedua** adalah akibat dari yang pertama ditambah dua klaim palsu di UI.
+`isVerified` hanya naik lewat `/webauthn/register/verify` (kredensial baru) atau
+Proof of Trust, tetapi jalur "pakai credential yang sudah ada" di Settings tidak
+menyentuh server sama sekali — sementara toastnya berbunyi "biometrik aktif".
+Pengguna pun melihat biometrik "berhasil" sambil unggahan awan terus ditolak 403
+(`SANDBOX_UPLOAD_RESTRICTION`), dan modal backup menyebutnya "gagal unggah" seolah
+gangguan jaringan. Sekarang: toast mengikuti `user.isVerified` (bukan asumsi), dan
+kegagalan unggah 403 dipetakan ke alasan yang bisa ditindaklanjuti — plus alasannya
+menetap di panel hasil, tidak hanya lewat toast yang hilang. Pesan error verifikasi
+di Settings juga menampilkan penyebab server, bukan lagi "Unknown error".
+
+Verifikasi: `server/tests/webauthnCredentials.test.ts` memanggil
+`generateRegistrationOptions` yang sebenarnya (bentuk Buffer wajib melempar, bentuk
+baru wajib lolos dengan id utuh), `server/scripts/webauthn-exclude-check.ts`
+mengulang hal yang sama pada credential NYATA di DB, dan probe ber-JWT ke instance
+yang berjalan mengembalikan 200 dengan `excludeCredentials` berisi id yang sama
+(sebelumnya 500).
+
+## 👍 Reaksi di bubble pesan tidak bertahan (2026-10-18)
+
+Mengirim reaksi tampak berhasil, lalu gelembung kecilnya hilang begitu berpindah
+percakapan — dan tidak pernah kembali setelah reload. Penyebabnya sederhana dan
+menyeluruh: **reaksi tidak pernah ikut disimpan**. `upsertMessages` menulis daftar
+kolom yang eksplisit dan `reactions` tidak ada di daftar itu (juga tidak ada di
+`DecryptedMessageRecord`), jadi reaksi hanya hidup di store:
+
+- `loadMessagesForConversation` langkah 1 (baca vault → replace store) menghapusnya
+  setiap kali percakapan dibuka kembali, begitu juga `loadMessageContext`;
+- reload hanya bisa memulihkannya bila pesan sinyal `{"type":"reaction"}` kebetulan
+  ikut ter-fetch ulang dan masih bisa didekripsi (tidak ada jaminan itu);
+- jalur kirim reaksi (`addLocalReaction`, `replaceOptimisticReaction`,
+  `removeLocalReaction`) memang hanya memutasi store, dan sinyal hapus reaksi pun
+  tidak pernah menulis apa pun.
+
+Sekarang `reactions` ikut dipersist sebagai kolom struktur ter-seal (`ENC1:`) —
+pola yang sama dengan `senderId`/`repliedToId` (emoji + userId = metadata
+perilaku, jadi tidak boleh plaintext). Dua aturan yang penting: kiriman tanpa
+field `reactions` (salinan server, tombstone parsial) **mempertahankan** reaksi
+yang sudah tersimpan, sedangkan `[]` eksplisit berarti “dibersihkan” (unsend).
+Ketiga mutator reaksi lokal kini menulis keadaan terbaru ke vault sendiri,
+sehingga reaksi sendiri tetap bertahan walau echo socket tidak datang atau
+kiriman sedang offline. Merge pesan pada sync juga membawa `reactions` dari
+salinan mana pun yang memilikinya — menangnya salinan server (yang tidak pernah
+memuat reaksi) tidak lagi menghapusnya dari UI.
+
+## 🔐 Logout sendiri saat idle + `/login?reason=revoked` di perangkat yang sama (2026-10-18)
+
+Gejalanya flaky: aplikasi dibiarkan idle, tab kehilangan fokus, lalu tiba-tiba
+sesi berakhir dan URL berisi `reason=revoked` — padahal perangkat & browser-nya
+sama. Log produksi menunjukkan penyebabnya: `[Security] Refresh token reuse
+detected!`, satu per insiden, masing-masing dengan `familyId` baru (artinya user
+sudah login ulang). Tiga kejadian klien yang normal ditafsirkan sebagai
+pencurian token:
+
+1. **Respons rotasi hilang / lambat.** Klien mem-POST `rt` = R1; server merotasi
+   ke R2 lalu respons hilang (tab di-freeze, jaringan pindah, timeout request
+   30 s). Klien mengulang dengan R1 — tetapi toleransinya hanya
+   `now - R2.createdAt < 5 s`, sementara timeout + retry wajar sudah melewati
+   jendela itu → seluruh family di-revoke.
+2. **Family sudah mati.** Satu tab logout (atau sesinya dicabut) → family
+   di-revoke; tab lain yang tertinggal mem-POST token lama. Dulu ini tetap
+   dianggap serangan dan mem-broadcast `force_logout` — padahal tidak ada sesi
+   hidup yang perlu dilindungi.
+3. **Device lain ikut ter-logout.** Event `force_logout` dikirim tanpa `deviceId`
+   ke **semua** socket milik user, jadi mencabut satu sesi me-logout seluruh
+   perangkat.
+
+Keputusan replay sekarang lewat helper murni `server/src/utils/refreshReplay.ts`:
+family tanpa token hidup → 401 biasa (tanpa alarm, tanpa broadcast); token yang
+merupakan **pendahulu langsung** dari tip hidup dan berumur ≤
+`REFRESH_REPLAY_GRACE_MS` (default 2 menit, clamp 24 jam) → dianggap retry benign
+dan rantai dilanjutkan; selebihnya baru replay asli → family di-revoke +
+`force_logout` dengan **scope `deviceId`** (payload & target). Cleanup tidak lagi
+menghapus baris revoked setiap hari — retensi 7 hari supaya rantai
+`replacedById` tetap ada untuk klasifikasi ini.
+
+Di sisi klien, `authFetch` tidak lagi memanggil handler logout untuk kegagalan
+refresh yang **transien**: `refreshRetry` menandai `auth` (401/403) vs
+`transient` (offline/timeout/5xx), dan hanya yang pertama boleh logout — karena
+logout mem-POST `/api/auth/logout` yang me-revoke seluruh family. Satu gangguan
+jaringan singkat saat tab resume tidak lagi mematikan sesi di semua tab, dan
+`bootstrap()` mempertahankan sesi lokal kalau kegagalannya transien.
+
+## 👤 Anggota baru bisa menerima tapi tidak bisa mengirim pesan grup (2026-10-18)
+
+Gejalanya asimetris dan itu yang membuatnya lama dicari: anggota yang baru
+ditambahkan **menerima** semua pesan, tetapi setiap kiriman darinya gagal.
+Penyebabnya satu baris metadata. `rotateGroupKey` menyusun metadata rotasi
+dengan `...existingMeta`, sehingga `pseudonymMap` era lama ikut terkirim;
+`encryptGroupMetadata` hanya meregenerasi peta bila `pseudonymMap` **tidak ada**.
+Peta lama itu tidak memuat anggota baru, jadi `getMyPseudonym()` → `undefined`,
+`ensureMyPseudonym()` juga tidak menemukannya, dan jalur kirim berhenti di
+`requireGroupSenderIdentity()` — sebelum `message:send`. Dekripsi pesan masuk
+tidak butuh pseudonym milik penerima, makanya hanya arah kirim yang rusak.
+
+Penyusunan metadata rotasi dipindah ke helper murni
+`web/src/lib/groupMetadataRotation.ts`: peta lama dibuang (penulis metadata
+meregenerasi untuk roster saat ini), role anggota lama dipertahankan, anggota
+baru diberi `joinedAtGeneration`, dan `generation` sengaja **belum** dinaikkan
+supaya `encryptGroupMetadata` menaikkannya tepat sekali (bukan +2). Helper yang
+sama menggabungkan `deliveryTokenMap` hasil invite — sebelumnya token itu hanya
+dikirim ke server sementara peta lokal tetap stale.
+
+Dua penyebab pendukung ikut ditutup. `addParticipants` tidak lagi memanggil
+`forceRotateGroupSenderKey` (pemanggil admin sudah memanggil `rotateGroupKey`
+eksplisit; dua jalur bersamaan = dua era dalam hitungan detik), dan setelah
+`storeReceivedSessionKey` sukses, pipeline mencoba ulang dekripsi metadata yang
+tiba sebelum kunci era-nya — dulu grup bisa tertahan “Unknown Group” sampai
+reload. Rotasi periodik PCS kini hanya dijalankan admin (PUT `/:id/details`
+memang admin-only; non-admin dulu tetap meng-update blob lokal setelah 403) dan
+mengemit `metadata:updated` seperti `rotateGroupKey`.
+
+## 🧾 Attestation pendaftaran akhirnya bisa dipantau & bundle root bisa disegarkan (2026-10-17)
+
+Tiga hal yang sebelumnya hanya bisa diketahui dengan mengingat atau menebak:
+penolakan attestation, isi bundle root, dan tanggal kedaluwarsa daftar root.
+Semuanya gagal **tanpa error** — `403 ATTESTATION_REJECTED` satu baris per
+percobaan, atau berkas yang diam sampai perangkat baru tidak bisa mendaftar.
+
+**Metrik hasil gerbang.** `nyx_attestation_registration_total{result,reason}`
+menghitung setiap keputusan `/register`: `accepted`, `rejected`, `missing`,
+`challenge_invalid`, `malformed`. Label `reason` memakai kode pendek dari
+`attestationReasonCode()` (`root_not_trusted`, `certificate_expired`,
+`synced_authenticator`, …; kode baru yang belum dipetakan masuk `unmapped`,
+bukan hilang). Pemetaan itu perlu karena `metrics.ts` menolak nilai label >24
+karakter atau berbentuk base64url/UUID — kode asli seperti
+`SYNCED_AUTHENTICATOR_NOT_ALLOWED` akan ditolak dan penolakan yang ingin dilihat
+operator justru lenyap.
+
+**Empat alert baru** (`ops/prometheus/alerts.yml`, grup `nyx-app`):
+`NyxAttestationRootNotTrusted` (`for: 0m` — setiap penolakan jenis ini adalah
+orang nyata yang tidak bisa mendaftar), `NyxAttestationRejectionRateHigh` (rasio
+>50% terhadap accepted+rejected dengan minimal 3 penolakan/jam, bukan jumlah
+mentah), `NyxAttestationRootExpired`, dan `NyxAttestationRootBundleStale`
+(`nextUpdate` MDS lewat). Penyebut rasio dijaga `or vector(0)` + `clamp_min`
+supaya jendela tanpa sampel tidak menghasilkan NaN yang membuat aturan diam.
+
+**Skrip refresh dengan verifikasi, bukan sekadar unduh.**
+`scripts/attestation-roots.mjs refresh` mengambil FIDO MDS (JWS RS256/ES256
+diverifikasi dengan kunci leaf `x5c`, seluruh tautan rantai + masa berlaku +
+identitas `CN=mds.fidoalliance.org`, fingerprint rantai dipin TOFU di metadata,
+`--mds-root` untuk anchor GlobalSign eksplisit), Android, dan Apple; lalu
+membuang non-CA, kedaluwarsa, duplikat, dan seluruh root dari entri MDS berstatus
+kompromi/revoked. `check` memberi peringatan (nextUpdate, root kedaluwarsa, sha256
+metadata) dan `--strict` menjadikannya exit 2 untuk cron; opsi tak dikenal ditolak
+(`check --file` salah ketik = exit 1, bukan diam-diam memeriksa bundle default).
+Unduhan mengulang sendiri untuk 429/5xx (menghormati `Retry-After`, tiga
+percobaan) karena MDS membalas 429 bila dipanggil berdekatan — terbukti saat
+menyegarkan bundle selfhost: percobaan ulang berjalan sesuai jadwal dan
+kegagalan tetap berakhir exit 1 tanpa menulis berkas setengah jadi.
+Uji nyata dengan blob
+MDS seri 291 (520 entri): 1094 kandidat → 208 root, +2 Android +1 Apple = 209
+root; 27 kedaluwarsa, 78 non-CA, 1 entri kompromi dibuang. Bundle yang sama
+menghasilkan sha stabil pada refresh kedua, dan JWT yang diubah satu byte
+ditolak sebelum satu pun root ditulis.
+
+**Peringatan boot + gauge.** `utils/attestationRootsHealth.ts` membaca bundle +
+`<bundle>.meta.json` tiap start dan memperingatkan metadata hilang, `nextUpdate`
+lewat/≤30 hari, root kedaluwarsa/≤30 hari, dan sha256 yang tidak cocok (berkas
+diganti manual). Gauge `nyx_attestation_roots_expired_certs` +
+`nyx_attestation_roots_next_update_timestamp_seconds` mengisi dua alert terakhir;
+tanpa `ABUSE_ATTESTATION_ROOTS_FILE` keduanya tidak di-set, jadi aturan diam
+(panel/alert tidak menyala palsu untuk deployment tanpa attestation).
+
+**Verifikasi.** 10 kasus `node:test` baru (`server/tests/attestationRootsHealth.test.ts`),
+`scripts/drill-alerts.sh` lulus: 39 aturan kompilasi, semua kasus
+menyala/tidak-menyala, dan 30 metrik yang dirujuk aturan sudah dideklarasikan.
+Bundle produksi saat ini (222 root) **tidak** otomatis diganti: `check`
+melaporkan 13 root kedaluwarsa dan metadata belum ada, jadi boot berikutnya akan
+memperingatkan sampai operator menjalankan `refresh` (langkahnya di
+`ops/attestation/README.md` dan docs/10 §10.16).
+
 ## ⏱️ Latensi jalur WebTransport vs WSS terukur — penurunan jalur cepat terlihat sebelum sidecar mati (2026-10-17)
 
 Sisa WS-G yang sebelumnya hanya bisa dijawab dengan "sidecar hidup": jalur cepat

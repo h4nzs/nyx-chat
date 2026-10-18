@@ -89,14 +89,16 @@ export interface ServerToClientEvents {
     "message:new": (message: RawServerMessage) => void; // Must be RawServerMessage, not the internal Message
     "message:updated": (message: Partial<RawServerMessage> & { id: string }) => void;
     "message:deleted": (payload: { conversationId: string; id: string }) => void;
+    // [GAP 2026-10-18] `message:viewed` dikirim server (view-once dibuka peer) dan
+    // kini punya listener di klien; tiga sequencer masal/expire juga:
+    // `message:deleted_batch` (messageSweeper) dan `message:deleted_remotely`.
     "message:viewed": (payload: { messageId: string; conversationId: string }) => void;
-    "messages:expired": (payload: { messageIds: string[] }) => void;
-    "reaction:new": (payload: { conversationId: string; messageId: string; reaction: { id: string; userId: string; emoji: string; isMessage?: boolean; tempId?: string } }) => void;
-    "reaction:deleted": (payload: { conversationId: string; messageId: string; reactionId: string }) => void;
     "conversation:new": (conversation: Conversation) => void;
     "conversation:updated": (conversation: Partial<Conversation> & { id: string }) => void;
     "conversation:deleted": (payload: { id: string }) => void;
-    "conversation:participants_added": (payload: { conversationId: string; newParticipants: { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] }) => void;
+    // [CLEANUP 2026-10-18] `conversation:participants_added` (nama payload
+    // `newParticipants`) DIHAPUS: tidak ada emitter di server — keanggotaan baru
+    // sampai lewat `conversation:updated` + refresh metadata terenkripsi.
     "conversation:participant_removed": (payload: { conversationId: string; userId: string }) => void;
     "conversation:participant_updated": (payload: { conversationId: string; userId: string; role: string }) => void; // Added
     "user:updated": (user: Partial<User> & { id: string }) => void;
@@ -110,13 +112,10 @@ export interface ServerToClientEvents {
     "presence:init": (onlineUserIds: string[]) => void;
     "presence:user_joined": (userId: string) => void;
     "presence:user_left": (userId: string) => void;
-    /**
-     * [docs/28 Tier 1.5 / D14] Balasan langganan presence per-kontak. Di wire
-     * (opcode PRESENCE) bentuknya `{ type: 'sync', statuses }`; event bertipe ini
-     * adalah padanan untuk jalur socket.io.
-     */
-    "presence:sync": (payload: PresenceSyncPayload) => void;
-    "typing:update": (payload: { userId: string; conversationId: string; isTyping: boolean }) => void;
+    // [CLEANUP 2026-10-18] `presence:sync` dan `typing:update` TIDAK PERNAH
+    // di-emit: keduanya tiba sebagai payload opcode PRESENCE (`{type:'sync'}` /
+    // `{type:'typing'}`) dan sudah ditangani klien di jalur itu. Bentuk wire-nya
+    // tetap terlihat di `PresenceSyncPayload` di bawah.
     "session:new_key": (payload: {
         conversationId: string;
         sessionId?: string;
@@ -125,18 +124,10 @@ export interface ServerToClientEvents {
         senderId?: string; // Added
         senderDeviceKey?: string;
     }) => void;
-    "session:fulfill_request": (payload: {
-        conversationId: string;
-        sessionId: string;
-        requesterId: string;
-        requesterPublicKey: string;
-        requesterPqPublicKey: string;
-    }) => void;
-    "session:key_requested": (payload: { // Added
-        conversationId: string;
-        sessionId: string;
-        requesterId: string;
-    }) => void;
+    // [CLEANUP 2026-10-18] `session:fulfill_request` (alias) dan
+    // `session:key_requested` DIHAPUS: yang benar-benar di-emit server adalah
+    // `session:request_key` (di bawah) — dulu klien mendengarkan nama yang salah,
+    // sehingga permintaan kunci sesi 1:1 tidak pernah difulfil.
     "subscription_updated": (payload: {
         tier: SubscriptionTier;
         expiresAt: string;
@@ -152,7 +143,8 @@ export interface ServerToClientEvents {
     "session:request_key_failed": (payload: { sessionId: string; targetId: string; reason: string }) => void;
     force_logout: (payload?: { jti?: string }) => void; // Updated
     'auth:banned': (payload: { reason: string }) => void; // Added
-    'user:identity_changed': (data: { userId: string; name?: string }) => void; // Made name optional
+    // [CLEANUP 2026-10-18] `user:identity_changed` DIHAPUS (tanpa emitter);
+    // perubahan identitas diumumkan lewat `user:updated`.
     "group:participants_changed": (payload: { conversationId: string }) => void;
     "session:request_key": (payload: { 
         conversationId: string; 
@@ -177,6 +169,8 @@ export interface ServerToClientEvents {
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: string }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:deleted_remotely': (payload: { messageId: string; conversationId: string; deletedBy: string }) => void;
+    /** [GAP 2026-10-18] messageSweeper menghapus pesan kedaluwarsa massal. */
+    'message:deleted_batch': (payload: { conversationId: string; messageIds: string[] }) => void;
     "burner:receive": (payload: { roomId: string; ciphertext: string }) => void;
     "burner:terminated": (payload: { roomId: string }) => void;
 }
@@ -199,13 +193,19 @@ export interface ClientToServerEvents {
     "typing:stop": (payload: TypingPayload) => void;
     "conversation:join": (conversationId: string) => void;
     "session:request_key": (payload: KeyRequestPayload) => void;
-    "session:request_missing": (payload: { conversationId: string; sessionId: string }) => void; // Added
+    // [CLEANUP 2026-10-18] `session:request_missing` (dan balasannya
+    // `session:key_requested`) DIHAPUS: tidak ada klien yang mengirimnya, dan
+    // permintaan kunci yang nyata dikirim lewat `session:request_key`
+    // (+ `targetId`, yang diwajibkan server Opaque Mailbox).
     "session:fulfill_response": (payload: KeyFulfillmentPayload) => void;
     "messages:distribute_keys": (payload: DistributeKeysPayload, callback: (res: { ok: boolean }) => void) => void;
     "group:request_key": (payload: GroupKeyRequestPayload) => void;
     "group:fulfilled_key": (payload: KeyFulfillmentPayload) => void;
     "push:subscribe": (payload: PushSubscribePayload) => void;
     "push:unsubscribe": () => void;
+    // [CATATAN 2026-10-18] Handler server untuk event ini ADA dan ber-rate-limit,
+    // tetapi belum ada klien yang memanggilnya (fitur QR device-linking belum
+    // dibangun di UI). Dibiarkan sebagai kontrak; jangan dianggap terpakai.
     "auth:request_linking_qr": (payload: { publicKey: string }, callback: (res: { ok: boolean, qrData?: string }) => void) => void; // Added
     
     // --- WEBRTC E2EE SIGNALING ---
@@ -220,7 +220,19 @@ export interface ClientToServerEvents {
     'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
     'message:view_once_opened': (payload: { messageId: string; conversationId: string }) => void;
     "burner:send": (payload: { roomId: string; targetDeviceId: string; ciphertext: string; hostUserId: string }, callback: (res: { ok: boolean; error?: string }) => void) => void;
-    "burner:join": (payload: { roomId: string }) => void;
-    "burner:reply": (payload: { roomId: string; ciphertext: string }) => void;
-    "burner:destroy": (payload: { roomId: string; hostUserId?: string }) => void;
+    // [BURNER 2026-10-18] ACK wajib: join mengembalikan status room (guest bisa
+    // tahu room sudah dihancurkan tanpa menunggu event realtime), reply/destroy
+    // memberi umpan balik supaya kegagalan tidak lagi hening di UI.
+    "burner:join": (
+      payload: { roomId: string },
+      callback: (res: { ok: boolean; terminated?: boolean }) => void
+    ) => void;
+    "burner:reply": (
+      payload: { roomId: string; ciphertext: string },
+      callback: (res: { ok: boolean; error?: string; notified?: number }) => void
+    ) => void;
+    "burner:destroy": (
+      payload: { roomId: string; hostUserId?: string },
+      callback: (res: { ok: boolean; notified?: number }) => void
+    ) => void;
 }

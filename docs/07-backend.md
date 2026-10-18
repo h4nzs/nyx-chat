@@ -81,7 +81,7 @@ All increment-based limits use the atomic Lua pattern (`RATE_LIMIT_LUA`) — nev
 - Timing-safe compares for: message `deleteSecret`, conversation `authSecret`, payment webhook HMACs.
 - `message:unsend` requires sender ownership OR a valid `deleteSecret`.
 - Broadcasts to recipients are parallelized (`Promise.all`), with a 500-recipient cap on both REST and socket paths.
-- Refresh reuse = full family revocation (containment), with the victim notified via `force_logout` — with a 5 s grace window for benign concurrent (multi-tab) refreshes.
+- Refresh replay is classified (`utils/refreshReplay.ts`), not assumed hostile: **already-dead family** → plain 401 (no alarm, nothing left to protect), **direct successor within the grace window** (`REFRESH_REPLAY_GRACE_MS`, default 2 min) → benign continuation for lost/slow rotation responses, otherwise → full family revocation. `force_logout` on reuse is **device-scoped** (`deviceId` in payload + target), so revoking one session never logs out the user's other devices.
 - `CSRF_SECRET` is trimmed before use; empty/whitespace falls back to `JWT_SECRET` with a warning pointing at the production `.env`.
 
 > **Full module catalog:** see [22-backend-reference.md](22-backend-reference.md) for the complete inventory of routes, middleware, bridge, utils, jobs, and Redis keys.

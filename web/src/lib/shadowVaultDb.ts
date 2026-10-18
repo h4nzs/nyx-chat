@@ -452,6 +452,7 @@ class NyxShadowVaultProxy {
         
         let encryptedContent: string | null = null;
         let encryptedRepliedTo: string | undefined = undefined;
+        let encryptedReactions: string | undefined = existing?.reactions ?? undefined;
         let encryptedSenderName: string | undefined = undefined;
         let encryptedSenderUsername: string | undefined = undefined;
         let encryptedSenderAvatarUrl: string | undefined = undefined;
@@ -466,6 +467,39 @@ class NyxShadowVaultProxy {
              encryptedRepliedTo = await encryptVaultText(repliedToStr);
         } else if (existing?.repliedTo) {
              encryptedRepliedTo = existing.repliedTo;
+        }
+
+        // [BUGFIX 2026-10-18] Reaksi ikut ditulis. Aturan:
+        //  - `m.reactions` berupa array (termasuk `[]` = dibersihkan) → tulis
+        //    keadaan itu (ter-seal).
+        //  - tidak membawa `reactions` (mis. salinan server, tombstone parsial,
+        //    atau baris vault tanpa reaksi) → PERTAHANKAN baris lama, jangan
+        //    menghapus reaksi yang sudah ada.
+        // Disimpan sebagai kolom struktur ter-seal (`ENC1:`) — pola yang sama
+        // dengan `senderId`/`repliedToId` (docs/30 WS-F), bukan `encryptVaultText`
+        // (itu butuh identity key di memori dan menahan tulis latar).
+        // [BUGFIX 2026-10-18] Status baca (`Message.statuses`) ikut ditulis dengan
+        // aturan yang sama seperti reaksi: array (termasuk `[]`) = keadaan
+        // eksplisit, sedangkan salinan yang tidak membawa field itu (mis. baris
+        // server lama) mempertahankan isi lama alih-alih menghapus centang biru
+        // yang sudah tersimpan.
+        let encryptedStatuses: string | undefined = existing?.statuses ?? undefined;
+        if (Array.isArray(m.statuses)) {
+            encryptedStatuses = (await sealLocalText(JSON.stringify(m.statuses))) ?? undefined;
+        }
+
+        // [BUGFIX 2026-10-18] Penanda auto-delete: hanya ditulis bila pesan
+        // MEMBAWA nilainya (`true` dari payload terenkripsi / bubble optimistik).
+        // Salinan server yang tidak tahu penanda ini (atau tombstone parsial)
+        // mempertahankan baris lama, jadi timer tidak bisa hilang/muncul sendiri
+        // hanya karena pesan ditulis ulang.
+        let autoDeleteRaw: boolean | string | undefined = existing?.autoDelete;
+        if (typeof m.autoDelete === 'boolean') {
+            autoDeleteRaw = (await sealLocalFlag(m.autoDelete)) ?? m.autoDelete;
+        }
+
+        if (Array.isArray(m.reactions)) {
+            encryptedReactions = (await sealLocalText(JSON.stringify(m.reactions))) ?? undefined;
         }
 
         const mSender = m.sender as { name?: string; username?: string; avatarUrl?: string } | undefined;
@@ -520,6 +554,9 @@ class NyxShadowVaultProxy {
             ? (await sealLocalText(m.repliedToId)) ?? m.repliedToId
             : existing?.repliedToId,
           repliedTo: encryptedRepliedTo,
+          reactions: encryptedReactions,
+          statuses: encryptedStatuses,
+          autoDelete: autoDeleteRaw,
           // [docs/28 Tier 2 — B3] waktu presisi (sentAt) bila ada, supaya
           // paginasi/urutan lokal tidak terganggu createdAt server yang kasar.
           // [docs/30 WS-F] `ensureOrderFields` memindahkannya ke lapis ter-seal
@@ -659,6 +696,9 @@ class NyxShadowVaultProxy {
         // (baris lama plaintext tetap terbaca — `openLocal*` menangani keduanya).
         const isDeletedLocal = (await openLocalFlag(r.isDeletedLocal)) === true;
         const isViewOnce = (await openLocalFlag(r.isViewOnce)) === true;
+        // [BUGFIX 2026-10-18] Penanda auto-delete ter-seal (baris lama tidak
+        // punya kolomnya → `false`, dan indikator timer tidak ditampilkan).
+        const autoDelete = (await openLocalFlag(r.autoDelete)) === true;
         const senderIdText = (await openLocalText(r.senderId)) ?? r.senderId;
         const repliedToIdText = r.repliedToId ? await openLocalText(r.repliedToId) : null;
         const expiresAtMs = await readExpiresAt(r.expiresAt);
@@ -681,6 +721,58 @@ class NyxShadowVaultProxy {
             }
         }
 
+        // [BUGFIX 2026-10-18] Reaksi dipulihkan dari lapis ter-seal. Entri yang
+        // rusak/bukan array di-drop diam-diam (reaksi bukan data kritis), bukan
+        // menggagalkan seluruh pembacaan baris.
+        let decryptedReactions: Message['reactions'];
+        if (r.reactions) {
+            const rawReactions = await openLocalText(r.reactions);
+            if (rawReactions) {
+                try {
+                    const parsed = JSON.parse(rawReactions);
+                    // Array kosong = keadaan "tidak ada reaksi" yang eksplisit
+                    // (unsend) — tetap dikembalikan apa adanya, bukan undefined.
+                    if (Array.isArray(parsed)) {
+                        type StoredReaction = NonNullable<Message['reactions']>[number];
+                        decryptedReactions = parsed
+                            .filter((e): e is StoredReaction =>
+                                !!e && typeof e === 'object' && typeof (e as { emoji?: unknown }).emoji === 'string'
+                            )
+                            .map((e) => ({ ...e, userId: asUserId(String(e.userId)) }));
+                    }
+                } catch { /* not JSON — baris rusak, abaikan */ }
+            }
+        }
+
+        // [BUGFIX 2026-10-18] Status baca dipulihkan dari lapis ter-seal (pola
+        // sama dengan reaksi). Entri rusak/bukan array di-drop diam-diam —
+        // peta centang yang cacat tidak boleh menggagalkan seluruh baris.
+        let decryptedStatuses: Message['statuses'];
+        if (r.statuses) {
+            const rawStatuses = await openLocalText(r.statuses);
+            if (rawStatuses) {
+                try {
+                    const parsed = JSON.parse(rawStatuses);
+                    // `[]` tetap dikembalikan apa adanya (keadaan eksplisit
+                    // "tidak ada receipt"), bukan undefined.
+                    if (Array.isArray(parsed)) {
+                        type StoredStatus = NonNullable<Message['statuses']>[number];
+                        decryptedStatuses = parsed
+                            .filter((e): e is StoredStatus =>
+                                !!e && typeof e === 'object' &&
+                                typeof (e as { status?: unknown }).status === 'string' &&
+                                typeof (e as { userId?: unknown }).userId === 'string'
+                            )
+                            .map((e) => ({
+                                ...e,
+                                userId: asUserId(String(e.userId)),
+                                messageId: asMessageId(String(e.messageId ?? r.id)),
+                            }));
+                    }
+                } catch { /* not JSON — baris rusak, abaikan */ }
+            }
+        }
+
         // FIX 3: Object construction yang konsisten dan strongly typed
         const msg: Message = {
           id: asMessageId(r.id),
@@ -688,6 +780,9 @@ class NyxShadowVaultProxy {
           content: plainText,
           repliedToId: repliedToIdText ? asMessageId(repliedToIdText) : undefined,
           repliedTo: decryptedRepliedTo,
+          reactions: decryptedReactions,
+          statuses: decryptedStatuses,
+          autoDelete,
           // [docs/30 WS-F] presisi dipulihkan dari lapis ter-seal (baris baru)
           // atau plaintext lama. Baris tanpa waktu sama sekali tidak punya
           // urutan terpercaya → 1970 (paling tua), bukan `Invalid Date`.
@@ -766,6 +861,20 @@ class NyxShadowVaultProxy {
       await db.conversations.delete(id);
     } catch (e) {
       console.error("Failed to delete conversation data from vault", e);
+    }
+  }
+
+  /**
+   * [BUGFIX 2026-10-18] Lepaskan HANYA record percakapan (sembunyi dari daftar)
+   * tanpa menyentuh pesan maupun state kripto — dipakai saat anggota dikeluarkan
+   * dari grup. `deleteConversation` menghapus pesan + group sender/receiver
+   * states, yang membuat riwayat tak terbaca saat anggota di-add kembali.
+   */
+  async forgetConversation(id: string) {
+    try {
+      await db.conversations.delete(id);
+    } catch (e) {
+      console.error("Failed to forget conversation record", e);
     }
   }
 

@@ -1,6 +1,7 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import type { BurnerDoubleRatchetState, BurnerDoubleRatchetHeader } from '../workers/crypto.worker';
-import { transportClient, } from '../lib/transportClient';
+import { transportClient, connectSocket } from '../lib/transportClient';
+import { api } from '../lib/api';
 import { worker_burner_dr_init_guest, worker_burner_dr_encrypt, worker_burner_dr_decrypt } from '../lib/crypto-worker-proxy';
 import { getSodiumLib } from '../utils/crypto';
 import { useAuthStore } from './auth';
@@ -35,14 +36,135 @@ interface BurnerState {
   error: string | null;
 }
 
+/**
+ * Hasil satu percobaan kirim. UI WAJIB memakainya: sebelumnya `sendMessage`
+ * mengembalikan `void` dan semua kegagalan berhenti di `console.error`, jadi
+ * menekan Enter di sesi guest yang transportnya mati tampak seperti tombol
+ * rusak — tidak ada pesan, tidak ada error.
+ */
+export interface BurnerSendResult {
+  ok: boolean;
+  /** 'OFFLINE' | 'ROOM_TERMINATED' | 'TIMEOUT' | 'NO_SESSION' | pesan server. */
+  error?: string;
+}
+
 interface BurnerActions {
   initializeFromHash: (hash: string) => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string) => Promise<BurnerSendResult>;
   receiveMessage: (roomId: string, ciphertext: string) => Promise<void>;
   terminateSession: (reason: string) => void;
-  destroyBurnerSession: (roomId: string) => void;
+  /**
+   * Tandai room dihancurkan host: status UI + penanda lokal, supaya refresh
+   * berikutnya langsung menolak room ini walau server/Redis sedang tak terjangkau.
+   */
+  markRoomDestroyed: (roomId: string) => void;
+  destroyBurnerSession: (roomId: string) => Promise<void>;
   reset: () => void;
 }
+
+/** TTL ack pengiriman burner. Lebih pendek dari default transport supaya UI
+ *  bisa memberi umpan balik sebelum pengguna mengetik ulang. */
+const SEND_ACK_TIMEOUT_MS = 8000;
+
+/**
+ * Pastikan transport guest hidup — memakai token yang ada, dan kalau gagal
+ * menerbitkan identitas guest baru.
+ *
+ * Kenapa retry: sesi guest TIDAK punya refresh token (server sengaja tidak
+ * mempersist-nya), sedangkan access token hanya berumur 15 menit. Guest yang
+ * duduk lebih lama dari itu masih punya `accessToken` basi di store, sehingga
+ * jalur lama (`else if (!socket.connected) connectSocket()`) terus mencoba
+ * menyambung dengan token mati: transport tidak pernah naik, `sendEvent` hanya
+ * menumpuk di antrean offline, dan tombol kirim tampak tidak melakukan apa pun.
+ * Membuat identitas burner baru adalah satu-satunya jalur yang tersedia — dan
+ * aman: room burner tidak mengikat identitas lama, guest hanya perlu join ulang.
+ */
+export async function ensureBurnerTransport(opts: { forceNewToken?: boolean } = {}): Promise<boolean> {
+  if (transportClient.connected) return true;
+
+  const auth = useAuthStore.getState();
+  let token = opts.forceNewToken ? null : auth.accessToken;
+
+  if (!token) {
+    try {
+      const res = await api<{ accessToken: string; user: import('./auth').User; deviceId: string }>(
+        '/api/auth/burner',
+        { method: 'POST' },
+      );
+      useAuthStore.getState().setAccessToken(res.accessToken);
+      useAuthStore.getState().setUser(res.user);
+      try { localStorage.setItem('deviceId', res.deviceId); } catch { /* private mode */ }
+      token = res.accessToken;
+    } catch (e) {
+      console.error('[Burner] Gagal mendapatkan token guest:', e);
+      return false;
+    }
+  }
+
+  connectSocket();
+  if (await waitForTransportConnected(5000)) return true;
+
+  // Token/identitas lama tidak bisa dipakai (kedaluwarsa/ditolak). Satu percobaan
+  // dengan identitas guest baru — tanpa ini sesi panjang berakhir jadi transport
+  // mati permanen sampai reload.
+  if (!opts.forceNewToken) return ensureBurnerTransport({ forceNewToken: true });
+  return false;
+}
+
+/**
+ * Tunggu transport benar-benar tersambung (bukan sekadar "sedang menyambung").
+ * Tanpa ini, `sendEvent` hanya menaruh payload di antrean offline dan pesan
+ * tampak hilang sampai ack timeout.
+ */
+/**
+ * Baca status room dari server. Satu retry untuk 401: cookie `at` guest hanya
+ * berlaku 15 menit dan tidak bisa di-refresh, sedangkan pemeriksaan ini
+ * dijalankan sesaat setelah halaman dibuka (bisa sebelum identitas guest baru
+ * diterbitkan). Tanpa retry, gerbang destroy akan diam-diam fail-open tepat pada
+ * kasus yang paling sering dilaporkan: guest me-refresh halaman yang lama.
+ */
+async function readRoomStatus(roomId: string): Promise<{ terminated: boolean } | null> {
+  const path = `/api/burner/${encodeURIComponent(roomId)}/status`;
+  try {
+    return await api<{ roomId: string; terminated: boolean }>(path);
+  } catch (e) {
+    if ((e as { status?: number } | null)?.status === 401) {
+      const ok = await ensureBurnerTransport();
+      if (ok) {
+        try {
+          return await api<{ roomId: string; terminated: boolean }>(path);
+        } catch (retryError) {
+          console.warn('[Burner] Status room tidak bisa diperiksa (setelah token baru):', retryError);
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+}
+
+export function waitForTransportConnected(timeoutMs: number): Promise<boolean> {
+  if (transportClient.connected) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      transportClient.off('connect', onConnect);
+      resolve(value);
+    };
+    const onConnect = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    transportClient.on('connect', onConnect);
+  });
+}
+
+/** Penanda lokal room yang sudah dihancurkan host (bertahan setelah refresh). */
+const BURNED_ROOM_PREFIX = 'burned_';
+
+/** Pesan yang sama dengan yang dikirim event `burner:terminated`. */
+export const BURNER_TERMINATED_MESSAGE = 'This secure session has been terminated by the host.';
 
 const initialState: BurnerState = {
   hostDeviceId: null,
@@ -80,6 +202,16 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     set({ error: reason, isInitialized: true, activeSessions: {} });
   },
 
+  markRoomDestroyed: (roomId: string) => {
+    // Penanda lokal dulu (tahan refresh/offline), baru status UI. `messages`
+    // dikosongkan juga supaya tidak ada sisa bubble yang bisa dibaca setelah
+    // sesi dianggap mati.
+    try {
+      localStorage.setItem(BURNED_ROOM_PREFIX + roomId, 'true');
+    } catch { /* storage penuh/private mode — status UI tetap di-set */ }
+    set({ error: BURNER_TERMINATED_MESSAGE, isInitialized: true, activeSessions: {}, messages: [] });
+  },
+
   initializeFromHash: async (hash: string) => {
     try {
       // Hash format: #<RoomID>_<HostDeviceID>_<HostPQPublicKey>_<HostClassicalPublicKey>_<HostUserId>
@@ -96,7 +228,31 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       const hostDeviceId = parts[2] ?? '';
       const hostPqPk = parts[3] ?? '';
       const hostClassicalPk = parts[4] ?? '';
-      
+
+      // [BURNER 2026-10-18] GERBANG DESTROY. Dulu satu-satunya tanda "room
+      // sudah dihancurkan" adalah event realtime `burner:terminated`; kalau
+      // guest sedang offline/tidak bergabung saat host menekan destroy, tidak
+      // ada yang tersimpan di klien dan halaman `/drop` tetap bisa dibuka
+      // (bahkan setelah refresh) seolah sesi masih hidup.
+      // Dua lapis: penanda lokal (bertahan tanpa jaringan) + status server.
+      if (localStorage.getItem(BURNED_ROOM_PREFIX + roomId)) {
+        set({ error: BURNER_TERMINATED_MESSAGE, isInitialized: true });
+        return;
+      }
+      try {
+        const status = await readRoomStatus(roomId);
+        if (status?.terminated) {
+          localStorage.setItem(BURNED_ROOM_PREFIX + roomId, 'true');
+          set({ error: BURNER_TERMINATED_MESSAGE, isInitialized: true });
+          return;
+        }
+      } catch (e) {
+        // Gagal bertanya bukan alasan menolak masuk (mis. offline) — penanda
+        // lokal di atas tetap berlaku, dan event realtime tetap menangani
+        // destroy yang terjadi selagi halaman terbuka.
+        console.warn('[Burner] Status room tidak bisa diperiksa:', e);
+      }
+
       const sodium = await getSodiumLib();
       // Ensure we safely decode URL-encoded base64 components
       const safePqPk = decodeURIComponent(hostPqPk);
@@ -136,15 +292,26 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string): Promise<BurnerSendResult> => {
     const roomId = Object.keys(get().activeSessions)[0];
-    if (!roomId) return;
+    if (!roomId) return { ok: false, error: 'NO_SESSION' };
 
-    await withRoomLock(roomId, async () => {
+    // [BURNER 2026-10-18] Pre-flight koneksi SEBELUM enkripsi.
+    // Dua alasan: (1) `sendEvent` saat transport mati hanya menaruh payload di
+    // antrean offline — pesan tidak pernah sampai dan ack tidak pernah datang,
+    // jadi UI diam total; (2) state Double Ratchet sudah maju saat enkripsi,
+    // dan membakar satu langkah ratchet untuk pesan yang tidak pernah keluar
+    // membuat percobaan berikutnya tidak sinkron dengan host.
+    if (!transportClient.connected) {
+      const connected = await ensureBurnerTransport();
+      if (!connected) return { ok: false, error: 'OFFLINE' };
+    }
+
+    return await withRoomLock(roomId, async (): Promise<BurnerSendResult> => {
       const session = get().activeSessions[roomId];
       const state = session?.drState;
       const { hostDeviceId, hostUserId } = get();
-      if (!state || !hostDeviceId || !hostUserId || !session) return;
+      if (!state || !hostDeviceId || !hostUserId || !session) return { ok: false, error: 'NO_SESSION' };
 
       try {
         const { state: newState, header, ciphertext } = await worker_burner_dr_encrypt({
@@ -183,31 +350,32 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
           }
         }
 
+        // `burner:reply` kini juga di-ACK server (sebelumnya diasumsikan sukses
+        // tanpa bukti, sehingga kegagalan host tidak pernah terlihat).
         const emitPromise = new Promise<{ok?: boolean; error?: string}>((resolve) => {
-          const timer = setTimeout(() => resolve({ ok: false, error: 'timeout' }), 15000);
-          
+          const timer = setTimeout(() => resolve({ ok: false, error: 'TIMEOUT' }), SEND_ACK_TIMEOUT_MS);
+
+          const onAck = (err: unknown, res: { ok?: boolean; error?: string } | undefined) => {
+            clearTimeout(timer);
+            if (err) {
+              resolve({ ok: false, error: err instanceof Error && err.message === 'timeout' ? 'TIMEOUT' : 'NETWORK' });
+            } else {
+              resolve(res && typeof res === 'object' ? res : { ok: true });
+            }
+          };
+
           if (isHost) {
             transportClient.sendEvent('burner:reply', {
               roomId,
               ciphertext: JSON.stringify(payload)
-            });
-            // burner:reply on server doesn't use ack callback, so we just assume success after a short delay
-            clearTimeout(timer);
-            resolve({ ok: true });
+            }, onAck);
           } else {
             transportClient.sendEvent('burner:send', { 
               roomId, 
               targetDeviceId: hostDeviceId, 
               hostUserId, 
               ciphertext: JSON.stringify(payload) 
-            }, (err: unknown, res: { ok: boolean; error?: string } | undefined) => {
-              clearTimeout(timer);
-              if (err) {
-                resolve({ ok: false, error: err instanceof Error ? err.message : String(err) });
-              } else {
-                resolve(res || { ok: true });
-              }
-            });
+            }, onAck);
           }
         });
         
@@ -233,11 +401,20 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
               ...fileData
             };
             set(s => ({ messages: [...s.messages, msg] }));
-          } else {
-            console.error("Failed to send burner message:", res?.error);
+            return { ok: true };
           }
+
+        // [BURNER 2026-10-18] Kegagalan tidak boleh berhenti di console.
+        const reason = res?.error || 'UNKNOWN';
+        console.error("Failed to send burner message:", reason);
+        if (reason === 'ROOM_TERMINATED') {
+          get().markRoomDestroyed(roomId);
+          return { ok: false, error: reason };
+        }
+        return { ok: false, error: reason };
       } catch (e) {
         console.error('Burner encrypt failed:', e);
+        return { ok: false, error: 'ENCRYPT_FAILED' };
       }
     });
   },
@@ -425,11 +602,26 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     const { useMessageStore } = await import('./message');
     useMessageStore.getState().clearMessagesForConversation(roomId);
 
-    // 4. Emit to server for blacklist reinforcement
-    const socket = transportClient;
-    if (socket) {
+    // 4. Emit ke server + TUNGGU ACK.
+    // [BURNER 2026-10-18] Dulu event dikirim lalu langsung redirect: navigasi
+    // bisa memutus transport sebelum payload terkirim, sehingga host melihat
+    // destroy "berhasil" padahal server tidak pernah menerimanya — dan guest
+    // tidak pernah menerima `burner:terminated` (gejala flaky). Tunggu ack
+    // (maks 3 s) supaya siaran benar-benar sudah diproses.
+    if (!transportClient.connected) {
+      connectSocket();
+      await waitForTransportConnected(3000);
+    }
+    if (transportClient.connected) {
       const myUserId = useAuthStore.getState().user?.id;
-      transportClient.sendEvent('burner:destroy', { roomId, hostUserId: myUserId });
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        transportClient.sendEvent(
+          'burner:destroy',
+          { roomId, hostUserId: myUserId },
+          () => { clearTimeout(timer); resolve(); },
+        );
+      });
     }
 
     // 5. Atomic Redirection

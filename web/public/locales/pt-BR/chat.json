@@ -198,7 +198,10 @@
     "init_failed": "Falha ao inicializar a sessão de convidado. Tente novamente.",
     "upload_failed": "Falha ao enviar o arquivo",
     "session_live": "Sessão ativa. As mensagens são efêmeras.",
-    "placeholder": "Digite uma mensagem efêmera..."
+    "placeholder": "Digite uma mensagem efêmera...",
+    "send_failed": "Falha ao enviar a mensagem. Tente novamente.",
+    "offline": "Não foi possível conectar ao servidor. Verifique sua conexão.",
+    "session_terminated": "Esta sessão foi destruída pelo host."
   },
   "embed": {
     "missing_id": "ID da conversa ausente",

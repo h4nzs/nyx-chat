@@ -533,7 +533,14 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
   // token dies — they can no longer discover the conversation via sync.
   deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId })
     .catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
-  await emitEventToUser(userId, 'conversation:deleted', { id: asConversationId(conversationId) });
+  // [BUGFIX 2026-10-18] Kick ≠ hapus permanen. `reason: 'removed'` memberi tahu
+  // klien bahwa riwayat lokal (pesan + kunci era) HARUS dipertahankan: klien
+  // lama mengabaikan field ini (perilaku lama), klien baru menyembunyikan chat
+  // tetapi menyimpan riwayatnya supaya bisa dibaca lagi setelah di-add ulang.
+  await emitEventToUser(userId, 'conversation:deleted', {
+    id: asConversationId(conversationId),
+    reason: 'removed',
+  });
   res.status(204).end();
 });
 
@@ -591,7 +598,12 @@ router.delete('/:id', async (req, res, next) => {
     const { id } = req.params
     const userId = req.user.id
     
-    await emitEventToUser(userId, 'conversation:deleted', { id: asConversationId(id) });
+    // [BUGFIX 2026-10-18] Hapus lokal (hide) = pengguna memang membuang chat;
+    // client boleh membersihkan riwayat + kuncinya.
+    await emitEventToUser(userId, 'conversation:deleted', {
+      id: asConversationId(id),
+      reason: 'hidden',
+    });
     res.status(204).send()
   } catch (error) {
     next(error)

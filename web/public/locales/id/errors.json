@@ -45,5 +45,7 @@
   "registration_attestation_invalid": "Verifikasi perangkat tidak bisa divalidasi, jadi akun tidak dibuat.",
   "registration_attestation_hardware_required": "Perangkat ini tidak bisa membuktikan dukungan perangkat keras. Pendaftaran mewajibkan attestation perangkat keras (Touch ID / Windows Hello / security key).",
   "registration_attestation_user_verification": "Konfirmasi dengan PIN atau biometrik untuk menyelesaikan pembuatan akun ini.",
+  "registration_attestation_no_platform": "Perangkat ini tidak punya authenticator platform (Touch ID, Windows Hello, atau biometrik ponsel), jadi tidak bisa memberi attestation perangkat yang diwajibkan. Daftar dari ponsel atau laptop dengan biometrik bawaan, lalu masuk di sini.",
+  "registration_attestation_cancelled": "Verifikasi perangkat dibatalkan atau waktu habis. Coba lagi dan konfirmasi dengan PIN atau biometrik.",
   "client_too_old": "Versi NYX ini terlalu tua untuk terus bekerja dengan server (minimal {{minimum}}). Muat ulang halaman — bila tetap sama, tutup dan buka lagi aplikasi (PWA) atau pasang ulang dari situs NYX."
 }

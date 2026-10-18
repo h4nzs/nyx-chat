@@ -11,11 +11,30 @@ let conversations: unknown[] = []
 const connectHandlers: Array<() => void> = []
 const disconnectHandlers: Array<(reason?: string) => void> = []
 const burnerHandlers: Array<(payload: { roomId?: string; ciphertext: string }) => Promise<void> | void> = []
+const conversationDeletedHandlers: Array<(data: { id: string; reason?: 'removed' | 'hidden' }) => void> = []
+// [GAP 2026-10-18] Event server yang sebelumnya TIDAK punya listener.
+const deletedRemotelyHandlers: Array<(data: { conversationId: string; messageId: string; deletedBy?: string }) => void> = []
+const deletedBatchHandlers: Array<(data: { conversationId: string; messageIds: string[] }) => void> = []
+const viewedHandlers: Array<(data: { conversationId: string; messageId: string }) => void> = []
+const subscriptionHandlers: Array<(data: { tier?: string; expiresAt?: string }) => void> = []
+const sessionKeyRequestHandlers: Array<(data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey?: string; requesterPqPublicKey?: string }) => void> = []
 const transportClientOn = vi.fn((event: string, cb: (arg?: unknown) => void) => {
   if (event === 'connect') connectHandlers.push(cb as () => void)
   else if (event === 'disconnect') disconnectHandlers.push(cb as (reason?: string) => void)
   else if (event === 'burner:receive')
     burnerHandlers.push(cb as (payload: { roomId?: string; ciphertext: string }) => Promise<void> | void)
+  else if (event === 'conversation:deleted')
+    conversationDeletedHandlers.push(cb as (data: { id: string; reason?: 'removed' | 'hidden' }) => void)
+  else if (event === 'message:deleted_remotely')
+    deletedRemotelyHandlers.push(cb as (data: { conversationId: string; messageId: string }) => void)
+  else if (event === 'message:deleted_batch')
+    deletedBatchHandlers.push(cb as (data: { conversationId: string; messageIds: string[] }) => void)
+  else if (event === 'message:viewed')
+    viewedHandlers.push(cb as (data: { conversationId: string; messageId: string }) => void)
+  else if (event === 'subscription_updated')
+    subscriptionHandlers.push(cb as (data: { tier?: string }) => void)
+  else if (event === 'session:request_key')
+    sessionKeyRequestHandlers.push(cb as (data: { conversationId: string; sessionId: string; requesterId: string }) => void)
 })
 
 vi.mock('../transportClient', () => ({
@@ -34,13 +53,23 @@ vi.mock('../../store/burner', () => ({
     getState: () => ({ activeSessions: burnerActiveSessions, receiveMessage: burnerReceiveMessage }),
   },
 }))
+const updateMessage = vi.fn()
 vi.mock('@store/message', () => ({
-  useMessageStore: { getState: () => ({ loadMessagesForConversation, processOfflineQueue }) },
+  useMessageStore: { getState: () => ({ loadMessagesForConversation, processOfflineQueue, updateMessage }) },
 }))
+const removeConversation = vi.fn()
 vi.mock('@store/conversation', () => ({
-  useConversationStore: { getState: () => ({ conversations }), subscribe: () => () => {} },
+  useConversationStore: { getState: () => ({ conversations, removeConversation }), subscribe: () => () => {} },
 }))
-vi.mock('@store/auth', () => ({ useAuthStore: { getState: () => ({}) } }))
+const updateSubscription = vi.fn()
+vi.mock('@store/auth', () => ({
+  useAuthStore: { getState: () => ({ updateSubscription, logout: vi.fn() }) },
+}))
+
+// Listener `session:request_key` memanggil fulfillKeyRequest lewat dynamic
+// import('../utils/crypto') — dari src/lib itu berarti src/utils/crypto.
+const fulfillKeyRequest = vi.fn(async () => {})
+vi.mock('../../utils/crypto', () => ({ fulfillKeyRequest }))
 vi.mock('@store/connection', () => ({
   useConnectionStore: { getState: () => ({ setStatus: vi.fn() }) },
 }))
@@ -55,8 +84,19 @@ beforeEach(() => {
   connectHandlers.length = 0
   disconnectHandlers.length = 0
   burnerHandlers.length = 0
+  conversationDeletedHandlers.length = 0
+  deletedRemotelyHandlers.length = 0
+  deletedBatchHandlers.length = 0
+  viewedHandlers.length = 0
+  subscriptionHandlers.length = 0
+  sessionKeyRequestHandlers.length = 0
+  updateMessage.mockReset()
+  updateSubscription.mockReset()
+  fulfillKeyRequest.mockReset()
+  fulfillKeyRequest.mockImplementation(async () => {})
   burnerActiveSessions = {}
   burnerReceiveMessage.mockReset()
+  removeConversation.mockReset()
   vi.useFakeTimers()
 })
 
@@ -250,6 +290,102 @@ describe('socketListeners robustness (ROBUSTNESS 2026-10-06)', () => {
     // Setelah batas 3 retry: tidak ada percobaan lagi walau waktu terus berjalan.
     await vi.advanceTimersByTimeAsync(120000)
     expect(loadMessagesForConversation).toHaveBeenCalledTimes(8)
+  })
+})
+
+describe('conversation:deleted — kick vs hapus lokal (BUGFIX 2026-10-18)', () => {
+  it("reason 'removed' mempertahankan riwayat (pesan + kunci era)", async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    conversationDeletedHandlers[0]!({ id: 'g1', reason: 'removed' })
+    expect(removeConversation).toHaveBeenCalledWith('g1', { preserveHistory: true })
+  })
+
+  it("reason 'hidden' menghapus riwayat seperti biasa", async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    conversationDeletedHandlers[0]!({ id: 'c2', reason: 'hidden' })
+    expect(removeConversation).toHaveBeenCalledWith('c2', { preserveHistory: false })
+  })
+
+  it('server lama tanpa reason = perilaku lama (hapus riwayat)', async () => {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+    conversationDeletedHandlers[0]!({ id: 'c3' })
+    expect(removeConversation).toHaveBeenCalledWith('c3', { preserveHistory: false })
+  })
+})
+
+describe('event server yang sebelumnya tanpa listener (GAP 2026-10-18)', () => {
+  async function initHandlers() {
+    const socketListeners = await loadModule()
+    socketListeners.initSocketListeners()
+  }
+
+  it('message:deleted_remotely menandai pesan peer yang di-unsend sebagai terhapus', async () => {
+    await initHandlers()
+    deletedRemotelyHandlers[0]!({ conversationId: 'c1', messageId: 'm1', deletedBy: 'u2' })
+    expect(updateMessage).toHaveBeenCalledWith('c1', 'm1', { isDeletedLocal: true, content: null })
+  })
+
+  it('message:deleted_batch menghapus tiap id (auto-delete sweeper)', async () => {
+    await initHandlers()
+    deletedBatchHandlers[0]!({ conversationId: 'c1', messageIds: ['m1', 'm2', 42 as unknown as string] })
+    expect(updateMessage).toHaveBeenCalledTimes(2)
+    expect(updateMessage).toHaveBeenNthCalledWith(1, 'c1', 'm1', { isDeletedLocal: true, content: null })
+    expect(updateMessage).toHaveBeenNthCalledWith(2, 'c1', 'm2', { isDeletedLocal: true, content: null })
+  })
+
+  it('message:deleted_batch mengabaikan payload cacat tanpa melempar', async () => {
+    await initHandlers()
+    expect(() => deletedBatchHandlers[0]!({ conversationId: '', messageIds: undefined as unknown as string[] })).not.toThrow()
+    expect(updateMessage).not.toHaveBeenCalled()
+  })
+
+  it('message:viewed menandai view-once yang sudah dibuka peer sebagai hilang', async () => {
+    await initHandlers()
+    viewedHandlers[0]!({ conversationId: 'c1', messageId: 'm9' })
+    expect(updateMessage).toHaveBeenCalledWith('c1', 'm9', { isDeletedLocal: true, content: null })
+  })
+
+  it('subscription_updated memperbarui tier tanpa menunggu refetch profil', async () => {
+    await initHandlers()
+    subscriptionHandlers[0]!({ tier: 'SUBSCRIBER', expiresAt: '2026-12-01T00:00:00.000Z' })
+    expect(updateSubscription).toHaveBeenCalledWith('SUBSCRIBER')
+  })
+
+  it('subscription_updated tanpa tier diabaikan', async () => {
+    await initHandlers()
+    subscriptionHandlers[0]!({})
+    expect(updateSubscription).not.toHaveBeenCalled()
+  })
+
+  it('session:request_key (nama yang benar dari server) memicu fulfillKeyRequest', async () => {
+    // Listener memakai dynamic import('../utils/crypto') → butuh event-loop nyata.
+    vi.useRealTimers()
+    await initHandlers()
+    sessionKeyRequestHandlers[0]!({
+      conversationId: 'c1',
+      sessionId: 's1',
+      requesterId: 'u2',
+      requesterPublicKey: 'pk-b64',
+      requesterPqPublicKey: 'pq-b64'
+    })
+    await vi.waitFor(() => expect(fulfillKeyRequest).toHaveBeenCalled(), { timeout: 2000 })
+    expect(fulfillKeyRequest).toHaveBeenCalledWith({
+      conversationId: 'c1',
+      sessionId: 's1',
+      requesterId: 'u2',
+      requesterPublicKey: 'pk-b64',
+      requesterPqPublicKey: 'pq-b64'
+    })
+  })
+
+  it('session:request_key tanpa public key peminta dilewati (bukan error)', async () => {
+    await initHandlers()
+    sessionKeyRequestHandlers[0]!({ conversationId: 'c1', sessionId: 's1', requesterId: 'u2' })
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(fulfillKeyRequest).not.toHaveBeenCalled()
   })
 })
 

@@ -89,6 +89,85 @@ groups:
           summary: "Blokir keamanan sesi/perangkat melonjak ({{ $labels.reason }})"
           description: "Periksa apakah ini pola kloning sesi, atau klien yang perlu re-auth setelah deploy."
 
+      # [docs/30 §30.12 WS-H] Gerbang attestation perangkat saat pendaftaran.
+      #
+      # Dua kegagalan di bawah ini sama-sama TIDAK berisik: tidak ada error 5xx,
+      # tidak ada lonjakan latensi, dan semua endpoint lain tetap 200. Yang
+      # terjadi hanya `403 ATTESTATION_REJECTED: <KODE>` pada `/register` — satu
+      # baris log per percobaan, mudah tenggelam di antara log akses.
+      #
+      # (1) `root_not_trusted`: bundle root operator tidak memuat root vendor
+      #     perangkat yang dipakai pendaftar. Akibatnya akun baru TIDAK BISA
+      #     dibuat dari perangkat itu — bukan cuma sybil yang tertahan — dan
+      #     satu-satunya perbaikan adalah menambah root yang benar (skrip
+      #     `scripts/attestation-roots.mjs refresh`; bundle dibaca ulang dari
+      #     mtime, tanpa restart). Karena itu `for: 0m`: setiap penolakan jenis
+      #     ini adalah orang nyata yang gagal mendaftar, bukan noise statistik.
+      #     Perhatikan juga: sybil yang memakai sertifikat self-signed TIDAK
+      #     memicu aturan ini bila tidak ada satu pun root yang dipin — rantai
+      #     `x5c` self-signed berujung diterima oleh aturan puncak default.
+      # (2) Rasio, bukan jumlah mentah: 20 penolakan dari 20.000 pendaftaran
+      #     adalah noise, sedangkan 3 dari 4 adalah kebijakan yang tidak cocok
+      #     dengan perangkat di lapangan. Penyebutnya hanya `accepted|rejected`
+      #     supaya `missing`/`challenge_invalid` (klien salah, bukan kebijakan)
+      #     tidak mengencerkan angka. Ambang `>= 3` mencegah satu percobaan yang
+      #     salah (pengguna membatalkan prompt biometrik) memicu alarm.
+      #     Penyebut dijaga `or vector(0)` + `clamp_min`: tanpa itu, jendela yang
+      #     belum punya sampel memberi vektor kosong dan pembagian nol memberi
+      #     NaN — perbandingannya selalu false tanpa error apa pun, justru saat
+      #     semua pendaftaran ditolak.
+      - alert: NyxAttestationRootNotTrusted
+        expr: increase(nyx_attestation_registration_total{result="rejected",reason="root_not_trusted"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: high
+        annotations:
+          summary: "Pendaftaran ditolak: root attestation perangkat tidak dipercaya"
+          description: "Ada rantai attestation yang berakhir di root di luar bundle operator (reason=root_not_trusted). Perangkat itu tidak bisa membuat akun baru. Salin kode penolakan dari body `403 ATTESTATION_REJECTED: <KODE>`, lalu segarkan bundle: `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` (tanpa restart) atau pin fingerprint vendor lewat ABUSE_ATTESTATION_ROOTS. Jangan longgarkan ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN untuk menutupinya."
+
+      - alert: NyxAttestationRejectionRateHigh
+        expr: |
+          (
+            sum(rate(nyx_attestation_registration_total{result="rejected"}[30m]))
+              /
+            clamp_min(
+              (sum(rate(nyx_attestation_registration_total{result=~"accepted|rejected"}[30m])) or vector(0)),
+              0.001
+            )
+          ) > 0.5
+          and
+          sum(increase(nyx_attestation_registration_total{result="rejected"}[1h])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Lebih dari separuh pendaftaran ditolak gerbang attestation"
+          description: "Rasio penolakan terhadap (accepted+rejected) melewati 50% selama 30 menit dengan minimal 3 penolakan/jam. Kode di body `403 ATTESTATION_REJECTED: <KODE>` menentukan penyebabnya: `format_not_allowed`/`synced_authenticator`/`user_verification` = kebijakan lebih ketat dari perangkat pengguna; `root_not_trusted`/`certificate_expired` = bundle root ketinggalan. Rincian per alasan ada di seri metrik ini dengan label result=rejected."
+
+      # [docs/30 §30.12 WS-H] Bundle root attestation bisa "basi" tanpa satu
+      # pun error: root yang sudah kedaluwarsa tetap ada di berkas dan hanya
+      # gagal saat dipakai (penolakan `certificate_expired` di atas), sedangkan
+      # MDS memberi tanggal `nextUpdate` yang tidak pernah diperiksa siapa pun.
+      # Gauge diisi saat boot dari metadata yang ditulis skrip refresh; tanpa
+      # metadata, seri ini tidak ada dan aturan diam (bukan false positive).
+      - alert: NyxAttestationRootExpired
+        expr: nyx_attestation_roots_expired_certs > 0
+        for: 1h
+        labels:
+          severity: high
+        annotations:
+          summary: "Bundle root attestation memuat sertifikat kedaluwarsa"
+          description: "nyx_attestation_roots_expired_certs > 0: ada anchor yang sudah lewat validTo dan tidak akan pernah bisa memverifikasi rantai baru. Segarkan bundle dengan `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` lalu restart nyx-api agar gauge dan peringatan boot ikut diperbarui."
+
+      - alert: NyxAttestationRootBundleStale
+        expr: nyx_attestation_roots_next_update_timestamp_seconds < time()
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bundle root attestation melewati nextUpdate MDS"
+          description: "Metadata bundle menunjukkan tanggal nextUpdate FIDO MDS sudah lewat, jadi daftar root yang dianggap sah mungkin tidak lagi lengkap. Jalankan `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` (verifikasi JWS MDS ikut dijalankan) sebelum perangkat baru mulai ditolak dengan reason=root_not_trusted."
+
   # ==========================================================================
   # Auditor pihak ketiga log Key Transparency (mode 3, `nyx-kt-auditor`).
   #

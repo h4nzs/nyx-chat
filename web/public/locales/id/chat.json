@@ -198,7 +198,10 @@
     "init_failed": "Gagal menginisialisasi sesi tamu. Silakan coba lagi.",
     "upload_failed": "Gagal mengunggah file",
     "session_live": "Sesi aktif. Pesan bersifat efemeral.",
-    "placeholder": "Ketik pesan efemeral..."
+    "placeholder": "Ketik pesan efemeral...",
+    "send_failed": "Pesan gagal dikirim. Coba lagi.",
+    "offline": "Tidak bisa terhubung ke server. Periksa koneksi Anda.",
+    "session_terminated": "Sesi ini sudah dihancurkan oleh host."
   },
   "embed": {
     "missing_id": "ID percakapan tidak ditemukan",

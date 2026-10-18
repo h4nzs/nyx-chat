@@ -9,6 +9,12 @@ import { newJti, refreshExpiryDate, signAccessToken, verifyJwt, signTransportTic
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { clearAuthCookies, isEphemeralGuestSubject, revokeFamily } from '../utils/sessionUtils.js'
+// [BUGFIX 2026-10-18] Klasifikasi replay rotasi refresh token (lihat util-nya).
+import {
+  classifyRefreshReplay,
+  refreshReplayGraceMs,
+  sessionEndedError,
+} from '../utils/refreshReplay.js'
 import { powRateKey, resolvePowIdentity } from '../utils/powIdentity.js'
 import { cfAwareClientIp } from '../utils/clientIp.js'
 import { env } from '../config.js'
@@ -26,7 +32,11 @@ import {
 // [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
 // [docs/30 §30.12 WS-H] Guard burst registrasi (per sumber IP-hash & instalasi).
-import { enforceRegistrationBurst } from '../utils/registrationGuard.js'
+import { enforceRegistrationBurst, mayWaiveAttestation } from '../utils/registrationGuard.js'
+// [docs/30 §30.12 WS-H] Attestation yang DITOLAK harus terlihat tanpa membaca log:
+// `root_not_trusted` = bundle root operator ketinggalan, `rejected`/`accepted` =
+// laju penolakan (ops/prometheus/alerts.yml grup `nyx-attestation`).
+import { ATTESTATION_REGISTRATION, incCounter } from '../utils/metrics.js'
 // [docs/28 Tier 2 — B4] bucket metadata temporal (hari/15 menit).
 import { dayBucket, deviceActivityBucket } from '../utils/temporalBucket.js'
 import { nanoid } from 'nanoid'
@@ -50,10 +60,13 @@ import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdenti
 // [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru (gerbang sybil).
 import {
   attestationPolicyFromEnv,
+  attestationReasonCode,
   consumeAttestationChallenge,
   storeAttestationChallenge,
   verifyNewAccountAttestation
 } from '../utils/webauthnAttestation.js'
+// [2026-10-18] Normalisasi credential ID WebAuthn (Buffer → Base64URLString).
+import { parseCredentialTransports, toBase64UrlCredentialId } from '../utils/webauthnCredentials.js'
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // ✅ FIX: Import tipe JWT Payload dari shared
@@ -275,7 +288,12 @@ router.post('/register', authLimiter, zodValidate({
     attestation: z.object({
       challenge: z.string().min(1).max(256),
       response: z.unknown()
-    }).optional()
+    }).optional(),
+    // Perangkat tanpa authenticator sama sekali (desktop Linux tanpa security
+    // key) tidak bisa *membuktikan* ketiadaan itu; klien hanya menyatakannya,
+    // dan server menerimanya HANYA bila operator menyalakan
+    // ABUSE_ATTESTATION_ALLOW_UNATTESTED. Akun yang lahir begini isVerified=false.
+    attestationUnavailable: z.boolean().optional()
   })
 }),
 async (req, res, next) => {
@@ -313,6 +331,9 @@ async (req, res, next) => {
     // oleh env (semua akun baru) ATAU oleh heuristik burst sybil per-ASN.
     // Diverifikasi SEBELUM akun dibuat — kegagalan tidak meninggalkan baris User.
     const attestationRequired = process.env.ABUSE_REQUIRE_ATTESTATION === 'on' || burst.requireAttestation;
+    const attestationWaivable = mayWaiveAttestation(process.env, {
+      requestedByBurst: burst.requireAttestation
+    });
     let attestedCredential: {
       credentialId: string;
       publicKey: Uint8Array<ArrayBuffer>;
@@ -324,38 +345,85 @@ async (req, res, next) => {
 
     if (attestationRequired) {
       const proof = req.body.attestation as { challenge: string; response: unknown } | undefined;
-      if (!proof) throw new ApiError(428, 'ATTESTATION_REQUIRED');
+      if (!proof) {
+        if (attestationWaivable && req.body.attestationUnavailable === true) {
+          // Perangkat tanpa authenticator sama sekali (desktop Linux tanpa
+          // platform authenticator maupun security key). Tidak ada bukti yang
+          // bisa dikirim — klien menyatakannya, server menerima HANYA karena
+          // operator menyalakan ABUSE_ATTESTATION_ALLOW_UNATTESTED. Akun lahir
+          // dengan isVerified=false, jadi sandbox (upload, pencarian luas)
+          // tetap tertutup; metrik membuat populasi ini terlihat.
+          incCounter(ATTESTATION_REGISTRATION, { result: 'unattested', reason: 'no_authenticator' });
+          console.warn(
+            '[WS-H] Akun baru dibuat TANPA attestation: perangkat tanpa authenticator (ABUSE_ATTESTATION_ALLOW_UNATTESTED=on). isVerified=false.'
+          );
+        } else {
+          // Bukan kegagalan keamanan: perangkat/klien belum menjalankan upacara
+          // WebAuthn (mis. tanpa authenticator platform). Tetap dihitung — lonjakan
+          // di sini berarti kebijakan tidak terpenuhi di sisi klien.
+          incCounter(ATTESTATION_REGISTRATION, { result: 'missing', reason: 'none' });
+          throw new ApiError(428, 'ATTESTATION_REQUIRED');
+        }
+      } else {
+        const challengeAlive = await consumeAttestationChallenge(redisClient, proof.challenge);
+        if (!challengeAlive) {
+          incCounter(ATTESTATION_REGISTRATION, { result: 'challenge_invalid', reason: 'none' });
+          throw new ApiError(403, 'ATTESTATION_CHALLENGE_INVALID');
+        }
 
-      const challengeAlive = await consumeAttestationChallenge(redisClient, proof.challenge);
-      if (!challengeAlive) throw new ApiError(403, 'ATTESTATION_CHALLENGE_INVALID');
+        let verification;
+        try {
+          verification = await verifyNewAccountAttestation({
+            response: proof.response,
+            expectedChallenge: proof.challenge,
+            expectedOrigin,
+            expectedRPID: rpID,
+            policy: attestationPolicyFromEnv()
+          });
+        } catch (verifyErr) {
+          // Respons tidak sah menurut pustaka (struktur/tanda tangan) → tolak, jangan 500.
+          console.warn('[WS-H] Attestation akun baru tidak sah:', verifyErr);
+          incCounter(ATTESTATION_REGISTRATION, { result: 'malformed', reason: 'none' });
+          throw new ApiError(403, 'ATTESTATION_INVALID');
+        }
 
-      let verification;
-      try {
-        verification = await verifyNewAccountAttestation({
-          response: proof.response,
-          expectedChallenge: proof.challenge,
-          expectedOrigin,
-          expectedRPID: rpID,
-          policy: attestationPolicyFromEnv()
-        });
-      } catch (verifyErr) {
-        // Respons tidak sah menurut pustaka (struktur/tanda tangan) → tolak, jangan 500.
-        console.warn('[WS-H] Attestation akun baru tidak sah:', verifyErr);
-        throw new ApiError(403, 'ATTESTATION_INVALID');
+        if (!verification.verified || !verification.credentialId || !verification.credentialPublicKey) {
+          // Penolakan KEBIJAKAN: kripto sah, tapi buktinya tidak memenuhi kriteria
+          // perangkat. Alasannya dipetakan ke kode pendek (`root_not_trusted`, …)
+          // supaya kedua aturan alert attestation bisa membedakannya.
+          //
+          // Metadata ini ikut dicatat karena `NOT_HARDWARE_ATTESTATION` punya dua
+          // penyebab yang butuh tindakan BERBEDA: browser yang tidak meneruskan
+          // attestation sama sekali (Firefox Android) vs passkey tersinkron milik
+          // Google/Apple Password Manager, yang memang tidak membawa bukti
+          // perangkat dan ditandai `multiDevice`. Tanpa AAGUID + jenis kredensial,
+          // operator hanya melihat "perangkat tidak bisa" tanpa tahu apakah yang
+          // perlu diganti browser atau memang kebijakannya tidak cocok.
+          console.warn('[WS-H] Attestation akun baru ditolak:', {
+            reason: verification.reason ?? 'UNKNOWN',
+            tier: verification.tier,
+            aaguid: verification.aaguid ?? 'none',
+            deviceType: verification.credentialDeviceType ?? 'unknown',
+            backedUp: verification.credentialBackedUp
+          });
+          incCounter(ATTESTATION_REGISTRATION, {
+            result: 'rejected',
+            reason: attestationReasonCode(verification.reason)
+          });
+          throw new ApiError(403, `ATTESTATION_REJECTED: ${verification.reason ?? 'UNKNOWN'}`);
+        }
+
+        incCounter(ATTESTATION_REGISTRATION, { result: 'accepted', reason: 'none' });
+
+        attestedCredential = {
+          credentialId: verification.credentialId,
+          publicKey: verification.credentialPublicKey,
+          counter: verification.counter,
+          deviceType: verification.credentialDeviceType ?? 'singleDevice',
+          backedUp: verification.credentialBackedUp,
+          tier: verification.tier
+        };
       }
-
-      if (!verification.verified || !verification.credentialId || !verification.credentialPublicKey) {
-        throw new ApiError(403, `ATTESTATION_REJECTED: ${verification.reason ?? 'UNKNOWN'}`);
-      }
-
-      attestedCredential = {
-        credentialId: verification.credentialId,
-        publicKey: verification.credentialPublicKey,
-        counter: verification.counter,
-        deviceType: verification.credentialDeviceType ?? 'singleDevice',
-        backedUp: verification.credentialBackedUp,
-        tier: verification.tier
-      };
     }
 
     const user = await prisma.user.create({
@@ -365,10 +433,13 @@ async (req, res, next) => {
         // [docs/28 Tier 2 — B4] hari pendaftaran (bucket harian), bukan detik.
         lastActiveDay: dayBucket(),
         encryptedProfile,
-        // [WS-H] Akun yang lolos attestation perangkat langsung terverifikasi
-        // (setara menambahkan passkey), jadi ia bisa memakai fitur yang butuh
-        // verifikasi tanpa langkah tambahan.
-        isVerified: attestedCredential !== null,
+        // [WS-H] Hanya attestation ber-tier `hardware` yang menandai akun
+        // terverifikasi. Bila operator menyalakan `ABUSE_ATTESTATION_ALLOW_NONE`
+        // (passkey tersinkron Google/Apple — `fmt: none`, `multiDevice`) akun
+        // tetap dibuat, tapi `isVerified` dibiarkan false: tidak ada bukti
+        // perangkat yang bisa diklaim, dan upload/aksi yang butuh verifikasi
+        // tidak boleh terbuka hanya karena upacara WebAuthn selesai.
+        isVerified: attestedCredential?.tier === 'hardware',
         authenticators: attestedCredential
           ? {
               create: [
@@ -672,24 +743,42 @@ router.post('/refresh', async (req, res, next) => {
     // SAME httpOnly `rt` cookie at the same instant. We must NOT brick the whole
     // session family for the benign case.
     if (basis.revokedAt || basis.replacedById) {
-      const FRESH_ROTATION_GRACE_MS = 5000;
-      const newest = await prisma.refreshToken.findFirst({
+      // [BUGFIX 2026-10-18] Dulu: toleransi 5 detik berbasis `now - newest.createdAt`.
+      // Retry klien yang wajar (timeout request 30 s + backoff, tab di-freeze)
+      // melewati jendela itu → family di-revoke → `force_logout` ke SEMUA device
+      // → user ter-logout sendiri dengan `/login?reason=revoked`.
+      // Sekarang keputusan diambil helper murni (utils/refreshReplay.ts):
+      //   session_ended → family sudah mati, 401 biasa tanpa alarm/broadcast;
+      //   benign        → penerus langsung & dalam jendela toleransi;
+      //   reuse         → benar-benar token lama di luar rantai → revoke.
+      const tip = await prisma.refreshToken.findFirst({
         where: { familyId: basis.familyId, deviceId: basis.deviceId, revokedAt: null, replacedById: null },
         orderBy: { createdAt: 'desc' },
       });
 
-      const isFreshDuplicate =
-        !!newest &&
-        basis.deviceId === payload.deviceId &&
-        (Date.now() - newest.createdAt.getTime()) < FRESH_ROTATION_GRACE_MS;
+      const graceMs = refreshReplayGraceMs();
+      const decision = classifyRefreshReplay({
+        presentedId: basis.id,
+        tip: tip ? { id: tip.id, replacesId: tip.replacedById, createdAt: tip.createdAt } : null,
+        now: Date.now(),
+        graceMs,
+      });
 
-      if (isFreshDuplicate) {
-        // Benign: another tab/window already rotated this token moments ago.
-        // Continue the chain from the freshest valid token instead of revoking.
-        console.info(`[Auth] Concurrent refresh detected (token ${payload.jti} superseded within ${FRESH_ROTATION_GRACE_MS}ms) — continuing session.`);
-        basis = newest;
+      if (decision === 'benign' && tip) {
+        // Benign: tab/jendela lain (atau retry setelah respons hilang) sudah
+        // merotasi token ini. Lanjutkan rantai dari token hidup terbaru.
+        console.info(`[Auth] Concurrent refresh detected (token superseded within ${graceMs}ms) — continuing session.`);
+        basis = tip;
+      } else if (decision === 'session_ended') {
+        // Tidak ada token hidup: sesi ini memang sudah berakhir (logout di tab
+        // lain, revokasi sesi, cleanup). Jangan alarm & jangan broadcast
+        // `force_logout` — tidak ada sesi hidup yang perlu dilindungi, dan
+        // broadcast itulah yang dulu me-logout device lain yang masih sah.
+        console.info(`[Auth] Refresh with token from an ended session (family already revoked) — 401 without alarm.`);
+        clearAuthCookies(res);
+        throw sessionEndedError();
       } else {
-        console.warn(`[Security] Refresh token reuse detected! JTI: ${payload.jti}, Family: ${basis.familyId}, User: ${payload.sub}`);
+        console.warn(`[Security] Refresh token reuse detected! Device: ${basis.deviceId.slice(0, 8)}…, Family: ${basis.familyId}`);
 
         // Revoke ALL tokens in this family (compromise containment) + Redis blacklist
         await revokeFamily(basis.familyId)
@@ -697,10 +786,17 @@ router.post('/refresh', async (req, res, next) => {
         // Clear cookies
         clearAuthCookies(res)
 
-        // Alert the user via their active WebSocket connection
+        // [BUGFIX 2026-10-18] Scope ke device asal replay. Dulu event tanpa
+        // deviceId → setiap socket milik user (termasuk perangkat lain yang
+        // sesinya masih sah) ikut logout.
         try {
           const { emitEventToUser } = await import('../network/redisBridge.js');
-          await emitEventToUser(payload.sub, 'force_logout', { reason: 'session_hijacked', message: 'Your session was compromised. Please login again.' });
+          await emitEventToUser(
+            payload.sub,
+            'force_logout',
+            { reason: 'session_hijacked', deviceId: basis.deviceId },
+            basis.deviceId,
+          );
         } catch (_e) {}
 
         throw new ApiError(401, 'Refresh token reuse detected. All sessions in this family have been revoked for security.');
@@ -1089,18 +1185,18 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
     type GenOpts = Parameters<typeof generateRegistrationOptions>[0];
     type ExcludeCredential = NonNullable<GenOpts['excludeCredentials']>[number];
 
+    // [2026-10-18] `id` WAJIB `Base64URLString`, bukan Buffer. `simplewebauthn`
+    // v13 memvalidasi tiap id lewat `input.replace(...)`; Buffer tidak punya
+    // `.replace`, jadi `Buffer` di sini melempar TypeError → 500 di setiap akun
+    // yang sudah punya authenticator (mis. kredensial attestation saat daftar).
+    // Itulah "internal server error" saat pengguna menekan verify/biometric.
     const excludeCredentials = forceNew ? [] : userAuthenticators.reduce((acc: ExcludeCredential[], auth) => {
-        try {
-          if (!auth.credentialID) return acc;
-          const base64 = String(auth.credentialID).replace(/-/g, '+').replace(/_/g, '/');
-          const idBuffer = Buffer.from(base64, 'base64');
-          acc.push({
-            id: idBuffer as unknown as ExcludeCredential['id'],
-            transports: auth.transports ? (auth.transports.split(',') as ExcludeCredential['transports']) : undefined
-          });
-        } catch (e) {
-          console.warn(`Skipping invalid credential ID: ${auth.credentialID}`, e);
+        const id = toBase64UrlCredentialId(auth.credentialID);
+        if (!id) {
+          console.warn('Skipping invalid credential ID:', auth.credentialID);
+          return acc;
         }
+        acc.push({ id, transports: parseCredentialTransports(auth.transports) as ExcludeCredential['transports'] });
         return acc;
       }, []);
 
@@ -1113,7 +1209,11 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
       excludeCredentials,
       authenticatorSelection: {
         residentKey: 'preferred',
-        userVerification: 'preferred',
+        // `required` juga di sini: credential yang dibuat harus bisa memenuhi
+        // UV, karena `/webauthn/login/options` kini menuntut `required`. Kalau
+        // create() mengizinkan `preferred`, lahir kredensial yang bisa dibuat
+        // tetapi tidak bisa dipakai login.
+        userVerification: 'required',
         authenticatorAttachment: 'platform'
       }
     })
@@ -1143,7 +1243,7 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) => 
     })
 
     if (verification.verified && verification.registrationInfo) {
-      const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo
+      const { credential, credentialDeviceType, credentialBackedUp, userVerified } = verification.registrationInfo
       const { id: credentialID, publicKey: credentialPublicKey, counter } = credential
 
       await prisma.authenticator.create({
@@ -1159,19 +1259,65 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) => 
         }
       })
 
-      await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null, isVerified: true } })
-      res.json({ verified: true })
+      // [2026-10-18] `isVerified` berarti "ada bukti perangkat", bukan "punya
+      // authenticator". Passkey tersinkron (`credentialBackedUp=true`) bisa
+      // dipakai di perangkat lain dan tidak membawa bukti perangkat — sama
+      // seperti jalur attestation, akun tidak boleh naik status karenanya.
+      // Device-bound + user verification (Windows Hello/TPM, security key,
+      // kredensial "this device only") tetap memenuhi kriteria.
+      const deviceBound = credentialBackedUp === false && userVerified === true
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { currentChallenge: null, ...(deviceBound ? { isVerified: true } : {}) }
+      })
+      res.json({ verified: true, isVerified: user.isVerified || deviceBound, deviceBound })
     } else {
       res.status(400).json({ verified: false, error: 'Verification failed' })
     }
   } catch (e) { next(e) }
 })
 
+/**
+ * [2026-10-18] Daftar credential milik user yang sedang login.
+ *
+ * Dipakai untuk **enroll PRF unlock pada credential yang sudah ada** (mis.
+ * credential attestation saat pendaftaran) alih-alih membuat passkey kedua di
+ * Google/Apple Password Manager. Tanpa endpoint ini, satu-satunya cara adalah
+ * `register/options` yang selalu membuat kredensial baru.
+ *
+ * Yang dikembalikan hanya metadata publik: credential ID, transports, jenis
+ * perangkat, dan status backup — tidak ada kunci publik/privat.
+ */
+router.get('/webauthn/credentials', requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Unauthorized')
+    const rows = await prisma.authenticator.findMany({
+      where: { userId: req.user.id },
+      select: { credentialID: true, transports: true, credentialDeviceType: true, credentialBackedUp: true }
+    })
+    res.json({
+      rpID,
+      credentials: rows.map((row) => ({
+        id: row.credentialID,
+        transports: row.transports ? row.transports.split(',') : undefined,
+        deviceType: row.credentialDeviceType,
+        backedUp: row.credentialBackedUp
+      }))
+    })
+  } catch (e) { next(e) }
+})
+
 router.get('/webauthn/login/options', async (req, res, next) => {
   try {
+    // [2026-10-18] `required`: assertion ini mencetak sesi. Dengan `preferred`,
+    // authenticator yang hanya mengirim user presence (sentuhan) bisa login,
+    // sehingga klaim "login dengan biometric" hanya dijaga dekripsi PRF di
+    // klien — bukan oleh server. Klien memang butuh UV untuk PRF, tapi sesi
+    // tidak boleh bergantung pada langkah lokal yang bisa dilewati.
     const options = await generateAuthenticationOptions({
       rpID,
-      userVerification: 'preferred'
+      userVerification: 'required'
     })
     res.cookie('webauthn_challenge', options.challenge, { httpOnly: true, maxAge: 60000, secure: env.nodeEnv === 'production' })
     res.json(options)
@@ -1205,10 +1351,15 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
         counter: Number(userAuthenticator.counter),
         transports: userAuthenticator.transports ? (userAuthenticator.transports.split(',') as NonNullable<VerifyOpts['credential']>['transports']) : undefined
       },
-      requireUserVerification: false
+      // [2026-10-18] Wajib UV: sesi tidak boleh lahir dari presence-only
+      // assertion (lihat komentar di /webauthn/login/options).
+      requireUserVerification: true
     } as VerifyOpts)
 
     if (verification.verified) {
+      // Challenge sekali pakai: cookie dibersihkan setelah verifikasi sukses
+      // supaya assertion berikutnya tidak bisa memakai challenge yang sama.
+      res.clearCookie('webauthn_challenge');
       const { authenticationInfo } = verification
 
       await prisma.authenticator.update({

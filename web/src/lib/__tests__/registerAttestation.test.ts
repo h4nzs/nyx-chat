@@ -36,10 +36,12 @@ vi.mock('@simplewebauthn/browser', () => ({
 
 import { ApiError } from '../api';
 import {
+  ATTESTATION_NO_PLATFORM_AUTHENTICATOR,
   ATTESTATION_UNSUPPORTED_DEVICE,
   attestationErrorKey,
   createRegistrationAttestation,
   isAttestationRequiredError,
+  isDeviceUnattestableError,
 } from '../registerAttestation';
 
 const CHALLENGE = 'Y2hhbGxlbmdlLWJhc2U2NHVybC1jaGFsbGVuZ2U';
@@ -90,6 +92,63 @@ describe('createRegistrationAttestation', () => {
     await expect(createRegistrationAttestation()).rejects.toThrow(ATTESTATION_UNSUPPORTED_DEVICE);
     expect(apiMock).not.toHaveBeenCalled();
   });
+
+  it('kebijakan platform tanpa authenticator platform → gagal sebelum upacara', async () => {
+    // jsdom tidak punya PublicKeyCredential sama sekali — setara Firefox di Linux.
+    Object.defineProperty(globalThis, 'PublicKeyCredential', { value: undefined, configurable: true });
+    apiMock.mockResolvedValueOnce({
+      challenge: CHALLENGE,
+      authenticatorSelection: { authenticatorAttachment: 'platform' },
+    });
+
+    await expect(createRegistrationAttestation()).rejects.toThrow(ATTESTATION_NO_PLATFORM_AUTHENTICATOR);
+    expect(startRegistrationMock).not.toHaveBeenCalled();
+  });
+
+  it('isUserVerifyingPlatformAuthenticatorAvailable() false → gagal sebelum upacara', async () => {
+    Object.defineProperty(globalThis, 'PublicKeyCredential', {
+      value: { isUserVerifyingPlatformAuthenticatorAvailable: async () => false },
+      configurable: true,
+    });
+    apiMock.mockResolvedValueOnce({
+      challenge: CHALLENGE,
+      authenticatorSelection: { authenticatorAttachment: 'platform' },
+    });
+
+    await expect(createRegistrationAttestation()).rejects.toThrow(ATTESTATION_NO_PLATFORM_AUTHENTICATOR);
+    expect(startRegistrationMock).not.toHaveBeenCalled();
+  });
+
+  it('platform tersedia → upacara tetap dijalankan', async () => {
+    Object.defineProperty(globalThis, 'PublicKeyCredential', {
+      value: { isUserVerifyingPlatformAuthenticatorAvailable: async () => true },
+      configurable: true,
+    });
+    apiMock.mockResolvedValueOnce({
+      challenge: CHALLENGE,
+      authenticatorSelection: { authenticatorAttachment: 'platform' },
+    });
+    startRegistrationMock.mockResolvedValueOnce({ id: 'cred-id' });
+
+    const result = await createRegistrationAttestation();
+
+    expect(startRegistrationMock).toHaveBeenCalledTimes(1);
+    expect(result.challenge).toBe(CHALLENGE);
+  });
+});
+
+describe('isDeviceUnattestableError', () => {
+  it('hanya kegagalan kapabilitas perangkat, bukan pembatalan user', () => {
+    expect(isDeviceUnattestableError(new Error(ATTESTATION_NO_PLATFORM_AUTHENTICATOR))).toBe(true);
+    expect(isDeviceUnattestableError(new Error(ATTESTATION_UNSUPPORTED_DEVICE))).toBe(true);
+    expect(isDeviceUnattestableError(new Error('WebAuthn is not supported in this browser'))).toBe(true);
+
+    // User menutup dialog / timeout: harus mengulang, bukan jatuh ke akun tanpa verifikasi.
+    const cancelled = new Error('The operation either timed out or was not allowed.');
+    cancelled.name = 'NotAllowedError';
+    expect(isDeviceUnattestableError(cancelled)).toBe(false);
+    expect(isDeviceUnattestableError(new Error('ATTESTATION_CHALLENGE_INVALID'))).toBe(false);
+  });
 });
 
 describe('attestationErrorKey', () => {
@@ -102,5 +161,17 @@ describe('attestationErrorKey', () => {
     expect(attestationErrorKey(new Error('ATTESTATION_REJECTED: SYNCED_AUTHENTICATOR_NOT_ALLOWED'))).toBe('registration_attestation_hardware_required');
     expect(attestationErrorKey(new Error('ATTESTATION_REJECTED: USER_VERIFICATION_REQUIRED'))).toBe('registration_attestation_user_verification');
     expect(attestationErrorKey(new Error('sesuatu yang lain'))).toBe('registration_attestation_invalid');
+  });
+
+  it('perangkat tanpa platform authenticator punya pesan sendiri', () => {
+    expect(attestationErrorKey(new Error(ATTESTATION_NO_PLATFORM_AUTHENTICATOR))).toBe(
+      'registration_attestation_no_platform',
+    );
+  });
+
+  it('NotAllowedError (dibatalkan/timeout) bukan "verifikasi gagal" generik', () => {
+    const cancelled = new Error('The request is not allowed by the user agent…');
+    cancelled.name = 'NotAllowedError';
+    expect(attestationErrorKey(cancelled)).toBe('registration_attestation_cancelled');
   });
 });

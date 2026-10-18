@@ -19,9 +19,12 @@
 //      RE-PROBE SEKALI LAGI di dalam lock tepat sebelum POST — menunggu mutex
 //      bisa makan waktu; tab lain mungkin sudah menyelesaikan refresh selama
 //      kita menunggu → jangan POST rt basi.
-//   2. Server punya grace window 5 detik (FRESH_ROTATION_GRACE_MS): POST
-//      near-simultaneous dengan rt yang sama dianggap refresh benign, bukan
-//      reuse attack.
+//   2. Server mengklasifikasikan replay (utils/refreshReplay.ts): token yang
+//      merupakan pendahulu LANGSUNG dari token hidup terbaru dan berumur
+//      ≤ REFRESH_REPLAY_GRACE_MS (default 2 menit) dianggap retry benign — ini
+//      menutup retry setelah respons hilang/timeout, bukan hanya yang
+//      near-simultaneous. Family yang sudah tidak punya token hidup dibalas
+//      401 biasa tanpa alarm, dan `force_logout` hanya dikirim ke device asal.
 import { isSwMutexAvailable, withSwMutex } from './swMutexClient';
 
 const LOCK_NAME = 'nyx:auth-refresh';

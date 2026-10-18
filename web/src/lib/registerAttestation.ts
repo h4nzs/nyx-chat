@@ -17,6 +17,16 @@
  *
  * Tidak ada fallback: bila perangkat tidak punya authenticator platform, kita
  * memberi tahu user dengan pesan yang jelas, bukan diam-diam melewati gerbang.
+ *
+ * Karena itu ada **preflight** sebelum upacara: Firefox/Chrome di desktop Linux
+ * (dan Chrome di Linux umumnya) tidak punya platform authenticator, sehingga
+ * `navigator.credentials.create()` dengan `authenticatorAttachment: 'platform'`
+ * langsung melempar `NotAllowedError` berisi "The request is not allowed by the
+ * user agent…". Tanpa preflight, pesan itu sampai ke user seolah-olah ia
+ * menolak izin atau membatalkan dialog — padahal tidak ada dialog yang mungkin
+ * muncul. `isUserVerifyingPlatformAuthenticatorAvailable()` memberi jawaban
+ * sebelum upacara, jadi user diarahkan ke perangkat yang memang bisa (ponsel /
+ * laptop berbiometrik / security key) tanpa menunggu kegagalan.
  */
 
 import { api, ApiError } from './api';
@@ -26,6 +36,12 @@ export const ATTESTATION_REQUIRED_STATUS = 428;
 
 /** Penanda kegagalan sisi klien (perangkat tanpa authenticator platform). */
 export const ATTESTATION_UNSUPPORTED_DEVICE = 'ATTESTATION_UNSUPPORTED_DEVICE';
+
+/**
+ * Perangkat/browser ini tidak punya authenticator platform yang bisa dipakai
+ * untuk upacara `authenticatorAttachment: 'platform'`.
+ */
+export const ATTESTATION_NO_PLATFORM_AUTHENTICATOR = 'ATTESTATION_NO_PLATFORM_AUTHENTICATOR';
 
 export interface RegistrationAttestation {
   challenge: string;
@@ -38,9 +54,30 @@ export function isAttestationRequiredError(error: unknown): boolean {
   return error instanceof Error && error.message.includes('ATTESTATION_REQUIRED');
 }
 
+type PlatformAuthenticatorProbe = {
+  isUserVerifyingPlatformAuthenticatorAvailable?: () => Promise<boolean>;
+};
+
+/**
+ * Apakah browser ini punya authenticator platform yang bisa melakukan user
+ * verification? `false` untuk Firefox/Chrome di desktop Linux tanpa Touch ID /
+ * Windows Hello, dan juga untuk browser yang belum punya API-nya.
+ */
+async function hasUserVerifyingPlatformAuthenticator(): Promise<boolean> {
+  const ctor = (globalThis as { PublicKeyCredential?: PlatformAuthenticatorProbe }).PublicKeyCredential;
+  if (!ctor || typeof ctor.isUserVerifyingPlatformAuthenticatorAvailable !== 'function') return false;
+  try {
+    return await ctor.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ambil opsi attestation dari server lalu jalankan upacara WebAuthn.
- * Melempar `ATTESTATION_UNSUPPORTED_DEVICE` bila perangkat tidak bisa.
+ * Melempar `ATTESTATION_UNSUPPORTED_DEVICE` bila perangkat tidak bisa, dan
+ * `ATTESTATION_NO_PLATFORM_AUTHENTICATOR` bila server mewajibkan platform tapi
+ * perangkat ini tidak punya (preflight, sebelum dialog apa pun muncul).
  */
 export async function createRegistrationAttestation(): Promise<RegistrationAttestation> {
   if (typeof navigator === 'undefined' || !navigator.credentials) {
@@ -55,10 +92,35 @@ export async function createRegistrationAttestation(): Promise<RegistrationAttes
     throw new Error('ATTESTATION_OPTIONS_INVALID');
   }
 
+  // Kebijakan server menentukan apakah authenticator platform diwajibkan. Bila
+  // ya dan browser menyatakan tidak ada, upacara pasti gagal dengan
+  // `NotAllowedError` yang membingungkan — lebih baik berhenti di sini.
+  const attachment = (
+    options as { authenticatorSelection?: { authenticatorAttachment?: unknown } }
+  ).authenticatorSelection?.authenticatorAttachment;
+  if (attachment === 'platform' && !(await hasUserVerifyingPlatformAuthenticator())) {
+    throw new Error(ATTESTATION_NO_PLATFORM_AUTHENTICATOR);
+  }
+
   const { startRegistration } = await import('@simplewebauthn/browser');
   const response = await startRegistration({ optionsJSON: options as never });
 
   return { challenge: options.challenge, response };
+}
+
+/**
+ * True bila kegagalan berasal dari **perangkat yang tidak punya authenticator**
+ * (bukan user membatalkan dialog). Hanya kasus ini yang boleh jatuh ke
+ * pendaftaran tanpa attestation bila server mengizinkannya; pembatalan user
+ * tetap harus meminta mereka mengulang.
+ */
+export function isDeviceUnattestableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes(ATTESTATION_NO_PLATFORM_AUTHENTICATOR) ||
+    message.includes(ATTESTATION_UNSUPPORTED_DEVICE) ||
+    message.includes('WebAuthn is not supported')
+  );
 }
 
 /**
@@ -68,7 +130,9 @@ export async function createRegistrationAttestation(): Promise<RegistrationAttes
  */
 export function attestationErrorKey(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+  const name = (error as { name?: unknown } | null)?.name;
 
+  if (message.includes(ATTESTATION_NO_PLATFORM_AUTHENTICATOR)) return 'registration_attestation_no_platform';
   if (message.includes(ATTESTATION_UNSUPPORTED_DEVICE)) return 'registration_attestation_unsupported';
   if (message.includes('ATTESTATION_CHALLENGE_INVALID')) return 'registration_attestation_expired';
   if (message.includes('ATTESTATION_INVALID')) return 'registration_attestation_invalid';
@@ -94,5 +158,9 @@ export function attestationErrorKey(error: unknown): string {
     return 'registration_attestation_hardware_required';
   }
   if (message.includes('USER_VERIFICATION_REQUIRED')) return 'registration_attestation_user_verification';
+  // `NotAllowedError` di sini = dialog ditutup/timeout/izin ditolak user, ATAU
+  // (bila preflight lolos tapi browser tetap menolak) perangkat menolak upacara.
+  // Keduanya butuh tindakan user yang sama: ulangi dan konfirmasi.
+  if (name === 'NotAllowedError') return 'registration_attestation_cancelled';
   return 'registration_attestation_invalid';
 }

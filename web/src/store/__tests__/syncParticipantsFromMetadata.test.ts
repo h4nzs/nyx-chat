@@ -53,6 +53,7 @@ vi.mock('@utils/feedback', () => ({ captureAndLog: vi.fn() }))
 vi.mock('../../i18n', () => ({ default: { t: (k: string) => k } }))
 
 import { useConversationStore } from '../conversation'
+import { forceRotateGroupSenderKey } from '@utils/crypto'
 import { asConversationId, asUserId } from '@nyx/shared'
 import type { GroupMemberEntry } from '@nyx/shared'
 
@@ -226,12 +227,37 @@ describe('removeParticipant + addParticipants sinkron metadata.members (T4 race 
 
     const conv = findConv()
     expect(conv.participants.map(p => p.id)).toContain(asUserId('newbie'))
-    const meta = conv.decryptedMetadata as { members: GroupMemberEntry[]; participants: string[] }
+    const meta = conv.decryptedMetadata as {
+      members: GroupMemberEntry[]
+      participants: string[]
+      deliveryTokenMap?: Record<string, string>
+    }
     expect(meta.members.map(m => m.userId)).toContain('newbie')
     const newbie = meta.members.find(m => m.userId === 'newbie')!
     expect(newbie.role).toBe('MEMBER')
     expect(newbie.joinedAtGeneration).toBe(2) // generation berjalan
     expect(meta.participants).toContain('newbie')
+  })
+
+  it('add: delivery token invite ikut masuk deliveryTokenMap metadata', () => {
+    useConversationStore.getState().addParticipants(
+      convId,
+      [{ id: asUserId('newbie'), name: '', role: 'MEMBER' }],
+      { deliveryTokens: { newbie: 'tok-newbie' } }
+    )
+
+    const meta = findConv().decryptedMetadata as { deliveryTokenMap?: Record<string, string> }
+    expect(meta.deliveryTokenMap?.newbie).toBe('tok-newbie')
+  })
+
+  it('add: TIDAK memicu forceRotateGroupSenderKey (rotasi hanya lewat rotateGroupKey eksplisit)', () => {
+    vi.mocked(forceRotateGroupSenderKey).mockClear()
+    useConversationStore.getState().addParticipants(convId, [
+      { id: asUserId('newbie'), name: '', role: 'MEMBER' },
+    ])
+    expect(forceRotateGroupSenderKey).not.toHaveBeenCalled()
+    // Jalur non-admin tetap boleh rotasi lazy.
+    expect(findConv().requiresKeyRotation).toBe(true)
   })
 
   it('kick → sync mirror: kicked member TIDAK hidup kembali (regresi utama)', () => {

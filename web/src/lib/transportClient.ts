@@ -11,17 +11,18 @@ import {
 } from '@nyx/shared';
 import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from '@nyx/shared';
 import { decideTransportMode, OUTGOING_OPCODE_MAP } from './transportMode';
+import { classifyKickPayload } from './forceLogout';
 import { advertisedCapabilities } from './spqrNegotiation';
 import { useAuthStore } from '../store/auth';
 
 import type { 
   RawServerMessage, 
   Message, 
-  Participant, 
   User, 
   Conversation,
   ConversationId,
-  UserId
+  UserId,
+  SubscriptionTier
 } from '@nyx/shared';
 
 // ============================================================================
@@ -77,13 +78,23 @@ type TransportEvents = {
   'message:new': [payload: BinaryPayload];
   'message:updated': [data: Partial<RawServerMessage> & { id: string, conversationId: string }];
   'message:deleted': [data: { conversationId: string; id: string }];
+  // [GAP 2026-10-18] Event yang benar-benar dikirim server, kini punya listener
+  // di socketListeners: unsend peer, hapus massal (auto-delete sweeper), dan
+  // view-once yang dibuka peer.
+  'message:deleted_remotely': [data: { conversationId: string; messageId: string; deletedBy?: string }];
+  'message:deleted_batch': [data: { conversationId: string; messageIds: string[] }];
+  'message:viewed': [data: { conversationId: string; messageId: string }];
   'message:status_updated': [data: { conversationId: string; messageId: string; userId: string; status: string }];
   
   // Conversations
   'conversation:new': [conversation: Conversation];
   'conversation:updated': [data: Partial<Conversation> & { id: string }];
-  'conversation:deleted': [data: { id: string }];
-  'conversation:participants_added': [data: { conversationId: string; participants: Participant[] }];
+  // [BUGFIX 2026-10-18] `reason: 'removed'` = dikeluarkan dari grup (kick) —
+  // riwayat lokal (pesan + kunci era) wajib dipertahankan agar tetap terbaca
+  // saat anggota di-add kembali. `'hidden'`/absent = hapus lokal seperti biasa.
+  'conversation:deleted': [data: { id: string; reason?: 'removed' | 'hidden' }];
+  // (event `conversation:participants_added` dihapus: TIDAK ada emitter di server
+  // — keanggotaan baru sampai lewat `conversation:updated` + refresh metadata.)
   'conversation:participant_removed': [data: { conversationId: string; userId: string }];
   'conversation:participant_updated': [data: { conversationId: string; userId: string; role: 'ADMIN' | 'MEMBER' | 'admin' | 'member' }];
   // [T1 FIX 2026-09-28] Perubahan keanggotaan (add/kick/leave) — pemicu refresh
@@ -98,11 +109,18 @@ type TransportEvents = {
   'webrtc:signal': [payload: BinaryPayload];
   
   // Auth & Security
-  'force_logout': [data: { jti: string }];
+  // `deviceId`/`reason` ikut dikirim server (`/api/sessions`, kick device, ban)
+  // dan dipakai handler untuk memutuskan apakah event ini untuk device lokal.
+  'force_logout': [data: { jti?: string; deviceId?: string; reason?: string }];
   'auth:banned': [data: { reason: string }];
+  // [GAP 2026-10-18] Dikirim setelah webhook pembayaran (routes/subscriptions.ts).
+  'subscription_updated': [data: { tier: SubscriptionTier; expiresAt?: string }];
   
   // Key Management
-  'session:request_key_fulfillment': [data: unknown];
+  // `session:request_key` = permintaan kunci sesi 1:1 yang DIRELAY server ke
+  // target (nama lama di klien: `session:fulfill_request`, event yang tidak
+  // pernah di-emit siapa pun). Listener-nya ada di socketListeners.
+  'session:request_key': [data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey?: string; requesterPqPublicKey?: string; requesterDeviceId?: string }];
   'session:new_key': [data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string }];
   'session:fulfill_request': [data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string }];
   'group:fulfill_key_request': [data: { conversationId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string; requesterDeviceId?: string }];
@@ -408,26 +426,52 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       case TransportOpCode.HELLO:
         this.handleCapabilityHelloReply(payload);
         break;
-      case TransportOpCode.KICK:
+      case TransportOpCode.KICK: {
+        // [PARITY 2026-10-18] Frame KICK kini benar-benar sampai di jalur WT —
+        // sidecar mengirim frame-nya SEBELUM menutup koneksi (dulu hanya
+        // `close("Kicked by server")`, sehingga alur force_logout yang jalan di
+        // jalur WSS tidak pernah aktif di transport utama). Pemetaannya sengaja
+        // sama dengan gateway WSS supaya hasilnya tidak bergantung transport:
+        //   - payload dengan `deviceId` = kick PER-DEVICE (revoke sesi, kick
+        //     device, hardware mismatch) → `force_logout` (handler melakukan
+        //     scoping device + logout + `/login?reason=revoked`).
+        //   - payload tanpa `deviceId` tapi ada `reason` = aksi level AKUN
+        //     (akun dihapus / ban admin) → `auth:banned` (perilaku lama tetap).
+        //   - payload tak terbaca → `force_logout` (server memang menutup sesi).
+        let json: Record<string, unknown> = {};
         try {
-           const parsedJson = JSON.parse(new TextDecoder().decode(payload)) as unknown;
-           const json = typeof parsedJson === 'object' && parsedJson !== null ? parsedJson as Record<string, unknown> : {};
-           // [+] AMBIL DARI OBJECT USER
-           const userJson = localStorage.getItem('user');
-           const parsedUser = userJson ? (JSON.parse(userJson) as unknown) : null;
-           const currentDeviceId = (typeof parsedUser === 'object' && parsedUser !== null && 'deviceId' in parsedUser) ? (parsedUser as Record<string, unknown>).deviceId : localStorage.getItem('deviceId');
-           
-           if (json.reason === 'Account deleted' || json.deviceId === currentDeviceId) {
-               this.emit('auth:banned', { reason: typeof json.reason === 'string' ? json.reason : 'Unknown reason' });
-               this.disconnect();
-           } else {
-               console.log("Ignored kick for different device ID:", json.deviceId);
-           }
-        } catch (e) {
-           this.emit('auth:banned', { reason: 'Kicked by server' });
-           this.disconnect();
+          const parsedJson = JSON.parse(new TextDecoder().decode(payload)) as unknown;
+          if (typeof parsedJson === 'object' && parsedJson !== null && !Array.isArray(parsedJson)) {
+            json = parsedJson as Record<string, unknown>;
+          }
+        } catch {
+          json = {}; // payload tidak terbaca → server tetap menutup sesi ini
+        }
+
+        // [+] AMBIL DARI OBJECT USER
+        let currentDeviceId: string | null = null;
+        try {
+          const userJson = localStorage.getItem('user');
+          const parsedUser = userJson ? (JSON.parse(userJson) as unknown) : null;
+          currentDeviceId = (typeof parsedUser === 'object' && parsedUser !== null && 'deviceId' in parsedUser)
+            ? ((parsedUser as Record<string, unknown>).deviceId as string | null)
+            : localStorage.getItem('deviceId');
+        } catch {
+          currentDeviceId = localStorage.getItem('deviceId');
+        }
+
+        // Keputusan (ignore/banned/logout) hidup di helper murni supaya jalur WT
+        // dan WSS diuji dengan aturan yang sama — lihat forceLogout.ts.
+        const disposition = classifyKickPayload(json, currentDeviceId);
+        if (disposition.action === 'ignore') {
+           console.log("Ignored kick for different device ID:", disposition.deviceId);
+        } else if (disposition.action === 'auth_banned') {
+           this.emit('auth:banned', { reason: disposition.reason });
+        } else {
+           this.emit('force_logout', disposition.payload);
         }
         break;
+      }
       default:
         // Handle generic events
         try {
@@ -625,6 +669,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
    *   'message:new'     -> CHAT_MESSAGE  (di-re-encode ke Uint8Array, sama spt WT)
    *   'presence:update' -> PRESENCE      (di-re-encode ke Uint8Array, sama spt WT)
    *   'message:ack_delivered' -> ACK     (konfirmasi terkirim, resolve pendingAcks)
+   *   'webrtc:secure_signal' -> webrtc:signal (paritas opcode 0x03/0x04 jalur WT)
    *   'force_logout'    -> force_logout  (passthrough json.data)
    *   <json.event>      -> passthrough   (message:updated, conversation:*,
    *                                       user:updated, session:*, group:*,
@@ -635,6 +680,13 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       this.routeOpCode(TransportOpCode.CHAT_MESSAGE, this.encodeJson(data));
     } else if (eventName === 'presence:update') {
       this.routeOpCode(TransportOpCode.PRESENCE, this.encodeJson(data));
+    } else if (eventName === 'webrtc:secure_signal') {
+      // [PARITY 2026-10-18] Sinyal panggilan (envelope `{ from, type, payload }`).
+      // Di-re-encode ke byte lalu lewat `routeOpCode` yang SAMA dengan jalur WT,
+      // sehingga listener `webrtc:signal` (webrtc.ts) tidak tahu transport apa
+      // yang dipakai. WEBRTC_SIGNAL dipilih karena di WSS tidak ada perbedaan
+      // datagram/uni — sisi penerima menangani keduanya identik.
+      this.routeOpCode(TransportOpCode.WEBRTC_SIGNAL, this.encodeJson(data));
     } else if (eventName === 'message:ack_delivered') {
       // Opcode ACK server (konfirmasi pesan terkirim) -> resolve pendingAcks.
       this.handleAck(this.encodeJson(data));

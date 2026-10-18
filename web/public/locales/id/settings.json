@@ -139,6 +139,7 @@
     "biometric_initializing": "Menginisialisasi pemindai biometrik...",
     "biometric_scan_now": "Pindai sidik jari sekarang untuk MENGUNCI brankas Anda...",
     "biometric_success": "Biometrik aktif! Anda sekarang dapat masuk tanpa kata sandi.",
+    "biometric_enabled_not_verified": "Unlock biometrik aktif, tetapi passkey ini tersinkron (akun Google/Apple) sehingga tidak membuktikan perangkat. Upload dan pencarian pengguna luas tetap terkunci sampai Anda menambahkan authenticator device-bound atau security key.",
     "mining_connecting": "Menghubungkan ke penambangan...",
     "mining_processing": "Menambang teka-teki kriptografi... (Intensif CPU)",
     "mining_verifying": "Memverifikasi bukti...",

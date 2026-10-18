@@ -21,7 +21,7 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 |---|---|---|---|
 | POST | `/register` | public (authLimiter + Turnstile) | `{usernameHash, password, encryptedProfile, publicKey, pqPublicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken}` + headers `X-Nyx-Fingerprint`, `X-Nyx-Installation-Id` → `{user, accessToken, deviceId}` |
 | POST | `/login` | public (authLimiter) | `{usernameHash, password, publicKey?, pqPublicKey?, signingKey?, encryptedPrivateKey?, deviceName?, deviceId?}` + fingerprint/installation headers → `{user, accessToken, deviceId, encryptedPrivateKey?}` |
-| POST | `/refresh` | cookie `rt` | Rotates tokens; reuse detection revokes the whole family → `{accessToken}` |
+| POST | `/refresh` | cookie `rt` | Rotates tokens → `{accessToken}`. Replay is classified (dead family → 401 tanpa alarm; retry penerus langsung dalam `REFRESH_REPLAY_GRACE_MS` → dilanjutkan; replay asli → family di-revoke + `force_logout` ber-scope `deviceId`) |
 | POST | `/logout` | cookie | Revokes the refresh family, clears cookies |
 | POST | `/logout-all` | requireAuth | Revokes all sessions of the user + Redis `active_device` |
 | GET | `/recover/challenge` | public | Recovery challenge for an identifier |
@@ -136,6 +136,18 @@ Backup ber-frame terenkripsi (`.nyxbak`) — lihat `docs/31`. Server hanya melih
 Objek backup juga dihapus saat akun dihapus (`DELETE /api/users/me`, langkah 1b): kuncinya tidak memuat userId, sehingga filter lampiran berbasis prefix `${userId}-` tidak pernah mencakupnya.
 
 Batasan yang jujur: kuota ditegakkan terhadap `size` yang **diklaim klien** (sama seperti `/api/uploads/presigned`); penegakan keras ada di kebijakan bucket/lifecycle R2. Rotasi `BACKUP_KEY_SECRET`/`JWT_SECRET` membuat backup awan lama tidak bisa ditemukan lagi.
+
+## burner — `/api/burner`
+
+Status room Burner Chat (`/drop`). Hanya berisi satu bit informasi per room — tidak ada isi pesan, kunci, atau daftar anggota.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/:roomId/status` | requireAuth (`generalLimiter`) → `{ roomId, terminated }`. `:roomId` wajib berbentuk `burner_[A-Za-z0-9]{1,64}` (400 bila tidak) supaya endpoint ini tidak bisa dipakai membaca key Redis lain |
+
+Kenapa ada: destroy hanya disiarkan sebagai event realtime `burner:terminated` ke anggota room yang sedang terhubung. Guest yang offline, belum sempat `burner:join`, atau sudah berganti identitas setelah reload tidak akan pernah menerimanya — dulu halaman `/drop` bahkan tidak punya cara bertanya, sehingga room yang sudah mati tetap bisa dibuka (bahkan setelah refresh). Klien memanggil endpoint ini di `initializeFromHash` dan menolak render bila `terminated: true` (plus menulis penanda lokal `burned_<roomId>`).
+
+Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burner:send` (ACK `{ok}` / `{ok:false, error:'ROOM_TERMINATED'}`), `burner:reply` (ACK `{ok, notified}`), `burner:destroy` (ACK `{ok, notified}`; menyimpan `burner:terminated:<roomId>` TTL 24 jam sebelum menyiarkan `burner:terminated` ke anggota lalu menghapus set room).
 
 ## previews — `/api/previews`
 

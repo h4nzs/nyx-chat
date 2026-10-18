@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useBurnerStore } from '../store/burner';
+import { useBurnerStore, ensureBurnerTransport } from '../store/burner';
 import { useAuthStore } from '../store/auth';
 import { useTranslation } from 'react-i18next';
 import { transportClient, connectSocket } from '../lib/transportClient';
@@ -42,42 +42,27 @@ export default function BurnerChat() {
   }, []); // Run ONCE on mount
 
   useEffect(() => {
+    // [BURNER 2026-10-18] Satu pintu untuk memastikan transport guest hidup.
+    // Dulu jalur ini memakai `currentUser` dari closure: kalau store masih
+    // menyimpan guest lama tanpa accessToken (token hanya di memori), ia
+    // memanggil connectSocket() dengan token kosong dan TIDAK pernah meminta
+    // token guest baru — transport mati, kirim pesan hanya mengantre.
+    // `ensureBurnerTransport()` juga menerbitkan identitas baru saat token lama
+    // kedaluwarsa (guest tidak punya refresh token; AT hanya 15 menit).
     const initSocket = async () => {
-      const socket = transportClient;
-      
-      // Jika Guest (tidak ada user login), minta token sementara
-      if (!currentUser && !socket.connected) {
-         try {
-            const res = await api<{ accessToken: string; user: User; deviceId: string }>('/api/auth/burner', {
-              method: 'POST'
-            });
-            
-            // Simpan token sementara di Auth Store
-            useAuthStore.getState().setAccessToken(res.accessToken);
-            useAuthStore.getState().setUser(res.user);
-            localStorage.setItem('deviceId', res.deviceId);
-            
-            connectSocket();
-         } catch (e) {
-            console.error("Failed to get guest token:", e);
-            toast.error(t('chat:burner.init_failed'));
-         }
-      } else if (!socket.connected) {
-        connectSocket();
-      }
+      const ok = await ensureBurnerTransport();
+      if (!ok) toast.error(t('chat:burner.init_failed'));
     };
-    
-    initSocket();
+
+    void initSocket();
 
     // Reconnect handler for Guests
     const handleDisconnect = () => {
       if (!useAuthStore.getState().user?.id.startsWith('guest_')) return;
-      
+
       // Auto-reconnect guest after a short delay
       setTimeout(() => {
-        if (!transportClient.connected) {
-          initSocket();
-        }
+        if (!transportClient.connected) void initSocket();
       }, 2000);
     };
 
@@ -85,7 +70,7 @@ export default function BurnerChat() {
     return () => {
       transportClient.off('disconnect', handleDisconnect);
     };
-  }, [currentUser]);
+  }, [t]);
 
   useEffect(() => {
     if (location.hash) {
@@ -103,7 +88,17 @@ export default function BurnerChat() {
     const roomId = hashPart ? hashPart.split(':')[0] : undefined;
     if (!roomId) return;
 
-    const join = () => transportClient.sendEvent('burner:join', { roomId });
+    // ACK `burner:join` membawa status room: kalau host sudah menghancurkannya
+    // saat guest offline/tidak bergabung, guest tahu di sini — bukan menunggu
+    // event realtime yang sudah lewat. (Gerbang REST di `initializeFromHash`
+    // menutup kasus refresh; ini menutup kasus halaman yang tetap terbuka.)
+    const join = () => transportClient.sendEvent(
+      'burner:join',
+      { roomId },
+      (_err: unknown, res: { ok?: boolean; terminated?: boolean } | undefined) => {
+        if (res?.terminated) useBurnerStore.getState().markRoomDestroyed(roomId);
+      },
+    );
     join();
     transportClient.on('connect', join);
     return () => {
@@ -115,11 +110,36 @@ export default function BurnerChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const [isSending, setIsSending] = useState(false);
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-    await sendMessage(inputText);
-    setInputText('');
+    const text = inputText.trim();
+    if (!text || isSending) return;
+
+    setIsSending(true);
+    try {
+      // [BURNER 2026-10-18] Kegagalan kirim TIDAK boleh hening: sebelumnya
+      // store menelan error (hanya console.error) dan teks input tetap
+      // dikosongkan, sehingga pengguna melihat "tidak terjadi apa-apa".
+      const result = await sendMessage(text);
+      if (result.ok) {
+        setInputText('');
+        return;
+      }
+
+      if (result.error === 'ROOM_TERMINATED') {
+        toast.error(t('chat:burner.session_terminated', 'Sesi ini sudah dihancurkan oleh host.'), { id: 'burner-send' });
+        return;
+      }
+      if (result.error === 'OFFLINE') {
+        toast.error(t('chat:burner.offline', 'Tidak bisa terhubung ke server. Periksa koneksi Anda.'), { id: 'burner-send' });
+        return;
+      }
+      toast.error(t('chat:burner.send_failed', 'Pesan gagal dikirim. Coba lagi.'), { id: 'burner-send' });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -310,10 +330,10 @@ export default function BurnerChat() {
           {inputText.trim() ? (
             <button
               type="submit"
-              disabled={isUploading}
+              disabled={isUploading || isSending}
               className="bg-accent hover:bg-accent/90 disabled:opacity-50 text-white rounded-full p-2 w-10 h-10 flex items-center justify-center transition-colors"
             >
-              <FiSend size={18} />
+              {isSending ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <FiSend size={18} />}
             </button>
           ) : (
             <button

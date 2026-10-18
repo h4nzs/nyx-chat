@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TransportOpCode } from '@nyx/shared';
-import { handleChatMessage, handlePresence, handleKeySync, type RealtimeContext } from '../src/network/realtimeHandlers.js';
+import { handleChatMessage, handlePresence, handleKeySync, handleAck, handleWebRtcRelay, type RealtimeContext } from '../src/network/realtimeHandlers.js';
 import { conversationScopedTag } from '../src/utils/atRestSecrets.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -664,6 +664,84 @@ test('D2 guard: kedua jalur receipt memakai tag opaque, tidak ada fallback userI
     /persistedReaderId\s*=\s*[^;]*:\s*userId\b/,
     'regresi D2: fallback ke userId asli di MessageStatus'
   );
+});
+
+// --- [PARITY 2026-10-18] Rate limit jalur data di HANDLER (berlaku WT + WSS) ---
+//
+// Sebelumnya bucket ini hanya dipasang di gateway WSS, sehingga klien
+// WebTransport (transport utama) bisa mengirim tanpa batas. Test di bawah
+// mengunci: (a) bucket + angkanya dipasang di handler, (b) limit tercapai →
+// handler berhenti sebelum menyentuh DB/relay, (c) subscribe presence TIDAK
+// ikut terkena bucket presence_update (punya bucketnya sendiri).
+
+test('PARITY: handleChatMessage menegakkan bucket chat_message sebelum menyentuh DB', async () => {
+  const { ctx, calls } = makeCtx();
+  const seen: unknown[][] = [];
+  ctx.checkRateLimit = async (...a) => { seen.push(a); return false; };
+  let created = 0;
+  ctx.prisma = new Proxy(ctx.prisma as unknown as Record<string, unknown>, {
+    get(target, prop: string) {
+      if (prop === 'message') {
+        return {
+          create: async () => { created++; return { id: 'm1' }; },
+          findUnique: async () => null,
+        };
+      }
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as RealtimeContext['prisma'];
+
+  await handleChatMessage(ctx, 'u1', 'd1', { conversationId: 'c1', content: 'halo', tempId: 1 }, 'ack-1');
+
+  assert.deepEqual(seen[0], ['u1', 'chat_message', 120, 60], 'bucket + angka sama untuk kedua transport');
+  assert.equal(created, 0, 'limit tercapai → TIDAK boleh insert');
+  assert.equal(calls.sendJsonToUser.length, 0, 'ditolak = hening (perilaku WSS yang dipertahankan)');
+});
+
+test('PARITY: handleAck menegakkan bucket message_ack_delivered', async () => {
+  const { ctx, calls } = makeCtx();
+  const seen: unknown[][] = [];
+  ctx.checkRateLimit = async (...a) => { seen.push(a); return false; };
+
+  await handleAck(ctx, 'u1', 'd1', { conversationId: 'c1', messageId: 'm1' });
+
+  assert.deepEqual(seen[0], ['u1', 'message_ack_delivered', 240, 60]);
+  assert.equal(calls.sendJsonToUser.length, 0, 'tanpa limit tersisa → tidak ada notifikasi status');
+});
+
+test('PARITY: handlePresence menegakkan bucket presence_update untuk typing/active', async () => {
+  const { ctx } = makeCtx();
+  const seen: unknown[][] = [];
+  ctx.checkRateLimit = async (...a) => { seen.push(a); return false; };
+
+  await handlePresence(ctx, 'u1', { event: 'typing:start', conversationId: 'c1', targetRecipients: ['p1'] });
+
+  assert.deepEqual(seen[0], ['u1', 'presence_update', 30, 60]);
+});
+
+test('PARITY: presence:subscribe memakai bucket presence_subscribe (tidak dihitung ganda)', async () => {
+  const { ctx } = makeCtx();
+  const seen: unknown[][] = [];
+  ctx.checkRateLimit = async (...a) => { seen.push(a); return true; };
+  // collectPresencePeers menurunkan daftar peer dari membership → butuh array.
+  ctx.prisma = new Proxy(ctx.prisma as unknown as Record<string, unknown>, {
+    get(target, prop: string) {
+      if (prop === 'userHiddenConversation') return { findMany: async () => [] };
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as unknown as RealtimeContext['prisma'];
+
+  await handlePresence(ctx, 'u1', { event: 'presence:subscribe', userIds: [] });
+
+  assert.deepEqual(seen.map((s) => s[1]), ['presence_subscribe'], 'hanya bucket langganan yang dipakai');
+});
+
+test('PARITY: handleWebRtcRelay fail-closed untuk token relay tak dikenal (tanpa relay)', async () => {
+  const { ctx, calls } = makeCtx();
+
+  await handleWebRtcRelay(ctx, 'u1', 'd1', { to: 'token-tak-dikenal', type: 'offer', payload: 'x' }, TransportOpCode.WEBRTC_SIGNAL);
+
+  assert.equal(calls.sendJsonToUser.length, 0, 'token tak dikenal → drop, tidak ada penerusan');
 });
 
 test('T3a singular: pengirim tidak me-receipt pesannya sendiri (senderId === pseudonym)', async () => {

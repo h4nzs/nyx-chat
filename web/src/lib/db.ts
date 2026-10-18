@@ -16,6 +16,25 @@ export interface DecryptedMessageRecord {
   // (lihat versi 10 di bawah): pembacaannya lewat `openLocalText`/`openLocalFlag`.
   repliedToId?: string | null;
   repliedTo?: string; // Encrypted JSON string of the replied message
+  // [BUGFIX 2026-10-18] Reaksi (`Message.reactions`) ikut dipersist. Sebelumnya
+  // kolom ini tidak ada sehingga reaksi hidup hanya di memori: berpindah
+  // percakapan (store di-replace dari vault) dan reload menghapusnya.
+  // Disimpan sebagai JSON TER-SEAL (`ENC1:`) — emoji + userId = metadata
+  // perilaku, sama kelas dengan `senderId`/`repliedToId` (docs/30 WS-F).
+  reactions?: string | null;
+  // [BUGFIX 2026-10-18] Status baca (`Message.statuses`: DELIVERED/READ per
+  // penerima) ikut dipersist. Sebelumnya kolomnya tidak ada, jadi
+  // `updateMessageStatus` "menyimpan" ke vault yang membuang field itu — peta
+  // centang biru hidup hanya di memori dan hilang saat reload / ganti
+  // percakapan. Bentuknya sama dengan `reactions`: JSON TER-SEAL (`ENC1:`),
+  // karena userId + waktu baca = metadata perilaku (docs/30 WS-F).
+  statuses?: string | null;
+  // [BUGFIX 2026-10-18] Penanda pesan AUTO-DELETE (timer yang benar-benar
+  // dipilih pengirim), bukan TTL store-and-forward server yang selalu ada di
+  // `expiresAt`. Tanpa penanda ini, indikator hitung-mundur muncul di SEMUA
+  // pesan. Disimpan sebagai flag ter-seal (`ENC1:`) — pola yang sama dengan
+  // `isViewOnce`/`isDeletedLocal`.
+  autoDelete?: boolean | string;
   // [docs/30 WS-F] `createdAt` adalah **bentuk lama** (plaintext ISO/Date) yang
   // masih dibaca dari baris yang belum ditulis ulang; baris baru menyimpannya
   // ter-seal di `createdAtSealed` dan mengosongkan kolom ini (`null`).

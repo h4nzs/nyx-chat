@@ -1418,3 +1418,133 @@ tests:
       - eval_time: 10m
         alertname: NyxKtQueryMetricsIdentityLeakAttempt
         exp_alerts: []
+
+  # ==========================================================================
+  # [docs/30 §30.12 WS-H] Attestation pendaftaran + kesehatan bundle root.
+  #
+  # Empat perilaku yang diuji: penolakan `root_not_trusted` (perangkat nyata
+  # tidak bisa mendaftar), rasio penolakan tinggi (kebijakan vs lapangan), root
+  # kedaluwarsa di bundle, dan `nextUpdate` MDS yang lewat. Semuanya kegagalan
+  # yang TIDAK menghasilkan error server — hanya 403 per percobaan / berkas yang
+  # diam — jadi ekspresinya harus terbukti menyala dan terbukti diam.
+  # ==========================================================================
+  - name: 'NyxAttestationRootNotTrusted: menyala saat rantai berakhir di root tak dipercaya'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_registration_total{result="rejected",reason="root_not_trusted"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NyxAttestationRootNotTrusted
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: rejected
+              reason: root_not_trusted
+              alertname: NyxAttestationRootNotTrusted
+            exp_annotations:
+              summary: 'Pendaftaran ditolak: root attestation perangkat tidak dipercaya'
+              description: 'Ada rantai attestation yang berakhir di root di luar bundle operator (reason=root_not_trusted). Perangkat itu tidak bisa membuat akun baru. Salin kode penolakan dari body `403 ATTESTATION_REJECTED: <KODE>`, lalu segarkan bundle: `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` (tanpa restart) atau pin fingerprint vendor lewat ABUSE_ATTESTATION_ROOTS. Jangan longgarkan ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN untuk menutupinya.'
+
+  - name: 'NyxAttestationRootNotTrusted: tidak menyala untuk alasan lain'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_registration_total{result="rejected",reason="certificate_expired"}'
+        values: '0+1x20'
+      - series: 'nyx_attestation_registration_total{result="accepted",reason="none"}'
+        values: '0+5x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NyxAttestationRootNotTrusted
+        exp_alerts: []
+
+  - name: 'NyxAttestationRejectionRateHigh: menyala saat >50% pendaftaran ditolak'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_registration_total{result="accepted",reason="none"}'
+        values: '0+1x200'
+      - series: 'nyx_attestation_registration_total{result="rejected",reason="format_not_allowed"}'
+        values: '0+3x200'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: NyxAttestationRejectionRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxAttestationRejectionRateHigh
+            exp_annotations:
+              summary: 'Lebih dari separuh pendaftaran ditolak gerbang attestation'
+              description: 'Rasio penolakan terhadap (accepted+rejected) melewati 50% selama 30 menit dengan minimal 3 penolakan/jam. Kode di body `403 ATTESTATION_REJECTED: <KODE>` menentukan penyebabnya: `format_not_allowed`/`synced_authenticator`/`user_verification` = kebijakan lebih ketat dari perangkat pengguna; `root_not_trusted`/`certificate_expired` = bundle root ketinggalan. Rincian per alasan ada di seri metrik ini dengan label result=rejected.'
+
+  - name: 'NyxAttestationRejectionRateHigh: tidak menyala saat penolakan minoritas'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_registration_total{result="accepted",reason="none"}'
+        values: '0+10x200'
+      - series: 'nyx_attestation_registration_total{result="rejected",reason="user_verification"}'
+        values: '0+1x200'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: NyxAttestationRejectionRateHigh
+        exp_alerts: []
+
+  - name: 'NyxAttestationRejectionRateHigh: tidak menyala saat belum ada pendaftaran sama sekali'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_registration_total{result="accepted",reason="none"}'
+        values: '0x200'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: NyxAttestationRejectionRateHigh
+        exp_alerts: []
+
+  - name: 'NyxAttestationRootExpired: menyala saat bundle memuat root kedaluwarsa'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_roots_expired_certs'
+        values: '2x200'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxAttestationRootExpired
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxAttestationRootExpired
+            exp_annotations:
+              summary: 'Bundle root attestation memuat sertifikat kedaluwarsa'
+              description: 'nyx_attestation_roots_expired_certs > 0: ada anchor yang sudah lewat validTo dan tidak akan pernah bisa memverifikasi rantai baru. Segarkan bundle dengan `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` lalu restart nyx-api agar gauge dan peringatan boot ikut diperbarui.'
+
+  - name: 'NyxAttestationRootExpired: tidak menyala saat semua root masih berlaku'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_roots_expired_certs'
+        values: '0x200'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxAttestationRootExpired
+        exp_alerts: []
+
+  - name: 'NyxAttestationRootBundleStale: menyala saat nextUpdate MDS sudah lewat'
+    interval: 30s
+    input_series:
+      - series: 'nyx_attestation_roots_next_update_timestamp_seconds'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxAttestationRootBundleStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxAttestationRootBundleStale
+            exp_annotations:
+              summary: 'Bundle root attestation melewati nextUpdate MDS'
+              description: 'Metadata bundle menunjukkan tanggal nextUpdate FIDO MDS sudah lewat, jadi daftar root yang dianggap sah mungkin tidak lagi lengkap. Jalankan `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` (verifikasi JWS MDS ikut dijalankan) sebelum perangkat baru mulai ditolak dengan reason=root_not_trusted.'
+
+  # Tanpa metadata (operator memakai `bundle` manual / fingerprint saja), seri ini
+  # tidak ada. Aturan harus DIAM — bukan menyala karena gauge hilang.
+  - name: 'NyxAttestationRootBundleStale: tidak menyala saat metadata tidak ada'
+    interval: 30s
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: NyxAttestationRootBundleStale
+        exp_alerts: []

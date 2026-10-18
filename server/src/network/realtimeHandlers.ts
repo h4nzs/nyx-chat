@@ -66,6 +66,10 @@ import {
   senderIdForStorage,
 } from '../utils/senderIdentity.js';
 import { sanitizeGroupMetadataBlob } from '../utils/groupMetadataBlob.js';
+// [docs/30 §30.9 WS-E(2)] Relay panggilan dialamatkan lewat token relay buram.
+import { relayCallSignal } from '../utils/callRelayTokens.js';
+// [docs/30 WS-G] Metrik event-only: label = opcode pendek, tidak pernah userId.
+import { incCounter, SECURITY_BLOCKS } from '../utils/metrics.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -133,6 +137,35 @@ async function emitEventToUser(
   deviceId?: string
 ): Promise<void> {
   await ctx.sendJsonToUser(userId, TransportOpCode.KEY_SYNC, { event, data }, false, deviceId);
+}
+
+// ===========================================================================
+// [PARITY 2026-10-18] Rate limit jalur DATA — satu sumber untuk DUA transport.
+// ===========================================================================
+//
+// Sebelum ini ketiga bucket ini hanya dipasang di gateway WSS
+// (`realtime/gateway.ts`), sehingga klien yang memakai WebTransport — transport
+// UTAMA — bisa mengirim chat/ACK/presence tanpa batas apa pun (sidecar Rust tidak
+// punya limiter, dan `handleUpstreamMessage` hanya memeriksa active-device).
+// Dampaknya bukan teoretis: satu klien cacat/malicious bisa membanjiri insert DB
+// + fan-out `sendJsonToUser` lewat jalur cepat.
+//
+// Limit kini hidup di HANDLER (dipanggil identik oleh kedua relay), bukan di
+// gateway: satu bucket per (user, event), jadi tidak ada penghitungan ganda
+// untuk klien WSS (bucket yang sama akan ter-INCR dua kali per pesan kalau
+// keduanya memasang limit). Angka dipertahankan sama dengan yang dulu berlaku di
+// WSS supaya tidak ada klien WSS yang berubah perilakunya.
+//
+// Ini BUKAN regression source saat Redis mati: `createCheckRateLimit` fail-open
+// (docs → utils/redisResilience.ts), jadi outage Redis tetap meloloskan trafik.
+export const CHAT_RATE_LIMIT = { limit: 120, windowSeconds: 60 } as const;
+export const ACK_RATE_LIMIT = { limit: 240, windowSeconds: 60 } as const;
+/** Presence non-subscribe (user:active/away, typing:*). Subscribe punya bucket sendiri. */
+export const PRESENCE_RATE_LIMIT = { limit: 30, windowSeconds: 60 } as const;
+
+/** Label opcode yang aman untuk metrik (`0x3`) — nilai terbatas, tanpa identitas. */
+function opcodeLabel(opCode: number): string {
+  return `0x${opCode.toString(16)}`;
 }
 
 // ===========================================================================
@@ -220,6 +253,14 @@ export async function handleChatMessage(
   payload: unknown,
   msgId?: string
 ): Promise<void> {
+  // [PARITY] Rate limit sebelum menyentuh DB — berlaku di jalur WT & WSS.
+  // Ditolak = hening (tanpa ACK) supaya perilakunya sama dengan WSS sebelumnya;
+  // pesan yang tertahan di klien akan diretry oleh watchdog yang sudah ada.
+  if (!await ctx.checkRateLimit(userId, 'chat_message', CHAT_RATE_LIMIT.limit, CHAT_RATE_LIMIT.windowSeconds)) {
+    console.warn('[RateLimit] chat_message ditolak untuk', sanitizeForLog(userId));
+    return;
+  }
+
   let validatedPayload;
   try {
     validatedPayload = MessageSendPayloadSchema.parse(payload);
@@ -409,6 +450,14 @@ export async function handlePresence(
     return;
   }
 
+  // [PARITY] Presence non-subscribe (active/away/typing) — satu bucket, angka
+  // sama dengan yang dulu hanya dipasang di gateway WSS. `subscribe` sengaja
+  // TIDAK terkena limit ini (ia punya bucket `presence_subscribe` 60/60 di atas,
+  // dan menimpanya akan menurunkan jatah langganan presence).
+  if (!await ctx.checkRateLimit(userId, 'presence_update', PRESENCE_RATE_LIMIT.limit, PRESENCE_RATE_LIMIT.windowSeconds)) {
+    return;
+  }
+
   if (payload.event === 'active' || payload.event === 'user:active') {
     // [docs/28 Tier 1.5 / D14] `online_users` menyimpan TAG (bukan userId asli).
     const added = await ctx.pubClient.sAdd('online_users', identityTag(userId));
@@ -456,6 +505,10 @@ export async function handleAck(
   _deviceId: string,
   payload: { conversationId: string, messageId: string, targetRecipient?: string }
 ): Promise<void> {
+  // [PARITY] Bucket sama untuk kedua jalur (dulu hanya gateway WSS).
+  if (!await ctx.checkRateLimit(userId, 'message_ack_delivered', ACK_RATE_LIMIT.limit, ACK_RATE_LIMIT.windowSeconds)) {
+    return;
+  }
   await handleMessageStatusUpdate(ctx, userId, payload.conversationId, payload.messageId, 'DELIVERED', payload.targetRecipient);
 }
 
@@ -508,17 +561,9 @@ export async function handleKeySync(
          break;
        }
 
-       case 'session:request_missing': {
-         const { conversationId, targetId } = data as { conversationId: string, targetId?: string };
-         if (conversationId && targetId) {
-           await emitEventToUser(ctx, targetId, 'session:key_requested', {
-              conversationId,
-              requesterId: userId,
-              deviceId
-           });
-         }
-         break;
-       }
+       // [CLEANUP 2026-10-18] Event permintaan-kunci-hilang (session:request_missing)
+       // DIHAPUS dari handler: tidak ada klien yang mengirimnya, dan permintaan
+       // kunci yang nyata lewat session:request_key (butuh `targetId`, lihat di atas).
 
        case 'messages:distribute_keys': {
          // [T2 FINAL — REMOVED] Jalur legacy distribusi kunci grup dihapus
@@ -774,43 +819,78 @@ export async function handleKeySync(
          break;
        }
 
-       // --- BURNER CHAT EVENTS ---
-       case 'burner:join': {
-         const { roomId } = data as { roomId?: string };
-         // [docs/28 Tier 1.5 / D14] member = userId TER-SEAL (harus bisa dipulihkan
-         // untuk routing, tapi tidak boleh terbaca dari dump Redis).
-         if (roomId) await ctx.pubClient.sAdd(`burner:room:${roomId}`, await sealIdentity(userId));
-         break;
-       }
-       case 'burner:send': {
-         const { roomId, targetDeviceId, hostUserId, ciphertext } = data as { roomId: string, targetDeviceId?: string, hostUserId: string, ciphertext: string };
-         if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) return;
+      // --- BURNER CHAT EVENTS ---
+      //
+      // [BURNER 2026-10-18] Tiga aturan yang sebelumnya hilang dan membuat
+      // sesi terasa "mati diam-diam":
+      //   1. Room yang sudah terminated TIDAK boleh menjawab dengan hening —
+      //      klien menunggu ACK, jadi tanpa balasan tombol kirim tampak tidak
+      //      melakukan apa pun sampai timeout. Sekarang selalu di-ACK dengan
+      //      alasan `ROOM_TERMINATED`.
+      //   2. `burner:join` mengembalikan status terminated lewat ACK, sehingga
+      //      guest yang baru masuk tahu room sudah dihancurkan tanpa perlu
+      //      menunggu event realtime (yang bisa saja sudah lewat).
+      //   3. Pengirim selalu di-`sAdd` ulang ke room (self-heal). Membership
+      //      hilang saat transport putus (`handleDisconnect` menyapu semua
+      //      `burner:room:*`) — tanpa ini, destroy setelah satu reconnect tidak
+      //      pernah sampai ke guest.
+      case 'burner:join': {
+        const { roomId } = data as { roomId?: string };
+        if (!roomId) return;
+        const terminated = (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) === 1;
+        // [docs/28 Tier 1.5 / D14] member = userId TER-SEAL (harus bisa dipulihkan
+        // untuk routing, tapi tidak boleh terbaca dari dump Redis).
+        if (!terminated) await ctx.pubClient.sAdd(`burner:room:${roomId}`, await sealIdentity(userId));
+        if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, terminated });
+        break;
+      }
+      case 'burner:send': {
+        const { roomId, targetDeviceId, hostUserId, ciphertext } = data as { roomId: string, targetDeviceId?: string, hostUserId: string, ciphertext: string };
+        if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) {
+          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'ROOM_TERMINATED' });
+          return;
+        }
 
-         // Broadcast to all active sessions of the host if specific device ID fails or isn't strictly required
-         await ctx.sendJsonToUser(hostUserId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } }, false, targetDeviceId);
+        // Self-heal membership (lihat catatan di atas) supaya broadcast destroy
+        // berikutnya menemukan guest ini.
+        await ctx.pubClient.sAdd(`burner:room:${roomId}`, await sealIdentity(userId)).catch(() => {});
 
-         if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true });
-         break;
-       }
-       case 'burner:reply': {
-         const { roomId, ciphertext } = data as { roomId: string, ciphertext: string };
-         if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) return;
-         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`burner:room:${roomId}`));
-         for (const memberId of members) {
-            if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } });
-         }
-         break;
-       }
-       case 'burner:destroy': {
-         const { roomId } = data as { roomId: string };
-         await ctx.redisClient.set(`burner:terminated:${roomId}`, "1", { EX: 86400 });
-         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`burner:room:${roomId}`));
-         for (const memberId of members) {
-            await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:terminated', data: { roomId } });
-         }
-         await ctx.pubClient.del(`burner:room:${roomId}`);
-         break;
-       }
+        // Broadcast to all active sessions of the host if specific device ID fails or isn't strictly required
+        await ctx.sendJsonToUser(hostUserId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } }, false, targetDeviceId);
+
+        if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true });
+        break;
+      }
+      case 'burner:reply': {
+        const { roomId, ciphertext } = data as { roomId: string, ciphertext: string };
+        if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) {
+          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'ROOM_TERMINATED' });
+          return;
+        }
+        const members = await openIdentityMembers(await ctx.pubClient.sMembers(`burner:room:${roomId}`));
+        for (const memberId of members) {
+           if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } });
+        }
+        if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, notified: members.length });
+        break;
+      }
+      case 'burner:destroy': {
+        const { roomId } = data as { roomId: string };
+        if (!roomId) return;
+        // Set SEBELUM menyiarkan: guest yang membuka halaman tepat setelah ini
+        // harus melihat status terminated, bukan room hidup.
+        await ctx.redisClient.set(`burner:terminated:${roomId}`, "1", { EX: 86400 });
+        const members = await openIdentityMembers(await ctx.pubClient.sMembers(`burner:room:${roomId}`));
+        for (const memberId of members) {
+           await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:terminated', data: { roomId } });
+        }
+        await ctx.pubClient.del(`burner:room:${roomId}`);
+        // ACK ke host: `notified` memperlihatkan berapa sesi yang benar-benar
+        // dijangkau. Angka 0 bukan kegagalan destroy (status tetap tersimpan
+        // untuk gerbang REST), tapi berguna saat mendiagnosis guest yang putus.
+        if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, notified: members.length });
+        break;
+      }
 
        // --- MIGRATION EVENTS ---
        case 'migration:prepare': {
@@ -1150,4 +1230,45 @@ async function handleMessageStatusBatchUpdate(
     if ((e as Record<string, unknown>).code === 'P2003') return;
     console.error(`[RedisBridge] Failed to batch update message statuses:`, e);
   }
+}
+
+// ===========================================================================
+// WEBRTC_SIGNAL (0x03) / WEBRTC_ICE (0x04) — relay panggilan
+// ===========================================================================
+//
+// [PARITY 2026-10-18] Fungsi ini dulu hanya hidup di `redisBridge.ts` (jalur WT),
+// sehingga fallback WSS TIDAK punya jalur relay panggilan sama sekali: gateway
+// tidak mendaftarkan event masuk, dan `OUTGOING_OPCODE_MAP` menandai 0x03/0x04
+// sebagai noop (sinyal keluar hilang diam-diam). Dipindahkan ke sini supaya kedua
+// relay memakai logika yang sama — satu tempat, seperti handler lain.
+//
+// [docs/30 §30.9 WS-E(2)] `to` adalah **token relay**, bukan userId. Token tak
+// dikenal / bentuknya salah → drop (fail-closed) dan dihitung sebagai blokir
+// keamanan; envelope yang diteruskan memuat token PENGIRIM, jadi jalur relay,
+// log, dan pub/sub tidak pernah melihat pasangan userId→userId.
+export async function handleWebRtcRelay(
+  ctx: RealtimeContext,
+  fromUserId: string,
+  fromDeviceId: string | null,
+  payload: { to?: string; type?: string; payload?: string },
+  opCode: TransportOpCode
+): Promise<void> {
+  const decision = await relayCallSignal(ctx.redisClient, {
+    fromUserId,
+    fromDeviceId: fromDeviceId ?? null,
+    payload,
+  }).catch(() => null);
+
+  if (!decision) {
+    incCounter(SECURITY_BLOCKS, { op: opcodeLabel(opCode), reason: 'call_token_unknown' });
+    return;
+  }
+
+  await ctx.sendJsonToUser(
+    decision.target.userId,
+    opCode,
+    decision.envelope,
+    opCode === TransportOpCode.WEBRTC_ICE,
+    decision.target.deviceId ?? undefined
+  );
 }

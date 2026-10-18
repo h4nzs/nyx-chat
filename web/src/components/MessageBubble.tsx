@@ -62,8 +62,11 @@ function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true }
 
   // ✅ OPTIMASI TIMER: Hitung mundur dengan sangat pelan (setiap 60 detik) 
   // atau biarkan backend / efek global yang menghapus pesannya.
+  // [BUGFIX 2026-10-18] `expiresAt` pada 1:1 SELALU terisi (TTL store-and-forward
+  // server). Timer hanya boleh tampil bila pengirim benar-benar memilih
+  // auto-delete — penanda itu datang dari ciphertext (`autoDelete`).
   useEffect(() => {
-    if (!message.expiresAt || message.deletedAt) {
+    if (!message.autoDelete || !message.expiresAt || message.deletedAt) {
       setTimeLeft(null);
       return;
     }
@@ -97,7 +100,7 @@ function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true }
     // Perbarui hanya setiap 1 Menit (60.000 ms), bukan setiap 1 detik (1.000 ms)!
     const interval = setInterval(checkExpiration, 30000); 
     return () => clearInterval(interval);
-  }, [message.expiresAt, message.deletedAt, message.id, message.conversationId]);
+  }, [message.autoDelete, message.expiresAt, message.deletedAt, message.id, message.conversationId]);
 
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');

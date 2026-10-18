@@ -31,6 +31,7 @@ import {
   evaluateRegistrationBurst,
   isKnownRegistrationGuardModeValue,
   makeRegistrationGuard,
+  mayWaiveAttestation,
   parseRegistrationGuardMode,
   registrationAsnBurstKey,
   registrationAsnKey,
@@ -323,4 +324,22 @@ test('mode off tidak diturunkan dari nilai tak dikenal (fail-open, bukan blokir)
   // Kontras: mode `on` pada counter yang sama memang menahan.
   const strict = makeRegistrationGuard(async () => REGISTRATION_MAX_PER_SOURCE + 1, 'on');
   await assert.rejects(() => strict({ ip: '198.51.100.9', installationId: 'iid-x' }), /REGISTRATION_BURST_LIMIT/);
+});
+
+test('mayWaiveAttestation: hanya dengan env menyala DAN bukan permintaan dari burst sybil', () => {
+  const on = { ABUSE_ATTESTATION_ALLOW_UNATTESTED: 'on' };
+  const onSpaced = { ABUSE_ATTESTATION_ALLOW_UNATTESTED: ' ON ' };
+
+  // Normal: perangkat tanpa authenticator boleh mendaftar tanpa bukti.
+  assert.equal(mayWaiveAttestation(on, { requestedByBurst: false }), true);
+  assert.equal(mayWaiveAttestation(onSpaced, { requestedByBurst: false }), true);
+
+  // Default: tidak pernah boleh.
+  assert.equal(mayWaiveAttestation({}, { requestedByBurst: false }), false);
+  assert.equal(mayWaiveAttestation({ ABUSE_ATTESTATION_ALLOW_UNATTESTED: 'off' }, { requestedByBurst: false }), false);
+  assert.equal(mayWaiveAttestation({ ABUSE_ATTESTATION_ALLOW_UNATTESTED: 'aktif' }, { requestedByBurst: false }), false);
+
+  // Heuristik burst sybil per-ASN TIDAK boleh diakali dengan mengaku
+  // "perangkat tanpa authenticator" — jalur itu tetap menuntut bukti.
+  assert.equal(mayWaiveAttestation(on, { requestedByBurst: true }), false);
 });

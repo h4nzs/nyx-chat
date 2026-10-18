@@ -26,6 +26,7 @@ import {
   removeBioVaultEntry,
   clearAllBioVaults,
   hasAnyBioVault,
+  browserSupportsWebAuthn,
 } from '../biometricUnlock'
 
 // Helper replikasi format yang ditulis setupBiometricUnlock (untuk simulasi enroll):
@@ -111,5 +112,34 @@ describe('bio vault per-credential (kontrak storage)', () => {
   it('hasAnyBioVault: true saat hanya ada legacy (perangkat yang belum re-enroll)', () => {
     localStorageStub.setItem(LEGACY, JSON.stringify({ ciphertext: 'x', iv: 'y' }))
     expect(hasAnyBioVault()).toBe(true)
+  })
+
+  it('salt PRF per-credential ikut tersimpan dan tidak hilang saat entry lain dihapus', () => {
+    // Entry baru (format 2026-10-18) membawa salt acak; entry lama tidak.
+    localStorageStub.setItem(V2, JSON.stringify({
+      'cred-new': { ciphertext: 'ct-new', iv: 'iv-new', salt: 'c2FsdC1uZXc=' },
+      'cred-old': { ciphertext: 'ct-old', iv: 'iv-old' },
+    }))
+
+    removeBioVaultEntry('cred-old')
+
+    const map = JSON.parse(localStorageStub.getItem(V2)!)
+    // Salt harus bertahan — tanpa itu unlock memakai salt legacy dan dekripsi
+    // vault baru gagal (diam-diam jadi `recoveryPhrase: null`).
+    expect(map['cred-new'].salt).toBe('c2FsdC1uZXc=')
+  })
+})
+
+describe('deteksi dukungan WebAuthn', () => {
+  it('tidak mensyaratkan isConditionalMediationAvailable (tidak relevan untuk PRF)', () => {
+    vi.stubGlobal('PublicKeyCredential', {
+      isUserVerifyingPlatformAuthenticatorAvailable: async () => true,
+    })
+    expect(browserSupportsWebAuthn()).toBe(true)
+
+    vi.stubGlobal('PublicKeyCredential', undefined)
+    expect(browserSupportsWebAuthn()).toBe(false)
+
+    vi.unstubAllGlobals()
   })
 })

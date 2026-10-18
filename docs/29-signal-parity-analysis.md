@@ -282,8 +282,8 @@ tetap plaintext**: `id`, `isGroup`, `lastMessageAt`, `seq`, `updatedAt`
 
 > **[2026-10-12 — WS-F] Sebagian besar sudah ditutup:** `lastMessageAt`
 di-bucket 15 menit (bucket yang sama dengan server), `seq`/`senderId`/
-`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`Conversation.isGroup`
-ter-seal `ENC1:` di tempat, urutan pesan memakai skema dua lapis
+`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`Conversation.isGroup`/
+`Message.reactions` ter-seal `ENC1:` di tempat, urutan pesan memakai skema dua lapis
 (`orderBucketMs` plaintext + `createdAtSealed`), pencarian lewat indeks
 in-memory saat vault terbuka, dan `ContactRow.updatedAt` /
 `ProfileCacheRecord.updatedAt` di-seal di rel migrasi unlock. OPFS sudah benar
@@ -577,7 +577,7 @@ dikerjakan dan diganti KT penuh (§30.3, §30.5).
 | 1 | Gate + binding credential | `server/tests/credentialIssuance.test.ts` | issuance butuh bukti keanggotaan + tiket; presentasi context-bound ke conversation |
 | 2 | Verification state ke keychain + hard gate | `web/src/lib/__tests__/peerIdentityTrust.test.ts` | kunci berubah → kirim diblokir sampai konfirmasi; pin lama TIDAK ditimpa dan tersimpan terenkripsi |
 | 3 | Tanpa STUN pihak ketiga | `server/tests/turnIceServers.test.ts` | kegagalan TURN = error eksplisit + kunci `call_no_turn` di 4 bahasa |
-| 4 | Metadata lokal di-bucket / `ENC1:` | `web/src/lib/__tests__/localAtRest.test.ts`, `localOrderKey.test.ts`, `dexieMigration.test.ts` (IndexedDB nyata), `vaultSeqPersistence.test.ts`, `contactStore.test.ts` | `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`isGroup`/`ContactRow.updatedAt`/`ProfileCacheRecord.updatedAt` tidak lagi plaintext, `lastMessageAt` dipotong 15 menit (baris lama plaintext tetap terbaca + di-seal saat unlock) |
+| 4 | Metadata lokal di-bucket / `ENC1:` | `web/src/lib/__tests__/localAtRest.test.ts`, `localOrderKey.test.ts`, `dexieMigration.test.ts` (IndexedDB nyata), `vaultSeqPersistence.test.ts`, `vaultReactionsPersistence.test.ts`, `contactStore.test.ts` | `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`isGroup`/`Message.reactions`/`ContactRow.updatedAt`/`ProfileCacheRecord.updatedAt` tidak lagi plaintext, `lastMessageAt` dipotong 15 menit (baris lama plaintext tetap terbaca + di-seal saat unlock) |
 | 5 | Lint hidup lagi | `pnpm run lint` (oxlint, CI blocking pada `error`; kategori `correctness` **`error`** sejak 2026-10-14, 0 error) | sisa 194 `no-unused-vars` yang sengaja tetap `warn` dan dibersihkan bertahap |
 | 6 | KAT lintas-implementasi | `server/tests/cryptoKnownAnswer.test.ts` (RFC 7748/8032/7693/8439/9106 + invarian X-Wing), `web/src/lib/__tests__/argonKnownAnswer.test.ts` | `hash-wasm` tidak mengekspos associated data → tag RFC 9106 §5.3 diikat di server; sisi klien mengunci nilai penengah A/B yang sama |
 | 7 | Negosiasi kapabilitas | `web/src/lib/__tests__/transportCapabilities.test.ts`, `cargo test` di sidecar (`protocol::tests`) | HELLO wajib lewat stream **bidi**; di jalur uni/datagram sidecar mengabaikannya supaya opcode 0x0B tidak pernah muncul di `nyx:upstream:*` |

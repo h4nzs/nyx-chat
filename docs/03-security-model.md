@@ -40,7 +40,7 @@ flowchart LR
 ## 3.3 Authentication & sessions
 
 - **Registration/login:** Argon2id password hash (server), username blind-indexed with Argon2id **client-side** before leaving the device.
-- **Tokens:** short-lived JWT access (15m) + rotating refresh (30d) in `HttpOnly` cookies. Refresh rotation uses family reuse-detection — reuse of a revoked token revokes the entire family and blacklists JTIs in Redis.
+- **Tokens:** short-lived JWT access (15m) + rotating refresh (30d) in `HttpOnly` cookies. Refresh rotation keeps family replay-detection, but replay is classified before acting (`utils/refreshReplay.ts`): a family with no live token left is a plain 401, a direct-successor retry inside `REFRESH_REPLAY_GRACE_MS` (default 2 min) continues the chain, and only otherwise is the whole family revoked (JTIs blacklisted in Redis) with a **device-scoped** `force_logout`.
 - **CSRF:** double-submit cookie, server state keyed **per client** via the `x-nyx-installation-id` header. The client MUST send it consistently (same value as `getPersistentInstallationId()`) or mutations fail with 403.
 - **Single active device:** enforced server-side per-opcode (`redisBridge.isActiveDeviceAllowed`, 60s cache) and at sidecar AUTH. Migration mode (`is_migrating:<userId>`) temporarily allows two devices.
 

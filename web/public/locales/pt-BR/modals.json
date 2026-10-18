@@ -16,7 +16,10 @@
     "result_cloud": "Também salvo na nuvem.",
     "failed": "Não foi possível criar o backup.",
     "upload_success": "Cópia criptografada salva na nuvem.",
-    "upload_failed": "Falha no envio para a nuvem; o arquivo local continua salvo."
+    "upload_failed": "Falha no envio para a nuvem; o arquivo local continua salvo.",
+    "upload_unverified": "Conta não verificada — verifique este dispositivo para permitir backups na nuvem. O arquivo local continua salvo.",
+    "result_cloud_unverified": "Cópia na nuvem ignorada: conta não verificada. Verifique este dispositivo nas Configurações e crie o backup novamente.",
+    "result_cloud_failed": "Falha ao enviar a cópia para a nuvem — o arquivo .nyxbak neste dispositivo continua válido."
   },
   "backup_restore": {
     "title": "Restaurar de Arquivo de Backup",

@@ -45,5 +45,7 @@
   "registration_attestation_invalid": "The device verification could not be validated, so the account was not created.",
   "registration_attestation_hardware_required": "This device could not prove it is hardware-backed. Registration requires a hardware attestation (Touch ID / Windows Hello / security key).",
   "registration_attestation_user_verification": "Confirm with your PIN or biometrics to finish creating this account.",
+  "registration_attestation_no_platform": "This device has no platform authenticator (Touch ID, Windows Hello, or phone biometrics), so it cannot provide the required device attestation. Register from a phone or a laptop with built-in biometrics, then sign in here.",
+  "registration_attestation_cancelled": "Device verification was cancelled or timed out. Try again and confirm with your PIN or biometrics.",
   "client_too_old": "This NYX version is too old to keep working with the server (minimum {{minimum}}). Reload the page — if it stays the same, close and reopen the app (PWA) or reinstall it from the NYX site."
 }

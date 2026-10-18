@@ -59,13 +59,21 @@ describe('OUTGOING_OPCODE_MAP parity', () => {
     expect(OUTGOING_OPCODE_MAP[TransportOpCode.KEY_SYNC]).toEqual({ kind: 'derived' });
   });
 
-  it('opCode non-MVP (webrtc/kick/handshake/chaff) adalah noop', () => {
+  // [PARITY 2026-10-18] WEBRTC_SIGNAL/ICE dulu ada di daftar noop — sinyal
+  // panggilan hilang diam-diam di mode WSS. Sekarang keduanya dipetakan ke satu
+  // event yang sudah ada di kontrak shared (`webrtc:secure_signal`); server yang
+  // memutuskan diteruskan atau tidak (token relay tidak dikenal → drop).
+  it('WEBRTC_SIGNAL dan WEBRTC_ICE dipetakan ke webrtc:secure_signal (bukan noop)', () => {
+    expect(OUTGOING_OPCODE_MAP[TransportOpCode.WEBRTC_SIGNAL]).toEqual({ kind: 'fixed', event: 'webrtc:secure_signal' });
+    expect(OUTGOING_OPCODE_MAP[TransportOpCode.WEBRTC_ICE]).toEqual({ kind: 'fixed', event: 'webrtc:secure_signal' });
+  });
+
+  it('opCode yang memang tidak punya padanan WSS tetap noop', () => {
     const noopOpcodes = [
       TransportOpCode.CHAFF,
-      TransportOpCode.WEBRTC_SIGNAL,
-      TransportOpCode.WEBRTC_ICE,
       TransportOpCode.KICK,
       TransportOpCode.HANDSHAKE,
+      TransportOpCode.HELLO,
     ];
     for (const op of noopOpcodes) {
       expect(OUTGOING_OPCODE_MAP[op]).toEqual({ kind: 'noop' });

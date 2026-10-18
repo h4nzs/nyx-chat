@@ -98,7 +98,10 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       const { useConversationStore } = await import('@store/conversation');
       useConversationStore.getState().addParticipants(
         conversationId,
-        selectedUserIds.map(uid => ({ id: uid as never, name: '', role: 'MEMBER' as const }))
+        selectedUserIds.map(uid => ({ id: uid as never, name: '', role: 'MEMBER' as const })),
+        // [BUGFIX 2026-10-18] Token ikut metadata rotasi di bawah — kalau tidak,
+        // peta delivery token lokal tetap stale untuk anggota baru.
+        { deliveryTokens }
       );
       // [T1 FIX 2026-09-28] Rotasi AKTIF: metadata baru (member baru masuk peta,
       // generation+1) + distribusi kunci era baru SEKARANG — member baru tidak

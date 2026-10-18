@@ -219,6 +219,17 @@ found and fixed the remaining holes. All verified with the full unit suite
   wipes receiver states, era archives, or skipped keys (`deleteGroupStates`
   removed from the flow); old-era messages stay readable and
   `handleGroupKeyDistribution` archives eras on arrival (invariant 1).
+- **Kick ≠ hapus permanen (2026-10-18).** `conversation:deleted` dari jalur kick
+  kini membawa `reason: 'removed'`; klien menyembunyikan percakapan tetapi
+  **mempertahankan pesan ShadowVault + seluruh state grup** (sender/receiver,
+  arsip era, skipped keys). Sebelumnya listener ini memanggil
+  `removeConversation` → `deleteConversation()` yang menghapus semua receiver
+  state/arsip: anggota yang di-add kembali hanya bisa membaca pesan yang
+  message-key-nya sempat di-cache, sisanya `waiting_for_key` walau masih bagian
+  dari era yang sama. State yang dipertahankan hanya membuka era saat anggota
+  masih anggota — era pasca-kick tidak pernah diterima, jadi tidak ada
+  eskalasi akses. Hapus lokal (`reason: 'hidden'`) tetap membersihkan
+  riwayat + kunci.
 - The self-receiver state minted in `ensureGroupSession` carries
   `signingKey` — metadata v2 decryption demands `record.signingKey`, so a
   writer re-reading its own blob failed otherwise.

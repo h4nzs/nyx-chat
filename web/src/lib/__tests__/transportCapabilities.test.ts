@@ -273,3 +273,46 @@ describe('wiring klien', () => {
     expect(helper).toMatch(/capability: 'none'/);
   });
 });
+
+// ============================================================================
+// [PARITY 2026-10-18] Wiring gap WT ↔ WSS yang diperbaiki saat audit
+// ============================================================================
+describe('paritas jalur WT ↔ WSS (audit 2026-10-18)', () => {
+  const client = webFile('src/lib/transportClient.ts');
+  const mode = webFile('src/lib/transportMode.ts');
+  const gateway = repoFile('server/src/realtime/gateway.ts');
+  const sidecar = repoFile('server/transport-sidecar/src/main.rs');
+
+  it('sinyal panggilan (WEBRTC_SIGNAL/ICE) punya rute di KEDUA jalur', () => {
+    // Keluar (klien WSS): tabel opcode → event, bukan noop (dulu hilang diam-diam).
+    expect(mode).toMatch(/\[TransportOpCode\.WEBRTC_SIGNAL\]: \{ kind: 'fixed', event: 'webrtc:secure_signal' \}/);
+    expect(mode).toMatch(/\[TransportOpCode\.WEBRTC_ICE\]: \{ kind: 'fixed', event: 'webrtc:secure_signal' \}/);
+    // Masuk (klien WSS): envelope relay di-re-encode lalu lewat routeOpCode yang
+    // sama dengan jalur WT → listener `webrtc:signal` tidak tahu transportnya.
+    expect(client).toMatch(/eventName === 'webrtc:secure_signal'/);
+    expect(client).toMatch(/routeOpCode\(TransportOpCode\.WEBRTC_SIGNAL, this\.encodeJson\(data\)\)/);
+    // Server: gateway mendaftarkan event masuk DAN memetakan opcode keluar.
+    expect(gateway).toMatch(/guardedOn\('webrtc:secure_signal'/);
+    expect(gateway).toMatch(/sock\.emit\('webrtc:secure_signal', json\)/);
+  });
+
+  it('KICK di jalur WT: sidecar mengirim frame DULU, klien memetakannya seperti WSS', () => {
+    // Sidecar: frame 0x07 ditulis sebelum koneksi ditutup (dulu hanya close).
+    expect(sidecar).toMatch(/frame\.put_u8\(0x07\)/);
+    expect(sidecar).toMatch(/let _ = stream\.finish\(\)\.await;[\s\S]{0,120}conn_kick\.close\(1000u32\.into\(\), b"Kicked by server"\)/);
+    // Klien: keputusan device-scoped/banned/logout lewat helper murni bersama.
+    expect(client).toMatch(/classifyKickPayload\(json, currentDeviceId\)/);
+    expect(client).toMatch(/this\.emit\('force_logout', disposition\.payload\)/);
+    expect(client).toMatch(/this\.emit\('auth:banned', \{ reason: disposition\.reason \}\)/);
+    // Gateway WSS memakai event yang sama (kontrak tidak boleh menyimpang).
+    expect(gateway).toMatch(/case TransportOpCode\.KICK:[\s\S]{0,120}sock\.emit\('force_logout', json\)/);
+  });
+
+  it('rate limit jalur data tidak dipasang di klien/gateway lokal', () => {
+    // Gateway WSS memakai bucket HANDLER (satu hitungan; lihat gatewayParity.test.ts
+    // di paket server) — di sini dipastikan pesan:send tetap lewat handler itu.
+    expect(gateway).toMatch(/await handleChatMessage\(/);
+    expect(gateway).toMatch(/await handleAck\(/);
+    expect(gateway).toMatch(/await handlePresence\(/);
+  });
+});

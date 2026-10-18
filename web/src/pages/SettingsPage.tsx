@@ -21,7 +21,7 @@ import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import BackupRestoreModal from '../components/BackupRestoreModal';
 import BackupExportModal from '../components/BackupExportModal';
-import { api } from '@lib/api';
+import { api, handleApiError } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
 import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
 import { executeLocalWipe } from '@lib/nukeProtocol';
@@ -30,7 +30,7 @@ import { useProfileStore } from '@store/profile';
 import { useSettingsStore } from '@store/settings';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
-import { setupBiometricUnlock, browserSupportsWebAuthn, hasAnyBioVault } from '@lib/biometricUnlock';
+import { setupBiometricUnlock, setupBiometricUnlockWithExistingCredentials, browserSupportsWebAuthn, hasAnyBioVault } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
 import ImageCropperModal from '../components/ImageCropperModal';
@@ -330,24 +330,67 @@ export default function SettingsPage() {
       }
 
       toast.loading(t('settings:messages.biometric_initializing'), { id: 'passkey' });
+
+      // [2026-10-18] Pakai credential yang SUDAH ada lebih dulu — akun yang
+      // mendaftar dengan attestation sudah punya passkey; membuat passkey baru
+      // di sini menghasilkan dua kredensial tersinkron dan dua prompt.
+      const registered = await api<{
+        rpID: string;
+        credentials: Array<{ id: string; transports?: string[]; deviceType?: string; backedUp?: boolean }>;
+      }>("/api/auth/webauthn/credentials");
+
+      const existing = registered.credentials ?? [];
+      if (existing.length > 0) {
+        toast.loading(t('settings:messages.biometric_scan_now'), { id: 'passkey' });
+        await setupBiometricUnlockWithExistingCredentials(
+          { rpID: registered.rpID, credentials: existing },
+          phraseToLock
+        );
+        setShowUpgradeModal(false);
+        setHasBioVault(true);
+        // [2026-10-18] Enroll PRF di credential LAMA tidak menyentuh server:
+        // `isVerified` hanya naik lewat `/webauthn/register/verify` (registrasi
+        // baru) atau Proof of Trust. Jadi jangan klaim "terverifikasi" di sini —
+        // satu-satunya sumber kebenaran status itu adalah `user.isVerified`.
+        // Klaim palsu inilah yang sebelumnya menutupi penolakan 403 saat unggah
+        // backup ke awan ("biometric-nya sukses, kenapa awan tetap menolak?").
+        toast.success(
+          user?.isVerified === true
+            ? t('settings:messages.biometric_success')
+            : t('settings:messages.biometric_enabled_not_verified'),
+          { id: 'passkey' }
+        );
+        return;
+      }
+
+      // Akun tanpa authenticator (mendaftar lewat jalur unattested): buat satu
+      // credential, lalu tandai status verifikasi sesuai jawaban server —
+      // passkey tersinkron tidak lagi otomatis dianggap terverifikasi.
       const options = await api<unknown>("/api/auth/webauthn/register/options?force=true");
-      
+
       toast.loading(t('settings:messages.biometric_scan_now'), { id: 'passkey' });
-      
+
       const attResp = await setupBiometricUnlock(
         options as Record<string, unknown>,
         phraseToLock
-      );      
-      const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
+      );
+      const verificationResp = await api<{ verified: boolean; isVerified?: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
       });
 
       if (verificationResp.verified) {
-        toast.success(t('settings:messages.biometric_success'), { id: 'passkey' });
         setShowUpgradeModal(false);
         setHasBioVault(true);
-        if (user) setUser({ ...user, isVerified: true });
+        if (user) setUser({ ...user, isVerified: verificationResp.isVerified === true });
+        if (verificationResp.isVerified === true) {
+          toast.success(t('settings:messages.biometric_success'), { id: 'passkey' });
+        } else {
+          // Kredensial tersinkron (Google/Apple PM): biometric aktif, tapi
+          // sandbox tetap berlaku sampai user menambahkan authenticator
+          // device-bound.
+          toast.success(t('settings:messages.biometric_enabled_not_verified'), { id: 'passkey' });
+        }
       } else {
         throw new Error("Verification failed");
       }
@@ -355,7 +398,11 @@ export default function SettingsPage() {
       if ((error as Error).name === 'NotAllowedError') {
         toast.error(t('common:actions.cancel'), { id: 'passkey' });
       } else {
-        toast.error(`${t('common:errors.unknown')}`, { id: 'passkey' });
+        // [2026-10-18] Jangan telan penyebabnya. Sebelumnya semua kegagalan
+        // (termasuk 500 dari `/webauthn/register/options`) tampil sebagai
+        // "Unknown error", sehingga bug server tak bisa dilaporkan pengguna.
+        console.error('[Settings] biometric setup failed:', error);
+        toast.error(handleApiError(error), { id: 'passkey' });
       }
     }
   };

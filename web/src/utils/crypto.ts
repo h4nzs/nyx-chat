@@ -1,5 +1,6 @@
 import type { DoubleRatchetState, ConversationId, UserId, Pseudonym, GroupMemberEntry } from '@nyx/shared';
-import { asPseudonym, parseGroupMembers, getParticipantUserId } from '@nyx/shared';
+import { asPseudonym, getParticipantUserId } from '@nyx/shared';
+import { buildRotatedGroupMetadata, type RotationSourceMetadata } from '@lib/groupMetadataRotation';
 // [T1] Helper pseudonym ada di module ringan (testable tanpa graph worker);
 // di-import + di-re-export agar pemakaian lama tetap jalan.
 import {
@@ -1499,7 +1500,7 @@ export async function rotateGroupKey(
   // kunci jalan dengan peta LAMA lalu peta baru di-generate — identitas
   // distribusi tak konsisten dengan metadata baru. Kicked member tidak ada di
   // peta baru → era kunci baru tak bisa dia ikuti (doc 26.5/26.7.1).
-  const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string; generation?: number; members?: GroupMemberEntry[] } | undefined;
+  const existingMeta = conversation.decryptedMetadata as ({ v?: number; authSecret?: string } & RotationSourceMetadata) | undefined;
   if (existingMeta && (existingMeta.v === 2 || existingMeta.v === 3)) {
     try {
       // [P2 NORMALISASI] getParticipantUserId (dulu p.userId||p.id — kandidat
@@ -1508,20 +1509,15 @@ export async function rotateGroupKey(
       // [T4 ROSTER v3] Roster di-reconcile dengan participants store saat
       // rotasi: anggota baru masuk sebagai MEMBER, yang keluar dibuang; role
       // lain dipertahankan. Roster v2 lama dimigrasi ke v3 otomatis.
-      const prevMembers = parseGroupMembers(existingMeta.members);
-      const prevById = new Map(prevMembers.map(m => [m.userId, m]));
-      const generation = (existingMeta.generation ?? 0) + 1;
-      const members: GroupMemberEntry[] = participantIds.map(uid => {
-        const prev = prevById.get(uid);
-        return prev ?? { userId: uid, role: 'MEMBER' as const, joinedAtGeneration: generation };
-      });
-      const newEncrypted = await encryptGroupMetadata({
-        ...existingMeta,
-        participants: participantIds,
-        v: 3,
-        generation,
-        members,
-      }, conversationId);
+      // [BUGFIX 2026-10-18] Peta pseudonym LAMA dulu ikut via `...existingMeta`
+      // sehingga anggota baru tidak pernah masuk peta → dia bisa menerima tapi
+      // gagal mengirim (`requireGroupSenderIdentity` undefined). Helper membuang
+      // peta itu supaya encryptGroupMetadata meregenerasi untuk roster baru.
+      const { metadata: rotatedMeta } = buildRotatedGroupMetadata(existingMeta, participantIds);
+      const newEncrypted = await encryptGroupMetadata(
+        rotatedMeta as Parameters<typeof encryptGroupMetadata>[0],
+        conversationId
+      );
       // authSecret dari metadata (blind authorization untuk PUT details).
       if (existingMeta.authSecret) {
         const { getMyAdminToken } = await import('@lib/groupPseudonyms');
@@ -1977,7 +1973,12 @@ async function doEncryptMessage(
                // pernah di-rotate pseudonym-nya di jalur PCS. v juga DIWARISKAN
                // (dulu dipaksa v:2 → roster members v3 bisa hilang).
                const existingMeta = conversation.decryptedMetadata as { v?: number; authSecret?: string } | undefined;
-               if ((existingMeta?.v === 2 || existingMeta?.v === 3) && existingMeta.authSecret) {
+               // [BUGFIX 2026-10-18] PUT /:id/details = operasi ADMIN. Non-admin
+               // yang mencoba re-encrypt akan kena 403 (lalu tetap meng-update
+               // blob lokal → desync peta antar-anggota). Rotasi periodik cukup
+               // dilakukan admin; anggota lain tetap merotasi sender key mereka.
+               const { amIGroupAdmin } = await import('@lib/groupPseudonyms');
+               if ((existingMeta?.v === 2 || existingMeta?.v === 3) && existingMeta.authSecret && amIGroupAdmin(conversationId)) {
                    void encryptGroupMetadata({
                        ...existingMeta,
                        // [P2 NORMALISASI] getParticipantUserId (dulu p.userId||p.id).
@@ -1998,6 +1999,20 @@ async function doEncryptMessage(
                                body: JSON.stringify({ encryptedMetadata: newEncrypted }),
                            });
                            useConversationStore.getState().updateConversation(conversationId, { encryptedMetadata: newEncrypted });
+                           // [BUGFIX 2026-10-18] Emit metadata:updated (sama seperti
+                           // rotateGroupKey) — tanpa ini anggota lain baru melihat
+                           // blob era baru setelah reload.
+                           const { emitMetadataUpdated } = await import('@lib/transportClient');
+                           const { ensureMyPseudonym } = await import('@lib/groupPseudonyms');
+                           const myPseudoForMeta = await ensureMyPseudonym(conversationId);
+                           emitMetadataUpdated(
+                               conversationId,
+                               newEncrypted,
+                               conversation.participants
+                                   .map(getParticipantUserId)
+                                   .filter(uid => uid !== useAuthStore.getState().user?.id),
+                               myPseudoForMeta ?? useAuthStore.getState().user?.id
+                           );
                        })
                        .catch(e => console.warn('[T1] Background pseudonym-map rotation failed:', e));
                }

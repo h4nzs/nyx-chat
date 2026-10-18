@@ -286,3 +286,24 @@ export async function enforceRegistrationBurst(opts: {
     },
   });
 }
+
+/**
+ * [docs/30 §30.12 WS-H] Boleh membuat akun **tanpa** attestation karena
+ * perangkatnya memang tidak punya authenticator (desktop Linux tanpa
+ * security key)?
+ *
+ * Hanya bila operator menyalakannya secara eksplisit DAN permintaan attestation
+ * tidak datang dari heuristik burst sybil. Jalur burst tetap menuntut bukti:
+ * kalau tidak, satu ASN yang sedang dibanjiri pendaftaran bisa lolos hanya
+ * dengan mengirim `attestationUnavailable: true`, dan gerbang sybil kehilangan
+ * gunanya. Akun hasil jalur ini tetap `isVerified=false`, jadi upload dan
+ * pencarian luas tetap tertutup (sandbox) di `routes/uploads.ts` dan
+ * `routes/users.ts`.
+ */
+export function mayWaiveAttestation(
+  env: { ABUSE_ATTESTATION_ALLOW_UNATTESTED?: string | undefined },
+  opts: { requestedByBurst: boolean }
+): boolean {
+  if (opts.requestedByBurst) return false;
+  return (env.ABUSE_ATTESTATION_ALLOW_UNATTESTED ?? '').trim().toLowerCase() === 'on';
+}

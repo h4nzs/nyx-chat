@@ -66,11 +66,36 @@ describe('profileStore dual-write alias plain-id', () => {
         expect(profiles['peer1']!.name).toBe('Peer Name');
     });
 
-    it('getCacheOnly menemukan profil via alias walau key komposit belum ada', async () => {
-        // Simulasi: entri hanya alias (hasil dekripsi sebelumnya)
-        useProfileStore.setState({ profiles: { peer2: { name: 'Alias Only', avatarUrl: null, description: null } } });
+    it('getCacheOnly TIDAK memakai alias plain-id untuk ep yang berbeda (profil basi)', async () => {
+        // [BUGFIX 2026-10-18] Alias = hasil dekripsi ep LAMA. Pemanggil
+        // (`useUserProfile` untuk peer yang baru mengganti avatar) membawa ep
+        // BARU. Dulu alias dikembalikan sebagai "cache cepat" → dekripsi ep
+        // baru tak pernah jalan → nama/avatar di daftar chat & story tray beku,
+        // sementara bubble/modal info (jalur decryptAndCache eksplisit) berubah.
+        const OLD_EP = 'ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ';
+        useProfileStore.setState({
+            profiles: {
+                [`peer2_${OLD_EP.substring(0, 32)}`]: { name: 'Old Avatar', avatarUrl: 'https://cdn/old.png', description: null },
+                peer2: { name: 'Old Avatar', avatarUrl: 'https://cdn/old.png', description: null },
+            },
+        });
+
         const res = await useProfileStore.getState().getCacheOnly('peer2', EP);
-        expect(res?.name).toBe('Alias Only');
+        expect(res).toBeNull(); // ep baru → wajib dekripsi, bukan pakai alias
+
+        // Alur yang sama seperti useUserProfile: dekripsi ep baru → profil segar
+        profileKeys.set('peer2', 'k2');
+        const fresh = await useProfileStore.getState().decryptAndCache('peer2', EP);
+        expect(fresh.name).toBe('Peer Name');
+        expect(useProfileStore.getState().profiles['peer2']!.name).toBe('Peer Name');
+        expect(decryptProfileMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('getCacheOnly memakai IDB bila encryptedHash COCOK walau alias basi ada', async () => {
+        useProfileStore.setState({ profiles: { peer7: { name: 'Alias Basi', avatarUrl: null, description: null } } });
+        idbProfiles.set('peer7', { id: 'peer7', name: 'IDB Fresh', avatarUrl: null, description: null, encryptedHash: EP, updatedAt: 1 });
+        const res = await useProfileStore.getState().getCacheOnly('peer7', EP);
+        expect(res?.name).toBe('IDB Fresh');
     });
 
     it('decryptAndCache TANPA ep mengembalikan cache RAM alias tanpa dekripsi', async () => {

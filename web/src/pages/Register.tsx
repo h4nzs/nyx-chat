@@ -8,6 +8,7 @@ import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
 import { Turnstile } from '@marsidev/react-turnstile';
 import toast from "react-hot-toast";
 import { api } from "@lib/api";
+import { attestationErrorKey } from "@lib/registerAttestation";
 import { captureAndLog } from '@utils/feedback';
 import { FiShield, FiSkipForward, FiCpu, FiZap } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
@@ -158,7 +159,18 @@ export default function Register() {
       
     } catch (err: unknown) {
       sessionStorage.removeItem('nyx_registration_in_progress');
-      setError((err instanceof Error ? err.message : t('common:errors.unknown', 'Unknown error')) || t('auth:errors.registration_failed', 'Registration failed'));
+      // Kegagalan attestation datang sebagai kode (`ATTESTATION_*`) atau
+      // `NotAllowedError` mentah dari WebAuthn. Tampilkan kalimat yang bisa
+      // ditindaklanjuti, bukan kode/teks DOMException di bawah form.
+      const rawMessage = err instanceof Error ? err.message : '';
+      const isAttestationFailure =
+        rawMessage.startsWith('ATTESTATION_') ||
+        (err as { name?: unknown } | null)?.name === 'NotAllowedError';
+      setError(
+        isAttestationFailure
+          ? t(`errors:${attestationErrorKey(err)}`)
+          : (rawMessage || t('auth:errors.registration_failed', 'Registration failed'))
+      );
     }
   }
 

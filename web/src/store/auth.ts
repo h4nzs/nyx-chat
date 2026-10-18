@@ -9,6 +9,7 @@ import {
   attestationErrorKey,
   createRegistrationAttestation,
   isAttestationRequiredError,
+  isDeviceUnattestableError,
   type RegistrationAttestation
 } from "@lib/registerAttestation";
 import { disconnectSocket, connectSocket } from '@lib/transportClient';
@@ -190,6 +191,19 @@ type Actions = {
 let privateKeysCache: RetrievedKeys | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let keysRetrievalPromise: Promise<RetrievedKeys> | null = null;
+
+// [BUGFIX 2026-10-18] Sifat kegagalan refresh TERAKHIR. Pemanggil (authFetch)
+// perlu membedakan "server menolak sesi" (401/403 → logout wajar) dari
+// "jaringan/timeout/5xx" (sesi belum tentu mati → JANGAN logout & JANGAN revoke
+// family, karena itu mematikan tab/perangkat lain dan memicu false
+// reuse-detection). Modul-level (bukan state zustand) supaya tidak memicu
+// render percabangan.
+let lastRefreshFailureKind: 'auth' | 'transient' | null = null;
+
+/** `null` = tidak ada kegagalan sejak refresh terakhir yang dipanggil. */
+export function getLastRefreshFailureKind(): 'auth' | 'transient' | null {
+  return lastRefreshFailureKind;
+}
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
   const savedUser = localStorage.getItem("user");
@@ -460,13 +474,31 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             await get().tryAutoUnlock();
             get().loadBlockedUsers();
             prefetchAppChunks();
-          } catch {
-            throw new Error("No valid session.");
+          } catch (fallbackErr) {
+            // Status asli HARUS dipertahankan — outer catch memakainya untuk
+            // membedakan sesi mati (401/403) dari gangguan jaringan.
+            throw fallbackErr;
           }
         }
       } catch (error: unknown) {
         // Kasus normal saat berkunjung tanpa sesi — debug, bukan error
         console.debug("Bootstrap failed (No session):", error instanceof Error ? error.message : error);
+
+        // [BUGFIX 2026-10-18] Jangan hapus sesi lokal saat kegagalan bersifat
+        // TRANSIEN (offline/timeout/5xx). Dulu bootstrap menghapus `user` +
+        // localStorage pada kegagalan APA PUN, sehingga satu gangguan jaringan
+        // saat reload memaksa login ulang padahal `rt` masih 30 hari.
+        const status = (error as { status?: unknown } | null)?.status;
+        const transient =
+          status === undefined || status === null || status === 0 ||
+          (typeof status === 'number' && status >= 500) ||
+          lastRefreshFailureKind === 'transient';
+        if (transient && (get().user || localStorage.getItem("user"))) {
+          console.warn('[Bootstrap] Gangguan jaringan — sesi lokal dipertahankan, coba lagi nanti.');
+          set({ isBootstrapping: false });
+          return;
+        }
+
         privateKeysCache = null;
         set({ user: null, accessToken: null, blockedUserIds: [] });
         clearAuthCookies();
@@ -675,7 +707,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         // operator, atau heuristik burst sybil per-jaringan), jalankan upacara
         // WebAuthn lalu kirim ulang pendaftaran SEKALI bersama buktinya. Bila
         // tetap ditolak, akun tidak dibuat — kita tampilkan alasan yang jelas.
-        const registerOnce = (attestation?: RegistrationAttestation) =>
+        const registerOnce = (attestation?: RegistrationAttestation, unattested = false) =>
           api<{ accessToken: string; user: User; deviceId?: string; attestationTier?: string | null }>("/api/auth/register", {
             method: "POST",
             headers: {
@@ -692,7 +724,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
               encryptedPrivateKeys,
               deviceName: getDeviceName(),
               turnstileToken,
-              ...(attestation ? { attestation } : {})
+              ...(attestation ? { attestation } : {}),
+              // [WS-H] Perangkat tanpa authenticator sama sekali: server hanya
+              // menerimanya bila ABUSE_ATTESTATION_ALLOW_UNATTESTED=on. Tanpa itu
+              // server tetap 428 dan user melihat pesan "perlu perangkat".
+              ...(unattested ? { attestationUnavailable: true } : {})
             }),
           });
 
@@ -704,11 +740,29 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           try {
             res = await registerOnce(await createRegistrationAttestation());
           } catch (attestationError) {
-            toast.error(i18n.t(
-              `errors:${attestationErrorKey(attestationError)}`,
-              'Registration was rejected: this device could not provide the required hardware attestation.'
-            ));
-            throw attestationError;
+            // Perangkat yang TIDAK punya authenticator (desktop Linux tanpa
+            // Touch ID/Windows Hello dan tanpa security key) tidak bisa
+            // menyelesaikan upacara. Bila operator mengizinkan akun tanpa
+            // attestation, coba sekali lagi dengan penanda `attestationUnavailable`:
+            // akun dibuat `isVerified=false` (sandbox tetap aktif), jadi ini
+            // bukan verifikasi yang dilewati diam-diam. Pembatalan user
+            // (NotAllowedError) TIDAK lewat jalur ini — mereka diminta mengulang.
+            if (!isDeviceUnattestableError(attestationError)) {
+              toast.error(i18n.t(
+                `errors:${attestationErrorKey(attestationError)}`,
+                'Registration was rejected: this device could not provide the required hardware attestation.'
+              ));
+              throw attestationError;
+            }
+            try {
+              res = await registerOnce(undefined, true);
+            } catch (unattestedError) {
+              toast.error(i18n.t(
+                `errors:${attestationErrorKey(attestationError)}`,
+                'Registration requires device verification, which this device cannot provide.'
+              ));
+              throw unattestedError;
+            }
           }
         }
 
@@ -969,6 +1023,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       if (currentUser?.role === 'GUEST' || currentUser?.id?.startsWith('guest_')) return false;
 
       if (refreshPromise) return refreshPromise;
+      lastRefreshFailureKind = null;
 
       refreshPromise = (async () => {
         try {
@@ -997,7 +1052,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 return await api<Record<string, unknown>>('/api/auth/refresh', {
                   method: 'POST',
                 });
-              })
+              }),
+              3,
+              400,
+              (kind) => { lastRefreshFailureKind = kind; },
             );
             if (data && typeof data.accessToken === 'string') {
               set({ accessToken: data.accessToken });

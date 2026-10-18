@@ -139,6 +139,7 @@
     "biometric_initializing": "Iniciando escáner biométrico...",
     "biometric_scan_now": "Escanea tu huella ahora para BLOQUEAR tu bóveda...",
     "biometric_success": "¡Biometría activada! Ahora puedes entrar sin contraseña.",
+    "biometric_enabled_not_verified": "El desbloqueo biométrico está activo, pero esta passkey se sincroniza (cuenta de Google/Apple), así que no demuestra un dispositivo. Las subidas y la búsqueda amplia de usuarios siguen bloqueadas hasta que añadas un autenticador vinculado al dispositivo o una llave de seguridad.",
     "mining_connecting": "Conectando con la minería...",
     "mining_processing": "Minando puzzle criptográfico... (Uso intenso de CPU)",
     "mining_verifying": "Verificando prueba...",

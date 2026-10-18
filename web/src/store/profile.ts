@@ -37,10 +37,18 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     if (!encryptedProfile) return null;
     const cacheKey = `${userId}_${encryptedProfile.substring(0, 32)}`;
 
-    // 1. Check RAM (key komposit, lalu alias plain-id — sama-sama valid):
-    // alias aman di sini karena pemanggil getCacheOnly TIDAK akan mendekripsi
-    // (tanpa ep → null balik), jadi tidak ada risiko menyematkan profil basa.
-    const cached = get().profiles[cacheKey] ?? get().profiles[String(userId)];
+    // 1. Check RAM — HANYA key komposit milik `encryptedProfile` ini.
+    //
+    // [BUGFIX 2026-10-18] Dulu ada fallback ke alias plain-id. Itu membuat
+    // `useUserProfile` menyematkan profil LAMA selamanya: begitu peer mengganti
+    // avatar/nama, participant membawa ep baru → key komposit baru belum ada →
+    // alias (hasil dekripsi ep lama) dikembalikan sebagai "cache cepat", fungsi
+    // langsung return, dan dekripsi ep baru TIDAK PERNAH dijalankan. Gejalanya:
+    // avatar di daftar chat & story tray tetap lama padahal bubble pesan dan
+    // modal info (jalur `decryptAndCache` eksplisit) sudah berubah.
+    // Alias tetap dipakai pemanggil yang memang tidak punya ep (lihat selector
+    // `useUserProfile` dan `hydrateProfileForPlainId`).
+    const cached = get().profiles[cacheKey];
     if (cached) return cached;
 
     // 2. Check IndexedDB

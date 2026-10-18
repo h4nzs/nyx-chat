@@ -29,6 +29,7 @@ import keysRouter from "./routes/keys.js";
 import ktQueryRouter from "./routes/ktQuery.js";
 import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
+import burnerRouter from "./routes/burner.js";
 import sessionsRouter from "./routes/sessions.js";
 // [docs/30 §30.9 WS-E(2)] Penerbit alamat relay panggilan (token, bukan userId).
 import callTokensRouter from "./routes/callTokens.js";
@@ -461,6 +462,9 @@ app.use("/api/uploads", uploadsRouter);
 app.use("/api/backup", backupRouter);
 app.use("/api/previews", previewsRouter);
 app.use("/api/session-keys", sessionKeysRouter);
+// [BURNER 2026-10-18] Status room burner — gerbang destroy yang tidak bergantung
+// pada socket (guest offline / reload / membership basi).
+app.use("/api/burner", burnerRouter);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRouter);
 app.use("/api/engine", engineRouter);

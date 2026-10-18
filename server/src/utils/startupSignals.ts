@@ -27,6 +27,8 @@ export interface AbuseGuardEnv {
   ABUSE_REGISTRATION_GUARD?: string | undefined
   ABUSE_REQUIRE_ATTESTATION?: string | undefined
   ABUSE_ATTESTATION_ALLOW_UNVERIFIED_CHAIN?: string | undefined
+  ABUSE_ATTESTATION_ALLOW_NONE?: string | undefined
+  ABUSE_ATTESTATION_ALLOW_UNATTESTED?: string | undefined
   ABUSE_ATTESTATION_ROOTS?: string | undefined
   ABUSE_ATTESTATION_ROOTS_FILE?: string | undefined
   ADMIN_CLEANUP_SECRET?: string | undefined
@@ -108,6 +110,26 @@ export function startupWarnings(env: AbuseGuardEnv): string[] {
     } else if (!(env.ABUSE_ATTESTATION_ROOTS ?? '').trim() && !(env.ABUSE_ATTESTATION_ROOTS_FILE ?? '').trim()) {
       warnings.push(
         'Rantai attestation diperiksa ketat tapi belum ada root yang dipin: rantai perangkat nyata yang `x5c`-nya berhenti di intermediate (TPM/Apple/YubiKey) akan ditolak. Isi ABUSE_ATTESTATION_ROOTS_FILE dengan root vendor (docs/10 §10.16).'
+      )
+    }
+
+    // [2026-10-18] `ALLOW_NONE=on` membuat gerbang menerima passkey tersinkron
+    // (`fmt: none`, `multiDevice`) — alur default Android/iOS. Tanpa peringatan
+    // ini, satu env terlihat seperti "attestation menyala" padahal tidak ada
+    // bukti perangkat yang diperiksa sama sekali, dan akun hasil jalur itu juga
+    // tidak ditandai terverifikasi (`isVerified: tier === 'hardware'`).
+    if ((env.ABUSE_ATTESTATION_ALLOW_NONE ?? '').trim().toLowerCase() === 'on') {
+      warnings.push(
+        'ABUSE_ATTESTATION_ALLOW_NONE=on: pendaftaran menerima attestation `none` (passkey tersinkron) — gate TIDAK membuktikan perangkat keras lagi, hanya authenticator ber-UV. Akun lewat jalur ini dibuat dengan isVerified=false; sybil resistance bergantung pada Turnstile + ABUSE_REGISTRATION_GUARD (docs/10 §10.16). Jangan lupa menambahkan `none` ke ABUSE_ATTESTATION_FORMATS.'
+      )
+    }
+
+    // [2026-10-18] Jalur "perangkat tanpa authenticator sama sekali": akun
+    // dibuat tanpa bukti apa pun, jadi isVerified=false dan sandbox tetap aktif.
+    // Peringatan ini mencegahnya terlupakan sebagai keadaan permanen.
+    if ((env.ABUSE_ATTESTATION_ALLOW_UNATTESTED ?? '').trim().toLowerCase() === 'on') {
+      warnings.push(
+        'ABUSE_ATTESTATION_ALLOW_UNATTESTED=on: perangkat tanpa authenticator boleh mendaftar tanpa bukti. Akun tersebut isVerified=false (upload & pencarian luas tetap tertutup) dan jalur burst sybil per-ASN TIDAK bisa memakainya. Sybil resistance bergantung pada Turnstile + ABUSE_REGISTRATION_GUARD (docs/10 §10.16).'
       )
     }
   }

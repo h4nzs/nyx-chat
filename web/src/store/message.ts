@@ -7,6 +7,8 @@ import { createWithEqualityFn } from "zustand/traditional";
 const uuidv4 = () => crypto.randomUUID();
 import { api, authFetch } from "@lib/api"; 
 import { transportClient, emitSessionKeyRequest, emitGroupKeyDistribution } from '@lib/transportClient';
+// [BUGFIX 2026-10-18] Receipt pesan-tiba = 'messages:mark_delivered' (bukan READ).
+import { sendDeliveryReceipts } from '@lib/deliveryReceipts';
 import { captureAndLog } from '@utils/feedback';
 import { 
   encryptMessage, 
@@ -454,7 +456,12 @@ type Actions = {
   replaceOptimisticReaction: (conversationId: string, messageId: string, tempId: string, finalReaction: { id: string; emoji: string; userId: string; isMessage?: boolean }) => void;
   updateSenderDetails: (user: Partial<User>) => void;
   updateMessageStatus: (conversationId: string, messageId: string, userId: string, status: string) => void;
-  clearMessagesForConversation: (conversationId: string) => void;
+  /**
+   * `preserveVault`: jangan hapus pesan di ShadowVault maupun state kripto
+   * (kunci grup per era). Dipakai saat anggota dikeluarkan dari grup — riwayat
+   * harus tetap terbaca bila di-add kembali.
+   */
+  clearMessagesForConversation: (conversationId: string, opts?: { preserveVault?: boolean }) => void;
   retrySendMessage: (message: Message) => void;
   addSystemMessage: (conversationId: string, content: string) => Promise<void>;
   reDecryptPendingMessages: (conversationId: string) => Promise<void>;
@@ -474,6 +481,19 @@ type Actions = {
 // (epoch-detik | counter per-tab | boot-random) tahan collision antar-tab.
 // Kontrak retry-dengan-tempId-sama untuk dedupe server tidak berubah.
 const generateTempId = () => generateTempIdSafe();
+
+/**
+ * [BUGFIX 2026-10-18] Tulis keadaan reaksi terbaru ke ShadowVault.
+ *
+ * Reaksi dulu hanya hidup di store: vault tidak punya kolomnya, sehingga
+ * `loadMessagesForConversation` (langkah 1: baca vault → replace store) dan
+ * reload menghapus reaksi dari UI. Dipakai oleh SEMUA mutasi reaksi lokal:
+ * optimistik saat kirim, penggantian id temp oleh id server, echo socket, dan
+ * rollback saat kirim gagal — jadi vault selalu memegang keadaan akhirnya.
+ */
+function persistReactionsToVault(message: Message): void {
+  shadowVault.upsertMessages([message]).catch(captureAndLog);
+}
 
 const initialState: State = {
   messages: {},
@@ -820,6 +840,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     }
 
+    // [BUGFIX 2026-10-18] Penanda auto-delete (pengirim memilih timer di
+    // messageInput → `expiresAt` terisi). Dipakai bubble optimistik + ciphertext.
+    const isAutoDeleteRequested = !!data.expiresAt;
+
     if (!shouldBeSilent) {
         let optimisticContent = data.content;
         let isOptimisticSilent = false;
@@ -843,6 +867,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             sentAt: Date.now(),
             conversationId: asConversationId(conversationId),
             reactions: [],
+            // [BUGFIX 2026-10-18] Timer di bubble sendiri langsung benar (tanpa
+            // menunggu echo server) hanya bila pengirim memang menyalakan timer.
+            autoDelete: isAutoDeleteRequested ? true : undefined,
             statuses: [{ userId: asUserId(user.id), status: 'READ', messageId: asMessageId(`temp_${actualTempId}`), id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
             status: 'SENDING',
             repliedTo: data.repliedTo,
@@ -927,18 +954,31 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             // lebih dulu) supaya waktu di layar == waktu di ciphertext; fallback now.
             const pendingBubble = get().messages[conversationId]?.find(m => String(m.tempId) === String(actualTempId));
             const sentAt = typeof pendingBubble?.sentAt === 'number' ? pendingBubble.sentAt : Date.now();
+            // [BUGFIX 2026-10-18] Auto-delete = pengirim MEMILIH timer; satu-satunya
+            // sumber kebenarannya adalah `expiresAt` yang diisi messageInput store
+            // (TTL server 14 hari selalu ada di `expiresAt` wire, jadi tidak bisa
+            // dipakai sebagai penanda). Penanda ini ikut di dalam ciphertext supaya
+            // penerima tahu pesan ini memang menghapus diri.
+            const isAutoDelete = isAutoDeleteRequested;
 
             if (parsedObj && typeof parsedObj === 'object') {
                 if (profileKey) parsedObj.profileKey = profileKey;
                 if (myEncryptedProfile) parsedObj.encryptedProfile = myEncryptedProfile;
                 parsedObj.sentAt = sentAt;
+                if (isAutoDelete) parsedObj.autoDelete = true;
                 contentToEncrypt = JSON.stringify(parsedObj);
-            } else if (profileKey) {
-                const obj: Record<string, unknown> = { text: contentToEncrypt, profileKey, sentAt };
+            } else if (profileKey || isAutoDelete) {
+                // Teks polos tanpa profileKey: hanya dibungkus bila ada sesuatu
+                // yang harus dibawa (profil / penanda auto-delete) — jalur baca
+                // (`stripProfileKey`) sudah menangani envelope
+                // `{text, sentAt, autoDelete}` dan mengembalikannya sebagai teks.
+                const obj: Record<string, unknown> = { text: contentToEncrypt, sentAt };
+                if (profileKey) obj.profileKey = profileKey;
                 if (myEncryptedProfile) obj.encryptedProfile = myEncryptedProfile;
+                if (isAutoDelete) obj.autoDelete = true;
                 contentToEncrypt = JSON.stringify(obj);
             }
-            // Tanpa profileKey & bukan JSON → biarkan apa adanya; tampilan memakai
+            // Tanpa profileKey & tanpa timer → biarkan apa adanya; tampilan memakai
             // fallback `createdAt` server.
         } catch (e) {
             console.error("Failed to inject profile key", e);
@@ -1940,12 +1980,20 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             if (existing) {
                 const existingIsValid = (existing.content || existing.fileMeta || existing.fileUrl) && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(existing.content || '');
                 const mIsFailure = (!m.content && !m.fileMeta && !m.fileUrl) || ['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(m.content || '');
+                // [BUGFIX 2026-10-18] `reactions` selalu dibawa dari salinan
+                // yang punya keadaan itu — salinan server memang TIDAK pernah
+                // memuat reaksi (reaksi = pesan sinyal terpisah), jadi menang-nya
+                // copy server tidak boleh menghapus reaksi dari ui+vault.
+                // `[]` tetap menang (unsend = dibersihkan eksplisit).
+                const carryReactions = mIsFailure
+                    ? (existing.reactions ?? m.reactions)
+                    : (m.reactions ?? existing.reactions);
                 if (existingIsValid && mIsFailure) {
-                    uniqueMessagesMap.set(m.id, { ...existing, repliedTo: existing.repliedTo || m.repliedTo });
+                    uniqueMessagesMap.set(m.id, { ...existing, repliedTo: existing.repliedTo || m.repliedTo, reactions: carryReactions });
                 } else if (!existingIsValid && !mIsFailure) {
-                    uniqueMessagesMap.set(m.id, { ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                    uniqueMessagesMap.set(m.id, { ...m, repliedTo: m.repliedTo || existing.repliedTo, reactions: carryReactions });
                 } else {
-                    uniqueMessagesMap.set(m.id, { ...existing, ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                    uniqueMessagesMap.set(m.id, { ...existing, ...m, repliedTo: m.repliedTo || existing.repliedTo, reactions: carryReactions });
                 }
             } else {
                 uniqueMessagesMap.set(m.id, m);
@@ -2012,28 +2060,27 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const socket = transportClient;
         const { user } = useAuthStore.getState();
         if (socket?.connected && user) {
-          // [BATCH] Satu event plural (chunk 100 = BATCH_RECEIPT_MAX server)
-          // alih-alih N event per-pesan. targets (Opaque Mailbox) dipetakan per
-          // messageId karena DB 1:1 sealed-sender menyimpan senderId null.
+          // [BUGFIX 2026-10-18] Sync/backfill = pesan TIBA, bukan dibaca: receipt
+          // yang dikirim `DELIVERED`. Dulu jalur ini mengirim READ untuk SEMUA
+          // percakapan (doSyncMessages memanggil loadMessagesForConversation
+          // untuk setiap conversation saat connect) → pengirim melihat centang
+          // biru padahal penerimanya belum pernah membuka chat itu. READ sekarang
+          // hanya dari ChatWindow/MessageItem saat bubble benar-benar terlihat.
           const receiptable = processedMessages.filter(
             (m) => !isUndecryptable(m) && m.senderId && m.senderId !== user.id
           );
-          const CHUNK = 100;
           // [T3a] Identitas pembaca = pseudonym (grup metadata v2).
           const readerPseudonym = await getMyPseudonym(id);
           const sendReceiptBatch = () => {
-            for (let i = 0; i < receiptable.length; i += CHUNK) {
-              const chunk = receiptable.slice(i, i + CHUNK);
-              transportClient.sendEvent('messages:mark_as_read', {
-                conversationId: id,
-                messageIds: chunk.map((m) => m.id),
-                targets: Object.fromEntries(chunk.map((m) => [m.id, m.senderId as string])),
-                readerPseudonym,
-              });
-            }
+            sendDeliveryReceipts(
+              transportClient,
+              id,
+              receiptable.map((m) => ({ id: m.id, senderId: m.senderId as string })),
+              readerPseudonym,
+            );
           };
           // [26.10.5] Ephemeral receipts (grup Maximum / burner): kirim via
-          // jitter acak 0-45s agar waktu-baca tidak berkorelasi dengan
+          // jitter acak 0-45s agar waktu-tiba tidak berkorelasi dengan
           // waktu-buka. Receipt tetap pseudonym-scoped (T3a).
           if (receiptable.length > 0 && isEphemeralReceipts(id)) {
             scheduleEphemeralReceipt(id, RECEIPT_JITTER_MAX_MS, sendReceiptBatch);
@@ -2377,11 +2424,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
               if (!conv || conv.isGroup) return;
               const { noteDirectMessageContact } = await import('@lib/contactStore');
+              const senderEp = decryptedMsg.sender?.encryptedProfile ?? null;
               await noteDirectMessageContact({
                   conversationId,
                   senderId: decryptedMsg.senderId,
-                  encryptedProfile: decryptedMsg.sender?.encryptedProfile ?? null,
+                  encryptedProfile: senderEp,
               });
+              // [BUGFIX 2026-10-18] Snapshot participant 1:1 juga wajib disegarkan.
+              // Contact store saja tidak cukup: daftar chat & story tray membaca
+              // participant (yang menang atas fallback kontak), jadi tanpa ini
+              // avatar/nama baru hanya terlihat di bubble & modal info.
+              if (senderEp) {
+                  const currentUser = useAuthStore.getState().user;
+                  if (decryptedMsg.senderId !== currentUser?.id) {
+                      const peer = conv.participants.find(p => getParticipantUserId(p) === String(decryptedMsg.senderId));
+                      if (peer && peer.encryptedProfile !== senderEp) {
+                          useConversationStore.getState().updateParticipantDetails({
+                              id: asUserId(String(decryptedMsg.senderId)),
+                              encryptedProfile: senderEp,
+                          });
+                      }
+                  }
+              }
           } catch (e) {
               console.warn('[ContactStore] Gagal mencatat kontak dari pesan masuk:', e);
           }
@@ -2754,7 +2818,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
               // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
               // [FIX OFFLINE-LOSS] Jangan receipt pesan yang gagal didekripsi —
-              // server menghapus ciphertext 1:1 saat READ, dan pendingDecryptions
+              // server hanya menyingkat TTL 1:1 setelah READ, dan pendingDecryptions
               // (in-memory) hilang saat reload. Tunggu reDecrypt sukses; pesan yang
               // belum terbaca tetap aman di server untuk catch-up berikutnya.
               const socket = transportClient;
@@ -2764,20 +2828,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent && isLiveReadSafe) {
                   // [T3a] pembaca grup v2 dikenali via pseudonym
                   const readerPseudonym = await getMyPseudonym(conversationId);
-                  const sendLiveRead = () => {
-                      transportClient.sendEvent('message:mark_as_read', {
-                          messageId: finalDecrypted.id,
-                          conversationId: conversationId,
-                          targetRecipient: finalDecrypted.senderId,
+                  // [BUGFIX 2026-10-18] Pesan yang baru TIBA = `DELIVERED`, bukan
+                  // READ. Menandai READ di sini membuat centang biru muncul di
+                  // pengirim hanya karena penerimanya online — walau percakapan
+                  // ini tidak sedang dibuka/di-render. READ dikirim oleh
+                  // ChatWindow + IntersectionObserver saat bubble terlihat.
+                  const sendLiveReceipt = () => {
+                      sendDeliveryReceipts(
+                          transportClient,
+                          conversationId,
+                          [{ id: finalDecrypted.id, senderId: finalDecrypted.senderId }],
                           readerPseudonym,
-                      });
+                      );
                   };
                   // [26.10.5] Ephemeral receipts (grup Maximum / burner): jitter acak
                   // 0-45s — receipt tetap terkirim, waktunya tidak bisa dikorelasikan.
                   if (isEphemeralReceipts(conversationId)) {
-                      scheduleEphemeralReceipt(conversationId, RECEIPT_JITTER_MAX_MS, sendLiveRead);
+                      scheduleEphemeralReceipt(conversationId, RECEIPT_JITTER_MAX_MS, sendLiveReceipt);
                   } else {
-                      sendLiveRead();
+                      sendLiveReceipt();
                   }
               }
 
@@ -2927,41 +2996,56 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   removeMessage: (conversationId, messageId) => {
-    set(state => {
-      const messages = state.messages[conversationId] || [];
-      const messageToRemove = messages.find(m => m.id === messageId);
-      
-      if (messageToRemove) {
-          if (messageToRemove.fileUrl?.startsWith('blob:')) {
-            URL.revokeObjectURL(messageToRemove.fileUrl);
-          }
-          shadowVault.upsertMessages([{ ...messageToRemove, content: null, fileUrl: undefined, isDeletedLocal: true }]).catch(captureAndLog);
-      } else {
-          shadowVault.upsertMessages([{ id: messageId, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message]).catch(captureAndLog);
-      }
+    const messages = get().messages[conversationId] || [];
+    const messageToRemove = messages.find(m => m.id === messageId);
 
-      import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(captureAndLog);
-
-      const updatedMessages = messages.map(m => {
-          if (m.id === messageId) {
-              return { ...m, content: null, fileUrl: undefined, isDeletedLocal: true, reactions: [] };
-          }
-          if (m.reactions && m.reactions.some(r => r.id === messageId)) {
-              return {
-                  ...m,
-                  reactions: m.reactions.filter(r => r.id !== messageId)
-              };
-          }
-          return m;
-      });
-
-      return {
-        messages: {
-            ...state.messages,
-            [conversationId]: updatedMessages,
+    if (messageToRemove) {
+        if (messageToRemove.fileUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(messageToRemove.fileUrl);
         }
-      };
+        shadowVault.upsertMessages([{ ...messageToRemove, content: null, fileUrl: undefined, isDeletedLocal: true }]).catch(captureAndLog);
+    } else {
+        shadowVault.upsertMessages([{ id: messageId, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message]).catch(captureAndLog);
+    }
+
+    import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(captureAndLog);
+
+    const updatedMessages = messages.map(m => {
+        if (m.id === messageId) {
+            return { ...m, content: null, fileUrl: undefined, isDeletedLocal: true, reactions: [] };
+        }
+        if (m.reactions && m.reactions.some(r => r.id === messageId)) {
+            return {
+                ...m,
+                reactions: m.reactions.filter(r => r.id !== messageId)
+            };
+        }
+        return m;
     });
+
+    set(state => ({
+      messages: {
+          ...state.messages,
+          [conversationId]: updatedMessages,
+      }
+    }));
+
+    // [2026-10-18] Kalau pesan yang dihapus adalah preview daftar chat, teksnya
+    // dulu tetap terpampang (preview hanya diperbarui saat ada pesan berikutnya)
+    // — daftar chat menampilkan pesan yang sudah tidak ada. Hitung ulang ke pesan
+    // terlihat berikutnya, atau `null` bila riwayatnya habis.
+    void (async () => {
+      try {
+        const m = await import('@store/conversation');
+        const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
+        if (conv?.lastMessage?.id !== messageId) return;
+        const { pickPreviewLastMessage } = await import('@utils/messagePreview');
+        const fallback = pickPreviewLastMessage(updatedMessages.filter(msg => msg.id !== messageId));
+        m.useConversationStore.getState().forceConversationLastMessage(conversationId, fallback);
+      } catch (e) {
+        captureAndLog(e);
+      }
+    })();
   },
 
   updateMessage: (conversationId, messageId, updates) => {
@@ -2981,11 +3065,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             shadowVault.upsertMessages([updatedMsg]); 
         }
 
-        import('@store/conversation').then(m => {
+        import('@store/conversation').then(async (m) => {
             const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
-            if (conv?.lastMessage?.id === messageId) {
+            if (conv?.lastMessage?.id !== messageId) return;
+
+            // [2026-10-18] Pesan yang menjadi preview bisa berubah menjadi
+            // "tidak terlihat" (view-once dibuka, dihapus/unsend). Dulu jalur ini
+            // menuliskan nisan ke `lastMessage` → daftar chat menampilkan
+            // "belum ada pesan" padahal masih ada riwayat. Sekarang preview
+            // dihitung ulang dari pesan terlihat TERBARU yang tersisa.
+            const { isPreviewableMessage, pickPreviewLastMessage } = await import('@utils/messagePreview');
+            if (isPreviewableMessage(messageForPreview)) {
                 m.useConversationStore.getState().updateConversationLastMessage(conversationId, messageForPreview);
+                return;
             }
+
+            const remaining = updatedMessages.filter(msg => msg.id !== messageId);
+            const fallback = pickPreviewLastMessage(remaining);
+            m.useConversationStore.getState().forceConversationLastMessage(conversationId, fallback);
         }).catch(captureAndLog);
       }
       return { messages: { ...state.messages, [conversationId]: updatedMessages } };
@@ -3001,24 +3098,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           if (!newReactions.some(r => r.id === reaction.id)) {
             newReactions.push({ ...reaction, userId: asUserId(reaction.userId) });
             }
-            return { ...m, reactions: newReactions };
+            const updated = { ...m, reactions: newReactions };
+            persistReactionsToVault(updated);
+            return updated;
             }
             return m;
             })
             }
             })),
 
-            removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m) } })),
+            removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({
+              messages: {
+                ...state.messages,
+                [conversationId]: (state.messages[conversationId] || []).map(m => {
+                  if (m.id !== messageId) return m;
+                  const updated = { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) };
+                  persistReactionsToVault(updated);
+                  return updated;
+                })
+              }
+            })),
 
             replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => ({
             messages: {
             ...state.messages,
             [conversationId]: (state.messages[conversationId] || []).map(m => {
             if (m.id === messageId) {
-            return {
+            const updated = {
             ...m,
             reactions: (m.reactions || []).map(r => r.id === tempId ? { ...finalReaction, userId: asUserId(finalReaction.userId) } : r),
             };
+            persistReactionsToVault(updated);
+            return updated;
             }
             return m;
             })
@@ -3099,9 +3210,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             });
           },
 
-            clearMessagesForConversation: (conversationId) => {
-            shadowVault.deleteConversationMessages(conversationId).catch(captureAndLog);
-            import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(captureAndLog);
+            clearMessagesForConversation: (conversationId, opts) => {
+            // [BUGFIX 2026-10-18] Kick (`preserveVault`) tidak boleh menyentuh
+            // vault/kunci: pesan tetap disimpan dan kunci era lama dipakai lagi
+            // untuk membaca riwayat setelah anggota di-add kembali.
+            if (!opts?.preserveVault) {
+                shadowVault.deleteConversationMessages(conversationId).catch(captureAndLog);
+                import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(captureAndLog);
+            }
 
             set(state => {
             const newMessages = { ...state.messages };

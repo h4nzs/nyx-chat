@@ -504,6 +504,56 @@ export const ABUSE_GUARD_ENABLED = defineGauge(
 );
 
 /**
+ * [docs/30 §30.12 WS-H] Hasil gerbang attestation perangkat saat pendaftaran
+ * akun baru, per hasil + alasan.
+ *
+ * Kenapa butuh metrik, bukan cuma log `403`: penolakan attestation tampak
+ * seperti pengguna yang salah mengisi form. Tidak ada error server, tidak ada
+ * penolakan di endpoint lain, dan satu-satunya jejak adalah satu baris log per
+ * percobaan. Dua keadaan paling mahal justru berbentuk begitu:
+ *
+ *   1. `result="rejected", reason="root_not_trusted"` — bundle root operator
+ *      ketinggalan model perangkat baru, sehingga **akun baru tidak bisa
+ *      dibuat** oleh pemilik perangkat itu, bukan hanya oleh sybil;
+ *   2. laju penolakan tinggi secara umum (`result="rejected"` dibanding
+ *      `result="accepted"`) — kebijakan tidak cocok dengan perangkat di
+ *      lapangan, dan itu harus terlihat sebelum jadi keluhan.
+ *
+ * Label `reason` hanya memuat kode enum pendek dari `attestationReasonCode()`:
+ * kode asli pemeriksa rantai lebih panjang dari batas label dan sebagian memuat
+ * nama OID/penerbit. Alasan yang belum dipetakan masuk sebagai `unmapped` —
+ * jadi penambahan kode baru justru terlihat, bukan hilang.
+ */
+export const ATTESTATION_REGISTRATION = defineCounter(
+  'nyx_attestation_registration_total',
+  'Hasil verifikasi attestation perangkat pada pendaftaran akun baru, per hasil dan alasan',
+  ['result', 'reason']
+);
+
+/**
+ * [docs/30 §30.12 WS-H] Keadaan bundle root attestation, diisi saat boot dari
+ * berkas + metadata yang ditulis `scripts/attestation-roots.mjs refresh`.
+ *
+ * Kenapa gauge, bukan cuma peringatan log: peringatan boot hanya terlihat oleh
+ * orang yang membaca log tepat setelah restart — padahal bundle basi justru
+ * masalah BERJALAN LAMA (MDS `nextUpdate` lewat 3 minggu, root vendor
+ * kedaluwarsa), dan tidak menghasilkan error apa pun sampai perangkat baru
+ * ditolak. Dua gauge ini membuat hal itu bisa di-alert (`NyxAttestationRoot*`).
+ *
+ * Tanpa `ABUSE_ATTESTATION_ROOTS_FILE`, gauge TIDAK di-set: aturan alert jadi
+ * diam, bukan menyala palsu untuk deployment yang tidak memakai attestation.
+ */
+export const ATTESTATION_ROOTS_EXPIRED_CERTS = defineGauge(
+  'nyx_attestation_roots_expired_certs',
+  'Jumlah sertifikat root attestation di bundle yang sudah lewat validTo'
+);
+
+export const ATTESTATION_ROOTS_NEXT_UPDATE = defineGauge(
+  'nyx_attestation_roots_next_update_timestamp_seconds',
+  'Tanggal nextUpdate FIDO MDS dari metadata bundle root attestation (detik epoch)'
+);
+
+/**
  * [docs/29 §5.6 · docs/33 §33.7] Kapabilitas hasil negosiasi jalur **WSS**,
  * per kapabilitas (`capability="none"` = klien mengiklankan sesuatu yang tidak
  * dikenal gateway).

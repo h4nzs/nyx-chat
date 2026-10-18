@@ -215,6 +215,74 @@ test('gateway WSS membalas kapabilitas hasil irisan (paritas dengan HELLO sideca
   assert.doesNotMatch(gatewaySource, /'spqr-ratchet'/, 'nama kapabilitas hidup di @nyx/shared');
 });
 
+// ============================================================================
+// [PARITY 2026-10-18] Gap yang ditemukan saat audit jalur WT ↔ WSS
+// ============================================================================
+//
+// Tiga kelas gap (rate limit hanya di WSS, sinyal WebRTC hilang di WSS, dan
+// bucket presence beda angka) sudah diperbaiki. Test di bawah mengunci perbaikan
+// itu supaya tidak kembali secara diam-diam.
+
+test('rate limit jalur data hidup di HANDLER, bukan di gateway (satu hitungan untuk dua transport)', () => {
+  // Kalau bucket dipasang di DUA tempat, klien WSS menghitung ganda (limit
+  // efektif separuh) — dan klien WT tetap tak terlindungi.
+  for (const bucket of ['chat_message', 'message_ack_delivered', 'presence_update']) {
+    assert.doesNotMatch(
+      gatewaySource,
+      new RegExp(`checkRateLimit\\(userId, '${bucket}'`),
+      `bucket '${bucket}' harus dipasang di realtimeHandlers, bukan gateway`
+    );
+  }
+
+  const expectations: Array<[string, string]> = [
+    ['chat_message', 'CHAT_RATE_LIMIT'],
+    ['message_ack_delivered', 'ACK_RATE_LIMIT'],
+    ['presence_update', 'PRESENCE_RATE_LIMIT'],
+  ];
+  for (const [bucket, constName] of expectations) {
+    assert.match(
+      handlersSource,
+      new RegExp(`checkRateLimit\\(userId, '${bucket}', ${constName}\\.limit, ${constName}\\.windowSeconds\\)`),
+      `handler harus menegakkan bucket '${bucket}' untuk KEDUA transport`
+    );
+  }
+  // Angka bucket dikunci sekali di sini (nilai efektifnya juga diuji perilaku
+  // di realtimeHandlers.test.ts).
+  assert.match(handlersSource, /CHAT_RATE_LIMIT = \{ limit: 120, windowSeconds: 60 \} as const/);
+  assert.match(handlersSource, /ACK_RATE_LIMIT = \{ limit: 240, windowSeconds: 60 \} as const/);
+  assert.match(handlersSource, /PRESENCE_RATE_LIMIT = \{ limit: 30, windowSeconds: 60 \} as const/);
+});
+
+test('gateway WSS merutekan sinyal WebRTC dua arah (paritas opcode 0x03/0x04)', () => {
+  // Masuk: klien WSS mengirim event yang sama dengan yang dipakai di shared
+  // socket contract; keluar: envelope relay dipetakan ke event itu, BUKAN
+  // jatuh ke cabang default (`message:new`).
+  assert.match(gatewaySource, /guardedOn\('webrtc:secure_signal'/, 'sinyal masuk harus terdaftar di gateway');
+  assert.match(gatewaySource, /handleWebRtcRelay\(/, 'gateway harus memakai handler relay bersama');
+  assert.match(
+    gatewaySource,
+    /case TransportOpCode\.WEBRTC_SIGNAL:\s*\n\s*case TransportOpCode\.WEBRTC_ICE:/,
+    'kedua opcode sinyal harus punya cabang keluar'
+  );
+  assert.match(
+    gatewaySource,
+    /sock\.emit\('webrtc:secure_signal', json\)/,
+    'sinyal keluar harus dipetakan ke webrtc:secure_signal (bukan message:new)'
+  );
+  // Satu sumber logika relay untuk kedua transport, memakai ctx (bisa diuji
+  // tanpa Redis nyata) — bukan client global seperti sebelumnya.
+  assert.match(handlersSource, /export async function handleWebRtcRelay\(/);
+  assert.match(handlersSource, /relayCallSignal\(ctx\.redisClient/);
+  assert.doesNotMatch(handlersSource, /relayCallSignal\(redisClient/);
+});
+
+test('gateway memakai event `penghentian sesi` yang sama dengan jalur WT (force_logout via KICK)', () => {
+  // Jalur WT sekarang mengirim frame KICK sebelum menutup koneksi (sidecar),
+  // dan klien memetakan payload-nya ke `force_logout` device-scoped — sama
+  // seperti gateway. Kontrak event-nya karena itu tidak boleh berubah di sini.
+  assert.match(gatewaySource, /case TransportOpCode\.KICK:[\s\S]{0,80}sock\.emit\('force_logout', json\)/);
+});
+
 test('gateway meneruskan msgId ke handleKeySync (paritas ACK dengan jalur WT)', () => {
   // keySyncHandler harus meneruskan msgId dari arg ke-2 emit socket.io.
   assert.match(

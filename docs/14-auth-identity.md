@@ -113,7 +113,24 @@ sequenceDiagram
 - **Framed backup restore (`docs/31` §31.6c):** the payload streamed by the migration pages is now a framed, AEAD-authenticated `.nyxbak` archive built by `lib/backupRestore.ts` (random 32-byte key sealed to the receiver's QR public key; chunks sent as base64). `MigrationReceivePage` restores it per frame with 0–100 % progress. The same archive format can be opened from a file with the recovery phrase via `openFramedBackupWithPhrase`.
 - **Manual backup path, both directions (`docs/31` §31.6b, `BackupExportModal`):** Settings → Data has an “Encrypted Backup (.nyxbak)” action that derives the archive key from the recovery phrase (`deriveBackupKey(normalizeBackupPhrase(phrase), salt)`, salt 16 B written into the header), downloads the archive and can optionally upload the same bytes to R2 (`uploadBackupToCloud`). `BackupRestoreModal` accepts either a user-picked file or a cloud copy (`downloadCloudBackup`, 404 = no cloud backup), so the phrase-keyed path is reachable end-to-end. `executeLocalWipe` deletes the cloud object (`deleteCloudBackup`) **before** `/api/auth/logout-all` — the delete needs a live session, and a “total” wipe that leaves the R2 blob behind would be a false claim.
 
-## 14.11 Files to know
+## 14.11 WebAuthn: attestation, verify, dan PRF unlock
+
+Tiga alur memakai API yang sama (`navigator.credentials`), jadi ketiganya memunculkan UI passkey milik OS (Google Password Manager di Android, iCloud Keychain di iOS/macOS, Windows Hello di Windows). Browser **tidak punya API "kunci biometrik lokal"**: `authenticatorAttachment: 'platform'` berarti "pakai authenticator platform", dan provider itulah yang memutuskan kredensialnya tersinkron atau device-bound.
+
+- **Attestation pendaftaran** (`/api/auth/register/attestation-options`): `direct` + `platform` + UV. Kebijakan passkey (`ABUSE_ATTESTATION_ALLOW_NONE`/`ALLOW_SYNCED`) menerima passkey tersinkron sebagai akun **unverified**; hanya tier `hardware` yang menandai `isVerified=true`.
+- **Verify biometric** (`/api/auth/webauthn/register/verify`): `isVerified` hanya bila `credentialBackedUp === false` **dan** `userVerified === true`. Passkey tersinkron tidak lagi menaikkan status akun (konsisten dengan kebijakan attestation); respons mengembalikan `{ verified, isVerified, deviceBound }` dan klien memakai nilai itu, bukan mengasumsikan `true`.
+- **Login/unlock passkey** (`/api/auth/webauthn/login/options`): `userVerification: 'required'` dan `requireUserVerification: true` — sesi tidak boleh lahir dari assertion presence-only. Cookie challenge dihapus setelah verifikasi sukses. `register/options` juga meminta UV `required` supaya credential yang dibuat pasti bisa dipakai login.
+
+Alur PRF unlock (`web/src/lib/biometricUnlock.ts`):
+
+- **Satu credential per akun:** `GET /api/auth/webauthn/credentials` mengembalikan credential ID yang sudah ada (dari attestation), dan Settings memakai `setupBiometricUnlockWithExistingCredentials` untuk enroll PRF pada credential itu — tanpa membuat passkey kedua. Hanya akun yang mendaftar lewat jalur *unattested* (tanpa authenticator) yang membuat credential baru.
+- **Salt per credential:** enroll baru memakai salt acak 32 byte yang disimpan di entry vault. Assertion memakai `prf.evalByCredential` karena credential yang dipilih baru diketahui setelah upacara. Entry lama (tanpa `salt`) tetap memakai salt statis legacy + KDF lama, sehingga vault lama tidak terkunci.
+- **Domain separation:** kunci vault = `generichash(32, 'NYX_BIO_VAULT_V2|prf|' || credentialId || 0x00 || prfOutput)`. Tanpa label/credential ID, output PRF mentah menjadi kunci yang sama untuk keperluan lain.
+- **Fallback assertion:** bila `create()` hanya mengembalikan `prf.enabled` tanpa `results` (umum di Chrome/Android), klien langsung melakukan `get()` dengan `allowCredentials` ke credential baru dan challenge acak lokal — PRF hanya dipakai menurunkan kunci di perangkat, tidak dikirim ke server.
+
+**Batas kepercayaan:** passkey tersinkron berarti private key dipegang Google/Apple dan tersedia di perangkat lain. PRF unlock karenanya setara "unlock oleh akun Google/Apple", bukan bukti perangkat; vault hanya sekuat akun provider tersebut. Untuk jaminan device-bound, credential harus `backedUp=false` (Windows Hello/TPM, security key, "this device only"). Vault (`nyx_bio_vault_v2`) dihapus oleh panic wipe (`nukeProtocol.ts`).
+
+## 14.12 Files to know
 
 | File | Role |
 |---|---|

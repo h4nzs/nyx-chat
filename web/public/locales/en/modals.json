@@ -16,7 +16,10 @@
     "result_cloud": "Also stored in the cloud.",
     "failed": "Could not create the backup.",
     "upload_success": "Encrypted copy stored in the cloud.",
-    "upload_failed": "Cloud upload failed; the local file is still saved."
+    "upload_failed": "Cloud upload failed; the local file is still saved.",
+    "upload_unverified": "Account not verified — verify this device first to allow cloud backups. The local file is still saved.",
+    "result_cloud_unverified": "Cloud copy skipped: account not verified. Verify this device in Settings, then create the backup again.",
+    "result_cloud_failed": "Cloud copy failed to upload — the .nyxbak file on this device is still valid."
   },
   "backup_restore": {
     "title": "Restore from Backup File",

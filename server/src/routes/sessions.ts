@@ -96,7 +96,15 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     );
 
     try {
-      await emitEventToUser(userId, 'force_logout', { jti });
+      // [BUGFIX 2026-10-18] Sertakan deviceId DAN targetkan hanya device itu.
+      // Dulu `force_logout` tanpa deviceId dikirim ke semua socket milik user →
+      // mencabut satu sesi me-logout seluruh perangkat.
+      await emitEventToUser(
+        userId,
+        'force_logout',
+        { jti, deviceId: revocation.deviceId },
+        revocation.deviceId ?? undefined,
+      );
       await sendJsonToUser(userId, TransportOpCode.KICK, { deviceId: revocation.deviceId }, false, revocation.deviceId ?? undefined);
     } catch (err) {
       console.error("[Session] Failed to send KICK or force_logout:", err)

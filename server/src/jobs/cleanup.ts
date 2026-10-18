@@ -59,6 +59,21 @@ export interface CleanupReport extends CleanupCounts {
 export const STALE_SESSION_KEY_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
+ * [BUGFIX 2026-10-18] Token refresh yang sudah di-revoke DIPERTAHANKAN selama
+ * jendela ini, bukan dihapus begitu saja.
+ *
+ * Rantai `replacedById` adalah satu-satunya bukti untuk membedakan
+ * "klien mengulang karena respons rotasi hilang" dari "token lama diputar
+ * ulang". Dulu cleanup menghapus SEMUA baris revoked setiap hari, sehingga:
+ *   - retry benign berubah menjadi `Refresh token not found` → klien logout
+ *     tanpa alasan (dan tanpa bisa dilacak);
+ *   - replay token lama tidak lagi bisa dideteksi (baris hilang).
+ * Retensi 7 hari cukup menutup umur sesi praktis, sementara tabel tetap
+ * terkendali (satu sesi aktif ≈ 96 rotasi/hari).
+ */
+export const REVOKED_REFRESH_TOKEN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * Irisan Prisma yang dipakai modul ini.
  *
  * Tipenya sengaja **permissif** (`args?: unknown`): Prisma 7 mengetik argumen
@@ -135,11 +150,17 @@ export async function runCleanup(db: CleanupDb, options: CleanupOptions = {}): P
     }
   };
 
-  // 1. RefreshToken kadaluarsa & yang sudah di-revoke (logout).
+  // 1. RefreshToken kadaluarsa & revoked yang sudah melewati masa retensi.
+  // Revoked yang masih segar SENGAJA disimpan — lihat
+  // REVOKED_REFRESH_TOKEN_RETENTION_MS (rantai reuse-detection).
   await step('refresh_token', async () => {
+    const revokedBefore = new Date(now.getTime() - REVOKED_REFRESH_TOKEN_RETENTION_MS);
     const deleted = await db.refreshToken.deleteMany({
       where: {
-        OR: [{ expiresAt: { lte: now } }, { revokedAt: { not: null } }],
+        OR: [
+          { expiresAt: { lte: now } },
+          { revokedAt: { not: null, lt: revokedBefore } },
+        ],
       },
     });
     report.refreshTokens = deleted.count;

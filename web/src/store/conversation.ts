@@ -21,6 +21,9 @@ import { generateDeliveryToken, findPseudonymInMap } from '@lib/groupPseudonyms'
 // sejalan dengan urutan tampilan (seq; pending = paling baru) — createdAt server
 // kini kasar sehingga perbandingan waktu bisa salah nilai.
 import { compareMessagesByOrder } from '@utils/messageOrder';
+// [2026-10-18] Preview daftar chat: hanya pesan yang benar-benar terlihat
+// (bukan pesan kontrol) yang boleh mengisi `lastMessage`.
+import { isPreviewableMessage, pickPreviewLastMessage, withPreview } from '@utils/messagePreview';
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
@@ -75,40 +78,35 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
     return String(a.id).localeCompare(String(b.id));
   });
 
-const withPreview = (msg: Message): Message => {
-  if (msg.content) {
-    const contentToParse = msg.content.trim();
-    if (contentToParse.startsWith('STORY_KEY:')) {
-        return { ...msg, preview: '', isSilent: true };
-    }
-    
-    // Check for Reaction, Silent, or Edit Payload
-    if (contentToParse.startsWith('{')) {
-       try {
-         const payload = JSON.parse(contentToParse);
-         if (payload.type === 'reaction') {
-            return { ...msg, preview: `Reacted ${payload.emoji || ''}` };
-         }
-         if (payload.type === 'silent' && typeof payload.text === 'string') {
-            return { ...msg, preview: payload.text, content: payload.text, isSilent: true };
-         }
-         if (payload.type === 'edit' && typeof payload.text === 'string') {
-            return { ...msg, preview: `✎ ${payload.text}`, content: payload.text, isEdited: true };
-         }
-         if (payload.type === 'CALL_INIT' || payload.type === 'GHOST_SYNC') {
-            return { ...msg, preview: '', isSilent: true };
-         }
-       } catch { /* not a JSON payload */ }
-    }
-    return { ...msg, preview: msg.content };
+/**
+ * Berapa baris vault yang diperiksa saat mencari preview. Baris terbaru bisa
+ * berupa pesan kontrol (CALL_INIT/GHOST_SYNC/reaksi/unsend), jadi satu baris
+ * saja tidak cukup — dan memindai seluruh riwayat jelas tidak perlu.
+ */
+const PREVIEW_SCAN_LIMIT = 30;
+
+/**
+ * Preview yang datang saat percakapan belum ada di store (pesan masuk lebih
+ * awal dari `conversation:new`). Disimpan sementara lalu dipakai saat
+ * percakapan itu muncul di `addOrUpdateConversation`/`loadConversations`,
+ * supaya pesan pertama tidak sempat tampil sebagai "belum ada pesan".
+ */
+const pendingPreviews = new Map<string, Message>();
+const PENDING_PREVIEW_MAX = 50;
+
+function rememberPendingPreview(conversationId: string, message: Message): void {
+  if (pendingPreviews.size >= PENDING_PREVIEW_MAX && !pendingPreviews.has(conversationId)) {
+    const oldest = pendingPreviews.keys().next().value;
+    if (oldest !== undefined) pendingPreviews.delete(oldest);
   }
-  if (msg.fileUrl) {
-    if (msg.fileType?.startsWith('image/')) return { ...msg, preview: "📷 Image" };
-    if (msg.fileType?.startsWith('video/')) return { ...msg, preview: "🎥 Video" };
-    return { ...msg, preview: `${msg.fileName || "File"}` };
-  }
-  return msg;
-};
+  pendingPreviews.set(conversationId, withPreview(message));
+}
+
+function takePendingPreview(conversationId: string): Message | undefined {
+  const pending = pendingPreviews.get(conversationId);
+  if (pending) pendingPreviews.delete(conversationId);
+  return pending;
+}
 
 // --- State Type ---
 
@@ -131,14 +129,29 @@ type Actions = {
   createGroup: (name: string, userIds: string[], avatarUrl?: string) => Promise<ConversationId>;
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
-  removeConversation: (conversationId: string) => void;
+  /**
+   * Lepas percakapan dari daftar. `preserveHistory` (kick/removed) hanya
+   * membuang record percakapan + state in-memory; pesan di ShadowVault dan
+   * kunci grup (sender/receiver/skipped per era) DIPERTAHANKAN agar riwayat
+   * tetap terbaca bila anggota di-add kembali (Opaque Mailbox: satu-satunya
+   * salinan riwayat lokal ada di perangkat ini).
+   */
+  removeConversation: (conversationId: string, opts?: { preserveHistory?: boolean }) => void;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   updateParticipantDetails: (user: Partial<User>) => void;
-  addParticipants: (conversationId: string, participants: Participant[]) => void;
+  addParticipants: (
+    conversationId: string,
+    participants: Participant[],
+    // [BUGFIX 2026-10-18] Token delivery yang di-issue saat invite WAJIB ikut
+    // metadata rotasi — sebelumnya hanya dikirim ke server, sehingga
+    // buildTargetDeliveryTokens pada kiriman berikutnya memakai peta lama.
+    opts?: { deliveryTokens?: Record<string, string> }
+  ) => void;
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
   syncParticipantsFromMetadata: (conversationId: string, members: GroupMemberEntry[]) => void;
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
+  forceConversationLastMessage: (conversationId: string, message: Message | null) => void;
   performHandshake: (conversationId: string) => Promise<void>;
   markKeyRotationNeeded: (conversationId: string, needed: boolean) => void;
   togglePinConversation: (conversationId: string) => Promise<void>;
@@ -270,12 +283,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const conversations = await Promise.all(mergedSource.map(async c => {
         const participants = c.participants || [];
 
+        // [2026-10-18] Ambil JENDELA baris terbaru, lalu pilih yang benar-benar
+        // terlihat. Dulu hanya 1 baris: kalau baris terakhir itu pesan kontrol
+        // (CALL_INIT/GHOST_SYNC/reaksi/tombstone) preview jadi kosong dan daftar
+        // chat menampilkan "no messages yet" untuk percakapan berisi riwayat.
         let localLastMessage: Message | null = null;
         try {
-            const localMsgs = await shadowVault.getMessagesByConversation(c.id, 1);
-            if (localMsgs.length > 0 && localMsgs[0]) {
-                localLastMessage = localMsgs[0];
-            }
+            const localMsgs = await shadowVault.getMessagesByConversation(c.id, PREVIEW_SCAN_LIMIT);
+            localLastMessage = pickPreviewLastMessage(localMsgs);
         } catch (_e) {}
 
         let lastMessage = c.lastMessage || null;
@@ -293,6 +308,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             }
         }
 
+        // Salinan server hanya boleh menang bila ia memang terlihat. Kalau tidak
+        // (mis. `lastMessage` server adalah sinyal reaksi atau nisan), preview
+        // lokal yang terlihat lebih benar.
+        if (lastMessage && !isPreviewableMessage(lastMessage)) lastMessage = null;
+
         // [docs/28 Tier 2 — B1/B3] pilih yang lebih baru dengan aturan urutan yang
         // sama dengan daftar pesan (bukan sekadar createdAt presisi vs kasar).
         let finalLastMessage = lastMessage;
@@ -303,11 +323,19 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         if (finalLastMessage) {
             // [P2 NORMALISASI] getParticipantUserId (dulu p.id — bentuk userId
             // terlewat untuk enrich nama pengirim lastMessage).
+            const messageSender = finalLastMessage.sender;
             const pInfo = participants.find(p => getParticipantUserId(p) === finalLastMessage!.senderId);
             if (pInfo) {
                 finalLastMessage.sender = {
-                    ...(finalLastMessage.sender || { id: finalLastMessage.senderId }),
-                    ...pInfo
+                    ...(messageSender || { id: finalLastMessage.senderId }),
+                    ...pInfo,
+                    // [BUGFIX 2026-10-18] `pInfo` adalah snapshot LOKAL (roster
+                    // participant tak pernah dikirim server) — jangan biarkan ia
+                    // menimpa `encryptedProfile` yang datang bersama pesan, karena
+                    // nilai pesan itu yang terbaru.
+                    ...(typeof messageSender?.encryptedProfile === 'string'
+                        ? { encryptedProfile: messageSender.encryptedProfile }
+                        : {}),
                 };
             }
             finalLastMessage = withPreview(finalLastMessage);
@@ -369,8 +397,54 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           return fetched;
       }));
 
-      set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
+      // [2026-10-18] Jangan timpa preview yang datang SAAT sync berjalan.
+      // Perhitungan di atas memakai snapshot vault/server; pesan live yang tiba
+      // di tengah await (dekripsi, metadata grup, dsb.) sudah memperbarui
+      // store. Tanpa penggabungan ini, preview yang lebih baru hilang lagi —
+      // itulah gejala "kadang last message salah" yang sulit direproduksi.
+      const liveById = new Map(get().conversations.map((c) => [c.id as string, c]));
+      const mergedConversations = reconciledConversations.map((fetched) => {
+        const pending = takePendingPreview(fetched.id);
+        const live = liveById.get(fetched.id);
+        let merged = fetched;
+
+        if (pending) {
+          if (!merged.lastMessage || compareMessagesByOrder(pending, merged.lastMessage) > 0) {
+            merged = { ...merged, lastMessage: pending };
+          }
+        }
+
+        if (!live?.lastMessage || !isPreviewableMessage(live.lastMessage)) return merged;
+        if (merged.lastMessage && compareMessagesByOrder(live.lastMessage, merged.lastMessage) <= 0) {
+          return merged;
+        }
+        return {
+          ...merged,
+          lastMessage: live.lastMessage,
+          // Unread yang bertambah selama sync juga jangan di-reset ke 0.
+          unreadCount: live.unreadCount ?? merged.unreadCount,
+        };
+      });
+
+      set({ conversations: sortConversations(mergedConversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
+
+      // [BUGFIX 2026-10-18] Segarkan profil peer 1:1 dari pengirim pesan terakhir.
+      // Server tidak mengirim roster participant (Opaque Mailbox), jadi snapshot
+      // ini hidup di klien dan dulu tidak pernah di-refresh: avatar/nama di
+      // daftar chat & story tray tetap basi sampai reload berikutnya. Pesan
+      // membawa `encryptedProfile` terbaru pengirimnya — sumber yang sama yang
+      // membuat bubble chat & modal info selalu tampak terbaru.
+      for (const c of get().conversations) {
+        if (c.isGroup) continue;
+        const messageSender = c.lastMessage?.sender;
+        const senderEp = messageSender?.encryptedProfile;
+        const senderId = messageSender?.id ?? c.lastMessage?.senderId;
+        if (typeof senderEp !== 'string' || senderEp.length === 0 || !senderId) continue;
+        const peer = c.participants.find(p => getParticipantUserId(p) === String(senderId));
+        if (!peer || peer.encryptedProfile === senderEp) continue;
+        useConversationStore.getState().updateParticipantDetails({ id: asUserId(String(senderId)), encryptedProfile: senderEp });
+      }
 
       // [CONTACT STORE P1 2026-10-05] Warm contact store + restore backup
       // (device baru/reinstall) + heal participants kosong dari kontak.
@@ -380,8 +454,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           const { seedContactsFromConversations, restoreContactsFromBundle, buildPeerParticipantsFromContacts } = await import('@lib/contactStore');
           const restored = await restoreContactsFromBundle();
           if (restored > 0) console.info(`[ContactStore] ${restored} kontak dipulihkan dari backup server`);
-          await seedContactsFromConversations(reconciledConversations);
-          for (const c of reconciledConversations) {
+          // [BUGFIX 2026-10-18] Seed dari STATE terkini, bukan snapshot awal sync:
+          // rekonsiliasi profil peer di atas bisa sudah mengganti `encryptedProfile`
+          // participant. Menulis snapshot lama akan mendowngrade kontak yang fresh
+          // (upsertContact memenangkan nilai non-null) dan mengembalikan avatar basi.
+          const currentConversations = useConversationStore.getState().conversations;
+          await seedContactsFromConversations(currentConversations);
+          for (const c of currentConversations) {
             if (c.isGroup || (c.participants && c.participants.length > 0)) continue;
             const peers = await buildPeerParticipantsFromContacts(c.id);
             if (peers.length > 0) {
@@ -721,6 +800,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         }
     }
 
+    // Diambil sekali di luar `set` supaya kedua cabang (baru/lama) melihat
+    // preview yang sama — `takePendingPreview` menghapus entri saat dibaca.
+    const pendingPreview = takePendingPreview(conversation.id);
+
     set(state => {
       const existing = state.conversations.find(c => c.id === conversation.id);
       let updatedConv: Conversation;
@@ -735,6 +818,16 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           !!existing.decryptedMetadata &&
           !!conversation.encryptedMetadata &&
           conversation.encryptedMetadata !== existing.encryptedMetadata;
+        // [2026-10-18] Preview tertunda dari pesan yang tiba sebelum
+        // percakapan ini ada di store (`conversation:new` datang belakangan).
+        const incomingLast = conversation.lastMessage && isPreviewableMessage(conversation.lastMessage)
+          ? conversation.lastMessage
+          : null;
+        const keepLast = pendingPreview &&
+          (!existing.lastMessage || compareMessagesByOrder(pendingPreview, existing.lastMessage) > 0)
+          ? pendingPreview
+          : existing.lastMessage;
+
         updatedConv = {
           ...existing,
           encryptedMetadata: keepExistingBlob
@@ -743,7 +836,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           decryptedMetadata: decryptedMetadata || existing.decryptedMetadata,
           isGroup: conversation.isGroup,
           participants: conversation.participants,
-          lastMessage: conversation.lastMessage || existing.lastMessage,
+          lastMessage: incomingLast || keepLast,
           updatedAt: conversation.updatedAt,
           unreadCount: conversation.unreadCount ?? existing.unreadCount,
         } as Conversation;
@@ -755,7 +848,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           conversations: sortConversations(state.conversations.map(c => c.id === conversation.id ? updatedConv : c), useAuthStore.getState().user?.id)
         };
       } else {
-        updatedConv = { ...conversation, decryptedMetadata } as Conversation;
+        const incomingLast = conversation.lastMessage && isPreviewableMessage(conversation.lastMessage)
+          ? conversation.lastMessage
+          : null;
+        updatedConv = {
+          ...conversation,
+          decryptedMetadata,
+          lastMessage: incomingLast || pendingPreview || null,
+        } as Conversation;
 
         // PERSIST TO SHADOW VAULT (Opaque Mailbox)
         import('@lib/shadowVaultDb').then(m => m.shadowVault.saveConversation(updatedConv));
@@ -779,14 +879,27 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     }
   },
 
-  removeConversation: (conversationId) => {
+  removeConversation: (conversationId, opts) => {
+    // [BUGFIX 2026-10-18] Kick bukan penghapusan permanen: server mengirim
+    // `conversation:deleted` dengan `reason: 'removed'`, dan klien TIDAK boleh
+    // membuang riwayat + kunci era. Dulu `deleteConversation()` di bawah
+    // menghapus semua receiver state/arsip + pesan vault; setelah di-add
+    // kembali, pesan lama ikut di-fetch ulang dari server tanpa kunci era —
+    // hanya pesan yang message-key-nya sempat di-cache yang bisa dibaca,
+    // sisanya "waiting_for_key".
+    const preserveHistory = opts?.preserveHistory === true;
     (async () => {
       const { useMessageStore } = await import('./message');
-      useMessageStore.getState().clearMessagesForConversation(conversationId);
+      useMessageStore.getState().clearMessagesForConversation(conversationId, { preserveVault: preserveHistory });
       // Persist penghapusan ke Shadow Vault agar percakapan tidak "hidup kembali"
       // saat reload (loadConversations membaca dari IndexedDB).
       const { shadowVault } = await import('@lib/shadowVaultDb');
-      await shadowVault.deleteConversation(conversationId);
+      if (preserveHistory) {
+        // Hanya record percakapan yang dilepas; pesan + state kripto tetap.
+        await shadowVault.forgetConversation(conversationId);
+      } else {
+        await shadowVault.deleteConversation(conversationId);
+      }
     })();
 
     set(state => {
@@ -886,61 +999,108 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   updateParticipantDetails: (user) => {
     const { role, ...userDetails } = user;
-    
-    set(state => {
-      const affectedConvoIds: string[] = [];
-      
-      state.conversations.forEach(c => {
-        // [P2 NORMALISASI] user:updated membawa userId ASLI — participant grup
-        // v2 ber-bentuk pseudonym harus di-resolve via pseudoMap agar update
-        // profil tetap sampai (dulu hanya p.id === user.id → no-op di grup v2).
-        const pseudoMap = getPseudonymMap(c.id);
-        const existingParticipant = c.participants.find(p =>
-            getParticipantUserId(p) === user.id ||
-            (pseudoMap && String(p.id) !== user.id && pseudoMap[String(p.id)] === user.id)
-        );
-        if (!existingParticipant) return;
+    // [BUGFIX 2026-10-18] user:updated membawa userId ASLI; `id` kosong/aneh
+    // tidak boleh dianggap cocok dengan participant mana pun.
+    const targetId = typeof user.id === 'string' && user.id.length > 0 ? String(user.id) : null;
+    if (!targetId) return;
 
-        // Check for cryptographic or membership changes
-        const hasCryptoChanged = 
-          (userDetails.publicKey !== undefined && userDetails.publicKey !== existingParticipant.publicKey) ||
-          (userDetails.pqPublicKey !== undefined && userDetails.pqPublicKey !== existingParticipant.pqPublicKey) ||
-          (userDetails.signingKey !== undefined && userDetails.signingKey !== existingParticipant.signingKey) ||
-          (userDetails.devices !== undefined && JSON.stringify(userDetails.devices) !== JSON.stringify(existingParticipant.devices)) ||
-          (role !== undefined && role !== existingParticipant.role);
+    // [P2 NORMALISASI] participant grup v2 berbentuk pseudonym — resolusi via
+    // pseudoMap agar update profil tetap sampai. Dipakai untuk DETEKSI dan
+    // untuk PENULISAN (dulu penulisan masih `p.id !== user.id` → event profil
+    // tak pernah mengubah participant pseudonym).
+    const matchesParticipant = (c: Conversation, p: Participant): boolean => {
+      if (String(getParticipantUserId(p)) === targetId) return true;
+      if (String(p.id) === targetId) return true;
+      const pseudoMap = getPseudonymMap(c.id);
+      return !!pseudoMap && String(p.id) !== targetId && pseudoMap[String(p.id)] === targetId;
+    };
 
-        if (hasCryptoChanged) {
-          affectedConvoIds.push(c.id);
-          import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(captureAndLog));
+    const affectedConvoIds: string[] = [];
+    const updatedConversations: Conversation[] = [];
+
+    const nextConversations = get().conversations.map(c => {
+      const existingParticipant = c.participants.find(p => matchesParticipant(c, p));
+      if (!existingParticipant) return c;
+
+      // Check for cryptographic or membership changes
+      const hasCryptoChanged = 
+        (userDetails.publicKey !== undefined && userDetails.publicKey !== existingParticipant.publicKey) ||
+        (userDetails.pqPublicKey !== undefined && userDetails.pqPublicKey !== existingParticipant.pqPublicKey) ||
+        (userDetails.signingKey !== undefined && userDetails.signingKey !== existingParticipant.signingKey) ||
+        (userDetails.devices !== undefined && JSON.stringify(userDetails.devices) !== JSON.stringify(existingParticipant.devices)) ||
+        (role !== undefined && role !== existingParticipant.role);
+
+      if (hasCryptoChanged) {
+        affectedConvoIds.push(c.id);
+        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(captureAndLog));
+      }
+
+      let participantChanged = false;
+      const participants = c.participants.map(p => {
+        if (!matchesParticipant(c, p)) return p;
+
+        const updatedParticipant = { ...p, ...userDetails };
+        // Pseudonym HARUS dipertahankan — menimpanya dengan userId asli
+        // membocorkan identitas anggota grup dan merusak peta pseudonym.
+        if (String(p.id) !== targetId) updatedParticipant.id = p.id;
+        if (role === "ADMIN" || role === "MEMBER" || role === "admin" || role === "member") {
+          updatedParticipant.role = role;
         }
+        // Hindari menulis vault / memicu re-render untuk event yang tidak
+        // mengubah apa pun (mis. `user:updated` milik diri sendiri dengan ep sama).
+        if (JSON.stringify(updatedParticipant) !== JSON.stringify(p)) participantChanged = true;
+        return updatedParticipant;
       });
 
-      return {
-        conversations: state.conversations.map(c => {
-          if (!affectedConvoIds.includes(c.id) && !c.participants.some(p => p.id === user.id)) {
-            return c;
-          }
-          
-          return {
-            ...c,
-            requiresKeyRotation: affectedConvoIds.includes(c.id) ? true : c.requiresKeyRotation,
-            participants: c.participants.map(p => {
-              if (p.id !== user.id) return p;
-              
-              const updatedParticipant = { ...p, ...userDetails };
-              if (role === "ADMIN" || role === "MEMBER" || role === "admin" || role === "member") {
-                updatedParticipant.role = role;
-              }
-              return updatedParticipant;
-            }),
-          };
-        })
+      if (!participantChanged && !hasCryptoChanged) return c;
+
+      const updatedConversation: Conversation = {
+        ...c,
+        requiresKeyRotation: affectedConvoIds.includes(c.id) ? true : c.requiresKeyRotation,
+        participants,
       };
+      updatedConversations.push(updatedConversation);
+      return updatedConversation;
     });
+
+    set({ conversations: nextConversations });
+
+    // [BUGFIX 2026-10-18] Efek samping HARUS di luar `set`.
+    //
+    // 1. Persist ke ShadowVault. Participants hanya hidup di sisi klien
+    //    (Opaque Mailbox) dan `loadConversations` membacanya dari vault — tanpa
+    //    ini profil baru hilang lagi setelah reload.
+    // 2. Dekripsi profil baru segera: UI lain (daftar chat, story tray, panel
+    //    info) membaca cache profil; mendekripsikan di sini membuat ketiganya
+    //    ikut segar walau tidak sedang dirender.
+    // 3. Segarkan contact store (picker grup/story + backup bundle) agar tidak
+    //    mempertahankan blob lama.
+    if (updatedConversations.length > 0) {
+      void import('@lib/shadowVaultDb')
+        .then(({ shadowVault }) => Promise.all(updatedConversations.map(c => shadowVault.saveConversation(c))))
+        .catch(captureAndLog);
+    }
+    if (
+      updatedConversations.length > 0 &&
+      typeof userDetails.encryptedProfile === 'string' &&
+      userDetails.encryptedProfile.length > 0
+    ) {
+      const encryptedProfile = userDetails.encryptedProfile;
+      void import('./profile')
+        .then(({ useProfileStore }) => useProfileStore.getState().decryptAndCache(targetId, encryptedProfile))
+        .catch(captureAndLog);
+      void import('@lib/contactStore')
+        .then(({ upsertContact }) => upsertContact({ userId: targetId, encryptedProfile }))
+        .catch(captureAndLog);
+    }
   },
 
-  addParticipants: (conversationId, newParticipants) => {
-    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(captureAndLog));
+  addParticipants: (conversationId, newParticipants, opts) => {
+    // [BUGFIX 2026-10-18] forceRotateGroupSenderKey DIHAPUS: pemanggil admin
+    // (AddParticipantModal / GroupInfoPanel) memanggil rotateGroupKey eksplisit
+    // setelah POST add-participants. Dua jalur bersamaan = rotasi era ganda
+    // dalam hitungan detik (churn keyId). requiresKeyRotation: true di bawah
+    // tetap menjaga lazy rotation untuk jalur non-admin.
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
@@ -957,20 +1117,38 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           // rotateGroupKey yang dipanggil segera setelah POST akan
           // mengenkripsi roster TANPA anggota baru (race mirip kick).
           let decryptedMetadata = c.decryptedMetadata;
-          const meta = decryptedMetadata as { v?: number; generation?: number; participants?: string[]; members?: GroupMemberEntry[] } | undefined;
-          if (meta?.v === 3) {
-            const known = new Set((meta.members ?? []).map(m => m.userId));
-            const additions = newParticipants.filter(p => !known.has(p.id as string));
-            if (additions.length > 0) {
-              decryptedMetadata = {
-                ...meta,
-                participants: Array.from(new Set([...(meta.participants ?? []), ...additions.map(p => p.id as string)])),
-                members: [
-                  ...(meta.members ?? []),
-                  ...additions.map(p => ({ userId: p.id as string, role: 'MEMBER' as const, joinedAtGeneration: meta.generation ?? 1 })),
-                ],
-              } as typeof decryptedMetadata;
+          const meta = decryptedMetadata as {
+            v?: number;
+            generation?: number;
+            participants?: string[];
+            members?: GroupMemberEntry[];
+            deliveryTokenMap?: Record<string, string>;
+          } | undefined;
+          if (meta) {
+            let nextMeta = meta;
+            if (meta.v === 3) {
+              const known = new Set((meta.members ?? []).map(m => m.userId));
+              const additions = newParticipants.filter(p => !known.has(p.id as string));
+              if (additions.length > 0) {
+                nextMeta = {
+                  ...meta,
+                  participants: Array.from(new Set([...(meta.participants ?? []), ...additions.map(p => p.id as string)])),
+                  members: [
+                    ...(meta.members ?? []),
+                    ...additions.map(p => ({ userId: p.id as string, role: 'MEMBER' as const, joinedAtGeneration: meta.generation ?? 1 })),
+                  ],
+                };
+              }
             }
+            // Token baru MENANG atas token lama (nama/userId yang sama tidak
+            // bisa punya dua token aktif).
+            if (opts?.deliveryTokens && Object.keys(opts.deliveryTokens).length > 0) {
+              nextMeta = {
+                ...nextMeta,
+                deliveryTokenMap: { ...(nextMeta.deliveryTokenMap ?? {}), ...opts.deliveryTokens },
+              };
+            }
+            if (nextMeta !== meta) decryptedMetadata = nextMeta as typeof decryptedMetadata;
           }
 
           return { ...c, participants: Array.from(uniqueMap.values()), decryptedMetadata, requiresKeyRotation: true };
@@ -1051,9 +1229,21 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   updateConversationLastMessage: (conversationId, message) => {
+    // [2026-10-18] Pesan yang tidak terlihat di UI (pesan kontrol, nisan, baris
+    // tanpa isi) TIDAK boleh menjadi preview: dulu CALL_INIT/GHOST_SYNC yang
+    // masuk lewat socket menimpa preview percakapan menjadi kosong → daftar
+    // chat menampilkan "belum ada pesan" padahal riwayatnya ada. Pesan seperti
+    // ini juga tidak menaikkan unread — tidak ada yang bisa dibaca pengguna.
+    if (!isPreviewableMessage(message)) return;
+
     set(state => {
       const conversation = state.conversations.find(c => c.id === conversationId);
-      if (!conversation) return state;
+      if (!conversation) {
+        // Pesan bisa tiba sebelum `conversation:new` (atau sebelum sync
+        // menemukan percakapannya). Simpan preview-nya agar tidak hilang.
+        rememberPendingPreview(conversationId, message);
+        return state;
+      }
 
       const meId = useAuthStore.getState().user?.id;
       const isMine = message.senderId === meId;
@@ -1104,6 +1294,27 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         unreadCount: (incrementsUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
       
+      const otherConversations = state.conversations.filter(c => c.id !== conversationId);
+      return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
+    });
+  },
+
+  /**
+   * [2026-10-18] Pasang preview TANPA aturan urutan — dipakai saat pesan yang
+   * selama ini menjadi preview dihapus/di-unsend: penggantinya pasti lebih tua,
+   * jadi `updateConversationLastMessage` (yang menolak pesan lebih lama) tidak
+   * bisa dipakai. `null` = tidak ada lagi pesan terlihat (riwayat habis).
+   */
+  forceConversationLastMessage: (conversationId, message) => {
+    set(state => {
+      const conversation = state.conversations.find(c => c.id === conversationId);
+      if (!conversation) return state;
+
+      const meId = useAuthStore.getState().user?.id;
+      const updatedConversation = {
+        ...conversation,
+        lastMessage: message && isPreviewableMessage(message) ? withPreview(message) : null,
+      };
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
       return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
     });

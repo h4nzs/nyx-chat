@@ -46,6 +46,8 @@ sequenceDiagram
 ## 15.3 Message statuses & read receipts
 
 - Statuses: `SENT` → `DELIVERED` → `READ`. The server stores `MessageStatus` rows and relays `message:status_updated`.
+- **Arrived ≠ read.** Messages that merely arrive live (`doAddIncomingMessage`) or are backfilled on connect (`loadMessagesForConversation`) are receipted `DELIVERED` via `sendDeliveryReceipts` (`web/src/lib/deliveryReceipts.ts` → `messages:mark_delivered`, chunked at the server's batch limit, with an explicit messageId → senderId `targets` map because 1:1 sealed-sender rows store a `NULL` sender on the wire). `READ` comes only from `ChatWindow`/`MessageItem` when the bubble is actually visible.
+- **Statuses persist at rest.** `Message.statuses` is stored in the Shadow Vault as a sealed (`ENC1:`) structural column. A write that does not carry `statuses` (server copy, partial tombstone) keeps the stored value; `statuses: []` means “no receipts”; malformed entries are dropped without failing the row.
 - **1:1 read = TTL grace, not immediate delete:** a READ receipt arms a 24-hour grace window (`READ_DELETE_GRACE_MS`) on the server row; the `messageSweeper` deletes after expiry. Receipts are one-shot — repeat READs never extend retention. The grace doubles as the **heal window** (§15.7.1): ciphertext that failed to decrypt client-side can be re-fetched for re-decryption once keys are repaired. Client-side, READ receipts are only sent for messages that **successfully decrypted** (`isLiveReadSafe` / `isUndecryptable` guards) — a premature receipt used to destroy the only server copy.
 - `ChatWindow` batches mark-as-read events and only fires them when the Virtuoso row is actually visible (IntersectionObserver).
 
@@ -57,13 +59,14 @@ All three are **E2EE tombstone control messages** carried through the normal mes
 |---|---|---|
 | Reaction | `reaction` / `reaction_remove` | `sendReaction`; rendered by `ReactionsDisplay` |
 | Edit | `edit` | limited to 5-minute window, own messages, non-file, non-system |
-| Unsend | `UNSEND` | `message:unsend` → server verifies sender or `deleteSecret` → `message:deleted` |
+| Unsend | `UNSEND` | `message:unsend` → server verifies sender or `deleteSecret` → `message:deleted_remotely` to recipients (handled in `socketListeners.ts`, which marks the row `isDeletedLocal` like a local delete) |
 
 ## 15.5 View-once, silent, expiry
 
-- **View-once:** `isViewOnce` flag; when viewed, the server deletes the message (`message:view_once_opened` → `message:viewed` → `prisma.message.delete`).
+- **View-once:** `isViewOnce` flag; when viewed, the server deletes the message (`message:view_once_opened` → `message:viewed` → `prisma.message.delete`). The sender's client handles `message:viewed` and hides its own copy (the row no longer exists server-side).
 - **Silent:** content wrapped as `{ type:'silent', text }` — no notification on the recipient side.
-- **Expiry/auto-delete:** `expiresAt` on the message; `messageSweeper` (cron, every minute) deletes expired messages and notifies recipients via `message:deleted_batch`.
+- **Expiry/auto-delete:** `expiresAt` on the message; `messageSweeper` (cron, every minute) deletes expired messages and notifies recipients via `message:deleted_batch` (each id marked `isDeletedLocal` client-side on arrival).
+- **`expiresAt` is not the auto-delete flag.** In 1:1 it is *always* set (14-day store-and-forward TTL, shortened to 24 h after READ), so the sender's actual choice travels inside the ciphertext as `autoDelete: true` (alongside the precise `sentAt`). `captureAutoDelete()` removes it on decrypt (a leftover field breaks the plaintext-collapse and renders raw JSON), and the flag is persisted sealed in the Shadow Vault. `MessageBubble` renders the countdown only when `autoDelete` is set.
 
 ## 15.6 Voice messages
 

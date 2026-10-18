@@ -474,6 +474,48 @@ export function verifyAttestationChain(
   };
 }
 
+/**
+ * Peta kode alasan → kode pendek untuk **label metrik**.
+ *
+ * Kenapa perlu dipetakan, bukan dipakai apa adanya: nilai label metrik wajib
+ * pendek (`metrics.ts` menolak nilai > 24 karakter dan nilai yang menyerupai
+ * base64url/UUID — justru supaya metrik tidak bisa membawa identitas). Kode asli
+ * (`CERTIFICATE_NOT_YET_VALID`, `SYNCED_AUTHENTICATOR_NOT_ALLOWED`, …) melewati
+ * batas itu, dan nilai yang ditolak **diam-diam hilang** — penolakan attestation
+ * yang paling ingin dilihat operator justru yang lenyap. Setiap kode di sini
+ * karena itu ≤ 21 karakter (agar tidak terjaring pola base64url ≥ 22 karakter)
+ * dan tidak memuat identitas apa pun.
+ */
+export const ATTESTATION_REASON_CODES: Readonly<Record<string, string>> = {
+  NOT_HARDWARE_ATTESTATION: 'not_hardware',
+  ATTESTATION_FORMAT_NOT_ALLOWED: 'format_not_allowed',
+  SELF_ATTESTATION_NOT_ALLOWED: 'self_not_allowed',
+  ATTESTATION_CHAIN_UNPARSEABLE: 'chain_unparseable',
+  CHAIN_UNPARSEABLE: 'chain_unparseable',
+  CHAIN_TOO_SHORT: 'chain_too_short',
+  CHAIN_NOT_LINKED: 'chain_not_linked',
+  CERTIFICATE_EXPIRED: 'certificate_expired',
+  CERTIFICATE_NOT_YET_VALID: 'cert_not_yet_valid',
+  LEAF_IS_CA: 'leaf_is_ca',
+  TOP_NOT_SELF_SIGNED: 'top_not_self_signed',
+  ROOT_NOT_TRUSTED: 'root_not_trusted',
+  PINNED_ROOT_UNPARSEABLE: 'pinned_unreadable',
+  TPM_AIK_EKU_MISSING: 'tpm_aik_eku_missing',
+  AAGUID_BLOCKED: 'aaguid_blocked',
+  USER_VERIFICATION_REQUIRED: 'user_verification',
+  SYNCED_AUTHENTICATOR_NOT_ALLOWED: 'synced_authenticator',
+  ATTESTATION_REJECTED: 'rejected_generic',
+};
+
+/**
+ * Kode alasan yang aman dipakai sebagai label metrik (`unmapped` bila belum ada
+ * di tabel — fenomena itu sendiri harus terlihat, bukan dibuang).
+ */
+export function attestationReasonCode(reason: string | undefined): string {
+  if (typeof reason !== 'string' || reason.length === 0) return 'unmapped';
+  return ATTESTATION_REASON_CODES[reason] ?? 'unmapped';
+}
+
 export interface VerifiedAttestation {
   verified: boolean;
   tier: AttestationTier;

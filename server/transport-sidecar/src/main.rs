@@ -378,7 +378,28 @@ async fn main() -> Result<()> {
                         let payload_clone = payload_bytes.clone();
 
                         if op_code == 0x07 { // KICK
-                            conn.close(1000u32.into(), b"Kicked by server");
+                            // [PARITY 2026-10-18] Frame KICK dikirim DULU, baru koneksi
+                            // ditutup. Sebelumnya hanya `close("Kicked by server")` yang
+                            // dikirim: klien tidak pernah menerima alasan terstruktur
+                            // (deviceId/reason), jadi alur force_logout — yang di jalur
+                            // WSS membuat perangkat yang di-revoke langsung logout —
+                            // tidak pernah jalan di jalur WT. Penulisan stream
+                            // diselesaikan sebelum close supaya frame tidak ter-reset.
+                            let conn_kick = conn.clone();
+                            let payload_kick = payload_clone.clone();
+                            tokio::spawn(async move {
+                                if let Ok(opening) = conn_kick.open_uni().await {
+                                    if let Ok(mut stream) = opening.await {
+                                        let mut frame = BytesMut::with_capacity(5 + payload_kick.len());
+                                        frame.put_u8(0x07);
+                                        frame.put_u32(payload_kick.len() as u32);
+                                        frame.put_slice(&payload_kick);
+                                        let _ = stream.write_all(&frame).await;
+                                        let _ = stream.finish().await;
+                                    }
+                                }
+                                conn_kick.close(1000u32.into(), b"Kicked by server");
+                            });
                             continue;
                         }
 
@@ -418,7 +439,28 @@ async fn main() -> Result<()> {
                         let payload_clone = payload_bytes.clone();
                         
                         if op_code == 0x07 { // KICK
-                            conn.close(1000u32.into(), b"Kicked by server");
+                            // [PARITY 2026-10-18] Frame KICK dikirim DULU, baru koneksi
+                            // ditutup. Sebelumnya hanya `close("Kicked by server")` yang
+                            // dikirim: klien tidak pernah menerima alasan terstruktur
+                            // (deviceId/reason), jadi alur force_logout — yang di jalur
+                            // WSS membuat perangkat yang di-revoke langsung logout —
+                            // tidak pernah jalan di jalur WT. Penulisan stream
+                            // diselesaikan sebelum close supaya frame tidak ter-reset.
+                            let conn_kick = conn.clone();
+                            let payload_kick = payload_clone.clone();
+                            tokio::spawn(async move {
+                                if let Ok(opening) = conn_kick.open_uni().await {
+                                    if let Ok(mut stream) = opening.await {
+                                        let mut frame = BytesMut::with_capacity(5 + payload_kick.len());
+                                        frame.put_u8(0x07);
+                                        frame.put_u32(payload_kick.len() as u32);
+                                        frame.put_slice(&payload_kick);
+                                        let _ = stream.write_all(&frame).await;
+                                        let _ = stream.finish().await;
+                                    }
+                                }
+                                conn_kick.close(1000u32.into(), b"Kicked by server");
+                            });
                             continue;
                         }
 

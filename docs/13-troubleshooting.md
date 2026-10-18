@@ -91,18 +91,22 @@ The SPA needs a fallback to `index.html` for unknown routes (nginx `try_files` i
 ## Auth / session (recent fixes)
 
 ### "Refresh token reuse detected" logs + random 401s on uploads/presigned
-The refresh route rotates the `rt` cookie on every refresh. Two concurrent refreshes (multi-tab, or the burner `/drop` page alongside the main app) used to look like theft, revoking the whole family. Fixes:
-- **Server** (`auth.ts`): a 5 s grace window treats a same-device, recently-rotated duplicate as a benign concurrent refresh and continues the chain instead of revoking.
-- **Client** (`store/auth.ts` + `lib/refreshLock.ts`): `silentRefresh` is single-flight per tab and serialized across tabs (Web Locks API + localStorage fallback), and retries up to 3×.
-- `bootstrap()` falls back to a direct `GET /api/users/me` before logging out when refresh fails transiently.
+The refresh route rotates the `rt` cookie on every refresh, so a duplicate presentation used to look like theft and revoked the whole family. Fixes (2026-10-18):
+- **Server** (`utils/refreshReplay.ts` + `auth.ts`): replay is *classified*. A token whose family has **no live token left** (logout/revocation already happened) is answered with a plain 401 — no `session_hijacked` alarm and no broadcast. A token that is the **direct predecessor** of the live tip and was rotated within `REFRESH_REPLAY_GRACE_MS` (default 120 s) is treated as a benign retry (lost/slow response, frozen tab) and the chain continues. Anything else is a genuine replay → family revoked.
+- **Server**: `force_logout` (reuse detection and `DELETE /api/sessions/:jti`) is **device-scoped** — payload carries `deviceId` and the event targets only that device.
+- **Client** (`store/auth.ts` + `lib/refreshLock.ts`): `silentRefresh` is single-flight per tab and serialized across tabs (Web Locks API + localStorage fallback), retries up to 3×, and now reports whether the failure was **auth** (401/403) or **transient** (network/timeout/5xx).
+- **Client** (`lib/api.ts` + `store/auth.ts`): only an *authoritative* refresh failure triggers the logout handler (which POSTs `/api/auth/logout` and therefore revokes the family). A transient failure keeps the session alive, and `bootstrap()` no longer wipes the local session when the failure looks transient.
+- **Cleanup**: revoked `RefreshToken` rows are kept 7 days (`REVOKED_REFRESH_TOKEN_RETENTION_MS`) so the `replacedById` chain still exists for the classification above.
 If you still see reuse logs on prod, the deploy is stale — confirm the latest `auth.ts` shipped.
 
 ### `⚠️ CSRF_SECRET not set` even though it's in `.env`
 `config.ts` reads `CSRF_SECRET` and warns only when it's empty/whitespace **and** `NODE_ENV=production`. The prod env is copied from `/root/nyx-app/.env` over `server/.env` on deploy — set a non-empty `CSRF_SECRET` there (not just in `server/.env`). The config now trims the value, so `CSRF_SECRET=` (empty) is treated as unset.
 
 ### App logs out intermittently on open / refresh
-- The `rt` cookie (30 d) may have been revoked earlier by a reuse false-positive (see above).
-- `bootstrap` now retries `silentRefresh` and falls back to validating the still-valid `at` cookie before logging out.
+- A transient refresh failure no longer triggers logout/revocation (see above): the session only ends on 401/403 from `/api/auth/refresh`.
+- `bootstrap` still falls back to a direct `GET /api/users/me`, but keeps the local session when the failure is transient (offline/timeout/5xx) instead of clearing `user` + `localStorage`.
+- Known limitation: if the app is opened while the network is down, `bootstrap` has no server-validated user yet and the route guard still shows `/login` until connectivity returns (local session is preserved, so no data is lost).
+- If `/login?reason=revoked` still appears with no reuse log, check that the client build is current — an old bundle ignores the `deviceId` scope and logs out on any device's revocation.
 
 ### Biometric login then password login says "incorrect password"
 Biometric unlock used to regenerate the key bundle with a random session key and overwrite the password-encrypted bundle in IndexedDB, breaking password login. Fixed: biometric unlock now loads keys **in memory only** and never touches `nyx_encrypted_keys`. Users whose bundle was already overwritten by the old bug need one recovery pass.
@@ -112,6 +116,14 @@ The biometric flow now sets `isUnlocking` during key restore, same as the passwo
 
 ### User's profile change doesn't propagate to other users' chatlist/header
 `PUT /api/users/me` now broadcasts `user:updated` to every peer sharing a conversation (`UserHiddenConversation`), not just to the user themselves. Previously peers only saw the new profile after a fresh message arrived.
+
+Client side, three things had to line up or the event was invisible in the chat list and story tray (bubble + user-info modal come from a different path):
+
+- `updateParticipantDetails` matched participants by `p.id === user.id` only, so group-v2 pseudonyms were skipped, and it never persisted the result — the stale snapshot came back from ShadowVault on reload.
+- `profileStore.getCacheOnly` fell back to the plain-id alias. Once a participant carried a new `encryptedProfile`, the alias (decrypted from the **old** blob) was returned as a "quick cache" and the new blob was never decrypted.
+- Nothing refreshed the participant snapshot when the event was missed; `loadConversations` now takes `encryptedProfile` from the sender of the last message (the same source that keeps bubbles fresh), and incoming 1:1 messages refresh their sender's participant entry.
+
+If a peer still shows an old avatar in a client after this release, hard-reload that client first — a cached PWA bundle runs the old code.
 
 ## Database / deploy
 

@@ -139,6 +139,7 @@
     "biometric_initializing": "Inicializando scanner biométrico...",
     "biometric_scan_now": "Escaneie sua impressão digital agora para BLOQUEAR seu cofre...",
     "biometric_success": "Biometria ativada! Agora você pode entrar sem senha.",
+    "biometric_enabled_not_verified": "O desbloqueio biométrico está ativo, mas esta passkey é sincronizada (conta Google/Apple), então não comprova um dispositivo. Envios e busca ampla de usuários continuam bloqueados até você adicionar um autenticador vinculado ao dispositivo ou uma chave de segurança.",
     "mining_connecting": "Conectando à mineração...",
     "mining_processing": "Minerando quebra-cabeça criptográfico... (Uso intenso de CPU)",
     "mining_verifying": "Verificando prova...",

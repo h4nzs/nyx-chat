@@ -79,6 +79,22 @@ export function captureSentAt(parsed: Record<string, unknown>, target: { sentAt?
 }
 
 /**
+ * [BUGFIX 2026-10-18] Ambil penanda AUTO-DELETE dari plaintext hasil dekripsi,
+ * lalu HAPUS dari objek.
+ *
+ * Sama seperti `captureSentAt`: field baru yang "asing" bagi baris lama akan
+ * membuat payload teks gagal di-collapse (`Object.keys(parsed).length === 1`)
+ * sehingga bubble menampilkan JSON mentah — jadi field-nya wajib dibuang setelah
+ * dibaca. Penerima perlu penanda ini karena `expiresAt` pada 1:1 juga dipakai
+ * server untuk TTL store-and-forward dan grace setelah READ.
+ */
+export function captureAutoDelete(parsed: Record<string, unknown>, target: { autoDelete?: boolean }): void {
+  const raw = parsed.autoDelete;
+  if (raw === true || raw === 'true') target.autoDelete = true;
+  delete parsed.autoDelete;
+}
+
+/**
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
  */
@@ -186,6 +202,8 @@ export async function decryptMessageObject(
                             if (!isPlainObject(parsed)) return finalMessage;
                             // [docs/28 Tier 2 — B2] ambil waktu presisi lalu buang.
                             captureSentAt(parsed as Record<string, unknown>, finalMessage);
+                            // [BUGFIX 2026-10-18] penanda auto-delete pengirim.
+                            captureAutoDelete(parsed as Record<string, unknown>, finalMessage);
                             if (parsed.senderId) {
                                 finalMessage.senderId = asUserId(String(parsed.senderId));
                                 if (!finalMessage.sender) finalMessage.sender = { id: asUserId(String(parsed.senderId)) };
@@ -454,6 +472,9 @@ export async function decryptMessageObject(
                 // [docs/28 Tier 2 — B2] ambil waktu presisi lalu buang (wajib —
                 // lihat catatan captureSentAt soal collapse payload teks).
                 captureSentAt(parsed as Record<string, unknown>, finalMessage);
+                // [BUGFIX 2026-10-18] penanda auto-delete pengirim (wajib dibuang
+                // juga, alasan collapse yang sama).
+                captureAutoDelete(parsed as Record<string, unknown>, finalMessage);
 
                 if (parsed.senderId) {
                     finalMessage.senderId = asUserId(String(parsed.senderId));
@@ -804,6 +825,24 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
 
                       if (success) {
                                   (await import('@store/message')).useMessageStore.getState().reDecryptPendingMessages(data.conversationId || conversationId);
+                                  // [BUGFIX 2026-10-18] Metadata bisa tiba SEBELUM era key
+                                  // (jalur offline sync): `conversation:new/updated`
+                                  // lalu gagal dekripsi karena metadataKey belum
+                                  // terikat, dan tidak ada yang mencoba ulang setelah
+                                  // distribusi key ini tersimpan → grup tampak
+                                  // "Unknown Group" sampai reload. Coba sekali di
+                                  // sini; addOrUpdateConversation sudah punya guard
+                                  // anti-rewind + anti-ratchet.
+                                  try {
+                                      const { useConversationStore } = await import('@store/conversation');
+                                      const convId = data.conversationId || conversationId;
+                                      const conv = useConversationStore.getState().conversations.find(c => c.id === convId);
+                                      if (conv?.isGroup && conv.encryptedMetadata && !conv.decryptedMetadata) {
+                                          await useConversationStore.getState().addOrUpdateConversation({ ...conv });
+                                      }
+                                  } catch (metaErr) {
+                                      console.warn('[Group Ratchet] Retry decrypt metadata gagal:', metaErr);
+                                  }
                       } else {
                           const requestorId = decrypted.senderId || data.senderId;
                           if (requestorId) {

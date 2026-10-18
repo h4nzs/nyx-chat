@@ -42,6 +42,7 @@ import {
   normalizeBackupPhrase,
 } from '@lib/backupRestore';
 import { startBackupFileDownload, uploadBackupToCloud } from '@lib/backupTransport';
+import { ApiError } from '@lib/api';
 import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
 import { getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import { useModalStore } from '@store/modal';
@@ -59,6 +60,12 @@ interface ExportResult {
   frameCount: number;
   records: number;
   uploaded: boolean;
+  /**
+   * Alasan salinan awan gagal, kalau memang gagal. Disimpan di state hasil
+   * supaya alasannya tetap terbaca setelah toast hilang — sebelumnya pengguna
+   * hanya melihat "gagal unggah ke awan" sesaat tanpa tahu penyebabnya.
+   */
+  uploadFailure?: 'unverified' | 'failed';
 }
 
 /**
@@ -94,6 +101,20 @@ async function acquireRecoveryPhrase(): Promise<string | null> {
       }
     });
   });
+}
+
+/**
+ * Terjemahkan kegagalan unggah awan menjadi alasan yang bisa ditindaklanjuti.
+ *
+ * 403 `SANDBOX_UPLOAD_RESTRICTION` bukan gangguan jaringan: server menolak
+ * backup awan untuk akun yang belum terverifikasi (`isVerified=false`). Itu
+ * sebabnya pesan generik "gagal unggah" menyesatkan — yang perlu dilakukan
+ * pengguna adalah menyelesaikan verifikasi perangkat, bukan mengulang unggah.
+ */
+function classifyUploadFailure(error: unknown): 'unverified' | 'failed' {
+  if (error instanceof ApiError && error.status === 403) return 'unverified';
+  if (error instanceof Error && /SANDBOX_UPLOAD_RESTRICTION/.test(error.message)) return 'unverified';
+  return 'failed';
 }
 
 export default function BackupExportModal({ isOpen, onClose }: BackupExportModalProps) {
@@ -159,6 +180,7 @@ export default function BackupExportModal({ isOpen, onClose }: BackupExportModal
       const fileName = startBackupFileDownload(report.bytes);
 
       let uploaded = false;
+      let uploadFailure: ExportResult['uploadFailure'];
       if (includeCloud) {
         try {
           setProgress(0);
@@ -171,7 +193,16 @@ export default function BackupExportModal({ isOpen, onClose }: BackupExportModal
           // Berkas lokal SUDAH terunduh — kegagalan awan tidak boleh membatalkan
           // backup yang sah, hanya dilaporkan.
           console.error('[BackupExport] cloud upload failed:', uploadError);
-          toast.error(t('modals:backup_export.upload_failed', 'Gagal mengunggah ke awan; berkas lokal tetap tersimpan.'), { id: 'backup-export-upload' });
+          uploadFailure = classifyUploadFailure(uploadError);
+          toast.error(
+            uploadFailure === 'unverified'
+              ? t(
+                  'modals:backup_export.upload_unverified',
+                  'Akun belum terverifikasi — verifikasi perangkat dulu agar backup awan diizinkan. Berkas lokal tetap tersimpan.'
+                )
+              : t('modals:backup_export.upload_failed', 'Gagal mengunggah ke awan; berkas lokal tetap tersimpan.'),
+            { id: 'backup-export-upload' }
+          );
         }
       }
 
@@ -181,6 +212,7 @@ export default function BackupExportModal({ isOpen, onClose }: BackupExportModal
         frameCount: report.frameCount,
         records: report.records,
         uploaded,
+        uploadFailure,
       });
       setPhase('done');
       toast.success(
@@ -285,6 +317,19 @@ export default function BackupExportModal({ isOpen, onClose }: BackupExportModal
             {result.uploaded && (
               <p className="font-mono text-[10px] text-accent">
                 {t('modals:backup_export.result_cloud', 'Tersimpan juga di awan.')}
+              </p>
+            )}
+            {!result.uploaded && result.uploadFailure && (
+              <p role="status" className="font-mono text-[10px] text-amber-500">
+                {result.uploadFailure === 'unverified'
+                  ? t(
+                      'modals:backup_export.result_cloud_unverified',
+                      'Salinan awan dilewati: akun belum terverifikasi. Verifikasi perangkat di Pengaturan, lalu buat ulang backup.'
+                    )
+                  : t(
+                      'modals:backup_export.result_cloud_failed',
+                      'Salinan awan gagal diunggah — berkas .nyxbak di perangkat ini tetap sah.'
+                    )}
               </p>
             )}
           </div>

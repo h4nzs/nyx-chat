@@ -9,7 +9,7 @@ import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
 import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
-import { transportClient, } from '@lib/transportClient';
+import { transportClient, emitSessionKeyRequest } from '@lib/transportClient';
 import { useTranslation } from 'react-i18next';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
@@ -131,11 +131,17 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
                 if (isMounted) {
                     setStatus('waiting');
                     const socket = transportClient;
-                    if (socket?.connected && targetSessionId) {
-                        transportClient.sendEvent('session:request_key', {
-                            conversationId: message.conversationId,
-                            sessionId: targetSessionId
-                        });
+                    // [GAP 2026-10-18] `targetId` WAJIB: server Opaque Mailbox tidak
+                    // bisa menurunkan penerima dari `sessionId` (1:1 menyimpan
+                    // `senderId: null`) dan SELALU menjawab
+                    // `session:request_key_failed` ("Opaque Mailbox requires
+                    // targetId") tanpa field itu — jadi loop retry di bawah ini dulu
+                    // berputar tanpa pernah ada yang men-fulfil. Penerima permintaan =
+                    // pengirim pesan (peer). Untuk grup `targetSessionId` sudah userId
+                    // pengirim, untuk 1:1 `sessionId` = conversationId.
+                    const requestTargetId = message.senderId;
+                    if (socket?.connected && targetSessionId && requestTargetId) {
+                        emitSessionKeyRequest(message.conversationId, targetSessionId, requestTargetId);
                     }
                     retryTimeout = setTimeout(() => {
                         if (isMounted) setRetryCount(c => c + 1);

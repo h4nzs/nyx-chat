@@ -889,7 +889,7 @@ dengan crypto yang lebih buruk. Yang dipakai (`web/src/lib/localOrderKey.ts`):
 - **Kolom non-pengurutan di-seal DI TEMPAT (langkah 3):** satu kolom berisi
   plaintext lama ATAU envelope `ENC1:` (pola `seq`), jadi tidak perlu kolom
   bayangan: `senderId`, `repliedToId`, `isViewOnce`, `isDeletedLocal`,
-  `expiresAt` (ms), `Conversation.isGroup`. Konsekuensi yang mudah salah: nilai
+  `expiresAt` (ms), `Conversation.isGroup`, `Message.reactions`. Konsekuensi yang mudah salah: nilai
   ter-seal **selalu truthy** — kode yang dulu menulis `if (row.isViewOnce ||
   row.isDeletedLocal)` harus membukanya (`openLocalFlag`) atau membaca boolean
   dari `Message` di memori, bukan dari baris DB. `expiresAt` juga: envelope

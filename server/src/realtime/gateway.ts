@@ -55,6 +55,7 @@ import {
   handleKeySync,
   handlePresence,
   handleAck,
+  handleWebRtcRelay,
   type RealtimeContext,
 } from '../network/realtimeHandlers.js';
 
@@ -188,7 +189,6 @@ let downstreamSubRef: typeof redisClient | null = null;
 export const WSS_KEYS_SYNC_EVENTS = [
   'session:request_key',
   'session:fulfill_response',
-  'session:request_missing',
   'group:request_key',
   'group:fulfilled_key',
   'messages:distribute_keys',
@@ -312,8 +312,12 @@ export function attachWssGateway(httpServer: HttpServer): void {
     };
 
     // --- Inbound: CHAT_MESSAGE ---
+    // [PARITY 2026-10-18] Rate limit TIDAK lagi di sini: bucket `chat_message`
+    // (dan `message_ack_delivered` / `presence_update`) hidup di
+    // `realtimeHandlers` supaya klien WebTransport — yang tidak pernah lewat
+    // gateway ini — mendapat batas yang sama. Memasangnya di dua tempat akan
+    // menghitung ganda bucket yang sama (limit efektif jadi separuh).
     guardedOn('message:send', async (payload: unknown) => {
-      if (!await checkRateLimit(userId, 'chat_message', 120, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       // Paritas dengan jalur WT: client menempelkan msgId (UUID) pada payload
       // message:send untuk korelasi ACK. Tanpa ini, callback pendingAcks di
@@ -332,18 +336,34 @@ export function attachWssGateway(httpServer: HttpServer): void {
       );
     });
 
-    // --- Inbound: ACK (delivery receipt) ---
+    // --- Inbound: ACK (delivery receipt) --- (limit ada di handleAck)
     guardedOn('message:ack_delivered', async (payload: unknown) => {
-      if (!await checkRateLimit(userId, 'message_ack_delivered', 240, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handleAck(wsCtx, userId, deviceId, payload as { conversationId: string; messageId: string; targetRecipient?: string });
     });
 
-    // --- Inbound: PRESENCE ---
+    // --- Inbound: PRESENCE --- (limit ada di handlePresence)
     guardedOn('presence:update', async (payload: unknown) => {
-      if (!await checkRateLimit(userId, 'presence_update', 30, 60)) return;
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handlePresence(wsCtx, userId, payload as { event: string; conversationId?: string });
+    });
+
+    // --- Inbound: WEBRTC signaling (paritas dengan opcode 0x03/0x04 jalur WT) ---
+    // [PARITY 2026-10-18] Sebelumnya event ini tidak terdaftar sama sekali di
+    // gateway, sedangkan klien WT mengirimnya sebagai opcode WEBRTC_SIGNAL/ICE —
+    // jadi di jaringan yang memblokir QUIC (justru alasan fallback ada) sinyal
+    // panggilan keluar hilang tanpa jejak. Payload = `{ to, type, payload }`
+    // dengan `to` adalah TOKEN relay buram (bukan userId); validasi token +
+    // keputusan drop fail-closed ada di `handleWebRtcRelay`.
+    guardedOn('webrtc:secure_signal', async (payload: unknown) => {
+      if (!await isActiveDeviceAllowed(userId, deviceId)) return;
+      await handleWebRtcRelay(
+        wsCtx,
+        userId,
+        deviceId,
+        (payload ?? {}) as { to?: string; type?: string; payload?: string },
+        TransportOpCode.WEBRTC_SIGNAL
+      );
     });
 
     // --- Inbound: KEY_SYNC sub-events (rate limits enforced inside handleKeySync) ---
@@ -402,6 +422,16 @@ export function attachWssGateway(httpServer: HttpServer): void {
               // sendAck publishes { msgId, data } on opcode 0x06 (no `event`
               // field) — the client resolves pendingAcks from this event.
               sock.emit('message:ack_delivered', json);
+              break;
+            case TransportOpCode.WEBRTC_SIGNAL:
+            case TransportOpCode.WEBRTC_ICE:
+              // [PARITY 2026-10-18] Envelope relay = `{ from, type, payload }`
+              // (TIDAK punya field `event`), jadi cabang default dulu
+              // meng-emit-nya sebagai `message:new` → klien mencoba mem-parse
+              // sinyal panggilan sebagai pesan chat dan membuangnya. Sekarang
+              // dipetakan ke event yang sama dengan jalur WT (`webrtc:signal`
+              // di klien, lihat transportClient.handleIncomingWss).
+              sock.emit('webrtc:secure_signal', json);
               break;
             default:
               // KEY_SYNC and other opcodes carry { event, data } — passthrough.
