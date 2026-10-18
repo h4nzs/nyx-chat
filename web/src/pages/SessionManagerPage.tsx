@@ -3,8 +3,10 @@ import { api } from '@lib/api';
 import { toast } from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { Link } from 'react-router-dom';
-import { FiMonitor, FiSmartphone, FiLogOut, FiChevronLeft, FiServer } from 'react-icons/fi';
+import { FiMonitor, FiSmartphone, FiLogOut, FiChevronLeft, FiServer, FiLink } from 'react-icons/fi';
 import { useTranslation } from 'react-i18next';
+// [LINK 2026-10-18] Pairing perangkat baru lewat QR (token + persetujuan).
+import LinkDeviceModal from '@components/LinkDeviceModal';
 
 type Session = {
   deviceId?: string;
@@ -90,6 +92,8 @@ export default function SessionManagerPage() {
   const { t } = useTranslation(['settings', 'common']);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  // [LINK 2026-10-18] Modal QR pairing — dirender on-demand (bukan di App).
+  const [showLinkDevice, setShowLinkDevice] = useState(false);
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -154,6 +158,19 @@ export default function SessionManagerPage() {
           </div>
       </div>
 
+      <div className="w-full max-w-3xl mb-6">
+        <button
+          onClick={() => setShowLinkDevice(true)}
+          className="w-full flex items-center justify-center gap-3 rounded-xl bg-bg-surface border border-text-secondary/10 px-4 py-3 text-sm font-bold text-text-primary shadow-neu-flat-light dark:shadow-neu-flat-dark hover:text-accent transition-all"
+        >
+          <FiLink size={18} />
+          {t('settings:sessions_page.link_button')}
+        </button>
+        <p className="mt-2 text-center text-[10px] font-mono uppercase tracking-widest text-text-secondary/70">
+          {t('settings:sessions_page.link_button_hint')}
+        </p>
+      </div>
+
       <div className="w-full max-w-3xl flex-1">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-64 text-text-secondary">
@@ -186,6 +203,8 @@ export default function SessionManagerPage() {
           </div>
         )}
       </div>
+
+      {showLinkDevice && <LinkDeviceModal onClose={() => setShowLinkDevice(false)} />}
     </div>
   );
 }

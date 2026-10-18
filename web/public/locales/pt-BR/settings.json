@@ -57,9 +57,10 @@
     "keys": "Chaves de Criptografia",
     "sessions": "Sessões Ativas",
     "export_vault": "Exportar Cofre",
-    "import_vault": "Importar Cofre",      "transfer": "Transferir para Novo Dispositivo (QR)",
-      "restore_backup": "Restaurar de Arquivo .nyxbak",
-      "export_backup": "Backup Criptografado (.nyxbak)"
+    "import_vault": "Importar Cofre",
+    "transfer": "Transferir para Novo Dispositivo (QR)",
+    "restore_backup": "Restaurar de Arquivo .nyxbak",
+    "export_backup": "Backup Criptografado (.nyxbak)"
   },
   "support": {
     "push_notif": "Notificações Push",
@@ -112,7 +113,26 @@
     "no_nodes": "Nenhum nó ativo detectado.",
     "current": "ATUAL",
     "ip": "IP",
-    "last_ping": "ÚLTIMO PING"
+    "last_ping": "ÚLTIMO PING",
+    "link_button": "Vincular um dispositivo",
+    "link_button_hint": "Adicione outro dispositivo escaneando o QR dele",
+    "link_title": "VINCULAR UM NOVO DISPOSITIVO",
+    "link_desc": "Escaneie este código no dispositivo que deseja adicionar. Vale uma vez e expira em 5 minutos.",
+    "link_qr_waiting": "Solicitando um código seguro…",
+    "link_new_qr": "Novo código",
+    "link_manual_label": "Ou cole este link no dispositivo novo",
+    "link_pending_title": "Aguardando aprovação",
+    "link_pending_empty": "Nenhum dispositivo aguardando vinculação.",
+    "link_approve": "Aprovar dispositivo",
+    "link_deny": "Rejeitar dispositivo",
+    "link_approved": "{device} foi vinculado.",
+    "link_denied": "{device} foi rejeitado.",
+    "link_unknown_device": "Dispositivo desconhecido",
+    "link_incoming": "{device} quer ser vinculado",
+    "link_offline": "Sem conexão com o servidor. Tente novamente em instantes.",
+    "link_qr_failed": "Não foi possível criar o código. Tente novamente.",
+    "link_action_failed": "Não foi possível concluir essa ação.",
+    "link_single_device_note": "Apenas um dispositivo fica ativo por conta: o novo desconecta este ao concluir."
   },
   "keys_page": {
     "title": "Cofre Criptográfico",

@@ -12,6 +12,7 @@ import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypt
 import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
 import { unlockWithBiometric, removeBioVaultEntry } from "@lib/biometricUnlock";
 import { executeLocalWipe } from "@lib/nukeProtocol";
+import { loginNoticeFromSearch } from "@lib/loginNotice";
 import { importDatabaseFromJson } from '@lib/keychainDb';
 import { sanitizeErrorLog } from '../utils/sanitize';
 import toast from "react-hot-toast";
@@ -29,6 +30,12 @@ export default function Login() {
   const vaultInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // [UX 2026-10-18] Redirect dari force_logout / auth:banned / kick sidecar
+  // membawa `reason` (+ `msg`), tetapi halaman ini dulu tidak membacanya —
+  // perangkat yang dicabut atau diblokir hanya melihat form login kosong tanpa
+  // penjelasan. Pemetaannya ada di lib murni (mudah diuji).
+  const loginNotice = loginNoticeFromSearch(location.search);
 
   const { login, user, accessToken, hasRestoredKeys, isUnlocking } = useAuthStore(useShallow(s => ({
     login: s.login,
@@ -470,6 +477,18 @@ export default function Login() {
             <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.access_terminal')}</h2>
             <p className="text-text-secondary">{t('auth:subtitles.login_desc')}</p>
           </div>
+
+          {loginNotice && (
+            <div
+              role="status"
+              className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-500"
+            >
+              <p className="font-semibold">{t(loginNotice.key)}</p>
+              {loginNotice.detail && (
+                <p className="mt-1 break-words text-xs opacity-80">{loginNotice.detail}</p>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-red-500 text-center mb-4 text-sm">{error}</p>}
 

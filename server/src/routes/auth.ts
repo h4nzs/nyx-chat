@@ -25,9 +25,24 @@ import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
 import {
   deviceInstallationTag,
   identifierLookupCandidates,
+  openAtRest,
   pepperedIdentifier,
   sealAtRest,
 } from '../utils/atRestSecrets.js'
+// [LINK 2026-10-18] State machine pairing perangkat lewat QR (token → pending →
+// approved → complete). Logikanya murni + bisa diuji tanpa Prisma/Redis.
+import {
+  LINK_TOKEN_PATTERN,
+  approvePendingLink,
+  consumeLinkToken,
+  createPendingLink,
+  denyPendingLink,
+  getLinkState,
+  readPendingLink,
+  takeApprovedLink,
+  type LinkingSealer,
+  type LinkingStore,
+} from '../utils/deviceLinking.js'
 // [docs/28 Tier 1.5 / D14] key Redis memakai tag, bukan userId asli (Redis = artefak setara dump).
 // [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
@@ -70,7 +85,10 @@ import { parseCredentialTransports, toBase64UrlCredentialId } from '../utils/web
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // ✅ FIX: Import tipe JWT Payload dari shared
-import type { AuthJwtPayload } from '@nyx/shared'
+import { TransportOpCode, type AuthJwtPayload } from '@nyx/shared'
+// [LINK] Notifikasi permintaan tautan ke perangkat lama (relay yang sama dengan
+// semua event KEY_SYNC lain — WSS maupun WebTransport).
+import { sendJsonToUser } from '../network/redisBridge.js'
 
 /**
  * [docs/28 Tier 0 — D7] Fingerprint perangkat = identifier ber-entropi rendah
@@ -977,6 +995,210 @@ router.post('/recover', authLimiter, zodValidate({
     setAuthCookies(res, tokens);
     res.json({ message: "Account recovered successfully.", accessToken: tokens.access });
   } catch (e) { next(e); }
+});
+
+// ===========================================================================
+// [LINK 2026-10-18] Pairing perangkat baru lewat QR — sisi server.
+// ===========================================================================
+//
+// Sebelum ini hanya ada separuh fitur (`auth:request_linking_qr` membuat token
+// lalu meng-emit QR yang tidak bisa dipakai siapa pun). Sekarang:
+//   POST /api/auth/link/claim     (publik)  → bakar token, buat pending
+//   GET  /api/auth/link/status/:id (publik) → pending | approved | expired
+//   POST /api/auth/link/approve   (auth)    → buat Device row untuk perangkat baru
+//   POST /api/auth/link/deny      (auth)    → batalkan
+//   POST /api/auth/link/complete  (publik)  → { deviceId, usernameHash }
+//
+// `complete` SENGAJA tidak menerbitkan token sesi: klien lalu memakai alur
+// `/login` yang sudah ada (verifikasi password + dekripsi kunci lokal), jadi
+// hanya ada SATU jalur pembuatan sesi — tidak ada jalur token kedua yang harus
+// diaudit. Kunci privat perangkat baru dibuat & dienkripsi di klien; server
+// hanya menyimpan bundel terenkripsi (sama seperti /register).
+
+const linkStore: LinkingStore = {
+  get: (key) => redisClient.get(key),
+  setEx: (key, ttlSeconds, value) => redisClient.setEx(key, ttlSeconds, value),
+  del: async (...keys) => {
+    if (keys.length === 0) return 0;
+    return redisClient.del(keys);
+  },
+};
+
+const linkSealer: LinkingSealer = { seal: sealAtRest, open: openAtRest };
+
+router.post('/link/claim', authLimiter, zodValidate({
+  body: z.object({
+    token: z.string().regex(LINK_TOKEN_PATTERN),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1216).optional(),
+    signingKey: validateKey(32),
+    encryptedPrivateKey: z.string().min(1),
+    deviceName: z.string().max(64).optional(),
+  })
+}), async (req, res, next) => {
+  try {
+    const { token, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body;
+
+    // Token sekali pakai: dibakar walaupun langkah berikutnya gagal. Tanpa ini,
+    // token yang sempat terlihat (mis. screenshot QR) bisa dipakai ulang.
+    const owner = await consumeLinkToken(linkStore, linkSealer, token);
+    if (!owner) throw new ApiError(401, 'Invalid or expired linking token.');
+
+    // Binding hardware diambil dari PERANGKAT BARU (request claim ini), bukan
+    // dari perangkat yang menyetujui — kalau tertukar, login berikutnya di
+    // perangkat baru akan dianggap "hardware mismatch" dan dipaksa recovery.
+    const newDeviceInstallationId = typeof req.headers['x-nyx-installation-id'] === 'string'
+      ? req.headers['x-nyx-installation-id']
+      : undefined;
+
+    const pendingId = await createPendingLink(linkStore, linkSealer, {
+      userId: owner.userId,
+      requestDeviceId: owner.deviceId,
+      deviceName: deviceName || undefined,
+      publicKey,
+      pqPublicKey: pqPublicKey || undefined,
+      signingKey,
+      encryptedPrivateKey,
+      fingerprint: indexDeviceFingerprint(req.headers['x-nyx-fingerprint']),
+      installationTag: newDeviceInstallationId ? deviceInstallationTag(newDeviceInstallationId) : null,
+    });
+
+    // Beri tahu perangkat yang menampilkan QR (scoped deviceId-nya). Kegagalan
+    // relay bukan alasan menggagalkan klaim — perangkat baru tetap polling.
+    try {
+      await sendJsonToUser(owner.userId, TransportOpCode.KEY_SYNC, {
+        event: 'auth:linking_request',
+        data: {
+          pendingId,
+          deviceName: deviceName || 'Perangkat baru',
+          publicKey,
+          signingKey,
+        },
+      }, false, owner.deviceId || undefined);
+    } catch (notifyError) {
+      console.warn('[Link] Gagal mengirim auth:linking_request:', notifyError);
+    }
+
+    res.json({ pendingId });
+  } catch (e) { next(e) }
+});
+
+router.get('/link/status/:pendingId', authLimiter, async (req, res, next) => {
+  try {
+    const pendingId = req.params.pendingId;
+    if (typeof pendingId !== 'string' || pendingId.length < 8) throw new ApiError(400, 'pendingId is required.');
+    res.json({ state: await getLinkState(linkStore, pendingId) });
+  } catch (e) { next(e) }
+});
+
+router.post('/link/approve', requireAuth, zodValidate({
+  body: z.object({ pendingId: z.string().min(8) })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Unauthorized');
+    const { pendingId } = req.body;
+
+    const pending = await readPendingLink(linkStore, linkSealer, pendingId);
+    if (!pending) throw new ApiError(404, 'Link request not found or expired.');
+    // Persetujuan hanya sah dari akun pemilik pending — perangkat lama mana pun
+    // milik user itu boleh menyetujui (token sudah membuktikan kepemilikan).
+    if (pending.userId !== req.user.id) throw new ApiError(403, 'This link request belongs to another account.');
+    if (await getLinkState(linkStore, pendingId) !== 'pending') {
+      throw new ApiError(409, 'Link request has already been handled.');
+    }
+
+    const device = await prisma.device.create({
+      data: {
+        userId: pending.userId,
+        publicKey: Buffer.from(pending.publicKey, 'base64url'),
+        pqPublicKey: pending.pqPublicKey ? Buffer.from(pending.pqPublicKey, 'base64url') : null,
+        signingKey: Buffer.from(pending.signingKey, 'base64url'),
+        encryptedPrivateKey: Buffer.from(pending.encryptedPrivateKey, 'utf8'),
+        nameSealed: await sealAtRest(pending.deviceName || 'Linked Device'),
+        // Binding milik PERANGKAT BARU (dikumpulkan saat claim).
+        fingerprint: pending.fingerprint || null,
+        installationTag: pending.installationTag || null,
+      }
+    });
+
+    const approved = await approvePendingLink(linkStore, linkSealer, pendingId, req.user.id, device.id);
+    if (!approved) {
+      // Race: approve lain menang lebih dulu → jangan tinggalkan device yatim.
+      await prisma.device.delete({ where: { id: device.id } }).catch(() => {});
+      throw new ApiError(409, 'Link request has already been handled.');
+    }
+
+    // [docs/30 §30.5 WS-A] Kunci identitas perangkat baru = perubahan yang harus
+    // terlihat di log KT (paritas dengan login yang meregenerasi kunci).
+    try {
+      const owner = await prisma.user.findUnique({
+        where: { id: pending.userId },
+        select: { usernameHash: true }
+      });
+      if (owner?.usernameHash) {
+        void publishIdentityKeyChange({
+          userId: pending.userId,
+          usernameHash: owner.usernameHash,
+          identityKey: Buffer.from(pending.publicKey, 'base64url'),
+          pqIdentityKey: pending.pqPublicKey ? Buffer.from(pending.pqPublicKey, 'base64url') : null,
+          signingKey: Buffer.from(pending.signingKey, 'base64url'),
+        });
+      }
+    } catch (ktError) {
+      console.warn('[Link] Gagal menerbitkan entri KT untuk perangkat baru:', ktError);
+    }
+
+    res.json({ ok: true, deviceId: device.id });
+  } catch (e) { next(e) }
+});
+
+router.post('/link/deny', requireAuth, zodValidate({
+  body: z.object({ pendingId: z.string().min(8) })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Unauthorized');
+    const { pendingId } = req.body;
+    const pending = await readPendingLink(linkStore, linkSealer, pendingId);
+    if (!pending) throw new ApiError(404, 'Link request not found or expired.');
+    if (pending.userId !== req.user.id) throw new ApiError(403, 'This link request belongs to another account.');
+    await denyPendingLink(linkStore, pendingId);
+    res.json({ ok: true });
+  } catch (e) { next(e) }
+});
+
+router.post('/link/complete', authLimiter, zodValidate({
+  // Password ikut diverifikasi DI SINI (bukan hanya di /login sesudahnya):
+  // `takeApprovedLink` membakar state, jadi tanpa cek ini salah ketik password
+  // akan menghabiskan tautan sekaligus meninggalkan Device row yang tidak pernah
+  // dipakai. Verifikasi dulu → baru state dibakar.
+  body: z.object({ pendingId: z.string().min(8), password: z.string().min(1) })
+}), async (req, res, next) => {
+  try {
+    const { pendingId, password } = req.body;
+
+    if (await getLinkState(linkStore, pendingId) !== 'approved') {
+      throw new ApiError(409, 'Link request is not approved or has expired.');
+    }
+    const pending = await readPendingLink(linkStore, linkSealer, pendingId);
+    if (!pending) throw new ApiError(409, 'Link request is not approved or has expired.');
+
+    const user = await prisma.user.findUnique({
+      where: { id: pending.userId },
+      select: { usernameHash: true, bannedAt: true, passwordHash: true }
+    });
+    if (!user) throw new ApiError(404, 'Account not found.');
+    if (user.bannedAt) throw new ApiError(403, 'ACCESS DENIED: Your account has been suspended.');
+    if (!await verifyPassword(password, user.passwordHash)) {
+      throw new ApiError(401, 'Invalid credentials');
+    }
+
+    const taken = await takeApprovedLink(linkStore, linkSealer, pendingId);
+    if (!taken) throw new ApiError(409, 'Link request is not approved or has expired.');
+
+    // Tidak ada token sesi di sini — klien melanjutkan dengan POST /login
+    // memakai password akun + kunci lokal yang baru dibuatnya.
+    res.json({ deviceId: taken.deviceId, usernameHash: user.usernameHash });
+  } catch (e) { next(e) }
 });
 
 router.post('/logout-all', requireAuth, async (req, res, next) => {

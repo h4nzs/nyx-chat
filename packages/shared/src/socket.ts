@@ -148,6 +148,23 @@ export interface ServerToClientEvents {
     "session:request_key_failed": (payload: { sessionId: string; targetId: string; reason: string }) => void;
     force_logout: (payload?: { jti?: string }) => void; // Updated
     'auth:banned': (payload: { reason: string }) => void; // Added
+    /**
+     * [LINK 2026-10-18] Perangkat lama menerima token QR setelah memanggil
+     * `auth:request_linking_qr`. QR berisi `${origin}/link?t=<linkingToken>`.
+     * Token berlaku 5 menit dan hanya bisa dipakai sekali.
+     */
+    'auth:linking_qr_ready': (payload: { linkingToken: string }) => void;
+    /**
+     * [LINK 2026-10-18] Ada perangkat baru memindai QR dan menunggu persetujuan.
+     * Keputusan diambil lewat REST (`/api/auth/link/approve|deny`), bukan event
+     * — supaya persetujuan tetap bisa dilakukan walau relay sedang putus.
+     */
+    'auth:linking_request': (payload: {
+        pendingId: string;
+        deviceName: string;
+        publicKey: string;
+        signingKey: string;
+    }) => void;
     // [CLEANUP 2026-10-18] `user:identity_changed` DIHAPUS (tanpa emitter);
     // perubahan identitas diumumkan lewat `user:updated`.
     "group:participants_changed": (payload: { conversationId: string }) => void;
@@ -209,10 +226,11 @@ export interface ClientToServerEvents {
     "group:fulfilled_key": (payload: KeyFulfillmentPayload) => void;
     "push:subscribe": (payload: PushSubscribePayload) => void;
     "push:unsubscribe": () => void;
-    // [CATATAN 2026-10-18] Handler server untuk event ini ADA dan ber-rate-limit,
-    // tetapi belum ada klien yang memanggilnya (fitur QR device-linking belum
-    // dibangun di UI). Dibiarkan sebagai kontrak; jangan dianggap terpakai.
-    "auth:request_linking_qr": (payload: { publicKey: string }, callback: (res: { ok: boolean, qrData?: string }) => void) => void; // Added
+    // [LINK 2026-10-18] Dipakai `LinkDeviceModal`: server membuat token 5 menit
+    // lalu menjawab lewat event `auth:linking_qr_ready`. `publicKey` tidak wajib
+    // lagi — token diikat ke SESI pemintanya (userId + deviceId), jadi field itu
+    // hanya untuk kompatibilitas klien lama.
+    "auth:request_linking_qr": (payload: { publicKey?: string }, callback: (res: { ok: boolean, qrData?: string }) => void) => void;
     
     // --- WEBRTC E2EE SIGNALING ---
     "webrtc:secure_signal": (payload: { to: string; type: string; payload: string }) => void;

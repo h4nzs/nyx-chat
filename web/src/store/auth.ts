@@ -28,7 +28,10 @@ import i18n from '../i18n';
 import { prefetchAppChunks } from '@lib/prefetch';
 
 // ✅ Helper pendeteksi nama perangkat
-const getDeviceName = () => {
+// [LINK 2026-10-18] diekspor agar halaman tautkan-perangkat memakai label yang
+// SAMA dengan yang dikirim saat login/registrasi (nama device konsisten di
+// Session Manager).
+export const getDeviceName = () => {
     const ua = navigator.userAgent;
     let browser = "Web Browser";
     let os = "Unknown OS";

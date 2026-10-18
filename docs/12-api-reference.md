@@ -28,6 +28,11 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | POST | `/recover` | public | Recovery with signature + new password |
 | GET | `/webauthn/register/options` / POST `/webauthn/register/verify` | requireAuth | Passkey registration |
 | GET | `/webauthn/login/options` / POST `/webauthn/login/verify` | public | Passkey login (returns `encryptedPrivateKey` when the device is recognized) |
+| POST | `/link/claim` | public (authLimiter) | Perangkat baru memindai QR: `{token, publicKey, pqPublicKey?, signingKey, encryptedPrivateKey, deviceName?}` + header fingerprint/installation **perangkat baru** → `{pendingId}`. Token sekali pakai; perangkat lama menerima `auth:linking_request` |
+| GET | `/link/status/:pendingId` | public (authLimiter) | `{state: 'pending'\|'approved'\|'expired'}` — perangkat baru melakukan polling |
+| POST | `/link/approve` | requireAuth | `{pendingId}` → `{ok, deviceId}`. Membuat Device row untuk kunci yang didaftarkan saat claim + entri log KT. Hanya akun pemilik pending |
+| POST | `/link/deny` | requireAuth | `{pendingId}` → `{ok}`; state dihapus |
+| POST | `/link/complete` | public (authLimiter) | `{pendingId, password}` → `{deviceId, usernameHash}`. Password diverifikasi **sebelum** state dibakar (salah ketik tidak menghabiskan QR). **Tidak** menerbitkan token: klien melanjutkan `POST /login` (password + kunci lokal) supaya hanya ada satu jalur sesi |
 | GET | `/pow/challenge` | requireAuth | PoW challenge for trust verification |
 | POST | `/pow/verify` | requireAuth | Submit PoW solution → verified tier |
 | GET | `/transport-ticket` | requireAuth | Short-lived ticket for WebTransport connect |

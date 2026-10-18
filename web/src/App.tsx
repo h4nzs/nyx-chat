@@ -20,6 +20,8 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
 const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
+// [LINK 2026-10-18] Halaman perangkat baru yang memindai QR dari perangkat lama.
+const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
 const UsernameLinkPage = lazy(() => import('./pages/UsernameLinkPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const BurnerChat = lazy(() => import('./pages/BurnerChat'));
@@ -577,6 +579,8 @@ const AppContent = () => {
                 }
               />
               <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+              {/* [LINK 2026-10-18] Publik: perangkat baru belum punya sesi. */}
+              <Route path="/link" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
               <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
               <Route path="/drop" element={<PageWrapper noScroll={true}><BurnerChat /></PageWrapper>} />
 

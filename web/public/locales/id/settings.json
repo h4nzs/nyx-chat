@@ -57,9 +57,10 @@
     "keys": "Kunci Enkripsi",
     "sessions": "Sesi Aktif",
     "export_vault": "Ekspor Brankas",
-    "import_vault": "Impor Brankas",      "transfer": "Transfer ke Perangkat Baru (QR)",
-      "restore_backup": "Pulihkan dari Berkas .nyxbak",
-      "export_backup": "Backup Terenkripsi (.nyxbak)"
+    "import_vault": "Impor Brankas",
+    "transfer": "Transfer ke Perangkat Baru (QR)",
+    "restore_backup": "Pulihkan dari Berkas .nyxbak",
+    "export_backup": "Backup Terenkripsi (.nyxbak)"
   },
   "support": {
     "push_notif": "Notifikasi Push",
@@ -112,7 +113,26 @@
     "no_nodes": "Tidak ada node aktif terdeteksi.",
     "current": "SAAT INI",
     "ip": "IP",
-    "last_ping": "PING TERAKHIR"
+    "last_ping": "PING TERAKHIR",
+    "link_button": "Tautkan perangkat",
+    "link_button_hint": "Tambah perangkat lain dengan memindai QR-nya",
+    "link_title": "TAUTKAN PERANGKAT BARU",
+    "link_desc": "Pindai kode ini di perangkat yang ingin ditambahkan. Sekali pakai dan kedaluwarsa dalam 5 menit.",
+    "link_qr_waiting": "Meminta kode tautan aman…",
+    "link_new_qr": "Kode baru",
+    "link_manual_label": "Atau tempel tautan ini di perangkat baru",
+    "link_pending_title": "Menunggu persetujuan",
+    "link_pending_empty": "Tidak ada perangkat yang menunggu ditautkan.",
+    "link_approve": "Setujui perangkat",
+    "link_deny": "Tolak perangkat",
+    "link_approved": "{device} berhasil ditautkan.",
+    "link_denied": "{device} ditolak.",
+    "link_unknown_device": "Perangkat tidak dikenal",
+    "link_incoming": "{device} ingin ditautkan",
+    "link_offline": "Belum terhubung ke server. Coba lagi sebentar.",
+    "link_qr_failed": "Gagal membuat kode tautan. Coba lagi.",
+    "link_action_failed": "Tindakan itu gagal diselesaikan.",
+    "link_single_device_note": "Hanya satu perangkat aktif per akun: setelah selesai, perangkat baru ini akan mengeluarkan perangkat lama."
   },
   "keys_page": {
     "title": "Brankas Kriptografi",

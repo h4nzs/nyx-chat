@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔗 QR device-linking akhirnya bisa dipakai, dan redirect `/login` menjelaskan alasannya (2026-10-18)
+
+`auth:request_linking_qr` sudah lama membuat token 5 menit di Redis lalu
+meng-emit `auth:linking_qr_ready`, tetapi tidak ada endpoint redeem, tidak ada
+persetujuan perangkat lama, tidak ada listener, dan tidak ada halaman — QR-nya
+hanya dekorasi. Sekarang alurnya utuh: perangkat lama menampilkan QR di
+**Settings → Active Connections → Link a device**, perangkat baru membuka
+`/link?t=<token>`, memasukkan password akun, dan kunci device **baru** dibuat di
+perangkat itu (dienkripsi password, server hanya menyimpan bundel terenkripsi).
+Perangkat lama menerima `auth:linking_request` dan menyetujui lewat REST
+(`/api/auth/link/approve|deny`); setelah disetujui, perangkat baru memanggil
+`/link/complete` → `{deviceId, usernameHash}` lalu menyelesaikan sesi lewat jalur
+`login()` yang sudah ada. State machine-nya (`utils/deviceLinking.ts`) menyimpan
+semua nilai ter-seal di Redis: token sekali pakai, pending 5 menit, dan approve
+kedua tidak bisa membuat device kedua. `complete` sengaja **tidak** menerbitkan
+token supaya tidak ada jalur sesi kedua untuk diaudit.
+
+Kebijakan “satu akun satu device aktif” tetap berlaku: begitu perangkat baru
+masuk, sesi perangkat lama dicabut oleh `issueTokens` (sama seperti login biasa)
+— UI menyebutkannya sebelum QR dipindai, bukan setelah pengguna kehilangan sesi.
+Transfer riwayat/kunci massal tetap memakai alur migrasi yang sudah ada.
+
+Dua sisa audit ikut ditutup: halaman login kini membaca `reason=revoked|kicked|
+banned` (+ `msg`) dan menampilkan alasannya, sehingga perangkat yang dicabut atau
+diblokir tidak lagi mendarat di form kosong; dan `NewMessageToast.tsx` (komponen
+yang tidak diimpor di mana pun, dengan handler klik yang hanya menutup toast)
+dihapus.
+
+Dikunci test: `server/tests/deviceLinking.test.ts` (token sekali pakai, nilai
+ter-seal, approve lintas-user ditolak, complete sebelum approve mustahil),
+`web/src/lib/__tests__/deviceLinking.test.ts` (bentuk URL/`t` hasil scan),
+`web/src/lib/__tests__/loginNotice.test.ts` (tiga alasan redirect).
+
 ## 🔌 Audit paritas WebTransport ↔ WebSocket: empat lubang ditutup (2026-10-18)
 
 Fallback WSS ada supaya klien di jaringan yang memblokir QUIC mendapat perilaku

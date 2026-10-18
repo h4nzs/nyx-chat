@@ -57,9 +57,10 @@
     "keys": "Encryption Keys",
     "sessions": "Active Sessions",
     "export_vault": "Export Vault",
-    "import_vault": "Import Vault",      "transfer": "Transfer to New Device (QR)",
-      "restore_backup": "Restore from .nyxbak File",
-      "export_backup": "Encrypted Backup (.nyxbak)"
+    "import_vault": "Import Vault",
+    "transfer": "Transfer to New Device (QR)",
+    "restore_backup": "Restore from .nyxbak File",
+    "export_backup": "Encrypted Backup (.nyxbak)"
   },
   "support": {
     "push_notif": "Push Notifications",
@@ -112,7 +113,26 @@
     "no_nodes": "No active nodes detected.",
     "current": "CURRENT",
     "ip": "IP",
-    "last_ping": "LAST PING"
+    "last_ping": "LAST PING",
+    "link_button": "Link a device",
+    "link_button_hint": "Add another device by scanning its QR",
+    "link_title": "LINK A NEW DEVICE",
+    "link_desc": "Scan this code on the device you want to add. It works once and expires in 5 minutes.",
+    "link_qr_waiting": "Requesting a secure link code…",
+    "link_new_qr": "New code",
+    "link_manual_label": "Or paste this link on the new device",
+    "link_pending_title": "Waiting for approval",
+    "link_pending_empty": "No device is waiting to be linked.",
+    "link_approve": "Approve device",
+    "link_deny": "Reject device",
+    "link_approved": "{device} was linked.",
+    "link_denied": "{device} was rejected.",
+    "link_unknown_device": "Unknown device",
+    "link_incoming": "{device} wants to be linked",
+    "link_offline": "Not connected to the server. Try again in a moment.",
+    "link_qr_failed": "Could not create a link code. Try again.",
+    "link_action_failed": "Could not complete that action.",
+    "link_single_device_note": "Only one device stays active per account: the new device signs this one out once it finishes."
   },
   "keys_page": {
     "title": "Cryptographic Vault",

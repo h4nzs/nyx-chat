@@ -57,9 +57,10 @@
     "keys": "Claves de cifrado",
     "sessions": "Sesiones activas",
     "export_vault": "Exportar bóveda",
-    "import_vault": "Importar bóveda",      "transfer": "Transferir a nuevo dispositivo (QR)",
-      "restore_backup": "Restaurar desde archivo .nyxbak",
-      "export_backup": "Copia cifrada (.nyxbak)"
+    "import_vault": "Importar bóveda",
+    "transfer": "Transferir a nuevo dispositivo (QR)",
+    "restore_backup": "Restaurar desde archivo .nyxbak",
+    "export_backup": "Copia cifrada (.nyxbak)"
   },
   "support": {
     "push_notif": "Notificaciones Push",
@@ -112,7 +113,26 @@
     "no_nodes": "No se detectaron nodos activos.",
     "current": "ACTUAL",
     "ip": "IP",
-    "last_ping": "ÚLTIMO PING"
+    "last_ping": "ÚLTIMO PING",
+    "link_button": "Vincular un dispositivo",
+    "link_button_hint": "Añade otro dispositivo escaneando su QR",
+    "link_title": "VINCULAR UN DISPOSITIVO NUEVO",
+    "link_desc": "Escanea este código en el dispositivo que quieres añadir. Sirve una sola vez y caduca en 5 minutos.",
+    "link_qr_waiting": "Solicitando un código seguro…",
+    "link_new_qr": "Nuevo código",
+    "link_manual_label": "O pega este enlace en el dispositivo nuevo",
+    "link_pending_title": "Esperando aprobación",
+    "link_pending_empty": "Ningún dispositivo espera ser vinculado.",
+    "link_approve": "Aprobar dispositivo",
+    "link_deny": "Rechazar dispositivo",
+    "link_approved": "{device} fue vinculado.",
+    "link_denied": "{device} fue rechazado.",
+    "link_unknown_device": "Dispositivo desconocido",
+    "link_incoming": "{device} quiere vincularse",
+    "link_offline": "Sin conexión al servidor. Inténtalo en un momento.",
+    "link_qr_failed": "No se pudo crear el código. Inténtalo de nuevo.",
+    "link_action_failed": "No se pudo completar la acción.",
+    "link_single_device_note": "Solo un dispositivo queda activo por cuenta: el nuevo dispositivo cerrará este al terminar."
   },
   "keys_page": {
     "title": "Bóveda criptográfica",
