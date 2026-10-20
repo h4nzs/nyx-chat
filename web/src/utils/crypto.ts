@@ -1,5 +1,13 @@
 import type { DoubleRatchetState, ConversationId, UserId, Pseudonym, GroupMemberEntry } from '@nyx/shared';
-import { asPseudonym, getParticipantUserId } from '@nyx/shared';
+import {
+  asPseudonym,
+  getParticipantUserId,
+  parseGroupEnvelope,
+  packGroupEnvelope,
+  deriveGroupSenderKeyId,
+  constantTimeEqual,
+  type GroupEnvelope,
+} from '@nyx/shared';
 import { buildRotatedGroupMetadata, type RotationSourceMetadata } from '@lib/groupMetadataRotation';
 // [T1] Helper pseudonym ada di module ringan (testable tanpa graph worker);
 // di-import + di-re-export agar pemakaian lama tetap jalan.
@@ -35,6 +43,9 @@ export {
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { isSameEraDistribution } from '@lib/groupEra';
+// [docs/35 Fase 1.4] Gerbang X3DH v2 (X-Wing murni + tanda tangan ML-DSA):
+// hanya aktif bila fitur dinyalakan DAN bundle peer memuat `signingKeyV2`.
+import { resolvePqV2Enabled } from '@lib/pqCapability';
 // [DR PROTOCOL 2026-10-05] Keputusan protokol 1:1 — pure & unit-tested.
 import {
   attachClientProtocolFields,
@@ -129,6 +140,9 @@ import {
   emitGroupKeyFulfillment 
 } from '@lib/transportClient';
 import type { Participant } from '@store/conversation';
+import { openSealedForDevice, sealForDevice } from '@lib/pqBoxSeal';
+
+export { openSealedForDevice, sealForDevice };
 
 // --- Group Metadata Helpers ---
 
@@ -209,10 +223,26 @@ export async function encryptGroupMetadata(
       const { workerXChaChaSeal } = await import('@lib/crypto-worker-proxy');
       const ct = await workerXChaChaSeal(metaKey, payload);
       const ctBytes = sodium.from_base64(ct, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const signature = sodium.to_base64(
-          sodium.crypto_sign_detached(ctBytes, new Uint8Array(signingPriv as unknown as ArrayLike<number>)),
-          sodium.base64_variants.URLSAFE_NO_PADDING
-      );
+      // [PQ v4 Fase 1.5] Bila v2 aktif, tandatangani byte `ct` dengan ML-DSA-65
+      // (context `PQ_V2_DOMAINS.GROUP`) dan set `sigV: 2`. Jalur v1 (Ed25519)
+      // tetap dipakai bila gerbang mati — `sigV: 1`.
+      const signingV2 = resolvePqV2Enabled() ? await useAuthStore.getState().getSigningV2KeyPair() : undefined;
+      let signature: string;
+      let sigV: 1 | 2;
+      if (signingV2) {
+          const { mlDsaSign, PQ_V2_DOMAINS } = await import('@nyx/shared');
+          signature = sodium.to_base64(
+              mlDsaSign(ctBytes, new Uint8Array(signingV2.secretKey), PQ_V2_DOMAINS.GROUP),
+              sodium.base64_variants.URLSAFE_NO_PADDING
+          );
+          sigV = 2;
+      } else {
+          signature = sodium.to_base64(
+              sodium.crypto_sign_detached(ctBytes, new Uint8Array(signingPriv as unknown as ArrayLike<number>)),
+              sodium.base64_variants.URLSAFE_NO_PADDING
+          );
+          sigV = 1;
+      }
       // [docs/28 Tier 4] `senderId` (userId penulis) DIHAPUS dari wrapper v2:
       // reader v2 merutekan lewat `chainId` + `senderDeviceKey` dan memverifikasi
       // tanda tangan hanya atas byte `ct`, jadi field itu tidak dipakai — dan ia
@@ -221,10 +251,20 @@ export async function encryptGroupMetadata(
       return JSON.stringify({
           v: 2,
           kind: 'group_metadata',
+          sigV,
           chainId: senderState.chainId,
           ct,
           signature,
-          senderDeviceKey: myDeviceKey
+          senderDeviceKey: myDeviceKey,
+          // [PQ v4 Fase 1.5 — envelope v3] Pengenal kunci verifikasi pengirim.
+          ...(signingV2
+              ? {
+                    senderKeyId: sodium.to_base64(
+                        deriveGroupSenderKeyId(signingV2.publicKey),
+                        sodium.base64_variants.URLSAFE_NO_PADDING
+                    ),
+                }
+              : {}),
       });
   }
 
@@ -259,14 +299,53 @@ export async function decryptGroupMetadata(
             console.warn('Group metadata v2: metadataKey era belum tersedia (menunggu distribusi)', wrapper.chainId);
             return null;
         }
-        if (!record?.signingKey) {
-            console.warn('Group metadata v2: signing key pengirim belum terikat ke state', wrapper.chainId);
-            return null;
-        }
         const ctBytes = sodium.from_base64(wrapper.ct, sodium.base64_variants.URLSAFE_NO_PADDING);
         const signatureBytes = sodium.from_base64(wrapper.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const signingPubBytes = sodium.from_base64(record.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const valid = sodium.crypto_sign_verify_detached(signatureBytes, ctBytes, signingPubBytes);
+        // [PQ v4 Fase 1.5] `sigV: 2` = tanda tangan ML-DSA-65 (verifikasi dengan
+        // `signingKeyV2` pengirim); default `1` = Ed25519 (jalur v1 lama).
+        const sigV: number = typeof wrapper.sigV === 'number' ? wrapper.sigV : 1;
+        let valid: boolean;
+        if (sigV === 2) {
+            // [PQ v4 Fase 1.5 — fallback 2026-10-20] State lama bisa belum
+            // terikat `signingKeyV2` (envelope live dari server yang belum
+            // meneruskan field itu). Resolusi per-device menutup celah ini
+            // tanpa menunggu distribusi ulang.
+            let signingKeyV2ForSender = record?.signingKeyV2;
+            if (!signingKeyV2ForSender && typeof wrapper.senderDeviceKey === 'string') {
+                const resolved = await resolveDeviceSigningKeys(conversationId, wrapper.senderDeviceKey);
+                signingKeyV2ForSender = resolved.signingKeyV2;
+            }
+            if (!signingKeyV2ForSender) {
+                console.warn('Group metadata v2: signing key v2 pengirim belum terikat ke state', wrapper.chainId);
+                return null;
+            }
+            const { mlDsaVerify, PQ_V2_DOMAINS } = await import('@nyx/shared');
+            // [PQ v4 Fase 1.5 — envelope v3] Bila wrapper membawa `senderKeyId`,
+            // kunci verifikasi yang terikat WAJIB menghasilkan id yang sama.
+            if (typeof wrapper.senderKeyId === 'string') {
+                const derived = deriveGroupSenderKeyId(
+                    sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING)
+                );
+                const claimed = sodium.from_base64(wrapper.senderKeyId, sodium.base64_variants.URLSAFE_NO_PADDING);
+                if (!constantTimeEqual(derived, claimed)) {
+                    console.warn('Group metadata v2: senderKeyId tidak cocok dengan signingKeyV2 pengirim', wrapper.chainId);
+                    return null;
+                }
+            }
+            valid = mlDsaVerify(
+                signatureBytes,
+                ctBytes,
+                sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING),
+                PQ_V2_DOMAINS.GROUP
+            );
+        } else {
+            if (!record?.signingKey) {
+                console.warn('Group metadata v2: signing key pengirim belum terikat ke state', wrapper.chainId);
+                return null;
+            }
+            const signingPubBytes = sodium.from_base64(record.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+            valid = sodium.crypto_sign_verify_detached(signatureBytes, ctBytes, signingPubBytes);
+        }
         if (!valid) {
             console.error('Group metadata v2: signature TIDAK valid — blob ditolak');
             return null;
@@ -560,6 +639,7 @@ export interface PreKeyBundle {
   identityKey: string;
   pqIdentityKey?: string; // NEW
   signingKey: string;
+  signingKeyV2?: string | null;
   signedPreKey: {
     key: string;
     pqKey?: string; // NEW
@@ -861,7 +941,6 @@ export async function decryptSessionKeyForUser(
 export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
   try {
     const sodium = await getSodiumLib();
-    const { worker_pq_box_seal } = await getWorkerProxy();
     const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
     const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
     
@@ -895,7 +974,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
           continue;
         }
 
-        const encryptedKey = await worker_pq_box_seal(sessionKey, theirPqPublicKey, theirPublicKey);
+        const encryptedKey = await sealForDevice(sessionKey, theirPqPublicKey, theirPublicKey);
         
         keysPayload.push({
           deviceId: bundle.deviceId,
@@ -961,7 +1040,7 @@ export async function ensureGroupSession(
       }
 
       const sodium = await getSodiumLib();
-      const { groupInitSenderKey, worker_pq_box_seal, worker_pq_box_seal_open } = await getWorkerProxy();
+      const { groupInitSenderKey } = await getWorkerProxy();
       const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
       const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
@@ -1008,7 +1087,10 @@ export async function ensureGroupSession(
 
               // [docs/29 §7.2] observasi pin (tidak menimpa pin yang dipercaya).
               const { observePeerIdentityKey } = await import('@lib/peerIdentityTrust');
-              const observation = await observePeerIdentityKey(uId, bundle.identityKey);
+              const observation = await observePeerIdentityKey(uId, bundle.identityKey, {
+                  pqIdentityKey: bundle.pqIdentityKey,
+                  signingKeyV2: bundle.signingKeyV2,
+              });
               if (observation.status === 'changed') {
                   const { useMessageStore } = await import('@store/message');
                   const { t } = await import('i18next');
@@ -1059,8 +1141,8 @@ export async function ensureGroupSession(
           const { privateKey: myPriv, publicKey: myPub } = await getMyEncryptionKeyPair();
           const myPqKeys = await useAuthStore.getState().getPqEncryptionKeyPair();
           const testPt = sodium.from_string('roundtrip_test_payload');
-          const testCt = await worker_pq_box_seal(testPt, myPqKeys.publicKey, myPub);
-          const testDec = await worker_pq_box_seal_open(testCt, myPqKeys.privateKey, myPriv);
+          const testCt = await sealForDevice(testPt, myPqKeys.publicKey, myPub);
+          const testDec = await openSealedForDevice(testCt, myPqKeys.privateKey, myPriv);
           const testDecStr = sodium.to_string(testDec);
       } catch (rtErr) {
           console.error("Self round-trip FAILED with exception:", rtErr);
@@ -1116,7 +1198,10 @@ export async function ensureGroupSession(
           // blob; tanpa ini dekripsi metadata SENDIRI selalu gagal "signing key
           // pengirim belum terikat ke state" (log 12:02:21, chainId 8BSwIoS9M_8
           // = blob era-2 milik A dibaca ulang oleh A).
-          signingKey: mySigningKeyB64
+          signingKey: mySigningKeyB64,
+          // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA kita sendiri — dipakai saat
+          // dekripsi ulang pesan/metadata KITA sendiri dengan `sigV:2`.
+          signingKeyV2: await getMySigningKeyV2B64()
       });
 
       return distributionKeys.length > 0 ? distributionKeys : [];
@@ -1147,35 +1232,25 @@ export type PairwiseKeyDistributionResult = {
 // SenderKeyDistributionMessage ala libsignal: (chainId, iter=0, chainKey,
 // metadataKey, signingKey) — dipakai create/rotate/redistribute/fulfill/reply.
 // Tidak ada format kedua; parsing di handleGroupKeyDistribution.
-const GROUP_DISTRIBUTION_VERSION = 2;
-// v2: [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)] = 77 byte
-const GROUP_DISTRIBUTION_V2_LEN = 1 + 8 + 4 + 32 + 32;
-
-function packGroupDistributionEnvelopeV2(
-  sodium: Awaited<ReturnType<typeof getSodiumLib>>,
-  chainIdB64: string,
-  iter: number,
-  ckB64: string,
-  metaKeyB64: string
-): Uint8Array {
-  const b64 = (s: string) => sodium.from_base64(s, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const chainId = b64(chainIdB64);
-  const ck = b64(ckB64);
-  const mk = b64(metaKeyB64);
-  const out = new Uint8Array(GROUP_DISTRIBUTION_V2_LEN);
-  out[0] = GROUP_DISTRIBUTION_VERSION;
-  out.set(chainId, 1);
-  new DataView(out.buffer).setUint32(9, iter, false);
-  out.set(ck, 13);
-  out.set(mk, 13 + ck.length);
-  return out;
-}
+// v2/v3: lihat `@nyx/shared` `groupEnvelope.ts` (parser dipakai bersama test).
+// v2 = 77 byte (tanpa senderKeyId), v3 = 85 byte (+8 byte senderKeyId).
 
 /**
  * [V2 — SATU JALUR] Seal + kirim distribusi sender key era saat ini ke semua
  * device target. `senderState` WAJIB punya chainId dan metadataKey (envelope v2
  * 77-byte); tanpa keduanya fungsi melempar (pack legacy v1/v0 sudah dihapus).
  */
+/**
+ * [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA kita sendiri (base64url), atau
+ * `undefined` bila v2 tidak aktif / bundle device belum punya kunci v2.
+ */
+async function getMySigningKeyV2B64(): Promise<string | undefined> {
+  if (!resolvePqV2Enabled()) return undefined;
+  const sodium = await getSodiumLib();
+  const keys = await useAuthStore.getState().getSigningV2KeyPair();
+  return keys ? sodium.to_base64(keys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined;
+}
+
 export async function sendGroupSenderKeyDistribution(
   conversationId: string,
   senderState: { CK: string; N: number; initialCK?: string; chainId?: string; metadataKey?: string },
@@ -1185,11 +1260,18 @@ export async function sendGroupSenderKeyDistribution(
 ): Promise<Array<Record<string, unknown>>> {
   if (!targets.length) return [];
   const sodium = await getSodiumLib();
-  const { worker_pq_box_seal } = await getWorkerProxy();
   const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
   const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
   const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  // [PQ v4 Fase 1.5] Sertakan kunci verifikasi ML-DSA kita bila v2 aktif —
+  // penerima mengikatnya ke receiver state agar verifikasi `sigV:2` tidak butuh
+  // lookup bundle lagi (pola sama dengan `senderSigningKey` Ed25519).
+  const mySigningV2 = resolvePqV2Enabled() ? await useAuthStore.getState().getSigningV2KeyPair() : undefined;
+  const mySigningKeyV2B64 = mySigningV2
+    ? sodium.to_base64(mySigningV2.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+    : undefined;
 
   const ckToSeal = senderState.initialCK ?? senderState.CK;
   const iterToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
@@ -1199,19 +1281,32 @@ export async function sendGroupSenderKeyDistribution(
   if (!senderState.chainId || !senderState.metadataKey) {
     throw new Error('Cannot distribute sender key: state lacks chainId/metadataKey (grup v2/v3 wajib)');
   }
-  const packed: Uint8Array = packGroupDistributionEnvelopeV2(
-    sodium,
-    senderState.chainId,
-    iterToSeal,
-    ckToSeal,
-    senderState.metadataKey
-  );
+  // [PQ v4 Fase 1.5 — envelope v4] Saat ML-DSA aktif, envelope membawa
+  // `senderKeyId` (8B, turunan signingKeyV2) DAN public key verifikasi itu
+  // sendiri (1952B). Penerima tidak perlu lookup bundle (yang gagal bila
+  // pseudonym pengirim belum bisa di-resolve sebelum metadata ter-decrypt).
+  // Tanpa kunci v2 → tetap v2 77B (kompatibel penuh).
+  const b64u = (s: string) => sodium.from_base64(s, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const envelopeBase = {
+    chainId: b64u(senderState.chainId),
+    iteration: iterToSeal,
+    chainKey: b64u(ckToSeal),
+    metadataKey: b64u(senderState.metadataKey),
+  };
+  const packed: Uint8Array = mySigningV2
+    ? packGroupEnvelope({
+        version: 4,
+        ...envelopeBase,
+        senderKeyId: deriveGroupSenderKeyId(mySigningV2.publicKey),
+        signingKeyV2: new Uint8Array(mySigningV2.publicKey),
+      })
+    : packGroupEnvelope({ version: 2, ...envelopeBase });
 
   const distributionKeys: Array<Record<string, unknown>> = [];
   for (const t of targets) {
     if (t.identityKey === myIdentityKeyB64) continue;
     try {
-      const encryptedKey = await worker_pq_box_seal(
+      const encryptedKey = await sealForDevice(
         packed,
         sodium.from_base64(t.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         sodium.from_base64(t.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING)
@@ -1227,7 +1322,8 @@ export async function sendGroupSenderKeyDistribution(
         // (server akan menolak/menyegel) daripada membocorkan userId.
         senderId: opts.senderIdOverride ?? (await ensureMyPseudonym(conversationId)),
         senderDeviceKey: myIdentityKeyB64,
-        senderSigningKey: mySigningKeyB64
+        senderSigningKey: mySigningKeyB64,
+        senderSigningKeyV2: mySigningKeyV2B64
       });
     } catch (e) {
       console.warn(`[Distribution] Seal gagal untuk ${t.userId} device ${t.deviceId}:`, e);
@@ -1277,6 +1373,8 @@ export async function sendGroupKeyDistributionPairwise(
         // [T2 FIX #9 2026-09-28] Public signing key pengirim — diikat ke
         // receiver state penerima (pola libsignal SenderKeyState).
         senderSigningKey: (dk as { senderSigningKey?: string }).senderSigningKey,
+        // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim (bila v2 aktif).
+        senderSigningKeyV2: (dk as { senderSigningKeyV2?: string }).senderSigningKeyV2,
         // [T2 FIX #10 2026-09-29] Pakai senderId yang sudah dihitung di
         // ensureGroupSession (opts.pseudonym → store → fallback). DULU dihitung
         // ulang di sini via getMyPseudonym() — saat createGroup store belum
@@ -1340,6 +1438,77 @@ export function clearLegacyGroupKeyReportForTests(): void {
   legacyGroupKeyReported.clear();
 }
 
+// [PQ v4 Fase 1.5 — fallback 2026-10-20] Resolusi kunci tanda tangan pengirim
+// berdasarkan identity key perangkatnya (`senderDeviceKey`), TANPA bergantung
+// pada resolve pseudonym. Distribution live bisa tiba sebelum metadata grup
+// ter-decrypt, sehingga `senderId` masih pseudonym dan `fetchPreKeyBundles`
+// mengembalikan kosong; saat itu satu-satunya kunci penghubung adalah identity
+// key perangkat yang ada di wrapper pesan/envelope.
+// Hasil sukses di-cache 10 menit agar tidak membakar kuota fetch bundle
+// (30/pasangan/24 jam, fail-closed 429).
+const deviceSigningKeyCache = new Map<string, { value: { signingKey?: string; signingKeyV2?: string }; at: number }>();
+
+async function resolveDeviceSigningKeys(
+    conversationId: string,
+    senderDeviceKey: string,
+    senderUserId?: string
+): Promise<{ signingKey?: string; signingKeyV2?: string }> {
+    if (!senderDeviceKey) return {};
+    const cached = deviceSigningKeyCache.get(senderDeviceKey);
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.value;
+
+    const pick = (list: PreKeyBundle[] | undefined) => {
+        const match = (list || []).find(b => b.identityKey === senderDeviceKey);
+        return match ? { signingKey: match.signingKey, signingKeyV2: match.signingKeyV2 ?? undefined } : {};
+    };
+    const isEmpty = (v: { signingKey?: string; signingKeyV2?: string }) => !v.signingKey && !v.signingKeyV2;
+
+    let result: { signingKey?: string; signingKeyV2?: string } = {};
+    try {
+        if (senderUserId) {
+            const map = await fetchPreKeyBundles([senderUserId]);
+            result = pick(map[senderUserId]);
+        }
+    } catch (e) {
+        console.warn('[Crypto] Gagal mengambil bundle pengirim via userId:', e);
+    }
+
+    // Fallback: pindai bundle semua participant + self (match murni identity key).
+    if (isEmpty(result)) {
+        try {
+            const { useConversationStore } = await import('@store/conversation');
+            const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+            const ids = (conv?.participants ?? [])
+                .map(p => String(getParticipantUserId(p) || ''))
+                .filter(id => id.length > 0);
+            const myId = useAuthStore.getState().user?.id;
+            if (myId && !ids.includes(myId)) ids.push(myId);
+            if (ids.length > 0) {
+                const all = await fetchPreKeyBundles(ids);
+                for (const uid of ids) {
+                    const found = pick(all[uid]);
+                    if (!isEmpty(found)) { result = found; break; }
+                }
+            }
+        } catch (e) {
+            console.warn('[Crypto] Gagal memindai bundle participant untuk kunci pengirim:', e);
+        }
+    }
+
+    if (!isEmpty(result)) deviceSigningKeyCache.set(senderDeviceKey, { value: result, at: Date.now() });
+    // [PQ v4] Jejak singkat agar log dua klien bisa membuktikan kode ini jalan.
+    console.debug(
+        `[PQ v4] resolveDeviceSigningKeys device=${senderDeviceKey.slice(0, 8)}… via=${result.signingKeyV2 ? 'bundle' : 'none'}`,
+        { signingKey: !!result.signingKey, signingKeyV2: !!result.signingKeyV2 }
+    );
+    return result;
+}
+
+/** Hanya untuk test: buang cache resolusi kunci perangkat. */
+export function clearDeviceSigningKeyCacheForTests(): void {
+  deviceSigningKeyCache.clear();
+}
+
 export async function handleGroupKeyDistribution(
     conversationId: string,
     encryptedKey: string,
@@ -1348,12 +1517,14 @@ export async function handleGroupKeyDistribution(
     drHeader?: any,
     // [T2 FIX #9 2026-09-28] Public signing key pengirim dari envelope — diikat
     // ke receiver state agar verifikasi signature pesan tidak butuh lookup lagi.
-    senderSigningKey?: string
+    senderSigningKey?: string,
+    // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim dari envelope (opsional;
+    // ada bila pengirim v2 aktif).
+    senderSigningKeyV2?: string
 ): Promise<void> {
   const { privateKey: classicalPrivateKey } = await getMyEncryptionKeyPair();
   const { privateKey: pqPrivateKey } = await useAuthStore.getState().getPqEncryptionKeyPair();
   const sodium = await getSodiumLib();
-  const { worker_pq_box_seal_open } = await getWorkerProxy();
 
   let senderKeyBytes: Uint8Array | null = null;
   
@@ -1369,7 +1540,7 @@ export async function handleGroupKeyDistribution(
           }
       }
 
-      senderKeyBytes = await worker_pq_box_seal_open(encryptedKeyBytes, pqPrivateKey, classicalPrivateKey);
+      senderKeyBytes = await openSealedForDevice(encryptedKeyBytes, pqPrivateKey, classicalPrivateKey);
   } catch (e) {
       console.error('[Crypto] FATAL: Gagal unseal Sender Key:', e);
       throw new Error('DECRYPTION_FAILED');
@@ -1379,21 +1550,67 @@ export async function handleGroupKeyDistribution(
       throw new Error('DECRYPTION_FAILED');
   }
 
-  // [V2 — RENCANA #4/#5] Envelope distribusi v2 (77B):
-  //   [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
+  // [V2/V3 — docs/35 §35.6.4] Parser bersama dengan test:
+  //   v2: [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
+  //   v3: v2 + [senderKeyId(8)]
   // [2026-10 legacy purge] Reader v1 (36B) & v0 (32B) dihapus.
-  if (senderKeyBytes.length !== GROUP_DISTRIBUTION_V2_LEN || senderKeyBytes[0] !== GROUP_DISTRIBUTION_VERSION) {
+  let envelope: GroupEnvelope;
+  try {
+      envelope = parseGroupEnvelope(senderKeyBytes);
+  } catch {
       // [R2 2026-10-15] Penolakan harus TERLIHAT, bukan senyap: pengguna melihat
       // pesan sistem + toast, bukan grup yang diam-diam kehilangan pesan.
       await reportLegacyGroupKeyIgnored(conversationId, senderKeyBytes.length, senderKeyBytes[0] ?? 0);
       return;
   }
-  const envelopeChainIdB64 = sodium.to_base64(senderKeyBytes.slice(1, 9), sodium.base64_variants.URLSAFE_NO_PADDING);
-  const currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset + 9, 4).getUint32(0, false);
-  const finalCKBytes = senderKeyBytes.slice(13, 45);
-  const metadataKeyB64 = sodium.to_base64(senderKeyBytes.slice(45, 77), sodium.base64_variants.URLSAFE_NO_PADDING);
+  const b64u = (bytes: Uint8Array) => sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const envelopeChainIdB64 = b64u(envelope.chainId);
+  const currentN = envelope.iteration;
+  const metadataKeyB64 = b64u(envelope.metadataKey);
+  const senderKeyB64 = b64u(envelope.chainKey);
 
-  const senderKeyB64 = sodium.to_base64(finalCKBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+  // [PQ v4 Fase 1.5 — fallback 2026-10-20] Event `group:fulfilled_key` dari
+  // server yang belum meneruskan `senderSigningKeyV2` (atau envelope SYSTEM
+  // yang tersimpan sebelum itu) tidak boleh membuat grup mustahil didekripsi:
+  // ambil kunci verifikasi dari bundle perangkat pengirim, dicocokkan lewat
+  // `senderDeviceKey` (identity key). Envelope v3 sendiri sudah mengikat
+  // `senderKeyId`, jadi kunci yang salah tetap ditolak di bawah.
+  let effectiveSigningKey = senderSigningKey;
+  let effectiveSigningKeyV2 = senderSigningKeyV2;
+  // [PQ v4 Fase 1.5 — envelope v4] Kunci verifikasi ikut di dalam envelope
+  // (sudah diseal per-device) → sumber otoritatif, tanpa lookup bundle.
+  if (envelope.version === 4) {
+      const envelopeKeyB64 = b64u(envelope.signingKeyV2);
+      if (effectiveSigningKeyV2 && effectiveSigningKeyV2 !== envelopeKeyB64) {
+          console.error('[Crypto] envelope v4: signingKeyV2 envelope tidak sama dengan event');
+          throw new Error('GROUP_KEY_DISTRIBUTION_KEY_MISMATCH');
+      }
+      effectiveSigningKeyV2 = envelopeKeyB64;
+  }
+  if ((!effectiveSigningKey || !effectiveSigningKeyV2) && senderDeviceKey) {
+      const resolved = await resolveDeviceSigningKeys(
+          conversationId,
+          senderDeviceKey,
+          resolvePseudonymToUserId(conversationId, senderId) ?? undefined
+      );
+      effectiveSigningKey = effectiveSigningKey || resolved.signingKey;
+      effectiveSigningKeyV2 = effectiveSigningKeyV2 || resolved.signingKeyV2;
+  }
+
+  // [PQ v4 Fase 1.5 — envelope v3] `senderKeyId` HARUS cocok dengan kunci
+  // verifikasi ML-DSA yang diklaim event. Ketidakcocokan = envelope dipindah
+  // antar-pengirim / event ditimpa: tolak sebelum menyentuh state.
+  let senderKeyIdB64: string | undefined;
+  if (envelope.version === 3 || envelope.version === 4) {
+      senderKeyIdB64 = b64u(envelope.senderKeyId);
+      if (effectiveSigningKeyV2) {
+          const claimed = sodium.from_base64(effectiveSigningKeyV2, sodium.base64_variants.URLSAFE_NO_PADDING);
+          if (!constantTimeEqual(deriveGroupSenderKeyId(claimed), envelope.senderKeyId)) {
+              console.error('[Crypto] envelope v3: senderKeyId tidak cocok dengan signingKeyV2 pengirim');
+              throw new Error('GROUP_KEY_DISTRIBUTION_KEY_ID_MISMATCH');
+          }
+      }
+  }
 
   // [BUGFIX 2026-10-02 — STATE KEY BY DEVICE] State dikunci per DEVICE pengirim
   // (identity key stabil lintas pseudonym/userId — wrapper metadata memakai
@@ -1412,8 +1629,14 @@ export async function handleGroupKeyDistribution(
   if (existingReceiverState && sameEra) {
       // Replay/duplikat distribusi era sama — no-op. Hanya lengkapi metadata
       // yang belum ada (signingKey) tanpa menyentuh CK/N.
-      if (senderSigningKey && !existingReceiverState.signingKey) {
-          await saveGroupReceiverState({ ...existingReceiverState, signingKey: senderSigningKey });
+      if (effectiveSigningKey && !existingReceiverState.signingKey) {
+          await saveGroupReceiverState({ ...existingReceiverState, signingKey: effectiveSigningKey });
+      }
+      if (effectiveSigningKeyV2 && !existingReceiverState.signingKeyV2) {
+          await saveGroupReceiverState({ ...existingReceiverState, signingKeyV2: effectiveSigningKeyV2 });
+      }
+      if (senderKeyIdB64 && !existingReceiverState.senderKeyId) {
+          await saveGroupReceiverState({ ...existingReceiverState, senderKeyId: senderKeyIdB64 });
       }
       return;
   }
@@ -1448,7 +1671,11 @@ export async function handleGroupKeyDistribution(
           // [V2 — RENCANA #2] Kunci metadata era ikut terdistribusi.
           metadataKey: metadataKeyB64 ?? existingReceiverState?.metadataKey,
           // [T2 FIX #9 2026-09-28] Ikat signing key pengirim sejak distribusi.
-          signingKey: senderSigningKey ?? existingReceiverState?.signingKey
+          signingKey: effectiveSigningKey ?? existingReceiverState?.signingKey,
+          // [PQ v4 Fase 1.5] Ikat kunci verifikasi ML-DSA pengirim (bila ada).
+          signingKeyV2: effectiveSigningKeyV2 ?? existingReceiverState?.signingKeyV2,
+          // [PQ v4 Fase 1.5 — envelope v3] Pengenal kunci verifikasi pengirim.
+          senderKeyId: senderKeyIdB64 ?? existingReceiverState?.senderKeyId
       });
   }
 
@@ -1748,7 +1975,7 @@ async function doEncryptMessage(
               privateKey: signingPrivateKey
           };
 
-          const { sessionKey, initiatorCiphertexts, otpkId, identityChanged } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peer.id);
+          const { sessionKey, initiatorCiphertexts, otpkId, identityChanged, handshakeVersion, initiatorSigningKeyV2 } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peer.id);
 
           // [SECURITY WARNING] Insert system message if identity changed
           if (identityChanged) {
@@ -1801,7 +2028,9 @@ async function doEncryptMessage(
           x3dhData = {
               initiatorSigningKey: sodium.to_base64(mySigningKey.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
               initiatorCiphertexts: sodium.to_base64(initiatorCiphertexts, sodium.base64_variants.URLSAFE_NO_PADDING),
-              otpkId
+              otpkId,
+              handshakeVersion,
+              ...(handshakeVersion === 2 ? { initiatorSigningKeyV2 } : {})
           };
       }
 
@@ -2042,11 +2271,16 @@ async function doEncryptMessage(
       senderDeviceKey: myPublicKeyB64
   });
 
+  // [PQ v4 Fase 1.5] Bila v2 aktif dan device punya kunci ML-DSA, tanda tangan
+  // pesan memakai ML-DSA (`sigV:2`). v1 (Ed25519) tetap default.
+  const signingV2Keys = resolvePqV2Enabled() ? await useAuthStore.getState().getSigningV2KeyPair() : undefined;
+
   // Encrypt & Ratchet
   const result = await groupRatchetEncrypt(
       { CK: senderState.CK, N: senderState.N },
       sealedPayload,
-      signingPrivateKey
+      signingPrivateKey,
+      signingV2Keys?.secretKey
   );
   
   // [FIX] Atomic order: save key before state
@@ -2087,8 +2321,20 @@ async function doEncryptMessage(
       chainId: chainId,
       ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
       signature: result.signature,
+      // [PQ v4] 2 = tanda tangan ML-DSA-65; 1/absen = Ed25519 (legacy).
+      sigV: result.signatureVersion,
       senderId: senderIdForServer,
-      senderDeviceKey: myPublicKeyB64
+      senderDeviceKey: myPublicKeyB64,
+      // [PQ v4 Fase 1.5 — envelope v3] Pengenal kunci verifikasi (8B b64url);
+      // penerima mencocokkannya dengan `signingKeyV2` yang terikat.
+      ...(signingV2Keys
+          ? {
+                senderKeyId: sodium.to_base64(
+                    deriveGroupSenderKeyId(signingV2Keys.publicKey),
+                    sodium.base64_variants.URLSAFE_NO_PADDING
+                ),
+            }
+          : {}),
   });
   
   // ✅ FIX: Atomic Persistence - Update state only after everything else succeeds
@@ -2104,6 +2350,8 @@ async function doEncryptMessage(
       // [V2] chainId random + metadataKey era wajib ikut ter-preserve.
       chainId: senderState.chainId,
       metadataKey: senderState.metadataKey,
+      // [PQ v4 Fase 1.5] Pertahankan kunci verifikasi ML-DSA di sender state.
+      signingKeyV2: senderState.signingKeyV2 ?? (signingV2Keys ? sodium.to_base64(signingV2Keys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined),
       createdAt: senderState.createdAt || Date.now(),
       messageCount: (senderState.messageCount || 0) + 1,
       lastActivityTime: Date.now(),
@@ -2237,6 +2485,8 @@ async function doDecryptMessage(
     try {
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
+        // [PQ v4] `sigV:2` = tanda tangan grup ML-DSA-65 (default absen/1 = Ed25519).
+        const signatureVersion: number = typeof payload.sigV === 'number' ? payload.sigV : 1;
 
         // [T1 FIX 2026-09-27] senderId di wrapper = PSEUDONYM (metadata v2).
         // Resolusi signing key butuh USER ID: lookup bundle/partisipan server
@@ -2328,7 +2578,46 @@ async function doDecryptMessage(
              return { status: 'error', error: new Error('Missing sender signing key') };
         }
 
+        // [PQ v4 Fase 1.5] Resolusi kunci verifikasi ML-DSA — hanya saat `sigV:2`.
+        // Sumber utama receiver state (diikat saat distribusi); fallback bundle
+        // device (match `senderDeviceKey`) lalu participant/user.
+        let keyV2ToUse: string | undefined;
+        if (signatureVersion === 2) {
+            keyV2ToUse = receiverState.signingKeyV2;
+            if (!keyV2ToUse && senderDeviceKey) {
+                // [PQ v4 Fase 1.5 — fallback 2026-10-20] Jangan hanya coba
+                // `senderUserId`: saat metadata belum ter-decrypt, senderId masih
+                // pseudonym dan lookup itu kosong (log dua klien 20:24). Helper
+                // ini memindai semua participant berdasarkan identity key.
+                const resolved = await resolveDeviceSigningKeys(conversationId, senderDeviceKey, senderUserId || undefined);
+                keyV2ToUse = resolved.signingKeyV2;
+            }
+            if (!keyV2ToUse) {
+                const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                const sender = conversation?.participants.find(p => getParticipantUserId(p) === senderUserId) as Participant | undefined;
+                keyV2ToUse = sender?.signingKeyV2 ?? sender?.user?.signingKeyV2 ?? undefined;
+            }
+            if (!keyV2ToUse) {
+                return { status: 'error', error: new Error('Missing sender signing key v2') };
+            }
+        }
+
         const senderSigningKey = sodium.from_base64(keyToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const senderSigningKeyV2Bytes = keyV2ToUse
+            ? sodium.from_base64(keyV2ToUse, sodium.base64_variants.URLSAFE_NO_PADDING)
+            : undefined;
+
+        // [PQ v4 Fase 1.5 — envelope v3] Bila wrapper membawa `senderKeyId`,
+        // pastikan kunci verifikasi yang dipilih memang kunci pengirim itu.
+        if (typeof (payload as { senderKeyId?: unknown }).senderKeyId === 'string' && senderSigningKeyV2Bytes) {
+            const claimed = sodium.from_base64(
+                (payload as { senderKeyId: string }).senderKeyId,
+                sodium.base64_variants.URLSAFE_NO_PADDING
+            );
+            if (!constantTimeEqual(deriveGroupSenderKeyId(senderSigningKeyV2Bytes), claimed)) {
+                return { status: 'error', error: new Error('Group sender key id mismatch') };
+            }
+        }
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
@@ -2355,7 +2644,8 @@ async function doDecryptMessage(
                 header.n,
                 ciphertextBytes,
                 signature,
-                senderSigningKey
+                senderSigningKey,
+                { signatureVersion, senderSigningKeyV2: senderSigningKeyV2Bytes }
             );
             
             if (messageId) {
@@ -2381,7 +2671,8 @@ async function doDecryptMessage(
                 header,
                 ciphertextBytes,
                 signature,
-                senderSigningKey
+                senderSigningKey,
+                { signatureVersion, senderSigningKeyV2: senderSigningKeyV2Bytes }
             );
         } catch (err) {
             // [SELF-HEAL MIGRASI 2026-10-02 — RE-DERIVE DARI ANCHOR ERA] State
@@ -2405,7 +2696,8 @@ async function doDecryptMessage(
                 header,
                 ciphertextBytes,
                 signature,
-                senderSigningKey
+                senderSigningKey,
+                { signatureVersion, senderSigningKeyV2: senderSigningKeyV2Bytes }
             );
         }
         
@@ -2677,8 +2969,7 @@ async function sealAdminTokenEnvelope(
   theirPublicKey: string
 ): Promise<string> {
   const sodium = await getSodiumLib();
-  const { worker_pq_box_seal } = await getWorkerProxy();
-  const sealed = await worker_pq_box_seal(
+  const sealed = await sealForDevice(
     new TextEncoder().encode(JSON.stringify({ adminToken })),
     sodium.from_base64(theirPqPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
     sodium.from_base64(theirPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
@@ -2739,10 +3030,9 @@ async function tryReceiveAdminToken(payload: ReceiveKeyPayload): Promise<string 
   const sodium = await getSodiumLib();
   const { privateKey: classicalPrivateKey } = await getMyEncryptionKeyPair();
   const { privateKey: pqPrivateKey } = await useAuthStore.getState().getPqEncryptionKeyPair();
-  const { worker_pq_box_seal_open } = await getWorkerProxy();
   try {
     const sealed = sodium.from_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const opened = await worker_pq_box_seal_open(sealed, pqPrivateKey, classicalPrivateKey);
+    const opened = await openSealedForDevice(sealed, pqPrivateKey, classicalPrivateKey);
     const parsed = JSON.parse(new TextDecoder().decode(opened)) as { adminToken?: string };
     if (!parsed.adminToken) return null;
     const { storeMyAdminToken } = await import('@lib/groupPseudonyms');
@@ -2760,9 +3050,9 @@ export async function establishSessionFromPreKeyBundle(
   mySigningKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   preKeyBundle: PreKeyBundle,
   peerUserId: string
-): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array, otpkId?: number, identityChanged: boolean }> {
+): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array, otpkId?: number, identityChanged: boolean, handshakeVersion: number, initiatorSigningKeyV2?: string }> {
   const sodium = await getSodiumLib();
-  const { worker_x3dh_initiator } = await getWorkerProxy();
+  const { worker_x3dh_initiator, worker_x3dh_v2_initiator } = await getWorkerProxy();
 
   if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
       throw new Error("Post-Quantum Handshake Mandatory");
@@ -2775,7 +3065,10 @@ export async function establishSessionFromPreKeyBundle(
   // hilang setelah peringatan pertama.
   const { observePeerIdentityKey } = await import('@lib/peerIdentityTrust');
   const newIdentityKeyB64 = preKeyBundle.identityKey;
-  const observation = await observePeerIdentityKey(peerUserId, newIdentityKeyB64);
+  const observation = await observePeerIdentityKey(peerUserId, newIdentityKeyB64, {
+      pqIdentityKey: preKeyBundle.pqIdentityKey,
+      signingKeyV2: preKeyBundle.signingKeyV2,
+  });
   const identityChanged = observation.status === 'changed';
   if (identityChanged) {
       console.warn(`[Security] Identity key changed for user ${peerUserId}. Pinned: ${observation.trustedKey.substring(0, 10)}... New: ${observation.pendingKey.substring(0, 10)}...`);
@@ -2806,6 +3099,38 @@ export async function establishSessionFromPreKeyBundle(
     theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   }
 
+  // [docs/35 Fase 1.4] Jalur v2 (X-Wing murni + tanda tangan ML-DSA) dipilih bila
+  // fitur aktif DAN bundle peer membawa `signingKeyV2` (penanda peer v2-capable).
+  // v2 tidak memakai DH X25519 sama sekali; autentikasi inisiator lewat tanda
+  // tangan transkrip yang diverifikasi penerima dengan `signingKeyV2` kita.
+  if (resolvePqV2Enabled() && preKeyBundle.signingKeyV2) {
+    const signingV2 = await useAuthStore.getState().getSigningV2KeyPair();
+    if (!signingV2) {
+      throw new Error("X3DH v2 diaktifkan tetapi device tidak memiliki kunci signingKeyV2");
+    }
+    const theirIdentityKeyV2 = new Uint8Array(theirIdentityKey);
+    const theirPqIdentityKeyV2 = new Uint8Array(theirPqIdentityKey);
+    const theirPqSignedPreKeyV2 = new Uint8Array(theirPqSignedPreKey);
+
+    const v2Result = await worker_x3dh_v2_initiator({
+      mySigningV2: { publicKey: signingV2.publicKey, secretKey: signingV2.secretKey },
+      theirIdentityKey: theirIdentityKeyV2,
+      theirPqIdentityKey: theirPqIdentityKeyV2,
+      theirPqSignedPreKey: theirPqSignedPreKeyV2,
+      theirPqOneTimePreKey: theirPqOneTimePreKey ? new Uint8Array(theirPqOneTimePreKey) : undefined,
+    });
+
+    const initiatorSigningKeyV2 = sodium.to_base64(signingV2.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    return {
+      sessionKey: v2Result.sessionKey,
+      initiatorCiphertexts: v2Result.initiatorCiphertexts,
+      otpkId: preKeyBundle.oneTimePreKey?.keyId,
+      identityChanged,
+      handshakeVersion: 2,
+      initiatorSigningKeyV2,
+    };
+  }
+
   const result = await worker_x3dh_initiator({
     mySigningKey: mySigningKeyPair,
     theirIdentityKey,
@@ -2823,7 +3148,8 @@ export async function establishSessionFromPreKeyBundle(
     sessionKey: result.sessionKey,
     initiatorCiphertexts: result.initiatorCiphertexts,
     otpkId: preKeyBundle.oneTimePreKey?.keyId,
-    identityChanged
+    identityChanged,
+    handshakeVersion: 1,
   };
 }
 
@@ -2834,7 +3160,9 @@ export async function deriveSessionKeyAsRecipient(
   myPqSignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   initiatorSigningKeyStr: string,
   initiatorCiphertextsInput: string | Uint8Array,
-  otpkId?: number
+  otpkId?: number,
+  handshakeVersion?: number,
+  initiatorSigningKeyV2?: string
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
@@ -2846,6 +3174,48 @@ export async function deriveSessionKeyAsRecipient(
     ? sodium.from_base64(initiatorCiphertextsInput, sodium.base64_variants.URLSAFE_NO_PADDING)
     : initiatorCiphertextsInput;
   
+  // [docs/35 Fase 1.4] Jalur v2 (X-Wing murni): verifikasi tanda tangan ML-DSA
+  // inisiator atas transkrip handshake dengan `signingKeyV2`-nya, lalu decaps
+  // X-Wing. Tidak menyentuh `crypto_scalarmult` sama sekali.
+  if (handshakeVersion === 2) {
+    if (!initiatorSigningKeyV2) {
+      throw new Error("X3DH v2: kunci verifikasi inisiator (signingKeyV2) tidak tersedia");
+    }
+    const theirSigningKeyV2 = sodium.from_base64(initiatorSigningKeyV2, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const myIdentityPublicKey = new Uint8Array(myIdentityKeyPair.publicKey);
+
+    if (otpkId !== undefined) {
+      const masterSeed = await getMasterSeedOrThrow();
+      try {
+        const { worker_x3dh_v2_recipient_regenerate } = await getWorkerProxy();
+        return await worker_x3dh_v2_recipient_regenerate({
+          keyId: otpkId,
+          masterSeed,
+          myIdentityKey: myIdentityPublicKey,
+          myPqIdentityKey: myPqIdentityKeyPair,
+          myPqSignedPreKey: myPqSignedPreKeyPair,
+          theirSigningKeyV2,
+          initiatorCiphertexts,
+        });
+      } catch (e) {
+        console.error('[X3DH v2] Gagal regenerate OTPK:', otpkId, e);
+      }
+    }
+
+    const { worker_x3dh_v2_recipient } = await getWorkerProxy();
+    const sessionKeyV2 = await worker_x3dh_v2_recipient({
+      myIdentityKey: myIdentityPublicKey,
+      myPqIdentityKey: myPqIdentityKeyPair,
+      myPqSignedPreKey: myPqSignedPreKeyPair,
+      theirSigningKeyV2,
+      initiatorCiphertexts,
+    });
+    if (otpkId !== undefined) {
+      await deleteOneTimePreKey(otpkId);
+    }
+    return sessionKeyV2;
+  }
+
   // [LINT 2026-10-11] `let myOneTimePreKey` dihapus: tidak pernah di-assign
   // (selalu undefined) dan jalur OTPK sudah ditangani worker regenerate di bawah;
   // meneruskan `undefined` ke worker identik dengan menghilangkan argumennya.
@@ -2914,6 +3284,8 @@ interface ReceiveKeyPayload {
   senderDeviceKey?: string;
   // [T2 FIX #9 2026-09-28] Public signing key pengirim dari envelope distribusi.
   senderSigningKey?: string;
+  // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim dari envelope distribusi.
+  senderSigningKeyV2?: string;
   drHeader?: any;
   initiatorCiphertextsStr?: string;
   initiatorSigningKey?: string;
@@ -2971,13 +3343,12 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
   }
 
   const sodium = await getSodiumLib();
-  const { worker_pq_box_seal } = await getWorkerProxy();
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   if (!requesterPqPublicKeyB64) return;
   const requesterPqPublicKey = sodium.from_base64(requesterPqPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   
-  const encryptedKeyForRequester = await worker_pq_box_seal(key, requesterPqPublicKey, requesterPublicKey);
+  const encryptedKeyForRequester = await sealForDevice(key, requesterPqPublicKey, requesterPublicKey);
 
   emitSessionKeyFulfillment({
     requesterId,
@@ -2992,6 +3363,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
   const { conversationId, sessionId, encryptedKey, type, senderId, senderDeviceKey, drHeader, initiatorCiphertextsStr, initiatorSigningKey } = payload;
   // [T2 FIX #9 2026-09-28] Public signing key pengirim dari envelope distribusi.
   const senderSigningKey = (payload as { senderSigningKey?: string }).senderSigningKey;
+  const senderSigningKeyV2 = (payload as { senderSigningKeyV2?: string }).senderSigningKeyV2;
   
   if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
       console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
@@ -3042,7 +3414,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
 
     try {
-        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey, drHeader, senderSigningKey);
+        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey, drHeader, senderSigningKey, senderSigningKeyV2);
         
         // Opaque Mailbox: update metadata FIRST (before re-decrypting messages)
         // so the receiver state CK hasn't been ratcheted by message decryption yet.
@@ -3103,6 +3475,22 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
         try {
             const metadata = JSON.parse(encryptedKey);
             if (metadata.x3dh && initiatorCiphertextsStr && initiatorSigningKey) {
+                // [docs/35 Fase 1.4 residual] Cross-check `signingKeyV2` payload
+                // terhadap bundle peer (sumber kebenaran = KT). Tanpa ini
+                // penyerang bisa memasang `initiatorSigningKeyV2` miliknya di
+                // payload dan lolos verifikasi transkrip (jalur offline sync
+                // `session:new_key`, paralel dengan cek di `messagePipeline`).
+                if (metadata.handshakeVersion === 2 && metadata.initiatorSigningKeyV2) {
+                    const myIdForV2 = useAuthStore.getState().user?.id;
+                    const convForV2 = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                    const peerIdForV2 = convForV2?.participants.find(p => getParticipantUserId(p) !== myIdForV2)?.userId || senderId;
+                    if (peerIdForV2) {
+                        const peerBundle = await fetchPreKeyBundle(peerIdForV2);
+                        if (peerBundle.signingKeyV2 && peerBundle.signingKeyV2 !== metadata.initiatorSigningKeyV2) {
+                            throw new Error('X3DH v2: kunci verifikasi inisiator tidak cocok dengan bundle peer');
+                        }
+                    }
+                }
                 const { getEncryptionKeyPair, getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                 const myIdentityKeyPair = await getEncryptionKeyPair();
                 const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -3116,7 +3504,9 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
                     myPqSignedPreKeyPair,
                     initiatorSigningKey,
                     initiatorCiphertextsStr,
-                    metadata.otpkId
+                    metadata.otpkId,
+                    metadata.handshakeVersion,
+                    metadata.initiatorSigningKeyV2
                 );
             } else {
                 throw new Error("Invalid X3DH payload");

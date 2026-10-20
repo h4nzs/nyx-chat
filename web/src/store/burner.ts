@@ -4,6 +4,7 @@ import { transportClient, connectSocket } from '../lib/transportClient';
 import { api } from '../lib/api';
 import { worker_burner_dr_init_guest, worker_burner_dr_encrypt, worker_burner_dr_decrypt } from '../lib/crypto-worker-proxy';
 import { getSodiumLib } from '../utils/crypto';
+import { resolvePqV2Enabled } from '../lib/pqCapability';
 import { useAuthStore } from './auth';
 // Burner file metadata arrives in TWO schemas depending on which UI sent it:
 // - Guest (/drop BurnerChat): { fileUrl, fileName, fileType, fileSize, fileKey }
@@ -29,7 +30,7 @@ interface BurnerState {
   hostClassicalPk: string | null;
   hostUserId: string | null;
   
-  activeSessions: Record<string, { drState: BurnerDoubleRatchetState | null; guestClassicalPk: string | null }>;
+  activeSessions: Record<string, { drState: BurnerDoubleRatchetState | null; guestClassicalPk: string | null; burnerVersion?: number }>;
   
   messages: BurnerMessage[];
   isInitialized: boolean;
@@ -228,6 +229,11 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       const hostDeviceId = parts[2] ?? '';
       const hostPqPk = parts[3] ?? '';
       const hostClassicalPk = parts[4] ?? '';
+      // [PQ v2 Fase 1.8] Bagian ke-6 opsional: `2` = burner v2 (X-Wing saja,
+      // tanpa X25519). Hanya dihormati bila VITE_PQ_V2 aktif; kalau tidak,
+      // link tetap diproses sebagai v1 (hostClassicalPk masih ada di link).
+      const linkBurnerVersion = parts[5] === '2' ? 2 : 1;
+      const usePqV2 = linkBurnerVersion === 2 && resolvePqV2Enabled();
 
       // [BURNER 2026-10-18] GERBANG DESTROY. Dulu satu-satunya tanda "room
       // sudah dihancurkan" adalah event realtime `burner:terminated`; kalau
@@ -264,10 +270,12 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       // Initialize Guest Double Ratchet State
       const initResult = await worker_burner_dr_init_guest({
         hostClassicalPk: hostClassicalPkBytes,
-        hostPqPk: hostPqPkBytes
+        hostPqPk: hostPqPkBytes,
+        pqOnly: usePqV2
       });
       const stateFromWorker = initResult.state;
       const guestPk = initResult.guestClassicalPk;
+      const burnerVersion = initResult.burnerVersion ?? (usePqV2 ? 2 : 1);
       // Extract ct for propagation (ignoring strict TS errors here as instructed)
       const ct = (initResult as Record<string, unknown>).ct || (initResult as Record<string, unknown>).savedCt || "";
 
@@ -278,7 +286,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         hostClassicalPk,
         activeSessions: {
           ...state.activeSessions,
-          [roomId]: { drState: stateFromWorker, guestClassicalPk: guestPk, ct }
+          [roomId]: { drState: stateFromWorker, guestClassicalPk: guestPk, ct, burnerVersion }
         },
         isInitialized: true,
         error: null
@@ -334,7 +342,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         const payload = {
           header: { ...header, ct: state.savedCt || "" },
           ciphertext: ciphertextB64,
-          guestClassicalPk: session.guestClassicalPk
+          guestClassicalPk: session.guestClassicalPk || "",
+          // [PQ v2 Fase 1.8] Penanda versi agar host menginisialisasi ratchet
+          // dengan root key X-Wing saja (tanpa X25519) pada sesi v2.
+          burnerVersion: session.burnerVersion ?? 1
         };
 
         const socket = transportClient;
@@ -430,6 +441,9 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       try {
         const payload = JSON.parse(cipherString);
         const { header, ciphertext: ciphertextB64, guestClassicalPk } = payload;
+        // [PQ v2 Fase 1.8] Sesi v2 mengirim guestClassicalPk kosong dan
+        // menandai versi; hanya hormati v2 bila gerbang PQ aktif.
+        const incomingBurnerVersion = payload.burnerVersion === 2 && resolvePqV2Enabled() ? 2 : 1;
 
         const sodium = await getSodiumLib();
 
@@ -457,13 +471,15 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         }
 
         if (!state) {
-          if (guestClassicalPk) {
+          if (guestClassicalPk || incomingBurnerVersion === 2) {
             const { getMyEncryptionKeyPair } = await import('../utils/crypto');
             const myDeviceKeys = await getMyEncryptionKeyPair(); // Host classical
             const authStore = useAuthStore.getState();
             const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
 
-            const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const guestPkBytes = guestClassicalPk
+              ? sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING)
+              : new Uint8Array(0);
             const ctStr = String((header as Record<string, unknown>).ct);
             if (!ctStr) {
                 throw new Error('KEM Ciphertext missing');
@@ -475,11 +491,12 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
                hostClassicalSk: myDeviceKeys.privateKey,
                hostPqSk: myPqKeys.privateKey,
                guestClassicalPk: guestPkBytes,
-               savedCt: savedCtBytes
+               savedCt: savedCtBytes,
+               pqOnly: incomingBurnerVersion === 2
             });
             
             state = initRes.state;
-            guestPkState = guestClassicalPk;
+            guestPkState = guestClassicalPk || null;
             
             // Try decrypting again with new state
             decryptionResult = await tryDecrypt(state);
@@ -496,7 +513,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         set(s => ({
           activeSessions: {
             ...s.activeSessions,
-            [roomId]: { drState: newState, guestClassicalPk: guestPkState }
+            [roomId]: { ...s.activeSessions[roomId], drState: newState, guestClassicalPk: guestPkState, burnerVersion: incomingBurnerVersion }
           }
         }));
 
@@ -657,6 +674,9 @@ export async function generateBurnerLink(): Promise<string> {
   const myPqPkB64 = sodium.to_base64(myPqKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const b64Classical = sodium.to_base64(myDeviceKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  // Link format: #<RoomID>:<HostUserId>:<HostDeviceID>:<HostPQPublicKey>:<HostClassicalPublicKey>
-  return `${window.location.origin}/drop/#${roomId}:${myUserId}:${myDeviceId}:${encodeURIComponent(myPqPkB64)}:${encodeURIComponent(b64Classical)}`;
+  // Link format: #<RoomID>:<HostUserId>:<HostDeviceID>:<HostPQPublicKey>:<HostClassicalPublicKey>[:<BurnerVersion>]
+  // [PQ v2 Fase 1.8] Bagian ke-6 `2` = burner v2 (X-Wing saja). Guest build
+  // lama hanya membaca 5 bagian pertama sehingga tetap kompatibel.
+  const linkPqVersion = resolvePqV2Enabled() ? 2 : 1;
+  return `${window.location.origin}/drop/#${roomId}:${myUserId}:${myDeviceId}:${encodeURIComponent(myPqPkB64)}:${encodeURIComponent(b64Classical)}:${linkPqVersion}`;
 }

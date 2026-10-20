@@ -105,7 +105,9 @@ model Device {
   publicKey           Bytes // Encryption/Identity Key
   pqPublicKey         Bytes? // NEW: PQ Identity Key (ML-KEM)
   signingKey          Bytes // Verification Key
+  signingKeyV2        Bytes? // ML-DSA-65 verification key (cryptoVersion 2)
   encryptedPrivateKey Bytes?
+  cryptoVersion       Int     @default(1)
 
   createdAt    DateTime @default(now())
   // [docs/28 Tier 2 — B4] Dipotong ke 15 menit (deviceActivityBucket()) supaya
@@ -151,6 +153,8 @@ model PreKeyBundle {
   pqKey         Bytes? // NEW: PQ signed pre-key
   signature     Bytes // Signature of the 'key'
   pqSignature   Bytes? // NEW: Signature of the 'pqKey'
+  signatureV2   Bytes? // ML-DSA-65 signature over bundle v2
+  cryptoVersion Int    @default(1)
 
   deviceId String @unique // Diubah dari userId
   device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
@@ -366,6 +370,7 @@ model GroupCredential {
   serial         String   @unique // 64-hex = SHA-384 dari prepared message
   conversationId String
   keyVersion     Int // versi issuer key yang menandatangani
+  suite          String?
   issuedAt       DateTime @default(now())
 
   @@index([conversationId])
@@ -381,6 +386,7 @@ model GroupCredential {
 model CredentialIssuerKey {
   keyVersion      Int      @id
   publicKeyJwk    String // JSON Web Key (public) — dibagikan ke klien
+  suite           String?
   createdAt       DateTime @default(now())
 }
 

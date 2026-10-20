@@ -107,6 +107,7 @@ export type RetrievedKeys = {
   signing: Uint8Array;
   signedPreKey: Uint8Array;
   pqSignedPreKey?: Uint8Array;
+  signingV2?: Uint8Array;
   masterSeed?: Uint8Array;
 };
 export type RetrieveKeysResult =
@@ -122,6 +123,7 @@ export async function registerAndGenerateKeys(password: string): Promise<{
   encryptionPublicKeyB64: string;
   pqEncryptionPublicKeyB64: string;
   signingPublicKeyB64: string;
+  signingPublicKeyV2B64: string;
   encryptedPrivateKeys: string;
   phrase: string;
 }> {
@@ -132,21 +134,24 @@ export async function generateNewKeys(password: string): Promise<{
     encryptionPublicKeyB64: string;
     pqEncryptionPublicKeyB64: string;
     signingPublicKeyB64: string;
+    signingPublicKeyV2B64: string;
     encryptedPrivateKeys: string;
 }> {
-  const { encryptionPublicKeyB64, pqEncryptionPublicKeyB64, signingPublicKeyB64, encryptedPrivateKeys } = await sendToWorker<{
+  const { encryptionPublicKeyB64, pqEncryptionPublicKeyB64, signingPublicKeyB64, signingPublicKeyV2B64, encryptedPrivateKeys } = await sendToWorker<{
     encryptionPublicKeyB64: string;
     pqEncryptionPublicKeyB64: string;
     signingPublicKeyB64: string;
+    signingPublicKeyV2B64: string;
     encryptedPrivateKeys: string;
   }>('registerAndGenerateKeys', { password });
-  return { encryptionPublicKeyB64, pqEncryptionPublicKeyB64, signingPublicKeyB64, encryptedPrivateKeys };
+  return { encryptionPublicKeyB64, pqEncryptionPublicKeyB64, signingPublicKeyB64, signingPublicKeyV2B64, encryptedPrivateKeys };
 }
 
 export async function restoreFromPhrase(phrase: string, password: string): Promise<{
   encryptionPublicKeyB64: string,
   pqEncryptionPublicKeyB64: string,
   signingPublicKeyB64: string,
+  signingPublicKeyV2B64: string,
   encryptedPrivateKeys: string,
 }> {
   return sendToWorker('restoreFromPhrase', { phrase, password });
@@ -162,8 +167,10 @@ export async function recoverAccountWithSignature(
   encryptionPublicKeyB64: string,
   pqEncryptionPublicKeyB64: string,
   signingPublicKeyB64: string,
+  signingPublicKeyV2B64: string,
   encryptedPrivateKeys: string,
-  signatureB64: string
+  signatureB64: string,
+  signatureV2B64: string
 }> {
   return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp, nonce });
 }
@@ -192,6 +199,7 @@ export async function reEncryptBundleFromMasterKey(masterKey: Uint8Array, newPas
   encryptedPrivateKeys: string;
   encryptionPublicKeyB64: string;
   signingPublicKeyB64: string;
+  signingPublicKeyV2B64: string;
 }> {
   return sendToWorker('reEncryptBundleFromMasterKey', { masterKey: asBuffer(masterKey), newPassword });
 }
@@ -207,6 +215,7 @@ export async function retrievePrivateKeys(encryptedDataStr: string, password:str
           signing: new Uint8Array(result.keys.signing),
           signedPreKey: new Uint8Array(result.keys.signedPreKey),
           pqSignedPreKey: result.keys.pqSignedPreKey ? new Uint8Array(result.keys.pqSignedPreKey) : undefined,
+          signingV2: result.keys.signingV2 ? new Uint8Array(result.keys.signingV2) : undefined,
           masterSeed: result.keys.masterSeed ? new Uint8Array(result.keys.masterSeed) : undefined,
         }
       };
@@ -220,6 +229,39 @@ export async function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicK
 
 export function worker_generate_random_key(): Promise<Uint8Array> {
     return sendToWorker('generate_random_key', {});
+}
+
+// --- ML-DSA-65 (FIPS 204, Tier A jalur v2) ---
+// `domain` = context FIPS 204 pemisah pemakaian (lihat PQ_V2_DOMAINS di
+// @nyx/shared). Seed wajib diberikan agar keypair deterministik dari masterSeed.
+
+export async function workerMlDsaKeygen(seed: Uint8Array): Promise<{ publicKey: Uint8Array; secretKey: Uint8Array }> {
+    const result = await sendToWorker<{ publicKey: Uint8Array; secretKey: Uint8Array }>('ml_dsa_keygen', { seed: asBuffer(seed) });
+    return { publicKey: asU8(result.publicKey), secretKey: asU8(result.secretKey) };
+}
+
+export async function workerMlDsaGetPublicKey(secretKey: Uint8Array): Promise<Uint8Array> {
+    const result = await sendToWorker<{ publicKey: Uint8Array }>('ml_dsa_get_public_key', { secretKey: asBuffer(secretKey) });
+    return asU8(result.publicKey);
+}
+
+export async function workerMlDsaSign(message: Uint8Array, secretKey: Uint8Array, domain?: string): Promise<Uint8Array> {
+    const result = await sendToWorker<{ signature: Uint8Array }>('ml_dsa_sign', {
+        message: asBuffer(message),
+        secretKey: asBuffer(secretKey),
+        domain,
+    });
+    return asU8(result.signature);
+}
+
+export async function workerMlDsaVerify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array, domain?: string): Promise<boolean> {
+    const result = await sendToWorker<{ valid: boolean }>('ml_dsa_verify', {
+        signature: asBuffer(signature),
+        message: asBuffer(message),
+        publicKey: asBuffer(publicKey),
+        domain,
+    });
+    return result.valid;
 }
 
 // --- Internal Crypto Primitives Proxy Functions ---
@@ -253,6 +295,20 @@ export function worker_pq_box_seal_open(combinedPayload: CryptoBuffer, pqPrivate
         combinedPayload: asBuffer(combinedPayload), 
         pqPrivateKey: asBuffer(pqPrivateKey), 
         classicalPrivateKey: asBuffer(classicalPrivateKey) 
+    });
+}
+
+export function worker_pq_box_seal_v2(message: CryptoBuffer | string, pqPublicKey: CryptoBuffer): Promise<Uint8Array> {
+    return sendToWorker('pq_box_seal_v2', {
+        message: typeof message === 'string' ? message : asBuffer(message),
+        pqPublicKey: asBuffer(pqPublicKey)
+    });
+}
+
+export function worker_pq_box_seal_v2_open(combinedPayload: CryptoBuffer, pqPrivateKey: CryptoBuffer): Promise<Uint8Array> {
+    return sendToWorker('pq_box_seal_v2_open', {
+        combinedPayload: asBuffer(combinedPayload),
+        pqPrivateKey: asBuffer(pqPrivateKey)
     });
 }
 
@@ -329,6 +385,72 @@ export function worker_x3dh_recipient_regenerate(payload: {
         myPqIdentityKey: { privateKey: asBuffer(payload.myPqIdentityKey.privateKey) },
         myPqSignedPreKey: { privateKey: asBuffer(payload.myPqSignedPreKey.privateKey) },
         theirSigningKey: asBuffer(payload.theirSigningKey),
+        initiatorCiphertexts: payload.initiatorCiphertexts
+    }, transfer).then(res => new Uint8Array(res));
+}
+
+// --- X3DH v2 (X-Wing-only + ML-DSA initiator signature) ---
+
+export function worker_x3dh_v2_initiator(payload: {
+    mySigningV2: { publicKey: CryptoBuffer, secretKey: CryptoBuffer },
+    theirIdentityKey: CryptoBuffer,
+    theirPqIdentityKey: CryptoBuffer,
+    theirPqSignedPreKey: CryptoBuffer,
+    theirPqOneTimePreKey?: CryptoBuffer
+}): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array }> {
+    return sendToWorker<{ sessionKey: ArrayBuffer, initiatorCiphertexts: ArrayBuffer }>('x3dh_v2_initiator', {
+      mySigningV2: {
+        publicKey: asBuffer(payload.mySigningV2.publicKey),
+        secretKey: asBuffer(payload.mySigningV2.secretKey),
+      },
+      theirIdentityKey: asBuffer(payload.theirIdentityKey),
+      theirPqIdentityKey: asBuffer(payload.theirPqIdentityKey),
+      theirPqSignedPreKey: asBuffer(payload.theirPqSignedPreKey),
+      theirPqOneTimePreKey: payload.theirPqOneTimePreKey ? asBuffer(payload.theirPqOneTimePreKey) : undefined
+    }).then(res => ({
+        sessionKey: asU8(res.sessionKey),
+        initiatorCiphertexts: asU8(res.initiatorCiphertexts)
+    }));
+}
+
+export function worker_x3dh_v2_recipient(payload: {
+    myIdentityKey: CryptoBuffer,
+    myPqIdentityKey: SodiumKeyPair,
+    myPqSignedPreKey: SodiumKeyPair,
+    theirSigningKeyV2: CryptoBuffer,
+    initiatorCiphertexts: Uint8Array,
+    myPqOneTimePreKey?: CryptoBuffer
+}): Promise<Uint8Array> {
+    const transfer: Transferable[] = [payload.initiatorCiphertexts.buffer];
+
+    return sendToWorker<ArrayBuffer>('x3dh_v2_recipient', {
+      myIdentityKey: asBuffer(payload.myIdentityKey),
+      myPqIdentityKey: { privateKey: asBuffer(payload.myPqIdentityKey.privateKey) },
+      myPqSignedPreKey: { privateKey: asBuffer(payload.myPqSignedPreKey.privateKey) },
+      theirSigningKeyV2: asBuffer(payload.theirSigningKeyV2),
+      initiatorCiphertexts: payload.initiatorCiphertexts,
+      myPqOneTimePreKey: payload.myPqOneTimePreKey ? asBuffer(payload.myPqOneTimePreKey) : undefined
+    }, transfer).then(res => new Uint8Array(res));
+}
+
+export function worker_x3dh_v2_recipient_regenerate(payload: {
+    keyId: number,
+    masterSeed: CryptoBuffer,
+    myIdentityKey: CryptoBuffer,
+    myPqIdentityKey: { privateKey: Uint8Array },
+    myPqSignedPreKey: { privateKey: Uint8Array },
+    theirSigningKeyV2: CryptoBuffer,
+    initiatorCiphertexts: Uint8Array
+}): Promise<Uint8Array> {
+    const transfer: Transferable[] = [payload.initiatorCiphertexts.buffer];
+
+    return sendToWorker<ArrayBuffer>('x3dh_v2_recipient_regenerate', {
+        keyId: payload.keyId,
+        masterSeed: asBuffer(payload.masterSeed),
+        myIdentityKey: asBuffer(payload.myIdentityKey),
+        myPqIdentityKey: { privateKey: asBuffer(payload.myPqIdentityKey.privateKey) },
+        myPqSignedPreKey: { privateKey: asBuffer(payload.myPqSignedPreKey.privateKey) },
+        theirSigningKeyV2: asBuffer(payload.theirSigningKeyV2),
         initiatorCiphertexts: payload.initiatorCiphertexts
     }, transfer).then(res => new Uint8Array(res));
 }
@@ -504,12 +626,14 @@ export async function groupInitSenderKey(): Promise<{ senderKeyB64: string; chai
 export async function groupRatchetEncrypt(
   serializedState: GroupRatchetState,
   plaintext: string | CryptoBuffer,
-  signingPrivateKey: CryptoBuffer
-): Promise<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: Uint8Array, signature: string, mk: Uint8Array }> {
-  return sendToWorker<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: ArrayBuffer, signature: string, mk: ArrayBuffer }>('group_ratchet_encrypt', { 
+  signingPrivateKey: CryptoBuffer,
+  signingV2PrivateKey?: CryptoBuffer
+): Promise<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: Uint8Array, signature: string, signatureVersion: number, mk: Uint8Array }> {
+  return sendToWorker<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: ArrayBuffer, signature: string, signatureVersion: number, mk: ArrayBuffer }>('group_ratchet_encrypt', { 
     serializedState, 
     plaintext: typeof plaintext === 'string' ? plaintext : asBuffer(plaintext),
-    signingPrivateKey: asBuffer(signingPrivateKey) 
+    signingPrivateKey: asBuffer(signingPrivateKey),
+    ...(signingV2PrivateKey ? { signingV2PrivateKey: asBuffer(signingV2PrivateKey) } : {})
   }).then(res => ({
       ...res,
       ciphertext: asU8(res.ciphertext),
@@ -522,14 +646,17 @@ export async function groupRatchetDecrypt(
   header: GroupRatchetHeader,
   ciphertext: CryptoBuffer,
   signature: string,
-  senderSigningPublicKey: CryptoBuffer
+  senderSigningPublicKey: CryptoBuffer,
+  options: { signatureVersion?: number; senderSigningKeyV2?: CryptoBuffer } = {}
 ): Promise<{ state: GroupRatchetState, plaintext: Uint8Array, skippedKeys: { n: number; mk: string }[], mk: Uint8Array }> {
   return sendToWorker<{ state: GroupRatchetState, plaintext: ArrayBuffer, skippedKeys: { n: number; mk: string }[], mk: ArrayBuffer }>('group_ratchet_decrypt', { 
     serializedState, 
     header, 
     ciphertext: asBuffer(ciphertext), 
     signature, 
-    senderSigningPublicKey: asBuffer(senderSigningPublicKey) 
+    senderSigningPublicKey: asBuffer(senderSigningPublicKey),
+    ...(options.signatureVersion !== undefined ? { signatureVersion: options.signatureVersion } : {}),
+    ...(options.senderSigningKeyV2 ? { senderSigningKeyV2: asBuffer(options.senderSigningKeyV2) } : {})
   }).then(res => ({
       ...res,
       plaintext: asU8(res.plaintext),
@@ -542,14 +669,17 @@ export async function groupDecryptSkipped(
   headerN: number,
   ciphertext: CryptoBuffer,
   signature: string,
-  senderSigningPublicKey: CryptoBuffer
+  senderSigningPublicKey: CryptoBuffer,
+  options: { signatureVersion?: number; senderSigningKeyV2?: CryptoBuffer } = {}
 ): Promise<{ plaintext: Uint8Array }> {
   return sendToWorker<{ plaintext: ArrayBuffer }>('group_decrypt_skipped', {
     mk,
     headerN,
     ciphertext: asBuffer(ciphertext),
     signature,
-    senderSigningPublicKey: asBuffer(senderSigningPublicKey)
+    senderSigningPublicKey: asBuffer(senderSigningPublicKey),
+    ...(options.signatureVersion !== undefined ? { signatureVersion: options.signatureVersion } : {}),
+    ...(options.senderSigningKeyV2 ? { senderSigningKeyV2: asBuffer(options.senderSigningKeyV2) } : {})
   }).then(res => ({
     plaintext: asU8(res.plaintext)
   }));
@@ -562,10 +692,12 @@ import type { BurnerDoubleRatchetState, BurnerDoubleRatchetHeader } from '../wor
 export function worker_burner_dr_init_guest(payload: {
   hostClassicalPk: CryptoBuffer;
   hostPqPk: CryptoBuffer;
-}): Promise<{ state: BurnerDoubleRatchetState; guestClassicalPk: string }> {
-  return sendToWorker<{ state: BurnerDoubleRatchetState; guestClassicalPk: string }>('burner_dr_init_guest', {
+  pqOnly?: boolean;
+}): Promise<{ state: BurnerDoubleRatchetState; guestClassicalPk: string; burnerVersion: number }> {
+  return sendToWorker<{ state: BurnerDoubleRatchetState; guestClassicalPk: string; burnerVersion: number }>('burner_dr_init_guest', {
     hostClassicalPk: asBuffer(payload.hostClassicalPk),
-    hostPqPk: asBuffer(payload.hostPqPk)
+    hostPqPk: asBuffer(payload.hostPqPk),
+    ...(payload.pqOnly ? { pqOnly: true } : {})
   });
 }
 
@@ -574,12 +706,14 @@ export function worker_burner_dr_init_host(payload: {
   hostClassicalSk: CryptoBuffer;
   savedCt: CryptoBuffer;
   hostPqSk: CryptoBuffer;
-}): Promise<{ state: BurnerDoubleRatchetState }> {
-  return sendToWorker<{ state: BurnerDoubleRatchetState }>('burner_dr_init_host', {
+  pqOnly?: boolean;
+}): Promise<{ state: BurnerDoubleRatchetState; burnerVersion: number }> {
+  return sendToWorker<{ state: BurnerDoubleRatchetState; burnerVersion: number }>('burner_dr_init_host', {
     guestClassicalPk: asBuffer(payload.guestClassicalPk),
     hostClassicalSk: asBuffer(payload.hostClassicalSk),
     savedCt: asBuffer(payload.savedCt),
-    hostPqSk: asBuffer(payload.hostPqSk)
+    hostPqSk: asBuffer(payload.hostPqSk),
+    ...(payload.pqOnly ? { pqOnly: true } : {})
   });
 }
 

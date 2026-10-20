@@ -396,7 +396,7 @@ router.put('/me/keys',
       // "kunci benar-benar berubah" (upload ulang yang sama bukan rotasi).
       const previousIdentity = await prisma.device.findUnique({
         where: { id: deviceId },
-        select: { publicKey: true, signingKey: true },
+        select: { publicKey: true, signingKey: true, signingKeyV2: true },
       })
       // [docs/28 Tier 0 — D7] index fingerprint mentah sebelum disimpan.
       const _fp = req.headers['x-nyx-fingerprint'];
@@ -431,6 +431,7 @@ router.put('/me/keys',
         identityKeysChanged(previousIdentity, {
           identityKey: Buffer.from(publicKey, 'base64url'),
           signingKey: Buffer.from(signingKey, 'base64url'),
+          signingKeyV2: previousIdentity?.signingKeyV2 ?? undefined,
         })
       ) {
         void publishIdentityKeyChange({
@@ -439,6 +440,7 @@ router.put('/me/keys',
           identityKey: Buffer.from(publicKey, 'base64url'),
           pqIdentityKey: Buffer.from(pqPublicKey, 'base64url'),
           signingKey: Buffer.from(signingKey, 'base64url'),
+          signingKeyV2: previousIdentity?.signingKeyV2 ?? null,
         })
       }
 

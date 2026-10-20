@@ -75,7 +75,7 @@ export function buildRotatedGroupMetadata(
       participants: participantIds,
       v: 3,
       generation: prevGeneration,
-      deliveryTokenMap: { ...(existing.deliveryTokenMap ?? {}), ...deliveryTokens },
+      deliveryTokenMap: { ...existing.deliveryTokenMap, ...deliveryTokens },
       members,
     },
     generation,

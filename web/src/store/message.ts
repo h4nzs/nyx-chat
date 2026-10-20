@@ -1068,21 +1068,45 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             // Encrypt for each recipient using Web Worker
             type PublicKeyInput = string | Uint8Array | { type: 'Buffer'; data: number[] } | ArrayBufferView;
+            type DeviceData = { id: string, publicKey: PublicKeyInput, pqPublicKey?: PublicKeyInput };
             type ParticipantData = { 
                 id: string, 
                 userId?: string, 
                 user?: { 
                     id?: string, // [P2] agar kompatibel dgn getParticipantUserId (weak-type)
-                    devices?: {id: string, publicKey: PublicKeyInput}[], 
-                    publicKey?: PublicKeyInput 
+                    devices?: DeviceData[], 
+                    publicKey?: PublicKeyInput,
+                    pqPublicKey?: PublicKeyInput
                 }, 
-                devices?: {id: string, publicKey: PublicKeyInput}[], 
-                publicKey?: PublicKeyInput 
+                devices?: DeviceData[], 
+                publicKey?: PublicKeyInput,
+                pqPublicKey?: PublicKeyInput
+            };
+
+            const decodePublicKey = (key: PublicKeyInput): Uint8Array => {
+                if (typeof key !== 'string') {
+                    if (typeof key === 'object' && key !== null && 'type' in key && (key as Record<string, unknown>).type === 'Buffer' && Array.isArray((key as Record<string, unknown>).data)) {
+                        return new Uint8Array((key as Record<string, unknown>).data as number[]);
+                    }
+                    if (key instanceof Uint8Array || ArrayBuffer.isView(key)) {
+                        return new Uint8Array(key.buffer, key.byteOffset, key.byteLength);
+                    }
+                    throw new Error("Invalid public key type: " + typeof key);
+                }
+                try {
+                    return sodium.from_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+                } catch {
+                    try {
+                        return sodium.from_base64(key, sodium.base64_variants.ORIGINAL);
+                    } catch {
+                        return sodium.from_base64(key, sodium.base64_variants.URLSAFE);
+                    }
+                }
             };
 
             // Kumpulkan semua (deviceId → publicKey bytes) dulu, lalu seal
             // PARALEL via Promise.all — sebelumnya sequential per device.
-            const sealTargets: { deviceId: string; pubBytes: Uint8Array }[] = [];
+            const sealTargets: { deviceId: string; pubBytes: Uint8Array; pqBytes?: Uint8Array }[] = [];
 
             for (const p of conversation.participants as ParticipantData[]) {
                // [P2 NORMALISASI] (dulu p.userId||p.id).
@@ -1100,29 +1124,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                        const targetPublicKey = device.publicKey;
                        if (targetPublicKey) {
                            try {
-                               let recipientPubBytes: Uint8Array;
-                               
-                               if (typeof targetPublicKey !== 'string') {
-                                   if (typeof targetPublicKey === 'object' && targetPublicKey !== null && 'type' in targetPublicKey && (targetPublicKey as Record<string, unknown>).type === 'Buffer' && Array.isArray((targetPublicKey as Record<string, unknown>).data)) {
-                                       recipientPubBytes = new Uint8Array((targetPublicKey as Record<string, unknown>).data as number[]);
-                                   } else if (targetPublicKey instanceof Uint8Array || ArrayBuffer.isView(targetPublicKey)) {
-                                       recipientPubBytes = new Uint8Array(targetPublicKey.buffer, targetPublicKey.byteOffset, targetPublicKey.byteLength);
-                                   } else {
-                                       throw new Error("Invalid public key type: " + typeof targetPublicKey);
-                                   }
-                               } else {
-                                   try {
-                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-                                   } catch (e1) {
-                                       try {
-                                           recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.ORIGINAL);
-                                       } catch (e2) {
-                                           recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE);
-                                       }
-                                   }
-                               }
-
-                               sealTargets.push({ deviceId: device.id, pubBytes: recipientPubBytes });
+                               const recipientPubBytes = decodePublicKey(targetPublicKey);
+                               // [PQ v2 Fase 1.5 langkah 9] Kunci PQ per-device (bila ada).
+                               const targetPqPublicKey = device.pqPublicKey || userObj.pqPublicKey;
+                               const recipientPqBytes = targetPqPublicKey ? decodePublicKey(targetPqPublicKey) : undefined;
+                               sealTargets.push({ deviceId: device.id, pubBytes: recipientPubBytes, pqBytes: recipientPqBytes });
                            } catch (e) {
                                console.error(`Failed to parse public key for device ${device.id}`, e);
                            }
@@ -1131,9 +1137,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                }
             }
 
-            await Promise.all(sealTargets.map(async ({ deviceId, pubBytes }) => {
+            const { resolvePqV2Enabled } = await import('@lib/pqCapability');
+            const { sealForDevice } = await import('@lib/pqBoxSeal');
+            const usePqV2Push = resolvePqV2Enabled();
+
+            await Promise.all(sealTargets.map(async ({ deviceId, pubBytes, pqBytes }) => {
                 try {
-                    const sealed = await worker_crypto_box_seal(pushDataBytes, pubBytes);
+                    // v2 hanya bila kill switch mengizinkan DAN perangkat punya kunci PQ;
+                    // selain itu jalur classical lama dipertahankan persis.
+                    const sealed = usePqV2Push && pqBytes
+                        ? await sealForDevice(pushDataBytes, pqBytes, pubBytes)
+                        : await worker_crypto_box_seal(pushDataBytes, pubBytes);
                     pushPayloads[deviceId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
                 } catch (e) {
                     console.error(`Failed to seal push for device ${deviceId}`, e);
@@ -1850,7 +1864,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                                       senderId: senderIdToUse,
                                       encryptedKey: extractedKey,
                                       senderDeviceKey: dist.senderDeviceKey || payload.senderDeviceKey,
-                                      senderSigningKey: (dist as { senderSigningKey?: string }).senderSigningKey || payload.senderSigningKey
+                                      senderSigningKey: (dist as { senderSigningKey?: string }).senderSigningKey || payload.senderSigningKey,
+                                      senderSigningKeyV2: (dist as { senderSigningKeyV2?: string }).senderSigningKeyV2 || (payload as { senderSigningKeyV2?: string }).senderSigningKeyV2
                                   });
                                   success = true;
                                   break; // Kunci valid untuk device ini
@@ -1894,6 +1909,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                                 // [T2 FIX #9 2026-09-28] Signing key ikut dipersist
                                 // ke receiver state (bawaan envelope fulfilled_key).
                                 senderSigningKey: payload.senderSigningKey,
+                                // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim.
+                                senderSigningKeyV2: (payload as { senderSigningKeyV2?: string }).senderSigningKeyV2,
                             });
                             success = true;
                         } catch(e) {

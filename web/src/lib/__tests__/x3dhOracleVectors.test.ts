@@ -113,6 +113,77 @@ describe('oracle lintas-implementasi — X3DH sisi penerima', () => {
   });
 });
 
+interface X3dhV2Vector {
+  name: string;
+  note: string;
+  aliceSigningV2PublicKey: string;
+  bob: {
+    identityKey: KeyPairJson;
+    pqIdentityKey: KeyPairJson;
+    pqSignedPreKey: KeyPairJson;
+    otpkPq?: KeyPairJson;
+  };
+  initiatorCiphertexts: string;
+  sessionKey: string;
+}
+
+const x3dhV2Vectors = vectors.x3dhV2 as unknown as X3dhV2Vector[];
+
+async function recipientV2SessionKey(vector: X3dhV2Vector, overrides?: { blob?: Uint8Array; signingKeyV2?: Uint8Array }) {
+  const payload: Record<string, unknown> = {
+    myIdentityKey: b64uToBytes(vector.bob.identityKey.publicKey),
+    myPqIdentityKey: {
+      publicKey: b64uToBytes(vector.bob.pqIdentityKey.publicKey),
+      privateKey: b64uToBytes(vector.bob.pqIdentityKey.privateKey),
+    },
+    myPqSignedPreKey: {
+      publicKey: b64uToBytes(vector.bob.pqSignedPreKey.publicKey),
+      privateKey: b64uToBytes(vector.bob.pqSignedPreKey.privateKey),
+    },
+    theirSigningKeyV2: overrides?.signingKeyV2 ?? b64uToBytes(vector.aliceSigningV2PublicKey),
+    initiatorCiphertexts: overrides?.blob ?? b64uToBytes(vector.initiatorCiphertexts),
+  };
+  if (vector.bob.otpkPq) {
+    payload.myPqOneTimePreKey = b64uToBytes(vector.bob.otpkPq.privateKey);
+  }
+  return callWorker<Uint8Array>('x3dh_v2_recipient', payload);
+}
+
+describe('oracle lintas-implementasi — X3DH v2 (X-Wing murni + ML-DSA-65)', () => {
+  it('vektor memuat dua kasus (dengan & tanpa One-Time Pre-Key)', () => {
+    expect(x3dhV2Vectors.map((v) => v.name)).toEqual(['x3dh-v2-plain', 'x3dh-v2-with-otpk']);
+  });
+
+  for (const vector of x3dhV2Vectors) {
+    it(`${vector.name}: sessionKey + tanda tangan oracle diterima NYX`, async () => {
+      const nyx = await recipientV2SessionKey(vector);
+      expect(nyx.length).toBe(32);
+      expect(toHex(nyx)).toBe(toHex(b64uToBytes(vector.sessionKey)));
+    });
+  }
+
+  it('kontrol negatif: kunci verifikasi ML-DSA lain → tanda tangan ditolak', async () => {
+    const [plain, withOtpk] = [x3dhV2Vectors[0]!, x3dhV2Vectors[1]!];
+    await expect(
+      recipientV2SessionKey(plain, { signingKeyV2: b64uToBytes(withOtpk.aliceSigningV2PublicKey) })
+    ).rejects.toThrow(/tanda tangan inisiator/i);
+  });
+
+  it('kontrol negatif: ciphertext diubah → tanda tangan transkrip ditolak', async () => {
+    const vector = x3dhV2Vectors[0]!;
+    const blob = b64uToBytes(vector.initiatorCiphertexts);
+    // Header v2 = 4 byte; byte pertama ctId berada tepat setelah header.
+    blob[4] = blob[4]! ^ 0x01;
+    await expect(recipientV2SessionKey(vector, { blob })).rejects.toThrow(/tanda tangan inisiator/i);
+  });
+
+  it('blob ber-OTPK tanpa kunci OTPK lokal → GAGAL keras', async () => {
+    const vector = x3dhV2Vectors[1]!;
+    const { otpkPq: _otpkPq, ...bobWithoutOtpk } = vector.bob;
+    await expect(recipientV2SessionKey({ ...vector, bob: bobWithoutOtpk })).rejects.toThrow(/OTPK/i);
+  });
+});
+
 describe('oracle lintas-implementasi — kdfChain (BLAKE2b keyed)', () => {
   const chainVectors = vectors.kdfChain as unknown as { chainKey: string; messageKey: string; newChainKey: string }[];
 

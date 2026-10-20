@@ -46,6 +46,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -56,6 +57,7 @@ import (
 	"strings"
 
 	"github.com/cloudflare/circl/kem/xwing"
+	"github.com/cloudflare/circl/sign/mldsa/mldsa65"
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
@@ -74,6 +76,13 @@ const (
 	aeadFinalOverhead  = 24 + 16
 	vectorsRelPath     = "web/src/lib/__tests__/fixtures/x3dhOracleVectors.json"
 	labelPrefix        = "nyx-dr-oracle/v1/"
+
+	// [Fase 1.4 / docs/35 §35.6.2] Handshake v2: X-Wing murni + ML-DSA-65.
+	handshakeV2Version  = 0x02
+	handshakeV2FlagOTPK = 0x01
+	handshakeV2Domain   = "NYX-PQ-HANDSHAKE-V2"
+	mlDsa65PublicKeyLen = 1952 // ML_DSA_65_PUBLIC_KEY_BYTES
+	mlDsa65SignatureLen = 3309 // ML_DSA_65_SIGNATURE_BYTES
 )
 
 // repoRoot: naik dari CWD sampai menemukan penanda root repo. Oracle dijalankan
@@ -441,11 +450,12 @@ type kdfVector struct {
 }
 
 type vectors struct {
-	Version     int          `json:"version"`
-	GeneratedBy string       `json:"generatedBy"`
-	Warning     string       `json:"warning"`
-	X3DH        []x3dhVector `json:"x3dh"`
-	KdfChain    []kdfVector  `json:"kdfChain"`
+	Version     int            `json:"version"`
+	GeneratedBy string         `json:"generatedBy"`
+	Warning     string         `json:"warning"`
+	X3DH        []x3dhVector   `json:"x3dh"`
+	X3DHV2      []x3dhV2Vector `json:"x3dhV2"`
+	KdfChain    []kdfVector    `json:"kdfChain"`
 }
 
 func jsonIntArray(b []byte) string {
@@ -532,10 +542,201 @@ func buildX3DHVector(name, note string, withOtpk bool) x3dhVector {
 	return v
 }
 
+// ============================================================================
+// X3DH v2 (X-Wing murni + ML-DSA-65) — [Fase 1.4]
+// ============================================================================
+
+type mlDsaKey struct {
+	publicKey  []byte
+	privateKey *mldsa65.PrivateKey
+}
+
+// mlDsaFromSeed: FIPS 204 KeyGen deterministik dari seed 32 byte. NYX memakai
+// `ml_dsa65.keygen(seed)` (noble) dengan seed yang sama.
+func mlDsaFromSeed(seed []byte) mlDsaKey {
+	var s [mldsa65.SeedSize]byte
+	if len(seed) != mldsa65.SeedSize {
+		panic(fmt.Sprintf("ml-dsa seed harus %d byte", mldsa65.SeedSize))
+	}
+	copy(s[:], seed)
+	pk, sk := mldsa65.NewKeyFromSeed(&s)
+	return mlDsaKey{publicKey: pk.Bytes(), privateKey: sk}
+}
+
+func mlDsaSign(sk *mldsa65.PrivateKey, message []byte) []byte {
+	sig := make([]byte, mldsa65.SignatureSize)
+	if err := mldsa65.SignTo(sk, message, []byte(handshakeV2Domain), false, sig); err != nil {
+		panic(fmt.Errorf("ml-dsa sign gagal: %w", err))
+	}
+	return sig
+}
+
+func mlDsaVerify(pkBytes, message, signature []byte) bool {
+	if len(pkBytes) != mlDsa65PublicKeyLen {
+		panic(fmt.Sprintf("ml-dsa pk harus %d byte, dapat %d", mlDsa65PublicKeyLen, len(pkBytes)))
+	}
+	if len(signature) != mlDsa65SignatureLen {
+		panic(fmt.Sprintf("ml-dsa sig harus %d byte, dapat %d", mlDsa65SignatureLen, len(signature)))
+	}
+	var pk mldsa65.PublicKey
+	if err := pk.UnmarshalBinary(pkBytes); err != nil {
+		panic(fmt.Errorf("ml-dsa pk tidak sah: %w", err))
+	}
+	return mldsa65.Verify(&pk, message, []byte(handshakeV2Domain), signature)
+}
+
+// lengthPrefixed: format transkrip v2 (u32 BE panjang + isi, per field).
+func lengthPrefixed(fields ...[]byte) []byte {
+	total := 0
+	for _, f := range fields {
+		total += 4 + len(f)
+	}
+	out := make([]byte, total)
+	offset := 0
+	for _, f := range fields {
+		binary.BigEndian.PutUint32(out[offset:], uint32(len(f)))
+		offset += 4
+		copy(out[offset:], f)
+		offset += len(f)
+	}
+	return out
+}
+
+// handshakeV2Transcript: [signingKeyV2(1952)][responderIdentityKey(32)][ctId][ctSpk][ctOtpk?]
+// — HARUS sama persis dengan `buildHandshakeV2Transcript` (packages/shared/src/pqHandshake.ts).
+func handshakeV2Transcript(initiatorSigningKeyV2, responderIdentityKey, ctID, ctSPK, ctOTPK []byte) []byte {
+	if len(initiatorSigningKeyV2) != mlDsa65PublicKeyLen {
+		panic("transkrip v2: signingKeyV2 panjang salah")
+	}
+	if len(responderIdentityKey) != x25519PKLen {
+		panic("transkrip v2: responderIdentityKey panjang salah")
+	}
+	otpk := ctOTPK
+	if otpk == nil {
+		otpk = []byte{}
+	}
+	return lengthPrefixed(initiatorSigningKeyV2, responderIdentityKey, ctID, ctSPK, otpk)
+}
+
+// serializeHandshakeV2: [magic][version][flags][pad][ctId][ctSpk][ctOtpk?][signature].
+func serializeHandshakeV2(ctID, ctSPK, ctOTPK, signature []byte) []byte {
+	flags := byte(0)
+	size := 4 + len(ctID) + len(ctSPK) + len(signature)
+	if len(ctOTPK) > 0 {
+		flags |= handshakeV2FlagOTPK
+		size += len(ctOTPK)
+	}
+	out := make([]byte, size)
+	out[0] = handshakeMagic
+	out[1] = handshakeV2Version
+	out[2] = flags
+	out[3] = 0x00
+	offset := 4
+	copy(out[offset:], ctID)
+	offset += len(ctID)
+	copy(out[offset:], ctSPK)
+	offset += len(ctSPK)
+	if len(ctOTPK) > 0 {
+		copy(out[offset:], ctOTPK)
+		offset += len(ctOTPK)
+	}
+	copy(out[offset:], signature)
+	return out
+}
+
+type x3dhV2Recipient struct {
+	IdentityKey    keyPair `json:"identityKey"`
+	PqIdentityKey  keyPair `json:"pqIdentityKey"`
+	PqSignedPreKey keyPair `json:"pqSignedPreKey"`
+	OtpkPq         keyPair `json:"otpkPq,omitempty"`
+}
+
+type x3dhV2Vector struct {
+	Name string `json:"name"`
+	Note string `json:"note"`
+	// Kunci verifikasi ML-DSA inisiator (1952 byte) — dipakai NYX untuk
+	// memverifikasi tanda tangan transkrip sebelum mendekapsulasi.
+	AliceSigningV2PublicKey string `json:"aliceSigningV2PublicKey"`
+	// Kunci privat Alice tidak dipakai test vektor, hanya material test
+	// deterministik untuk arah NYX → oracle di masa depan.
+	AliceSigningV2Seed   string          `json:"aliceSigningV2Seed"`
+	Bob                  x3dhV2Recipient `json:"bob"`
+	InitiatorCiphertexts string          `json:"initiatorCiphertexts"`
+	SessionKey           string          `json:"sessionKey"`
+}
+
+// buildX3DHV2Vector: inisiator = oracle. Rahasia sesi = BLAKE2b-256(ss_id ‖ ss_spk [‖ ss_otpk])
+// TANPA DH; tanda tangan ML-DSA mengikat transkrip. Sisi penerima dihitung ulang
+// dari blob terserialisasi dan tanda tangannya diverifikasi ulang di dalam oracle
+// sebelum vektor ditulis (self-consistency gate).
+func buildX3DHV2Vector(name, note string, withOtpk bool) x3dhV2Vector {
+	aliceSeed := seedFor(name + "/alice-signing-v2")
+	aliceSigning := mlDsaFromSeed(aliceSeed)
+
+	bobIdentityPub, bobIdentityPriv := x25519FromSeed(seedFor(name + "/bob-identity"))
+	bobPqIDPub, bobPqIDPriv := xwingFromSeed(seedFor(name + "/bob-pq-identity"))
+	bobPqSpkPub, bobPqSpkPriv := xwingFromSeed(seedFor(name + "/bob-pq-spk"))
+	otpkPqPub, otpkPqPriv := xwingFromSeed(seedFor(name + "/bob-pq-otpk"))
+
+	ctID, ssID := xwingEncapsulate(bobPqIDPub, seedFor64(name+"/encaps-v2-id"))
+	ctSPK, ssSPK := xwingEncapsulate(bobPqSpkPub, seedFor64(name+"/encaps-v2-spk"))
+	secrets := [][]byte{ssID, ssSPK}
+	var ctOTPK []byte
+	if withOtpk {
+		var ssOTPK []byte
+		ctOTPK, ssOTPK = xwingEncapsulate(otpkPqPub, seedFor64(name+"/encaps-v2-otpk"))
+		secrets = append(secrets, ssOTPK)
+	}
+
+	sessionKey := blake2bKeyed(32, bytes.Join(secrets, nil), nil)
+	transcript := handshakeV2Transcript(aliceSigning.publicKey, bobIdentityPub, ctID, ctSPK, ctOTPK)
+	signature := mlDsaSign(aliceSigning.privateKey, transcript)
+	blob := serializeHandshakeV2(ctID, ctSPK, ctOTPK, signature)
+
+	// Self-check 1: tanda tangan oracle bisa diverifikasi oracle.
+	if !mlDsaVerify(aliceSigning.publicKey, transcript, signature) {
+		panic("oracle v2 tidak konsisten: tanda tangan transkrip tidak sah")
+	}
+	// Self-check 2: penerima menurunkan kunci yang sama dari blob.
+	recipientSecrets := [][]byte{
+		xwingDecapsulate(ctID, bobPqIDPriv),
+		xwingDecapsulate(ctSPK, bobPqSpkPriv),
+	}
+	if withOtpk {
+		recipientSecrets = append(recipientSecrets, xwingDecapsulate(ctOTPK, otpkPqPriv))
+	}
+	if derived := blake2bKeyed(32, bytes.Join(recipientSecrets, nil), nil); !bytes.Equal(derived, sessionKey) {
+		panic("oracle v2 tidak konsisten: sessionKey inisiator ≠ penerima")
+	}
+
+	v := x3dhV2Vector{
+		Name:                    name,
+		Note:                    note,
+		AliceSigningV2PublicKey: b64(aliceSigning.publicKey),
+		AliceSigningV2Seed:      b64(aliceSeed),
+		Bob: x3dhV2Recipient{
+			IdentityKey:    keyPair{PublicKey: b64(bobIdentityPub), PrivateKey: b64(bobIdentityPriv)},
+			PqIdentityKey:  keyPair{PublicKey: b64(bobPqIDPub), PrivateKey: b64(bobPqIDPriv)},
+			PqSignedPreKey: keyPair{PublicKey: b64(bobPqSpkPub), PrivateKey: b64(bobPqSpkPriv)},
+		},
+		InitiatorCiphertexts: b64(blob),
+		SessionKey:           b64(sessionKey),
+	}
+	if withOtpk {
+		v.Bob.OtpkPq = keyPair{PublicKey: b64(otpkPqPub), PrivateKey: b64(otpkPqPriv)}
+	}
+	return v
+}
+
 func buildVectors() vectors {
 	x3dh := []x3dhVector{
 		buildX3DHVector("x3dh-plain", "tanpa One-Time Pre-Key (5 rahasia: dh1,dh2,dh3,ss_id,ss_spk)", false),
 		buildX3DHVector("x3dh-with-otpk", "dengan One-Time Pre-Key (7 rahasia: + dh4, ss_otpk)", true),
+	}
+
+	x3dhV2 := []x3dhV2Vector{
+		buildX3DHV2Vector("x3dh-v2-plain", "X-Wing murni tanpa OTPK (3 rahasia: ss_id, ss_spk) + ML-DSA-65", false),
+		buildX3DHV2Vector("x3dh-v2-with-otpk", "X-Wing murni dengan OTPK (4 rahasia: ss_id, ss_spk, ss_otpk) + ML-DSA-65", true),
 	}
 
 	kdf := make([]kdfVector, 0, 4)
@@ -551,6 +752,7 @@ func buildVectors() vectors {
 		GeneratedBy: "tools/dr-oracle (Go: cloudflare/circl + x/crypto; TANPA libsodium)",
 		Warning:     "Kunci di sini dibangkitkan deterministik dari label dan HANYA untuk test. Jangan dipakai di produksi.",
 		X3DH:        x3dh,
+		X3DHV2:      x3dhV2,
 		KdfChain:    kdf,
 	}
 }

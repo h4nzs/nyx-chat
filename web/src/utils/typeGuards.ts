@@ -148,7 +148,9 @@ export interface X3dhHeader {
   x3dh?: {
     initiatorSigningKey: string;
     initiatorCiphertexts: string;
-    otpkId: number;
+    otpkId?: number;
+    handshakeVersion?: number;
+    initiatorSigningKeyV2?: string;
   };
 }
 
@@ -160,7 +162,9 @@ export function isX3dhHeader(data: unknown): data is X3dhHeader {
     const x = d.x3dh as Record<string, unknown>;
     if (typeof x.initiatorSigningKey !== 'string') return false;
     if (typeof x.initiatorCiphertexts !== 'string') return false;
-    if (typeof x.otpkId !== 'number') return false;
+    if (x.otpkId !== undefined && typeof x.otpkId !== 'number') return false;
+    if (x.handshakeVersion !== undefined && typeof x.handshakeVersion !== 'number') return false;
+    if (x.initiatorSigningKeyV2 !== undefined && typeof x.initiatorSigningKeyV2 !== 'string') return false;
   }
   return true;
 }

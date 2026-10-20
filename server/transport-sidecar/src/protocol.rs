@@ -40,7 +40,7 @@ pub const TRANSPORT_PROTOCOL_VERSION: u32 = 1;
 /// dinyatakan adalah "frame jalur v2 boleh lewat", bukan kemampuan peer mana
 /// pun (bukti kemampuan peer datang in-band lewat `ackV` di payload ter-seal).
 /// Menghapusnya dari daftar = kill switch deployment (semua klien kembali ke v1).
-pub const SERVER_CAPABILITIES: [&str; 2] = ["hello-v1", "spqr-ratchet"];
+pub const SERVER_CAPABILITIES: [&str; 3] = ["hello-v1", "spqr-ratchet", "pq-v2"];
 pub const HELLO_MAX_CAPS: usize = 32;
 pub const HELLO_MAX_CAP_LENGTH: usize = 64;
 pub const HELLO_MAX_VERSION: u32 = 65535;

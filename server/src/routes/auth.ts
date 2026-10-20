@@ -85,7 +85,8 @@ import { parseCredentialTransports, toBase64UrlCredentialId } from '../utils/web
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
 // ✅ FIX: Import tipe JWT Payload dari shared
-import { TransportOpCode, type AuthJwtPayload } from '@nyx/shared'
+import { TransportOpCode, CRYPTO_VERSION_V2, ML_DSA_65_PUBLIC_KEY_BYTES, PQ_V2_DOMAINS, type AuthJwtPayload } from '@nyx/shared'
+import { verifyMlDsaSignature } from '../utils/mlDsa.js'
 // [LINK] Notifikasi permintaan tautan ke perangkat lama (relay yang sama dengan
 // semua event KEY_SYNC lain — WSS maupun WebTransport).
 import { sendJsonToUser } from '../network/redisBridge.js'
@@ -299,6 +300,7 @@ router.post('/register', authLimiter, zodValidate({
     publicKey: validateKey(32),
     pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
+    signingKeyV2: validateKey(ML_DSA_65_PUBLIC_KEY_BYTES).optional(),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
     turnstileToken: z.string().optional(),
@@ -316,7 +318,7 @@ router.post('/register', authLimiter, zodValidate({
 }),
 async (req, res, next) => {
   try {
-    const { usernameHash, password, encryptedProfile, publicKey, pqPublicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
+    const { usernameHash, password, encryptedProfile, publicKey, pqPublicKey, signingKey, signingKeyV2, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
 
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again or reload page.')
@@ -478,6 +480,10 @@ async (req, res, next) => {
             publicKey: Buffer.from(publicKey, 'base64url'),
             pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
             signingKey: Buffer.from(signingKey, 'base64url'),
+            ...(signingKeyV2 && {
+              signingKeyV2: Buffer.from(signingKeyV2, 'base64url'),
+              cryptoVersion: CRYPTO_VERSION_V2
+            }),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
             // [docs/28 Tier 1.5] label & anchor perangkat tidak pernah plaintext.
             nameSealed: await sealAtRest(deviceName || 'Primary Device'),
@@ -504,6 +510,7 @@ async (req, res, next) => {
       identityKey: Buffer.from(publicKey, 'base64url'),
       pqIdentityKey: Buffer.from(pqPublicKey ?? '', 'base64url'),
       signingKey: Buffer.from(signingKey, 'base64url'),
+      signingKeyV2: signingKeyV2 ? Buffer.from(signingKeyV2, 'base64url') : null,
       keyVersion: KT_KEY_VERSION_REGISTRATION,
       updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
     });
@@ -584,7 +591,7 @@ router.post('/login', authLimiter, zodValidate({
       // "kunci benar-benar berubah": login normal mengirim kunci yang SAMA, jadi
       // hanya regenerasi kunci lokal yang menghasilkan entri log.
       const previousIdentity = device
-        ? { publicKey: device.publicKey, signingKey: device.signingKey }
+        ? { publicKey: device.publicKey, signingKey: device.signingKey, signingKeyV2: device.signingKeyV2 }
         : null;
 
       if (device) {
@@ -628,6 +635,7 @@ router.post('/login', authLimiter, zodValidate({
         identityKeysChanged(previousIdentity, {
           identityKey: Buffer.from(publicKey, 'base64url'),
           signingKey: Buffer.from(signingKey, 'base64url'),
+          signingKeyV2: previousIdentity?.signingKeyV2 ?? undefined,
         })
       ) {
         void publishIdentityKeyChange({
@@ -636,6 +644,7 @@ router.post('/login', authLimiter, zodValidate({
           identityKey: Buffer.from(publicKey, 'base64url'),
           pqIdentityKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
           signingKey: Buffer.from(signingKey, 'base64url'),
+          signingKeyV2: previousIdentity?.signingKeyV2 ?? null,
         });
       }
 
@@ -893,13 +902,15 @@ router.post('/recover', authLimiter, zodValidate({
     publicKey: validateKey(32),
     pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
+    signingKeyV2: validateKey(ML_DSA_65_PUBLIC_KEY_BYTES).optional(),
     signature: z.string(),
+    signatureV2: z.string().optional(),
     timestamp: z.number(),
     nonce: z.string()
   })
 }), async (req, res, next) => {
   try {
-    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, pqPublicKey, signingKey, signature, timestamp, nonce } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, pqPublicKey, signingKey, signingKeyV2, signature, signatureV2, timestamp, nonce } = req.body;
 
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
@@ -932,6 +943,16 @@ router.post('/recover', authLimiter, zodValidate({
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
     
+    // [PQ v2 Fase 1.5 langkah 9] Pemulihan bisa ditandatangani ML-DSA (v1 tetap diterima).
+    let signatureV2Bytes: Uint8Array | null = null;
+    if (signatureV2) {
+        try {
+            signatureV2Bytes = sodium.from_base64(signatureV2, sodium.base64_variants.URLSAFE_NO_PADDING);
+        } catch {
+            throw new ApiError(400, "Invalid v2 recovery signature encoding.");
+        }
+    }
+
     let isValid = false;
     for (const device of user.devices) {
         try {
@@ -941,6 +962,20 @@ router.post('/recover', authLimiter, zodValidate({
                 break;
             }
         } catch(e) { console.warn("[Auth] Recovery signature verification error:", e); }
+
+        if (!isValid && signatureV2Bytes && device.signingKeyV2) {
+            try {
+                if (verifyMlDsaSignature({
+                    signature: signatureV2Bytes,
+                    message: new Uint8Array(messageBytes),
+                    publicKey: new Uint8Array(device.signingKeyV2),
+                    domain: PQ_V2_DOMAINS.RECOVERY,
+                })) {
+                    isValid = true;
+                    break;
+                }
+            } catch(e) { console.warn("[Auth] Recovery v2 signature verification error:", e); }
+        }
     }
 
     if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
@@ -970,6 +1005,10 @@ router.post('/recover', authLimiter, zodValidate({
             publicKey: Buffer.from(publicKey, 'base64url'),
             pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
             signingKey: Buffer.from(signingKey, 'base64url'),
+            ...(signingKeyV2 && {
+              signingKeyV2: Buffer.from(signingKeyV2, 'base64url'),
+              cryptoVersion: CRYPTO_VERSION_V2
+            }),
             encryptedPrivateKey: newEncryptedKeys ? Buffer.from(newEncryptedKeys, 'utf8') : null,
             nameSealed: recoveredDeviceNameSealed,
             fingerprint: fingerprint || null,
@@ -987,6 +1026,7 @@ router.post('/recover', authLimiter, zodValidate({
       identityKey: Buffer.from(publicKey, 'base64url'),
       pqIdentityKey: Buffer.from(pqPublicKey ?? '', 'base64url'),
       signingKey: Buffer.from(signingKey, 'base64url'),
+      signingKeyV2: signingKeyV2 ? Buffer.from(signingKeyV2, 'base64url') : null,
       keyVersion: KT_KEY_VERSION_RECOVERY,
       updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
     });
@@ -1032,12 +1072,13 @@ router.post('/link/claim', authLimiter, zodValidate({
     publicKey: validateKey(32),
     pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
+    signingKeyV2: validateKey(ML_DSA_65_PUBLIC_KEY_BYTES).optional(),
     encryptedPrivateKey: z.string().min(1),
     deviceName: z.string().max(64).optional(),
   })
 }), async (req, res, next) => {
   try {
-    const { token, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body;
+    const { token, publicKey, pqPublicKey, signingKey, signingKeyV2, encryptedPrivateKey, deviceName } = req.body;
 
     // Token sekali pakai: dibakar walaupun langkah berikutnya gagal. Tanpa ini,
     // token yang sempat terlihat (mis. screenshot QR) bisa dipakai ulang.
@@ -1058,6 +1099,7 @@ router.post('/link/claim', authLimiter, zodValidate({
       publicKey,
       pqPublicKey: pqPublicKey || undefined,
       signingKey,
+      signingKeyV2: signingKeyV2 || undefined,
       encryptedPrivateKey,
       fingerprint: indexDeviceFingerprint(req.headers['x-nyx-fingerprint']),
       installationTag: newDeviceInstallationId ? deviceInstallationTag(newDeviceInstallationId) : null,
@@ -1073,6 +1115,7 @@ router.post('/link/claim', authLimiter, zodValidate({
           deviceName: deviceName || 'Perangkat baru',
           publicKey,
           signingKey,
+          ...(signingKeyV2 ? { signingKeyV2 } : {}),
         },
       }, false, owner.deviceId || undefined);
     } catch (notifyError) {
@@ -1113,6 +1156,12 @@ router.post('/link/approve', requireAuth, zodValidate({
         publicKey: Buffer.from(pending.publicKey, 'base64url'),
         pqPublicKey: pending.pqPublicKey ? Buffer.from(pending.pqPublicKey, 'base64url') : null,
         signingKey: Buffer.from(pending.signingKey, 'base64url'),
+        ...(pending.signingKeyV2
+          ? {
+              signingKeyV2: Buffer.from(pending.signingKeyV2, 'base64url'),
+              cryptoVersion: CRYPTO_VERSION_V2,
+            }
+          : {}),
         encryptedPrivateKey: Buffer.from(pending.encryptedPrivateKey, 'utf8'),
         nameSealed: await sealAtRest(pending.deviceName || 'Linked Device'),
         // Binding milik PERANGKAT BARU (dikumpulkan saat claim).
@@ -1142,6 +1191,9 @@ router.post('/link/approve', requireAuth, zodValidate({
           identityKey: Buffer.from(pending.publicKey, 'base64url'),
           pqIdentityKey: pending.pqPublicKey ? Buffer.from(pending.pqPublicKey, 'base64url') : null,
           signingKey: Buffer.from(pending.signingKey, 'base64url'),
+          ...(pending.signingKeyV2
+            ? { signingKeyV2: Buffer.from(pending.signingKeyV2, 'base64url') }
+            : {}),
         });
       }
     } catch (ktError) {

@@ -231,6 +231,20 @@ export interface KtGossipRow {
   blob: string; // JSON ter-seal (ENC1:)
 }
 
+/**
+ * [docs/34 §34.5] Pin konfigurasi log Key Transparency (TOFU).
+ *
+ * Satu baris (lihat `KT_CONFIG_ROW_ID`) menyimpan kunci verifikasi log
+ * (`mode`, `signatureKey`, `vrfKey`, `auditorKeys`) yang PERTAMA kali dilihat.
+ * Tanpa pin, server yang menyajikan `/api/keys/kt/config` bisa menukar kunci dan
+ * memalsukan seluruh log untuk klien. Baris ter-seal `ENC1:` (masterSeed) —
+ * pin yang bisa dibaca memudahkan penyerang lokal menukarnya.
+ */
+export interface KtConfigRow {
+  id: string; // PK; selalu satu baris (lihat KT_CONFIG_ROW_ID)
+  blob: string; // JSON ter-seal (ENC1:)
+}
+
 export interface ContactRow {
   userId: UserId; // PK
   data: string; // ENCRYPTED JSON ContactRecord (base64 envelope)
@@ -280,6 +294,9 @@ export class NyxDatabase extends Dexie {
 
   // [docs/30 §30.5 tahap C] Jangkar + head peer untuk deteksi split-view.
   ktGossip!: Table<KtGossipRow, string>;
+
+  // [docs/34 §34.5] Pin konfigurasi log KT (TOFU) — satu baris ter-seal.
+  ktConfig!: Table<KtConfigRow, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -403,6 +420,12 @@ export class NyxDatabase extends Dexie {
     // yang dibagikan antar-klien + head terakhir per sesi. Murni aditif.
     this.version(13).stores({
       ktGossip: 'id'
+    });
+
+    // [docs/34 §34.5] v14 — tabel pin konfigurasi KT (`ktConfig`): kunci verifikasi
+    // log yang pertama kali dipercaya. Murni aditif.
+    this.version(14).stores({
+      ktConfig: 'id'
     });
   }
 }

@@ -107,6 +107,9 @@ export interface GroupSenderState {
   messageCount?: number;
   lastActivityTime?: number;
   requiresImmediateRotation?: boolean;
+  // [PQ v4 Fase 1.5] Kunci privat ML-DSA milik sendiri untuk era ini (bila v2
+  // aktif). Saat null → jalur tanda tangan v1 (Ed25519) tetap dipakai.
+  signingKeyV2?: string;
 }
 
 export interface GroupReceiverState {
@@ -131,6 +134,12 @@ export interface GroupReceiverState {
   // penerima). Sumber utama verifikasi signature pesan grup — menghapus
   // ketergantungan decrypt pada pseudonymMap/bundle API (chicken-and-egg).
   signingKey?: string;
+  // [PQ v4 Fase 1.5] Public signing key ML-DSA pengirim, diikat sejak
+  // distribusi kunci (bila pengirim memakai tanda tangan v2).
+  signingKeyV2?: string;
+  // [PQ v4 Fase 1.5 — envelope v3] Pengenal 8B (base64url) dari `signingKeyV2`
+  // pengirim; dipakai mencocokkan envelope dengan kunci verifikasi.
+  senderKeyId?: string;
 }
 
 // --- GLOBAL WRITE QUEUE ---
@@ -189,7 +198,11 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
         createdAt: record.state.createdAt,
         messageCount: record.state.messageCount,
         lastActivityTime: record.state.lastActivityTime,
-        requiresImmediateRotation: record.state.requiresImmediateRotation
+        requiresImmediateRotation: record.state.requiresImmediateRotation,
+        // [PQ v4 Fase 1.5 — AUDIT 2026-10-20] Kunci PUBLIK ML-DSA era ini
+        // (bukan rahasia). Dulu field ini tidak pernah dibaca/ditulis sehingga
+        // hilang setiap reload; sender state lalu jatuh ke jalur v1.
+        signingKeyV2: record.state.signingKeyV2
     } : null;
   });
 }
@@ -209,7 +222,10 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
             createdAt: state.createdAt,
             messageCount: state.messageCount,
             lastActivityTime: state.lastActivityTime,
-            requiresImmediateRotation: state.requiresImmediateRotation
+            requiresImmediateRotation: state.requiresImmediateRotation,
+            // [PQ v4 Fase 1.5 — AUDIT 2026-10-20] Lihat catatan di
+            // `getGroupSenderState`: field ini wajib ikut persist.
+            signingKeyV2: state.signingKeyV2
           }
       });  });
 }
@@ -256,7 +272,14 @@ export async function getGroupReceiverState(conversationId: string, senderId: st
             ? (await decryptValueAtRest(record.state.metadataKey)) ?? undefined
             : undefined,
         skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys),
-        signingKey: record.state.signingKey
+        signingKey: record.state.signingKey,
+        // [PQ v4 Fase 1.5 — BUGFIX 2026-10-20] Field ini dulu TIDAK ikut
+        // dibaca/ditulis di lapisan Dexie, sehingga kunci verifikasi ML-DSA
+        // yang sudah terikat saat distribusi hilang setiap kali state dibaca →
+        // semua pesan/metadata `sigV:2` gagal "Missing sender signing key v2"
+        // walau envelope v4 membawanya.
+        signingKeyV2: record.state.signingKeyV2,
+        senderKeyId: record.state.senderKeyId
     } : null;
   });
 }
@@ -277,7 +300,9 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
             senderId: state.senderId,
             skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
             // Public key — tidak sensitif (bukan private), simpan plaintext.
-            signingKey: state.signingKey
+            signingKey: state.signingKey,
+            signingKeyV2: state.signingKeyV2,
+            senderKeyId: state.senderKeyId
           }
       });
   });
@@ -320,6 +345,8 @@ export async function archiveGroupReceiverState(state: GroupReceiverState): Prom
           senderId: state.senderId,
           skippedKeys: await encryptSkippedKeysAtRest(state.skippedKeys),
           signingKey: state.signingKey,
+          signingKeyV2: state.signingKeyV2,
+          senderKeyId: state.senderKeyId,
           archivedAt: Date.now()
         }
     });
@@ -992,6 +1019,8 @@ export async function listGroupReceiverStates(
             : undefined,
         skippedKeys: await decryptSkippedKeysAtRest(record.state.skippedKeys ?? {}),
         signingKey: record.state.signingKey,
+        signingKeyV2: record.state.signingKeyV2,
+        senderKeyId: record.state.senderKeyId,
         archivedAt: (record.state as { archivedAt?: number }).archivedAt
       });
     }

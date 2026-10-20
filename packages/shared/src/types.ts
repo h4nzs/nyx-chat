@@ -150,14 +150,16 @@ export type Participant = {
       publicKey?: string; 
       pqPublicKey?: string; 
       signingKey?: string; 
-      devices?: { id: string; publicKey: string; signingKey?: string; pqPublicKey?: string | null }[];
+      signingKeyV2?: string | null;
+      devices?: { id: string; publicKey: string; signingKey?: string; signingKeyV2?: string | null; pqPublicKey?: string | null }[];
       [key: string]: unknown 
   };
   encryptedProfile?: string | null;
   publicKey?: string;
   pqPublicKey?: string;
   signingKey?: string;
-  devices?: { id: string; publicKey: string; signingKey?: string; pqPublicKey?: string | null }[];
+  signingKeyV2?: string | null;
+  devices?: { id: string; publicKey: string; signingKey?: string; signingKeyV2?: string | null; pqPublicKey?: string | null }[];
   name?: string;
   username?: string;
   avatarUrl?: string | null;
@@ -475,6 +477,7 @@ export interface IDeviceTemplate {
   identityKey: string;
   pqIdentityKey: string | null;
   signingKey: string;
+  signingKeyV2?: string | null;
   signedPreKey: ISignedPreKey | null;
 }
 
@@ -483,6 +486,7 @@ export interface IPreKeyBundle {
   identityKey: string;
   pqIdentityKey: string | null;
   signingKey: string;
+  signingKeyV2?: string | null;
   signedPreKey: ISignedPreKey | null;
   oneTimePreKey?: IOneTimePreKey;
 }

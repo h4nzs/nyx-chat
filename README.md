@@ -290,6 +290,7 @@ Full technical documentation lives in [`docs/`](docs/README.md).
 | [Key Transparency](docs/32-key-transparency-kt.md) | KT log writer, read service, snapshots |
 | [SPQR WASM](docs/33-spqr-wasm.md) | PQ ratchet v2, ABI, negotiation, rollback |
 | [KT Verifier](docs/34-key-transparency-verifier.md) | Client-side verification, monitor, auditor, gossip |
+| [PQ Migration Plan](docs/35-post-quantum-migration-plan.md) | Tier A post-quantum migration: inventory, v2 formats, credentials, discovery, KT, rollout |
 
 **Reference & operations**
 

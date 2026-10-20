@@ -121,6 +121,7 @@ export default function LinkDevicePage() {
         publicKey: keys.encryptionPublicKeyB64,
         pqPublicKey: keys.pqEncryptionPublicKeyB64,
         signingKey: keys.signingPublicKeyB64,
+        ...(keys.signingPublicKeyV2B64 ? { signingKeyV2: keys.signingPublicKeyV2B64 } : {}),
         encryptedPrivateKey: keys.encryptedPrivateKeys,
         deviceName: getDeviceName(),
       });

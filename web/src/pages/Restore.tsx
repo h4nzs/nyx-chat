@@ -83,8 +83,10 @@ export default function RestorePage() {
             encryptionPublicKeyB64,
             pqEncryptionPublicKeyB64,
             signingPublicKeyB64,
+            signingPublicKeyV2B64,
             encryptedPrivateKeys,
-            signatureB64
+            signatureB64,
+            signatureV2B64
           } = await recoverAccountWithSignature(trimmedPhrase, password, effectiveIdentifier, timestamp, nonce);
 
           if (!encryptedPrivateKeys || !signatureB64 || !encryptionPublicKeyB64 || !pqEncryptionPublicKeyB64 || !signingPublicKeyB64) {
@@ -108,7 +110,9 @@ export default function RestorePage() {
               publicKey: encryptionPublicKeyB64,
               pqPublicKey: pqEncryptionPublicKeyB64,
               signingKey: signingPublicKeyB64,
+              ...(signingPublicKeyV2B64 ? { signingKeyV2: signingPublicKeyV2B64 } : {}),
               signature: signatureB64,
+              ...(signatureV2B64 ? { signatureV2: signatureV2B64 } : {}),
               timestamp,
               nonce
             })

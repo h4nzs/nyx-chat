@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_API_URL: string;
   readonly VITE_TRANSPORT_URL: string;
   readonly VITE_TRANSPORT_CERT_HASH: string;
+  readonly VITE_PQ_V2?: string;
 }
 
 interface ImportMeta {

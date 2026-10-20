@@ -217,6 +217,46 @@ withSkip('ktBundleProof: verifikasi bundle terhadap log', () => {
     expect(verdict.keyVersion).toBe(1);
   });
 
+  it('pqIdentityKey bundle berbeda dari log → mismatch (celah X25519-only ditutup)', async () => {
+    const { deps } = makeDeps();
+
+    // Nilai log v1: 1 version + 1 keyVersion + 32 X25519 + 1216 PQ + ...
+    const logValue = hexToBytes(fixture.entries[0]!.value);
+    const logPq = bytesToBase64Url(logValue.slice(34, 34 + 1216));
+    const impostorPq = bytesToBase64Url(new Uint8Array(1216).fill(0x77));
+
+    const okVerdict = await checkBundleAgainstKeyTransparency(
+      {
+        userId: 'peer-alice',
+        username: 'alice',
+        identityKey: LOG_IDENTITY_KEY_B64,
+        pqIdentityKey: logPq,
+        now: FIXTURE_NOW,
+      },
+      deps
+    );
+    expect(okVerdict.status).toBe('confirmed');
+
+    const badVerdict = await checkBundleAgainstKeyTransparency(
+      {
+        userId: 'peer-alice',
+        username: 'alice',
+        identityKey: LOG_IDENTITY_KEY_B64,
+        pqIdentityKey: impostorPq,
+        now: FIXTURE_NOW,
+      },
+      deps
+    );
+
+    expect(badVerdict.status).toBe('mismatch');
+    expect(badVerdict.logIdentityKey).toBe('11'.repeat(32));
+    expect(badVerdict.logPqIdentityKey).toBe(
+      Array.from(logValue.slice(34, 34 + 1216))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('')
+    );
+  });
+
   it('bukti yang diubah byte-nya → unverifiable (fail-closed)', async () => {
     // Rusak byte di dalam `vrf_proof` (field 2) — mengikat nilai ke index VRF,
     // sehingga wajib ditolak bahkan pada pencarian pertama tanpa anchor.

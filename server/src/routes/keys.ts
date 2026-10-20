@@ -35,6 +35,15 @@ import {
   toPublicDeviceBundle,
   type OneTimePreKeyRow,
 } from '../utils/keyBundle.js'
+// [docs/35 Fase 1.3] Bundle v2: verifikasi tanda tangan ML-DSA-65 atas material kunci.
+import {
+  buildBundleV2Message,
+  BUNDLE_V2_FIELD_LENGTHS,
+  CRYPTO_VERSION_V2,
+  ML_DSA_65_SIGNATURE_BYTES,
+  PQ_V2_DOMAINS,
+} from '@nyx/shared'
+import { verifyMlDsaSignature } from '../utils/mlDsa.js'
 
 // === Kuota harian konsumsi OTPK per pasangan (requester, target) ===
 // Lua INCR+EXPIRE atomik — pola yang sama dengan limiter lain di repo.
@@ -81,7 +90,12 @@ router.post(
         pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format'),
         signature: z.string().regex(base64UrlRegex, 'Invalid signature format'),
         pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format')
-      })
+      }),
+      // [docs/35 Fase 1.3] Material bundle v2 (opsional agar klien lama tetap jalan).
+      // Bila `signingKeyV2` ADA, `signatureV2` wajib — diverifikasi di handler.
+      signingKeyV2: z.string().regex(base64UrlRegex, 'Invalid v2 signing key format').optional(),
+      signatureV2: z.string().regex(base64UrlRegex, 'Invalid v2 signature format').optional(),
+      cryptoVersion: z.number().int().min(1).max(2).optional()
     })
   }),
   async (req, res, next) => {
@@ -102,14 +116,66 @@ router.post(
         pqIdentityKey,
         signedPreKey,
         signingKey,
+        signingKeyV2,
+        signatureV2,
         usernameHash
       } = req.body;
+
+      // [docs/35 Fase 1.3] Verifikasi bundle v2 SEBELUM menyentuh DB. Kehadiran
+      // salah satu field v2 mewajibkan keduanya; server hanya menyimpan setelah
+      // tanda tangan ML-DSA-65 atas seluruh material kunci terbukti sah.
+      let v2Bundle: { signingKeyV2: Buffer<ArrayBuffer>; signatureV2: Buffer<ArrayBuffer>; cryptoVersion: number } | null = null;
+      if (signingKeyV2 !== undefined || signatureV2 !== undefined) {
+        if (!signingKeyV2 || !signatureV2) {
+          throw new ApiError(400, 'Bundle v2 tidak lengkap.');
+        }
+        const identityBuf = Buffer.from(identityKeyB64, 'base64url');
+        const pqIdentityBuf = pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null;
+        const signedPreKeyBuf = Buffer.from(signedPreKey.key, 'base64url');
+        const pqSignedPreKeyBuf = signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null;
+        const signingKeyV2Buf = Buffer.from(signingKeyV2, 'base64url');
+        const signatureV2Buf = Buffer.from(signatureV2, 'base64url');
+        if (
+          identityBuf.length !== BUNDLE_V2_FIELD_LENGTHS.identityKey ||
+          !pqIdentityBuf ||
+          pqIdentityBuf.length !== BUNDLE_V2_FIELD_LENGTHS.pqIdentityKey ||
+          signedPreKeyBuf.length !== BUNDLE_V2_FIELD_LENGTHS.signedPreKey ||
+          !pqSignedPreKeyBuf ||
+          pqSignedPreKeyBuf.length !== BUNDLE_V2_FIELD_LENGTHS.pqSignedPreKey ||
+          signingKeyV2Buf.length !== BUNDLE_V2_FIELD_LENGTHS.signingKeyV2 ||
+          signatureV2Buf.length !== ML_DSA_65_SIGNATURE_BYTES
+        ) {
+          throw new ApiError(400, 'Ukuran material bundle v2 tidak valid.');
+        }
+        const message = buildBundleV2Message({
+          identityKey: identityBuf,
+          pqIdentityKey: pqIdentityBuf,
+          signedPreKey: signedPreKeyBuf,
+          pqSignedPreKey: pqSignedPreKeyBuf,
+          signingKeyV2: signingKeyV2Buf,
+        });
+        if (
+          !verifyMlDsaSignature({
+            signature: signatureV2Buf,
+            message,
+            publicKey: signingKeyV2Buf,
+            domain: PQ_V2_DOMAINS.BUNDLE,
+          })
+        ) {
+          throw new ApiError(400, 'Tanda tangan bundle v2 tidak valid.');
+        }
+        v2Bundle = {
+          signingKeyV2: signingKeyV2Buf,
+          signatureV2: signatureV2Buf,
+          cryptoVersion: CRYPTO_VERSION_V2,
+        };
+      }
 
       // [docs/30 §30.5 WS-A] Material identitas SEBELUM update — dasar keputusan
       // "kunci benar-benar berubah" (upload ulang bundle yang sama bukan rotasi).
       const previousIdentity = await prisma.device.findUnique({
         where: { id: deviceId },
-        select: { publicKey: true, signingKey: true }
+        select: { publicKey: true, signingKey: true, signingKeyV2: true }
       });
 
       // [Temuan #2] Validasi ulang payload encrypted keys (defense in depth;
@@ -132,7 +198,8 @@ router.post(
             key: Buffer.from(signedPreKey.key, 'base64url'),
             pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
             signature: Buffer.from(signedPreKey.signature, 'base64url'),
-            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null
+            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null,
+            ...(v2Bundle ? { signatureV2: v2Bundle.signatureV2 } : {})
           },
           create: {
             deviceId,
@@ -141,7 +208,8 @@ router.post(
             key: Buffer.from(signedPreKey.key, 'base64url'),
             pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
             signature: Buffer.from(signedPreKey.signature, 'base64url'),
-            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null
+            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null,
+            ...(v2Bundle ? { signatureV2: v2Bundle.signatureV2 } : {})
           }
         });
 
@@ -152,6 +220,10 @@ router.post(
             ...(identityKeyB64 !== undefined && { publicKey: Buffer.from(identityKeyB64, 'base64url') }),
             ...(pqIdentityKey !== undefined && { pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null }),
             ...(signingKey !== undefined && { signingKey: Buffer.from(signingKey, 'base64url') }),
+            // [docs/35 Fase 1.3] Material v2 (ML-DSA-65) — hanya ditulis bila
+            // upload membawa bundle v2 yang sudah lolos verifikasi; upload v1
+            // tidak menurunkan (menghapus) material v2 yang sudah ada.
+            ...(v2Bundle && { signingKeyV2: v2Bundle.signingKeyV2, cryptoVersion: v2Bundle.cryptoVersion }),
             // [Temuan #2] Sinkronkan salinan encryptedPrivateKey server SETIAP
             // upload bundle — mencegah login blind di device baru menerima
             // bundle basi dari identitas lama.
@@ -166,7 +238,8 @@ router.post(
       if (
         identityKeysChanged(previousIdentity, {
           identityKey: Buffer.from(identityKeyB64, 'base64url'),
-          signingKey: Buffer.from(signingKey, 'base64url')
+          signingKey: Buffer.from(signingKey, 'base64url'),
+          signingKeyV2: v2Bundle?.signingKeyV2
         })
       ) {
         void publishIdentityKeyChange({
@@ -174,7 +247,8 @@ router.post(
           usernameHash,
           identityKey: Buffer.from(identityKeyB64, 'base64url'),
           pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
-          signingKey: Buffer.from(signingKey, 'base64url')
+          signingKey: Buffer.from(signingKey, 'base64url'),
+          signingKeyV2: v2Bundle?.signingKeyV2 ?? null
         });
       }
 
@@ -374,7 +448,7 @@ router.post(
       if (missingUserIds.length > 0) {
         const devices = await prisma.device.findMany({
           where: { userId: { in: missingUserIds } },
-          select: { id: true, userId: true, publicKey: true, pqPublicKey: true, signingKey: true }
+          select: { id: true, userId: true, publicKey: true, pqPublicKey: true, signingKey: true, signingKeyV2: true }
         });
 
         const dbResults = new Map<string, Record<string, unknown>[]>();

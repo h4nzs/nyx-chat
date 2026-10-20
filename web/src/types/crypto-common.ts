@@ -23,6 +23,13 @@ export interface GroupRatchetState {
   // [T2 FIX #9 2026-09-28] Public signing key pengirim (receiver state saja).
   // Pola libsignal SenderKeyState: diikat sejak distribusi kunci.
   signingKey?: string;
+  // [PQ v4 Fase 1.5] Public signing key ML-DSA-65 (sender state = milik sendiri;
+  // receiver state = diikat dari distribusi `senderSigningKeyV2`). Wrapper pesan
+  // ber-`sigV:2` diverifikasi dengan kunci ini (domain `NYX-PQ-GROUP-V4`).
+  signingKeyV2?: string;
+  // [PQ v4 Fase 1.5 — envelope v3] Pengenal 8B (base64url) kunci verifikasi
+  // pengirim, dari envelope distribusi v3.
+  senderKeyId?: string;
   // [INVARIANT 1 — multi-era 2026-10-02] Anchor chain key awal era (receiver
   // state) — identitas era untuk deteksi replay distribusi (idempotent receive,
   // tanpa rewind). Juga dipakai arsip era lama (archiveGroupReceiverState).

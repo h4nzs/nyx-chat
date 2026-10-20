@@ -30,6 +30,8 @@ export interface DeviceLinkClaimInput {
   publicKey: string;
   pqPublicKey?: string;
   signingKey: string;
+  /** [PQ v2 Fase 1.5 langkah 9] Kunci verifikasi ML-DSA perangkat baru. */
+  signingKeyV2?: string;
   encryptedPrivateKey: string;
   deviceName?: string;
 }

@@ -86,6 +86,16 @@ export interface ObserveOptions {
    * dilewati (`unknown-subject`) dan pin tetap TOFU.
    */
   username?: string | null;
+  /**
+   * `pqIdentityKey` (X-Wing) peer dari bundle (base64url). Diteruskan ke
+   * verifikasi log KT supaya kunci PQ ikut dibandingkan, bukan hanya `identityKey`.
+   */
+  pqIdentityKey?: string | null;
+  /**
+   * `signingKeyV2` (ML-DSA-65) peer dari bundle (base64url). Bila nilai log v2
+   * dan bundle menyediakannya, kunci tanda tangan PQ ikut dibandingkan.
+   */
+  signingKeyV2?: string | null;
   /** Hook test: ganti cara menurunkan username peer. */
   resolveUsername?: (userId: string) => Promise<string | undefined>;
   /** Hook test: ganti pemeriksa log KT. */
@@ -93,6 +103,8 @@ export interface ObserveOptions {
     userId: string;
     username?: string | null;
     identityKey: string;
+    pqIdentityKey?: string | null;
+    signingKeyV2?: string | null;
   }) => Promise<{ status: string; keyVersion?: number; logIdentityKey?: string; reason?: string }>;
   /** Hook test: waktu sekarang. */
   now?: number;
@@ -189,6 +201,8 @@ export async function observePeerIdentityKey(
   const kt = await checkLog({
     peerId,
     identityKey,
+    pqIdentityKey: options.pqIdentityKey,
+    signingKeyV2: options.signingKeyV2,
     username: options.username,
     resolveUsername: options.resolveUsername,
     existing,
@@ -286,6 +300,8 @@ export async function observePeerIdentityKey(
 async function checkLog(input: {
   peerId: string;
   identityKey: string;
+  pqIdentityKey?: string | null;
+  signingKeyV2?: string | null;
   username?: string | null;
   resolveUsername?: ObserveOptions['resolveUsername'];
   existing?: PeerIdentityTrust;
@@ -313,6 +329,8 @@ async function checkLog(input: {
       userId: input.peerId,
       username,
       identityKey: input.identityKey,
+      pqIdentityKey: input.pqIdentityKey,
+      signingKeyV2: input.signingKeyV2,
     });
     return {
       verdict: verdict.status,

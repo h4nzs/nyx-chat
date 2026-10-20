@@ -156,6 +156,14 @@ test('approve oleh user lain ditolak; approve benar menyimpan deviceId', async (
   assert.equal(await getLinkState(store, pendingId), 'approved');
 });
 
+test('signingKeyV2 perangkat baru ikut tersimpan di pending dan terbaca kembali', async () => {
+  const store = makeStore();
+  const withV2: PendingDeviceLink = { ...pending, signingKeyV2: 'v2-pub' };
+  const pendingId = await createPendingLink(store, sealer, withV2);
+  assert.deepEqual(await readPendingLink(store, sealer, pendingId), withV2);
+  assert.deepEqual(await approvePendingLink(store, sealer, pendingId, 'user-1', 'dev-new'), { pending: withV2, deviceId: 'dev-new' });
+});
+
 test('approve kedua tidak boleh membuat device kedua', async () => {
   const store = makeStore();
   const pendingId = await createPendingLink(store, sealer, pending);

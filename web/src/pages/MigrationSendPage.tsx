@@ -4,6 +4,7 @@ import { FiUploadCloud } from 'react-icons/fi';
 import { Html5Qrcode } from 'html5-qrcode';
 import { transportClient, connectSocket } from '@lib/transportClient';
 import { getSodium } from '@lib/sodiumInitializer';
+import { sealForDevice } from '@lib/pqBoxSeal';
 import { libsodiumBackupCrypto } from '@lib/backupFormat';
 import { libsodiumBackupValueCodec } from '@lib/backupPayload';
 import { createFramedBackup, formatBackupSize, liveBackupStore } from '@lib/backupRestore';
@@ -132,12 +133,21 @@ export default function MigrationSendPage() {
       const prepared = archiveRef.current;
       if (!prepared) throw new Error(t('common:migration.read_vault_failed', 'Gagal membaca brankas data.'));
 
-      const { roomId, pubKey } = JSON.parse(qrText);
+      const { roomId, pubKey, pqPubKey } = JSON.parse(qrText) as { roomId: string; pubKey: string; pqPubKey?: string };
       const sodium = await getSodium();
       const receiverPubKeyBytes = sodium.from_base64(pubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       // 1. Seal the backup key using Receiver's Public Key (arsip tetap ber-frame).
-      const sealedKeyBytes = sodium.crypto_box_seal(prepared.key, receiverPubKeyBytes);
+      // [docs/35 Fase 1.5] Bila QR penerima memuat kunci PQ, pakai choke point
+      // v1/v2 (v2 = X-Wing murni saat VITE_PQ_V2 aktif); QR v1 lama jatuh ke
+      // jalur X25519 klasik.
+      const sealedKeyBytes = pqPubKey
+        ? await sealForDevice(
+            prepared.key,
+            sodium.from_base64(pqPubKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+            receiverPubKeyBytes
+          )
+        : sodium.crypto_box_seal(prepared.key, receiverPubKeyBytes);
       const sealedKey = sodium.to_base64(sealedKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       setStatus('sending');

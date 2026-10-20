@@ -65,6 +65,7 @@ test('toDeviceTemplate memetakan seluruh field termasuk signed pre-key', () => {
     identityKey: B('pk').toString('base64url'),
     pqIdentityKey: B('pqpk').toString('base64url'),
     signingKey: B('sk').toString('base64url'),
+    signingKeyV2: null,
     signedPreKey: {
       key: B('spk').toString('base64url'),
       pqKey: B('pqspk').toString('base64url'),
@@ -211,6 +212,7 @@ test('toPublicDeviceBundle memakai deviceId dan tanpa signed pre-key', () => {
     identityKey: B('pk').toString('base64url'),
     pqIdentityKey: null,
     signingKey: B('sk').toString('base64url'),
+    signingKeyV2: null,
   });
   assert.ok(!('signedPreKey' in bundle));
   assert.ok(!('id' in bundle));

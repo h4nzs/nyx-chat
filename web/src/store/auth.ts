@@ -2,7 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
-import { MinimalUserSchema } from '@nyx/shared';
+import { buildBundleV2Message, CRYPTO_VERSION_V2, MinimalUserSchema, mlDsaGetPublicKey, PQ_V2_DOMAINS } from '@nyx/shared';
 import { authFetch, api } from "@lib/api";
 // [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru.
 import {
@@ -20,6 +20,7 @@ import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, setAutoUnlockIdentity, saveKtIdentifier, getKtIdentifier, clearKtIdentifier } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy";
+import { workerMlDsaSign } from "@lib/crypto-worker-proxy";
 import { getBrowserFingerprint } from "@utils/fingerprint";
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto";
 import type { UserId, User, SubscriptionTier } from '@nyx/shared';
@@ -68,7 +69,7 @@ export async function setupAndUploadPreKeyBundle() {
   try {
     const { getSodiumLib } = await import('@utils/crypto');
     
-    const { getSigningPrivateKey, getEncryptionKeyPair, getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
+    const { getSigningPrivateKey, getEncryptionKeyPair, getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair, getSigningV2KeyPair } = useAuthStore.getState();
 
     const sodium = await getSodiumLib();
     const signingPrivateKey = await getSigningPrivateKey();
@@ -83,6 +84,27 @@ export async function setupAndUploadPreKeyBundle() {
 
     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
     const pqSignature = sodium.crypto_sign_detached(pqSignedPreKey, signingPrivateKey);
+
+    // [docs/35 Fase 1.3] Bundle v2 — autentikasi ML-DSA-65 atas seluruh material
+    // kunci. Bundle lama (pra-v2) tidak punya `signingV2`, jadi field v2 hanya
+    // dikirim bila tersedia; server tetap menerima bundle v1 apa adanya.
+    const signingV2Keys = await getSigningV2KeyPair();
+    const bundleV2 = signingV2Keys
+      ? (() => {
+          const signingKeyV2B64 = sodium.to_base64(signingV2Keys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+          const message = buildBundleV2Message({
+            identityKey,
+            pqIdentityKey,
+            signedPreKey,
+            pqSignedPreKey,
+            signingKeyV2: signingV2Keys.publicKey,
+          });
+          return { signingKeyV2B64, message, secretKey: signingV2Keys.secretKey };
+        })()
+      : null;
+    const signatureV2 = bundleV2
+      ? await workerMlDsaSign(bundleV2.message, bundleV2.secretKey, PQ_V2_DOMAINS.BUNDLE)
+      : null;
 
     // [Temuan #2] Kirim salinan encryptedPrivateKey terbaru bersama bundle —
     // tanpa ini, rotasi kunci membiarkan kolom device di server memegang bundle
@@ -101,6 +123,13 @@ export async function setupAndUploadPreKeyBundle() {
       signingKey: sodium.to_base64(signingPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
       ...(ktIdentifier ? { usernameHash: ktIdentifier } : {}),
       ...(encryptedPrivateKeys ? { encryptedPrivateKeys } : {}),
+      ...(bundleV2 && signatureV2
+        ? {
+            signingKeyV2: bundleV2.signingKeyV2B64,
+            signatureV2: sodium.to_base64(signatureV2, sodium.base64_variants.URLSAFE_NO_PADDING),
+            cryptoVersion: CRYPTO_VERSION_V2,
+          }
+        : {}),
       signedPreKey: {
         key: sodium.to_base64(signedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         pqKey: sodium.to_base64(pqSignedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
@@ -169,6 +198,7 @@ type Actions = {
   getSigningPrivateKey: () => Promise<Uint8Array>;
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getPqSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
+  getSigningV2KeyPair: () => Promise<{ publicKey: Uint8Array, secretKey: Uint8Array } | undefined>;
   getMasterSeed: () => Promise<Uint8Array | undefined>;
   /**
    * Master seed **tanpa** memunculkan prompt password: cache dulu, lalu coba
@@ -470,18 +500,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           // FALLBACK: refresh bisa gagal secara transien (network/race) sementara
           // cookie akses `at` masih valid. Jangan langsung logout — coba validasi
           // sesi langsung. Hanya logout jika sesi memang sudah tidak berlaku.
-          try {
-            const me = await api<User>("/api/users/me");
-            set({ user: me, hasRestoredKeys: await hasStoredKeys() });
-            localStorage.setItem("user", JSON.stringify(me));
-            await get().tryAutoUnlock();
-            get().loadBlockedUsers();
-            prefetchAppChunks();
-          } catch (fallbackErr) {
-            // Status asli HARUS dipertahankan — outer catch memakainya untuk
-            // membedakan sesi mati (401/403) dari gangguan jaringan.
-            throw fallbackErr;
-          }
+          // Status asli dipertahankan: outer catch memakainya untuk membedakan
+          // sesi mati (401/403) dari gangguan jaringan.
+          const me = await api<User>("/api/users/me");
+          set({ user: me, hasRestoredKeys: await hasStoredKeys() });
+          localStorage.setItem("user", JSON.stringify(me));
+          await get().tryAutoUnlock();
+          get().loadBlockedUsers();
+          prefetchAppChunks();
         }
       } catch (error: unknown) {
         // Kasus normal saat berkunjung tanpa sesi — debug, bukan error
@@ -700,6 +726,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           encryptionPublicKeyB64,
           pqEncryptionPublicKeyB64,
           signingPublicKeyB64,
+          signingPublicKeyV2B64,
           encryptedPrivateKeys,
           phrase
         } = await registerAndGenerateKeys(password);
@@ -724,6 +751,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
               publicKey: encryptionPublicKeyB64,
               pqPublicKey: pqEncryptionPublicKeyB64,
               signingKey: signingPublicKeyB64,
+              ...(signingPublicKeyV2B64 ? { signingKeyV2: signingPublicKeyV2B64 } : {}),
               encryptedPrivateKeys,
               deviceName: getDeviceName(),
               turnstileToken,
@@ -969,6 +997,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const sodium = await getSodiumLib();
       if (!keys.pqSignedPreKey) throw new Error("PQ Signed PreKey missing");
       return sodium.crypto_kem_xwing_seed_keypair(keys.pqSignedPreKey);
+    },
+    async getSigningV2KeyPair() {
+      const keys = await retrieveAndCacheKeys();
+      if (!keys.signingV2) return undefined;
+      return { publicKey: mlDsaGetPublicKey(keys.signingV2), secretKey: keys.signingV2 };
     },
     setUser: (user) => {
       set({ user });

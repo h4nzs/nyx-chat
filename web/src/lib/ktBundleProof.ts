@@ -57,6 +57,8 @@ import {
   type KtStoredState,
 } from './ktMonitoring';
 import { getLocalAnchor, storeAnchor, type KtHeadAnchor } from './ktGossip';
+import { ktConfigPinMatches, loadKtConfigPin, parseKtConfigPin, saveKtConfigPin } from './ktConfigPin';
+import { parseKtValueBytes } from '@nyx/shared';
 import {
   KT_MODE_CONTACT_MONITORING,
   KtVerificationError,
@@ -91,6 +93,10 @@ export interface KtVerdict {
   keyVersion?: number;
   /** `identityKey` di log (hex) saat status `mismatch`. */
   logIdentityKey?: string;
+  /** `pqIdentityKey` di log (hex) saat mismatch kunci PQ. */
+  logPqIdentityKey?: string;
+  /** `signingKeyV2` (ML-DSA-65) di log (hex) saat mismatch kunci tanda tangan PQ. */
+  logSigningKeyV2?: string;
 }
 
 export interface KtRemoteConfig {
@@ -119,6 +125,17 @@ export interface KtBundleCheckInput {
   username?: string | null;
   /** `identityKey` dari prekey bundle (base64url). */
   identityKey: string;
+  /**
+   * `pqIdentityKey` (X-Wing) dari prekey bundle (base64url). Nilai log v1/v2
+   * sudah memuatnya sejak awal — membandingkannya menutup celah lama di mana
+   * hanya `identityKey` X25519 yang dicek.
+   */
+  pqIdentityKey?: string | null;
+  /**
+   * `signingKeyV2` (ML-DSA-65) dari prekey bundle (base64url). Hanya ada pada
+   * nilai log v2; membandingkannya mengikat kunci tanda tangan PQ ke log.
+   */
+  signingKeyV2?: string | null;
   now?: Date | number;
 }
 
@@ -143,6 +160,7 @@ export interface ParsedKtValue {
   identityKey: Uint8Array;
   pqIdentityKey: Uint8Array;
   signingKey: Uint8Array;
+  signingKeyV2?: Uint8Array;
   updatedAtDay: number;
 }
 
@@ -186,24 +204,12 @@ export function ktSearchKeyFromUsernameHash(usernameHashB64Url: string): Uint8Ar
   return searchKey;
 }
 
-/** Urai nilai log v1 NYX (`docs/32`): versi, keyVersion, kunci-kunci, bucket hari. */
+/**
+ * Urai nilai log NYX (`docs/32`): versi 1 (1286 B) atau versi 2 (3238 B, + `signingKeyV2`).
+ * Delegasi ke kodek bersama agar web/server memakai tata letak yang sama.
+ */
 export function parseKtValue(value: Uint8Array): ParsedKtValue {
-  if (value.length < KT_VALUE_BYTES) {
-    throw new Error(`kt: nilai log terlalu pendek (${value.length} < ${KT_VALUE_BYTES})`);
-  }
-  const version = value[0]!;
-  if (version !== KT_VALUE_VERSION) {
-    throw new Error(`kt: versi nilai log tidak dikenal (${version})`);
-  }
-  const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
-  return {
-    version,
-    keyVersion: value[1]!,
-    identityKey: value.subarray(2, 34).slice(),
-    pqIdentityKey: value.subarray(34, 34 + 1216).slice(),
-    signingKey: value.subarray(34 + 1216, 34 + 1216 + 32).slice(),
-    updatedAtDay: view.getUint32(34 + 1216 + 32, false),
-  };
+  return parseKtValueBytes(value);
 }
 
 /**
@@ -384,6 +390,13 @@ async function defaultFetchAnchor(query: { last?: number; distinguished?: number
   };
 }
 
+/**
+ * Konfigurasi log yang dilayani berbeda dari pin TOFU pertama. Ini kondisi
+ * fail-closed: verifier tidak boleh mempercayai kunci yang tiba-tiba berubah,
+ * jadi verdict-nya `unverifiable` (lihat cabang `KtVerificationError`).
+ */
+class KtConfigPinMismatchError extends KtVerificationError {}
+
 async function resolveConfig(
   fetchConfig: () => Promise<KtRemoteConfig>
 ): Promise<KtConfig> {
@@ -391,6 +404,23 @@ async function resolveConfig(
   const remote = await fetchConfig();
   if (typeof remote.mode !== 'number' || !remote.signatureKey || !remote.vrfKey) {
     throw new Error('kt: config log tidak lengkap');
+  }
+  const observed = parseKtConfigPin({
+    mode: remote.mode,
+    signatureKey: remote.signatureKey,
+    vrfKey: remote.vrfKey,
+    auditorKeys: remote.auditorKeys ?? [],
+  });
+  if (!observed) throw new Error('kt: config log tidak valid');
+  const pin = await loadKtConfigPin();
+  if (pin) {
+    if (!ktConfigPinMatches(pin, observed)) {
+      throw new KtConfigPinMismatchError(
+        'kt: konfigurasi log berubah dari pin (kemungkinan server menukar kunci verifikasi)'
+      );
+    }
+  } else {
+    await saveKtConfigPin(observed);
   }
   const config: KtConfig = {
     // Mode divalidasi sebagai angka di atas; tipe `KtMode` adalah union nilai
@@ -533,6 +563,50 @@ export async function checkBundleAgainstKeyTransparency(
         keyVersion: parsed.keyVersion,
         logIdentityKey: bytesToHex(parsed.identityKey),
       };
+    }
+
+    if (input.pqIdentityKey) {
+      let servedPq: Uint8Array;
+      try {
+        servedPq = base64UrlToBytes(input.pqIdentityKey);
+      } catch {
+        return { status: 'unavailable', reason: 'pqIdentityKey bundle bukan base64url' };
+      }
+      if (!bytesEqual(parsed.pqIdentityKey, servedPq)) {
+        log('kt.pq-key-mismatch', {
+          userId: input.userId,
+          logPqIdentityKey: bytesToHex(parsed.pqIdentityKey),
+          keyVersion: parsed.keyVersion,
+        });
+        return {
+          status: 'mismatch',
+          keyVersion: parsed.keyVersion,
+          logIdentityKey: bytesToHex(parsed.identityKey),
+          logPqIdentityKey: bytesToHex(parsed.pqIdentityKey),
+        };
+      }
+    }
+
+    if (input.signingKeyV2 && parsed.signingKeyV2) {
+      let servedV2: Uint8Array;
+      try {
+        servedV2 = base64UrlToBytes(input.signingKeyV2);
+      } catch {
+        return { status: 'unavailable', reason: 'signingKeyV2 bundle bukan base64url' };
+      }
+      if (!bytesEqual(parsed.signingKeyV2, servedV2)) {
+        log('kt.signing-key-v2-mismatch', {
+          userId: input.userId,
+          logSigningKeyV2: bytesToHex(parsed.signingKeyV2),
+          keyVersion: parsed.keyVersion,
+        });
+        return {
+          status: 'mismatch',
+          keyVersion: parsed.keyVersion,
+          logIdentityKey: bytesToHex(parsed.identityKey),
+          logSigningKeyV2: bytesToHex(parsed.signingKeyV2),
+        };
+      }
     }
 
     return { status: 'confirmed', keyVersion: parsed.keyVersion };

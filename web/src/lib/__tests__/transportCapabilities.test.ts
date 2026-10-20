@@ -204,6 +204,11 @@ describe('wiring klien', () => {
     // benar-benar mematikan iklannya.
     expect(announced).toContain('advertisedCapabilities()');
     expect(announced).not.toContain('CLIENT_CAPABILITIES.SPQR_RATCHET');
+    // [docs/35] `pq-v2` juga tidak boleh di-hardcode: iklannya harus lewat
+    // `advertisedPqCapabilities()` supaya default tetap v1 sampai implementasi
+    // v2 benar-benar siap.
+    expect(announced).toContain('advertisedPqCapabilities()');
+    expect(announced).not.toContain('CLIENT_CAPABILITIES.PQ_V2');
     // Fitur yang belum ada TIDAK boleh diiklankan (server bisa memilih format).
     for (const notReady of ['KT_LITE']) {
       expect(announced).not.toContain(`CLIENT_CAPABILITIES.${notReady}`);

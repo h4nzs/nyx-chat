@@ -1145,7 +1145,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             if (opts?.deliveryTokens && Object.keys(opts.deliveryTokens).length > 0) {
               nextMeta = {
                 ...nextMeta,
-                deliveryTokenMap: { ...(nextMeta.deliveryTokenMap ?? {}), ...opts.deliveryTokens },
+                deliveryTokenMap: { ...nextMeta.deliveryTokenMap, ...opts.deliveryTokens },
               };
             }
             if (nextMeta !== meta) decryptedMetadata = nextMeta as typeof decryptedMetadata;

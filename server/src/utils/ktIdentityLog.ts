@@ -59,6 +59,8 @@ export interface IdentityKeyChangeInput {
   identityKey?: Uint8Array | null;
   pqIdentityKey?: Uint8Array | null;
   signingKey?: Uint8Array | null;
+  /** Verification key ML-DSA-65; bila ada, entri ditulis sebagai nilai log v2. */
+  signingKeyV2?: Uint8Array | null;
   /** Label alur; default `KT_KEY_VERSION_ROTATION`. */
   keyVersion?: number;
 }
@@ -140,6 +142,7 @@ export async function publishIdentityKeyChange(
       identityKey,
       pqIdentityKey: input.pqIdentityKey ?? new Uint8Array(0),
       signingKey,
+      signingKeyV2: input.signingKeyV2 ?? null,
       keyVersion: input.keyVersion ?? KT_KEY_VERSION_ROTATION,
       updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
     },
@@ -153,13 +156,24 @@ export async function publishIdentityKeyChange(
  * (auto-heal, login berulang) tidak boleh membanjiri log dengan entri identik.
  */
 export function identityKeysChanged(
-  before: { publicKey?: Uint8Array | null; signingKey?: Uint8Array | null } | null | undefined,
-  after: { identityKey?: Uint8Array | null; signingKey?: Uint8Array | null }
+  before:
+    | { publicKey?: Uint8Array | null; signingKey?: Uint8Array | null; signingKeyV2?: Uint8Array | null }
+    | null
+    | undefined,
+  after: { identityKey?: Uint8Array | null; signingKey?: Uint8Array | null; signingKeyV2?: Uint8Array | null }
 ): boolean {
   if (!before?.publicKey?.length || !before.signingKey?.length) return true; // belum ada identitas tercatat
   const sameIdentity =
     Buffer.from(before.publicKey).equals(Buffer.from(after.identityKey ?? new Uint8Array(0)));
   const sameSigning =
     Buffer.from(before.signingKey).equals(Buffer.from(after.signingKey ?? new Uint8Array(0)));
-  return !(sameIdentity && sameSigning);
+  // Kunci v2 belum tentu ada di kedua sisi (bundle legacy): hanya dianggap
+  // berubah bila salah satu sisi benar-benar membawa material v2.
+  const sameV2 =
+    !before.signingKeyV2?.length && !after.signingKeyV2?.length
+      ? true
+      : Buffer.from(before.signingKeyV2 ?? new Uint8Array(0)).equals(
+          Buffer.from(after.signingKeyV2 ?? new Uint8Array(0))
+        );
+  return !(sameIdentity && sameSigning && sameV2);
 }

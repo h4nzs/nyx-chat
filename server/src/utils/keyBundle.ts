@@ -35,6 +35,7 @@ export interface DeviceTemplateSource {
   publicKey: unknown;
   pqPublicKey: unknown;
   signingKey: unknown;
+  signingKeyV2?: unknown;
   preKeyBundle: {
     key: unknown;
     pqKey: unknown;
@@ -54,6 +55,7 @@ export function toDeviceTemplate(device: DeviceTemplateSource): IDeviceTemplate 
     identityKey: toBase64Url(device.publicKey),
     pqIdentityKey: toOptionalBase64Url(device.pqPublicKey),
     signingKey: toBase64Url(device.signingKey),
+    signingKeyV2: toOptionalBase64Url(device.signingKeyV2),
     signedPreKey: device.preKeyBundle
       ? {
           key: toBase64Url(device.preKeyBundle.key),
@@ -110,6 +112,7 @@ export function toPreKeyBundle(template: IDeviceTemplate, otpk?: OneTimePreKeyRo
     identityKey: template.identityKey,
     pqIdentityKey: template.pqIdentityKey,
     signingKey: template.signingKey,
+    signingKeyV2: template.signingKeyV2 ?? null,
     signedPreKey: template.signedPreKey,
   };
   if (otpk) bundle.oneTimePreKey = toOneTimePreKey(otpk);
@@ -146,11 +149,13 @@ export function toPublicDeviceBundle(device: {
   publicKey: unknown;
   pqPublicKey: unknown;
   signingKey: unknown;
+  signingKeyV2?: unknown;
 }): Record<string, unknown> {
   return {
     deviceId: device.id,
     identityKey: toBase64Url(device.publicKey),
     pqIdentityKey: toOptionalBase64Url(device.pqPublicKey),
     signingKey: toBase64Url(device.signingKey),
+    signingKeyV2: toOptionalBase64Url(device.signingKeyV2),
   };
 }

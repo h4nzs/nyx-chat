@@ -13,6 +13,7 @@ import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from
 import { decideTransportMode, OUTGOING_OPCODE_MAP } from './transportMode';
 import { classifyKickPayload } from './forceLogout';
 import { advertisedCapabilities } from './spqrNegotiation';
+import { advertisedPqCapabilities } from './pqCapability';
 import { useAuthStore } from '../store/auth';
 
 import type { 
@@ -41,6 +42,7 @@ import type {
 const ANNOUNCED_CLIENT_CAPABILITIES: string[] = [
   CLIENT_CAPABILITIES.HELLO_V1,
   ...advertisedCapabilities(),
+  ...advertisedPqCapabilities(),
 ];
 const HELLO_ACK_TIMEOUT_MS = 5000;
 
@@ -123,7 +125,10 @@ type TransportEvents = {
   // target (nama lama di klien: `session:fulfill_request`, event yang tidak
   // pernah di-emit siapa pun). Listener-nya ada di socketListeners.
   'session:request_key': [data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey?: string; requesterPqPublicKey?: string; requesterDeviceId?: string }];
-  'session:new_key': [data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string }];
+  // [PQ v4 Fase 1.5 — AUDIT 2026-10-20] Kunci verifikasi pengirim ikut tipe:
+  // event ini satu-satunya jalan distribusi sender-key, jadi field v1/v2 tidak
+  // boleh hilang diam-diam di seam transport.
+  'session:new_key': [data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string; senderSigningKey?: string; senderSigningKeyV2?: string; drHeader?: unknown }];
   'group:fulfill_key_request': [data: { conversationId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string; requesterDeviceId?: string }];
   'group:key_request_failed': [data: { conversationId: string; reason: string }];
   'session:request_key_failed': [data: { sessionId: string; targetId: string; reason: string }];
@@ -881,7 +886,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
 // async adalah bug class: throw SEBELUM await pertama tidak pernah sampai ke
 // reject() (menjadi unhandled rejection). Diubah ke async function biasa;
 // pesan error untuk pemanggil tetap sama.
-export async function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderSigningKey?: string, senderId?: string }[]): Promise<void> {
+export async function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string, senderSigningKey?: string, senderSigningKeyV2?: string, senderId?: string }[]): Promise<void> {
   if (!transportClient.connected) throw new Error('Socket not connected');
   // [T2 FINAL] Pairwise DR adalah satu-satunya jalur — fallback legacy
   // `messages:distribute_keys` dihapus (prod reset, semua klien ter-update).
@@ -925,7 +930,7 @@ export async function emitGroupKeyRequest(conversationId: string, targetSenderId
 // [T2 FIX #11 2026-09-29] senderSigningKey diteruskan — fulfillment offline
 // sebelumnya hilang signing key → penerima gagal verifikasi signature pesan
 // walau kunci grup ter-unseal (pola libsignal SenderKeyState).
-export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; senderSigningKey?: string; drHeader?: any; senderPseudonym?: string }) {
+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; senderSigningKey?: string; senderSigningKeyV2?: string; drHeader?: any; senderPseudonym?: string }) {
   transportClient.sendEvent('group:fulfilled_key', payload);
 }
 

@@ -362,6 +362,8 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
       encryptedKey: 'sealed-envelope-b64',
       targetDeviceId: 'dev-b',
       senderDeviceKey: 'dev-sender-key',
+      senderSigningKey: 'sig-ed25519-b64',
+      senderSigningKeyV2: 'sig-mldsa65-b64',
       senderPseudonym: 'BBBBBBBBBBBBBBBBBBBBBB',
     },
   });
@@ -369,6 +371,12 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
   // 1. Live relay tetap jalan (session:new_key ke requester).
   const relay = calls.sendJsonToUser.find((c) => c[0] === 'u-b');
   assert.ok(relay, 'live relay session:new_key harus tetap terkirim');
+  // [PQ v4 Fase 1.5 — AUDIT 2026-10-20] Field kunci verifikasi WAJIB ikut relay:
+  // dulu handler mem-whitelist field dan membuang `senderSigningKeyV2`, sehingga
+  // penerima menyimpan receiver state tanpa kunci → semua pesan `sigV:2` gagal.
+  const relayData = (relay![2] as { data: Record<string, unknown> }).data;
+  assert.equal(relayData['senderSigningKeyV2'], 'sig-mldsa65-b64', 'relay membawa kunci verifikasi v2');
+  assert.equal(relayData['senderSigningKey'], 'sig-ed25519-b64', 'relay membawa kunci verifikasi v1');
 
   // 2. Envelope dipersist — penerima yang offline saat fulfillment tetap
   //    mendapat kunci lewat offline catch-up (SYSTEM message TTL 7d).
@@ -377,9 +385,25 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
   assert.equal(persisted['type'], 'SYSTEM');
   assert.equal(persisted['conversationId'], 'c1');
   assert.equal(persisted['senderId'], 'BBBBBBBBBBBBBBBBBBBBBB', 'senderId = pseudonym, bukan userId auth');
-  const content = JSON.parse(String(persisted['content'])) as { type: string; key: string };
+  const content = JSON.parse(String(persisted['content'])) as {
+    type: string;
+    key: string;
+    senderSigningKey?: string;
+    senderSigningKeyV2?: string;
+    targetDeviceKey?: string;
+  };
   assert.equal(content.type, 'GROUP_KEY');
   assert.equal(content.key, 'sealed-envelope-b64', 'envelope utuh (opaque) dipersist');
+  // [PQ v4 Fase 1.5 — AUDIT 2026-10-20] Offline catch-up juga harus membawa
+  // kunci verifikasi v2, bukan hanya jalur live.
+  assert.equal(content.senderSigningKey, 'sig-ed25519-b64', 'content SYSTEM menyimpan kunci v1');
+  assert.equal(content.senderSigningKeyV2, 'sig-mldsa65-b64', 'content SYSTEM menyimpan kunci v2');
+  // Device target disimpan TER-SEAL (bukan plaintext) — cukup pastikan field
+  // routing itu tetap ada di content.
+  assert.ok(
+    typeof content.targetDeviceKey === 'string' && content.targetDeviceKey.length > 0,
+    'target device dipertahankan untuk filter penerima'
+  );
   assert.ok(persisted['expiresAt'] instanceof Date, 'TTL 7d terpasang');
 });
 

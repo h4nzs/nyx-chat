@@ -122,6 +122,8 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Lint
         run: pnpm run lint
+      - name: PQ-only guard
+        run: node scripts/check-pq-only.mjs
 
   alerts:
     # [docs/30 WS-G(2)] DRILL alert (gate): aturan Prometheus harus terbukti bisa

@@ -337,6 +337,7 @@ export interface PreKeyBundle {
   identityKey: string;
   pqIdentityKey?: string;
   signingKey: string;
+  signingKeyV2?: string | null;
   signedPreKey: {
     key: string;
     pqKey?: string;

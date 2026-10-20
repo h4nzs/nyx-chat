@@ -625,7 +625,7 @@ export async function handleKeySync(
        }
 
        case 'group:fulfilled_key': {
-           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, senderSigningKey, drHeader, senderPseudonym, adminToken } = data as KeyFulfillmentPayload & { senderPseudonym?: string; senderSigningKey?: string; adminToken?: boolean };
+           const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey, senderSigningKey, senderSigningKeyV2, drHeader, senderPseudonym, adminToken } = data as KeyFulfillmentPayload & { senderPseudonym?: string; senderSigningKey?: string; senderSigningKeyV2?: string; adminToken?: boolean };
            if (!requesterId || !conversationId || !encryptedKey) return;
            if (!await ctx.checkRateLimit(userId, 'group_fulfilled_key', 60, 60)) return;
 
@@ -640,6 +640,11 @@ export async function handleKeySync(
            // selalu mengirim pseudonym lewat ensureMyPseudonym, jadi cabang ini
            // hanya jaring pengaman bila payload cacat.
            const emitPayload: Record<string, unknown> = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: senderPseudonym ?? userId, senderDeviceKey, senderSigningKey };
+           // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim WAJIB ikut relay:
+           // tanpa ini penerima menyimpan receiver state tanpa `signingKeyV2`,
+           // lalu pesan grup `sigV:2` gagal "Missing sender signing key v2".
+           // Nilainya kunci publik (bukan rahasia) dan tetap diverifikasi klien.
+           if (typeof senderSigningKeyV2 === 'string' && senderSigningKeyV2) emitPayload.senderSigningKeyV2 = senderSigningKeyV2;
            if (drHeader) emitPayload.drHeader = drHeader;
            // [26.9 RBAC] Amplop admin capability token ditandai eksplisit agar
            // penerima TIDAK memprosesnya sebagai chain key GROUP_KEY.
@@ -671,7 +676,7 @@ export async function handleKeySync(
                    createdAt: groupKeyAt,
                    // [docs/28 Tier 4] Device.id target disimpan TER-SEAL; server
                    // membukanya kembali saat relay/catch-up (openMessageForClient).
-                   content: await sealSystemContentDeviceKeys(JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) })),
+                   content: await sealSystemContentDeviceKeys(JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, ...(typeof senderSigningKeyV2 === 'string' && senderSigningKeyV2 ? { senderSigningKeyV2 } : {}), targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) })),
                    expiresAt: new Date(groupKeyAt.getTime() + 7 * 24 * 60 * 60 * 1000)
                  }
                });

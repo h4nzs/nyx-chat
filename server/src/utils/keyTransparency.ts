@@ -39,6 +39,7 @@
 
 import http2 from 'node:http2';
 import { createHash } from 'node:crypto';
+import { encodeKtValueV2, ML_DSA_65_PUBLIC_KEY_BYTES } from '@nyx/shared';
 
 import { incCounter, setGauge, KT_WRITES, KT_LAST_SUCCESS } from './metrics.js';
 
@@ -348,6 +349,12 @@ export interface KtLogEntryInput {
   identityKey: Uint8Array;
   pqIdentityKey: Uint8Array;
   signingKey: Uint8Array;
+  /**
+   * Verification key ML-DSA-65 (`nyx-pq-v2`). Bila ada, nilai log ditulis dalam
+   * format **v2** sehingga verifier mengikat kunci tanda tangan PQ, bukan hanya
+   * X25519 (celah yang ditutup di Fase KT Scope A).
+   */
+  signingKeyV2?: Uint8Array | null;
   keyVersion: number;
   /** Bucket harian (`dayBucket()`) — presisi detik tidak pernah masuk log. */
   updatedAtDay: number;
@@ -446,7 +453,11 @@ export function buildKtLogEntry(input: KtLogEntryInput): KtLogEntry {
   if (!usernameHash) throw new Error('KT_USERNAME_HASH_INVALID');
 
   const searchKey = ktSearchKey(usernameHash);
-  const value = encodeKtValue(input);
+  const signingKeyV2 = input.signingKeyV2 ?? null;
+  const value =
+    signingKeyV2 && signingKeyV2.length === ML_DSA_65_PUBLIC_KEY_BYTES
+      ? encodeKtValueV2({ ...input, signingKeyV2 })
+      : encodeKtValue(input);
   return { searchKey, value, keyVersion: input.keyVersion, entryTag: ktEntryTag(searchKey) };
 }
 

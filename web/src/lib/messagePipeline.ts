@@ -339,17 +339,18 @@ export async function decryptMessageObject(
         const existingState = await retrieveRatchetStateSecurely(rawMsg.conversationId);
         if (!existingState) {
             try {
-                const payload = JSON.parse(contentToDecrypt) as { ciphertext?: string, x3dh?: { initiatorSigningKey: string, initiatorCiphertexts: string, otpkId: number } };
+                const payload = JSON.parse(contentToDecrypt) as { ciphertext?: string, x3dh?: { initiatorSigningKey: string, initiatorCiphertexts: string, otpkId?: number, handshakeVersion?: number, initiatorSigningKeyV2?: string } };
                 const { retrieveMessageKeySecurely } = await import('@utils/crypto');
                 const mk = await retrieveMessageKeySecurely(rawMsg.id);
                 
                 if (mk) {
                     contentToDecrypt = payload.ciphertext;
                 } else if (payload.x3dh && payload.ciphertext) {
-                    const { initiatorSigningKey, initiatorCiphertexts, otpkId } = payload.x3dh;
+                    const { initiatorSigningKey, initiatorCiphertexts, otpkId, handshakeVersion, initiatorSigningKeyV2 } = payload.x3dh;
                     const ciphertext = payload.ciphertext;
 
                     // [SECURITY] Fetch peer's PreKeyBundle to verify identity and update keychain
+                    let initiatorV2KeyMismatch = false;
                     try {
                         const { fetchPreKeyBundle } = await import('@utils/crypto');
                         const myId = useAuthStore.getState().user?.id;
@@ -358,9 +359,20 @@ export async function decryptMessageObject(
 
                         if (peerId) {
                             const bundle = await fetchPreKeyBundle(peerId);
+                            // [docs/35 Fase 1.4] Handshake v2: kunci verifikasi yang
+                            // menempel di payload HARUS sama dengan `signingKeyV2`
+                            // bundle peer (yang sudah dicek terhadap KT) — kalau tidak,
+                            // penyerang mengirim transkrip yang ditandatangani kunci lain.
+                            if (handshakeVersion === 2 && bundle.signingKeyV2 && initiatorSigningKeyV2
+                                && bundle.signingKeyV2 !== initiatorSigningKeyV2) {
+                                initiatorV2KeyMismatch = true;
+                            }
                             // [docs/29 §7.2] observasi pin — pin yang dipercaya tidak ditimpa.
                             const { observePeerIdentityKey } = await import('@lib/peerIdentityTrust');
-                            const observation = await observePeerIdentityKey(peerId, bundle.identityKey);
+                            const observation = await observePeerIdentityKey(peerId, bundle.identityKey, {
+                                pqIdentityKey: bundle.pqIdentityKey,
+                                signingKeyV2: bundle.signingKeyV2,
+                            });
                             if (observation.status === 'changed') {
                                 const { t } = await import('i18next');
                                 const { default: toast } = await import('react-hot-toast');
@@ -384,6 +396,10 @@ export async function decryptMessageObject(
                         console.error("[X3DH] Failed to verify peer identity", e);
                     }
 
+                    if (initiatorV2KeyMismatch) {
+                        throw new Error('X3DH v2: kunci verifikasi inisiator tidak cocok dengan bundle peer');
+                    }
+
                     const myIdentityKeyPair = await getMyEncryptionKeyPair();
                     const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                     const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -398,7 +414,9 @@ export async function decryptMessageObject(
                         myPqSignedPreKeyPair,
                         initiatorSigningKey,
                         initiatorCiphertexts,
-                        otpkId
+                        otpkId,
+                        handshakeVersion,
+                        initiatorSigningKeyV2
                     );
                     
                     const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
@@ -801,7 +819,9 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                                       // tanpa signing key → decryptGroupMetadata v2
                                       // selamanya gagal "signing key pengirim belum
                                       // terikat" di jalur offline sync.
-                                      senderSigningKey: (dist as { senderSigningKey?: string }).senderSigningKey || (data as { senderSigningKey?: string }).senderSigningKey
+                                      senderSigningKey: (dist as { senderSigningKey?: string }).senderSigningKey || (data as { senderSigningKey?: string }).senderSigningKey,
+                                      // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim.
+                                      senderSigningKeyV2: (dist as { senderSigningKeyV2?: string }).senderSigningKeyV2 || (data as { senderSigningKeyV2?: string }).senderSigningKeyV2
                                   });
                                   success = true;
                                   break;
@@ -818,7 +838,9 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                               senderDeviceKey: data.senderDeviceKey,
                               // [AUDIT FIX 2026-10-05] Forward signing key pengirim
                               // (dipersist server di content GROUP_KEY SYSTEM).
-                              senderSigningKey: (data as { senderSigningKey?: string }).senderSigningKey
+                              senderSigningKey: (data as { senderSigningKey?: string }).senderSigningKey,
+                              // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim.
+                              senderSigningKeyV2: (data as { senderSigningKeyV2?: string }).senderSigningKeyV2
                            });
                            success = true;
                       }

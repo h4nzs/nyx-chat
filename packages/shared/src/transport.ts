@@ -34,6 +34,8 @@ export const CLIENT_CAPABILITIES = {
   KT_LITE: 'kt-lite',
   /** Kesiapan PQ ratchet SPQR-style (jalur versi paralel). */
   SPQR_RATCHET: 'spqr-ratchet',
+  /** Kesiapan migrasi crypto PQ v2 (bundle/X3DH/sealed-box KEM). */
+  PQ_V2: 'pq-v2',
   // Catatan: TIDAK ADA kapabilitas multi-device. NYX memilih satu perangkat
   // aktif per akun sebagai properti keamanan (docs/30 §30.6/§30.18), jadi
   // kapabilitas untuk fitur itu sengaja tidak pernah dideklarasikan —
@@ -65,6 +67,7 @@ export type ClientCapability = (typeof CLIENT_CAPABILITIES)[keyof typeof CLIENT_
 export const SERVER_CAPABILITIES: readonly string[] = [
   CLIENT_CAPABILITIES.HELLO_V1,
   CLIENT_CAPABILITIES.SPQR_RATCHET,
+  CLIENT_CAPABILITIES.PQ_V2,
 ];
 
 export interface TransportHello {

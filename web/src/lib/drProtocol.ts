@@ -34,6 +34,10 @@ export interface DrProtocolStateView {
     initiatorSigningKey: string;
     initiatorCiphertexts: string;
     otpkId?: number;
+    /** 2 = handshake X-Wing murni + tanda tangan ML-DSA (docs/35 Fase 1.4). */
+    handshakeVersion?: number;
+    /** `signingKeyV2` inisiator (ML-DSA) — verifikasi tanda tangan handshake v2. */
+    initiatorSigningKeyV2?: string;
   } | null;
   peerAckedKem?: string | null;
   /**
@@ -57,6 +61,8 @@ export interface DrHandshakePayload {
   initiatorSigningKey: string;
   initiatorCiphertexts: string;
   otpkId?: number;
+  handshakeVersion?: number;
+  initiatorSigningKeyV2?: string;
 }
 
 /**

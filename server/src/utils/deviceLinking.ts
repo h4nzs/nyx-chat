@@ -72,6 +72,8 @@ export interface PendingDeviceLink {
   publicKey: string;
   pqPublicKey?: string;
   signingKey: string;
+  /** [PQ v2 Fase 1.5 langkah 9] Kunci verifikasi ML-DSA perangkat baru. */
+  signingKeyV2?: string;
   encryptedPrivateKey: string;
   /**
    * Binding hardware PERANGKAT BARU (sudah ter-index/ter-tag server) — diambil
@@ -123,6 +125,7 @@ function parsePending(raw: string | null): PendingDeviceLink | null {
   const signingKey = nonEmptyString(obj.signingKey);
   const encryptedPrivateKey = nonEmptyString(obj.encryptedPrivateKey);
   if (!userId || !publicKey || !signingKey || !encryptedPrivateKey) return null;
+  const signingKeyV2 = nonEmptyString(obj.signingKeyV2);
   return {
     userId,
     requestDeviceId: nonEmptyString(obj.requestDeviceId) ?? '',
@@ -130,6 +133,7 @@ function parsePending(raw: string | null): PendingDeviceLink | null {
     publicKey,
     pqPublicKey: nonEmptyString(obj.pqPublicKey) ?? undefined,
     signingKey,
+    ...(signingKeyV2 ? { signingKeyV2 } : {}),
     encryptedPrivateKey,
     fingerprint: nonEmptyString(obj.fingerprint) ?? undefined,
     installationTag: nonEmptyString(obj.installationTag) ?? null,

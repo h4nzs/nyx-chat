@@ -1,0 +1,48 @@
+{
+  "packages/shared/src/credentials.ts": {
+    "RSABSSA": 3
+  },
+  "server/src/lib/groupCredentials.ts": {
+    "RSABSSA": 6
+  },
+  "server/src/routes/auth.ts": {
+    "crypto_sign_verify_detached": 1
+  },
+  "web/src/lib/crypto-worker-proxy.ts": {
+    "crypto_box_seal": 1,
+    "crypto_box_seal_open": 1
+  },
+  "web/src/lib/groupCredentials.ts": {
+    "RSABSSA": 1
+  },
+  "web/src/pages/MigrationReceivePage.tsx": {
+    "crypto_box_keypair": 1
+  },
+  "web/src/pages/MigrationSendPage.tsx": {
+    "crypto_box_seal": 1
+  },
+  "web/src/store/auth.ts": {
+    "crypto_scalarmult_base": 4,
+    "crypto_sign_detached": 2
+  },
+  "web/src/store/message.ts": {
+    "crypto_box_seal": 1
+  },
+  "web/src/utils/crypto.ts": {
+    "crypto_box_seal_open": 1,
+    "crypto_sign_detached": 1,
+    "crypto_sign_verify_detached": 1
+  },
+  "web/src/workers/crypto.worker.ts": {
+    "RSABSSA": 5,
+    "crypto_box_keypair": 3,
+    "crypto_box_seal": 1,
+    "crypto_box_seal_open": 1,
+    "crypto_scalarmult": 16,
+    "crypto_sign_detached": 2,
+    "crypto_sign_ed25519_pk_to_curve25519": 2,
+    "crypto_sign_ed25519_sk_to_curve25519": 1,
+    "crypto_sign_seed_keypair": 4,
+    "crypto_sign_verify_detached": 4
+  }
+}
