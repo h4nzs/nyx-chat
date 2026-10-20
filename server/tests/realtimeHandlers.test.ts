@@ -361,6 +361,8 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
       conversationId: 'c1',
       encryptedKey: 'sealed-envelope-b64',
       targetDeviceId: 'dev-b',
+      // Identity key perangkat target — dipakai penerima saat deviceId stale.
+      targetDeviceKey: 'identity-key-dev-b',
       senderDeviceKey: 'dev-sender-key',
       senderSigningKey: 'sig-ed25519-b64',
       senderSigningKeyV2: 'sig-mldsa65-b64',
@@ -391,6 +393,7 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
     senderSigningKey?: string;
     senderSigningKeyV2?: string;
     targetDeviceKey?: string;
+    targetIdentityKey?: string;
   };
   assert.equal(content.type, 'GROUP_KEY');
   assert.equal(content.key, 'sealed-envelope-b64', 'envelope utuh (opaque) dipersist');
@@ -403,6 +406,13 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
   assert.ok(
     typeof content.targetDeviceKey === 'string' && content.targetDeviceKey.length > 0,
     'target device dipertahankan untuk filter penerima'
+  );
+  // [PQ v4 Fase 1.5 — AUDIT 2026-10-20] Identity key target ikut dipersist supaya
+  // offline catch-up tetap jalan saat `localStorage.deviceId` sudah stale.
+  // Disimpan TER-SEAL (seperti targetDeviceKey), jadi cukup cek keberadaannya.
+  assert.ok(
+    typeof content.targetIdentityKey === 'string' && content.targetIdentityKey.length > 0,
+    'identity key target dipertahankan untuk filter penerima'
   );
   assert.ok(persisted['expiresAt'] instanceof Date, 'TTL 7d terpasang');
 });

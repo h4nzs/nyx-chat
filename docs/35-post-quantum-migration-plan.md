@@ -598,10 +598,23 @@ Status (2026-10-20): **seluruh langkah 1–9 selesai di kode**, termasuk residua
     membawa `senderSigningKey`/`senderSigningKeyV2` di relay live **dan** content SYSTEM).
   - `TransportEvents['session:new_key']` juga mendeklarasikan kedua field agar seam transport
     tidak bisa membuangnya tanpa error tipe.
-  - Sisa temuan terpisah (belum diperbaiki, bukan v2): filter offline sync membandingkan
-    `targetDeviceKey` (Device.id) dengan `localStorage.deviceId` sehingga bisa menolak
-    envelope untuk device sendiri setelah DB di-reset; dan `xchacha_open` gagal untuk
-    metadata grup lama (era `chainId` yang state aktifnya sudah tertimpa era baru).
+  - Dua temuan terpisah dari audit yang sama sudah diperbaiki:
+    - **Filter offline sync vs `deviceId` stale.** Envelope distribusi kini juga membawa
+      `targetDeviceKey` (identity key X25519 perangkat target, stabil lintas re-register);
+      `group:fulfilled_key` mempersist-nya sebagai `targetIdentityKey` (ikut ter-seal:
+      `SYSTEM_DEVICE_FIELDS` di `server/src/utils/senderIdentity.ts`), dan
+      `web/src/store/message.ts` menerima baris bila `targetDeviceKey ===
+      localStorage.deviceId` **atau** identity key kita sama dengan `targetIdentityKey`
+      maupun `targetDeviceKey`. Device yang di-reset tetap dapat catch-up.
+    - **Metadata grup multi-era.** `decryptGroupMetadata` tidak lagi bergantung pada satu
+      receiver state: ia mengumpulkan kandidat era (`findGroupReceiverState` untuk
+      `chainId` di wrapper + semua `listGroupReceiverStates` milik `senderDeviceKey`),
+      memverifikasi signature per kandidat (fail-closed: `senderKeyId` mismatch atau
+      signature salah → kandidat dilewati) dan mencoba `xchacha_open` dengan `metadataKey`
+      masing-masing, sehingga metadata era lama tetap terbaca setelah state aktif pindah era.
+  - Verifikasi: `tsc` web+server bersih, `vitest groupMetadata/groupMetadataRotation/
+    groupEra/keychainDbPersistence` (27 test) dan `realtimeHandlers` (25 test) lulus,
+    oxlint 0 error, guard PQ-only lulus.
 - Oracle Go X3DH v2 selesai (`tools/dr-oracle/main.go`): vektor `x3dhV2` berisi
   `x3dh-v2-plain` dan `x3dh-v2-with-otpk`. Oracle memakai `cloudflare/circl` `mldsa65`
   dengan context `NYX-PQ-HANDSHAKE-V2` (`SignTo` deterministik, tanpa libsodium), transkrip

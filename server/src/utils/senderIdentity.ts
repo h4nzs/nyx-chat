@@ -68,7 +68,10 @@ export async function openSenderId(stored: string | null | undefined): Promise<s
  * itu tidak boleh terbaca dari dump. `senderDeviceKey`/`senderSigningKey` TIDAK
  * termasuk: keduanya kunci publik (memang dibagikan ke anggota grup).
  */
-const SYSTEM_DEVICE_FIELDS = ['targetDeviceKey'] as const
+// [PQ v4 Fase 1.5 — AUDIT 2026-10-20] `targetIdentityKey` (identity key X25519
+// perangkat target) ikut ter-seal: dipakai penerima untuk memfilter envelope
+// saat `localStorage.deviceId` stale, dan itu tetap penanda perangkat.
+const SYSTEM_DEVICE_FIELDS = ['targetDeviceKey', 'targetIdentityKey'] as const
 
 async function transformSystemContent(
   content: string,

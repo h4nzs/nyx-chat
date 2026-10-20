@@ -1882,12 +1882,36 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                         // be decrypted using that key") → di-retry tiap sync +
                         // spam emitGroupKeyRequest ke pengirim (terlihat di log
                         // 2-browser 2026-09-29).
-                        // CATATAN: targetDeviceKey di envelope persist adalah
-                        // Device ID (dari bundle.deviceId), BUKAN identityKey —
-                        // device saya = localStorage 'deviceId'.
+                        // CATATAN: `targetDeviceKey` di envelope persist adalah
+                        // Device ID (dari bundle.deviceId), BUKAN identityKey.
+                        // [AUDIT 2026-10-20] Device ID lokal bisa STALE (DB test
+                        // di-wipe / clear site data → Device.id baru) sehingga
+                        // envelope sah untuk perangkat ini ikut terbuang. Karena
+                        // itu server juga menyegel `targetIdentityKey` (identity
+                        // key X25519 perangkat); identitas itu stabil lintas
+                        // re-register, jadi cocokkan keduanya.
                         const targetKey = (payload as { targetDeviceKey?: string }).targetDeviceKey;
+                        const targetIdentityKey = (payload as { targetIdentityKey?: string }).targetIdentityKey;
                         const myDeviceId = localStorage.getItem('deviceId');
-                        const addressedToMe = !targetKey || (myDeviceId !== null && targetKey === myDeviceId);
+                        let myIdentityKeyB64: string | null = null;
+                        if (targetKey || targetIdentityKey) {
+                            try {
+                                const [{ getMyEncryptionKeyPair }, { getSodium }] = await Promise.all([
+                                    import('@utils/crypto'),
+                                    import('@lib/sodiumInitializer')
+                                ]);
+                                const sodium = await getSodium();
+                                const { publicKey } = await getMyEncryptionKeyPair();
+                                myIdentityKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                            } catch {
+                                myIdentityKeyB64 = null;
+                            }
+                        }
+                        const addressedToMe =
+                            !targetKey
+                            || (myDeviceId !== null && targetKey === myDeviceId)
+                            || (targetIdentityKey !== undefined && myIdentityKeyB64 !== null && targetIdentityKey === myIdentityKeyB64)
+                            || (myIdentityKeyB64 !== null && targetKey === myIdentityKeyB64);
                         if (!addressedToMe) {
                             console.debug(`[Offline Sync] Skip GROUP_KEY envelope untuk device lain (${String(targetKey).slice(0, 8)}…)`);
                             continue;

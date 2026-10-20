@@ -676,7 +676,7 @@ export async function handleKeySync(
                    createdAt: groupKeyAt,
                    // [docs/28 Tier 4] Device.id target disimpan TER-SEAL; server
                    // membukanya kembali saat relay/catch-up (openMessageForClient).
-                   content: await sealSystemContentDeviceKeys(JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, ...(typeof senderSigningKeyV2 === 'string' && senderSigningKeyV2 ? { senderSigningKeyV2 } : {}), targetDeviceKey: targetDeviceId, ...(adminToken ? { adminToken: true } : {}) })),
+                   content: await sealSystemContentDeviceKeys(JSON.stringify({ type: 'GROUP_KEY', key: encryptedKey, senderDeviceKey, senderSigningKey, ...(typeof senderSigningKeyV2 === 'string' && senderSigningKeyV2 ? { senderSigningKeyV2 } : {}), targetDeviceKey: targetDeviceId, ...(typeof (data as { targetDeviceKey?: unknown }).targetDeviceKey === 'string' && (data as { targetDeviceKey?: string }).targetDeviceKey ? { targetIdentityKey: (data as { targetDeviceKey?: string }).targetDeviceKey } : {}), ...(adminToken ? { adminToken: true } : {}) })),
                    expiresAt: new Date(groupKeyAt.getTime() + 7 * 24 * 60 * 60 * 1000)
                  }
                });

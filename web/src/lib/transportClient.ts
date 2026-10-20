@@ -930,7 +930,7 @@ export async function emitGroupKeyRequest(conversationId: string, targetSenderId
 // [T2 FIX #11 2026-09-29] senderSigningKey diteruskan — fulfillment offline
 // sebelumnya hilang signing key → penerima gagal verifikasi signature pesan
 // walau kunci grup ter-unseal (pola libsignal SenderKeyState).
-export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; senderSigningKey?: string; senderSigningKeyV2?: string; drHeader?: any; senderPseudonym?: string }) {
+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; targetDeviceKey?: string; senderDeviceKey?: string; senderSigningKey?: string; senderSigningKeyV2?: string; drHeader?: any; senderPseudonym?: string }) {
   transportClient.sendEvent('group:fulfilled_key', payload);
 }
 

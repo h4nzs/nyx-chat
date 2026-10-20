@@ -286,72 +286,99 @@ export async function decryptGroupMetadata(
     // tangan pengirim. Blob v1 (metadata sebagai pesan rantai) sudah dihapus.
     if (wrapper?.v === 2 && wrapper?.kind === 'group_metadata') {
         const { workerXChaChaOpen } = await import('@lib/crypto-worker-proxy');
-        const { findGroupReceiverState } = await import('@lib/keychainDb');
+        const { findGroupReceiverState, listGroupReceiverStates } = await import('@lib/keychainDb');
         const sodium = await getSodiumLib();
-        const record = await findGroupReceiverState(
-            conversationId,
-            { chainId: wrapper.chainId },
-            undefined,
-            wrapper.senderDeviceKey
-        );
-        const metaKey = record?.metadataKey;
-        if (!metaKey) {
-            console.warn('Group metadata v2: metadataKey era belum tersedia (menunggu distribusi)', wrapper.chainId);
-            return null;
-        }
         const ctBytes = sodium.from_base64(wrapper.ct, sodium.base64_variants.URLSAFE_NO_PADDING);
         const signatureBytes = sodium.from_base64(wrapper.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
         // [PQ v4 Fase 1.5] `sigV: 2` = tanda tangan ML-DSA-65 (verifikasi dengan
         // `signingKeyV2` pengirim); default `1` = Ed25519 (jalur v1 lama).
         const sigV: number = typeof wrapper.sigV === 'number' ? wrapper.sigV : 1;
-        let valid: boolean;
-        if (sigV === 2) {
-            // [PQ v4 Fase 1.5 — fallback 2026-10-20] State lama bisa belum
-            // terikat `signingKeyV2` (envelope live dari server yang belum
-            // meneruskan field itu). Resolusi per-device menutup celah ini
-            // tanpa menunggu distribusi ulang.
-            let signingKeyV2ForSender = record?.signingKeyV2;
-            if (!signingKeyV2ForSender && typeof wrapper.senderDeviceKey === 'string') {
-                const resolved = await resolveDeviceSigningKeys(conversationId, wrapper.senderDeviceKey);
-                signingKeyV2ForSender = resolved.signingKeyV2;
-            }
-            if (!signingKeyV2ForSender) {
-                console.warn('Group metadata v2: signing key v2 pengirim belum terikat ke state', wrapper.chainId);
-                return null;
-            }
-            const { mlDsaVerify, PQ_V2_DOMAINS } = await import('@nyx/shared');
-            // [PQ v4 Fase 1.5 — envelope v3] Bila wrapper membawa `senderKeyId`,
-            // kunci verifikasi yang terikat WAJIB menghasilkan id yang sama.
-            if (typeof wrapper.senderKeyId === 'string') {
-                const derived = deriveGroupSenderKeyId(
-                    sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING)
-                );
-                const claimed = sodium.from_base64(wrapper.senderKeyId, sodium.base64_variants.URLSAFE_NO_PADDING);
-                if (!constantTimeEqual(derived, claimed)) {
-                    console.warn('Group metadata v2: senderKeyId tidak cocok dengan signingKeyV2 pengirim', wrapper.chainId);
-                    return null;
-                }
-            }
-            valid = mlDsaVerify(
-                signatureBytes,
-                ctBytes,
-                sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING),
-                PQ_V2_DOMAINS.GROUP
-            );
-        } else {
-            if (!record?.signingKey) {
-                console.warn('Group metadata v2: signing key pengirim belum terikat ke state', wrapper.chainId);
-                return null;
-            }
-            const signingPubBytes = sodium.from_base64(record.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-            valid = sodium.crypto_sign_verify_detached(signatureBytes, ctBytes, signingPubBytes);
+
+        // [AUDIT 2026-10-20 — MULTI-ERA] Metadata bisa tiba untuk era yang
+        // state aktifnya sudah ditimpa era lebih baru (atau sudah keluar dari
+        // jendela arsip 5 era). Dulu hanya SATU state dipilih via chainId,
+        // lalu `xchacha_open` gagal dengan kunci era lain → metadata hilang.
+        // Sekarang semua state perangkat pengirim dicoba: kunci yang benar
+        // dibuktikan oleh tanda tangan pengirim, jadi mencoba beberapa
+        // kandidat aman (pola libsignal: state lama tetap dipakai untuk pesan
+        // era lama).
+        type MetadataCandidate = { id: string; metadataKey?: string; signingKey?: string; signingKeyV2?: string };
+        const candidates: MetadataCandidate[] = [];
+        const addCandidate = (s: MetadataCandidate | null | undefined) => {
+            if (!s || !s.metadataKey) return;
+            if (candidates.some(c => c.id === s.id)) return;
+            candidates.push(s);
+        };
+        addCandidate(await findGroupReceiverState(
+            conversationId,
+            { chainId: wrapper.chainId },
+            undefined,
+            wrapper.senderDeviceKey
+        ));
+        const allStates = await listGroupReceiverStates(conversationId);
+        for (const s of allStates) {
+            if (typeof wrapper.senderDeviceKey === 'string' && !s.id.includes(wrapper.senderDeviceKey)) continue;
+            addCandidate(s);
         }
-        if (!valid) {
-            console.error('Group metadata v2: signature TIDAK valid — blob ditolak');
+        if (candidates.length === 0) {
+            console.warn('Group metadata v2: metadataKey era belum tersedia (menunggu distribusi)', wrapper.chainId);
             return null;
         }
-        const plaintext = await workerXChaChaOpen(metaKey, wrapper.ct);
-        return JSON.parse(plaintext);
+
+        // Kunci verifikasi bisa tidak terikat di state lama → resolusi per-device
+        // sekali saja (di-cache di dalam helper).
+        let resolvedKeys: { signingKey?: string; signingKeyV2?: string } | undefined;
+        const resolveOnce = async () => {
+            if (!resolvedKeys && typeof wrapper.senderDeviceKey === 'string') {
+                resolvedKeys = await resolveDeviceSigningKeys(conversationId, wrapper.senderDeviceKey);
+            }
+            return resolvedKeys ?? {};
+        };
+
+        for (const record of candidates) {
+            let valid = false;
+            if (sigV === 2) {
+                let signingKeyV2ForSender = record.signingKeyV2;
+                if (!signingKeyV2ForSender) {
+                    signingKeyV2ForSender = (await resolveOnce()).signingKeyV2;
+                }
+                if (!signingKeyV2ForSender) continue;
+                const { mlDsaVerify, PQ_V2_DOMAINS } = await import('@nyx/shared');
+                // [PQ v4 Fase 1.5 — envelope v3/v4] Bila wrapper membawa
+                // `senderKeyId`, kunci verifikasi WAJIB menghasilkan id sama.
+                if (typeof wrapper.senderKeyId === 'string') {
+                    const derived = deriveGroupSenderKeyId(
+                        sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING)
+                    );
+                    const claimed = sodium.from_base64(wrapper.senderKeyId, sodium.base64_variants.URLSAFE_NO_PADDING);
+                    if (!constantTimeEqual(derived, claimed)) continue;
+                }
+                valid = mlDsaVerify(
+                    signatureBytes,
+                    ctBytes,
+                    sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING),
+                    PQ_V2_DOMAINS.GROUP
+                );
+            } else {
+                const signingKeyForSender = record.signingKey ?? (await resolveOnce()).signingKey;
+                if (!signingKeyForSender) continue;
+                const signingPubBytes = sodium.from_base64(signingKeyForSender, sodium.base64_variants.URLSAFE_NO_PADDING);
+                valid = sodium.crypto_sign_verify_detached(signatureBytes, ctBytes, signingPubBytes);
+            }
+            if (!valid) continue;
+
+            try {
+                const plaintext = await workerXChaChaOpen(record.metadataKey!, wrapper.ct);
+                return JSON.parse(plaintext);
+            } catch {
+                // Kunci era ini bukan kunci yang dipakai wrapper — coba kandidat
+                // berikutnya (era lain), bukan gagal total.
+                continue;
+            }
+        }
+
+        console.warn('Group metadata v2: tidak ada state era yang cocok (metadata ditolak)', wrapper.chainId);
+        return null;
     }
 
     // [2026-10 legacy purge] Blob v1 (metadata sebagai pesan rantai) tidak lagi
@@ -1369,6 +1396,10 @@ export async function sendGroupKeyDistributionPairwise(
         conversationId,
         encryptedKey: key,
         targetDeviceId,
+        // [AUDIT 2026-10-20] Identity key perangkat target — dipersist server
+        // sebagai `targetIdentityKey` supaya catch-up offline tetap mengenali
+        // perangkat ini walau `localStorage.deviceId` sudah stale.
+        targetDeviceKey,
         senderDeviceKey: (dk as { senderDeviceKey?: string }).senderDeviceKey,
         // [T2 FIX #9 2026-09-28] Public signing key pengirim — diikat ke
         // receiver state penerima (pola libsignal SenderKeyState).
