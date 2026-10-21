@@ -94,6 +94,13 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Prisma generate
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
+        run: pnpm exec prisma generate
       - name: Run unit tests
         run: pnpm run test
         env:
@@ -173,6 +180,8 @@ jobs:
       - name: Gate drift vektor (oracle vs berkas ter-commit)
         working-directory: tools/dr-oracle
         run: go run . -check
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
       - name: Vektor NYX↔oracle + interop dua arah
         working-directory: web
         run: pnpm exec vitest run src/lib/__tests__/x3dhOracleVectors.test.ts src/lib/__tests__/x3dhOracleInterop.test.ts
@@ -201,6 +210,11 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Prisma generate
+        working-directory: server
+        run: pnpm exec prisma generate
       - name: Go — vet + test kt-query (termasuk pemeriksa nyx-kt-check)
         working-directory: server/kt-query
         run: |
@@ -270,6 +284,8 @@ jobs:
         run: |
           pnpm exec prisma generate
           pnpm exec prisma db push
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
       - name: Install Playwright Chromium
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
@@ -343,6 +359,8 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
       - name: Prisma generate + db push (DB CI)
         working-directory: server
         env:
@@ -353,7 +371,7 @@ jobs:
       - name: Install Google Chrome (channel 'chrome')
         working-directory: web
         run: |
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/google-chrome.gpg
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
