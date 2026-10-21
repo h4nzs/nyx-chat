@@ -19,6 +19,7 @@ set -euo pipefail
 PIN_SPQR="06959b4708f9b7b1e94d0f8cc835f3958c077e94"
 PIN_LIBSIGNAL="e8cc2dddd578859b4a029c9c94670b24ce2b616a"
 PIN_KT_SERVER="30b7a2a40604fbe04545d47f26e4c5a35f5d3161"
+PIN_KT_AUDITOR="13a9126a63081c189de8422bb2e7dca770adec9f"
 
 SIGNAL_ROOT="${SIGNAL_ROOT:-$HOME/signal}"
 FORCE=0
@@ -182,6 +183,7 @@ atribusi, dan daftar artefak yang dikirim ada di [\`NOTICE\`](../../NOTICE).
 | \`spqr/\` | https://github.com/signalapp/SparsePostQuantumRatchet | \`$PIN_SPQR\` | crate \`spqr\` v1.6.0 disalin utuh (\`src\`, \`benches\`, \`proofs\`, \`build.rs\`, \`Cargo.lock\` upstream apa adanya) |
 | \`libsignal-keytrans/\` | https://github.com/signalapp/libsignal (\`rust/keytrans\`) | \`$PIN_LIBSIGNAL\` | \`Cargo.toml\` dimaterialisasi (semua \`workspace = true\` → versi eksplisit) karena crate ini berdiri sendiri di sini |
 | \`../../server/kt-query/vendor/\` | https://github.com/signalapp/key-transparency-server | \`$PIN_KT_SERVER\` | dihasilkan \`go mod vendor\`, bukan oleh skrip ini |
+| \`../../server/kt-query/cmd/nyx-kt-auditor/testdata/\` | https://github.com/signalapp/key-transparency-auditor | \`$PIN_KT_AUDITOR\` | hanya test vector + referensi port Go; kode Java tidak di-vendor |
 
 Keduanya dipakai **tanpa patch**: perubahan perilaku harus datang dari naiknya
 pin, bukan suntingan di sini (jangan jalankan \`cargo\` di dalam direktori
