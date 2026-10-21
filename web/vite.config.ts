@@ -132,6 +132,13 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         secure: false,
       },
+      // Fallback WSS memakai origin aplikasi (sama seperti nginx produksi);
+      // tanpa entri ini socket.io menabrak Vite dan koneksi tidak pernah jadi.
+      '/socket.io': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        ws: true,
+      },
     }
   },
   // FIX: Konfigurasi untuk npm run build && npm run preview (Port 4173)
@@ -149,6 +156,13 @@ export default defineConfig(({ mode }) => {
         target: 'http://localhost:4000',
         changeOrigin: true,
         secure: false,
+      },
+      // Fallback WSS memakai origin aplikasi (sama seperti nginx produksi);
+      // tanpa entri ini socket.io menabrak Vite dan koneksi tidak pernah jadi.
+      '/socket.io': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        ws: true,
       },
     }
   },

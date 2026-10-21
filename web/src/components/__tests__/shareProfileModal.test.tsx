@@ -64,14 +64,17 @@ vi.mock('@hooks/useUserProfile', () => ({
 
 import ShareProfileModal from '../ShareProfileModal';
 
-const HASH_43 = 'A'.repeat(43); // Argon2id klien (base64url 32 byte)
+// [docs/28 §R5] Tautan baru memakai shareId acak `s1_<43 base64url>`,
+// bukan usernameHash (blind index) — komponen menolak render tanpa shareId sah.
+const SHARE_ID = `s1_${'A'.repeat(43)}`;
 const USER_ID = 'user-raw-id';
 
 beforeEach(() => {
   vi.clearAllMocks();
   authState.user = {
     id: USER_ID,
-    usernameHash: HASH_43,
+    shareId: SHARE_ID,
+    usernameHash: 'A'.repeat(43),
     encryptedProfile: 'ENCRYPTED-PROFILE-BLOB',
   };
   Object.defineProperty(navigator, 'clipboard', {
@@ -87,7 +90,7 @@ describe('ShareProfileModal — tautan berbagi WS-I', () => {
     const qr = screen.getByTestId('share-qr');
     const value = qr.getAttribute('data-value') ?? '';
 
-    expect(value).toBe(`${window.location.origin}/u/${HASH_43}`);
+    expect(value).toBe(`${window.location.origin}/u/${SHARE_ID}`);
     expect(value).not.toContain(USER_ID);
     expect(value).not.toContain('ENCRYPTED-PROFILE-BLOB');
     expect(value).not.toMatch(/[?&]i=/);
@@ -106,7 +109,7 @@ describe('ShareProfileModal — tautan berbagi WS-I', () => {
   });
 
   it('usernameHash tak berbentuk sah → tidak merender QR yang menyesatkan', () => {
-    authState.user = { id: USER_ID, usernameHash: 'rusak', encryptedProfile: null };
+    authState.user = { id: USER_ID, shareId: 'rusak', encryptedProfile: null };
     const { container } = render(<ShareProfileModal onClose={() => {}} />);
     expect(screen.queryByTestId('share-qr')).toBeNull();
     expect(container.firstChild).toBeNull();
