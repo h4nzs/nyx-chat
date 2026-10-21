@@ -45,7 +45,19 @@ test.describe('Panggilan (relay coturn nyata)', () => {
         const mod = (await import('/src/lib/api.ts')) as {
           api: <T>(path: string) => Promise<T>;
         };
-        return mod.api<TurnPayload>('/api/keys/turn');
+        try {
+          return await mod.api<TurnPayload>('/api/keys/turn');
+        } catch (error) {
+          // Server tanpa TURN sama sekali menjawab 503 TURN_NOT_CONFIGURED
+          // (bukan payload `stunOnly`). Itu juga alasan untuk skip, bukan gagal.
+          const code = (error as { code?: string; message?: string }).code
+            ?? (error as { message?: string }).message;
+          const details = (error as { details?: { error?: string } }).details;
+          if (code === 'TURN_NOT_CONFIGURED' || details?.error === 'TURN_NOT_CONFIGURED') {
+            return { iceServers: [], stunOnly: true };
+          }
+          throw error;
+        }
       });
     });
 

@@ -163,7 +163,11 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   // --- WebSocket fallback (state machine) ---
   // mode 'wt' adalah default; beralih ke 'wss' (sticky untuk sesi) jika WT
   // gagal berturut-turut mencapai ambang batas.
-  private mode: 'wt' | 'wss' = 'wt';
+  // [e2e/self-host] VITE_FORCE_WSS=1 melewati percobaan QUIC sepenuhnya.
+  // Dipakai job E2E Chromium yang tidak menjalankan sidecar: Chromium baru
+  // mengekspos WebTransport walau tidak ada uplink, sehingga deteksi
+  // `typeof WebTransport` saja tidak lagi cukup.
+  private mode: 'wt' | 'wss' = import.meta.env.VITE_FORCE_WSS === '1' ? 'wss' : 'wt';
   private wtFailCount = 0;
   private readonly WT_MAX_FAILS = 2;
   private readonly WT_TIMEOUT_MS = 8000;
@@ -675,7 +679,12 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private resolveApiOrigin(): string {
     const envUrl = (import.meta.env.VITE_API_URL as string | undefined) || '';
     const cleaned = envUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
-    return cleaned || 'https://api.nyx-app.my.id';
+    if (cleaned) return cleaned;
+    // Dev/E2E tanpa VITE_API_URL: socket.io harus menuju origin yang sama
+    // dengan REST (relatif /api), bukan produksi. Fallback produksi tetap
+    // dipakai untuk build non-DEV yang lupa mengisi env.
+    if (import.meta.env.DEV && typeof window !== 'undefined') return window.location.origin;
+    return 'https://api.nyx-app.my.id';
   }
 
   private drainWtQueueToWss(): void {

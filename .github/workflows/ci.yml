@@ -105,6 +105,9 @@ jobs:
         run: pnpm run test
         env:
           JWT_SECRET: ci-jwt-secret-not-for-prod
+          # Modul server mengimpor src/lib/prisma.ts saat load; tanpa URL ini
+          # PrismaClient melempar sebelum test sempat memakai fake DB.
+          DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
 
   lint:
     # [2026-10-11, diperbarui 2026-10-14] Lint BLOCKING lewat oxlint (Rust; tidak
@@ -291,6 +294,11 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Run E2E (spec transport auto-skip bila WebTransport tidak tersedia)
         working-directory: web
+        env:
+          # Chromium di runner kini mengekspos WebTransport walau job ini tidak
+          # menjalankan sidecar Rust. Paksa fallback WSS agar suite menguji
+          # logika aplikasi, bukan menunggu QUIC yang tidak punya uplink.
+          VITE_FORCE_WSS: '1'
         run: pnpm exec playwright test --project=chromium
       # [docs/35 §35.8] PQ v2 hanya dikirim/diiklankan saat gerbang menyala, dan
       # `pqV2.spec` skip dengan alasan tertulis bila flag mati. Tanpa step ini
