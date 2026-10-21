@@ -1,9 +1,12 @@
 {
-  "packages/shared/src/credentials.ts": {
+  "packages/shared/src/credentialSuite.ts": {
     "RSABSSA": 3
   },
+  "packages/shared/src/credentials.ts": {
+    "RSABSSA": 2
+  },
   "server/src/lib/groupCredentials.ts": {
-    "RSABSSA": 6
+    "RSABSSA": 5
   },
   "server/src/routes/auth.ts": {
     "crypto_sign_verify_detached": 1
@@ -11,6 +14,9 @@
   "web/src/lib/crypto-worker-proxy.ts": {
     "crypto_box_seal": 1,
     "crypto_box_seal_open": 1
+  },
+  "web/src/lib/db.ts": {
+    "RSABSSA": 1
   },
   "web/src/lib/groupCredentials.ts": {
     "RSABSSA": 1

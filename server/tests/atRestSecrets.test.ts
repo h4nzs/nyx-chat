@@ -26,9 +26,12 @@ import {
   clearAtRestSecretCacheForTests,
   credentialTokenMatches,
   getAtRestPepper,
+  generateShareId,
   hashCredentialToken,
   identifierLookupCandidates,
   isHashedToken,
+  isSearchableIdentifier,
+  isShareId,
   openAtRest,
   pepperedIdentifier,
   sealAtRest,
@@ -71,11 +74,57 @@ test('pepper: dump DB tanpa pepper tidak bisa membalik IP/fingerprint', async ()
   assert.notEqual(dumped, attackerGuess, 'menebak IP tanpa pepper tidak menghasilkan hash yang sama');
 });
 
-test('identifierLookupCandidates: [ter-pepper, nilai kiriman] untuk echo klien', async () => {
-  const candidates = await withPepper('p', () => identifierLookupCandidates('user-hash-abc'));
-  assert.equal(candidates.length, 2, 'tidak ada kandidat lain (query tetap minimal)');
-  assert.equal(candidates[0], await withPepper('p', () => pepperedIdentifier('user-hash-abc')));
-  assert.equal(candidates[1], 'user-hash-abc', 'kandidat kedua = nilai kiriman apa adanya (echo hash-ID dari share link)');
+test('[docs/35 Fase 4 — R5] identifierLookupCandidates: hanya bentuk hash, tidak pernah nilai mentah', async () => {
+  const clientHash = 'A'.repeat(43);
+  const candidates = await withPepper('p', () => identifierLookupCandidates(clientHash));
+  assert.equal(candidates.length, 1, 'hash klien → satu kandidat (ter-pepper)');
+  assert.equal(candidates[0], await withPepper('p', () => pepperedIdentifier(clientHash)));
+
+  // R5: nilai mentah (username/email) tidak boleh menjadi kandidat lookup.
+  const rawCandidates = await withPepper('p', () => identifierLookupCandidates('alice@example.com'));
+  assert.deepEqual(rawCandidates, [await withPepper('p', () => pepperedIdentifier('alice@example.com'))]);
+  assert.equal(rawCandidates.includes('alice@example.com'), false, 'nilai mentah tidak pernah dikirim ke DB');
+});
+
+test('identifierLookupCandidates: 64-hex (echo server) dipakai apa adanya sebagai satu-satunya kandidat', async () => {
+  const pepperedEcho = await withPepper('p', () => pepperedIdentifier('A'.repeat(43)));
+  const candidates = await withPepper('p', () => identifierLookupCandidates(pepperedEcho));
+  assert.deepEqual(candidates, [pepperedEcho]);
+  assert.deepEqual(
+    await withPepper('p', () => identifierLookupCandidates(pepperedEcho.toUpperCase())),
+    [pepperedEcho],
+    'hex dinormalisasi ke lowercase',
+  );
+});
+
+test('isSearchableIdentifier: 43-char base64url, 64-hex, atau shareId `s1_`', async () => {
+  assert.equal(isSearchableIdentifier('A'.repeat(43)), true);
+  assert.equal(isSearchableIdentifier('a'.repeat(64)), true);
+  assert.equal(isSearchableIdentifier(generateShareId()), true);
+  assert.equal(isSearchableIdentifier('alice'), false);
+  assert.equal(isSearchableIdentifier('alice@example.com'), false);
+  assert.equal(isSearchableIdentifier('A'.repeat(42)), false);
+  assert.equal(isSearchableIdentifier('z'.repeat(64)), false);
+  assert.equal(isSearchableIdentifier('s1_' + 'A'.repeat(42)), false, 'shareId harus 43 char setelah prefiks');
+});
+
+test('[docs/28 §R5] generateShareId: acak, berprefiks, dan tidak memakai pepper', async () => {
+  const ids = Array.from({ length: 50 }, () => generateShareId());
+  assert.equal(new Set(ids).size, ids.length, 'setiap shareId unik');
+  for (const id of ids) {
+    assert.match(id, /^s1_[A-Za-z0-9_-]{43}$/);
+    assert.equal(isShareId(id), true);
+  }
+  assert.equal(isShareId('A'.repeat(43)), false, 'hash lama bukan shareId');
+  assert.equal(isShareId('s1_' + 'A'.repeat(44)), false);
+  assert.equal(isShareId(undefined), false);
+
+  // ShareId adalah nilai acak: nilai sama dengan pepper berbeda tetap identik
+  // (route search mem-branch ke kolom shareId, bukan ke blind index).
+  const id = generateShareId();
+  const a = await withPepper('p-satu', () => isShareId(id));
+  const b = await withPepper('p-dua', () => isShareId(id));
+  assert.equal(a, b);
 });
 
 test('hashCredentialToken: SHA-256 hex (pola adminSecretHash)', () => {

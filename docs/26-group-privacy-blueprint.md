@@ -444,7 +444,9 @@ load is itself a privacy property; relaxing it amplifies traffic signatures).
   traffic analysis easier, not harder.
 - Any new batching/jitter/cover-traffic feature must be **opt-in per group** first
   (maximum-privacy mode), measured for battery/latency, then default-on only with
-  evidence it does not hurt UX.
+  evidence it does not hurt UX. `docs/35` Fase 3 menambahkan satu pengecualian yang
+  disengaja: **chat 1:1 boleh opt-in** (default tetap mati), dengan syarat cover
+  tidak pernah memulai sesi baru — DM tanpa riwayat tidak dikirimi cover.
 
 ## 26.10 Cover traffic (T4) — detailed design
 
@@ -526,6 +528,11 @@ Per group with M active members at λ=0.5/min, 8KB padded envelope:
   **[implemented]** Cover-traffic toggle in Group Info (CoverTrafficCard) with the
   ~5.6 MB/day estimate shown before enabling; ephemeral receipts and
   batched/jittered release remain future additions to the bundle.
+  **[implemented 2026-10-20, docs/35 Fase 3]** Toggle yang sama tersedia untuk
+  **chat 1:1** lewat panel info kontak (`DirectCoverTrafficCard`).
+  `sendCoverTraffic` kini memakai `coverTargetAllowed()`: grup dan burner tetap
+  boleh, DM hanya bila sudah punya pesan nyata (`lastMessage`) — cover tidak boleh
+  menjadi pemicu handshake/percakapan baru.
 - Show the honest per-group data estimate before enabling; no silent data burn.
 - Burner groups: **Maximum by default** (per Q5 — burners inherit everything from
   day one, no fallback paths).

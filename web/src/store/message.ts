@@ -7,6 +7,8 @@ import { createWithEqualityFn } from "zustand/traditional";
 const uuidv4 = () => crypto.randomUUID();
 import { api, authFetch } from "@lib/api"; 
 import { transportClient, emitSessionKeyRequest, emitGroupKeyDistribution } from '@lib/transportClient';
+// [docs/35 Fase 3] Jitter/batching kirim pada mode Maximum (client-local).
+import { applyMaximumSendDelay } from '@lib/sendTiming';
 // [BUGFIX 2026-10-18] Receipt pesan-tiba = 'messages:mark_delivered' (bukan READ).
 import { sendDeliveryReceipts } from '@lib/deliveryReceipts';
 import { captureAndLog } from '@utils/feedback';
@@ -48,7 +50,7 @@ export { decryptMessageObject } from '../lib/messagePipeline';
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import { compareMessagesByOrder } from '@utils/messageOrder';
-import { isBurnerConversation } from '@lib/coverTraffic';
+import { coverTargetAllowed } from '@lib/coverTraffic';
 import { isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS, getDeliveryTokenMap } from '@lib/groupPseudonyms';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
 
@@ -639,11 +641,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   // prefix burner_) tanpa opt-in eksplisit — jalur burner sendMessage sudah
   // menangani isSilent (tanpa bubble optimistik) di atas.
   sendCoverTraffic: async (conversationId) => {
-    const isBurner = isBurnerConversation(String(conversationId));
-    if (!isBurner) {
-      const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-      if (!conv?.isGroup) return;
-    }
+    // [docs/35 Fase 3] 1:1 opt-in: DM yang sudah punya riwayat boleh mengirim
+    // cover. Tanpa riwayat (`lastMessage` null) cover akan memulai handshake /
+    // percakapan baru di server — metadata baru, bukan yang disembunyikan.
+    const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!coverTargetAllowed({
+      conversationId: String(conversationId),
+      isGroup: conv?.isGroup === true,
+      hasHistory: Boolean(conv?.lastMessage),
+    })) return;
     try {
       await get().sendMessage(conversationId, {
         content: JSON.stringify({ type: 'COVER', ts: Date.now() }),
@@ -812,7 +818,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     // Jalur burner kembali lebih awal sebelum titik ini — burner tidak masuk
     // bucket chat_message yang sama, tidak dihitung sebagai real send.
     if (!isCover && !conversationId.startsWith('burner_')) {
-        import('@lib/coverTraffic').then(m => m.notifyRealSend()).catch(() => {});
+        // Percakapan ikut dicatat supaya λ cover bisa adaptif (docs/35 Fase 3):
+        // percakapan ramai mendapat denyut cover lebih rapat, tanpa koordinasi.
+        import('@lib/coverTraffic')
+          .then(m => m.notifyRealSend(Date.now(), String(conversationId)))
+          .catch(() => {});
     }
 
     // [docs/29 §7.2] HARD GATE: kunci identitas peer 1:1 berubah dan belum
@@ -921,6 +931,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         useConversationStore.getState().updateConversationLastMessage(conversationId, { ...optimisticMessage, content: lastMsgPreview, fileType: data.fileType, fileName: data.fileName });
 
     }
+
+    // [docs/35 Fase 3] Mode Maximum: jeda acak 200–800 ms (jendela batching)
+    // SEBELUM enkripsi/kirim, setelah bubble optimistik tampil. Pesan yang jatuh
+    // di jendela sama dilepas bersama dalam urutan asli, jadi burst ketukan tidak
+    // membentuk sidik jari timing. Silent (receipt/sinkronisasi kunci) dilewati.
+    await applyMaximumSendDelay(String(conversationId), { silent: shouldBeSilent });
 
     // [BUG-FIX H1] Watchdog untuk menjamin bubble optimistik mencapai status
     // terminal (FAILED) bila callback emit transport tidak pernah fire.

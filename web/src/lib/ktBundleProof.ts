@@ -57,15 +57,26 @@ import {
   type KtStoredState,
 } from './ktMonitoring';
 import { getLocalAnchor, storeAnchor, type KtHeadAnchor } from './ktGossip';
-import { ktConfigPinMatches, loadKtConfigPin, parseKtConfigPin, saveKtConfigPin } from './ktConfigPin';
+import {
+  ktConfigPinMatches,
+  loadKtConfigPin,
+  parseKtConfigPin,
+  saveKtConfigPin,
+  type KtConfigAbi,
+  type KtConfigPin,
+} from './ktConfigPin';
 import { parseKtValueBytes } from '@nyx/shared';
 import {
   KT_MODE_CONTACT_MONITORING,
   KtVerificationError,
-  instantiateKeyTransparencyVerifier,
-  type KeyTransparencyVerifier,
-  type KtConfig,
+  type KeyTransparencyVerifier as KeyTransparencyVerifierV1,
+  type KtConfig as KtConfigV1,
+  type KtVerifySearchResult,
 } from './keyTransparency';
+import {
+  type KeyTransparencyVerifier as KeyTransparencyVerifierV2,
+  type KtConfig as KtConfigV2,
+} from './keyTransparencyV2';
 
 /** Prefix tipe search key di log KT (`shared.UsernameHashPrefix`, docs/32). */
 export const KT_SEARCH_PREFIX = 0x75;
@@ -102,10 +113,20 @@ export interface KtVerdict {
 export interface KtRemoteConfig {
   mode: number;
   signatureKey: string;
-  vrfKey: string;
+  /** Hanya ABI 1 (Ed25519 + EC-VRF). Log v2 memakai ML-DSA-65 tanpa VRF. */
+  vrfKey?: string;
   auditorKeys?: string[];
   valueFormat?: string;
+  /** ABI frame verifier; tidak ada = 1 (server lama). */
+  abiVersion?: number;
 }
+
+/** Verifier v1 dan v2 punya permukaan identik; ABI dipilih dari config. */
+type KtVerifier = KeyTransparencyVerifierV1 | KeyTransparencyVerifierV2;
+
+type ResolvedKtConfig =
+  | { abi: 1; config: KtConfigV1; pin: KtConfigPin; pinChanged: boolean }
+  | { abi: 2; config: KtConfigV2; pin: KtConfigPin; pinChanged: boolean };
 
 export interface KtProof {
   fullTreeHead: Uint8Array;
@@ -148,7 +169,7 @@ export interface KtBundleDeps {
   fetchProof?: (query: KtProofQuery) => Promise<KtProof>;
   /** Bukti anchor distinguished (`GET /api/keys/kt/distinguished`). */
   fetchAnchor?: (query: { last?: number; distinguished?: number }) => Promise<KtProof>;
-  verifier?: KeyTransparencyVerifier;
+  verifier?: KtVerifier;
   loadStates?: () => Promise<KtStoredState[]>;
   saveState?: (update: KtStateUpdate) => Promise<void>;
   log?: (event: string, detail: Record<string, unknown>) => void;
@@ -271,39 +292,64 @@ export function treeSizeFromFullTreeHead(fullTreeHead: Uint8Array): number {
 // Loader lazy (modul WASM + config)
 // ---------------------------------------------------------------------------
 
-let verifierPromise: Promise<KeyTransparencyVerifier> | null = null;
-let cachedConfig: KtConfig | null = null;
+let verifierPromises: Partial<Record<KtConfigAbi, Promise<KtVerifier>>> = {};
+let cachedConfig: ResolvedKtConfig | null = null;
 let lastUnavailableAt = 0;
 
 /** Hook test: buang cache config & instance WASM. */
 export function resetKtBundleProofCaches(): void {
-  verifierPromise = null;
+  verifierPromises = {};
   cachedConfig = null;
   lastUnavailableAt = 0;
 }
 
 /**
- * Muat verifier sekali per sesi. Modul WASM diambil lewat URL aset Vite
- * (`?url`) sehingga hanya diunduh saat KT benar-benar dipakai.
+ * Muat verifier sesuai ABI config, sekali per ABI per sesi. Modul WASM diambil
+ * lewat URL aset Vite (`?url`) sehingga hanya diunduh saat KT benar-benar dipakai.
+ *
+ * ABI 1 (v1) dan ABI 2 (v2) memakai file WASM berbeda; frame v1 ditolak modul v2
+ * dan sebaliknya, jadi modul tidak boleh dipilih dari tebakan.
  */
-async function loadKtVerifier(): Promise<KeyTransparencyVerifier> {
-  if (!verifierPromise) {
-    verifierPromise = (async () => {
+async function loadKtVerifier(abi: KtConfigAbi): Promise<KtVerifier> {
+  const existing = verifierPromises[abi];
+  if (existing) {
+    try {
+      return await existing;
+    } catch (error) {
+      delete verifierPromises[abi];
+      throw error;
+    }
+  }
+
+  const promise = (async (): Promise<KtVerifier> => {
+    if (abi === 2) {
       const [{ instantiateKeyTransparencyVerifier: instantiate }, wasmModule] = await Promise.all([
-        import('./keyTransparency'),
-        import('../../../packages/keytrans-wasm/dist/keytrans.wasm?url'),
+        import('./keyTransparencyV2'),
+        import('../../../packages/keytrans-wasm-v2/dist/keytrans-v2.wasm?url'),
       ]);
       const url = (wasmModule as { default: string }).default;
       const response = await fetch(url);
-      if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier (${response.status})`);
+      if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier v2 (${response.status})`);
       const bytes = new Uint8Array(await response.arrayBuffer());
       return instantiate(bytes as Uint8Array<ArrayBuffer>);
-    })();
-  }
+    }
+
+    const [{ instantiateKeyTransparencyVerifier: instantiate }, wasmModule] = await Promise.all([
+      import('./keyTransparency'),
+      import('../../../packages/keytrans-wasm/dist/keytrans.wasm?url'),
+    ]);
+    const url = (wasmModule as { default: string }).default;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier (${response.status})`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return instantiate(bytes as Uint8Array<ArrayBuffer>);
+  })();
+
+  verifierPromises[abi] = promise;
   try {
-    return await verifierPromise;
+    return await promise;
   } catch (error) {
-    verifierPromise = null;
+    delete verifierPromises[abi];
     throw error;
   }
 }
@@ -397,41 +443,126 @@ async function defaultFetchAnchor(query: { last?: number; distinguished?: number
  */
 class KtConfigPinMismatchError extends KtVerificationError {}
 
+/** ABI tak dikenal tidak boleh jatuh ke verifier v1 secara diam-diam. */
+function remoteAbi(remote: KtRemoteConfig): KtConfigAbi {
+  if (remote.abiVersion === undefined) return 1;
+  if (remote.abiVersion === 1 || remote.abiVersion === 2) return remote.abiVersion;
+  throw new Error(`kt: ABI log tidak dikenal (${String(remote.abiVersion)})`);
+}
+
 async function resolveConfig(
   fetchConfig: () => Promise<KtRemoteConfig>
-): Promise<KtConfig> {
+): Promise<ResolvedKtConfig> {
   if (cachedConfig) return cachedConfig;
   const remote = await fetchConfig();
-  if (typeof remote.mode !== 'number' || !remote.signatureKey || !remote.vrfKey) {
+  if (
+    typeof remote.mode !== 'number' ||
+    !Number.isInteger(remote.mode) ||
+    !remote.signatureKey
+  ) {
     throw new Error('kt: config log tidak lengkap');
   }
+
+  const abi = remoteAbi(remote);
+  if (abi === 1 && !remote.vrfKey) throw new Error('kt: config log ABI 1 tanpa vrfKey');
+  if (abi === 2 && remote.valueFormat !== 'nyx-kt-value-v2') {
+    throw new Error('kt: format nilai log tidak cocok dengan ABI 2');
+  }
+
   const observed = parseKtConfigPin({
+    abiVersion: abi,
     mode: remote.mode,
     signatureKey: remote.signatureKey,
     vrfKey: remote.vrfKey,
     auditorKeys: remote.auditorKeys ?? [],
   });
   if (!observed) throw new Error('kt: config log tidak valid');
+
   const pin = await loadKtConfigPin();
-  if (pin) {
-    if (!ktConfigPinMatches(pin, observed)) {
-      throw new KtConfigPinMismatchError(
-        'kt: konfigurasi log berubah dari pin (kemungkinan server menukar kunci verifikasi)'
-      );
+  let pinChanged = false;
+  if (!pin || !ktConfigPinMatches(pin, observed)) {
+    if (pin) {
+      // [docs/35 §35.7 Fase 7] Satu-satunya transisi yang diizinkan: pin ABI 1
+      // → config ABI 2 dengan mode sama. Pin baru ditulis setelah bukti v2
+      // terbukti sah (`commitKtConfigPin`), jadi config palsu tidak bisa
+      // "membajak" pin sebelum ada bukti yang lolos verifikasi. Arah v2 → v1
+      // (downgrade) dan perubahan kunci dalam ABI yang sama selalu ditolak.
+      const upgrading =
+        pin.abiVersion === 1 && observed.abiVersion === 2 && pin.mode === observed.mode;
+      if (!upgrading) {
+        throw new KtConfigPinMismatchError(
+          'kt: konfigurasi log berubah dari pin (kemungkinan server menukar kunci verifikasi)'
+        );
+      }
     }
-  } else {
-    await saveKtConfigPin(observed);
+    pinChanged = true;
   }
-  const config: KtConfig = {
-    // Mode divalidasi sebagai angka di atas; tipe `KtMode` adalah union nilai
-    // yang dikenal verifier.
-    mode: remote.mode as KtConfig['mode'],
-    signatureKey: hexToBytesLocal(remote.signatureKey),
-    vrfKey: hexToBytesLocal(remote.vrfKey),
-    auditorKeys: (remote.auditorKeys ?? []).map(hexToBytesLocal),
+
+  const signatureKey = hexToBytesLocal(observed.signatureKey);
+  const auditorKeys = observed.auditorKeys.map(hexToBytesLocal);
+  cachedConfig =
+    abi === 1
+      ? {
+          abi: 1,
+          config: {
+            // Mode divalidasi sebagai integer di atas; tipe `KtMode` adalah
+            // union nilai yang dikenal verifier.
+            mode: observed.mode as KtConfigV1['mode'],
+            signatureKey,
+            vrfKey: hexToBytesLocal(observed.vrfKey!),
+            auditorKeys,
+          },
+          pin: observed,
+          pinChanged,
+        }
+      : {
+          abi: 2,
+          config: {
+            mode: observed.mode as KtConfigV2['mode'],
+            signatureKey,
+            auditorKeys,
+          },
+          pin: observed,
+          pinChanged,
+        };
+  return cachedConfig;
+}
+
+/** Tulis pin (TOFU/upgrade) hanya setelah verifier menerima bukti. */
+async function commitKtConfigPin(resolved: ResolvedKtConfig): Promise<void> {
+  if (!resolved.pinChanged) return;
+  resolved.pinChanged = false;
+  await saveKtConfigPin(resolved.pin);
+}
+
+interface SearchVerificationInput {
+  searchKey: Uint8Array;
+  condensedResponse: Uint8Array;
+  fullTreeHead: Uint8Array;
+  context?: {
+    lastTreeHead?: Uint8Array;
+    lastDistinguishedTreeHead?: Uint8Array;
+    monitoringData?: Uint8Array;
   };
-  cachedConfig = config;
-  return config;
+  now?: number;
+}
+
+/** Panggil `verifySearch` pada verifier yang ABI-nya cocok dengan config. */
+function verifySearchWith(
+  resolved: ResolvedKtConfig,
+  verifier: KtVerifier,
+  input: SearchVerificationInput
+): KtVerifySearchResult {
+  if (resolved.abi === 1) {
+    return (verifier as KeyTransparencyVerifierV1).verifySearch({
+      ...input,
+      config: resolved.config,
+    });
+  }
+  return (verifier as KeyTransparencyVerifierV2).verifySearch({
+    ...input,
+    config: resolved.config,
+  });
 }
 
 const defaultLog = (event: string, detail: Record<string, unknown>) => {
@@ -489,12 +620,12 @@ export async function checkBundleAgainstKeyTransparency(
     const fetchProof = deps.fetchProof ?? defaultFetchProof;
     const fetchAnchor = deps.fetchAnchor ?? defaultFetchAnchor;
     const saveState = deps.saveState ?? saveKtState;
-    const verifier = deps.verifier ?? (await loadKtVerifier());
-    const config = await resolveConfig(fetchConfig);
+    // Config dulu: ABI-nya menentukan modul WASM yang harus dimuat.
+    const resolved = await resolveConfig(fetchConfig);
+    const verifier = deps.verifier ?? (await loadKtVerifier(resolved.abi));
 
     const proof = await fetchProof({ searchKey, last: state?.treeSize });
-    const result = verifier.verifySearch({
-      config,
+    const result = verifySearchWith(resolved, verifier, {
       searchKey,
       condensedResponse: proof.condensed,
       fullTreeHead: proof.fullTreeHead,
@@ -508,6 +639,9 @@ export async function checkBundleAgainstKeyTransparency(
       now,
     });
 
+    // Bukti diterima → pin config boleh ditulis (termasuk upgrade v1 → v2).
+    await commitKtConfigPin(resolved);
+
     const parsed = parseKtValue(result.value);
     const treeSize = treeSizeFromFullTreeHead(proof.fullTreeHead);
 
@@ -517,8 +651,7 @@ export async function checkBundleAgainstKeyTransparency(
     if (!anchor) {
       try {
         const anchorProof = await fetchAnchor({});
-        anchor = verifier.verifySearch({
-          config,
+        anchor = verifySearchWith(resolved, verifier, {
           searchKey: new TextEncoder().encode('distinguished'),
           condensedResponse: anchorProof.condensed,
           fullTreeHead: anchorProof.fullTreeHead,
@@ -611,7 +744,14 @@ export async function checkBundleAgainstKeyTransparency(
 
     return { status: 'confirmed', keyVersion: parsed.keyVersion };
   } catch (error) {
-    if (error instanceof KtVerificationError) {
+    // `KtVerificationError` v1/v2 adalah dua kelas berbeda (modul dimuat dinamis);
+    // nama kelas adalah kontrak yang sama, jadi jangan bergantung pada satu
+    // identitas kelas saja — kalau tidak, penolakan bukti v2 salah dihitung
+    // sebagai `unavailable` + backoff.
+    if (
+      error instanceof KtVerificationError ||
+      (error instanceof Error && error.name === 'KtVerificationError')
+    ) {
       // Bukti DITOLAK verifier: bisa anchor basi, bisa server berbohong.
       log('kt.proof-rejected', { userId: input.userId, reason: error.message });
       return { status: 'unverifiable', reason: error.message };
@@ -636,7 +776,7 @@ async function defaultFetchMonitor(request: Uint8Array): Promise<Uint8Array> {
 }
 
 export interface KtMonitorDeps {
-  verifier?: KeyTransparencyVerifier;
+  verifier?: KtVerifier;
   fetchConfig?: () => Promise<KtRemoteConfig>;
   fetchMonitor?: (request: Uint8Array) => Promise<Uint8Array>;
   /** Tree head ringkas untuk gossip (`GET /api/keys/kt/head`). */
@@ -659,15 +799,20 @@ export interface KtMonitorDeps {
  * cara menampilkannya). Kesalahan diteruskan ke pemanggil (penjadwal menangkap).
  */
 export async function monitorKeyTransparency(deps: KtMonitorDeps = {}): Promise<KtMonitorOutcome> {
-  const verifier = deps.verifier ?? (await loadKtVerifier());
-  const config = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
+  const resolved = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
+  const verifier = deps.verifier ?? (await loadKtVerifier(resolved.abi));
   const outcome = await runKtMonitorOnce({
-    verifier,
-    config,
+    // `ktMonitoring` hanya meneruskan keduanya ke verifier; modul WASM yang
+    // dipilih di atas yang menentukan ABI. Cast ini menjaga tipe v1 lama tanpa
+    // menduplikasi loop monitor untuk v2.
+    verifier: verifier as unknown as KeyTransparencyVerifierV1,
+    config: resolved.config as unknown as KtConfigV1,
     fetchMonitor: deps.fetchMonitor ?? defaultFetchMonitor,
     states: deps.states,
     now: deps.now,
   });
+  // Bukti monitor diterima → pin config boleh ditulis (termasuk upgrade v1 → v2).
+  await commitKtConfigPin(resolved);
   // [docs/30 §30.5 tahap C] Satu langkah monitor = satu titik segar untuk
   // jangkar gossip (interval 6 jam; satu GET tambahan per langkah, bukan per pesan).
   await refreshKtAnchor(deps.fetchHead);

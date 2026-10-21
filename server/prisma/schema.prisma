@@ -12,6 +12,13 @@ datasource db {
 model User {
   id               String  @id @default(uuid())
   usernameHash     String  @unique
+  // [docs/28 §R5] ID publik acak untuk tautan berbagi (`/u/<shareId>`),
+  // terpisah dari blind index. NULL untuk baris legacy; diisi sekali saat
+  // register atau lazily saat login/GET /me. Memakai usernameHash sebagai ID
+  // berbagi membuat pemegang dump bisa memakai nilai tersimpan sebagai kunci
+  // lookup hidup; shareId memutus kaitan itu tanpa memutus tautan lama
+  // (64-hex masih diterima sebagai jalur migrasi).
+  shareId          String? @unique
   passwordHash     String
   encryptedProfile String? @db.Text
 

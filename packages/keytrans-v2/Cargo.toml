@@ -1,0 +1,45 @@
+#
+# Copyright (C) 2024 Signal Messenger, LLC.
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# NYX KT v2 fork of `libsignal-keytrans`: ML-DSA-65 tree-head authentication
+# and a public SHA-256 index instead of an ECVRF. The tree/proof machinery is
+# unchanged. See docs/35 §35.7 Fase 7.
+
+[package]
+name = "libsignal-keytrans-v2"
+version = "0.0.1"
+authors = ["Signal Messenger LLC", "NYX"]
+license = "AGPL-3.0-only"
+edition = "2024"
+
+[dependencies]
+displaydoc = { version = "0.2.6" }
+hex = { version = "0.4.3" }
+hmac = { version = "0.13.0" }
+hybrid-array = { version = "0.4", features = ["extra-sizes"] }
+itertools = { version = "0.15.0" }
+ml-dsa = { version = "0.1.1", default-features = false, features = ["alloc"] }
+prost = { version = "0.14" }
+sha2 = { version = "0.11" }
+zerocopy = { version = "0.8.33", features = ["derive"] }
+
+[build-dependencies]
+prost-build = { version = "0.14" }
+
+[dev-dependencies]
+assert_matches = { version = "1.5" }
+const-str = { version = "1.0" }
+proptest = { version = "1.7" }
+serde_json = { version = "1.0" }
+test-case = { version = "3.3" }
+
+# [lints] workspace = true (libsignal) — ditulis ulang saat vendoring.
+[lints.clippy]
+cast_possible_truncation = "warn"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(fuzzing)',
+    'cfg(tokio_unstable)',
+] }

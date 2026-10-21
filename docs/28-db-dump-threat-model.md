@@ -813,6 +813,13 @@ Mitigasi yang berlaku sekarang: rate limit per IP pada semua jalur itu, dan
 pencarian publik dibatasi (sandbox hanya boleh lookup persis,
 `users.ts` `isExactHash`). Perbaikan penuh = **memisahkan "ID untuk dibagikan"
 dari kolom blind index** (kolom `shareId` terpisah + kandidat kedua dibatasi ke
-endpoint pencarian). Belum dikerjakan karena menyentuh skema **dan** klien; kalau
-dikerjakan, urutannya: kolom baru → klien mulai memakai `shareId` untuk tautan →
-hapus kandidat kedua dari jalur auth.
+endpoint pencarian).
+
+Status perbaikan penuh (2026-10-21): **landed.** `User.shareId` (`s1_` +
+32 byte acak base64url, `@unique`, nullable) diisi saat register dan lazily
+saat login / `GET /me` (`utils/userShareId.ts`). `/api/users/search` menerima
+`shareId` dan me-lookup kolom `shareId` sendiri — bukan blind index. Klien
+(`ShareProfileModal`, `usernameLink`) menulis tautan baru `/u/<shareId>`.
+Tautan lama 43-char/64-hex tetap dibaca supaya QR yang sudah beredar tidak
+mati, jadi langkah penghapusan kandidat kedua dari jalur auth (login/restore)
+masih **belum** — perlu masa deprekasi tautan lama dulu.

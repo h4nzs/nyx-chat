@@ -17,12 +17,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   samplePoissonInterval,
   CoverTrafficScheduler,
+  CoverBudget,
+  adaptiveCoverLambda,
+  realSendRatePerMin,
   coverShouldYield,
   notifyRealSend,
   makeCoverContent,
   estimateDailyCoverBytes,
   isBurnerConversation,
   isCoverPayload,
+  coverTargetAllowed,
   collectCoverArmedIds,
   _resetCoverTrafficStateForTests,
   COVER_MIN_INTERVAL_MS,
@@ -229,6 +233,32 @@ describe('[26.10.5 Q5] burner default Maximum', () => {
   })
 })
 
+describe('[docs/35 Fase 3] cover traffic 1:1 opt-in', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('scheduler FIRE untuk DM yang di-opt-in lewat daftar Maximum', () => {
+    const sentTo: string[] = []
+    const scheduler = new CoverTrafficScheduler({
+      masterEnabled: true,
+      maximumGroups: new Set(['dm-conv-1']),
+      isVisible: () => true,
+      isTransportConnected: () => true,
+      onSendCover: (id) => sentTo.push(id),
+    })
+    scheduler.start('dm-conv-1')
+    vi.advanceTimersByTime(COVER_MAX_INTERVAL_MS + 1000)
+    expect(sentTo).toContain('dm-conv-1')
+  })
+
+  it('coverTargetAllowed: grup & burner selalu boleh, DM hanya setelah ada riwayat', () => {
+    expect(coverTargetAllowed({ conversationId: 'conv-x', isGroup: true, hasHistory: false })).toBe(true)
+    expect(coverTargetAllowed({ conversationId: 'burner_a', isGroup: false, hasHistory: false })).toBe(true)
+    expect(coverTargetAllowed({ conversationId: 'conv-dm', isGroup: false, hasHistory: false })).toBe(false)
+    expect(coverTargetAllowed({ conversationId: 'conv-dm', isGroup: false, hasHistory: true })).toBe(true)
+  })
+})
+
 describe('payload & estimasi', () => {
   it('makeCoverContent: payload { type: COVER, ts } — dikenali parseSilent client', () => {
     const content = makeCoverContent()
@@ -241,5 +271,86 @@ describe('payload & estimasi', () => {
     const bytes = estimateDailyCoverBytes()
     expect(bytes).toBeGreaterThan(5 * 1024 * 1024)
     expect(bytes).toBeLessThan(6.5 * 1024 * 1024)
+  })
+})
+
+describe('[docs/35 Fase 3] adaptive λ + budget harian', () => {
+  const now = Date.UTC(2026, 9, 21, 12, 0, 0)
+
+  afterEach(() => _resetCoverTrafficStateForTests())
+
+  it('adaptiveCoverLambda: naik mengikuti laju nyata, tapi di-clamp', () => {
+    expect(adaptiveCoverLambda(0)).toBe(0.5)
+    expect(adaptiveCoverLambda(0.4)).toBe(0.5)
+    expect(adaptiveCoverLambda(2)).toBe(1)
+    expect(adaptiveCoverLambda(100)).toBe(2)
+    expect(adaptiveCoverLambda(-5)).toBe(0.5)
+  })
+
+  it('realSendRatePerMin: hanya menghitung 60 detik terakhir per percakapan', () => {
+    notifyRealSend(now - 120_000, 'conv-a')
+    notifyRealSend(now - 30_000, 'conv-a')
+    notifyRealSend(now - 10_000, 'conv-a')
+    notifyRealSend(now - 5_000, 'conv-b')
+    expect(realSendRatePerMin('conv-a', now)).toBe(2)
+    expect(realSendRatePerMin('conv-b', now)).toBe(1)
+    expect(realSendRatePerMin('conv-c', now)).toBe(0)
+  })
+
+  it('budget: menolak fire setelah batas harian tercapai', () => {
+    const storage = new Map<string, string>()
+    const budget = new CoverBudget({
+      storage: {
+        getItem: (key) => storage.get(key) ?? null,
+        setItem: (key, value) => { storage.set(key, value) },
+      },
+      now: () => now,
+      dailyBytes: 16_384,
+    })
+    expect(budget.canSend('conv-a', 8192)).toBe(true)
+    budget.record('conv-a', 8192)
+    expect(budget.canSend('conv-a', 8192)).toBe(true)
+    budget.record('conv-a', 8192)
+    expect(budget.canSend('conv-a', 8192)).toBe(false)
+    expect(budget.canSend('conv-b', 8192)).toBe(true)
+  })
+
+  it('budget: reset saat hari berganti', () => {
+    let current = now
+    const storage = new Map<string, string>()
+    const budget = new CoverBudget({
+      storage: {
+        getItem: (key) => storage.get(key) ?? null,
+        setItem: (key, value) => { storage.set(key, value) },
+      },
+      now: () => current,
+      dailyBytes: 8192,
+    })
+    budget.record('conv-a', 8192)
+    expect(budget.canSend('conv-a', 8192)).toBe(false)
+    current = now + 24 * 60 * 60 * 1000
+    expect(budget.canSend('conv-a', 8192)).toBe(true)
+  })
+
+  it('scheduler tidak fire bila budget habis, dan mencatat pemakaian saat fire', () => {
+    vi.useFakeTimers()
+    try {
+      const budget = new CoverBudget({ storage: null, now: () => now, dailyBytes: 0 })
+      const sentTo: string[] = []
+      const scheduler = new CoverTrafficScheduler({
+        masterEnabled: true,
+        maximumGroups: new Set(['conv-budget']),
+        isVisible: () => true,
+        isTransportConnected: () => true,
+        onSendCover: (id) => sentTo.push(id),
+        budget,
+        now: () => now,
+      })
+      scheduler.start('conv-budget')
+      vi.advanceTimersByTime(COVER_MAX_INTERVAL_MS + 1000)
+      expect(sentTo).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

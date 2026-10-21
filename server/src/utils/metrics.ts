@@ -405,6 +405,24 @@ export const KT_LAST_SUCCESS = defineGauge(
 );
 
 /**
+ * [docs/35 §35.7 Fase 7] Penulisan ke log KT **v2** (ML-DSA, tanpa VRF) saat
+ * dual-write transisi. Dipisahkan dari `nyx_kt_writes_total` supaya operator
+ * bisa melihat log mana yang tertinggal — nilai yang sama ditulis ke dua pohon
+ * yang berbeda, dan satu pohon yang diam tidak boleh tersembunyi di rata-rata.
+ */
+export const KT_V2_WRITES = defineCounter(
+  'nyx_kt_v2_writes_total',
+  'Penulisan entri log Key Transparency v2 (ML-DSA), per hasil',
+  ['result']
+);
+
+/** Unix timestamp penulisan log KT v2 terakhir yang berhasil. */
+export const KT_V2_LAST_SUCCESS = defineGauge(
+  'nyx_kt_v2_last_success_timestamp_seconds',
+  'Unix timestamp penulisan log Key Transparency v2 terakhir yang berhasil'
+);
+
+/**
  * [docs/30 §30.5 WS-A / docs/32 §32.8] Permintaan bukti ke layanan baca KT
  * (proxy `/api/keys/kt/*`), per hasil. `disabled` penting: tanpa `KT_QUERY_URL`
  * klien jatuh ke TOFU, dan itu harus terlihat di dashboard, bukan senyap.
@@ -587,4 +605,18 @@ export const CLIENT_VERSION_REJECTED = defineCounter(
   'nyx_client_version_rejected_total',
   'Permintaan API yang ditolak karena versi klien di bawah minimum, per alasan',
   ['result']
+);
+
+/**
+ * [docs/35 Fase 3] Aktivitas OHTTP, per jalur dan hasil.
+ *
+ * Tanpa metrik ini, satu-satunya cara tahu OHTTP hidup adalah membaca log — dan
+ * log justru yang ingin dihindari (relay melihat IP, gateway melihat isi).
+ * Nilai label = enum pendek: route `config|relay|gateway|token`, result
+ * `ok|denied|invalid|unknown_key|upstream`. Tidak ada path, key id, atau IP.
+ */
+export const OHTTP_OPS = defineCounter(
+  'nyx_ohttp_ops_total',
+  'Operasi OHTTP (config/relay/gateway/token), per jalur dan hasil',
+  ['route', 'result']
 );

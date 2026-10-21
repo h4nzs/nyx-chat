@@ -6,11 +6,35 @@ let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 let datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 
 // --- TRAFFIC COVER: CHAFFING ---
+// [docs/35 Fase 3] Profil chaff dapat diubah runtime (visibility-aware):
+// tab background berhenti mengirim chaff — chaff dari tab yang tidak dilihat
+// justru mengkorelasikan "user membuka app" dengan lonjakan trafik, dan
+// membakar kuota tanpa manfaat penyamaran.
 const CHAFF_INTERVAL_MS = 3000;
 const CHAFF_JITTER_MS = 500;
 // Ukuran chaff ≤ MTU datagram QUIC (~1200B) agar tidak drop diam-diam.
 const CHAFF_DATAGRAM_SIZE = 1000;
 let isChaffingActive = false;
+
+const chaffProfile = {
+  enabled: true,
+  intervalMs: CHAFF_INTERVAL_MS,
+  jitterMs: CHAFF_JITTER_MS,
+  sizeBytes: CHAFF_DATAGRAM_SIZE,
+};
+
+function clampInt(value: number | undefined, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function updateChaffProfile(input: { enabled?: boolean; intervalMs?: number; jitterMs?: number; sizeBytes?: number }) {
+  if (typeof input.enabled === 'boolean') chaffProfile.enabled = input.enabled;
+  chaffProfile.intervalMs = clampInt(input.intervalMs, 500, 60_000, chaffProfile.intervalMs);
+  chaffProfile.jitterMs = clampInt(input.jitterMs, 0, 5_000, chaffProfile.jitterMs);
+  // 1..1000 byte: 0 berarti "tidak mengirim apa pun" yang bukan chaff.
+  chaffProfile.sizeBytes = clampInt(input.sizeBytes, 1, 1000, chaffProfile.sizeBytes);
+}
 
 // Serialisasi pengiriman frame (FIFO) tanpa delay buatan:
 // pesan asli dikirim SEKETIKA, chaff dummy dikirim oleh loop interval.
@@ -95,19 +119,20 @@ async function chaffingLoop() {
     isChaffingActive = true;
 
     while (isChaffingActive) {
-        if (!transport || !datagramWriter) {
+        if (!transport || !datagramWriter || !chaffProfile.enabled) {
+            // Diam tanpa antre: saat profil hidup lagi, interval di-resample.
             await new Promise(r => setTimeout(r, 1000));
             continue;
         }
 
         // Generate encrypted-looking dummy data (traffic cover saat idle)
-        const dummyPayload = new Uint8Array(CHAFF_DATAGRAM_SIZE);
+        const dummyPayload = new Uint8Array(chaffProfile.sizeBytes);
         self.crypto.getRandomValues(dummyPayload);
         enqueueSend({ opCode: TransportOpCode.CHAFF, payload: dummyPayload, useStream: false });
 
         // Wait for next interval with jitter
-        const jitter = Math.floor(Math.random() * (CHAFF_JITTER_MS * 2)) - CHAFF_JITTER_MS;
-        await new Promise(r => setTimeout(r, Math.max(500, CHAFF_INTERVAL_MS + jitter)));
+        const jitter = Math.floor(Math.random() * (chaffProfile.jitterMs * 2)) - chaffProfile.jitterMs;
+        await new Promise(r => setTimeout(r, Math.max(500, chaffProfile.intervalMs + jitter)));
     }
 }
 
@@ -321,6 +346,9 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
         transport = null;
       }
       await initWebTransport(data.url, data.token, data.certificateHash, data.deviceIdentity);
+      break;
+    case 'CHAFF_CONFIG':
+      updateChaffProfile(data);
       break;
     case 'DISCONNECT':
       if (transport) {

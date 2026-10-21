@@ -29,6 +29,7 @@ import { makeOtpkQuotaGate } from '../utils/otpkQuota.js'
 import { validateEncryptedPrivateKeysPayload, toEncryptedPrivateKeyPatch } from '../utils/encryptedKeysSync.js'
 // [docs/30 WS-G(4)] Pemetaan perangkat → bundle dipakai di 3 jalur; satu util teruji.
 import {
+  parseOtpkMode,
   requireBundleDevice,
   toDeviceTemplate,
   toPreKeyBundle,
@@ -343,9 +344,15 @@ router.get(
   async (req, res, next) => {
     try {
       const { userId } = req.params
+      // [docs/35 Fase 4] `read` (PIR/preview) tidak mengonsumsi OTPK, jadi tidak
+      // boleh memotong kuota konsumsi — kalau dipotong, preview profil tetap
+      // "membakar" jatah harian walau kolam OTPK tidak disentuh.
+      const otpkMode = parseOtpkMode(req.query.otpk)
 
       // Kuota harian: tolak SEBELUM cache/DB/query konsumsi OTPK (fail-closed)
-      await consumeOtpkQuota((req.user as AuthJwtPayload).id, [String(userId)])
+      if (otpkMode === 'consume') {
+        await consumeOtpkQuota((req.user as AuthJwtPayload).id, [String(userId)])
+      }
 
       // 1. Try to get device template from Redis
       let deviceTemplate: IDeviceTemplate | null = null;
@@ -380,8 +387,15 @@ router.get(
         }
       }
 
-      // 3. Fetch and DELETE one OTPK from DB (Atomic)
+      // 3. Fetch and DELETE one OTPK from DB (Atomic) — hanya pada mode
+      //    `consume`. [docs/35 Fase 4] Jalur PIR/preview memakai
+      //    `?otpk=read`: identitas + signed pre-key tanpa menguras kolam OTPK
+      //    peer (dulu setiap GET membakar satu pre-key, termasuk retry jaringan).
       let otpk = null;
+      if (otpkMode === 'read') {
+        res.json(toPreKeyBundle(deviceTemplate, null));
+        return;
+      }
       try {
         otpk = await prisma.$queryRaw`
           DELETE FROM "OneTimePreKey"

@@ -107,7 +107,9 @@ export async function publishIdentityKeyChange(
   }
 
   // Tanpa endpoint & tanpa transport injeksi = fitur mati (no-op, bukan error).
-  if (!process.env.KT_SERVER_URL && !deps.transport) return { ok: false, skipped: 'DISABLED' };
+  if (!process.env.KT_SERVER_URL && !process.env.KT_V2_SERVER_URL && !deps.transport) {
+    return { ok: false, skipped: 'DISABLED' };
+  }
 
   const raw = input.usernameHash?.trim();
   if (!raw) {

@@ -15,6 +15,12 @@
       "bytes": 299670,
       "sha256": "4b551a496c7c5463672363d1830046ef79cbd8ce60cdf83e7c74ce5b8aa4cc92",
       "source": "vendor/signal/libsignal-keytrans@e8cc2dddd578859b4a029c9c94670b24ce2b616a"
+    },
+    {
+      "path": "packages/keytrans-wasm-v2/dist/keytrans-v2.wasm",
+      "bytes": 279233,
+      "sha256": "7e5dfe8034338bce02bea86894689d54a0e67482de8267e92e5423af42df7fa9",
+      "source": "packages/keytrans-v2@nyx-kt-v2-fork (docs/35 §35.7)"
     }
   ]
 }

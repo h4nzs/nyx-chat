@@ -276,6 +276,16 @@ jobs:
       - name: Run E2E (spec transport auto-skip bila WebTransport tidak tersedia)
         working-directory: web
         run: pnpm exec playwright test --project=chromium
+      # [docs/35 §35.8] PQ v2 hanya dikirim/diiklankan saat gerbang menyala, dan
+      # `pqV2.spec` skip dengan alasan tertulis bila flag mati. Tanpa step ini
+      # jalur X3DH v2 / grup `sigV:2` / burner PQ-only tidak punya bukti otomatis
+      # sama sekali. Dijalankan terpisah supaya suite utama tetap menguji default
+      # v1; web/.env tidak ada di CI, jadi nilainya murni dari env step ini.
+      - name: Run E2E PQ v2 (gerbang VITE_PQ_V2=1)
+        working-directory: web
+        env:
+          VITE_PQ_V2: '1'
+        run: pnpm exec playwright test --project=chromium e2e/pqV2.spec.ts
       # [docs/30 WS-G(2)] Lapis "scrape nyata" dari drill alert: exporter hidup di
       # 127.0.0.1:9464 milik proses ini sendiri (Postgres/Redis sudah siap di job
       # ini). Menolak nama metrik yang terkirim tapi tidak dideklarasikan —

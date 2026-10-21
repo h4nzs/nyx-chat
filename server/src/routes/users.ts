@@ -14,6 +14,8 @@ import { hashPassword, verifyPassword } from '../utils/password.js'
 import { env } from '../config.js'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
+// [docs/35 Fase 4] Pencarian dibatasi per akun + per IP (endpoint enumerasi).
+import { searchIpLimiter, searchLimiter } from '../middleware/rateLimiter.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
@@ -22,9 +24,12 @@ import { AuthJwtPayload } from '../types/auth.js';
 import {
   deviceInstallationTag,
   identifierLookupCandidates,
+  isSearchableIdentifier,
+  isShareId,
   openAtRest,
   pepperedIdentifier,
 } from '../utils/atRestSecrets.js';
+import { ensureUserShareId } from '../utils/userShareId.js';
 import {
   blockedUserTag, purgeSealedUserRows, resolveRoutingUser, routingCandidates,
   type SealedOwnedRowsPrisma
@@ -48,10 +53,12 @@ router.get('/me', async (req, res, next) => {
     
     let user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
+      select: { id: true, usernameHash: true, shareId: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
     })
 
     if (!user) throw new ApiError(404, 'User not found');
+    // [docs/28 §R5] Baris legacy: isi shareId sekali saat /me.
+    const shareId = await ensureUserShareId(user);
 
     // RESTORE: Lazy Expiration Check
     let systemAlert: { type: 'subscription_expiring', daysLeft: number } | undefined = undefined;
@@ -67,14 +74,14 @@ router.get('/me', async (req, res, next) => {
             user = await prisma.user.update({
                 where: { id: userId },
                 data: { subscriptionTier: 'FREE' },
-                select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
+                select: { id: true, usernameHash: true, shareId: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
             });
         } else if (daysLeft <= 7) {
             systemAlert = { type: 'subscription_expiring', daysLeft };
         }
     }
 
-    res.json({ ...user, systemAlert })
+    res.json({ ...user, shareId, systemAlert })
   } catch (error) { next(error) }
 })
 
@@ -548,30 +555,32 @@ router.post('/me/logout', async (req, res, next) => {
 // --- PARAMETERIZED ROUTES (Must be last) ---
 
 // SEARCH users (Blind Indexing)
-router.get('/search', async (req, res, next) => {
+router.get('/search', searchIpLimiter, searchLimiter, async (req, res, next) => {
   try {
     const { q } = req.query
     if (!q || typeof q !== 'string') throw new ApiError(400, 'Search query is required.')
 
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    
-    // RESTORE: Sandbox Search Restriction
-    const requester = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isVerified: true } });
-    
-    // Check if query is an exact Hash ID — 43 char base64url (Argon2id klien)
-    // atau 64 hex (blind index ter-pepper yang dikirim balik server, mis. dari
-    // link undangan/documentation docs/28 Tier 0.2).
-    const isExactHash = typeof q === 'string'
-      ? (q.length === 43 && /^[A-Za-z0-9_-]+$/.test(q)) || (q.length === 64 && /^[a-f0-9]{64}$/.test(q))
-      : false;
 
-    if (!requester?.isVerified && !isExactHash) {
-        throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users can only find contacts by providing the exact Hash ID.');
+    // [docs/35 Fase 4 — R5] Hanya hash yang boleh dicari: 43-char base64url
+    // (Argon2id klien) atau 64-hex (blind index ter-pepper dari link berbagi).
+    // Nilai mentah ditolak SEBELUM menyentuh DB: sebelumnya server mau
+    // menghitungkan HMAC untuk tebakan apa pun, sehingga dump DB + akses API
+    // hidup menjadi oracle keanggotaan. Penolakan ini berlaku untuk semua akun
+    // (termasuk yang terverifikasi) — klien memang selalu meng-hash lebih dulu.
+    if (!isSearchableIdentifier(q)) {
+      throw new ApiError(400, 'INVALID_IDENTIFIER_HASH: Search hanya menerima hash identifier (43 karakter base64url atau 64 hex).');
     }
 
+    // [docs/28 §R5] shareId (`s1_…`) adalah ID publik acak → lookup kolom
+    // sendiri, bukan blind index. Bentuk hash tetap lewat `usernameHash`
+    // (43-char Argon2id klien / 64-hex echo legacy).
+    const shareLookup = isShareId(q)
     const users = await prisma.user.findMany({
-      where: { usernameHash: { in: identifierLookupCandidates(q) } },
-      take: 20,
+      where: shareLookup
+        ? { shareId: q.trim() }
+        : { usernameHash: { in: identifierLookupCandidates(q) } },
+      take: shareLookup ? 1 : 20,
       select: { 
         id: true, 
         encryptedProfile: true, 

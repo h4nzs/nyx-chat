@@ -854,7 +854,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       // public key → (blindedMsg, inv). Server menandatangani blinded form
       // tanpa tahu isinya. Suite: RSABSSA-SHA384-PSS-Randomized.
       case 'credential_blind': {
-        const { publicJwk, message } = payload as { publicJwk: JsonWebKey; message: string };
+        const { publicJwk, message, suite: suiteId } = payload as { publicJwk: JsonWebKey; message: string; suite: string };
+        // [docs/35 §35.6.6 — Fase 5] Suite divalidasi terhadap daftar bersama:
+        // suite asing tidak boleh di-blind dengan parameter v1.
+        const { requireCredentialSuite } = await import('@nyx/shared');
+        requireCredentialSuite(suiteId);
         const { RSABSSA } = await import('@cloudflare/blindrsa-ts');
         const suite = RSABSSA.SHA384.PSS.Randomized();
         const publicKey = await crypto.subtle.importKey(
@@ -873,7 +877,9 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'credential_finalize': {
-        const { publicJwk, preparedMsgB64, blindSigB64, inv } = payload as { publicJwk: JsonWebKey; preparedMsgB64: string; blindSigB64: string; inv: string };
+        const { publicJwk, preparedMsgB64, blindSigB64, inv, suite: suiteId } = payload as { publicJwk: JsonWebKey; preparedMsgB64: string; blindSigB64: string; inv: string; suite: string };
+        const { requireCredentialSuite } = await import('@nyx/shared');
+        requireCredentialSuite(suiteId);
         const { RSABSSA } = await import('@cloudflare/blindrsa-ts');
         const suite = RSABSSA.SHA384.PSS.Randomized();
         const publicKey = await crypto.subtle.importKey(

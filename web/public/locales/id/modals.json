@@ -180,7 +180,15 @@
     "verify_security": "Verifikasi Keamanan",
     "pq_status": "X-Wing Post-Quantum",
     "pq_desc": "Kerahasiaan Maju Diperkuat Aktif",
-    "id_label": "ID"
+    "id_label": "ID",
+    "cover": {
+      "title": "Privasi maksimum (trafik penutup)",
+      "description": "Pesan umpan di latar belakang, tidak bisa dibedakan dari trafik asli (~{{mb}} MB/hari per chat).",
+      "no_history": "Kirim pesan nyata dulu — trafik penutup tidak pernah memulai percakapan baru.",
+      "disabled_by_master": "Trafik penutup dimatikan secara global di Pengaturan.",
+      "enabled_toast": "Trafik penutup aktif untuk chat ini (~{{mb}} MB/hari).",
+      "disabled_toast": "Trafik penutup dimatikan untuk chat ini."
+    }
   },
   "participants": {
     "make_admin": "Jadikan Admin",

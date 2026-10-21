@@ -14,6 +14,7 @@ import { decideTransportMode, OUTGOING_OPCODE_MAP } from './transportMode';
 import { classifyKickPayload } from './forceLogout';
 import { advertisedCapabilities } from './spqrNegotiation';
 import { advertisedPqCapabilities } from './pqCapability';
+import { resolveChaffProfile } from './chaff';
 import { useAuthStore } from '../store/auth';
 
 import type { 
@@ -190,8 +191,16 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     this.worker = new Worker(new URL('../workers/transport.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = this.handleWorkerMessage.bind(this);
     
+    // [docs/35 Fase 3] Chaff visibility-aware: tab background berhenti
+    // mengirim datagram penyamaran (aturan sama dengan cover traffic).
+    if (typeof document !== 'undefined') {
+      this.applyChaffProfile();
+      document.addEventListener('visibilitychange', () => this.applyChaffProfile());
+    }
+
     // [+] FLUSH ANTRIAN SAAT KONEK
     this.on('connect', () => {
+      this.applyChaffProfile();
       if (this.mode === 'wss') {
         while (this.wssOfflineQueue.length > 0) {
           const m = this.wssOfflineQueue.shift();
@@ -351,6 +360,19 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     });
   }
 
+  /**
+   * [docs/35 Fase 3] Kirim profil chaff ke worker. Dipanggil saat visibilitas
+   * berubah dan saat koneksi terbentuk; `maximum` dibiarkan default karena
+   * kepadatan cover diatur scheduler aplikasi, bukan transport.
+   */
+  private applyChaffProfile(maximum = false): void {
+    const profile = resolveChaffProfile({
+      visible: typeof document === 'undefined' || document.visibilityState === 'visible',
+      maximum,
+    });
+    this.worker.postMessage({ type: 'CHAFF_CONFIG', ...profile } satisfies MainToTransportWorker);
+  }
+
   public disconnect(): void {
     this.clearWtTimer();
     if (this.wtStableTimer) {
@@ -367,6 +389,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   }
 
   private handleWorkerMessage(event: MessageEvent<TransportWorkerToMain>): void {
+
     const data = event.data;
     switch (data.type) {
       case 'CONNECTED':

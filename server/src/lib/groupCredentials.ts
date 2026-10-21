@@ -38,9 +38,15 @@ import { env } from '../config.js'
 // [docs/29 §7.1] Format pesan credential dibagi klien↔server (packages/shared)
 // supaya binding konteks bisa diperiksa server, bukan disimpan sebagai string
 // duplikat yang bisa menyimpang.
-import { credentialClaimFromPrepared } from '@nyx/shared'
+import {
+  CREDENTIAL_SUITE_RSA_V1,
+  credentialClaimFromPrepared,
+  isSupportedCredentialSuite,
+} from '@nyx/shared'
 
-export const CREDENTIAL_SUITE = 'RSABSSA-SHA384-PSS-Randomized'
+// [docs/35 §35.6.6 — Fase 5] ID suite dari modul bersama; klien memakai daftar
+// yang sama untuk memutuskan apakah suite yang ditawarkan issuer didukung.
+export const CREDENTIAL_SUITE = CREDENTIAL_SUITE_RSA_V1
 export const ISSUER_KEY_MODULUS = 2048
 /** Serial = SHA-384 hex dari prepared message (48 byte → 96 hex). */
 export const SERIAL_HEX_LENGTH = 96
@@ -137,7 +143,7 @@ async function ensurePublicKeyRow(keyVersion: number, publicJwk: JsonWebKey): Pr
   const existing = await prisma.credentialIssuerKey.findUnique({ where: { keyVersion } })
   if (!existing) {
     await prisma.credentialIssuerKey.create({
-      data: { keyVersion, publicKeyJwk: JSON.stringify(publicJwk) },
+      data: { keyVersion, publicKeyJwk: JSON.stringify(publicJwk), suite: CREDENTIAL_SUITE },
     })
     return
   }
@@ -196,9 +202,16 @@ export async function getActiveIssuerKey(): Promise<IssuerKey> {
 }
 
 /** Public key (JWK) untuk klien — dibagikan bebas. */
-export async function getIssuerPublicJwk(): Promise<{ keyVersion: number; publicJwk: JsonWebKey }> {
+export async function getIssuerPublicJwk(): Promise<{ keyVersion: number; publicJwk: JsonWebKey; suite: string }> {
   const { keyVersion, publicJwk } = await getActiveIssuerKey()
-  return { keyVersion, publicJwk }
+  // [docs/35 §35.6.6 — Fase 5] Suite yang diiklankan = yang tercatat di DB untuk
+  // key ini (row legacy → v1). Klien menolak suite yang tidak didukung, jadi
+  // jangan pernah mengiklankan konstanta yang berbeda dari yang dipakai verify.
+  const row = await prisma.credentialIssuerKey.findUnique({
+    where: { keyVersion },
+    select: { suite: true },
+  })
+  return { keyVersion, publicJwk, suite: row?.suite ?? CREDENTIAL_SUITE }
 }
 
 /** Serial deterministik dari prepared message (untuk dedupe & revocation). */
@@ -228,7 +241,9 @@ export async function recordIssuedCredential(serial: string, conversationId: str
   await prisma.groupCredential.upsert({
     where: { serial },
     update: {},
-    create: { serial, conversationId, keyVersion },
+    // [docs/35 §35.6.6 — Fase 5] Stempel suite yang menandatangani; selama
+    // migrasi hanya ada suite v1, dan kolomnya nullable untuk row lama.
+    create: { serial, conversationId, keyVersion, suite: CREDENTIAL_SUITE },
   })
 }
 
@@ -280,6 +295,17 @@ export async function verifyPresentation(
   })
   if (!registered || registered.conversationId !== conversationId) return false
   if (registered.keyVersion !== keyVersion) return false
+
+  // [docs/35 §35.6.6 — Fase 5] Suite yang tercatat pada issuer key adalah
+  // kontrak: presentasi dari suite asing (atau key yang tercatat dengan suite
+  // yang tidak kita implementasikan) ditolak. Row legacy tanpa `suite` = v1,
+  // satu-satunya suite yang pernah ada sebelum kolom ini diisi.
+  const keyRow = await prisma.credentialIssuerKey.findUnique({
+    where: { keyVersion },
+    select: { suite: true },
+  })
+  const suiteId = keyRow?.suite ?? CREDENTIAL_SUITE
+  if (!isSupportedCredentialSuite(suiteId)) return false
 
   const publicJwk = await getPublicJwkForVersion(keyVersion)
   if (!publicJwk) return false

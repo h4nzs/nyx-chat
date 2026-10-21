@@ -36,8 +36,15 @@ function initWebMCP(): void {
             required: ['query']
           },
           execute: async (args: { query: string }) => {
+            // [docs/35 Fase 4 — R5] Server hanya menerima hash; tool ini menerima
+            // teks bebas, jadi hash di klien dulu (atau teruskan hash yang sudah ada).
+            const raw = args.query.trim();
+            const isHash = /^[A-Za-z0-9_-]{43}$/.test(raw) || /^[a-f0-9]{64}$/i.test(raw);
+            const query = isHash
+              ? raw
+              : await (await import('./lib/crypto-worker-proxy')).hashUsername(raw);
             // [R2] Jalur ini tidak lewat `api()`, jadi header versi dikirim eksplisit.
-            const response = await fetch('/api/users/search?q=' + encodeURIComponent(args.query), { credentials: 'include', headers: clientVersionHeaders() });
+            const response = await fetch('/api/users/search?q=' + encodeURIComponent(query), { credentials: 'include', headers: clientVersionHeaders() });
             return response.json();
           }
         },

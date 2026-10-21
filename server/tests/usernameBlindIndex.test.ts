@@ -78,20 +78,21 @@ test('D6: lookup tetap deterministik dengan pepper yang sama (login tidak rusak)
   assert.equal(a, b, 'identifier sama → index sama → lookup by equality tetap jalan');
 });
 
-test('D6: echo klien (hash-ID ter-pepper) tetap ketemu lewat kandidat lookup', async () => {
+test('D6: echo klien (hash-ID ter-pepper) tetap ketemu, tanpa membuka lookup nilai mentah', async () => {
   const clientValue = clientArgon('shared-user');
-  const candidates = await withPepper('p', () => identifierLookupCandidates(clientValue));
-
-  assert.equal(candidates[0], await withPepper('p', () => pepperedIdentifier(clientValue)));
-  assert.equal(candidates[1], clientValue, 'kandidat kedua = nilai kiriman apa adanya (echo)');
-  assert.equal(candidates.length, 2, 'tidak ada kandidat lain (query tetap minimal)');
-
-  // Simulasi share-link: klien mengirim kembali nilai TER-PEPPER yang di-echo
-  // server. Kolom DB berisi nilai ter-pepper itu, jadi kandidat kedua harus
-  // sama persis dengannya agar pencarian hash-ID tetap menemukan user.
   const pepperedByServer = await withPepper('p', () => pepperedIdentifier(clientValue));
+
+  const candidates = await withPepper('p', () => identifierLookupCandidates(clientValue));
+  assert.deepEqual(candidates, [pepperedByServer], 'hash klien → satu kandidat (ter-pepper)');
+
+  // Share-link mengirim kembali nilai TER-PEPPER; kolom DB berisi nilai itu,
+  // jadi bentuk 64-hex dipakai apa adanya.
   const echoCandidates = await withPepper('p', () => identifierLookupCandidates(pepperedByServer));
-  assert.ok(echoCandidates.includes(pepperedByServer), 'nilai ter-pepper yang di-echo cocok dengan baris DB');
+  assert.deepEqual(echoCandidates, [pepperedByServer], 'nilai ter-pepper yang di-echo cocok dengan baris DB');
+
+  // [docs/35 Fase 4 — R5] Nilai mentah tidak pernah menjadi kandidat.
+  const rawCandidates = await withPepper('p', () => identifierLookupCandidates('shared-user'));
+  assert.equal(rawCandidates.includes('shared-user'), false, 'pencarian plaintext tidak lagi didukung');
 });
 
 test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kandidat', () => {
@@ -114,8 +115,12 @@ test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kand
   assert.match(auth, /recover_nonce:\$\{pepperedIdentifier\(identifier\)\}/, 'nonce recovery di-key oleh index ter-pepper');
   assert.match(auth, /for \(const candidate of identifierLookupCandidates\(usernameHash\)\)/, 'verify menerima bentuk legacy/echo');
 
-  assert.match(users, /where: \{ usernameHash: \{ in: identifierLookupCandidates\(q\) \} \}/, 'pencarian user memakai kandidat');
-  assert.match(users, /q\.length === 64 && \/\^\[a-f0-9\]\{64\}\$\//, 'isExactHash menerima bentuk 64-hex ter-index');
+  assert.match(users, /\{ usernameHash: \{ in: identifierLookupCandidates\(q\) \} \}/, 'pencarian user memakai kandidat');
+  assert.match(users, /isShareId\(q\)/, 'shareId (docs/28 §R5) dikenali terpisah');
+  assert.match(users, /shareId: q\.trim\(\)/, 'shareId dicari di kolomnya sendiri, bukan blind index');
+  assert.match(users, /isSearchableIdentifier\(q\)/, 'search hanya menerima hash identifier');
+  assert.match(users, /INVALID_IDENTIFIER_HASH/, 'nilai mentah ditolak sebelum menyentuh DB (R5)');
+  assert.doesNotMatch(users, /SANDBOX_SEARCH_RESTRICTION/, 'gerbang sandbox lama digantikan validasi hash yang lebih ketat');
   assert.match(engine, /const usernameHash = pepperedIdentifier\(/, 'user B2B (engine) ikut ter-pepper');
 });
 

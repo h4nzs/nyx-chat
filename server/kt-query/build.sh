@@ -36,6 +36,14 @@ CHECK_OUT="${NYX_KT_CHECK_BINARY:-$here/nyx-kt-check}"
 # aliran update lalu mengirim `SetAuditorHead`. Diport dari implementasi auditor
 # referensi Signal; tanpa proses ini log hanya berjalan `ContactMonitoring`.
 AUDITOR_OUT="${NYX_KT_AUDITOR_BINARY:-$here/nyx-kt-auditor}"
+# Layanan log v2 (ML-DSA + indeks SHA-256, docs/35 §35.7 Fase 7). Proses, basis
+# data, dan port terpisah dari v1 sampai migrasi selesai.
+V2_OUT="${NYX_KT_V2_BINARY:-$here/nyx-kt-query-v2}"
+# Auditor v2: proses terpisah dengan kunci/state/port ML-DSA sendiri.
+V2_AUDITOR_OUT="${NYX_KT_V2_AUDITOR_BINARY:-$here/nyx-kt-auditor-v2}"
+# Bootstrap pemasangan pertama v2 (kunci + config). Bukan layanan; hanya alat
+# satu kali yang dipanggil deploy bila config belum ada.
+V2_INIT_OUT="${NYX_KT_V2_INIT_BINARY:-$here/nyx-kt-v2-init}"
 UPSTREAM="${NYX_KT_UPSTREAM:-}"
 
 if [[ -n "$UPSTREAM" ]]; then
@@ -73,6 +81,12 @@ fi
 go build -o "$OUT" .
 go build -o "$CHECK_OUT" ./cmd/nyx-kt-check
 go build -o "$AUDITOR_OUT" ./cmd/nyx-kt-auditor
+go build -o "$V2_OUT" ./cmd/nyx-kt-query-v2
+go build -o "$V2_AUDITOR_OUT" ./cmd/nyx-kt-auditor-v2
+go build -o "$V2_INIT_OUT" ./cmd/nyx-kt-v2-init
 echo "dibangun: $OUT"
 echo "dibangun: $CHECK_OUT"
 echo "dibangun: $AUDITOR_OUT"
+echo "dibangun: $V2_OUT"
+echo "dibangun: $V2_AUDITOR_OUT"
+echo "dibangun: $V2_INIT_OUT"

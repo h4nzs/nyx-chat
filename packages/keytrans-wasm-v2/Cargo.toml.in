@@ -1,0 +1,26 @@
+# TEMPLATE — `build.sh` menyalin berkas ini ke `Cargo.toml` sambil mengganti
+# `__KEYTRANS_V2_PATH__` dengan path crate `libsignal-keytrans-v2` (fork NYX,
+# lihat docs/35 §35.7 Fase 7). Default = `packages/keytrans-v2`, jadi clone
+# bersih tidak butuh checkout di luar repo. Cargo.toml hasil generate tidak
+# di-commit karena memuat path tersebut.
+[package]
+name = "nyx-keytrans-wasm-v2"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Versi prost WAJIB sama dengan yang dipakai `libsignal-keytrans-v2` (trait
+# `Message` berbeda antar versi).
+libsignal-keytrans-v2 = { path = "__KEYTRANS_V2_PATH__" }
+prost = "0.14"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

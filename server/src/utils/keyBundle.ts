@@ -99,6 +99,26 @@ export function toOneTimePreKey(row: OneTimePreKeyRow): IOneTimePreKey {
 }
 
 /**
+ * [docs/35 Fase 4] Mode konsumsi OTPK pada pembacaan bundle.
+ *
+ * - `consume` (default, klien X3DH): ambil DAN hapus satu OTPK atomik. Ini
+ *   perilaku lama dan tetap default supaya klien yang ada tidak berubah.
+ * - `read` (jalur PIR/preview): hanya baca identitas + signed pre-key, **tanpa**
+ *   menyentuh kolam OTPK. Sebelum ini, setiap pembacaan menguras satu OTPK,
+ *   sehingga preview/PIR akan menghabiskan pre-key peer hanya dengan melihat
+ *   profil — dan retry jaringan ikut membakar jatah.
+ *
+ * `read` SENGAJA tidak mengembalikan `oneTimePreKey`: OTPK yang dikirim tanpa
+ * dihapus bisa dipakai dua inisiator sekaligus (bidang X3DH bukan lagi
+ * sekali-pakai). Konsumsi tetap terjadi lewat `consume`.
+ */
+export type OtpkMode = 'consume' | 'read';
+
+export function parseOtpkMode(value: unknown): OtpkMode {
+  return value === 'read' ? 'read' : 'consume';
+}
+
+/**
  * Bundle akhir untuk klien: template perangkat + OTPK **bila ada**.
  *
  * OTPK habis bukan kegagalan: bundle tetap sah tanpa `oneTimePreKey` (klien

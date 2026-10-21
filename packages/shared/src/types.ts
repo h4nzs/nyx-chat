@@ -23,6 +23,8 @@ export type MinimalProfile = {
 export type User = z.infer<typeof MinimalUserSchema> & {
   hasCompletedOnboarding?: boolean;
   usernameHash?: string;
+  // [docs/28 §R5] ID publik untuk tautan berbagi, terpisah dari blind index.
+  shareId?: string | null;
   autoDestructDays?: number | null;
   systemAlert?: {
     type: 'subscription_expiring';

@@ -41,6 +41,7 @@ import {
   decodeKtValue,
 } from '../src/utils/keyTransparency.js';
 import { identityKeysChanged, publishIdentityKeyChange } from '../src/utils/ktIdentityLog.js';
+import { pepperedIdentifier } from '../src/utils/atRestSecrets.js';
 import { renderMetricsText, resetMetricsForTests } from '../src/utils/metrics.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -168,9 +169,10 @@ test('rotasi: identifier cocok → entri keyVersion rotasi, material publik saja
     },
     {
       transport,
-      // Bentuk yang disimpan DB = ter-pepper (HMAC) — di sini disimulasikan
-      // dengan kandidat apa pun yang dipakai `identifierLookupCandidates`.
-      lookupStoredIdentifier: async () => USERNAME_HASH_B64,
+      // Bentuk yang disimpan DB = ter-pepper (HMAC). [docs/35 Fase 4 — R5]
+      // Kandidat lookup tidak lagi memuat nilai mentah, jadi fake ini WAJIB
+      // mengembalikan bentuk tersimpan yang sebenarnya.
+      lookupStoredIdentifier: async () => pepperedIdentifier(USERNAME_HASH_B64),
     }
   );
 
@@ -193,7 +195,7 @@ test('rotasi: tanpa identifier (klien lama) dilewati dengan alasan yang bisa dib
 
   const result = await publishIdentityKeyChange(
     { userId: 'user-a', identityKey: IDENTITY_KEY, pqIdentityKey: PQ_KEY, signingKey: SIGNING_KEY },
-    { transport, lookupStoredIdentifier: async () => USERNAME_HASH_B64 }
+    { transport, lookupStoredIdentifier: async () => pepperedIdentifier(USERNAME_HASH_B64) }
   );
 
   assert.equal(result.ok, false);
@@ -218,10 +220,12 @@ test('rotasi: kunci wajib tidak lengkap → invalid (tidak menulis nilai yang sa
   assert.equal(metricCount('invalid'), 1);
 });
 
-test('rotasi: tanpa KT_SERVER_URL dan tanpa transport → no-op (bukan error)', async () => {
+test('rotasi: tanpa KT_SERVER_URL/KT_V2_SERVER_URL dan tanpa transport → no-op (bukan error)', async () => {
   clearKtDedupeForTests();
   const saved = process.env.KT_SERVER_URL;
+  const savedV2 = process.env.KT_V2_SERVER_URL;
   delete process.env.KT_SERVER_URL;
+  delete process.env.KT_V2_SERVER_URL;
   try {
     const result = await publishIdentityKeyChange({
       userId: 'user-a',
@@ -233,6 +237,7 @@ test('rotasi: tanpa KT_SERVER_URL dan tanpa transport → no-op (bukan error)', 
     assert.deepEqual(result, { ok: false, skipped: 'DISABLED' });
   } finally {
     if (saved !== undefined) process.env.KT_SERVER_URL = saved;
+    if (savedV2 !== undefined) process.env.KT_V2_SERVER_URL = savedV2;
   }
 });
 
@@ -282,7 +287,7 @@ test('live: entri rotasi masuk ke binary KT (opt-in NYX_KT_LIVE_WRITE=1)', { ski
       pqIdentityKey: PQ_KEY,
       signingKey: SIGNING_KEY,
     },
-    { lookupStoredIdentifier: async () => usernameHash }
+    { lookupStoredIdentifier: async () => pepperedIdentifier(usernameHash) }
   );
 
   assert.equal(result.ok, true, `penulisan rotasi gagal: ${result.reason ?? 'unknown'}`);

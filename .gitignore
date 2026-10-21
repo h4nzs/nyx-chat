@@ -68,6 +68,15 @@ packages/keytrans-wasm/Cargo.toml
 !packages/keytrans-wasm/dist/
 !packages/keytrans-wasm/dist/keytrans.wasm
 
+# Verifier Key Transparency v2 (docs/35 §35.7 Fase 7): crate fork lokal
+# `packages/keytrans-v2`, jadi artefak WASM tetap di-commit dan diverifikasi
+# manifest seperti v1. Cargo.toml wrapper di-generate `build.sh`.
+packages/keytrans-v2/target/
+packages/keytrans-wasm-v2/target/
+packages/keytrans-wasm-v2/Cargo.toml
+!packages/keytrans-wasm-v2/dist/
+!packages/keytrans-wasm-v2/dist/keytrans-v2.wasm
+
 # Layanan baca/tulis Key Transparency NYX (docs/32 §32.8): biner hasil build
 # tidak di-commit (modul upstream-nya sendiri di-vendor di
 # `server/kt-query/vendor/`, lihat NOTICE).
@@ -79,6 +88,10 @@ server/kt-query/nyx-kt-check
 # dan auditor pihak ketiga (`nyx-kt-auditor`) — biner, bukan sumber
 # (sumbernya `cmd/nyx-kt-auditor/`).
 server/kt-query/nyx-kt-auditor
+# fork v2 (docs/35 §35.7) — biner build.sh, sumbernya cmd/nyx-kt-*-v2/
+server/kt-query/nyx-kt-query-v2
+server/kt-query/nyx-kt-auditor-v2
+server/kt-query/nyx-kt-v2-init
 
 # Oracle DR lintas-implementasi (`tools/dr-oracle`, docs/30 WS-G(6)): sumber Go
 # di-commit, binernya tidak (`go build`/`go build ./...` meninggalkannya di sini).

@@ -11,7 +11,10 @@ import { describe, it, expect } from 'vitest';
 import {
   USERNAME_HASH_BASE64URL_LENGTH,
   USERNAME_HASH_HEX_LENGTH,
+  SHARE_ID_PREFIX,
   buildUsernameLink,
+  isValidShareHandle,
+  isValidShareId,
   isValidUsernameHash,
   parseProfileShareLink,
   parseUsernameHashSegment,
@@ -20,6 +23,7 @@ import {
 
 const BASE64_HASH = 'A'.repeat(USERNAME_HASH_BASE64URL_LENGTH); // 43 char base64url
 const HEX_HASH = 'ab'.repeat(32); // 64 hex
+const SHARE_ID = `${SHARE_ID_PREFIX}${'B'.repeat(43)}`; // s1_<43 base64url>
 
 describe('usernameLink: validasi hashId', () => {
   it('menerima 43 base64url dan 64 hex', () => {
@@ -27,6 +31,17 @@ describe('usernameLink: validasi hashId', () => {
     expect(HEX_HASH).toHaveLength(64);
     expect(isValidUsernameHash(BASE64_HASH)).toBe(true);
     expect(isValidUsernameHash(HEX_HASH)).toBe(true);
+  });
+
+  it('[docs/28 §R5] shareId `s1_…` sah sebagai handle, tapi bukan hash username', () => {
+    expect(isValidShareId(SHARE_ID)).toBe(true);
+    expect(isValidShareHandle(SHARE_ID)).toBe(true);
+    expect(isValidUsernameHash(SHARE_ID)).toBe(false);
+    expect(isValidShareId(BASE64_HASH)).toBe(false);
+    expect(isValidShareId(`${SHARE_ID_PREFIX}${'B'.repeat(42)}`)).toBe(false);
+    expect(isValidShareId(`${SHARE_ID_PREFIX}${'B'.repeat(44)}`)).toBe(false);
+    expect(isValidShareId(`${SHARE_ID_PREFIX}${'B'.repeat(42)}!`)).toBe(false);
+    expect(isValidShareId(undefined)).toBe(false);
   });
 
   it('menolak panjang/alfabet salah dan nilai non-string', () => {
@@ -41,6 +56,7 @@ describe('usernameLink: validasi hashId', () => {
 
   it('parseUsernameHashSegment mengembalikan null untuk segmen tak sah', () => {
     expect(parseUsernameHashSegment(BASE64_HASH)).toBe(BASE64_HASH);
+    expect(parseUsernameHashSegment(SHARE_ID)).toBe(SHARE_ID);
     expect(parseUsernameHashSegment('nope')).toBeNull();
     expect(parseUsernameHashSegment(undefined)).toBeNull();
   });
@@ -56,8 +72,18 @@ describe('usernameLink: buildUsernameLink', () => {
     );
   });
 
+  it('[docs/28 §R5] shareId membangun link baru, dan tautan lama tetap bekerja', () => {
+    expect(buildUsernameLink('https://nyx-app.my.id', SHARE_ID)).toBe(
+      `https://nyx-app.my.id/u/${SHARE_ID}`
+    );
+    expect(buildUsernameLink('https://nyx-app.my.id', BASE64_HASH)).toBe(
+      `https://nyx-app.my.id/u/${BASE64_HASH}`
+    );
+  });
+
   it('menolak hashId tidak sah (tidak ada link rusak yang tersebar)', () => {
     expect(() => buildUsernameLink('https://nyx-app.my.id', 'rusak')).toThrow(/tidak sah/);
+    expect(() => buildUsernameLink('https://nyx-app.my.id', `${SHARE_ID_PREFIX}${'B'.repeat(42)}`)).toThrow(/tidak sah/);
   });
 });
 
@@ -70,6 +96,7 @@ describe('parseProfileShareLink', () => {
     expect(parseProfileShareLink(`https://nyx-app.my.id/u/${BASE64_HASH}`)).toBe(`?u=${BASE64_HASH}`);
     expect(parseProfileShareLink(`https://app.nyx-app.my.id/u/${HEX_HASH}/`)).toBe(`?u=${HEX_HASH}`);
     expect(parseProfileShareLink(`http://localhost:5173/u/${BASE64_HASH}`)).toBe(`?u=${BASE64_HASH}`);
+    expect(parseProfileShareLink(`https://nyx-app.my.id/u/${SHARE_ID}`)).toBe(`?u=${SHARE_ID}`);
   });
 
   it('link pendek hasil buildUsernameLink selalu bisa diurai kembali (roundtrip)', () => {

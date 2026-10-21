@@ -1,11 +1,42 @@
 # 35 — Rencana Migrasi Post-Quantum (Tier A)
 
-> **Status: rencana, belum ada implementasi.** Dokumen ini adalah hasil analisis
-> codebase dan keputusan arah. Format v2 di §35.6 masih **usulan**; spec final,
-> test vector, dan review kriptografi wajib selesai sebelum kode produksi.
+> **Status (2026-10-21): Fase 0–7 landed di kode** (Fase 4 kecuali PIR yang
+> ditunda, Fase 5 kecuali riset BRaccoon, Fase 6 default mati; Fase 7 = log KT
+> ML-DSA + dual-write, **belum cutover baca**). Fitur PQ klien berada di balik
+> gerbang `VITE_PQ_V2`/`VITE_ANON_CREDENTIALS` yang **default mati**: jalur v1
+> tetap default dan tetap terbaca. **Belum di-deploy dan belum pernah
+> dinyalakan di produksi.** Fase 8 (removal/audit) belum dikerjakan.
+>
+> Format di §35.6 **bukan lagi usulan**: yang tertulis di sana adalah bentuk
+> yang benar-benar diimplementasikan (koreksi terhadap proposal awal ditandai di
+> tiap butir). Yang masih terbuka: review kriptografi eksternal, KAT resmi FIPS
+> 204/X-Wing, dan benchmark di perangkat rendah (§35.11).
 >
 > Dokumen terkait: `docs/03`, `docs/04`, `docs/26`, `docs/28`, `docs/33`,
 > `docs/34`.
+
+## 35.0 Status per fase
+
+| Fase | Isi | Status | Bukti |
+|---|---|---|---|
+| 0 | Fondasi: dependency, `cryptoSuite` + domain, capability `pq-v2`, schema aditif, guard PQ-only | **landed** 2026-10-19 | §35.7 Fase 0, `scripts/check-pq-only.mjs` (CI job `lint`) |
+| 1 | Core PQ: ML-DSA-65, bundle v2, X3DH v2, sealed box v2, grup v4, burner, recovery/linking/migration/push v2 | **landed** 2026-10-20 | §35.7 Fase 1, `web/e2e/pqV2.spec.ts` |
+| 2 | KT Scope A: nilai log v2, verifikasi tiga kunci, pin config TOFU | **landed** (inti) | §35.7 Fase 2 |
+| 3 | Metadata (OHTTP, cover traffic 1:1) | **landed di kode** 2026-10-21 — OHTTP dipakai jalur pencarian lewat token scoped, rotasi 2 slot, metrik; λ adaptif + budget, jitter/batching, chaff visibility-aware. Default mati, belum di-deploy | §35.7 Fase 3 |
+| 4 | Discovery (tutup R5, OHTTP search, PIR spike) | **landed kecuali PIR** 2026-10-21 — R5 penuh (shareId terpisah dari blind index), search lewat OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa mengonsumsi OTPK. PIR **ditunda** dengan kriteria go (§35.11 #3) | §35.7 Fase 4 |
+| 5 | Credential PQ (suite abstraction, BRaccoon) | **landed kecuali riset v2** 2026-10-21 — suite abstraction, kolom `*.suite`, persist IndexedDB (Dexie v15), await commit, revoke saat leave. BRaccoon/blind UOV + kick-revoke tetap riset | §35.7 Fase 5, `groupCredentialPersistence.test.ts` |
+| 6 | Anonymous issuance | **landed di kode** 2026-10-21 — bank token (SHA-256 di Redis, kuota harian), redeem tanpa JWT via `X-Group-Token`, commit ticket single-use. Default mati (`VITE_ANON_CREDENTIALS`) | §35.6.7, §35.7 Fase 6 |
+| 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
+| 8 | Removal, audit, dokumentasi | belum | — |
+
+Gerbang rollout: `VITE_PQ_V2=1` mengaktifkan **pengiriman dan advertising** v2;
+`resolvePqV2Enabled()` hanya membandingkan nilai itu, jadi tanpa variabel (atau
+nilai lain) klien tetap mengirim/mengiklankan v1 sambil **tetap bisa membaca**
+v2. `.env.example` memuat `VITE_PQ_V2=1` **dengan sengaja** (bukan sisa
+percobaan): dengan gerbang menyala, alur perpesanan **1:1 dan grup** sudah
+diverifikasi manual berjalan normal. Konsekuensinya build dev/E2E yang menyalin
+template mengiklankan v2. **Produksi tetap harus memilih nilainya eksplisit** —
+sampai sekarang belum ada build produksi dengan gerbang hidup.
 
 ## 35.1 Tujuan dan definisi selesai
 
@@ -54,6 +85,12 @@ memiliki komponen classical-only. SPQR v2 adalah pengecualian: runtime
 dependency-nya hanya ML-KEM/HKDF/SHA2, sehingga ratchet v2 sendiri sudah PQ.
 Akar sesi SPQR berasal dari X3DH; karena itu X3DH v2 adalah prasyarat.
 
+> **Catatan (2026-10-20):** tabel dan temuan di §35.2 adalah **baseline audit
+> sebelum Fase 1** dan dipertahankan sebagai rekam jejak. Jalur yang kini punya
+> v2 (ML-DSA untuk tanda tangan, X3DH/sealed box/burner tanpa DH klasik, grup
+> v4, KT value v2) dijelaskan di §35.6 dengan status per langkah di §35.7;
+> sisanya masih seperti tabel ini.
+
 ### 35.2.2 Inventaris classical-only (non-test)
 
 | Berkas | Lokasi | Pemakaian |
@@ -76,6 +113,12 @@ Akar sesi SPQR berasal dari X3DH; karena itu X3DH v2 adalah prasyarat.
 
 Tier B yang tidak masuk target migrasi ini: VAPID P-256, WebAuthn P-256/Ed25519,
 TLS/QUIC ECDHE/ECDSA, WebRTC DTLS-SRTP, dan sertifikat self-signed WebTransport.
+
+Catatan (2026-10-20): daftar di atas adalah **baseline audit sebelum Fase 1**.
+Sisa pemakaian classical-only yang masih disengaja sekarang dijaga
+`scripts/check-pq-only.mjs` terhadap `scripts/pq-only-baseline.json` (step CI
+`PQ-only guard` di job `lint`), sehingga call classical-only baru menggagalkan
+gate alih-alih menumpang di daftar ini.
 
 ### 35.2.3 Credentials
 
@@ -105,10 +148,12 @@ TLS/QUIC ECDHE/ECDSA, WebRTC DTLS-SRTP, dan sertifikat self-signed WebTransport.
   pemegang dump DB bisa mengirim nilai mentah ke API hidup.
 - `GET /api/keys/prekey-bundle/:userId` memakai userId langsung; server melihat
   requester → target.
-- Belum ada OHTTP/PIR.
+- OHTTP sudah di-scaffold (§35.7 Fase 3, default mati) tetapi **belum dipakai
+  alur aplikasi**; PIR belum ada.
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
-  - hanya grup yang opt-in dan burner,
+  - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
+    (`coverTargetAllowed` — cover tidak boleh memulai sesi baru),
   - tidak menunda real send,
   - payload `COVER` di-drop setelah dekripsi,
   - estimasi ~5,6 MB/hari/conversation.
@@ -133,7 +178,10 @@ TLS/QUIC ECDHE/ECDSA, WebRTC DTLS-SRTP, dan sertifikat self-signed WebTransport.
 
 ### 35.2.6 Dependency dan ukuran
 
-- Belum ada ML-DSA di repo.
+- ~~Belum ada ML-DSA di repo.~~ **Sudah ada (2026-10-19):** `packages/shared/src/mlDsa.ts`
+  (ML-DSA-65 di atas `@noble/post-quantum`, domain separation lewat ML-DSA
+  `context` = `PQ_V2_DOMAINS`), dipakai worker, web, dan server
+  (`server/src/utils/mlDsa.ts`).
 - `@noble/post-quantum@0.7.1` tersedia (MIT, pure JS) dan mendukung
   `ml_dsa44`, `ml_dsa65`, `ml_dsa87`.
 - ML-DSA-65: public key 1952 B, secret key 4032 B, signature 3309 B.
@@ -203,10 +251,12 @@ gagal memenuhi budget atau jika dibutuhkan test oracle independen.
   `NYX-PQ-BUNDLE-V2`, `NYX-PQ-HANDSHAKE-V2`, `NYX-PQ-SEAL-V2`,
   `NYX-PQ-GROUP-V4`, `NYX-KT-VALUE-V2`, `NYX-CRED-V2`.
 
-## 35.5 Perubahan schema (usulan)
+## 35.5 Perubahan schema (sudah diterapkan)
 
-Semua kolom baru nullable dan additive. Deploy memakai `prisma db push || true`;
-kegagalan push tidak boleh dianggap sukses, jadi verifikasi manual tetap wajib.
+Kolom di bawah sudah ada di `server/prisma/schema.prisma` dan semuanya
+nullable/aditif — **tetapi baru ada di DB setelah `prisma db push` berjalan saat
+deploy.** Deploy memakai `prisma db push || true`; kegagalan push tidak boleh
+dianggap sukses, jadi verifikasi manual tetap wajib.
 
 ```prisma
 model Device {
@@ -240,28 +290,40 @@ Catatan:
 - `PreKeyBundle.signatureV2` = ML-DSA signature atas bundle v2.
 - Tidak perlu kolom X25519 baru; v1 tetap menyimpan field lama.
 
-## 35.6 Usulan format v2
+## 35.6 Format v2 (diimplementasikan)
 
-> Bagian ini adalah **usulan**. Spec final + test vector harus direview sebelum
-> implementasi. Jangan menganggap format di bawah sudah final.
+> Bagian ini **sudah diimplementasikan** di balik `VITE_PQ_V2` (2026-10-20).
+> Yang tertulis di bawah adalah bentuk yang benar-benar ada di kode — koreksi
+> terhadap proposal awal ditandai “koreksi”. Format v1 di §35.4 tetap beku dan
+> tetap dibaca.
 
 ### 35.6.1 Bundle v2
 
 ```text
-version            = 2
-cryptoVersion      = 2
-identityKem        = pqIdentityKey (X-Wing, 1216 B)
-signedPreKeyKem    = pqKey (X-Wing, 1216 B)
-signingKey         = Device.signingKeyV2 (ML-DSA-65, 1952 B)
+version            = 2                 (kolom DB `cryptoVersion`)
+identityKey        = X25519 (32 B)      (dipakai ulang dari v1)
+pqIdentityKey      = X-Wing (1216 B)    (dipakai ulang dari v1)
+signedPreKey       = X25519 (32 B)
+pqSignedPreKey     = X-Wing (1216 B)
+signingKeyV2       = Device.signingKeyV2 (ML-DSA-65, 1952 B)
 signature          = ML-DSA-65(
-                       "NYX-PQ-BUNDLE-V2" || deviceId ||
-                       identityKem || signedPreKeyKem
+                       context "NYX-PQ-BUNDLE-V2",
+                       u32len(identityKey) || u32len(pqIdentityKey) ||
+                       u32len(signedPreKey) || u32len(pqSignedPreKey) ||
+                       u32len(signingKeyV2)
                      ) (3309 B)
-oneTimePreKeyKem   = optional X-Wing (1216 B)
 ```
 
+Koreksi terhadap proposal awal: **tidak ada `deviceId`** di pesan tanda tangan,
+**OTPK tidak ikut ditandatangani** (bundle menandatangani material prekey saja),
+dan domain separation memakai ML-DSA `context`, bukan prefix byte. Setiap field
+diawali panjang `u32` BE (`packages/shared/src/pqBundle.ts`) agar urutan/encode
+klien dan server identik.
+
 Initiator memverifikasi `signature` sebelum memakai bundle. Bundle v2 tidak
-memakai X25519 identity atau Ed25519 signature.
+memakai X25519 identity atau Ed25519 signature. Server memverifikasi tanda tangan
+ini di `POST /api/keys/prekey-bundle` **sebelum menyentuh DB**; kehadiran salah
+satu field v2 tanpa pasangannya ditolak `400`.
 
 ### 35.6.2 X3DH v2 (KEM-X3DH)
 
@@ -269,49 +331,69 @@ Tujuan: menghapus DH1–DH4 dan konversi Ed25519→X25519. Semua kerahasiaan ber
 dari X-Wing; autentikasi initiator memakai ML-DSA.
 
 ```text
-magic            = 0x4E
+magic            = 0x4E ('N', sama dengan v1)
 version          = 0x02
 flags            = bit 0: OTPK present
+pad              = 0x00
 ctIdentity       = X-Wing encapsulation ke recipient identity (1120 B)
 ctSignedPreKey   = X-Wing encapsulation ke recipient signed prekey (1120 B)
 ctOneTimePreKey  = optional X-Wing encapsulation ke OTPK (1120 B)
-initiatorSignKey = ML-DSA-65 public key (1952 B)
 signature        = ML-DSA-65(
-                     "NYX-PQ-HANDSHAKE-V2" || flags ||
-                     ctIdentity || ctSignedPreKey || [ctOneTimePreKey]
+                     context "NYX-PQ-HANDSHAKE-V2",
+                     u32len(initiatorSigningKeyV2 1952) ||
+                     u32len(responderIdentityKey 32) ||
+                     u32len(ctIdentity) || u32len(ctSignedPreKey) ||
+                     u32len(ctOneTimePreKey)   // 0 byte bila absen
                    ) (3309 B)
 ```
+
+Total wire: **5553 B tanpa OTPK, 6673 B dengan OTPK**. Koreksi terhadap proposal
+awal: public key ML-DSA inisiator **tidak** dibawa di wire handshake — ia
+dikirim di payload ter-seal (`handshakeVersion: 2`, `initiatorSigningKeyV2`) dan
+wajib sama dengan `signingKeyV2` bundle peer.
 
 Alur:
 1. Initiator memverifikasi signature signed prekey recipient.
 2. Initiator melakukan X-Wing encaps ke identity, signed prekey, dan OTPK (jika ada).
 3. Initiator menandatangani transcript dengan ML-DSA.
-4. Recipient melakukan X-Wing decaps, memverifikasi signature initiator terhadap
-   `initiatorSignKey` yang dipercaya (KT/TOFU), lalu menurunkan session key.
-5. Session key = `BLAKE2b-256(ssIdentity || ssSignedPreKey || [ssOneTimePreKey] || transcriptHash)`.
+4. Recipient melakukan X-Wing decaps, memverifikasi signature initiator dengan
+   `signingKeyV2` yang diterima dari payload ter-seal — dan klien **mewajibkan**
+   nilai itu sama dengan `signingKeyV2` bundle peer — lalu menurunkan session key.
+5. Session key = `BLAKE2b-256(ssIdentity || ssSignedPreKey [|| ssOneTimePreKey])`
+   — **tanpa** hash transkrip; transkrip hanya ditandatangani/diverifikasi.
 
 Catatan desain:
 - Tidak ada ephemeral X25519 terpisah; X-Wing ciphertext sudah membawa material
-  ephemeral di dalamnya.
-- `initiatorSignKey` harus diikat ke identitas yang dipercaya. Jika belum ada
-  pin/KT, klien memakai TOFU dan mencatatnya.
-- Format ini belum menggantikan analisis formal X3DH; review kriptografi wajib
-  sebelum produksi.
+  ephemeral di dalamnya. Transkrip mengikat `signingKeyV2` inisiator, identitas
+  X25519 penerima, dan semua ciphertext (OTPK diwakili field panjang 0 bila
+  absen).
+- Kunci verifikasi inisiator harus diikat ke identitas yang dipercaya: klien
+  membandingkannya dengan bundle peer yang sudah dicek ke KT, di dua jalur
+  (`messagePipeline` dan offline sync `session:new_key`). Tanpa pengikatan itu,
+  siapa pun bisa meng-encapsulate dan mengaku sebagai pengirim.
+- Format ini belum menggantikan analisis formal X3DH; review kriptografi
+  eksternal wajib sebelum produksi.
 
 ### 35.6.3 Sealed box v2
 
 ```text
-version   = 0x02
-ct        = X-Wing ciphertext (1120 B)
-nonce     = 24 B
+magic      = "NYS2" (4 B, 0x4E595332)
+ct         = X-Wing ciphertext (1120 B)
+nonce      = 24 B
 ciphertext = XChaCha20-Poly1305(
-               key = BLAKE2b-256("NYX-PQ-SEAL-V2" || ss),
+               key = BLAKE2b-256(ss),   // koreksi: tanpa prefix domain
                nonce,
                plaintext
              )
 ```
 
-Envelope: `[0x02][ct][nonce][ciphertext]`.
+Envelope: `[magic 4][ct 1120][nonce 24][ciphertext]`, minimum **1164 B**.
+
+Koreksi terhadap proposal awal: envelope memakai magic ASCII `"NYS2"`, bukan
+byte versi `0x02`, karena v1 dibungkus sebagai
+`[ephemeral X25519 32][ct 1120][nonce 24][ct]` sehingga byte pertama bukan
+penanda versi. Peluang kunci ephemeral v1 kebetulan berawalan magic adalah
+2^-32; `isPqSealV2` tetap memeriksa panjang minimum sebelum memilih jalur v2.
 
 Dipakai untuk:
 - distribusi group sender key,
@@ -328,7 +410,8 @@ Dipakai untuk:
   - `signingKeyV2` (ML-DSA public key),
   - key ID / generation.
 - Group message wrapper v4:
-  - `sigV2` = ML-DSA-65 atas `"NYX-PQ-GROUP-V4" || u32 N || ciphertext`.
+  - `sigV: 2` = ML-DSA-65 (context `"NYX-PQ-GROUP-V4"`) atas
+    `u32(N) BE || nonce(24) || ciphertext`; `sigV: 1` tetap Ed25519.
   - `senderKeyId` untuk memilih public key anggota =
     `BLAKE2b-256("NYX-PQ-GROUP-V4" || signingKeyV2)[:8]` (base64url di wrapper).
 - Distribution envelope v3/v4:
@@ -346,14 +429,21 @@ Dipakai untuk:
 ```text
 version       = 2
 keyVersion    = 1 byte
-identityKem   = X-Wing (1216 B)
+identityKey   = X25519 (32 B)
+pqIdentityKey = X-Wing (1216 B)
+signingKey    = Ed25519 (32 B)              // tetap ada, v1 compatibility
 signingKeyV2  = ML-DSA-65 public key (1952 B)
 updatedAtDay  = u32 (4 B)
-total         = 3174 B
+total         = 3238 B                      // v1 (1286 B) + 1952 B
 ```
 
 - `searchKey` tetap `0x75 || usernameHash(32)`.
-- Client v2 membandingkan **identityKem dan signingKeyV2** ke bundle peer.
+- Client v2 membandingkan **tiga** kunci ke bundle peer: X25519 `identityKey`,
+  X-Wing `pqIdentityKey`, dan ML-DSA `signingKeyV2`; mismatch mana pun →
+  verdict `mismatch` (fail-closed untuk pinning).
+- `ktConfig` (Dexie v14) + `web/src/lib/ktConfigPin.ts` menyimpan
+  `signatureKey`/`vrfKey`/`auditorKeys` pertama ter-seal `ENC1:` dan menolak
+  perubahan (verdict `unverifiable`).
 - `peerIdentityTrust` menyimpan digest semua key (mis. SHA-256 dari
   `identityKem || signingKeyV2`), bukan hanya X25519.
 - `ktMonitoring` dan `ktGossip` mendapat `logVersion`/`logId` agar baris v1/v2
@@ -361,7 +451,7 @@ total         = 3174 B
 - `/api/keys/kt/config` harus dipin ke build/release manifest; config dari
   server tidak boleh dipercaya mentah-mentah.
 
-### 35.6.6 Credential suite abstraction
+### 35.6.6 Credential suite abstraction (Fase 5 — implemented)
 
 Interface yang dibutuhkan:
 
@@ -383,6 +473,49 @@ interface CredentialSuite {
 - Credential disimpan di IndexedDB (`ENC1:`), bukan hanya memory.
 - Commit di-await; jika gagal, credential tidak di-cache.
 - Revoke dipanggil saat kick/leave; serial dipersist.
+
+Status (2026-10-21): suite mengalir dari issuer key → `worker_credential_blind`
+(`suite`) → verifikasi server (`GroupCredential.suite`/`CredentialIssuerKey.suite`
+diisi saat issuance; baris legacy nullable tetap v1/RSA). Credential dipersist
+di Dexie **v15** (`groupCredentials`, blob `ENC1:`), jadi reload tidak memicu
+issuance ulang: `ensureCredential` memuat baris tersimpan sebelum issuance,
+commit **di-await** (gagal → credential tidak di-cache/dipersist dan
+`ensureCredential` mengembalikan `null`), serial dihitung klien sebagai hex
+SHA-384 dari prepared message dan divalidasi `/^[0-9a-f]{96}$/` sebelum commit.
+Leave memanggil `revokeMyCredential` (best-effort, `X-Group-Token` bila ada)
+sebelum `POST /leave`, lalu membuang baris lokal. Deviasi: revocation anggota
+yang **di-kick belum mungkin** — server hanya menyimpan hash serial anonim yang
+cuma diketahui pemiliknya; perlu distribusi serial antar-anggota di metadata
+(belum ada). Suite v2 (BRaccoon/blind UOV) tetap riset: jangan implementasi
+lattice sendiri sebelum test vector paper + benchmark + audit + dual verify.
+
+### 35.6.7 Anonymous issuance (Fase 6 — implemented)
+
+Tujuan: issuance/commit credential tidak lagi menyimpan `user ↔ conversation`
+di jalur baru. Dua bagian:
+
+1. **Bank token (terautentikasi).** `POST /api/credentials/tokens` (butuh
+   sesi + CSRF) menerbitkan batch token single-use `nct1_<43 base64url>`
+   (32 byte acak). Server hanya menyimpan **SHA-256(token)** di Redis dengan
+   TTL 24 jam, dan membatasi jumlah token per user per hari
+   (`cred:tokens:<identityTag>:<hari>`, Lua INCR+EXPIRE). Token asli hanya
+   dikembalikan sekali ke klien.
+2. **Redeem (tanpa JWT).** `POST /api/credentials/issuance` menerima
+   `{ token, conversationId, blindedMsg }` + **hanya** `X-Group-Token`
+   (bukti grup-level; delivery token pseudonim stabil sengaja TIDAK diterima di
+   jalur anonim). Token dikonsumsi atomik (Lua GET+DEL) setelah bukti
+   keanggotaan lolos, jadi replay = 403 `CREDENTIAL_TOKEN_INVALID`.
+   Respons menambah `commitTicket` (`cct1_<43>`, single-use, TTL 10 menit,
+   terikat `conversationId`). `POST /api/credentials/commit` menukar ticket itu
+   dengan baris `GroupCredential` — tanpa identitas pemanggil.
+
+Residual yang harus jujur: **akuisisi batch tetap menghubungkan batch ↔ user**
+(server tahu siapa membeli token, bukan siapa memakainya); satu token = satu
+issuance sehingga kehilangan token = kuota terpakai; dan endpoint lama
+`/api/conversations/credential-*` tetap ada untuk klien lama (kuota per user).
+Rate limit per IP tetap berlaku pada jalur redeem; `requireAuth` tidak dipasang
+di router ini dan CSRF dikecualikan karena tidak ada cookie/sesi yang bisa
+dipalsukan (token bearer ada di body).
 
 ## 35.7 Fase implementasi
 
@@ -454,7 +587,7 @@ Acceptance:
 
 Status (2026-10-20): **seluruh langkah 1–9 selesai di kode**, termasuk residual cross-check `signingKeyV2` payload vs bundle, tanda tangan pesan + metadata grup v4, envelope distribusi grup v4 (kunci verifikasi ter-seal di dalam envelope), burner v2, recovery/device-linking/migration/push v2, test vector lintas-implementasi (oracle Go) untuk X3DH v2, dan audit persistensi/relay yang mengunci `signingKeyV2`/`senderKeyId` di state grup. Belum di-deploy dan gerbang `VITE_PQ_V2` masih default mati.
 - Langkah 1–3 (ML-DSA, device key v2, bundle v2) selesai; lihat status Fase 0 dan catatan KT Scope A.
-- Langkah 4 (X3DH v2) selesai sebagian — **hanya jalur 1:1**:
+- Langkah 4 (X3DH v2) selesai untuk **jalur 1:1** — satu-satunya jalur yang memakai X3DH (grup memakai distribusi sender key, bukan handshake per-anggota):
   - `packages/shared/src/pqHandshake.ts` mendefinisikan wire v2 (`HANDSHAKE_V2_VERSION = 0x02`,
     `[magic][version][flags][pad][ctId][ctSpk][ctOtpk?][signature]`) dan pembangun transkrip
     tanda tangan yang mengikat identitas inisiator (signingKeyV2) + identitas X25519 penerima +
@@ -665,12 +798,85 @@ Status (2026-10-19): **inti Scope A selesai di kode, belum di-deploy.**
 
 ### Fase 3 — Metadata resistance
 
-Pekerjaan:
-- OHTTP client worker + relay/gateway untuk REST.
-- Cover traffic 1:1 opt-in; adaptive λ; budget baterai/bandwidth.
-- Batch/jitter real message 200–800 ms pada mode “Maximum”.
-- Chaff visibility-aware dan configurable.
-- Dokumentasikan Tier B OHTTP/HPKE.
+Status (2026-10-21): **seluruh pekerjaan Fase 3 landed di kode, default mati,
+belum di-deploy.** Ringkas:
+
+- **OHTTP dipakai alur aplikasi** untuk `GET /api/users/search` (dan siap untuk
+  prekey): token bearer 120 detik ber-scope `ohttp` diletakkan DI DALAM amplop,
+  diterbitkan `POST /api/auth/ohttp-token` (cookie + CSRF). `requireAuth`
+  menolak token itu di luar allowlist/method GET, jadi token yang bocor tidak
+  bisa dipakai untuk mutasi. Tanpa fallback diam-diam ke HTTP biasa.
+- **Rotasi kunci dua slot**: `/api/ohttp/config` mempublikasikan key id 1 dan 2,
+  gateway memilih slot dari byte pertama amplop, klien mem-pin per key id
+  (kunci yang sudah dipin tidak boleh berubah; kunci baru hanya diadopsi setelah
+  kunci lama pensiun). Metrik `nyx_ohttp_ops_total{route,result}`.
+- **Cover traffic**: λ adaptif terhadap laju kirim nyata per percakapan
+  (0.2–2.0/menit), plafon byte harian 25 MB/percakapan (reset UTC, persisted),
+  dan cover 1:1 opt-in hanya setelah ada pesan nyata (tidak pernah memulai sesi).
+- **Jitter/batching 200–800 ms** pada mode Maximum untuk pesan user: satu
+  jendela per percakapan, urutan tetap, silent/receipt tidak ditahan.
+- **Chaff visibility-aware**: tab background berhenti mengirim (interval/ukuran
+  dapat diubah runtime lewat `CHAFF_CONFIG`, ≤1000 byte agar tidak di-drop QUIC).
+- **Uji jalur nyata**: client → relay HTTP → gateway → dispatch → response
+  terenkripsi (14 test di `server/tests/ohttp.test.ts`).
+
+Yang TIDAK diklaim: metadata (graf, timing, volume) tidak hilang oleh fase ini;
+OHTTP/HPKE tetap Tier B classical; relay dan gateway masih di host yang sama
+sehingga operator VPS tetap melihat IP.
+
+#### Desain relay & gateway OHTTP (2026-10-20)
+
+Topologi yang dipilih: **self-hosted, dua peran pada jalur yang sama** — tidak
+ada relay pihak ketiga (katalog layanan tidak menyediakan OHTTP relay, dan
+privacy tidak boleh bergantung pada satu operator eksternal).
+
+```text
+client ──message/ohttp-req──▶ relay /api/ohttp/relay
+       ──message/ohttp-req──▶ gateway /api/ohttp/gateway
+       ──HTTP biasa (loopback)──▶ target /api/...
+```
+
+- **Relay** melihat IP + waktu, tidak pernah isi: ia hanya mem-POST byte ke
+  `OHTTP_RELAY_TARGET` yang berasal dari env, bukan input klien — tidak ada
+  open proxy/SSRF.
+- **Gateway** membuka HPKE, menegakkan allowlist, melakukan dispatch ke API
+  lewat loopback dengan header jaringan dibuang (`x-forwarded-for`,
+  `cf-connecting-ip`, `forwarded`, …), lalu membalas `message/ohttp-res`.
+- **Kejujuran deployment:** di VPS yang sama kedua peran dijalankan operator
+  yang sama. Keuntungannya menyembunyikan path/header/konten dari edge
+  Cloudflare dan access log nginx, **bukan** dari operator VPS. Memindahkan
+  relay ke host lain cukup mengubah `OHTTP_RELAY_TARGET`/URL klien — protokol
+  tidak berubah.
+- **Profil kripto:** DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM,
+  semuanya WebCrypto native (tanpa WASM/dependency kripto baru di worker).
+  Wire mengikuti RFC 9458 §4.1–4.4 apa adanya; isi = Binary HTTP (RFC 9292)
+  known-length, request framing 0 / response framing 1. Ini **Tier B
+  (classical)** dan tidak diklaim PQ.
+- **Allowlist** (`packages/shared/src/ohttp.ts`): hanya
+  `GET /api/users/search` dan `GET /api/keys/prekey-bundle/<id>` (pathname,
+  query bebas). Gateway menjawab 403 terenkripsi untuk target lain, body
+  dibatasi 128 KiB, dan relay/gateway dibatasi 120 req/menit.
+- **Pin config:** klien mengambil `/api/ohttp/config` (`application/ohttp-keys`)
+  dan mem-pin SHA-256-nya di `localStorage` (TOFU). Config berubah tanpa rotasi
+  eksplisit → `OHTTP_CONFIG_CHANGED`, fail-closed (pola yang sama dengan pin KT).
+- **Blocker integrasi yang disengaja:** cookie sesi `HttpOnly` tidak bisa dibaca
+  JS, jadi worker tidak bisa memasukkannya ke amplop. OHTTP **belum dipakai alur
+  aplikasi**; gateway sudah meneruskan `authorization` bila ada, sehingga
+  langkah berikutnya adalah keputusan carriage token (bearer berumur pendek di
+  dalam amplop), bukan lagi perubahan transport.
+- **Aktivasi:** `OHTTP_ENABLED=1` + `OHTTP_PRIVATE_KEY`/`OHTTP_PUBLIC_KEY`
+  (`pnpm --filter nyx-server run ohttp-key:generate`), klien
+  `VITE_OHTTP_ENABLED=1`. Default mati di kedua sisi: saat mati router tidak
+  dipasang (404). Rotasi kunci dan metrik OHTTP belum ada.
+
+Pekerjaan (semua ✅ landed di kode, default mati):
+- ✅ OHTTP client worker + relay/gateway untuk REST.
+- ✅ Carriage token (scoped, 120 s) sehingga OHTTP dipakai jalur pencarian.
+- ✅ Rotasi kunci dua slot + metrik `nyx_ohttp_ops_total`.
+- ✅ Cover traffic 1:1 opt-in + adaptive λ + budget byte harian.
+- ✅ Batch/jitter real message 200–800 ms pada mode “Maximum”.
+- ✅ Chaff visibility-aware dan configurable.
+- ✅ Dokumentasikan Tier B OHTTP/HPKE (§35.7 desain + §35.10 residual).
 
 Acceptance:
 - API tidak melihat IP client langsung saat OHTTP aktif,
@@ -680,19 +886,49 @@ Acceptance:
 
 ### Fase 4 — Discovery
 
+Status (2026-10-21): **R5 ditutup.** `identifierLookupCandidates` tidak lagi
+mengembalikan nilai kiriman mentah — 43-char hash klien di-pepper (satu
+kandidat), 64-hex (blind index yang di-echo server) dipakai apa adanya. Route
+`GET /api/users/search` menolak apa pun yang bukan kedua bentuk hash dengan 400
+`INVALID_IDENTIFIER_HASH`, **sebelum** menyentuh DB, sehingga dump DB + akses
+API hidup bukan lagi oracle keanggotaan untuk tebakan plaintext. Tool WebMCP
+`search_users` ikut meng-hash di klien, dan `searchUsers` store meneruskan
+64-hex apa adanya supaya link lama tetap berfungsi (jalur migrasi). Client-side
+OHTTP sudah aktif untuk jalur ini (Fase 3).
+
 Pekerjaan:
-- Hapus kandidat raw value dari `identifierLookupCandidates`.
-- Search hanya menerima 43-char hash; update link share/profil.
-- Rate limit per akun/IP.
-- OHTTP + padded query untuk search/prekey.
-- PIR spike: direktori `usernameHash → encryptedProfile + device keys`,
+- ✅ Hapus kandidat raw value dari `identifierLookupCandidates`.
+- ✅ Search hanya menerima bentuk hash; link lama 64-hex diteruskan apa adanya.
+- ✅ Rate limit per akun (30/menit) + per IP (90/menit): kunci `identityTag`/
+  `clientIpTag` (HMAC), bukan userId/IP mentah — `utils/searchRateKey.ts`,
+  `middleware/rateLimiter.ts` (`rl:search:` + `rl:search-ip:`).
+- ✅ OHTTP (Fase 3) + padded query: `paddedSearchPath()` mengisi sisa slot q
+  sampai 64 karakter sehingga panjang path sama untuk hash 43-char dan 64-hex.
+- ✅ Konsumsi OTPK dipisah dari pembacaan bundle: `GET /prekey-bundle/:id`
+  default tetap `consume` (klien X3DH lama), `?otpk=read` mengembalikan
+  identitas + signed pre-key **tanpa** menghapus OTPK dan **tanpa**
+  `oneTimePreKey` (OTPK yang beredar tanpa dihapus bisa dipakai dua inisiator).
+  Jalur PIR/preview wajib memakai `read` supaya retry jaringan tidak membakar
+  pre-key peer.
+- ✅ `shareId` terpisah dari blind index (docs/28 §R5): `User.shareId`
+  (`s1_` + 32 byte acak, `@unique`) diisi saat register dan lazily saat
+  login/`GET /me`; `/api/users/search` me-lookup kolom itu untuk handle `s1_…`;
+  tautan baru `/u/<shareId>`. Tautan lama 43-char/64-hex tetap dibaca (jalur
+  migrasi); penghapusan kandidat kedua dari jalur auth menunggu deprekasi.
+- ⏸ PIR spike: direktori `usernameHash → encryptedProfile + device keys`,
   padding ~2 KB, evaluasi SimplePIR/OnionPIRv2, client hint + WASM.
-- Pisahkan konsumsi OTPK dari pembacaan bundle untuk jalur PIR.
+  **Diputuskan tunda** (2026-10-21, §35.11 #3): PIR tidak menutup enumerasi
+  terautentikasi maupun residual R5, jadi R5 penuh (shareId terpisah) dan
+  pengurangan daya enumerasi dikerjakan lebih dulu; PIR baru dimulai bila
+  ambang + benchmark + audit di §35.11 #3 terpenuhi.
 
 Acceptance:
-- R5 tertutup: nilai mentah tidak lagi dicari,
-- link lama yang memakai 64-hex punya jalur migrasi,
-- PIR tidak masuk default sebelum benchmark + audit.
+- ✅ R5 tertutup: nilai mentah tidak lagi dicari,
+- ✅ R5 penuh: ID berbagi terpisah dari blind index (`shareId`),
+- ✅ link lama yang memakai 64-hex punya jalur migrasi,
+- ✅ pembacaan bundle untuk PIR tidak menguras OTPK,
+- ⏸ PIR tidak masuk default; keputusan **tunda** + kriteria go tercatat di
+  §35.11 #3 (2026-10-21).
 
 ### Fase 5 — Credentials PQ
 
@@ -714,6 +950,17 @@ Acceptance:
 - commit failure tidak menghasilkan credential “sukses”,
 - credential v2 tidak diklaim PQ sebelum audit.
 
+Status (2026-10-21): **seluruh pekerjaan Fase 5 yang tidak bergantung riset
+selesai di kode.** Suite abstraction (issuer key → worker `blind(suite)` →
+verifikasi server v1-aware), kolom `*.suite` terisi, persist IndexedDB
+(Dexie v15, `ENC1:`), commit di-await + validasi serial hex SHA-384, dan revoke
+saat leave (sebelum `/leave`) landed. Tes: `groupCredentialPersistence.test.ts`
+(6, termasuk reload tanpa issuance ulang dan commit-failure) plus 30 tes server
+(`credentialIssuance`/`groupCredentials`/`credentialAuth`/`credentialSuite`).
+BRaccoon/blind UOV tetap **riset** (butuh test vector paper, benchmark, audit
+eksternal, dual verify + kill switch); Fase 6 (issuance token-only) belum
+dimulai. Deviasi kick-vs-revoke tercatat di §35.6.6.
+
 ### Fase 6 — Anonymous issuance
 
 Pekerjaan:
@@ -727,10 +974,23 @@ Pekerjaan:
 - Catat residual: batch acquisition masih menghubungkan batch ↔ user.
 
 Acceptance:
-- issuance tidak lagi menyimpan `user ↔ conversation`,
-- token dapat di-redeem tanpa JWT/user id,
-- replay token ditolak,
-- kuota dan revocation tetap berfungsi.
+- ✅ issuance tidak lagi menyimpan `user ↔ conversation` (jalur baru),
+- ✅ token dapat di-redeem tanpa JWT/user id,
+- ✅ replay token ditolak (Lua GET+DEL),
+- ✅ kuota dan revocation tetap berfungsi.
+
+Status (2026-10-21): **landed di kode, default mati.** Bank token
+(`POST /api/credentials/tokens`, kuota 5 token/hari per `identityTag`, token
+hanya SHA-256 di Redis TTL 24 jam), redeem anonim
+(`POST /api/credentials/issuance` tanpa JWT, hanya `X-Group-Token`, token
+dikonsumsi atomik, `commitTicket` TTL 10 menit), dan
+`POST /api/credentials/commit` (ticket single-use terikat conversation).
+Klien memakai jalur ini hanya bila `VITE_ANON_CREDENTIALS=1` **dan** authSecret
+grup tersedia; tanpa itu jalur lama. CSRF dikecualikan hanya untuk dua path
+redeem (bank tetap di bawah CSRF). Tes: `server/tests/anonymousCredentials.test.ts`
+(7, helper + wiring) dan `web/src/lib/__tests__/credentialTokens.test.ts`
+(5, klien). Residual: akuisisi batch masih menghubungkan batch ↔ user; endpoint
+lama tetap ada untuk klien lama; BRaccoon tetap menunggu riset/audit.
 
 ### Fase 7 — KT Scope B
 
@@ -749,6 +1009,25 @@ Acceptance:
 - auditor v2 berjalan terpisah,
 - v1 tetap tersedia selama transisi,
 - residual index privacy didokumentasikan.
+
+Status implementasi (2026-10-21, belum di-deploy):
+
+- Fork hanya `server/kt-query/v2/transparency` (ML-DSA-65, index =
+  `SHA-256("nyx-kt-v2-index" || searchKey)`); `vendor/` tidak disentuh.
+- WASM ABI v2 (`packages/keytrans-wasm-v2`, `abiVersion` 2, kunci
+  length-prefixed) + wrapper web `keyTransparencyV2.ts`; ABI dipilih dari
+  `/api/keys/kt/config` dan pin `ktConfigPin` mendukung 1→2 (tanpa downgrade).
+- Service v2 `cmd/nyx-kt-query-v2` (port 8089/8088/8087, metrik 9468,
+  LevelDB + snapshot sendiri), auditor v2 `cmd/nyx-kt-auditor-v2` (metrik
+  9469), unit systemd + deploy gated `systemctl is-enabled`.
+- Server menulis ke v1 dan v2 bila `KT_V2_SERVER_URL` diisi (dedupe/metrik
+  terpisah); pembacaan pindah dengan mengarahkan `KT_QUERY_URL` ke :8089.
+- Vektor lintas implementasi: Go fixtures → Rust verifier + WASM klien.
+- Residual: index v2 tetap deterministik (SHA-256 tanpa VRF), jadi server yang
+  memegang log bisa menguji tebakan `searchKey`; ini **lebih lemah dari ECVRF
+  v1** dan diterima hanya karena v2 menghapus primitif non-PQ. Mitigasi ada di
+  lapisan akses (OHTTP/token scoped), bukan di log. Rollback baca setelah klien
+  mem-pin ABI 2 bersifat satu arah (anti-downgrade) sampai ada jalur reset pin.
 
 ### Fase 8 — Removal, audit, dan dokumentasi
 
@@ -774,19 +1053,44 @@ Wajib:
 - `server/kt-query/build.sh test`
 - Playwright chromium + chrome (WT/coturn)
 
-Test baru:
-- ML-DSA-65 FIPS 204 known-answer test.
-- X-Wing KAT.
-- X3DH v2 oracle Go (tanpa libsodium).
-- Group v4 wrapper/signature.
-- KT value v2 parsing + bundle binding.
-- Config pinning fail-closed.
+Test yang sudah ada (Fase 0–2):
+- ML-DSA-65: `web/src/lib/__tests__/mlDsa.test.ts`,
+  `server/tests/mlDsa.test.ts`.
+- Bundle v2 (kanonik + verifikasi server): `server/tests/pqBundle.test.ts`.
+- X3DH v2: `web/src/lib/__tests__/pqHandshake.test.ts`, plus oracle Go (tanpa
+  libsodium) di `x3dhOracleVectors.test.ts` (15 vektor) dan
+  `x3dhOracleInterop.test.ts`.
+- OHTTP (Fase 3): `server/tests/ohttp.test.ts` (14 test — round-trip
+  klien↔relay↔gateway↔dispatch lewat HTTP nyata, rotasi dua slot, key id tak
+  dikenal, allowlist, pembuangan header identitas, amplop diubah ditolak, token
+  scoped), `web/src/lib/__tests__/ohttpPin.test.ts` (6 test rotasi/fail-closed),
+  `ohttpClient.test.ts` (5 test guard target + fitur mati).
+- Metadata lain (Fase 3): `sendTiming.test.ts` (9 test jitter/batching urutan),
+  `chaff.test.ts` (3 test visibility/ukuran datagram), dan `coverTraffic.test.ts`
+  (29 test — termasuk λ adaptif + budget harian).
+- Sealed box v2: `pqSeal.test.ts`; gerbang/negosiasi: `pqCapability.test.ts`,
+  `transportCapabilities.test.ts`.
+- Grup v2/v3/v4: `groupEnvelopeV3.test.ts`, `groupV4Signature.test.ts`,
+  `groupMetadata.test.ts`, `keychainDbPersistence.test.ts`.
+- KT value v2 + config pin: `ktBundleProof.test.ts`, `ktConfigPin.test.ts`.
+- Recovery/burner: `recoveryV2Signature.test.ts`, `burnerV2RootKey.test.ts`.
+- End-to-end: `web/e2e/pqV2.spec.ts` (X3DH v2, grup `sigV: 2`, burner PQ-only;
+  **skip dengan alasan tertulis** bila `VITE_PQ_V2` mati). CI menjalankannya di
+  **step terpisah** pada job `e2e` dengan `VITE_PQ_V2=1`, sehingga suite utama
+  tetap menguji default v1 — spec ini tidak lagi hanya skip.
+
+Belum ada (fase lanjut):
+- KAT resmi FIPS 204 / X-Wing dari NIST.
 - Credential suite v1/v2 dual verify.
 - Anonymous issuance replay/quota.
-- OHTTP request/response.
+- OHTTP E2E lewat relay nyata (unit test menutup format, bukan topologi).
 - PIR record lookup (spike).
 
 ## 35.9 Rollout dan rollback
+
+Status urutan ini (2026-10-20): langkah **1–2 sudah ada di kode** (schema aditif
+dan server yang memverifikasi/menerima v2), langkah **3 belum dijalankan** — belum
+ada build produksi dengan `VITE_PQ_V2=1`, dan client default tetap v1.
 
 1. Deploy schema additive.
 2. Deploy server yang menerima v2 tetapi belum mengirim v2.
@@ -809,7 +1113,7 @@ Test baru:
 | PIR kompleks | discovery privacy tertunda | OHTTP/exact-hash dulu; PIR spike |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
-| Noble ML-DSA JS | timing/perf | benchmark; worker-only signing; pertimbangkan liboqs |
+| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; benchmark perangkat rendah masih terbuka |
 | v1/v2 state bercampur | decrypt gagal | version scoping, archive cap, test migrasi |
 
 Residual yang harus ditulis jujur:
@@ -821,11 +1125,28 @@ Residual yang harus ditulis jujur:
 
 ## 35.11 Keputusan yang masih terbuka
 
-1. ML-DSA runtime: `@noble/post-quantum` vs `@oqs/liboqs-js`. Rekomendasi: noble
-   dulu, benchmark sebelum produksi.
+1. ~~ML-DSA runtime: `@noble/post-quantum` vs `@oqs/liboqs-js`.~~ **Diputuskan:**
+   `@noble/post-quantum@0.7.1` (pinned exact) dipakai di web, worker, dan server.
+   Yang masih terbuka: benchmark di perangkat rendah dan keputusan pindah ke
+   liboqs bila budget gagal.
 2. BRaccoon: go/no-go setelah spike + audit; fallback blind UOV.
 3. PIR: library vs service sendiri; kapan ambang direktori membuat PIR wajib.
-4. OHTTP: relay/gateway self-host vs Cloudflare; ini keputusan Tier B.
+   **Diputuskan (2026-10-21): tunda — no-go untuk implementasi sekarang.**
+   PIR hanya menyembunyikan *record mana* yang diambil dari gateway/operator
+   (OHTTP sudah menyembunyikan *pemanggil*); ia tidak menutup enumerasi oleh
+   akun terautentikasi (`/search` 30/menit mengembalikan profil + public key)
+   maupun residual R5 penuh (`usernameHash` masih dipakai sebagai ID berbagi).
+   Keduanya lebih murah dan dikerjakan lebih dulu. Syarat go: (a) direktori
+   username melewati ambang ~100k akun **atau** traffic pencarian cukup untuk
+   membangun graf, (b) benchmark membuktikan biaya hint/download, latensi, dan
+   staleness (user baru tidak langsung ketemu) dapat diterima untuk record
+   ~2 KB dengan hint client O(√N), (c) audit eksternal tersedia. Pilihan
+   library vs service diputuskan SETELAH benchmark — jangan menulis kripto PIR
+   sendiri.
+4. ~~OHTTP: relay/gateway self-host vs Cloudflare.~~ **Diputuskan:** self-host,
+   dua peran (`/api/ohttp/relay` + `/api/ohttp/gateway`, default mati).
+   Yang masih terbuka: apakah relay dipindah ke host/operator lain (hanya
+   mengganti `OHTTP_RELAY_TARGET`), dan kapan carriage token diaktifkan.
 5. Kapan Scope B KT dimulai; jangan mulai sebelum format bundle v2 stabil.
 
 ## 35.12 Referensi

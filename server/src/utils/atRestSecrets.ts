@@ -32,7 +32,7 @@
  * onboarding tidak putus. Jangan pernah menulis pepper ke DB/backup.
  */
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { env } from '../config.js'
 import { getSodium } from '../lib/sodium.js'
 
@@ -80,20 +80,70 @@ export function pepperedIdentifier(value: string): string {
 }
 
 /**
- * Nilai lookup kanonik untuk kolom identifier.
+ * [docs/28 §R5] Prefiks shareId publik. Sengaja berbeda dari bentuk hash
+ * (43 base64url / 64 hex) supaya route pencarian bisa memilih kolom lookup
+ * tanpa menebak, dan supaya tautan baru tidak pernah membawa blind index.
+ */
+export const SHARE_ID_PREFIX = 's1_'
+export const SHARE_ID_BODY_LENGTH = 43
+const SHARE_ID_RE = /^[A-Za-z0-9_-]{43}$/
+
+/** 32 byte acak → `s1_<base64url>` (46 karakter). */
+export function generateShareId(): string {
+  return `${SHARE_ID_PREFIX}${randomBytes(32).toString('base64url')}`
+}
+
+export function isShareId(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  return trimmed.startsWith(SHARE_ID_PREFIX) &&
+    trimmed.length === SHARE_ID_PREFIX.length + SHARE_ID_BODY_LENGTH &&
+    SHARE_ID_RE.test(trimmed.slice(SHARE_ID_PREFIX.length))
+}
+
+/**
+ * Apakah `value` berbentuk identifier yang boleh di-lookup?
  *
- * Selalu `[ter-pepper, nilai yang dikirim klien]`.
+ * Tiga bentuk yang sah:
+ *  - 43 karakter base64url = Argon2id(username) yang dihitung klien;
+ *  - 64 hex = blind index ter-pepper yang PERNAH diterbitkan server
+ *    (echo pada link berbagi profil / hash-ID);
+ *  - `s1_<43 base64url>` = shareId acak (docs/28 §R5) — lookup ke kolom
+ *    `User.shareId`, BUKAN ke `usernameHash`.
  *
- * Kandidat kedua BUKAN toleransi baris legacy (baris pra-pepper sudah tidak ada)
- * melainkan **nilai ter-pepper yang di-echo klien**: server mengembalikan
- * `usernameHash` ter-pepper pada respons register/login/`/me`, dan link berbagi
- * profil (`connect?u=<usernameHash>`) mengirim balik nilai itu ke pencarian
- * kontak. Kolom DB menyimpan nilai ter-pepper, jadi lookup `where { in }` harus
- * memuat nilai kiriman apa adanya agar tautan itu tetap menemukan user.
- * (Meniadakan kandidat ini = pencarian hash-ID 64-hex berhenti bekerja.)
+ * [docs/35 Fase 4 — R5] Nilai mentah (username/email/IP apa pun) TIDAK sah:
+ * kalau server mau memetakan nilai mentah ke baris, pemegang dump cukup
+ * menebak lewat API hidup dan server yang menghitungkan HMAC-nya. Batas ini
+ * yang menutup R5.
+ */
+export function isSearchableIdentifier(value: string): boolean {
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (isShareId(trimmed)) return true
+  return (trimmed.length === 43 && /^[A-Za-z0-9_-]+$/.test(trimmed)) || HEX64_RE.test(trimmed.toLowerCase())
+}
+
+/**
+ * Nilai lookup kanonik untuk kolom identifier — HANYA bentuk hash.
+ *
+ * - 43-char (hash klien) → `[HMAC_pepper(value)]` (satu-satunya kandidat).
+ * - 64-hex → `[value]` karena itu SUDAH nilai tersimpan yang di-echo server
+ *   (link berbagi profil). Menghitung HMAC atas hash itu tidak akan pernah
+ *   cocok dan hanya menambah satu query.
+ *
+ * [docs/35 Fase 4 — R5] Tidak ada lagi kandidat `value` mentah. Sebelumnya
+ * fungsi ini mengembalikan `[ter-pepper, nilai kiriman]`, sehingga pencarian
+ * dengan username plaintext bisa mencocokkan baris yang menyimpan nilai
+ * tersebut — persis oracle yang ingin ditutup. Baris legacy pra-pepper sudah
+ * tidak ada (lihat `credentialTokenMatches`), jadi tak ada yang hilang.
+ *
+ * [docs/28 §R5] Jangan panggil fungsi ini dengan shareId (`s1_…`): route
+ * pencarian mem-branch ke kolom `User.shareId` lebih dulu.
  */
 export function identifierLookupCandidates(value: string): string[] {
-  return [pepperedIdentifier(value), value]
+  const trimmed = value.trim()
+  if (HEX64_RE.test(trimmed.toLowerCase())) return [trimmed.toLowerCase()]
+  return [pepperedIdentifier(trimmed)]
 }
 
 /** SHA-256 hex dari token yang dipegang klien (`adminSecretHash` pattern). */

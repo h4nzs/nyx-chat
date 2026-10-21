@@ -24,6 +24,10 @@
 
 // λ default: satu cover / 2 menit / percakapan (26.10.3).
 export const COVER_LAMBDA_PER_MIN = 0.5;
+// Batas adaptive λ: di bawah 0.2 cover jadi terlalu jarang untuk menyamarkan
+// burst; di atas 2.0 penghematan baterai/bandwidth habis (26.10.3).
+export const COVER_LAMBDA_MIN = 0.2;
+export const COVER_LAMBDA_MAX = 2.0;
 // Clamp interval sesuai desain: [10s, 15min].
 export const COVER_MIN_INTERVAL_MS = 10_000;
 export const COVER_MAX_INTERVAL_MS = 15 * 60_000;
@@ -48,9 +52,56 @@ const recentSendTimestamps: number[] = [];
 // jangan sampai cover memenuhi bucket (cover yield ke real, 26.10.4).
 const CHAT_MESSAGE_LIMIT_PER_MIN = 118; // margin 2 slot di bawah 120 server-side
 
-export function notifyRealSend(now: number = Date.now()): void {
+// [docs/35 Fase 3] Laju nyata per percakapan untuk adaptive λ. Disimpan hanya
+// di memori: tidak perlu bertahan reload, dan tidak boleh jadi jejak aktivitas
+// yang menetap di disk.
+const realSendsByConversation = new Map<string, number[]>();
+
+function pruneConversationSends(list: number[], now: number): number[] {
+  const cutoff = now - 60_000;
+  let first = 0;
+  while (first < list.length && (list[first] ?? Infinity) < cutoff) first += 1;
+  return first === 0 ? list : list.slice(first);
+}
+
+export function notifyRealSend(now: number = Date.now(), conversationId?: string): void {
   recentSendTimestamps.push(now);
   pruneRecentSends(now);
+  if (conversationId) {
+    const list = pruneConversationSends(realSendsByConversation.get(conversationId) ?? [], now);
+    list.push(now);
+    realSendsByConversation.set(conversationId, list);
+    // Batasi jumlah percakapan yang dilacak (burner/1:1 bisa banyak); entri
+    // terlama tanpa aktivitas dibuang supaya memori tidak tumbuh selamanya.
+    if (realSendsByConversation.size > 64) {
+      const oldest = realSendsByConversation.keys().next().value;
+      if (oldest !== undefined) realSendsByConversation.delete(oldest);
+    }
+  }
+}
+
+/** Laju kirim nyata percakapan ini dalam 60 detik terakhir (pesan/menit). */
+export function realSendRatePerMin(conversationId: string, now: number = Date.now()): number {
+  const list = realSendsByConversation.get(conversationId);
+  if (!list || list.length === 0) return 0;
+  const pruned = pruneConversationSends(list, now);
+  realSendsByConversation.set(conversationId, pruned);
+  return pruned.length;
+}
+
+/**
+ * [docs/35 Fase 3] λ adaptif: cover mengikuti laju nyata supaya rasio
+ * cover:nyata tetap ~1:2 pada percakapan aktif, tetapi tidak pernah turun di
+ * bawah `COVER_LAMBDA_MIN` (percakapan sepi tetap punya denyut) dan tidak
+ * melewati `COVER_LAMBDA_MAX` (baterai/bandwidth).
+ */
+export function adaptiveCoverLambda(
+  realPerMin: number,
+  base: number = COVER_LAMBDA_PER_MIN,
+): number {
+  if (!Number.isFinite(realPerMin) || realPerMin <= 0) return base;
+  const blended = Math.max(base, realPerMin * 0.5);
+  return Math.min(COVER_LAMBDA_MAX, Math.max(COVER_LAMBDA_MIN, blended));
 }
 
 function pruneRecentSends(now: number): void {
@@ -76,6 +127,23 @@ export const BURNER_CONVERSATION_PREFIX = 'burner_';
 
 export function isBurnerConversation(conversationId: string): boolean {
   return conversationId.startsWith(BURNER_CONVERSATION_PREFIX);
+}
+
+/**
+ * [docs/35 Fase 3] Bolehkah cover dikirim ke percakapan ini?
+ *
+ * Grup dan burner: ya (perilaku lama). Chat 1:1 biasa: hanya setelah ada pesan
+ * nyata (`hasHistory`) — cover tidak boleh menjadi pemicu handshake/percakapan
+ * baru, karena itu justru menciptakan metadata yang ingin disembunyikan.
+ */
+export function coverTargetAllowed(input: {
+  conversationId: string;
+  isGroup: boolean;
+  hasHistory: boolean;
+}): boolean {
+  if (isBurnerConversation(input.conversationId)) return true;
+  if (input.isGroup) return true;
+  return input.hasHistory;
 }
 
 /**
@@ -113,9 +181,10 @@ export function isCoverPayload(content: string): boolean {
   }
 }
 
-/** Hanya untuk test — kosongkan riwayat real-send (state modul). */
+/** Hanya untuk test — kosongkan riwayat real-send + laju per percakapan. */
 export function _resetCoverTrafficStateForTests(): void {
   recentSendTimestamps.length = 0;
+  realSendsByConversation.clear();
 }
 
 export interface CoverTrafficPreferences {
@@ -128,6 +197,121 @@ export interface CoverTrafficPreferences {
   isVisible?: () => boolean;
   isTransportConnected?: () => boolean;
   onSendCover?: (conversationId: string) => void;
+  /** λ per percakapan (adaptive). Default: adaptive dari laju nyata. */
+  lambdaFor?: (conversationId: string, now: number) => number;
+  /** Budget byte harian; default dibuat lazy dari localStorage. */
+  budget?: CoverBudget;
+  /** Ukuran amplop yang dihitung ke budget (8KB padding). */
+  envelopeBytes?: number;
+}
+
+// ───────────────────────── Budget byte harian ─────────────────────────
+
+export const COVER_BUDGET_STORAGE_KEY = 'nyx_cover_budget_v1';
+/**
+ * Default per percakapan per hari: λ=0.5/menit × 8 KB ≈ 5.8 MB; 25 MB memberi
+ * ruang untuk burst tanpa membuat "Maximum" jadi tombol pembakar kuota.
+ */
+export const COVER_DAILY_BUDGET_BYTES = 25 * 1024 * 1024;
+
+export interface CoverBudgetSnapshot {
+  day: string;
+  used: Record<string, number>;
+}
+
+function budgetDay(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+function readBudget(storage: Pick<Storage, 'getItem'> | null, now: number): CoverBudgetSnapshot {
+  const empty: CoverBudgetSnapshot = { day: budgetDay(now), used: {} };
+  if (!storage) return empty;
+  try {
+    const raw = storage.getItem(COVER_BUDGET_STORAGE_KEY);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return empty;
+    const { day, used } = parsed as { day?: unknown; used?: unknown };
+    if (typeof day !== 'string' || day !== budgetDay(now)) return empty;
+    if (!used || typeof used !== 'object' || Array.isArray(used)) return empty;
+    const clean: Record<string, number> = {};
+    for (const [id, value] of Object.entries(used as Record<string, unknown>)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) clean[id] = value;
+    }
+    return { day, used: clean };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Budget byte cover harian (client-local, reset per hari UTC).
+ *
+ * Kenapa perlu: λ adaptif pada percakapan ramai bisa menaikkan volume beberapa
+ * kali lipat; tanpa plafon, "Maximum" berubah jadi penguras kuota data yang
+ * tidak terlihat. Budget dihitung konservatif (per fire, bukan per sukses).
+ */
+export class CoverBudget {
+  private snapshot: CoverBudgetSnapshot;
+  private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null;
+  private readonly now: () => number;
+  private readonly dailyBytes: number;
+
+  constructor(options: {
+    storage?: Pick<Storage, 'getItem' | 'setItem'> | null;
+    now?: () => number;
+    dailyBytes?: number;
+  } = {}) {
+    this.storage = options.storage ?? defaultStorage();
+    this.now = options.now ?? Date.now;
+    this.dailyBytes = options.dailyBytes ?? COVER_DAILY_BUDGET_BYTES;
+    this.snapshot = readBudget(this.storage, this.now());
+  }
+
+  usedToday(conversationId: string): number {
+    this.rolloverIfNeeded();
+    return this.snapshot.used[conversationId] ?? 0;
+  }
+
+  remaining(conversationId: string): number {
+    return Math.max(0, this.dailyBytes - this.usedToday(conversationId));
+  }
+
+  canSend(conversationId: string, bytes: number = 8192): boolean {
+    return this.remaining(conversationId) >= bytes;
+  }
+
+  record(conversationId: string, bytes: number = 8192): void {
+    this.rolloverIfNeeded();
+    this.snapshot.used[conversationId] = (this.snapshot.used[conversationId] ?? 0) + bytes;
+    this.persist();
+  }
+
+  private rolloverIfNeeded(): void {
+    const today = budgetDay(this.now());
+    if (this.snapshot.day !== today) {
+      this.snapshot = { day: today, used: {} };
+      this.persist();
+    }
+  }
+
+  private persist(): void {
+    if (!this.storage) return;
+    try {
+      this.storage.setItem(COVER_BUDGET_STORAGE_KEY, JSON.stringify(this.snapshot));
+    } catch {
+      // Quota penuh / storage diblokir: budget jadi in-memory saja. Jangan
+      // sampai kegagalan menulis storage mematikan cover traffic.
+    }
+  }
+}
+
+function defaultStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -144,11 +328,15 @@ export class CoverTrafficScheduler {
     Pick<CoverTrafficPreferences, 'maximumGroups' | 'masterEnabled'>;
 
   constructor(prefs: CoverTrafficPreferences) {
+    const now = prefs.now ?? Date.now;
     this.prefs = {
-      now: Date.now,
+      now,
       isVisible: () => typeof document === 'undefined' || document.visibilityState === 'visible',
       isTransportConnected: () => false,
       onSendCover: () => {},
+      lambdaFor: (conversationId, at) => adaptiveCoverLambda(realSendRatePerMin(conversationId, at)),
+      budget: new CoverBudget({ now }),
+      envelopeBytes: 8192,
       ...prefs,
     };
   }
@@ -190,7 +378,8 @@ export class CoverTrafficScheduler {
   }
 
   private scheduleNext(conversationId: string): void {
-    const interval = samplePoissonInterval(COVER_LAMBDA_PER_MIN);
+    const lambda = this.prefs.lambdaFor(conversationId, this.prefs.now());
+    const interval = samplePoissonInterval(lambda);
     const t = setTimeout(() => {
       this.timers.delete(conversationId);
       this.fireIfEligible(conversationId);
@@ -214,7 +403,14 @@ export class CoverTrafficScheduler {
     if (!this.prefs.isVisible() || !this.prefs.isTransportConnected()) return;
     // Rate-limit backoff: cover yield ke real (26.10.4).
     if (coverShouldYield(this.prefs.now())) return;
+    // Budget harian habis → berhenti sampai besok (bukan menurunkan λ diam-diam;
+    // user melihat estimasi di UI dan bisa mematikan Maximum).
+    const envelopeBytes = this.prefs.envelopeBytes;
+    if (this.prefs.budget && !this.prefs.budget.canSend(conversationId, envelopeBytes)) return;
     this.prefs.onSendCover(conversationId);
+    // Dihitung per fire (konservatif): cover yang gagal kirim tetap memakai
+    // jatah, sehingga budget tidak bisa dipakai untuk burst tak terbatas.
+    this.prefs.budget?.record(conversationId, envelopeBytes);
   }
 }
 

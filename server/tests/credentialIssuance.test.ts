@@ -122,8 +122,12 @@ test('29 §7.1: verifyPresentation menolak presentasi tanpa binding conversation
   const lib = read('../src/lib/groupCredentials.ts');
   assert.match(lib, /credentialClaimFromPrepared\(preparedMsg\)/, 'klaim dibaca dari preparedMsg');
   assert.match(lib, /claim\.conversationId !== conversationId/, 'conversation yang diklaim harus cocok');
-  assert.match(lib, /import \{ credentialClaimFromPrepared \} from '@nyx\/shared'/,
+  // [docs/35 §35.6.6 — Fase 5] Import kini berbentuk multi-baris (suite ID ikut);
+  // yang dikunci adalah sumbernya, bukan tata letak import.
+  assert.match(lib, /from '@nyx\/shared'/,
     'format dibagi lewat @nyx/shared, bukan string duplikat');
+  assert.match(lib, /credentialClaimFromPrepared,/,
+    'helper klaim tetap diimpor dari @nyx/shared');
 });
 
 test('29 §7.1: route issuance/commit memerlukan bukti keanggotaan + tiket', () => {
@@ -163,10 +167,12 @@ test('29 §7.1: klien mengirim bukti keanggotaan pada issuance & commit', () => 
   assert.doesNotMatch(client, /`nyx-grp-cred:v1:\$\{conversationId\}/,
     'format tidak boleh ditulis ulang sebagai string lokal');
 
-  const headerCount = (client.match(/headers: Object\.keys\(buildIssuanceHeaders\(conversationId\)\)\.length > 0/g) ?? []).length;
-  assert.ok(headerCount >= 1, 'header dikirim pada request issuance/commit');
+  assert.match(client, /const commitHeaders = buildIssuanceHeaders\(conversationId\);/,
+    'header bukti dibangun untuk commit');
   assert.match(client, /headers: Object\.keys\(proofHeaders\)\.length > 0 \? proofHeaders : undefined/,
     'issuance memakai header yang sudah dibangun');
+  assert.match(client, /headers: Object\.keys\(commitHeaders\)\.length > 0 \? commitHeaders : undefined/,
+    'commit memakai header yang sudah dibangun');
 });
 
 test('29 §7.1: discovery token-first tidak lagi melewatkan metadata v3', () => {

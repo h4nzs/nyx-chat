@@ -22,6 +22,7 @@ import { ADMIN_CLEANUP, incCounter } from "./utils/metrics.js";
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
 import conversationsRouter from "./routes/conversations.js";
+import credentialsRouter from "./routes/credentials.js";
 import messagesRouter from "./routes/messages.js";
 import uploadsRouter from "./routes/uploads.js";
 import backupRouter from "./routes/backup.js";
@@ -33,6 +34,9 @@ import burnerRouter from "./routes/burner.js";
 import sessionsRouter from "./routes/sessions.js";
 // [docs/30 §30.9 WS-E(2)] Penerbit alamat relay panggilan (token, bukan userId).
 import callTokensRouter from "./routes/callTokens.js";
+// [docs/35 Fase 3] OHTTP — router hanya dipasang bila OHTTP_ENABLED=1.
+import createOhttpRouter from "./routes/ohttp.js";
+import { loadOhttpConfig } from "./ohttp/config.js";
 import adminRouter from "./routes/admin.js";
 import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
@@ -399,9 +403,26 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getCsrfTokenFromRequest: (req) => String(req.headers['csrf-token'] ?? ''),
 });
 
+// [docs/35 Fase 3] OHTTP di-mount SEBELUM lapisan CSRF: amplopnya opaque dan
+// tidak membawa cookie/header yang bisa diverifikasi di sini. Header target
+// (termasuk token CSRF) ikut DI DALAM request terenkripsi dan diverifikasi
+// ulang oleh API setelah gateway melakukan dispatch. Tanpa OHTTP_ENABLED=1,
+// router tidak dipasang sama sekali (jalur 404, bukan 403).
+const ohttpConfig = loadOhttpConfig();
+if (ohttpConfig) {
+  app.use("/api/ohttp", createOhttpRouter(ohttpConfig));
+}
+
 app.use((req, res, next) => {
   // [PAYMENTS CRYPTO-ONLY] Exempt Tripay webhook dihapus — hanya NOWPayments.
   if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
+    return next();
+  }
+  // [docs/35 Fase 6] Redeem credential anonim tidak membaca cookie/sesi; token
+  // bearer ada di body. CSRF tidak melindungi apa pun di sini (dan klien tanpa
+  // sesi tidak punya token CSRF). Bank token `/api/credentials/tokens` TETAP
+  // di bawah doubleCsrfProtection.
+  if (req.path === '/api/credentials/issuance' || req.path === '/api/credentials/commit') {
     return next();
   }
   doubleCsrfProtection(req, res, next);
@@ -457,6 +478,9 @@ app.use("/api", (req, res, next) => {
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/conversations", conversationsRouter);
+// [docs/35 Fase 6] Issuance/commit anonim (tanpa JWT). Bank token di router ini
+// tetap terautentikasi; hanya dua path redeem yang dikecualikan dari CSRF.
+app.use("/api/credentials", credentialsRouter);
 app.use("/api/messages", messagesRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/backup", backupRouter);

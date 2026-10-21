@@ -24,11 +24,13 @@ import { getSodium } from '../lib/sodium.js'
 import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
 import {
   deviceInstallationTag,
+  generateShareId,
   identifierLookupCandidates,
   openAtRest,
   pepperedIdentifier,
   sealAtRest,
 } from '../utils/atRestSecrets.js'
+import { ensureUserShareId } from '../utils/userShareId.js'
 // [LINK 2026-10-18] State machine pairing perangkat lewat QR (token → pending →
 // approved → complete). Logikanya murni + bisa diuji tanpa Prisma/Redis.
 import {
@@ -51,7 +53,10 @@ import { enforceRegistrationBurst, mayWaiveAttestation } from '../utils/registra
 // [docs/30 §30.12 WS-H] Attestation yang DITOLAK harus terlihat tanpa membaca log:
 // `root_not_trusted` = bundle root operator ketinggalan, `rejected`/`accepted` =
 // laju penolakan (ops/prometheus/alerts.yml grup `nyx-attestation`).
-import { ATTESTATION_REGISTRATION, incCounter } from '../utils/metrics.js'
+import { ATTESTATION_REGISTRATION, OHTTP_OPS, incCounter } from '../utils/metrics.js'
+// [docs/35 Fase 3] Token carriage OHTTP (umur 120 detik, scope allowlist).
+import { OHTTP_TOKEN_TTL_SEC, signOhttpToken } from '../utils/ohttpToken.js'
+import { isOhttpEnabled } from '../ohttp/config.js'
 // [docs/28 Tier 2 — B4] bucket metadata temporal (hari/15 menit).
 import { dayBucket, deviceActivityBucket } from '../utils/temporalBucket.js'
 import { nanoid } from 'nanoid'
@@ -449,6 +454,8 @@ async (req, res, next) => {
     const user = await prisma.user.create({
       data: {
         usernameHash: pepperedIdentifier(usernameHash),
+        // [docs/28 §R5] ID publik terpisah dari blind index.
+        shareId: generateShareId(),
         passwordHash,
         // [docs/28 Tier 2 — B4] hari pendaftaran (bucket harian), bukan detik.
         lastActiveDay: dayBucket(),
@@ -519,7 +526,7 @@ async (req, res, next) => {
 
     res.status(201).json({
       message: 'Registration successful.',
-      user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, subscriptionTier: user.subscriptionTier },
+      user: { id: user.id, usernameHash: user.usernameHash, shareId: user.shareId, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, subscriptionTier: user.subscriptionTier },
       accessToken: tokens.access,
       deviceId,
       needVerification: false,
@@ -696,7 +703,7 @@ router.post('/login', authLimiter, zodValidate({
       }
     }
 
-    const safeUser = { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role, subscriptionTier: user.subscriptionTier }
+    const safeUser = { id: user.id, usernameHash: user.usernameHash, shareId: await ensureUserShareId(user), encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role, subscriptionTier: user.subscriptionTier }
 
     const tokens = await issueTokens(safeUser, activeDeviceId, req)
     setAuthCookies(res, tokens)
@@ -1292,6 +1299,35 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+/**
+ * [docs/35 Fase 3] Terbitkan token OHTTP untuk carriage di dalam amplop.
+ *
+ * Endpoint ini tetap di belakang cookie + CSRF (bukan jalur OHTTP), karena
+ * tujuannya justru MENGAMBIL token memakai sesi yang sah. Setelah itu token
+ * yang dikirim lewat relay tidak membawa identitas jaringan klien.
+ */
+router.post('/ohttp-token', authLimiter, requireAuth, (req, res) => {
+  // Fitur mati = endpoint tidak ada, bukan 403: deployment biasa tidak boleh
+  // mengiklankan jalur ini sama sekali.
+  if (!isOhttpEnabled()) {
+    incCounter(OHTTP_OPS, { route: 'token', result: 'denied' })
+    res.status(404).json({ error: 'Not found' })
+    return
+  }
+  if (!req.user?.id) {
+    incCounter(OHTTP_OPS, { route: 'token', result: 'denied' })
+    res.status(401).json({ error: 'Unauthorized' })
+    return
+  }
+  const token = signOhttpToken({
+    userId: req.user.id,
+    deviceId: req.deviceId,
+    jti: newJti(),
+  })
+  incCounter(OHTTP_OPS, { route: 'token', result: 'ok' })
+  res.json({ token, expiresInSeconds: OHTTP_TOKEN_TTL_SEC })
+})
+
 router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
   if (endpoint) {
@@ -1646,6 +1682,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
         select: {
           id: true,
           usernameHash: true,
+          shareId: true,
           encryptedProfile: true,
           isVerified: true,
           role: true,
@@ -1709,7 +1746,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
 
       res.json({
         verified: true,
-        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role, subscriptionTier: safeUser.subscriptionTier },
+        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, shareId: await ensureUserShareId(safeUser), encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role, subscriptionTier: safeUser.subscriptionTier },
         accessToken: tokens?.access || undefined,
         encryptedPrivateKey: encryptedPrivKeyStr || undefined
       })    } else {

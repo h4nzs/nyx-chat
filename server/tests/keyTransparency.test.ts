@@ -298,6 +298,120 @@ test('penulis: idempoten, tidak melempar, dan fail-visible', async () => {
   if (previousKtUrl !== undefined) process.env.KT_SERVER_URL = previousKtUrl;
 });
 
+/**
+ * [docs/35 §35.7 Fase 7] Dual-write transisi v1 + v2.
+ *
+ * Entri yang sama harus masuk ke DUA pohon (nilai byte identik), dedupe terpisah
+ * per log, dan kegagalan satu log tidak boleh membatalkan log lain — tetapi juga
+ * tidak boleh dilaporkan sebagai sukses penuh.
+ */
+test('dual-write: entri sama ke log v1 dan v2, dedupe dan kegagalan terpisah', async () => {
+  const entry = buildKtLogEntry({
+    usernameHash: USERNAME_HASH_B64,
+    identityKey: IDENTITY_KEY,
+    pqIdentityKey: PQ_KEY,
+    signingKey: SIGNING_KEY,
+    keyVersion: 1,
+    updatedAtDay: 20_100,
+  });
+
+  let v1Calls = 0;
+  let v2Calls = 0;
+  let v2Requests: Uint8Array[] = [];
+  const v1 = {
+    async update() {
+      v1Calls++;
+      return buildUpdateResponse(7n, 96);
+    },
+  };
+  const v2 = {
+    async update(request: Uint8Array) {
+      v2Calls++;
+      v2Requests.push(request);
+      return buildUpdateResponse(7n, 0);
+    },
+  };
+
+  clearKtDedupeForTests();
+  const both = await commitKeyTransparencyEntry(entry, { transport: v1, v2Transport: v2, now: 1_000 });
+  assert.equal(both.ok, true);
+  assert.equal(both.treeSize, 7n);
+  assert.equal(both.v2?.ok, true);
+  assert.equal(v1Calls, 1);
+  assert.equal(v2Calls, 1);
+
+  // Nilai protobuf yang dikirim ke kedua log identik (search key + value).
+  const fields = decodeProtoFields(v2Requests[0]!);
+  assert.deepEqual(Array.from(fields.get(1)![0] as Uint8Array), Array.from(entry.searchKey));
+  assert.deepEqual(Array.from(fields.get(2)![0] as Uint8Array), Array.from(entry.value));
+
+  // Dedupe per log: nilai baru ditulis ke v1 saja dulu, lalu dual-write →
+  // v1 dedupe tetapi v2 (yang belum punya nilai itu) tetap ditulis.
+  const rotatedV1Only = buildKtLogEntry({
+    usernameHash: USERNAME_HASH_B64,
+    identityKey: new Uint8Array(32).fill(0x46),
+    pqIdentityKey: PQ_KEY,
+    signingKey: SIGNING_KEY,
+    keyVersion: 1,
+    updatedAtDay: 20_103,
+  });
+  const v1Only = await commitKeyTransparencyEntry(rotatedV1Only, { transport: v1, now: 2_000 });
+  assert.equal(v1Only.ok, true);
+  assert.equal(v1Calls, 2);
+
+  v2Calls = 0;
+  const onlyV2 = await commitKeyTransparencyEntry(rotatedV1Only, {
+    transport: v1,
+    v2Transport: v2,
+    now: 2_100,
+  });
+  assert.equal(v1Calls, 2, 'v1 tidak ditulis ulang (dedupe v1)');
+  assert.equal(v2Calls, 1, 'v2 tetap ditulis walau v1 dedupe');
+  assert.equal(onlyV2.ok, true);
+  assert.notEqual(onlyV2.skipped, 'DUPLICATE');
+
+  // Kedua log duplikat → skipped DUPLICATE di tingkat atas.
+  const duplicate = await commitKeyTransparencyEntry(rotatedV1Only, {
+    transport: v1,
+    v2Transport: v2,
+    now: 2_500,
+  });
+  assert.equal(duplicate.ok, true);
+  assert.equal(duplicate.skipped, 'DUPLICATE');
+
+  // Log v2 gagal: v1 tetap sukses, tetapi hasil gabungan TIDAK boleh `ok`.
+  let v1AfterFailure = 0;
+  const failingV2 = {
+    async update(): Promise<Uint8Array> {
+      throw new Error('KT_V2_UPDATE_TIMEOUT');
+    },
+  };
+  const rotated = buildKtLogEntry({
+    usernameHash: USERNAME_HASH_B64,
+    identityKey: new Uint8Array(32).fill(0x45),
+    pqIdentityKey: PQ_KEY,
+    signingKey: SIGNING_KEY,
+    keyVersion: 1,
+    updatedAtDay: 20_102,
+  });
+  const partial = await commitKeyTransparencyEntry(rotated, {
+    transport: {
+      async update() {
+        v1AfterFailure++;
+        return buildUpdateResponse(8n, 96);
+      },
+    },
+    v2Transport: failingV2,
+    now: 3_000,
+  });
+  assert.equal(v1AfterFailure, 1, 'kegagalan v2 tidak membatalkan penulisan v1');
+  assert.equal(partial.ok, false, 'satu log tertinggal bukan sukses penuh');
+  assert.equal(partial.reason, 'KT_V2_UPDATE_TIMEOUT');
+  assert.equal(partial.v2?.ok, false);
+
+  clearKtDedupeForTests();
+});
+
 test('publishKeyTransparencyEntry: bentuk tidak sah tidak ditulis ke log', async () => {
   let calls = 0;
   const transport = {

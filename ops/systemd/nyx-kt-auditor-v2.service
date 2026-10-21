@@ -1,0 +1,63 @@
+# NYX — auditor pihak ketiga log Key Transparency v2 (`nyx-kt-auditor-v2`, ML-DSA, Go).
+# Dipasang dari repo ini:
+#
+#   instalasi pertama : ops/systemd/README.md (direktori + kunci auditor +
+#                       `api.auditors` di config log + EnvironmentFile + `enable`)
+#   pembaruan         : otomatis oleh .github/workflows/deploy.yml — CI membangun
+#                       binary dari vendor, menaruhnya di
+#                       /root/nyx-app/server/kt-query/, menyalin ulang unit ini ke
+#                       /etc/systemd/system/, lalu merestart bila unit sudah
+#                       `enabled`.
+#
+# Kenapa proses terpisah dan bukan bagian `nyx-kt-query`: auditor adalah **pihak
+# ketiga**. Ia hanya bicara ke layanan lewat gRPC loopback (`TreeSize`/`Audit`/
+# `SetAuditorHead`) dan tidak pernah menyentuh LevelDB — kalau ia ikut memegang
+# basis data, "verifikasi independen" hanya jadi klaim. Ia juga boleh mati tanpa
+# mematikan log (bukti lama tetap dilayani; yang berhenti hanyalah tanda tangan
+# baru, dan itu terlihat di klien sebagai bukti tanpa auditor head yang segar).
+#
+# Semua listener yang dipakai auditor adalah loopback. JANGAN pernah membuka
+# :8088/:8087 ke publik (docs/10 §10.9).
+
+[Unit]
+Description=NYX Key Transparency v2 third-party auditor (nyx-kt-auditor-v2, ML-DSA)
+Documentation=file:///root/nyx-app/server/kt-query/README.md
+Documentation=file:///root/nyx-app/ops/systemd/README.md
+After=network-online.target nyx-kt-query-v2.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EnvironmentFile opsional (tanda `-`): unit ini boleh dipasang sebelum config
+# ada. Tanpa `NYX_KT_V2_AUDITOR_NAME` + `NYX_KT_V2_AUDITOR_KEY_FILE`, proses keluar
+# dengan pesan jelas di journal — memang itu yang diinginkan (auditor tanpa
+# identitas tidak boleh "hidup" diam-diam).
+EnvironmentFile=-/etc/nyx/kt-v2/nyx-kt-auditor.env
+WorkingDirectory=/root/nyx-app/server/kt-query
+# Tanpa argumen: seluruh setelan dibaca dari EnvironmentFile di atas (flag CLI
+# mengambil nilai awalnya dari env yang sama), jadi unit ini tidak perlu diedit
+# saat nama auditor/irama berubah.
+ExecStart=/root/nyx-app/server/kt-query/nyx-kt-auditor-v2
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+# Hardening dasar. State auditor (`NYX_KT_V2_AUDITOR_STATE_FILE`) harus berada di
+# dalam ReadWritePaths; kalau tidak, service mati dengan "read-only file system"
+# alih-alih kehilangan state verifikasinya diam-diam.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/nyx/kt-auditor-v2
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

@@ -202,14 +202,20 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (!query.trim()) return [];
 
       const trimmedQuery = query.trim();
-      const isAlreadyHash = /^[A-Za-z0-9_-]{43}$/.test(trimmedQuery);
+      // [docs/35 Fase 4] Dua bentuk hash yang sah: 43-char (Argon2id klien) dan
+      // 64-hex (blind index ter-pepper dari link lama). Bentuk 64-hex WAJIB
+      // diteruskan apa adanya — kalau di-hash lagi, link lama tidak akan pernah
+      // menemukan user dan tidak ada jalur migrasi.
+      const isAlreadyHash =
+        /^[A-Za-z0-9_-]{43}$/.test(trimmedQuery) || /^[a-f0-9]{64}$/i.test(trimmedQuery);
 
       const searchQuery = isAlreadyHash
         ? trimmedQuery
         : await import('@lib/crypto-worker-proxy').then(m => m.hashUsername(trimmedQuery));
 
-      const safeQuery = encodeURIComponent(searchQuery);
-      const users = await api<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>(`/api/users/search?q=${safeQuery}`);
+      // [docs/35 Fase 3] Jalur tunggal: OHTTP bila aktif (`userSearch.ts`).
+      const { searchUsersByHash } = await import('@lib/userSearch');
+      const users = await searchUsersByHash(searchQuery);
       return users;
     } catch (error) {
       console.error("Failed to search users", error);

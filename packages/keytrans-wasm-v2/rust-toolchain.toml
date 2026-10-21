@@ -1,0 +1,8 @@
+# [R1 2026-10-15] Toolchain dipin untuk artefak WASM yang DI-COMMIT.
+# Lihat `packages/spqr-wasm/rust-toolchain.toml` untuk alasan lengkapnya:
+# hash `dist/keytrans.wasm` diverifikasi CI terhadap manifest, dan itu hanya
+# bermakna bila compiler-nya identik.
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

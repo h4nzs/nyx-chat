@@ -753,6 +753,8 @@ export function worker_burner_dr_decrypt(payload: {
 export function worker_credential_blind(payload: {
   publicJwk: JsonWebKey;
   message: string;
+  /** [docs/35 §35.6.6 — Fase 5] suite dari issuer; worker menolak yang asing. */
+  suite: string;
 }): Promise<{ preparedMsgB64: string; blindedMsgB64: string; inv: string }> {
   return sendToWorker<{ preparedMsgB64: string; blindedMsgB64: string; inv: string }>('credential_blind', payload);
 }
@@ -762,6 +764,7 @@ export function worker_credential_finalize(payload: {
   preparedMsgB64: string;
   blindSigB64: string;
   inv: string;
+  suite: string;
 }): Promise<{ preparedMsgB64: string; signatureB64: string }> {
   return sendToWorker<{ preparedMsgB64: string; signatureB64: string }>('credential_finalize', payload);
 }

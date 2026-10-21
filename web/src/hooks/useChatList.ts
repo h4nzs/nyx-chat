@@ -4,7 +4,7 @@ import { useConversationStore } from '@store/conversation';
 import { usePresenceStore } from '@store/presence';
 import { useAuthStore, type User } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
-import { authFetch } from '@lib/api';
+import { searchUsersByHash } from '@lib/userSearch';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import i18n from '../i18n';
 import { getParticipantUserId } from '@nyx/shared';
@@ -71,7 +71,8 @@ export function useChatList() {
       setIsSearching(true);
       try {
         const hashedQuery = await hashUsername(rawQuery);
-        const users = await authFetch<User[]>(`/api/users/search?q=${encodeURIComponent(hashedQuery)}`);
+        // [docs/35 Fase 3] OHTTP bila aktif; tanpa fallback diam-diam.
+        const users = await searchUsersByHash(hashedQuery) as unknown as User[];
         
         // Inject optimistic query as username/name since it was an exact hash match
         // Guard: If we already know the user locally (friend/existing chat), use their real name.

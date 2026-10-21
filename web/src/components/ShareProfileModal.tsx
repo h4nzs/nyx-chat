@@ -12,7 +12,7 @@ import DefaultAvatar from '@/components/ui/DefaultAvatar';
 // mentah + profil terenkripsi seperti bentuk lama `/connect?u=…&i=…&p=…`.
 // Bentuk lama tetap DIBACA (QR yang sudah beredar tidak boleh mati) — lihat
 // `parseProfileShareLink` di `@utils/usernameLink`.
-import { buildUsernameLink, isValidUsernameHash } from '@utils/usernameLink';
+import { buildUsernameLink, isValidShareId } from '@utils/usernameLink';
 
 const QRCode = (
   (QRCodeRaw as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
@@ -30,16 +30,15 @@ export default function ShareProfileModal({ onClose }: Props) {
   const profile = useUserProfile(user);
   const [copied, setCopied] = useState(false);
 
-  // HashId tak berbentuk sah tidak bisa menjadi link yang bekerja (dan
-  // `buildUsernameLink` menolaknya) → jangan render QR yang menyesatkan.
-  // Terjadi hanya bila data tersimpan menyimpang; jalur register/login selalu
-  // menyimpan Argon2id base64url 32 byte.
-  if (!user?.usernameHash || !isValidUsernameHash(user.usernameHash)) {
+  // [docs/28 §R5] Tautan baru memakai shareId acak, bukan usernameHash (blind
+  // index). Server mengisi shareId saat register/login/GET /me; tanpa itu jangan
+  // render QR yang menyesatkan.
+  if (!user?.shareId || !isValidShareId(user.shareId)) {
     return null; // Should not happen if data is loaded
   }
 
-  // [docs/30 §30.13 WS-I] Link berbagi = `/u/<hashId>`.
-  const shareUrl = buildUsernameLink(window.location.origin, user.usernameHash);
+  // [docs/30 §30.13 WS-I] Link berbagi = `/u/<shareId>`.
+  const shareUrl = buildUsernameLink(window.location.origin, user.shareId);
 
   const handleCopy = async () => {
     try {

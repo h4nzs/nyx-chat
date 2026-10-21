@@ -9,7 +9,12 @@ systemd. Repo ini mengirim unit-nya, jadi pembaruan binary tidak lagi manual.
 | `nyx-kt-query.env.example` | Template `EnvironmentFile` (alamat loopback + setelan snapshot) |
 | `nyx-kt-auditor.service` | Unit systemd untuk **auditor pihak ketiga** (mode 3, `server/kt-query/cmd/nyx-kt-auditor`, Go) |
 | `nyx-kt-auditor.env.example` | Template `EnvironmentFile` auditor (nama, kunci, state, irama tanda tangan) |
+| `nyx-kt-query-v2.service` | Unit systemd untuk **log KT v2** (ML-DSA, LevelDB terpisah) |
+| `nyx-kt-query-v2.env.example` | Template `EnvironmentFile` v2 (port 8089/8088/8087, snapshot v2) |
+| `nyx-kt-auditor-v2.service` | Unit systemd untuk **auditor v2** (ML-DSA, mode 3) |
+| `nyx-kt-auditor-v2.env.example` | Template `EnvironmentFile` auditor v2 |
 | `nyx-kt-query` / `nyx-kt-auditor` (binary) | Dibangun CI dari `server/kt-query` (vendor) dan ditaruh `deploy.yml` di `/root/nyx-app/server/kt-query/` |
+| `nyx-kt-query-v2` / `nyx-kt-auditor-v2` / `nyx-kt-v2-init` (binary) | Binary v2 + alat bootstrap; dibangun CI dan dikirim `deploy.yml` |
 
 Yang **otomatis** sejak unit ini ada di repo (`.github/workflows/deploy.yml`, docs/10 §10.3):
 build binary dari vendor → masuk `nyx-deploy.zip` → disalin ke
@@ -140,6 +145,52 @@ Catatan operasional:
   = auditor mengaudit ulang dari posisi 0, bukan bencana, tetapi ia akan kehilangan
   posisi terakhir yang sudah ia tandatangani.
 
+## Log KT v2 (ML-DSA) — bootstrap otomatis
+
+Sejak Fase 7 (docs/35 §35.7) ada log **terpisah** dengan kunci ML-DSA-65, indeks
+SHA-256, dan LevelDB sendiri. `deploy.yml` menjalankan `nyx-kt-v2-init` **hanya bila
+`/etc/nyx/kt-v2/config.yaml` belum ada**; alat itu membuat:
+
+- `config.yaml` (seed signing ML-DSA 32 byte, prefix/opening 32 byte, entri
+  `api.auditors` berisi kunci publik ML-DSA-65 auditor, `distinguished: 1m`,
+  `db.file=/var/lib/nyx/kt-v2/tree.db`);
+- berkas seed auditor di path `NYX_KT_V2_AUDITOR_KEY_FILE`;
+- direktori `0700` untuk config, DB, snapshot, dan state auditor.
+
+Lalu deploy menyalin kedua EnvironmentFile (hanya jika belum ada),
+`systemctl enable nyx-kt-query-v2 nyx-kt-auditor-v2`, dan menambahkan
+`KT_V2_SERVER_URL=http://127.0.0.1:8088` ke `/root/nyx-app/.env` supaya penulis
+yang sama melakukan **dual-write**. Deploy **tidak** memindahkan `KT_QUERY_URL`:
+pembacaan tetap v1 sampai cutover disengaja.
+
+```bash
+# Status setelah deploy (semua loopback):
+curl -s 127.0.0.1:8089/healthz
+systemctl status nyx-kt-query-v2 nyx-kt-auditor-v2 --no-pager
+journalctl -u nyx-kt-query-v2 -n 30 --no-pager
+curl -s 127.0.0.1:9468/metrics | grep -E '^nyx_kt_query_(tree_size|writes)'
+curl -s 127.0.0.1:9469/metrics | grep -E '^nyx_kt_auditor_'
+```
+
+**Jangan** menjalankan `nyx-kt-v2-init -force` pada log yang sudah berisi bukti:
+itu mengganti identitas log dan semua bukti lama menjadi tidak terverifikasi.
+Deploy berikutnya tidak pernah menimpa config/kunci yang ada.
+
+### Kenapa cutover baca belum otomatis
+
+`User.usernameHash` di Postgres adalah HMAC ter-pepper, sedangkan search key KT
+diturunkan dari Argon2id mentah yang hanya dipegang klien. Karena itu log v2
+**tidak dapat di-backfill dari database** dan akun lama belum punya entri v2.
+Registrasi, pemulihan, dan rotasi kunci baru menulis ke kedua log (dual-write).
+Pindahkan `KT_QUERY_URL` ke `http://127.0.0.1:8089` dan `KT_SNAPSHOT_DIR` ke
+`/var/lib/nyx/kt-v2-snapshots` hanya setelah populasi yang dibutuhkan masuk;
+setelah itu v1 **read-only** (jangan dimatikan) supaya klien lama masih bisa
+memverifikasi.
+
+Rollback: klien yang sudah mem-pin ABI 2 menolak turun ke ABI 1 (anti-downgrade).
+Rollback yang aman = biarkan v2 hidup dan kembalikan `KT_QUERY_URL`, bukan
+menghapus pin di klien. Pin hanya bisa di-reset lewat jalur pemulihan lokal.
+
 ## Verifikasi
 
 ```bash
@@ -208,12 +259,11 @@ Tidak ada port yang perlu dibuka di firewall: ketiga listener loopback
 
 ## Yang masih belum otomatis (jujur)
 
-- Pemasangan pertama di atas (kunci + config + `enable`) — sengaja manual: kunci log
-  tidak boleh lahir dari CI.
-- Auditor pihak ketiga: prosesnya sudah ada (`nyx-kt-auditor`, unit di direktori
-  ini), tetapi **memasangnya tetap langkah manual** karena kunci auditor tidak boleh
-  lahir dari CI — sama seperti kunci log. Selama `api.auditors` belum diisi, log
-  tetap mode 1 dan auditor akan menolak start dengan pesan jelas.
+- Pemasangan pertama **v1** di atas (kunci + config + `enable`) — sengaja manual:
+  kunci log v1 tidak boleh lahir dari CI. Log v2 memakai bootstrap otomatis
+  (`nyx-kt-v2-init`) dengan kunci yang lahir di VPS.
+- Cutover baca v2 dan pengisian akun lama: manual, karena search key tidak dapat
+  diturunkan dari database (lihat bagian v2 di atas).
 - Latihan pemulihan arsip **dari R2** masih langkah manual (§10.13); versi otomatisnya
   (dari arsip lokal) sudah jalan di CI sebagai job `kt-recovery`.
 - coturn dan tumpukan observability (`ops/prometheus`, `ops/grafana`) tetap owner ops

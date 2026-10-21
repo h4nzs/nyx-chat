@@ -190,12 +190,16 @@ export async function fetchKtMonitor(monitorRequest: Uint8Array): Promise<Uint8A
 
 export interface KtPublicConfig {
   mode: number;
+  /** ML-DSA-65 (v2, 1952 byte → 3904 hex) atau Ed25519 (v1, 64 hex). */
   signatureKey: string;
-  vrfKey: string;
+  /** Hanya v1 (EC-VRF). Log v2 tidak memakai VRF. */
+  vrfKey?: string;
   auditorKeys: string[];
   searchKeyPrefix: string;
   distinguishedKey: string;
   valueFormat: string;
+  /** 2 = nilai `nyx-kt-value-v2` + tanda tangan ML-DSA; absen = v1. */
+  abiVersion?: number;
 }
 
 /** Kunci publik log: klien membandingkan ini dengan yang diharapkan sebelum percaya. */

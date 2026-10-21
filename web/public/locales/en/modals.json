@@ -180,7 +180,15 @@
     "verify_security": "Verify Security",
     "pq_status": "X-Wing Post-Quantum",
     "pq_desc": "Hardened Forward Secrecy Enabled",
-    "id_label": "ID"
+    "id_label": "ID",
+    "cover": {
+      "title": "Maximum privacy (cover traffic)",
+      "description": "Background decoy messages, indistinguishable from real traffic (~{{mb}} MB/day per chat).",
+      "no_history": "Send a real message first — cover traffic never starts a new conversation.",
+      "disabled_by_master": "Cover traffic is disabled globally in Settings.",
+      "enabled_toast": "Cover traffic enabled for this chat (~{{mb}} MB/day).",
+      "disabled_toast": "Cover traffic disabled for this chat."
+    }
   },
   "participants": {
     "make_admin": "Make Admin",

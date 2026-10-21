@@ -1,0 +1,63 @@
+# NYX — layanan log Key Transparency v2 (`nyx-kt-query-v2`, ML-DSA + SHA-256),
+# satu-satunya pemilik LevelDB log KT v2. Dipasang dari repo ini:
+#
+#   instalasi pertama : otomatis oleh deploy.yml lewat `nyx-kt-v2-init` bila config
+#                       belum ada (kunci lahir di VPS; ops/systemd/README.md)
+#   pembaruan         : otomatis oleh .github/workflows/deploy.yml — CI membangun
+#                       binary dari vendor, menaruhnya di
+#                       /root/nyx-app/server/kt-query/, menyalin ulang unit ini ke
+#                       /etc/systemd/system/, lalu merestart bila unit sudah
+#                       `enabled` (docs/10 §10.3/§10.15).
+#
+# Kenapa systemd dan bukan pm2: service ini harus **satu proses** (flock LevelDB —
+# dua proses = `resource temporarily unavailable`) dan hidup di luar cluster
+# `nyx-api`, jadi `pm2 restart nyx-api` tidak boleh menyentuhnya.
+#
+# Semua listener loopback. JANGAN pernah membuka :8088/:8089/:8087 ke publik —
+# hanya `nyx-api` di host yang sama yang boleh menulis/membaca (docs/10 §10.9).
+
+[Unit]
+Description=NYX Key Transparency log v2 (nyx-kt-query-v2, ML-DSA, pemilik LevelDB v2)
+Documentation=file:///root/nyx-app/server/kt-query/README.md
+Documentation=file:///root/nyx-app/ops/systemd/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EnvironmentFile opsional (tanda `-`): unit ini boleh dipasang sebelum config
+# ada. Tanpa config, service gagal start dengan pesan jelas di journal — itu
+# memang yang diinginkan (jangan pernah "hidup" tanpa log KT).
+EnvironmentFile=-/etc/nyx/kt-v2/nyx-kt-query.env
+WorkingDirectory=/root/nyx-app/server/kt-query
+# `-config` sengaja literal (flag mengalahkan env) supaya path tidak berubah
+# tanpa sengaja; alamat read/write/auditor dan setelan snapshot dibaca dari
+# EnvironmentFile di atas (padanannya ada di server/kt-query/README.md).
+#
+# Irama kunci `distinguished` TIDAK dioper di sini: satu sumber kebenaran =
+# `api.distinguished` di config YAML (docs/32 §32.8). Biarkan `0`/kosong di sana
+# = kunci distinguished tidak berotasi, dan itu terlihat di `GET /distinguished`.
+ExecStart=/root/nyx-app/server/kt-query/nyx-kt-query-v2 -config /etc/nyx/kt-v2/config.yaml
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+
+# Hardening dasar. Kalau operator memilih `db.file` / `-snapshot-dir` di luar
+# /var/lib/nyx, tambahkan path-nya ke ReadWritePaths — kalau tidak, service mati
+# dengan "read-only file system" (bukan diam-diam kehilangan tulisannya).
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/nyx/kt-v2 /var/lib/nyx/kt-v2-snapshots
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

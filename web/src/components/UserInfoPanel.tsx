@@ -13,10 +13,86 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
 import MediaGallery from './MediaGallery';
-import type { UserId, ProfileUser } from '@nyx/shared';
+import type { UserId, ProfileUser, ConversationId } from '@nyx/shared';
 import { asConversationId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
+import toast from 'react-hot-toast';
+import clsx from 'clsx';
+import { useSettingsStore } from '@store/settings';
+import { estimateDailyCoverBytes } from '@lib/coverTraffic';
+
+// [docs/35 Fase 3] Cover traffic 1:1 opt-in. State client-local seperti versi
+// grup: server tidak pernah tahu chat mana yang mengirim umpan. Kartu hanya
+// diberikan untuk DM yang sudah punya riwayat — cover tidak boleh memulai sesi.
+function DirectCoverTrafficCard({
+  conversationId,
+  hasHistory,
+}: {
+  conversationId: ConversationId;
+  hasHistory: boolean;
+}) {
+  const { t } = useTranslation(['modals']);
+  const { maximum, masterEnabled } = useSettingsStore(useShallow((s) => ({
+    maximum: s.coverTrafficMaximumGroups.includes(conversationId),
+    masterEnabled: s.coverTrafficMasterEnabled,
+  })));
+  const dailyMb = (estimateDailyCoverBytes() / (1024 * 1024)).toFixed(1);
+  const isOn = maximum && masterEnabled;
+  const blockedNoHistory = !maximum && !hasHistory;
+
+  const handleToggle = () => {
+    const next = !maximum;
+    useSettingsStore.getState().setGroupCoverTraffic(conversationId, next);
+    import('@lib/coverTraffic').then(({ getCoverScheduler }) => {
+      const settings = useSettingsStore.getState();
+      const scheduler = getCoverScheduler();
+      scheduler.updatePreferences({
+        masterEnabled: settings.coverTrafficMasterEnabled,
+        maximumGroups: new Set(settings.coverTrafficMaximumGroups),
+      });
+      scheduler.sync(settings.coverTrafficMaximumGroups);
+    }).catch(() => {});
+    toast.success(next
+      ? t('modals:user_info.cover.enabled_toast', { mb: dailyMb })
+      : t('modals:user_info.cover.disabled_toast'));
+  };
+
+  return (
+    <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h4 className="font-semibold text-text-primary">{t('modals:user_info.cover.title')}</h4>
+          <p className="text-xs text-text-secondary mt-1">
+            {!masterEnabled
+              ? t('modals:user_info.cover.disabled_by_master')
+              : blockedNoHistory
+                ? t('modals:user_info.cover.no_history')
+                : t('modals:user_info.cover.description', { mb: dailyMb })}
+          </p>
+        </div>
+        <button
+          role="switch"
+          aria-checked={isOn}
+          disabled={!masterEnabled || blockedNoHistory}
+          onClick={handleToggle}
+          className={clsx(
+            'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+            isOn ? 'bg-accent-color' : 'bg-bg-tertiary',
+            (!masterEnabled || blockedNoHistory) && 'opacity-50 cursor-not-allowed'
+          )}
+        >
+          <span
+            className={clsx(
+              'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+              isOn ? 'translate-x-6' : 'translate-x-1'
+            )}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function UserInfoPanel({ userId }: { userId: UserId }) {
   // Tambahkan namespace 'common' untuk menangkap pesan error global
@@ -157,6 +233,12 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
               {t('modals:user_info.verify_security')}
             </button>
           </div>
+          {activeId && (
+            <DirectCoverTrafficCard
+              conversationId={asConversationId(activeId)}
+              hasHistory={Boolean(activeConversation?.lastMessage)}
+            />
+          )}
         </div>
       );
     }

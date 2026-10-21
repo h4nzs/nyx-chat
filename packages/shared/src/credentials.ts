@@ -25,14 +25,21 @@
  * dari suite yang beku (`CREDENTIAL_SUITE`), jangan diubah tanpa rotasi suite.
  */
 
+import { CREDENTIAL_SUITE_RSA_V1, requireCredentialSuite } from './credentialSuite.js';
+
 /** Tag versi format pesan. Perubahan bentuk = versi baru, bukan edit di tempat. */
 export const CREDENTIAL_MESSAGE_PREFIX = 'nyx-grp-cred:v1';
 
 /** Panjang nonce acak (hex) — 128 bit, bagian yang membuat pesan unik per anggota. */
 export const CREDENTIAL_RANDOM_HEX_LENGTH = 32;
 
-/** Prefix acak yang ditambahkan `suites.prepare()` (RSABSSA-...-Randomized). */
-export const CREDENTIAL_PREPARE_PREFIX_BYTES = 32;
+/**
+ * Prefix acak yang ditambahkan `prepare()` suite v1. Nilainya sekarang diambil
+ * dari deklarasi suite (`credentialSuite.ts`) supaya penambahan suite PQ tidak
+ * perlu menyentuh parser ini.
+ */
+export const CREDENTIAL_PREPARE_PREFIX_BYTES =
+  requireCredentialSuite(CREDENTIAL_SUITE_RSA_V1).preparePrefixBytes;
 
 const NONCE_RE = /^[a-f0-9]{32}$/;
 

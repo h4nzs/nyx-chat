@@ -13,7 +13,7 @@
 | Redis | `127.0.0.1:6379` | pub/sub bridge + caches |
 | Storage | Cloudflare R2 | Encrypted blobs + arsip snapshot KT (`kt-snapshots/`) |
 | TURN (WebRTC) | coturn `:3478/udp+tcp`, `:5349/tls` + rentang relay | **primer** untuk kredensial `/api/keys/turn`; Cloudflare TURN hanya cadangan; prosesnya systemd = owner ops (§10.9) |
-| Observability | NYX `127.0.0.1:9464`, sidecar `:9465`, auditor KT `:9466`, log KT `:9467`; Prometheus (default `:9090`); Alertmanager `:9093` + relay ntfy `:9095`; exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | semuanya loopback; konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
+| Observability | NYX `127.0.0.1:9464`, sidecar `:9465`, auditor KT `:9466`, log KT `:9467`, log KT v2 `:9468`, auditor KT v2 `:9469`; Prometheus (default `:9090`); Alertmanager `:9093` + relay ntfy `:9095`; exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | semuanya loopback; konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
 
 `deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, dan binary + unit systemd `nyx-kt-query`**. Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `web/nginx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
 
@@ -151,6 +151,20 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 ### `nyx-kt-query` (env proses log KT, §10.15)
 
 `KT_CONFIG_FILE` (config YAML berisi kunci log + `db.file`), `NYX_KT_QUERY_ADDR` (default `127.0.0.1:8085`), `NYX_KT_WRITE_ADDR` (`127.0.0.1:8081`), `NYX_KT_AUDITOR_ADDR` (`127.0.0.1:8082`), `NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL` (`24h`), `NYX_KT_SNAPSHOT_KEEP` (`7`), `NYX_KT_METRICS_ADDR` (default `127.0.0.1:9467`; wajib loopback, `0` = mati). Semua alamat = loopback; tidak ada port KT yang boleh publik.
+
+### `nyx-kt-query-v2` (env proses log KT v2, transisi docs/35 §35.7)
+
+Paralel dan **terpisah** dari v1: database, config, snapshot, dan port sendiri
+(`NYX_KT_V2_QUERY_ADDR` default `127.0.0.1:8089`, `NYX_KT_V2_WRITE_ADDR`
+`:8088`, `NYX_KT_V2_AUDITOR_ADDR` `:8087`, `NYX_KT_V2_SNAPSHOT_DIR`,
+`NYX_KT_V2_METRICS_ADDR` default `127.0.0.1:9468`). Unit + contoh env:
+`ops/systemd/nyx-kt-query-v2.*`; auditor ML-DSA: `nyx-kt-auditor-v2.*`
+(`NYX_KT_V2_AUDITOR_*`, metrics `:9469`). Server menulis ke keduanya bila
+`KT_V2_SERVER_URL` diisi; pembacaan pindah dengan mengarahkan `KT_QUERY_URL` ke
+`:8089`. Saat `/etc/nyx/kt-v2/config.yaml` belum ada, `deploy.yml` menjalankan
+`nyx-kt-v2-init` lalu meng-`enable` kedua unit (bootstrap otomatis); setelah
+`enabled`, setiap deploy me-restart + health-check. Cutover baca dan backfill
+tetap manual — lihat §10.15.
 
 ### Web (`web/.env` → build-time `VITE_*`, disuntik `deploy.yml` dari secrets)
 
@@ -473,6 +487,13 @@ aplikasi yang menunjuk kemari:
 | `nyx_kt_query_uptime_seconds` | Umur proses (pembeda restart cepat) |
 | `nyx_kt_query_metrics_rejected_total{reason}` | Penjaga privasi sisi log; harus **selalu 0** |
 
+**Metrik proses LOG KT v2** mengekspor nama yang sama (`nyx_kt_query_*`) di
+`NYX_KT_V2_METRICS_ADDR` (`127.0.0.1:9468`, job `nyx-kt-query-v2`); demikian
+pula auditor v2 (`nyx_kt_auditor_*`, `127.0.0.1:9469`, job
+`nyx-kt-auditor-v2`). Nama sengaja tidak diberi sufiks v2 supaya dashboard dan
+aturan alarm yang ada berlaku untuk kedua log; `job` membedakannya. Jangan
+menambahkan aturan `up == 0` sebelum unit v2 di-`enable` (akan menyala palsu).
+
 **Metrik sidecar WebTransport** (`server/transport-sidecar/src/metrics.rs`,
 `TRANSPORT_METRICS_ADDR`, default `127.0.0.1:9465`) — job `nyx-sidecar`. "Aplikasi
 hidup" tidak berarti jalur ini hidup: klien yang gagal handshake **turun ke WSS
@@ -514,7 +535,7 @@ dari kenyataan luar** (mis. daftar objek R2, `…_remote_latest_timestamp_second
 
 **Pemasangan (ops di VPS).** Prometheus + Grafana + exporter node/postgres/redis
 di host yang sama (`nyx-api` :9464, sidecar :9465, auditor KT :9466, log KT
-:9467 — semuanya **loopback**). Alertmanager juga di-commit, tetapi **tanpa
+:9467, log KT v2 :9468, auditor KT v2 :9469 — semuanya **loopback**). Alertmanager juga di-commit, tetapi **tanpa
 rahasia**: `ops/alertmanager/alertmanager.yml` hanya menunjuk relay loopback,
 dan topik ntfy hidup di EnvironmentFile 0600 di VPS (§10.12 sub-bagian
 notifikasi).
@@ -875,6 +896,18 @@ alasan bentuknya begitu (query service upstream tidak bisa melayani nilai log NY
 LevelDB menolak dibuka dua proses) ada di `server/kt-query/README.md` — baca itu
 sebelum menyentuh service ini.
 
+**Transisi v2 (docs/35 §35.7).** Binary `nyx-kt-query-v2` dan
+`nyx-kt-auditor-v2` memakai direktori data/konfigurasi sendiri
+(`/var/lib/nyx/kt-v2`, `/var/lib/nyx/kt-v2-snapshots`,
+`/var/lib/nyx/kt-auditor-v2`, config `/etc/nyx/kt-v2/`). `deploy.yml` memasang
+unitnya, dan bila config belum ada ia menjalankan `nyx-kt-v2-init` (kunci lahir
+di VPS), menyalin contoh `EnvironmentFile`, lalu `enable` kedua unit. Pemasangan
+pertama **v1** tetap manual; cutover baca (`KT_QUERY_URL`) dan backfill akun lama
+juga manual (search key tidak dapat diturunkan dari database). Jangan
+menjalankan dua proses pada **satu** direktori LevelDB. Setelah cutover
+(`KT_QUERY_URL` → `:8089`), v1 dipertahankan read-only sampai tidak ada klien
+lama; rollback setelah klien mem-pin ABI 2 bersifat satu arah (anti-downgrade).
+
 **Bangun** (dari vendor, tanpa jaringan dan tanpa checkout upstream; artefaknya
 **tidak** ikut `deploy.yml`):
 
@@ -930,6 +963,8 @@ Perannya hari ini:
 | Simpan binary sebelumnya sebagai `nyx-kt-query.prev` | `deploy.yml` |
 | Pemasangan pertama: direktori, kunci log + config YAML, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
 | Pemasangan pertama auditor (mode 3): kunci auditor, entri `api.auditors`, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
+| Bootstrap v2: `nyx-kt-v2-init` (config + kunci ML-DSA di VPS), salin env contoh, `enable` kedua unit, isi `KT_V2_SERVER_URL`, `pm2 restart --update-env` | `deploy.yml` (bila `/etc/nyx/kt-v2/config.yaml` belum ada) |
+| Cutover baca v2 (`KT_QUERY_URL` → `:8089`, `KT_SNAPSHOT_DIR` → `kt-v2-snapshots`), lalu v1 read-only | **owner ops, manual** — akun lama belum punya entri v2 |
 | Isi `KT_SERVER_URL` / `KT_QUERY_URL` / `KT_SNAPSHOT_DIR` di `/root/nyx-app/.env`, lalu `pm2 restart nyx-api` | **owner ops, sekali** |
 
 Aturan yang tidak boleh dilanggar:

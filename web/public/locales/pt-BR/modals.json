@@ -181,7 +181,15 @@
     "verify_security": "Verificar Segurança",
     "pq_status": "X-Wing Post-Quantum",
     "pq_desc": "Sigilo Direto Reforçado Ativado",
-    "id_label": "ID"
+    "id_label": "ID",
+    "cover": {
+      "title": "Privacidade máxima (tráfego de cobertura)",
+      "description": "Mensagens chamariz em segundo plano, indistinguíveis do tráfego real (~{{mb}} MB/dia por conversa).",
+      "no_history": "Envie uma mensagem real primeiro — o tráfego de cobertura nunca inicia uma conversa nova.",
+      "disabled_by_master": "O tráfego de cobertura está desativado globalmente nas Configurações.",
+      "enabled_toast": "Tráfego de cobertura ativado para esta conversa (~{{mb}} MB/dia).",
+      "disabled_toast": "Tráfego de cobertura desativado para esta conversa."
+    }
   },
   "participants": {
     "make_admin": "Tornar Administrador",

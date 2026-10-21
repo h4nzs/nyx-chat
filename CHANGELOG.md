@@ -2,6 +2,267 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔏 Fase 7 landed: log Key Transparency v2 (ML-DSA) + dual-write, cutover baca belum (2026-10-21)
+
+Log KT v2 berjalan berdampingan dengan v1: crate fork lokal
+(`packages/keytrans-v2`) memakai ML-DSA-65 dan indeks SHA--256 alih-alih
+Ed25519/EC-VRF, dengan WASM verifier terpisah (`keytrans-v2.wasm`, ABI 2) yang
+diverifikasi lintas bahasa lewat fixture Go → Rust → vitest. Service, auditor,
+LevelDB, port, metrics, dan snapshot v2 terpisah; `deploy.yml` mem-bootstrap
+config + kunci di VPS lewat `nyx-kt-v2-init` lalu meng-enable unit v2.
+
+Server menulis entri identik ke v1 dan v2 bila `KT_V2_SERVER_URL` diisi
+(`nyx_kt_v2_writes_total`, dedupe per log), dan klien memilih ABI dari
+`/config` lalu mem-pin ABI 2 hanya setelah bukti terverifikasi. **Pembacaan
+tetap v1**: search key KT diturunkan dari Argon2id mentah yang tidak disimpan
+server, jadi akun lama tidak bisa di-backfill ke log v2. Cutover `KT_QUERY_URL`
+dan v1 read-only masih manual setelah populasi cukup.
+
+## 🧭 Sisa Fase 4: limiter pencarian per akun, padded query, OTPK tidak lagi terbakar saat preview (2026-10-21)
+
+Pencarian user kini punya dua limiter berlapis: **30/menit per akun** dan
+**90/menit per IP**. Limiter umum sebelumnya hanya menghitung per IP, sehingga
+satu akun di balik NAT bisa memborong jatah bersama sementara banyak akun dari
+satu kantor/VPN saling memblokir. Kunci limiter memakai `identityTag`/
+`clientIpTag` (HMAC), jadi snapshot Redis tidak memuat userId atau alamat mentah.
+
+Query pencarian diberi padding: `q` bisa 43 karakter (hash klien) atau 64 hex
+(hash-ID lama), dan perbedaan panjang itu sebelumnya terbaca dari URL. Sekarang
+sisa slot diisi `&pad=` acak sampai 64 karakter sehingga panjang path seragam.
+Server hanya membaca `q`.
+
+Pembacaan bundle pre-key dipisah dari konsumsi OTPK. Sebelumnya **setiap** GET
+`/api/keys/prekey-bundle/:userId` menghapus satu OTPK peer — artinya preview
+profil, percobaan gagal, atau retry jaringan ikut menguras pre-key korban.
+Sekarang `?otpk=read` mengembalikan identitas + signed pre-key tanpa menyentuh
+kolam dan tanpa `oneTimePreKey` (OTPK yang dikirim tanpa dihapus bisa dipakai
+dua inisiator sekaligus). Default tetap `consume` agar klien X3DH yang ada tidak
+berubah.
+
+PIR masih riset: butuh keputusan library/service (§35.11 #3), benchmark, dan
+audit sebelum boleh masuk default.
+
+## 🔒 R5 ditutup: pencarian user hanya menerima hash, bukan nilai mentah (2026-10-21)
+
+`identifierLookupCandidates()` dulu mengembalikan `[HMAC_pepper(q), q]`. Kandidat
+kedua membuat server mau mencari **nilai kiriman apa adanya** ke kolom
+`usernameHash` — artinya pemegang dump DB bisa mengirim tebakan username/email
+ke API hidup dan server yang menghitungkan hash-nya, menjadikan endpoint
+pencarian sebagai oracle keanggotaan. Sekarang fungsi itu hanya mengembalikan
+bentuk hash: 43-char (Argon2id klien) → satu kandidat ter-pepper; 64-hex (blind
+index yang di-echo server untuk link berbagi) → dipakai apa adanya.
+
+`GET /api/users/search` menolak nilai non-hash dengan 400
+`INVALID_IDENTIFIER_HASH` sebelum menyentuh DB, untuk semua akun. Gerbang
+sandbox lama (`SANDBOX_SEARCH_RESTRICTION`) menjadi tidak relevan dan digantikan
+validasi yang lebih ketat. Tool WebMCP `search_users` kini meng-hash input bebas
+di klien, dan store percakapan meneruskan 64-hex apa adanya sehingga link profil
+lama tetap menemukan user (jalur migrasi, bukan kompatibilitas nilai mentah).
+
+## 🕶️ Fase 3 selesai di kode: OHTTP dipakai jalur pencarian, cover adaptif, jitter, chaff visibility-aware (2026-10-21)
+
+docs/35 Fase 3 sebelumnya baru "scaffold": relay/gateway ada tetapi tidak
+mungkin dipakai karena cookie sesi `HttpOnly` tidak bisa masuk amplop OHTTP.
+Sekarang ada **carriage token**: `POST /api/auth/ohttp-token` (cookie + CSRF)
+menerbitkan JWT 120 detik ber-scope `ohttp` yang diletakkan di dalam amplop
+sebagai `authorization: Bearer …`. `requireAuth` menolak token itu di luar
+allowlist OHTTP dan hanya untuk GET, jadi token yang bocor tidak sama dengan
+sesi penuh. `GET /api/users/search` sekarang lewat relay → gateway lewat
+`web/src/lib/userSearch.ts` (satu pintu untuk hook pencarian, daftar chat, dan
+store percakapan) tanpa fallback diam-diam ke HTTP biasa.
+
+Rotasi kunci dua slot: `/api/ohttp/config` mempublikasikan key id 1 dan 2,
+gateway memilih slot dari byte pertama amplop, dan pin klien disimpan **per key
+id** — kunci yang sudah dipin tidak boleh berubah (fail-closed), kunci baru baru
+diadopsi setelah kunci lama pensiun. Metrik `nyx_ohttp_ops_total{route,result}`
+membedakan `unknown_key` dari amplop rusak.
+
+Cover traffic menjadi adaptif: λ mengikuti laju kirim nyata per percakapan
+(0.2–2.0/menit) dengan plafon 25 MB/percakapan/hari yang direset per hari UTC,
+sehingga "Maximum" tidak lagi bisa menjadi penguras kuota tanpa terlihat. Mode
+Maximum menambah jitter/batching 200–800 ms untuk pesan user (urutan tetap,
+silent/receipt dilewati). Chaff transport berhenti saat tab background dan
+profilnya dapat diubah runtime.
+
+Gerbang: server tetap default mati (`OHTTP_ENABLED` kosong → router 404) dan
+klien `VITE_OHTTP_ENABLED=1`. Jalur relay→gateway→dispatch diuji lewat HTTP
+nyata (14 test), dan uji itu menemukan bug nyata: sanitasi header identitas
+sebelumnya hanya ada di dispatcher default, bukan di gateway — kini gateway yang
+membersihkan, jadi dispatcher apa pun aman.
+
+## 🕶️ OHTTP punya relay, gateway, dan worker klien — default mati, belum dipakai alur aplikasi (2026-10-20)
+
+docs/35 Fase 3 meminta "OHTTP client worker + relay/gateway untuk REST".
+Katalog layanan tidak menyediakan OHTTP relay, jadi relay-nya **self-hosted**:
+`POST /api/ohttp/relay` hanya meneruskan byte opaque ke gateway yang URL-nya
+berasal dari env (bukan input klien, sehingga bukan open proxy), dan
+`POST /api/ohttp/gateway` membuka HPKE, menegakkan allowlist, lalu melakukan
+dispatch ke API lewat loopback dengan header jaringan dibuang. Wire mengikuti
+RFC 9458 §4.1–4.4: DHKEM(P-256, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM
+(semuanya WebCrypto native), isi Binary HTTP RFC 9292 known-length. Tidak ada
+primitif buatan sendiri; tambahan dependency hanya `@hpke/core` di
+`packages/shared`.
+
+Sisi klien: `web/src/workers/ohttp.worker.ts` (HPKE + Binary HTTP di worker,
+bukan main thread) dan `web/src/lib/ohttpClient.ts` yang mengambil
+`application/ohttp-keys`, mem-pin SHA-256-nya secara TOFU, lalu mengirim lewat
+relay. Allowlist dibatasi ke `GET /api/users/search` dan
+`GET /api/keys/prekey-bundle/<id>`; body 128 KiB; relay/gateway 120 req/menit.
+
+Batas yang ditulis jujur: relay dan gateway ada di VPS yang sama, jadi yang
+terlindung adalah path/header/konten dari edge Cloudflare dan access log nginx,
+**bukan** dari operator VPS. Dan OHTTP **belum dipakai alur aplikasi**: cookie
+sesi `HttpOnly` tidak bisa dibaca JS, sehingga belum ada kredensial yang bisa
+dimasukkan ke amplop. Gateway sudah meneruskan `authorization` bila ada, jadi
+langkah berikutnya adalah keputusan carriage token, bukan perubahan transport.
+
+Dikunci test: `server/tests/ohttp.test.ts` (10 test — round-trip HPKE
+request/response, framing Binary HTTP, key config collection, allowlist
+termasuk query string, sanitasi header, gate config default-mati/gagal-keras,
+403 terenkripsi tanpa dispatch, dan amplop yang diubah ditolak). Verifikasi:
+`tsc` web + server bersih, `vite build` web sukses, `oxlint` 0 error.
+
+## 🕵️ Cover traffic akhirnya bisa dipakai di chat 1:1 — tanpa memulai percakapan baru (2026-10-20)
+
+Cover traffic (T4) selama ini hanya hidup di grup Maximum dan burner, dan itu
+bukan karena scheduler-nya menolak: `sendCoverTraffic` sendiri yang kembali lebih
+awal untuk percakapan non-grup (`if (!conv?.isGroup) return`). Akibatnya privacy
+level "Maximum" praktis tidak tersedia untuk chat personal — padahal justru DM
+yang paling sering dipakai.
+
+Sekarang DM yang sudah punya riwayat bisa di-opt-in dari panel info kontak
+(`DirectCoverTrafficCard`): state tetap client-local (server tidak pernah tahu
+chat mana yang mengirim umpan), estimasi ~MB/hari tetap ditampilkan sebelum
+menyalakan, dan toggle-nya tunduk pada master kill-switch global. Yang sengaja
+**tidak** dilonggarkan: cover tidak boleh menjadi pemicu sesi.
+`coverTargetAllowed()` menolak DM yang `lastMessage`-nya masih kosong, karena
+handshake untuk pesan umpan justru membuat percakapan/handshake baru di server —
+metadata baru, bukan yang ingin disembunyikan. Grup dan burner berperilaku sama
+seperti sebelumnya.
+
+Dikunci test: `web/src/lib/__tests__/coverTraffic.test.ts` (24 test; dua di
+antaranya baru — scheduler meng-arm DM yang di-opt-in, dan matriks
+`coverTargetAllowed` untuk grup/burner/DM tanpa riwayat). Verifikasi: `tsc -b
+--noEmit` web bersih, `oxlint` 0 error, dan key i18n baru tersedia di keempat
+locale (en/es/id/pt-BR).
+
+## 🛡️ Migrasi post-quantum Fase 1 landed — ML-DSA, X3DH v2, grup v4 — di balik gerbang yang masih mati (2026-10-20)
+
+Seluruh langkah Fase 1 `docs/35` sekarang ada di kode, dan **tidak satu pun
+menyala secara default**. Semua jalur baru berada di balik gerbang
+`VITE_PQ_V2=1` (`resolvePqV2Enabled()`): tanpa gerbang itu klien tetap
+mengirim/mengiklankan v1, tetap **membaca** v2, dan tidak ada format v1 yang
+berubah. Capability dan format baru hanya aktif setelah keputusan deploy, bukan
+karena kebetulan build.
+
+**Fondasi.** `@noble/post-quantum@0.7.1` dipin exact di web, server, dan shared.
+`packages/shared/src/cryptoSuite.ts` mendefinisikan `PQ_V2_SUITE`, ukuran
+ML-DSA-65/X-Wing, dan `PQ_V2_DOMAINS` (bundle, handshake, seal, group, KT,
+credential, recovery, link). Capability `pq-v2` masuk `SERVER_CAPABILITIES`
+(sidecar Rust) dan `CLIENT_CAPABILITIES.PQ_V2`, dan klien hanya mengiklankannya
+lewat `advertisedPqCapabilities()` saat gerbang hidup. `scripts/check-pq-only.mjs`
+bersama `scripts/pq-only-baseline.json` menjadi ratchet: 12 pola classical-only
+(`crypto_scalarmult`, `crypto_box_seal`, Ed25519 sign/verify, RSABSSA, ECVRF) di
+`web/src`, `server/src`, dan `packages/shared/src` dibandingkan ke baseline, dan
+call baru menggagalkan CI (step `PQ-only guard` di job `lint`).
+
+**Tanda tangan ML-DSA-65.** `packages/shared/src/mlDsa.ts` membungkus noble
+dengan `context` = domain, sehingga domain separation tidak bisa lupa dipasang.
+Worker mendapat op `ml_dsa_*`; server mendapat `verifyMlDsaSignature` yang
+fail-closed (panjang salah atau exception → `false`). Device key v2 diturunkan
+deterministik dari `masterSeed` (label `signing-v2`) sehingga user lama dapat
+kunci v2 saat unlock tanpa reset password. Bundle v2 ditandatangani atas pesan
+kanonik ber-prefix panjang `u32` BE (identity X25519, pqIdentity, signedPreKey,
+pqSignedPreKey, signingKeyV2) dengan context `NYX-PQ-BUNDLE-V2`, dan server
+memverifikasinya **sebelum menyentuh DB** di `POST /api/keys/prekey-bundle`:
+bundle yang hanya membawa sebagian field v2 ditolak `400`, bukan disimpan
+tanggung.
+
+**1:1 X3DH v2 tanpa DH klasik.** `packages/shared/src/pqHandshake.ts`
+mendefinisikan wire `[magic 'N'][0x02][flags][pad][ctId][ctSpk][ctOtpk?][signature]`
+(5553 B tanpa OTPK, 6673 B dengan OTPK) dan transkrip ber-prefix panjang yang
+mengikat `signingKeyV2` inisiator + identity X25519 penerima + semua ciphertext.
+Session key = `BLAKE2b-256(ss_id ‖ ss_spk [‖ ss_otpk])` — murni hasil encapsulation
+X-Wing, tanpa `crypto_scalarmult` dan tanpa konversi Ed25519→X25519. Karena KEM
+saja tidak membuktikan siapa pengirim, inisiator menandatangani transkrip dengan
+ML-DSA; kunci verifikasinya **tidak** ada di wire, melainkan di payload ter-seal
+(`handshakeVersion: 2`, `initiatorSigningKeyV2`) dan diwajibkan sama dengan
+`signingKeyV2` bundle peer — dicek di dua jalur: `messagePipeline` untuk pesan
+masuk dan `storeReceivedSessionKey` untuk offline sync `session:new_key`.
+
+**Grup v4.** Pesan dan metadata grup memakai `sigV: 2` (ML-DSA-65 atas
+`u32(N) BE ‖ nonce(24) ‖ ciphertext`), dengan `senderKeyId` 8 byte =
+`BLAKE2b-256("NYX-PQ-GROUP-V4" ‖ signingKeyV2)[:8]` yang dicocokkan constant-time
+secara fail-closed. Envelope distribusi sender key naik v2 (77 B) → v3 (85 B,
++senderKeyId) → **v4 (2037 B, +signingKeyV2)**: kunci verifikasi pengirim ikut di
+dalam envelope yang sudah diseal per-device, sehingga penerima tidak perlu lookup
+bundle — bug nyata yang membuat semua metadata/pesan `sigV: 2` gagal saat
+pseudonym pengirim belum bisa di-resolve. `packGroupEnvelope` menolak v4 yang
+`senderKeyId`-nya tidak cocok dengan `signingKeyV2`, dan v2/v3 tetap dibaca.
+
+**Burner, recovery, device linking, migration, push.** Burner mendapat init
+PQ-only (`pqOnly`): tanpa keypair X25519, root key dari shared secret X-Wing,
+`guestClassicalPk: ''` dan `KEMr: null`; link memakai bagian ke-6 opsional
+(`…:<HostClassicalPublicKey>:2`) dan link 5-bagian lama tetap valid. Recovery
+mengirim `signatureV2` (ML-DSA atas string yang identik dengan v1) dan server
+memverifikasinya terhadap `Device.signingKeyV2` **atau** jalur Ed25519 lama.
+Device linking memvalidasi panjang `signingKeyV2`, menyimpannya ter-seal di
+pending, menulis `cryptoVersion: 2` saat approve, dan menerbitkan entri KT v2.
+Migrasi vault membawa `pqPubKey` di QR dan memakai `sealForDevice` /
+`openSealedForDevice`; push payload memakai jalur yang sama bila kunci PQ device
+tersedia. Semua ini memakai choke point yang sama, jadi fallback perangkat lama
+tetap `crypto_box_seal` v1.
+
+**Sealed box v2.** `packages/shared/src/pqSeal.ts` membungkus
+`[magic "NYS2"][X-Wing ct 1120][nonce 24][ct]` dengan key `BLAKE2b-256(ss)`;
+magic 4 byte dipakai karena v1 dibungkus `[ephemeral X25519 32][ct][nonce][ct]`
+sehingga tidak ada byte versi. Pembaca mendeteksi versi dari magic (peluang
+salah deteksi 2^-32) lalu memverifikasi panjang minimum.
+
+**Key Transparency Scope A.** Nilai log v2 = 3238 B (v1 1286 B + `signingKeyV2`
+1952 B), dipilih otomatis saat `signingKeyV2` tersedia; nilai v1 tetap dibaca.
+Verifikasi bundle kini membandingkan **tiga** kunci ke log (X25519 identity,
+X-Wing pqIdentity, ML-DSA signingKeyV2) dan mismatch mana pun menghasilkan
+verdict `mismatch`. Konfigurasi KT dipin TOFU di tabel Dexie `ktConfig` (v14)
+lewat `ktConfigPin.ts`: `signatureKey`/`vrfKey`/`auditorKeys` pertama disimpan
+ter-seal `ENC1:` dan perubahan ditolak sebagai `unverifiable`.
+
+**Audit yang menemukan akar bug, bukan gejalanya.** Lapisan persistensi Dexie
+(`keychainDb.ts`) menulis state dengan whitelist field eksplisit dan tidak
+memuat `signingKeyV2`/`senderKeyId`, sehingga kunci yang sudah terikat saat
+distribusi hilang setiap kali state dibaca ulang — inilah akar
+"Missing sender signing key v2" (relay dan envelope sudah benar). Field itu
+sekarang ikut di `save/getGroupReceiverState`, `archiveGroupReceiverState`,
+`listGroupReceiverStates`, dan `save/getGroupSenderState`; relay
+`group:fulfilled_key` diuji membawa field v1/v2 di jalur live **dan** content
+SYSTEM. Dua temuan audit yang sama ikut ditutup: metadata grup sekarang
+didekripsi dengan kandidat era (verifikasi signature per kandidat, fail-closed)
+sehingga era lama tetap terbaca setelah state aktif pindah, dan envelope
+distribusi membawa `targetDeviceKey` yang disertakan server ke payload SYSTEM
+sebagai `targetIdentityKey` (`SYSTEM_DEVICE_FIELDS`) sehingga device yang
+di-reset tetap bisa catch-up offline.
+
+**Yang belum.** Belum di-deploy, belum ada build produksi dengan gerbang hidup,
+KAT resmi FIPS 204/X-Wing belum dijalankan, scoping versi log di
+`ktMonitoring`/`ktGossip` sengaja ditunda sampai Scope B, dan Fase 3–8 (OHTTP,
+discovery, credential PQ, anonymous issuance, KT Scope B) belum disentuh.
+`.env.example` memuat `VITE_PQ_V2=1` dengan sengaja: dengan gerbang menyala,
+alur perpesanan 1:1 dan grup diverifikasi manual berjalan normal. Build dev/E2E
+yang menyalin template karena itu mengiklankan v2; produksi tetap harus memilih
+nilainya eksplisit, dan belum ada build produksi dengan gerbang hidup.
+
+Dikunci test: `web/src/lib/__tests__/mlDsa.test.ts`,
+`server/tests/mlDsa.test.ts`, `server/tests/pqBundle.test.ts`,
+`pqHandshake.test.ts`, `pqSeal.test.ts`, `pqCapability.test.ts`,
+`x3dhOracleVectors.test.ts` (15 vektor vs oracle Go), `x3dhOracleInterop.test.ts`,
+`groupEnvelopeV3.test.ts` (v2/v3/v4), `groupV4Signature.test.ts`,
+`keychainDbPersistence.test.ts`, `ktBundleProof.test.ts`, `ktConfigPin.test.ts`,
+`recoveryV2Signature.test.ts`, `burnerV2RootKey.test.ts`, dan
+`web/e2e/pqV2.spec.ts` (X3DH v2, grup `sigV: 2`, burner PQ-only; skip dengan
+alasan tertulis bila gerbang mati). Verifikasi yang menyertai commit: `tsc` web
+dan server bersih, `oxlint` 0 error, `go run . -check` untuk vektor oracle, dan
+`node scripts/check-pq-only.mjs` lulus tanpa mengubah baseline.
+
 ## 🔗 QR device-linking akhirnya bisa dipakai, dan redirect `/login` menjelaskan alasannya (2026-10-18)
 
 `auth:request_linking_qr` sudah lama membuat token 5 menit di Redis lalu

@@ -1,6 +1,6 @@
 module github.com/h4nzs/nyx-chat/server/kt-query
 
-go 1.26.6
+go 1.27.0
 
 // `github.com/signalapp/keytransparency` TIDAK dapat diambil dari jaringan
 // (repo privat — `git ls-remote` menjawab "Repository not found"). Karena itu

@@ -29,7 +29,12 @@
  *     registrasi (ketersediaan), tetapi dihitung di metrik
  *     `nyx_kt_writes_total{result="error"}` dan di-log dengan search key
  *     ter-hash (tidak ada identitas).
- *   - **Nonaktif secara default** — tanpa `KT_SERVER_URL`, modul ini no-op.
+ *   - **Nonaktif secara default** — tanpa `KT_SERVER_URL`/`KT_V2_SERVER_URL`,
+ *     modul ini no-op.
+ *   - **Dual-write transisi (docs/35 §35.7 Fase 7)** — bila `KT_V2_SERVER_URL`
+ *     diatur, entri yang SAMA ditulis ke log v1 dan log v2 (dua pohon, dua
+ *     proses, port berbeda). Dedupe dan metrik dipisah per log; kegagalan salah
+ *     satu log tidak membatalkan yang lain, tetapi hasilnya dilaporkan per log.
  *
  * Sisa yang jujur (dicatat di docs/30 §30.20): **verifier klien** (Spike-1
  * KT→WASM: verifikasi VRF/commitment atas search & monitor proof) belum ada —
@@ -41,7 +46,14 @@ import http2 from 'node:http2';
 import { createHash } from 'node:crypto';
 import { encodeKtValueV2, ML_DSA_65_PUBLIC_KEY_BYTES } from '@nyx/shared';
 
-import { incCounter, setGauge, KT_WRITES, KT_LAST_SUCCESS } from './metrics.js';
+import {
+  incCounter,
+  setGauge,
+  KT_WRITES,
+  KT_LAST_SUCCESS,
+  KT_V2_WRITES,
+  KT_V2_LAST_SUCCESS,
+} from './metrics.js';
 
 /** Prefix tipe search key di server KT (`shared.UsernameHashPrefix`). */
 export const KT_USERNAME_HASH_PREFIX = 0x75;
@@ -465,6 +477,9 @@ export function buildKtLogEntry(input: KtLogEntryInput): KtLogEntry {
 // Penulis idempoten
 // ============================================================================
 
+/** Log tujuan. `v1` = Ed25519/VRF, `v2` = ML-DSA/tanpa VRF (docs/35 §35.7). */
+export type KtLogTarget = 'v1' | 'v2';
+
 const recentWrites = new Map<string, number>();
 
 /** Hook test: buang dedupe. */
@@ -472,40 +487,53 @@ export function clearKtDedupeForTests(): void {
   recentWrites.clear();
 }
 
-export interface KtCommitResult {
+export interface KtTargetResult {
   ok: boolean;
   skipped?: 'DISABLED' | 'DUPLICATE';
   reason?: string;
   treeSize?: bigint | null;
 }
 
-/**
- * Tulis satu entri ke log. **Tidak pernah melempar**: kegagalan dicatat sebagai
- * metrik + log (search key ter-hash) supaya registrasi tetap jalan, dan operator
- * melihat lag di dashboard (`nyx_kt_writes_total`).
- */
-export async function commitKeyTransparencyEntry(
-  entry: KtLogEntry,
-  options: { transport?: KtTransport; now?: number } = {}
-): Promise<KtCommitResult> {
-  const endpoint = process.env.KT_SERVER_URL;
-  const transport =
-    options.transport ??
-    (endpoint ? createGrpcKtTransport({ endpoint, timeoutMs: Number(process.env.KT_TIMEOUT_MS) || 5000 }) : null);
+export interface KtCommitResult extends KtTargetResult {
+  /** Hasil log v2 saat dual-write aktif. */
+  v2?: KtTargetResult;
+}
 
-  if (!transport) return { ok: false, skipped: 'DISABLED' };
+interface WriteTarget {
+  name: KtLogTarget;
+  transport: KtTransport;
+}
 
-  const now = options.now ?? Date.now();
-  // Dedupe = (search key, versi kunci, nilai). Nilai yang sama tidak ditulis dua
-  // kali; nilai yang BERUBAH selalu ditulis meski versinya sama.
-  const dedupeKey = `${entry.entryTag}:${entry.keyVersion}:${ktValueDigest(entry.value)}`;
+function configuredTargets(options: { transport?: KtTransport; v2Transport?: KtTransport }): WriteTarget[] {
+  // Transport eksplisit = mode uji: jangan sentuh env/jaringan nyata.
+  if (options.transport) {
+    const targets: WriteTarget[] = [{ name: 'v1', transport: options.transport }];
+    if (options.v2Transport) targets.push({ name: 'v2', transport: options.v2Transport });
+    return targets;
+  }
+
+  const targets: WriteTarget[] = [];
+  const timeoutMs = Number(process.env.KT_TIMEOUT_MS) || 5000;
+  const v1Endpoint = process.env.KT_SERVER_URL;
+  const v2Endpoint = process.env.KT_V2_SERVER_URL;
+  if (v1Endpoint) targets.push({ name: 'v1', transport: createGrpcKtTransport({ endpoint: v1Endpoint, timeoutMs }) });
+  if (v2Endpoint) targets.push({ name: 'v2', transport: createGrpcKtTransport({ endpoint: v2Endpoint, timeoutMs }) });
+  return targets;
+}
+
+async function writeToTarget(target: WriteTarget, entry: KtLogEntry, now: number): Promise<KtTargetResult> {
+  // Dedupe = (log, search key, versi kunci, nilai). Nilai yang sama tidak ditulis
+  // dua kali; nilai yang BERUBAH selalu ditulis meski versinya sama. Log v1 dan
+  // v2 punya pohon sendiri, jadi dedupe-nya terpisah — entri yang sudah ada di
+  // v1 tetap harus masuk v2 saat dual-write dimulai.
+  const dedupeKey = `${target.name}:${entry.entryTag}:${entry.keyVersion}:${ktValueDigest(entry.value)}`;
   const last = recentWrites.get(dedupeKey);
   if (last !== undefined && now - last < KT_DEDUPE_TTL_MS) {
     return { ok: true, skipped: 'DUPLICATE' };
   }
 
   try {
-    const responseBytes = await transport.update(
+    const responseBytes = await target.transport.update(
       encodeKtUpdateRequest({
         searchKey: entry.searchKey,
         value: entry.value,
@@ -521,15 +549,56 @@ export async function commitKeyTransparencyEntry(
       }
     }
 
-    incCounter(KT_WRITES, { result: 'ok' });
-    setGauge(KT_LAST_SUCCESS, Math.floor(now / 1000));
+    incCounter(target.name === 'v2' ? KT_V2_WRITES : KT_WRITES, { result: 'ok' });
+    setGauge(target.name === 'v2' ? KT_V2_LAST_SUCCESS : KT_LAST_SUCCESS, Math.floor(now / 1000));
     return { ok: true, treeSize: summary.treeSize };
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'UNKNOWN';
-    incCounter(KT_WRITES, { result: 'error' });
-    console.error(`[KT] Penulisan log gagal (entry ${entry.entryTag}, keyVersion ${entry.keyVersion}): ${reason}`);
+    incCounter(target.name === 'v2' ? KT_V2_WRITES : KT_WRITES, { result: 'error' });
+    console.error(
+      `[KT] Penulisan log ${target.name} gagal (entry ${entry.entryTag}, keyVersion ${entry.keyVersion}): ${reason}`
+    );
     return { ok: false, reason };
   }
+}
+
+/**
+ * Tulis satu entri ke log (v1, v2, atau keduanya). **Tidak pernah melempar**:
+ * kegagalan dicatat sebagai metrik + log (search key ter-hash) supaya registrasi
+ * tetap jalan, dan operator melihat lag per log di dashboard.
+ *
+ * Hasil tingkat atas selalu mewakili log **v1** bila v1 dikonfigurasi (kompatibel
+ * dengan pemanggil lama); `v2` berisi hasil log v2 saat dual-write. Bila hanya v2
+ * yang dikonfigurasi, hasil tingkat atas mewakili v2.
+ */
+export async function commitKeyTransparencyEntry(
+  entry: KtLogEntry,
+  options: { transport?: KtTransport; v2Transport?: KtTransport; now?: number } = {}
+): Promise<KtCommitResult> {
+  const targets = configuredTargets(options);
+  if (targets.length === 0) return { ok: false, skipped: 'DISABLED' };
+
+  const now = options.now ?? Date.now();
+  const results = await Promise.all(targets.map((target) => writeToTarget(target, entry, now)));
+
+  const v1Index = targets.findIndex((target) => target.name === 'v1');
+  const v2Index = targets.findIndex((target) => target.name === 'v2');
+  const primary = results[v1Index >= 0 ? v1Index : v2Index]!;
+  const combined: KtCommitResult = { ...primary };
+
+  if (v2Index >= 0) {
+    combined.v2 = results[v2Index]!;
+    const failed = results.find((result) => !result.ok);
+    if (failed && primary.ok) {
+      // Satu log tertinggal bukan sukses penuh: laporkan alasannya di tingkat
+      // atas supaya pemanggil/log tidak menyimpulkan "kedua pohon sinkron".
+      combined.ok = false;
+      combined.reason = failed.reason;
+    }
+    combined.skipped = results.every((result) => result.skipped === 'DUPLICATE') ? 'DUPLICATE' : undefined;
+  }
+
+  return combined;
 }
 
 /**
@@ -539,9 +608,11 @@ export async function commitKeyTransparencyEntry(
  */
 export async function publishKeyTransparencyEntry(
   input: KtLogEntryInput,
-  options: { transport?: KtTransport; now?: number } = {}
+  options: { transport?: KtTransport; v2Transport?: KtTransport; now?: number } = {}
 ): Promise<KtCommitResult> {
-  if (!process.env.KT_SERVER_URL && !options.transport) return { ok: false, skipped: 'DISABLED' };
+  if (!process.env.KT_SERVER_URL && !process.env.KT_V2_SERVER_URL && !options.transport) {
+    return { ok: false, skipped: 'DISABLED' };
+  }
 
   let entry: KtLogEntry;
   try {

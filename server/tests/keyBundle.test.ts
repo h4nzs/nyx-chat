@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import {
+  parseOtpkMode,
   requireBundleDevice,
   toBase64Url,
   toDeviceTemplate,
@@ -197,6 +198,24 @@ test('wiring keys.ts: kuota dicek sebelum OTPK dikonsumsi (fail-closed)', () => 
   assert.ok(utilCalls >= 2, `kedua jalur harus memakai toPreKeyBundle, ditemukan ${utilCalls}`);
   assert.ok(!source.includes('bundle.oneTimePreKey ='), 'pemetaan OTPK inline harus dihapus dari rute');
   assert.ok(!source.includes('Buffer.isBuffer(otpk.publicKey)'), 'ekspresi biner inline harus dihapus dari rute');
+});
+
+test('[docs/35 Fase 4] parseOtpkMode: default consume, hanya `read` yang melewati konsumsi', () => {
+  assert.equal(parseOtpkMode(undefined), 'consume', 'klien lama tidak berubah');
+  assert.equal(parseOtpkMode('consume'), 'consume');
+  assert.equal(parseOtpkMode('read'), 'read');
+  assert.equal(parseOtpkMode('READ'), 'consume', 'nilai tak dikenal = perilaku aman (konsumsi)');
+  assert.equal(parseOtpkMode(['read']), 'consume', 'array query tidak lolos');
+  assert.equal(parseOtpkMode(1), 'consume');
+});
+
+test('[docs/35 Fase 4] wiring keys.ts: mode read kembali TANPA menghapus OTPK', () => {
+  const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/routes/keys.ts'), 'utf8');
+  const guard = source.indexOf("if (otpkMode === 'read')");
+  const removal = source.indexOf('DELETE FROM "OneTimePreKey"');
+  assert.ok(guard > 0, 'ada cabang read eksplisit');
+  assert.ok(removal > guard, 'cabang read berada SEBELUM penghapusan OTPK');
+  assert.match(source, /toPreKeyBundle\(deviceTemplate, null\)/, 'mode read tidak mengirim oneTimePreKey');
 });
 
 test('toPublicDeviceBundle memakai deviceId dan tanpa signed pre-key', () => {

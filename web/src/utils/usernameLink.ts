@@ -6,11 +6,13 @@
  * [docs/30 §30.13 WS-I] Username links `/u/<hashId>`.
  *
  * Link berbagi profil lama (`/connect?u=&i=&p=`) memuat userId + profil
- * terenkripsi di query string. Link pendek ini hanya membawa **hashId** —
- * nilai yang sudah dikirim klien ke `/api/users/search` untuk pencocokan persis
- * (tanpa enumerasi, rate-limit + exact match). Validasi di sini memakai aturan
- * yang sama dengan server (`users.ts` `isExactHash`): 43 char base64url
- * (Argon2id klien) atau 64 hex (blind index ter-pepper).
+ * terenkripsi di query string. Link pendek ini hanya membawa **handle**:
+ *  - `s1_<43 base64url>` — shareId acak (docs/28 §R5), bentuk yang ditulis
+ *    sekarang;
+ *  - 43 char base64url (Argon2id klien) atau 64 hex (blind index ter-pepper) —
+ *    bentuk lama yang tetap dibaca agar QR yang sudah beredar tidak mati.
+ * Validasi di sini memakai aturan yang sama dengan server (`users.ts`
+ * `isSearchableIdentifier`).
  */
 
 /** Panjang hashId Argon2id-base64url dari klien. */
@@ -19,8 +21,17 @@ export const USERNAME_HASH_BASE64URL_LENGTH = 43;
 /** Panjang blind index ter-pepper (hex). */
 export const USERNAME_HASH_HEX_LENGTH = 64;
 
+/**
+ * [docs/28 §R5] Prefiks shareId publik — ID acak yang terpisah dari blind
+ * index. Tautan baru memakai bentuk ini; tautan lama (43-char / 64-hex) tetap
+ * dibaca supaya QR yang sudah beredar tidak mati.
+ */
+export const SHARE_ID_PREFIX = 's1_';
+export const SHARE_ID_BODY_LENGTH = 43;
+
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const HEX_RE = /^[a-f0-9]{64}$/;
+const SHARE_ID_RE = /^[A-Za-z0-9_-]{43}$/;
 
 /**
  * true bila nilai berbentuk hashId yang sah. Dipakai di klien agar format salah
@@ -33,9 +44,22 @@ export function isValidUsernameHash(value: unknown): value is string {
   return false;
 }
 
+/** true bila nilai berbentuk shareId acak `s1_<43 base64url>` (docs/28 §R5). */
+export function isValidShareId(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  return value.startsWith(SHARE_ID_PREFIX) &&
+    value.length === SHARE_ID_PREFIX.length + SHARE_ID_BODY_LENGTH &&
+    SHARE_ID_RE.test(value.slice(SHARE_ID_PREFIX.length));
+}
+
+/** Bentuk apa pun yang boleh muncul di `/u/:handle` (shareId baru atau hash lama). */
+export function isValidShareHandle(value: unknown): value is string {
+  return isValidShareId(value) || isValidUsernameHash(value);
+}
+
 /** Ambil hashId dari segmen URL `/u/:hashId`; `null` bila tidak sah. */
 export function parseUsernameHashSegment(raw: string | undefined | null): string | null {
-  return isValidUsernameHash(raw) ? raw : null;
+  return isValidShareHandle(raw) ? raw : null;
 }
 
 /**
@@ -102,7 +126,7 @@ export function parseProfileShareLink(raw: string): string | null {
     } catch {
       return null; // escape rusak
     }
-    return isValidUsernameHash(segment) ? `?u=${encodeURIComponent(segment)}` : null;
+    return isValidShareHandle(segment) ? `?u=${encodeURIComponent(segment)}` : null;
   }
 
   if (/\/connect\/?$/.test(url.pathname)) {
@@ -115,10 +139,10 @@ export function parseProfileShareLink(raw: string): string | null {
 
 /**
  * Bangun link pendek absolut. Melempar bila hashId tidak sah — mencegah link
- * rusak ikut tersebar.
+ * rusak ikut tersebar. Menerima shareId baru maupun hash lama (jalur migrasi).
  */
 export function buildUsernameLink(origin: string, hashId: string): string {
-  if (!isValidUsernameHash(hashId)) throw new Error('Hash ID tidak sah');
+  if (!isValidShareHandle(hashId)) throw new Error('Hash ID tidak sah');
   const base = origin.replace(/\/+$/, '');
   return `${base}/u/${encodeURIComponent(hashId)}`;
 }

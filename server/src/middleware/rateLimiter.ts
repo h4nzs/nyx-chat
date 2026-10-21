@@ -4,6 +4,7 @@ import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
 import { Request, Response, NextFunction } from 'express';
 import { clientIpTag } from '../utils/clientIp.js'
+import { searchRateKey } from '../utils/searchRateKey.js'
 import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 
 // Secure IP Extractor: prioritas pada CF-Connecting-IP — melalui edge/tunnel
@@ -90,6 +91,68 @@ export const uploadLimiter = rateLimit({
 // dibutuhkan. NYX berjalan satu instance (`docs/10`), jadi hitungan in-memory
 // sudah menutup tujuan limiter di sini (memperlambat brute-force kunci), tanpa
 // menambah ketergantungan yang bisa mematikannya.
+/**
+ * [docs/35 Fase 4] Batas pencarian PER AKUN: 30/menit.
+ *
+ * Limiter umum menghitung per IP, sehingga satu akun di balik NAT/CGNAT bisa
+ * memborong jatah bersama, sementara banyak akun dari satu IP (kantor, VPN)
+ * saling memblokir. Pencarian adalah endpoint enumerasi, jadi batasnya harus
+ * melekat pada akun. Kunci = tag HMAC (`utils/searchRateKey.ts`).
+ */
+export const searchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: searchRateKey,
+  validate: { trustProxy: false },
+  message: { error: 'SEARCH_RATE_LIMITED: Too many searches. Please wait a minute.' },
+  store: new RedisStore({
+    prefix: 'rl:search:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
+/**
+ * Batas per IP: 90/menit. Bukan pengganti batas akun, melainkan penahan
+ * pembuatan banyak akun untuk mengakali batas akun di satu host.
+ */
+export const searchIpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 90,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
+  message: { error: 'SEARCH_RATE_LIMITED: Too many searches from this network.' },
+  store: new RedisStore({
+    prefix: 'rl:search-ip:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
+/**
+ * [docs/35 Fase 6] Redeem token credential anonim: per IP, 60/menit.
+ * Jalur ini tidak punya akun (tanpa JWT), jadi IP adalah satu-satunya kunci;
+ * kuota sebenarnya ada di bank token (per user per hari).
+ */
+export const anonCredentialLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
+  message: { error: 'CREDENTIAL_RATE_LIMITED: Too many anonymous credential requests.' },
+  store: new RedisStore({
+    prefix: 'rl:cred-anon:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
 export const adminCleanupLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,

@@ -192,4 +192,8 @@ export type MainToTransportWorker =
   // irisan kapabilitas di stream yang sama). `SEND_STREAM` membuat stream UNI
   // yang tidak bisa dibalas server — dan di jalur itu sidecar akan
   // meneruskannya ke `nyx:upstream:11` (melanggar "transport-local").
-  | { type: 'CAPABILITY_HELLO'; payload: BinaryPayload };
+  | { type: 'CAPABILITY_HELLO'; payload: BinaryPayload }
+  // [docs/35 Fase 3] Profil chaff dari main thread: tab background berhenti
+  // mengirim, dan interval/ukuran bisa diubah tanpa reload (semua di-clamp
+  // di worker supaya nilai aneh dari luar tidak mengubah perilaku transport).
+  | { type: 'CHAFF_CONFIG'; enabled?: boolean; intervalMs?: number; jitterMs?: number; sizeBytes?: number };

@@ -21,7 +21,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { MinimalProfile } from '@nyx/shared';
-import { api } from '@lib/api';
+import { searchProfilesByHash } from '@lib/userSearch';
 
 /** Jeda setelah user berhenti mengetik sebelum search dieksekusi. */
 export const SEARCH_DEBOUNCE_MS = 600;
@@ -49,7 +49,8 @@ export function useUserSearch(rawSearchTerm: string, options: UseUserSearchOptio
   const doSearch = searchFn ?? (async (query: string) => {
     const { hashUsername } = await import('@lib/crypto-worker-proxy');
     const hashedQuery = await hashUsername(query);
-    return api<MinimalProfile[]>(`/api/users/search?q=${encodeURIComponent(hashedQuery)}`);
+    // [docs/35 Fase 3] Jalur OHTTP (bila aktif) ada di helper bersama.
+    return searchProfilesByHash(hashedQuery);
   });
 
   useEffect(() => {

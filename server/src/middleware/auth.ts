@@ -4,6 +4,7 @@ import { env } from '../config.js'
 import { AuthPayload } from '../types/auth.js'
 import { redisClient } from '../lib/redis.js'
 import { prisma } from '../lib/prisma.js'
+import { isOhttpScopeRequestAllowed, isOhttpScopedPayload } from '../utils/ohttpToken.js'
 
 // === Middleware untuk REST API ===
 export async function requireAuth (req: Request, res: Response, next: NextFunction) {
@@ -19,6 +20,14 @@ export async function requireAuth (req: Request, res: Response, next: NextFuncti
 
   try {
     const payload = jwt.verify(token, env.jwtSecret) as AuthPayload
+
+    // [docs/35 Fase 3] Token carriage OHTTP: umur 120 detik dan HANYA untuk
+    // target allowlist (GET search/prekey). Tanpa cek ini, token yang bocor
+    // dari amplop sama kuasanya dengan sesi penuh.
+    if (isOhttpScopedPayload(payload as unknown as { scope?: unknown }) &&
+        !isOhttpScopeRequestAllowed(req.method, req.originalUrl)) {
+      return res.status(403).json({ error: 'OHTTP_SCOPE_DENIED' })
+    }
 
     // ========== REDIS TOKEN BLACKLIST CHECK ==========
     if (payload.jti) {

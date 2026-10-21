@@ -180,7 +180,15 @@
     "verify_security": "Verificar seguridad",
     "pq_status": "X-Wing Post-Quantum",
     "pq_desc": "Secreto Directo Reforzado Activado",
-    "id_label": "ID"
+    "id_label": "ID",
+    "cover": {
+      "title": "Privacidad máxima (tráfico de cobertura)",
+      "description": "Mensajes señuelo en segundo plano, indistinguibles del tráfico real (~{{mb}} MB/día por chat).",
+      "no_history": "Envía primero un mensaje real: el tráfico de cobertura nunca inicia una conversación nueva.",
+      "disabled_by_master": "El tráfico de cobertura está desactivado globalmente en Ajustes.",
+      "enabled_toast": "Tráfico de cobertura activado para este chat (~{{mb}} MB/día).",
+      "disabled_toast": "Tráfico de cobertura desactivado para este chat."
+    }
   },
   "participants": {
     "make_admin": "Hacer administrador",
