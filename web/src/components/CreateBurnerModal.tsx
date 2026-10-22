@@ -41,30 +41,32 @@ export default function CreateBurnerModal({ onClose }: Props) {
 
   const handleCopy = async () => {
     if (!link) return;
+    // [FIX 2026-10-22] Percakapan burner TIDAK boleh bergantung pada izin
+    // clipboard. Dulu penambahan baris sidebar ada di dalam try yang sama
+    // dengan writeText(); di browser/headless yang menolak clipboard, host
+    // tidak pernah punya conversation sehingga pesan guest tak pernah tampil.
+    // Link tetap bisa disalin manual dari modal, jadi daftarkan room lebih dulu.
+    const hashPart = link.split('#')[1];
+    const [roomId] = hashPart ? hashPart.split(':') : [];
+    if (roomId) {
+      useConversationStore.getState().addOrUpdateConversation({
+        id: roomId,
+        isGroup: false,
+        participants: [],
+        messages: [],
+        unreadCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastMessage: null,
+        encryptionMode: 'SENDER_KEY' as const,
+        encryptedMetadata: "BURNER_CHAT"
+      } as unknown as import('@nyx/shared').ConversationUi);
+    }
+
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
       toast.success(t('modals:burner.link_copied'));
-
-      const hashPart = link.split('#')[1];
-      if (hashPart) {
-        const [roomId] = hashPart.split(':');
-        if (roomId) {
-           useConversationStore.getState().addOrUpdateConversation({
-             id: roomId,
-             isGroup: false,
-             participants: [],
-             messages: [],
-             unreadCount: 0,
-             createdAt: new Date().toISOString(),
-             updatedAt: new Date().toISOString(),
-             lastMessage: null,
-             encryptionMode: 'SENDER_KEY' as const,
-             encryptedMetadata: "BURNER_CHAT"
-           } as unknown as import('@nyx/shared').ConversationUi);
-        }
-      }
-
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error(t('common:actions.copy_failed'));

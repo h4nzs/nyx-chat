@@ -9,9 +9,19 @@ import { uploadLimiter } from '../middleware/rateLimiter.js'
 
 const router: Router = Router()
 
+// Presigning tanpa kredensial R2 hanya menghasilkan 500 yang membingungkan
+// (dan di CI/e2e membuat kegagalan upload tampak seperti bug klien). Jawab
+// eksplisit agar klien/ops tahu fitur file memang belum dikonfigurasi.
+const storageConfigured = (): boolean =>
+  Boolean(env.r2AccountId && env.r2AccessKeyId && env.r2SecretAccessKey && env.r2BucketName)
+
 // === 0. GENERATE PRESIGNED URL ===
 router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => {
   try {
+    if (!storageConfigured()) {
+      return res.status(503).json({ error: 'STORAGE_NOT_CONFIGURED' })
+    }
+
     const { fileName, fileType, folder } = req.body
 
     if (!fileName || !fileType || !folder) {
@@ -97,6 +107,10 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
 // === 0.1 BURNER CHAT PRESIGNED URL (ANONYMOUS) ===
 router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
   try {
+    if (!storageConfigured()) {
+      return res.status(503).json({ error: 'STORAGE_NOT_CONFIGURED' })
+    }
+
     const { fileName, fileType, folder } = req.body
 
     if (!fileName || !fileType || folder !== 'attachments') {

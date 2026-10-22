@@ -4,6 +4,37 @@ import { registerUser, supportsWebTransport, dismissOnboardingTour } from './hel
 
 const GUEST_PLACEHOLDER = 'Type an ephemeral message...';
 
+// Upload burner (foto/file) membutuhkan presigned URL dari object storage.
+// CI tidak punya kredensial R2, jadi probe dulu dan skip dengan alasan tertulis
+// alih-alih membiarkan tes gagal karena 503 STORAGE_NOT_CONFIGURED.
+async function burnerStorageConfigured(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    // @ts-ignore — path absolut Vite dev server (runtime-only)
+    const mod = (await import('/src/lib/api.ts')) as {
+      api: <T>(path: string, options?: RequestInit) => Promise<T>;
+    };
+    try {
+      await mod.api('/api/uploads/burner-presigned', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: 'probe.png',
+          fileType: 'application/octet-stream',
+          folder: 'attachments',
+        }),
+      });
+      return true;
+    } catch (error) {
+      const code = (error as { message?: string }).message;
+      const details = (error as { details?: { error?: string } }).details;
+      if (code === 'STORAGE_NOT_CONFIGURED' || details?.error === 'STORAGE_NOT_CONFIGURED') {
+        return false;
+      }
+      throw error;
+    }
+  });
+}
+
 // Helper: bikin link burner dari sidebar host, buka di konteks guest, kirim teks awal
 async function openBurnerAsGuest(
   page: Page,
@@ -111,7 +142,17 @@ test.describe('Regression: burner flows', () => {
 
   test('host sends a photo → guest bubble shows a preview (regression: no preview on host→guest files)', async ({ page, browser }) => {
     const supported = await supportsWebTransport(page, { navigateToAppOrigin: true });
-    test.skip(!supported, 'WebTransport tidak tersedia di environment ini');
+    // Burner memakai handshake DR yang hanya ada di jalur WebTransport;
+    // `startHandshake` sengaja no-op di fallback WSS. Job E2E Chromium tidak
+    // menjalankan sidecar dan memaksa WSS (VITE_FORCE_WSS=1), jadi API
+    // WebTransport yang terlihat di browser bukan bukti uplink tersedia.
+    test.skip(
+      !supported || process.env.VITE_FORCE_WSS === '1',
+      'WebTransport/uplink sidecar tidak tersedia (burner butuh WT, bukan fallback WSS)'
+    );
+
+    const storage = await burnerStorageConfigured(page);
+    test.skip(!storage, 'Object storage (R2) tidak dikonfigurasi — upload burner tidak bisa diuji');
 
     const hostName = `bh_${Date.now()}`;
     await registerUser(page, 'Burn Host', hostName);
@@ -133,7 +174,14 @@ test.describe('Regression: burner flows', () => {
 
   test('burner conversation destroyed on host stays deleted after reload (regression: reappears)', async ({ page, browser }) => {
     const supported = await supportsWebTransport(page, { navigateToAppOrigin: true });
-    test.skip(!supported, 'WebTransport tidak tersedia di environment ini');
+    // Burner memakai handshake DR yang hanya ada di jalur WebTransport;
+    // `startHandshake` sengaja no-op di fallback WSS. Job E2E Chromium tidak
+    // menjalankan sidecar dan memaksa WSS (VITE_FORCE_WSS=1), jadi API
+    // WebTransport yang terlihat di browser bukan bukti uplink tersedia.
+    test.skip(
+      !supported || process.env.VITE_FORCE_WSS === '1',
+      'WebTransport/uplink sidecar tidak tersedia (burner butuh WT, bukan fallback WSS)'
+    );
 
     const hostName = `bd_${Date.now()}`;
     await registerUser(page, 'Burn Del', hostName);

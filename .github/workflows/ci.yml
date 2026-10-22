@@ -397,11 +397,13 @@ jobs:
       # dengan coturn", jadi coturn harus benar-benar berjalan di runner ini:
       # peer di loopback → `allow-loopback-peers` wajib (produksi memakai IP
       # publik dan tidak boleh memakainya).
-      - name: Install coturn (TURN self-host untuk e2e/call.spec.ts)
-        run: sudo apt-get update && sudo apt-get install -y coturn
-      - name: Start coturn
+      # coturn resmi via Docker (bukan paket apt runner): versi & config sama
+      # dengan resep lokal docs/30 §30.9 yang terbukti merelay. Paket apt bisa
+      # bertabrakan dengan unit coturn bawaan, sehingga port 3478 "listen" tapi
+      # kredensial HMAC dari server ditolak → 0 kandidat relay.
+      - name: Start coturn (TURN self-host untuk e2e/call.spec.ts)
         run: |
-          sudo tee /etc/turnserver.conf >/dev/null <<EOF
+          cat > /tmp/turnserver.conf <<EOF
           listening-ip=127.0.0.1
           relay-ip=127.0.0.1
           listening-port=3478
@@ -417,13 +419,15 @@ jobs:
           allow-loopback-peers
           log-file=stdout
           EOF
-          sudo turnserver -c /etc/turnserver.conf > /tmp/coturn.log 2>&1 &
+          docker run -d --name nyx-coturn --network host \
+            -v /tmp/turnserver.conf:/etc/coturn/turnserver.conf:ro \
+            coturn/coturn:4.6-alpine -c /etc/coturn/turnserver.conf
           for i in $(seq 1 20); do
             ss -lun 2>/dev/null | grep -q ':3478' && break
             sleep 1
           done
           ss -lun | grep ':3478'   # gagal keras bila coturn tidak listen
-          tail -5 /tmp/coturn.log
+          docker logs --tail 10 nyx-coturn
       - name: Start sidecar & ambil cert hash untuk pinning
         working-directory: server
         run: |
@@ -434,7 +438,7 @@ jobs:
           done
           CERT_HASH=$(grep -oE "Hash: ([0-9a-f]{2}:){31}[0-9a-f]{2}" /tmp/sidecar.log | head -1 | cut -d' ' -f2)
           echo "VITE_TRANSPORT_CERT_HASH=$CERT_HASH" >> "$GITHUB_ENV"
-          echo "VITE_TRANSPORT_URL=http://localhost:33333" >> "$GITHUB_ENV"
+          echo "VITE_TRANSPORT_URL=http://127.0.0.1:33333" >> "$GITHUB_ENV"
           cat /tmp/sidecar.log
       - name: Run E2E full (chat + transport + call specs aktif)
         working-directory: web
