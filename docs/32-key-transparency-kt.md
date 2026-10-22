@@ -7,10 +7,13 @@
 > `server/kt-query` (§32.8) — pemilik tunggal basis data, penyaji bukti untuk
 > search/monitor/distinguished — dan **proxy-nya** di `/api/keys/kt/*`. Sisi
 > **verifier klien** ada di `packages/keytrans-wasm` + `web/src/lib/keyTransparency.ts`
-> dan sudah memverifikasi bukti dari jalur produksi ini (`docs/34`). Yang
-> **belum**: pemanggilan verifier di jalur bundle dan loop monitor otomatis
-> (`docs/34` §34.6). Auditor/`SetAuditorHead` **sudah dioperasikan** sejak
-> 2026-10-16 (`server/kt-query/cmd/nyx-kt-auditor`, mode 3) — lihat §32.4 poin 4.
+> dan sudah memverifikasi bukti dari jalur produksi ini (`docs/34`).
+> Pemanggilan verifier di jalur bundle, loop monitor otomatis, auditor, dan
+> gossip **semuanya landed** — lihat `docs/34` §34.6a–§34.6c. Auditor/
+> `SetAuditorHead` dioperasikan sejak 2026-10-16
+> (`server/kt-query/cmd/nyx-kt-auditor`, mode 3) — lihat §32.4 poin 4. Log v1
+> tetap **frozen**; log v2 ML-DSA-65 (Scope B) berjalan sebagai **dual-write**
+> dan pembacaan masih v1 (`docs/35` §35.7 Fase 7).
 
 Pin referensi (§30.2): `key-transparency-server` commit `30b7a2a40604`,
 `libsignal/rust/keytrans` `e8cc2dddd578`.
@@ -160,12 +163,13 @@ dalam 1 jam). Keduanya tidak menyala pada instance sepi.
 ## 32.7 Residual (jujur)
 
 1. ~~**Verifier klien belum ada.**~~ **Sudah ada (2026-10-13)**: Spike-1 berhasil
-   (`libsignal/rust/keytrans` → WASM, nol import) dan verifier klien + 12 test
-   berbasis bukti nyata dari kt-server ada di `docs/34`. Yang **masih** tersisa
-   dari poin ini: pemanggilan verifier di jalur bundle (`processPreKeyBundle`)
-   dan **loop monitor** yang otomatis (`verify_monitor` + `monitorStep` + endpoint
-   server), plus temuan penting di `docs/34` §34.5: tanpa anchor yang tersimpan,
-   perubahan `search`/tree head tidak terdeteksi — jadi monitor bukan opsional.
+   (`libsignal/rust/keytrans` → WASM, nol import) dan verifier klien + **18 test**
+   berbasis bukti nyata dari kt-server ada di `docs/34`. Pemanggilan verifier di
+   jalur bundle (`processPreKeyBundle`) dan **loop monitor** otomatis
+   (`verify_monitor` + `monitorStep` + endpoint server) juga **sudah landed**
+   (`docs/34` §34.6a–§34.6b). Temuan penting di `docs/34` §34.5 tetap berlaku:
+   tanpa anchor yang tersimpan, perubahan `search`/tree head tidak terdeteksi —
+   jadi monitor bukan opsional.
 2. **`keyVersion` masih label alur**, bukan penghitung yang naik otomatis per
    rotasi kunci. Tiga label: **registrasi**, **pemulihan**, **rotasi**
    (`KT_KEY_VERSION_*` di `keyTransparency.ts`) — jadi tidak ada lagi angka sihir,

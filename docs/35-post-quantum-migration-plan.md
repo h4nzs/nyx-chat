@@ -148,8 +148,9 @@ gate alih-alih menumpang di daftar ini.
   pemegang dump DB bisa mengirim nilai mentah ke API hidup.
 - `GET /api/keys/prekey-bundle/:userId` memakai userId langsung; server melihat
   requester → target.
-- OHTTP sudah di-scaffold (§35.7 Fase 3, default mati) tetapi **belum dipakai
-  alur aplikasi**; PIR belum ada.
+- OHTTP **sudah dipakai alur aplikasi** untuk `GET /api/users/search` bila
+  diaktifkan (carriage token scoped 120 s; §35.7 Fase 3). Default mati di kedua
+  sisi. PIR sengaja ditunda (§35.11 #3).
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
   - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
@@ -859,15 +860,15 @@ client ──message/ohttp-req──▶ relay /api/ohttp/relay
 - **Pin config:** klien mengambil `/api/ohttp/config` (`application/ohttp-keys`)
   dan mem-pin SHA-256-nya di `localStorage` (TOFU). Config berubah tanpa rotasi
   eksplisit → `OHTTP_CONFIG_CHANGED`, fail-closed (pola yang sama dengan pin KT).
-- **Blocker integrasi yang disengaja:** cookie sesi `HttpOnly` tidak bisa dibaca
-  JS, jadi worker tidak bisa memasukkannya ke amplop. OHTTP **belum dipakai alur
-  aplikasi**; gateway sudah meneruskan `authorization` bila ada, sehingga
-  langkah berikutnya adalah keputusan carriage token (bearer berumur pendek di
-  dalam amplop), bukan lagi perubahan transport.
+- **Carriage token (landed):** cookie sesi `HttpOnly` tidak bisa dibaca JS,
+  jadi klien menukar sesi menjadi token bearer scoped berumur 120 s lewat
+  `POST /api/auth/ohttp-token`, lalu memasukkannya ke amplop OHTTP. Inilah yang
+  membuat OHTTP benar-benar dipakai jalur aplikasi (`GET /api/users/search`).
 - **Aktivasi:** `OHTTP_ENABLED=1` + `OHTTP_PRIVATE_KEY`/`OHTTP_PUBLIC_KEY`
   (`pnpm --filter nyx-server run ohttp-key:generate`), klien
   `VITE_OHTTP_ENABLED=1`. Default mati di kedua sisi: saat mati router tidak
-  dipasang (404). Rotasi kunci dan metrik OHTTP belum ada.
+  dipasang (404). Rotasi kunci dua slot dan metrik `nyx_ohttp_ops_total` sudah
+  landed.
 
 Pekerjaan (semua ✅ landed di kode, default mati):
 - ✅ OHTTP client worker + relay/gateway untuk REST.
@@ -958,8 +959,8 @@ saat leave (sebelum `/leave`) landed. Tes: `groupCredentialPersistence.test.ts`
 (6, termasuk reload tanpa issuance ulang dan commit-failure) plus 30 tes server
 (`credentialIssuance`/`groupCredentials`/`credentialAuth`/`credentialSuite`).
 BRaccoon/blind UOV tetap **riset** (butuh test vector paper, benchmark, audit
-eksternal, dual verify + kill switch); Fase 6 (issuance token-only) belum
-dimulai. Deviasi kick-vs-revoke tercatat di §35.6.6.
+eksternal, dual verify + kill switch). Fase 6 (issuance token-only) sudah landed
+di kode (lihat di bawah). Deviasi kick-vs-revoke tercatat di §35.6.6.
 
 ### Fase 6 — Anonymous issuance
 
@@ -1053,7 +1054,7 @@ Wajib:
 - `server/kt-query/build.sh test`
 - Playwright chromium + chrome (WT/coturn)
 
-Test yang sudah ada (Fase 0–2):
+Test yang sudah ada (Fase 0–7):
 - ML-DSA-65: `web/src/lib/__tests__/mlDsa.test.ts`,
   `server/tests/mlDsa.test.ts`.
 - Bundle v2 (kanonik + verifikasi server): `server/tests/pqBundle.test.ts`.
@@ -1081,10 +1082,11 @@ Test yang sudah ada (Fase 0–2):
 
 Belum ada (fase lanjut):
 - KAT resmi FIPS 204 / X-Wing dari NIST.
-- Credential suite v1/v2 dual verify.
-- Anonymous issuance replay/quota.
+- BRaccoon/blind UOV + dual verify/kill switch untuk suite credential baru
+  (suite abstraction v1 sudah landed; replay/quota token sudah diuji).
 - OHTTP E2E lewat relay nyata (unit test menutup format, bukan topologi).
-- PIR record lookup (spike).
+- Interop `cmd/kt-client` upstream dan dua implementasi auditor berdampingan.
+- PIR record lookup (spike; sengaja ditunda, §35.11 #3).
 
 ## 35.9 Rollout dan rollback
 
@@ -1147,7 +1149,10 @@ Residual yang harus ditulis jujur:
    dua peran (`/api/ohttp/relay` + `/api/ohttp/gateway`, default mati).
    Yang masih terbuka: apakah relay dipindah ke host/operator lain (hanya
    mengganti `OHTTP_RELAY_TARGET`), dan kapan carriage token diaktifkan.
-5. Kapan Scope B KT dimulai; jangan mulai sebelum format bundle v2 stabil.
+5. Kapan cutover **baca** KT ke v2 (`KT_QUERY_URL` diarahkan ke `:8089`)
+   setelah populasi log v2 cukup. Scope B sudah dimulai dan berjalan sebagai
+   **dual-write** (`KT_V2_SERVER_URL`); pembacaan masih v1, dan rollback baca
+   setelah klien mem-pin ABI 2 bersifat satu arah sampai ada jalur reset pin.
 
 ## 35.12 Referensi
 

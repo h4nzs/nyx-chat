@@ -1,20 +1,24 @@
 # 34 — Verifier Key Transparency di klien
 
-> **Status: verified-search landed + teruji terhadap bukti nyata, termasuk dari
-> jalur baca produksi (2026-10-13); integrasi jalur bundle + loop monitor +
-> auditor + gossip landed (2026-10-14).** Modul WASM
+> **Status: seluruh integrasi klien landed** — verified-search terhadap bukti
+> nyata (2026-10-13), lalu bundle + loop monitor + auditor + gossip (2026-10-14);
+> log v2 ML-DSA-65 baru **dual-write** (2026-10-21). Modul WASM
 > (`packages/keytrans-wasm`, kompilasi `libsignal-keytrans`), pembungkus klien
 > (`web/src/lib/keyTransparency.ts`), pemakai produksinya
 > (`web/src/lib/ktBundleProof.ts`, `web/src/lib/ktSubject.ts`,
-> `web/src/lib/ktMonitoring.ts`, `web/src/lib/ktGossip.ts`), dan **60 test**
-> verifier di lima berkas — `keyTransparency.test.ts` 12 (bukti nyata dari penulis
+> `web/src/lib/ktMonitoring.ts`, `web/src/lib/ktGossip.ts`), dan **74 test**
+> verifier di enam berkas — `keyTransparency.test.ts` 18 (bukti nyata dari penulis
 > Go + `server/kt-query`, termasuk rotasi kunci terhadap anchor bukti sebelumnya),
-> `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 9,
-> `ktSubject.test.ts` 8. Bundle peer kini **diverifikasi terhadap log sebelum
-> dipin** (§34.6a), loop monitor dijalankan penjadwal (§34.6b), auditor pihak
-> ketiga dilayani `server/kt-query` (`audit.go`), dan tree head di-gossip antar
-> klien (§34.6c). Yang **belum**: auditor
-> + gossip (mode 3) — §34.6 poin 3.
+> `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 11,
+> `ktSubject.test.ts` 8, `ktBundleProof.test.ts` 6. Bundle peer kini
+> **diverifikasi terhadap log sebelum dipin** (§34.6a), loop monitor dijalankan
+> penjadwal (§34.6b), auditor pihak ketiga dilayani `server/kt-query`
+> (`audit.go`), dan tree head di-gossip antar klien (§34.6c). Log v1 tetap
+> frozen; log v2 (ML-DSA-65, port/metrik terpisah) didokumentasikan di
+> `docs/35` §35.7 Fase 7. Yang **belum**: interop `cmd/kt-client` upstream, dua
+> implementasi auditor (Java referensi vs port Go) berdampingan, auditor masih
+> satu host dengan log, banner UI saat KT tidak tersedia, dan cutover baca ke
+> v2 — server masih membaca v1 via `KT_QUERY_URL` (§34.6 poin 3).
 
 Rencana & gate: `docs/30` §30.5. Sisi penulis log: `docs/32`.
 
@@ -40,7 +44,7 @@ Semua berjalan **di klien**: server hanya menyampaikan byte.
 |---|---|
 | `packages/keytrans-wasm/src/lib.rs` | ABI verifier + framing + re-tag protobuf `UpdateResponse` |
 | `packages/keytrans-wasm/build.sh` | build ke `wasm32-unknown-unknown` (tanpa `wasm-pack`) |
-| `packages/keytrans-wasm/dist/keytrans.wasm` | artefak ter-commit (295 KiB, **nol import**) |
+| `packages/keytrans-wasm/dist/keytrans.wasm` | artefak ter-commit (≈293 KiB / 299.670 byte, **nol import**) |
 | `web/src/lib/keyTransparency.ts` | pembungkus TS: frame, konfigurasi, state update, error |
 | `web/src/lib/__tests__/keyTransparency.test.ts` | 18 test (bukti nyata, MITM, tamper, fuzz, `monitor_build`) |
 | `server/scripts/kt-fixtures.ts` | generator fixture dari kt-server hidup (`pnpm --filter nyx-server run kt:fixtures`) |
@@ -209,7 +213,7 @@ Perilaku yang berubah (dan patut diingat):
    tetap `unknown-subject` → TOFU. Server tidak pernah menyediakan username
    plaintext (`docs/14`), dan itu memang disengaja.
 4. **Biaya:** satu verifikasi = Argon2id (memory-hard) + 1–2 permintaan bukti
-   (bisa puluhan KB) + WASM 295 KiB (dimuat sekali, impor dinamis). Hasil
+   (bisa puluhan KB) + WASM ≈293 KiB (dimuat sekali, impor dinamis). Hasil
    `confirmed` disimpan dengan TTL 24 jam (`KT_CONFIRMATION_TTL_MS`) sehingga
    pengamatan berulang tidak memanggil log lagi. Penurunan username yang **gagal**
    ditahan `KT_SUBJECT_MISS_RETRY_MS` (60 detik) supaya jalur pemrosesan pesan
@@ -220,7 +224,7 @@ Perilaku yang berubah (dan patut diingat):
 Verifikasi: `peerIdentityTrust.test.ts` (+5 test: mismatch kontak pertama,
 penerimaan user, TTL konfirmasi, sumber `kt` di daftar pending, unknown-subject),
 `ktSubject.test.ts` (8 test: prioritas sumber + fail-open), dan — ditambahkan
-2026-10-17 — `ktBundleProof.test.ts` (5 test integrasi yang memanggil
+2026-10-17 — `ktBundleProof.test.ts` (6 test integrasi yang memanggil
 `checkBundleAgainstKeyTransparency` dengan bukti `search-v1.pb` dari kt-server
 sungguhan + verifier WASM; yang dipalsukan hanya batas jaringan). Test terakhir
 mengunci hal yang sebelumnya hanya diuji lewat primitif: `confirmed` + state
@@ -243,7 +247,7 @@ adalah **pemanggilnya**:
   impor dinamis sehingga WASM tidak masuk bundel awal); `keyVersion` yang naik
   memunculkan toast `chat:banners.kt_key_rotation` (4 bahasa).
 
-9 test di `ktMonitoring.test.ts` (urutan penjadwalan, tidak menumpuk, tidak
+11 test di `ktMonitoring.test.ts` (urutan penjadwalan, tidak menumpuk, tidak
 berhenti saat gagal, pelaporan `changed`, dan tanpa state → tidak memanggil
 jaringan). Loop ini tidak mengubah kunci yang dipercaya: hasilnya state baru +
 notifikasi; keputusan blokir tetap di jalur pin (§34.6a). Setiap langkah juga
@@ -278,9 +282,10 @@ menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
 6. **Verifikasi E2E jalur KT** — tidak bisa dijalankan di suite E2E NYX (butuh
    layanan `nyx-kt-query` + penulis log hidup; dengan `KT_QUERY_URL` kosong,
    setiap verdict `unavailable` dan pin tetap TOFU). Yang bisa diverifikasi
-   sekarang: unit/properti (**60 test**: `keyTransparency.test.ts` 12,
-   `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 9,
-   `ktSubject.test.ts` 8) + jalur hidup manual (`docs/32` §32.8).
+   sekarang: unit/properti (**74 test**: `keyTransparency.test.ts` 18,
+   `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 11,
+   `ktSubject.test.ts` 8, `ktBundleProof.test.ts` 6) + jalur hidup manual
+   (`docs/32` §32.8).
 
 ## 34.6c Auditor + gossip (landed 2026-10-14)
 
