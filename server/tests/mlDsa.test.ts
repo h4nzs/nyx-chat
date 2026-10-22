@@ -4,6 +4,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import {
   ML_DSA_65_LENGTHS,
   PQ_V2_DOMAINS,
@@ -57,4 +59,35 @@ test('ml-dsa: verifier server menolak panjang salah dan tanda tangan palsu', () 
     verifyMlDsaSignature({ signature: tampered, message, publicKey, domain: PQ_V2_DOMAINS.BUNDLE }),
     false,
   );
+});
+
+test('ml-dsa: KAT ACVP FIPS 204 ML-DSA-65 (keygen + deterministic siggen)', () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL('./fixtures/mlDsaAcvp65.json', import.meta.url), 'utf8')
+  ) as {
+    keyGen: { tcId: number; seed: string; pk: string; sk: string };
+    sigGen: {
+      tcId: number;
+      message: string;
+      pk: string;
+      sk: string;
+      context: string;
+      signature: string;
+    };
+  };
+  const bytes = (value: string) => Uint8Array.from(Buffer.from(value, 'hex'));
+  const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
+
+  const keypair = ml_dsa65.keygen(bytes(fixture.keyGen.seed));
+  assert.equal(hex(keypair.publicKey), fixture.keyGen.pk.toLowerCase(), `ACVP tcId ${fixture.keyGen.tcId}: public key`);
+  assert.equal(hex(keypair.secretKey), fixture.keyGen.sk.toLowerCase(), `ACVP tcId ${fixture.keyGen.tcId}: secret key`);
+
+  const message = bytes(fixture.sigGen.message);
+  const context = bytes(fixture.sigGen.context);
+  const signature = ml_dsa65.sign(message, bytes(fixture.sigGen.sk), {
+    context,
+    extraEntropy: false,
+  });
+  assert.equal(hex(signature), fixture.sigGen.signature.toLowerCase(), `ACVP tcId ${fixture.sigGen.tcId}: deterministic signature`);
+  assert.equal(ml_dsa65.verify(signature, message, bytes(fixture.sigGen.pk), { context }), true, 'signature ACVP terverifikasi');
 });

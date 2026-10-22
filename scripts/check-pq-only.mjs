@@ -9,6 +9,8 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(here, '..');
 const baselinePath = path.join(here, 'pq-only-baseline.json');
+const exceptionsPath = path.join(here, 'pq-only-exceptions.json');
+const EXCEPTION_TIERS = new Set(['legacy-v1-fallback', 'tier-b']);
 
 const ROOTS = ['web/src', 'server/src', 'packages/shared/src'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__', 'target', 'vendor']);
@@ -75,6 +77,34 @@ function readBaseline() {
   return JSON.parse(readFileSync(baselinePath, 'utf8'));
 }
 
+function readExceptions() {
+  return JSON.parse(readFileSync(exceptionsPath, 'utf8'));
+}
+
+function validateExceptions(baseline, exceptions) {
+  const problems = [];
+  for (const file of Object.keys(baseline)) {
+    const entry = exceptions[file];
+    if (!entry) {
+      problems.push(`${file}: belum punya entri di pq-only-exceptions.json`);
+      continue;
+    }
+    if (!EXCEPTION_TIERS.has(entry.tier)) {
+      problems.push(`${file}: tier tidak dikenal (${entry.tier})`);
+    }
+    if (!entry.rationale || entry.rationale.trim() === '') {
+      problems.push(`${file}: rationale kosong`);
+    }
+    if (!entry.removalGate || entry.removalGate.trim() === '') {
+      problems.push(`${file}: removalGate kosong`);
+    }
+  }
+  for (const file of Object.keys(exceptions)) {
+    if (!baseline[file]) problems.push(`${file}: entri exception usang (tidak ada di baseline)`);
+  }
+  return problems;
+}
+
 function diff(expected, actual) {
   const problems = [];
   const files = new Set([...Object.keys(expected), ...Object.keys(actual)]);
@@ -109,7 +139,8 @@ if (!existsSync(baselinePath)) {
   process.exit(1);
 }
 
-const problems = diff(readBaseline(), actual);
+const baseline = readBaseline();
+const problems = diff(baseline, actual);
 if (problems.length > 0) {
   console.error('Guard PQ-only gagal:');
   for (const problem of problems) console.error(`  - ${problem}`);
@@ -117,4 +148,24 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.log(`Guard PQ-only lulus (${Object.keys(actual).length} berkas terdaftar, tidak ada penambahan klasik-only).`);
+if (!existsSync(exceptionsPath)) {
+  console.error(`Manifest exception tidak ada: ${path.relative(repo, exceptionsPath)}`);
+  process.exit(1);
+}
+
+const exceptions = readExceptions();
+const exceptionProblems = validateExceptions(baseline, exceptions);
+if (exceptionProblems.length > 0) {
+  console.error('Guard PQ-only gagal (manifest exception):');
+  for (const problem of exceptionProblems) console.error(`  - ${problem}`);
+  process.exit(1);
+}
+
+const tiers = Object.values(exceptions).reduce((counts, entry) => {
+  counts[entry.tier] = (counts[entry.tier] ?? 0) + 1;
+  return counts;
+}, {});
+console.log(
+  `Guard PQ-only lulus (${Object.keys(actual).length} berkas legacy/exception; ` +
+    `Tier A baru: 0; Tier B: ${tiers['tier-b'] ?? 0}; legacy v1: ${tiers['legacy-v1-fallback'] ?? 0}).`
+);

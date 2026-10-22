@@ -22,11 +22,12 @@
  *     ulang di JS + ChaCha20-Poly1305 OpenSSL harus menghasilkan envelope yang
  *     identik dengan libsodium. Ini menguji bahwa envelope NYX memang standar
  *     XChaCha (bukan varian internal libsodium).
- *   - X-Wing (ML-KEM-768): TIDAK ada vector resmi yang bisa ditempelkan di sini
- *     tanpa menyalin berkas KAT besar dari spec — jadi yang diuji adalah
- *     invariannya (ukuran sesuai spec X-Wing: pk 1216 / ct 1120 / ss 32,
- *     determinisme dari seed, dan roundtrip enc→dec). Catatan: Kyber1024 milik
- *     libsignal BUKAN primitive yang sama, jadi vector libsignal tidak berlaku.
+ *   - X-Wing (ML-KEM-768): vector resmi draft-connolly-cfrg-xwing-kem-06
+ *     Appendix C (seed keypair + deterministic encapsulation). Vector ini
+ *     mencakup pk 1216 / ct 1120 / ss 32 dan mengunci derivasi seed → kunci,
+ *     sehingga kesalahan di library tidak bisa lolos hanya dengan roundtrip.
+ *     Kyber1024 milik libsignal BUKAN primitive yang sama, jadi vector
+ *     libsignal tidak berlaku.
  *   - RFC 9106 §5.3 — Argon2id (vault unlock, blind index username di klien,
  *     hash password & PoW di server). Ini satu-satunya vektor di sini yang
  *     memakai secret (K) + associated data (X). `hash-wasm` (sisi klien) tidak
@@ -37,6 +38,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import crypto, { createHash, createPrivateKey, createPublicKey, diffieHellman } from 'node:crypto';
 import argon2 from 'argon2';
 import sodium from 'libsodium-wrappers';
@@ -264,7 +266,7 @@ test('KAT: Argon2id RFC 9106 §5.3 — node-argon2 cocok tag yang dipublikasikan
   }
 });
 
-test('KAT: X-Wing (ML-KEM-768) — ukuran sesuai spec, seed deterministik, roundtrip', () => {
+test('KAT: X-Wing draft-06 Appendix C — keypair, encapsulation, decapsulation', () => {
   // Ukuran X-Wing: pk = ML-KEM-768 pk (1184) + X25519 (32) = 1216;
   // ct = ML-KEM-768 ct (1088) + X25519 (32) = 1120; ss = 32 byte.
   assert.equal(sodium.crypto_kem_xwing_PUBLICKEYBYTES, 1216);
@@ -272,16 +274,20 @@ test('KAT: X-Wing (ML-KEM-768) — ukuran sesuai spec, seed deterministik, round
   assert.equal(sodium.crypto_kem_xwing_SHAREDSECRETBYTES, 32);
   assert.equal(sodium.crypto_kem_xwing_SEEDBYTES, 32);
 
-  const seed = sodium.randombytes_buf(sodium.crypto_kem_xwing_SEEDBYTES);
-  const kp1 = sodium.crypto_kem_xwing_seed_keypair(seed);
-  const kp2 = sodium.crypto_kem_xwing_seed_keypair(seed);
-  assert.equal(hex(kp1.publicKey), hex(kp2.publicKey), 'seed sama → keypair sama (basis derivasi dari masterSeed)');
+  const vector = JSON.parse(
+    readFileSync(new URL('./fixtures/xwing-draft06.json', import.meta.url), 'utf8')
+  ) as { seed: string; eseed: string; pk: string; ct: string; ss: string };
 
-  const { sharedSecret, ciphertext } = sodium.crypto_kem_xwing_enc(kp1.publicKey);
-  assert.equal(ciphertext.length, 1120, 'ciphertext 1120 byte (header DR membawa ukuran ini)');
-  const decapsulated = sodium.crypto_kem_xwing_dec(ciphertext, kp1.privateKey);
-  assert.equal(hex(decapsulated), hex(sharedSecret), 'enc→dec menghasilkan shared secret yang sama');
+  const keypair = sodium.crypto_kem_xwing_seed_keypair(bytes(vector.seed));
+  assert.equal(hex(keypair.publicKey), vector.pk, 'seed vector → public key persis draft-06');
 
-  const other = sodium.crypto_kem_xwing_seed_keypair(sodium.randombytes_buf(32));
-  assert.notEqual(hex(sodium.crypto_kem_xwing_dec(ciphertext, other.privateKey)), hex(sharedSecret), 'kunci lain → secret lain');
+  const encapsulated = sodium.crypto_kem_xwing_enc_deterministic(keypair.publicKey, bytes(vector.eseed));
+  assert.equal(hex(encapsulated.ciphertext), vector.ct, 'eseed vector → ciphertext persis draft-06');
+  assert.equal(hex(encapsulated.sharedSecret), vector.ss, 'eseed vector → shared secret persis draft-06');
+
+  const decapsulated = sodium.crypto_kem_xwing_dec(encapsulated.ciphertext, keypair.privateKey);
+  assert.equal(hex(decapsulated), vector.ss, 'decapsulation memulihkan shared secret vector');
+
+  const other = sodium.crypto_kem_xwing_seed_keypair(new Uint8Array(32).fill(0x42));
+  assert.notEqual(hex(sodium.crypto_kem_xwing_dec(encapsulated.ciphertext, other.privateKey)), vector.ss, 'kunci lain → secret lain');
 });

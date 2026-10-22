@@ -1,16 +1,24 @@
 # 35 — Rencana Migrasi Post-Quantum (Tier A)
 
-> **Status (2026-10-21): Fase 0–7 landed di kode** (Fase 4 kecuali PIR yang
-> ditunda, Fase 5 kecuali riset BRaccoon, Fase 6 default mati; Fase 7 = log KT
-> ML-DSA + dual-write, **belum cutover baca**). Fitur PQ klien berada di balik
-> gerbang `VITE_PQ_V2`/`VITE_ANON_CREDENTIALS` yang **default mati**: jalur v1
-> tetap default dan tetap terbaca. **Belum di-deploy dan belum pernah
-> dinyalakan di produksi.** Fase 8 (removal/audit) belum dikerjakan.
+> **Status (2026-10-22): Fase 0–8 selesai di kode.** Fase 0–7 landed di kode
+> (Fase 4 kecuali PIR yang ditunda, Fase 5 kecuali riset BRaccoon, Fase 6 default
+> mati; Fase 7 = log KT ML-DSA + dual-write, **belum cutover baca**). Fase 8
+> mendaratkan KAT resmi **ML-DSA-65 ACVP** + **X-Wing draft-06**, KAT
+> lintas-implementasi X3DH v2/group v4/KT v2, **registry exception** legacy
+> v1/Tier B, dan `bench:pq` desktop. Denylist Tier A **baru** = 0; 13 berkas
+> legacy v1 tetap ada sebagai exception tervalidasi (`scripts/pq-only-exceptions.json`)
+> karena pembaca v1 tidak boleh dihapus (§35.9 langkah 8). Fitur PQ klien berada
+> di balik gerbang `VITE_PQ_V2`/`VITE_ANON_CREDENTIALS` yang **default mati**:
+> jalur v1 tetap default dan tetap terbaca. **Belum di-deploy dan belum pernah
+> dinyalakan di produksi.**
 >
 > Format di §35.6 **bukan lagi usulan**: yang tertulis di sana adalah bentuk
 > yang benar-benar diimplementasikan (koreksi terhadap proposal awal ditandai di
-> tiap butir). Yang masih terbuka: review kriptografi eksternal, KAT resmi FIPS
-> 204/X-Wing, dan benchmark di perangkat rendah (§35.11).
+> tiap butir). Sisa Fase 8 adalah residual non-kode: denylist legacy v1 menjadi
+> literal 0 (menunggu tidak ada sesi/pesan v1), benchmark perangkat
+> rendah/baterai + keputusan liboqs, E2E browser pelengkap
+> recovery/device-linking/credential/OHTTP, dan review kriptografi eksternal
+> (§35.8, §35.10, §35.11).
 >
 > Dokumen terkait: `docs/03`, `docs/04`, `docs/26`, `docs/28`, `docs/33`,
 > `docs/34`.
@@ -27,7 +35,7 @@
 | 5 | Credential PQ (suite abstraction, BRaccoon) | **landed kecuali riset v2** 2026-10-21 — suite abstraction, kolom `*.suite`, persist IndexedDB (Dexie v15), await commit, revoke saat leave. BRaccoon/blind UOV + kick-revoke tetap riset | §35.7 Fase 5, `groupCredentialPersistence.test.ts` |
 | 6 | Anonymous issuance | **landed di kode** 2026-10-21 — bank token (SHA-256 di Redis, kuota harian), redeem tanpa JWT via `X-Group-Token`, commit ticket single-use. Default mati (`VITE_ANON_CREDENTIALS`) | §35.6.7, §35.7 Fase 6 |
 | 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
-| 8 | Removal, audit, dokumentasi | belum | — |
+| 8 | Removal, audit, dokumentasi | **sebagian** 2026-10-22 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop; denylist legacy 13 belum 0 | §35.8, §35.10 |
 
 Gerbang rollout: `VITE_PQ_V2=1` mengaktifkan **pengiriman dan advertising** v2;
 `resolvePqV2Enabled()` hanya membandingkan nilai itu, jadi tanpa variabel (atau
@@ -1032,13 +1040,46 @@ Status implementasi (2026-10-21, belum di-deploy):
 
 ### Fase 8 — Removal, audit, dan dokumentasi
 
-Pekerjaan:
-- CI denylist Tier A harus 0.
-- KAT ML-DSA, X-Wing, X3DH v2, group v4, KT v2.
-- E2E: handshake, prekey, recovery, device linking, group, credential, OHTTP.
-- Benchmark worker, ukuran pesan, latensi KT/PIR, baterai.
-- Update `docs/04`, `docs/26`, `docs/28`, `docs/30`, `docs/33`, `docs/34`.
-- Catat Tier B exception dan residual.
+Status (2026-10-22): **selesai di kode, dengan residual non-kode**. Yang sudah landed:
+
+- **KAT resmi**: ML-DSA-65 dari NIST ACVP (`server/tests/fixtures/mlDsaAcvp65.json`,
+  keygen tcId 26 + deterministic siggen tcId 31) dan X-Wing draft-06 Appendix C
+  (`server/tests/fixtures/xwing-draft06.json`) di
+  `server/tests/cryptoKnownAnswer.test.ts` + `server/tests/mlDsa.test.ts`.
+- **KAT lintas-implementasi**: X3DH v2 di
+  `web/src/lib/__tests__/x3dhOracleVectors.test.ts` (vektor Go `tools/dr-oracle`,
+  tanpa libsodium; `go run . -check` menjaga drift), group v4 via
+  `groupV4Signature.test.ts`, KT v2 via fixture Go→Rust/WASM.
+- **Benchmark**: `web/src/lib/pqBench.ts` + `bench:pq`. Hasil desktop
+  2026-10-22 (20 iterasi, p95): ML-DSA-65 keygen 11,33 ms, sign 82,79 ms,
+  verify 18,17 ms; X-Wing keypair 4,42 ms, encaps 2,63 ms, decaps 5,34 ms.
+  Ukuran: ML-DSA pk/sk/sig = 1952/4032/3309 B; X-Wing pk/ct/ss =
+  1216/1120/32 B. Ini **bukan** pengukuran perangkat rendah atau baterai.
+- **Registry exception**: `scripts/pq-only-exceptions.json` mendaftarkan seluruh
+  13 berkas baseline dengan `tier`, `rationale`, dan `removalGate`. Guard
+  `scripts/check-pq-only.mjs` menolak entri hilang/usang, tier tak dikenal, atau
+  rationale/removal gate kosong, lalu mencetak
+  `Tier A baru: 0; Tier B: 5; legacy v1: 8`.
+- **Dokumentasi**: status/angka di `docs/35`, `docs/README`, `docs/30`,
+  `docs/32`, `docs/34`, `AGENTS`, dan `README` sudah diselaraskan dengan kode.
+  `docs/04`, `docs/26`, `docs/28`, `docs/33` tidak memuat klaim status usang.
+
+Residual non-kode (tidak memblokir Fase 8 di repo):
+
+- **Denylist literal 0**: 8 berkas `legacy-v1-fallback` masih bisa aktif untuk
+  peer/perangkat v1, dan 5 berkas `tier-b` adalah credential RSABSSA v1.
+  Menghapusnya sekarang melanggar §35.9 langkah 8; `removalGate` per berkas
+  menunggu semua sesi/pesan/credential v1 habis. Yang dijamin guard: tidak ada
+  simbol Tier A baru.
+- **E2E browser pelengkap**: `web/e2e/pqV2.spec.ts` menutup X3DH v2, group
+  `sigV:2`, dan burner PQ-only. Recovery/device-linking dilindungi unit test +
+  alur UI, credential di server/unit test, OHTTP di server test HTTP nyata;
+  belum ada spec Playwright khusus untuk empat alur itu.
+- **Benchmark perangkat rendah/baterai**, termasuk keputusan tetap di noble atau
+  pindah ke liboqs (§35.11 #1).
+- **Review kriptografi eksternal** sebelum produksi (§35.11).
+- **Tier B exception dan residual** tetap dicatat di §35.10; jangan dihapus dari
+  dokumen saat mengejar denylist 0.
 
 ## 35.8 Test dan CI
 
@@ -1081,7 +1122,7 @@ Test yang sudah ada (Fase 0–7):
   tetap menguji default v1 — spec ini tidak lagi hanya skip.
 
 Belum ada (fase lanjut):
-- KAT resmi FIPS 204 / X-Wing dari NIST.
+- Benchmark perangkat rendah dan baterai (desktop `bench:pq` sudah ada).
 - BRaccoon/blind UOV + dual verify/kill switch untuk suite credential baru
   (suite abstraction v1 sudah landed; replay/quota token sudah diuji).
 - OHTTP E2E lewat relay nyata (unit test menutup format, bukan topologi).
@@ -1115,7 +1156,7 @@ ada build produksi dengan `VITE_PQ_V2=1`, dan client default tetap v1.
 | PIR kompleks | discovery privacy tertunda | OHTTP/exact-hash dulu; PIR spike |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
-| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; benchmark perangkat rendah masih terbuka |
+| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms — benchmark perangkat rendah/baterai masih terbuka |
 | v1/v2 state bercampur | decrypt gagal | version scoping, archive cap, test migrasi |
 
 Residual yang harus ditulis jujur:

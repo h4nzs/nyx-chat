@@ -1,0 +1,67 @@
+{
+  "packages/shared/src/credentialSuite.ts": {
+    "tier": "tier-b",
+    "rationale": "Suite kredensial v1 (RSABSSA) masih harus bisa memverifikasi/menerbitkan credential untuk klien dan grup lama; suite PQ baru belum menggantikan seluruh jalur v1.",
+    "removalGate": "Hapus setelah tidak ada credential v1 yang berlaku dan seluruh klien memakai suite PQ; sampai saat itu v1 hanya fallback."
+  },
+  "packages/shared/src/credentials.ts": {
+    "tier": "tier-b",
+    "rationale": "Helper blind credential RSA v1 dipakai jalur kompatibilitas kredensial lama.",
+    "removalGate": "Hapus setelah migrasi credential v1 selesai dan tidak ada token/commitment v1 yang tersisa."
+  },
+  "server/src/lib/groupCredentials.ts": {
+    "tier": "tier-b",
+    "rationale": "Server memverifikasi blind credential RSABSSA v1 dari klien lama; menolaknya akan memutus grup yang sudah ada.",
+    "removalGate": "Hapus setelah semua anggota memakai credential suite PQ dan tidak ada credential v1 yang dapat dipakai."
+  },
+  "server/src/routes/auth.ts": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Verifikasi tanda tangan Ed25519 prekey v1 masih diperlukan untuk klien lama yang belum mengirim bundle PQ.",
+    "removalGate": "Hapus setelah semua klien mengadvertise pq-v2 dan tidak ada sesi/prekey v1."
+  },
+  "web/src/lib/crypto-worker-proxy.ts": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Proxy worker v1 mengekspos crypto_box_seal untuk pesan/backup lama sampai peer mendukung kunci PQ.",
+    "removalGate": "Hapus setelah pembacaan pesan v1 tidak lagi dibutuhkan dan semua peer memakai sealed box PQ."
+  },
+  "web/src/lib/db.ts": {
+    "tier": "tier-b",
+    "rationale": "Penyimpanan metadata credential v1 (RSABSSA) dipertahankan agar credential lama tetap dapat dibaca.",
+    "removalGate": "Hapus setelah migrasi penyimpanan credential ke suite PQ selesai."
+  },
+  "web/src/lib/groupCredentials.ts": {
+    "tier": "tier-b",
+    "rationale": "Klien masih memakai blind credential RSABSSA v1 untuk grup yang belum beralih ke suite PQ.",
+    "removalGate": "Hapus setelah semua grup aktif memakai suite credential PQ."
+  },
+  "web/src/pages/MigrationReceivePage.tsx": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Penerimaan migrasi perangkat v1 membuat crypto_box keypair untuk QR lama; QR v2 dideteksi terpisah.",
+    "removalGate": "Hapus setelah tidak ada QR migrasi v1 yang beredar dan seluruh perangkat memakai format v2."
+  },
+  "web/src/pages/MigrationSendPage.tsx": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Pengiriman migrasi memakai crypto_box_seal hanya saat QR lawan tidak membawa kunci PQ (fallback v1).",
+    "removalGate": "Hapus setelah semua perangkat menerbitkan QR dengan kunci PQ."
+  },
+  "web/src/store/auth.ts": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Prekey bundle v1 (Ed25519 + X25519) tetap diterbitkan agar klien lama dapat memulai sesi; bundle v2 ditandatangani ML-DSA.",
+    "removalGate": "Hapus setelah semua klien mendukung pq-v2 dan tidak ada sesi/prekey v1 yang perlu dilayani."
+  },
+  "web/src/store/message.ts": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Pesan memakai crypto_box_seal v1 hanya bila kunci PQ perangkat peer tidak tersedia atau kill switch memaksa v1.",
+    "removalGate": "Hapus setelah semua peer memiliki kunci PQ dan jalur v1 tidak lagi diperlukan untuk membaca riwayat."
+  },
+  "web/src/utils/crypto.ts": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Helper verifikasi/tanda tangan v1 dipakai membaca dan memvalidasi data lama; jalur baru memakai ML-DSA.",
+    "removalGate": "Hapus setelah seluruh data v1 kedaluwarsa dan tidak ada verifikasi v1 yang diperlukan."
+  },
+  "web/src/workers/crypto.worker.ts": {
+    "tier": "legacy-v1-fallback",
+    "rationale": "Worker menyimpan operasi v1 (box, scalarmult, Ed25519, RSABSSA) untuk kompatibilitas; operasi PQ sudah menjadi jalur utama fitur baru.",
+    "removalGate": "Hapus setelah v1 reader/generator tidak lagi dipakai; jangan hapus selama pesan/sesi v1 masih ada."
+  }
+}
