@@ -26,3 +26,13 @@ allowBuilds:
 
 onlyBuiltDependencies:
   - supabase
+
+minimumReleaseAgeExclude:
+  - serialize-javascript@7.1.2
+  - dompurify@3.4.16
+  - http-cache-semantics@4.2.1
+  - braces@3.0.4
+  - source-map-js@1.2.2
+  - sharp@0.35.5
+  - vite@8.3.3
+  - '@vitest/mocker@4.1.12'

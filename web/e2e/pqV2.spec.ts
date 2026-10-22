@@ -59,11 +59,16 @@ async function readDirectHandshakes(page: Page): Promise<DirectHandshake[]> {
     );
     if (!conversation) return [];
 
-    const response = await fetch(`/api/messages/${conversation.id}?limit=100`, {
-      credentials: 'include',
-    });
-    if (!response.ok) return [];
-    const payload = (await response.json()) as unknown;
+    // @ts-ignore — path absolut Vite dev server (runtime-only)
+    const { api } = (await import('/src/lib/api.ts')) as {
+      api: <T>(path: string) => Promise<T>;
+    };
+    let payload: unknown;
+    try {
+      payload = await api(`/api/messages/${conversation.id}?limit=100`);
+    } catch {
+      return [];
+    }
     const list = Array.isArray(payload) ? payload : ((payload as { items?: unknown[] }).items ?? []);
 
     return list.flatMap((message) => {
@@ -102,18 +107,29 @@ async function readGroupEnvelopes(page: Page, title: string): Promise<GroupEnvel
       id: string;
       name?: string;
       type?: string;
+      isGroup?: boolean;
       participants?: unknown[];
     }[];
+    // Grup 2 anggota (kreator + 1 undangan) TIDAK boleh disyaratkan >2 peserta:
+    // metadata v2 bisa belum terbuka sehingga `name` juga kosong. Cukup pastikan
+    // ini conversation grup (bukan burner/DM).
     const conversation =
       conversations.find((c) => c.name === groupTitle) ??
-      conversations.find((c) => c.type === 'GROUP' && (c.participants?.length ?? 0) > 2);
+      conversations.find(
+        (c) => (c.type === 'GROUP' || c.isGroup === true) && !String(c.id).startsWith('burner_')
+      );
     if (!conversation) return [];
 
-    const response = await fetch(`/api/messages/${conversation.id}?limit=100`, {
-      credentials: 'include',
-    });
-    if (!response.ok) return [];
-    const payload = (await response.json()) as unknown;
+    // @ts-ignore — path absolut Vite dev server (runtime-only)
+    const { api } = (await import('/src/lib/api.ts')) as {
+      api: <T>(path: string) => Promise<T>;
+    };
+    let payload: unknown;
+    try {
+      payload = await api(`/api/messages/${conversation.id}?limit=100`);
+    } catch {
+      return [];
+    }
     const list = Array.isArray(payload) ? payload : ((payload as { items?: unknown[] }).items ?? []);
 
     return list.flatMap((message) => {
@@ -304,6 +320,13 @@ test.describe('PQ v2 (X3DH/grup/burner) — gerbang VITE_PQ_V2', () => {
     test.skip(
       !enabled,
       'VITE_PQ_V2 tidak aktif (jalankan dev server dengan VITE_PQ_V2=1) — gerbang v2 default mati'
+    );
+    // Init burner PQ-only memakai handshake DR yang hanya ada di jalur
+    // WebTransport; fallback WSS sengaja no-op. Job E2E Chromium memaksa WSS
+    // (tanpa sidecar), jadi tes ini dijalankan di job `e2e-chrome`.
+    test.skip(
+      process.env.VITE_FORCE_WSS === '1',
+      'WebTransport/uplink sidecar tidak tersedia (burner PQ-only butuh WT)'
     );
 
     await registerUser(page, 'Alice Burner PQ', `pqburn_${Date.now()}`);
