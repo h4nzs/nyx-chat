@@ -3,40 +3,33 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/35 Fase 1.5] Choke point sealed box per-device v1/v2.
+ * [docs/35 Fase 1.5 / PQ-only 2026-10-23] Choke point sealed box per-device.
  *
- * v1 (beku) mencampur DH X25519 + X-Wing; v2 murni X-Wing. Penyegelan memilih
- * versi lewat gerbang `VITE_PQ_V2`; pembukaan mendeteksi versi dari magic
- * envelope (`isPqSealV2`), jadi ciphertext v1 yang beredar tetap bisa dibuka.
+ * Hanya v2 (X-Wing murni, magic `NYS2`) yang dipakai. Jalur hybrid v1
+ * (DH X25519 + X-Wing) dan `crypto_box_seal` v1 dihapus bersama fallback-nya:
+ * tidak ada lagi ciphertext yang boleh dibuat dengan format lama. Parameter
+ * kunci klasik tetap diterima agar pemanggil tidak perlu diubah, tetapi
+ * diabaikan — pembukaan hanya menerima envelope `isPqSealV2`.
  */
 
 import { isPqSealV2 } from '@nyx/shared';
-import {
-  worker_pq_box_seal,
-  worker_pq_box_seal_open,
-  worker_pq_box_seal_v2,
-  worker_pq_box_seal_v2_open,
-} from './crypto-worker-proxy';
-import { resolvePqV2Enabled } from './pqCapability';
+import { worker_pq_box_seal_v2, worker_pq_box_seal_v2_open } from './crypto-worker-proxy';
 
 export async function sealForDevice(
   message: Uint8Array | string,
   pqPublicKey: Uint8Array,
-  classicalPublicKey: Uint8Array
+  _classicalPublicKey?: Uint8Array
 ): Promise<Uint8Array> {
-  if (resolvePqV2Enabled()) {
-    return worker_pq_box_seal_v2(message, pqPublicKey);
-  }
-  return worker_pq_box_seal(message, pqPublicKey, classicalPublicKey);
+  return worker_pq_box_seal_v2(message, pqPublicKey);
 }
 
 export async function openSealedForDevice(
   sealed: Uint8Array,
   pqPrivateKey: Uint8Array,
-  classicalPrivateKey: Uint8Array
+  _classicalPrivateKey?: Uint8Array
 ): Promise<Uint8Array> {
-  if (isPqSealV2(sealed)) {
-    return worker_pq_box_seal_v2_open(sealed, pqPrivateKey);
+  if (!isPqSealV2(sealed)) {
+    throw new Error('sealed box v1 tidak lagi didukung (PQ-only)');
   }
-  return worker_pq_box_seal_open(sealed, pqPrivateKey, classicalPrivateKey);
+  return worker_pq_box_seal_v2_open(sealed, pqPrivateKey);
 }

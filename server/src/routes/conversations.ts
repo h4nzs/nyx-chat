@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import crypto, { createHash } from 'node:crypto'
+import crypto from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { ApiError } from '../utils/errors.js'
@@ -7,25 +7,12 @@ import { z } from 'zod'
 import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { emitEventToUsers, emitEventToUser } from '../network/redisBridge.js'
 import { redisClient } from '../lib/redis.js'
-import {
-  blindSign, getIssuerPublicJwk, revokeCredentialsFor, recordIssuedCredential,
-  verifyPresentation, SERIAL_HEX_LENGTH, CREDENTIAL_SUITE,
-} from '../lib/groupCredentials.js'
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
-import { credentialTokenMatches, hashCredentialToken } from '../utils/atRestSecrets.js'
-// [docs/29 §7.1] Gate keanggotaan issuance + capability admin (bisa diuji
-// dengan klien Prisma palsu; lihat tests/credentialAuth.test.ts).
-import {
-  DELIVERY_TOKEN_RE, authorizeCredentialIssuance, type CredentialAuthDb,
-} from '../utils/credentialAuth.js'
+import { hashCredentialToken } from '../utils/atRestSecrets.js'
 import {
   authorizeMemberMutation, authorizeMemberLeave, authorizeDetailsWrite,
   authorizeKeyRotation, authorizeGroupPurge, type GroupAccessDb,
 } from '../utils/groupAccess.js'
-import {
-  CREDENTIAL_INCR_LUA, CREDENTIAL_QUOTA_TTL_SECONDS, commitAllowed, credentialCommitKey,
-  credentialDays, credentialIssuanceKey, exceedsIssuanceQuota,
-} from '../utils/credentialIssuance.js'
 // [docs/28 Tier 4] identitas at-rest: key Redis ber-tag + metadata grup tanpa userId penulis.
 import { identityTag } from '../utils/redisIdentity.js'
 import { sanitizeGroupMetadataBlob } from '../utils/groupMetadataBlob.js'
@@ -43,163 +30,10 @@ import { createConversationBodySchema } from '../utils/conversationSchemas.js'
 const router: Router = Router()
 router.use(requireAuth)
 
-// [docs/29 §7.1 / docs/30 WS-G] Otorisasi issuance credential dan capability
-// admin kini tinggal di `utils/credentialAuth.ts` supaya keputusannya bisa
-// diuji sebagai perilaku (klien Prisma palsu) — bukan hanya regex atas source.
-const authDb = prisma as unknown as CredentialAuthDb
-
 // [docs/30 WS-G(4) sisa] Jalur grup (anggota/leave/details/rotasi/purge) juga
 // dipindah ke `utils/groupAccess.ts` — tes perilakunya di
 // `tests/groupAccess.test.ts` mengunci urutan gate & kode status, bukan teks.
 const groupDb = prisma as unknown as GroupAccessDb
-
-// [26.8.1] Issuer public key — dibagikan bebas ke semua klien.
-router.get('/credential-issuer-key', async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { keyVersion, publicJwk } = await getIssuerPublicJwk()
-    res.json({ suite: CREDENTIAL_SUITE, keyVersion, publicJwk })
-  } catch (error) { next(error) }
-})
-
-// [26.8.1] Credential issuance — klien mengirim (conversationId, blindedMsg)
-// yang sudah di-blind. Server hanya melihat blinded message; TIDAK bisa
-// mengaitkannya dengan user/anggota. Kontrak kepercayaan: klien hanya meminta
-// satu credential per keanggotaannya; server mencatat serial untuk dedupe &
-// revocation (serial = hash prepared message, tidak bisa di-link balik).
-// [docs/29 §7.1] WAJIB membawa bukti keanggotaan (X-Group-Token atau delivery
-// token) — lihat authorizeCredentialIssuance.
-router.post('/credential-issuance', zodValidate({
-  body: z.object({
-    conversationId: z.string().min(1).max(64),
-    blindedMsg: z.string().min(1).max(1024), // base64url dari blinded message
-    // Alternatif bukti keanggotaan untuk klien yang belum bisa mengirim header
-    // (mis. token undangan sudah didapat, metadata belum ter-dekripsi).
-    deliveryToken: z.string().regex(DELIVERY_TOKEN_RE).optional(),
-  })
-}), async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { conversationId, blindedMsg, deliveryToken } = req.body as {
-      conversationId: string; blindedMsg: string; deliveryToken?: string
-    }
-
-    if (!(await authorizeCredentialIssuance(authDb, conversationId, req.headers as unknown as Record<string, unknown>, deliveryToken))) {
-      return res.status(403).json({ error: 'MEMBERSHIP_PROOF_REQUIRED: Valid X-Group-Token or delivery token required.' });
-    }
-
-    // Per-user quota anti-abuse: satu issuance per (user, conversation) per hari.
-    // Grup nyata tidak perlu lebih — credential tidak berubah kecuali re-join.
-    // [docs/29 §7.1] key memakai identityTag (bukan userId mentah): Redis
-    // persisten = artefak setara dump, jadi kunci tidak boleh memuat identitas.
-    // Counter yang sama juga berfungsi sebagai TIKET yang dibatasi di commit.
-    const [today] = credentialDays();
-    const issueKey = credentialIssuanceKey(req.user.id, conversationId, today!);
-    const count = Number(await redisClient.eval(CREDENTIAL_INCR_LUA, {
-      keys: [issueKey], arguments: [String(CREDENTIAL_QUOTA_TTL_SECONDS)],
-    }));
-    if (exceedsIssuanceQuota(count)) {
-      return res.status(429).json({ error: 'CREDENTIAL_QUOTA: Too many issuance requests.' });
-    }
-
-    const blinded = Buffer.from(blindedMsg, 'base64url')
-    if (blinded.length === 0 || blinded.length > 512) {
-      return res.status(400).json({ error: 'Invalid blinded message size' });
-    }
-
-    // Blind message TIDAK bisa diverifikasi isi → serial dibangun dari blind
-    // message (bukan prepared). Dedupe berbasis blind-message-hash: blind yang
-    // sama (retry) → serial sama; blind berbeda (re-issuance jahat) → tetap
-    // tercatat tapi quota per (user, conversation) membatasinya.
-    const serial = createHash('sha384').update(blinded).digest('hex');
-    const already = await prisma.groupCredential.findUnique({ where: { serial }, select: { id: true } });
-    if (already) {
-      // Retry: blindSign ulang memberi blind signature berbeda? TIDAK — blind
-      // signature deterministik atas (sk, blinded). Aman untuk blindSign ulang;
-      // klien finalize dengan inv miliknya.
-    }
-
-    const { blindSig, keyVersion } = await blindSign(new Uint8Array(blinded));
-
-    // Catatan: serial prepared-message belum bisa dihitung server (prepared
-    // disembunyikan). Row dibuat saat klien submit serial (finalize) — lihat
-    // POST /credential-commit. Untuk revocation berbasis conversation, serial
-    // prepared dikaitkan di commit; row di sini hanya blind-hash untuk dedupe.
-    res.json({ blindSig: Buffer.from(blindSig).toString('base64url'), keyVersion })
-  } catch (error) { next(error) }
-})
-
-// [26.8.1] Credential commit — setelah finalize, klien mengirim serial
-// prepared-message + conversationId agar server mengaitkannya untuk verifikasi
-// & revocation.
-//
-// Integritas isi dijaga saat PRESENTASI (serial hanya lolos bila tanda tangan
-// valid untuk conversationId yang diklaim + binding konteks cocok). Di sini
-// yang ditegakkan: (a) bukti keanggotaan yang sama seperti issuance, (b) commit
-// tidak boleh melebihi jumlah issuance hari itu — tanpa ini siapa pun bisa
-// menyuntikkan serial 96-hex sembarang tanpa batas (spam tabel GroupCredential).
-router.post('/credential-commit', zodValidate({
-  body: z.object({
-    conversationId: z.string().min(1).max(64),
-    keyVersion: z.number().int().min(1),
-    serial: z.string().length(SERIAL_HEX_LENGTH),
-    deliveryToken: z.string().regex(DELIVERY_TOKEN_RE).optional(),
-  })
-}), async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { conversationId, keyVersion, serial, deliveryToken } = req.body as {
-      conversationId: string; keyVersion: number; serial: string; deliveryToken?: string
-    }
-
-    if (!(await authorizeCredentialIssuance(authDb, conversationId, req.headers as unknown as Record<string, unknown>, deliveryToken))) {
-      return res.status(403).json({ error: 'MEMBERSHIP_PROOF_REQUIRED: Valid X-Group-Token or delivery token required.' });
-    }
-
-    // Ticket check: issuance di hari ini ATAU kemarin (grace tengah malam).
-    const days = credentialDays();
-    const issuedCounts = await Promise.all(days.map(day =>
-      redisClient.get(credentialIssuanceKey(req.user.id, conversationId, day!))
-    ));
-    const issued = issuedCounts.reduce((max, raw) => Math.max(max, Number(raw ?? 0)), 0);
-
-    const [today] = days;
-    const commitKey = credentialCommitKey(req.user.id, conversationId, today!);
-    const committed = Number(await redisClient.eval(CREDENTIAL_INCR_LUA, {
-      keys: [commitKey], arguments: [String(CREDENTIAL_QUOTA_TTL_SECONDS)],
-    }));
-    if (!commitAllowed(committed, issued)) {
-      return res.status(403).json({ error: 'CREDENTIAL_COMMIT_WITHOUT_ISSUANCE: No issuance ticket for this credential.' });
-    }
-
-    await recordIssuedCredential(serial, conversationId, keyVersion)
-    res.status(201).json({ ok: true })
-  } catch (error) { next(error) }
-})
-
-// [26.8.1] Revocation via credential — kick/leave menghapus serial milik
-// anggota. Klien yang men-kick tidak tahu serial (anonim); yang melakukannya:
-// server menghapus SEMUA credential serial untuk conversation yang tidak lagi
-// valid — tapi serial terikat conversation, bukan identitas. Karena revocation
-// per-anggota butuh pemetaan serial↔anggota yang hanya klien tahu, kick
-// menyertakan serials yang di-revoke di body (dari encrypted metadata).
-router.post('/:id/credential-revoke', zodValidate({
-  body: z.object({ serials: z.array(z.string().length(SERIAL_HEX_LENGTH)).max(500) })
-}), async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { id } = req.params
-    const { serials } = req.body as { serials: string[] }
-    const gt = req.headers['x-group-token'];
-    const groupToken = typeof gt === 'string' ? gt : Array.isArray(gt) ? (gt[0] ?? '') : '';
-    const conversation = await prisma.conversation.findUnique({ where: { id: String(id) }, select: { authSecret: true } }) as { authSecret: string | null } | null;
-    if (!conversation || !credentialTokenMatches(conversation.authSecret, groupToken)) {
-      return res.status(403).json({ error: 'BLIND_AUTH_REQUIRED: Invalid or missing X-Group-Token' });
-    }
-    await revokeCredentialsFor(String(id), serials)
-    res.json({ ok: true })
-  } catch (error) { next(error) }
-})
 
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
@@ -227,31 +61,6 @@ router.get('/sync', async (req, res, next) => {
           select: { conversationId: true }
         });
         conversationIds.push(...tokenRows.map(r => r.conversationId));
-      }
-    }
-
-    // [26.8.1] Credential presentations: header X-Group-Credentials memuat
-    // (keyVersion, conversationId, preparedMsg, signature) base64url — server
-    // memverifikasi tanda tangan issuer + serial terdaftar. Tidak ada identitas
-    // di dalamnya; kepemilikan (msg, sig) = bukti keanggotaan.
-    const credHeader = req.headers['x-group-credentials'];
-    const credRaw = typeof credHeader === 'string' ? credHeader : (Array.isArray(credHeader) ? credHeader[0] : undefined);
-    if (typeof credRaw === 'string' && credRaw.length > 0) {
-      const presentations = credRaw.split('~').slice(0, 100);
-      for (const p of presentations) {
-        try {
-          const [kvRaw, convId, msgB64, sigB64] = p.split(':');
-          const keyVersion = parseInt(kvRaw ?? '', 10);
-          if (!Number.isInteger(keyVersion) || !convId || !msgB64 || !sigB64) continue;
-          const preparedMsg = Buffer.from(msgB64, 'base64url');
-          const signature = Buffer.from(sigB64, 'base64url');
-          if (preparedMsg.length === 0 || preparedMsg.length > 512) continue;
-          if (await verifyPresentation(convId, keyVersion, preparedMsg, signature)) {
-            conversationIds.push(convId);
-          }
-        } catch {
-          // Presentasi malformed → skip (bukan error request)
-        }
       }
     }
 

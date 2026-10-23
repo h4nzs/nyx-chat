@@ -22,6 +22,9 @@ const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 // [LINK 2026-10-18] Halaman perangkat baru yang memindai QR dari perangkat lama.
 const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
+// [docs/35 residual] Harness benchmark perangkat; isinya menolak jalan kecuali
+// build dev / VITE_PQ_BENCH=1, jadi route ini aman ada di bundle default.
+const PqDeviceBenchPage = lazy(() => import('./pages/PqDeviceBenchPage'));
 const UsernameLinkPage = lazy(() => import('./pages/UsernameLinkPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const BurnerChat = lazy(() => import('./pages/BurnerChat'));
@@ -582,6 +585,9 @@ const AppContent = () => {
               {/* [LINK 2026-10-18] Publik: perangkat baru belum punya sesi. */}
               <Route path="/link" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
               <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
+              {/* [docs/35 residual] Benchmark perangkat: publik supaya HP bisa
+                  membuka tanpa sesi; nonaktif pada build default. */}
+              <Route path="/bench/pq" element={<PageWrapper><PqDeviceBenchPage /></PageWrapper>} />
               <Route path="/drop" element={<PageWrapper noScroll={true}><BurnerChat /></PageWrapper>} />
 
               {/* Protected Routes */}

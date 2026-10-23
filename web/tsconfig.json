@@ -53,7 +53,8 @@
   "include": [
     "src",
     "e2e",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright.ohttp.config.ts"
   ],
   "references": []
 }

@@ -10,7 +10,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(here, '..');
 const baselinePath = path.join(here, 'pq-only-baseline.json');
 const exceptionsPath = path.join(here, 'pq-only-exceptions.json');
-const EXCEPTION_TIERS = new Set(['legacy-v1-fallback', 'tier-b']);
+// `hybrid-v2-identity` = primitif klasik yang masih DIBUTUHKAN oleh format v2
+// yang frozen (identitas X25519 yang diikat transkrip X3DH v2) atau oleh kolom
+// bundle/DB yang belum nullable. Bukan jalur baca v1.
+const EXCEPTION_TIERS = new Set(['legacy-v1-fallback', 'tier-b', 'hybrid-v2-identity']);
 
 const ROOTS = ['web/src', 'server/src', 'packages/shared/src'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__tests__', 'target', 'vendor']);
@@ -167,5 +170,6 @@ const tiers = Object.values(exceptions).reduce((counts, entry) => {
 }, {});
 console.log(
   `Guard PQ-only lulus (${Object.keys(actual).length} berkas legacy/exception; ` +
-    `Tier A baru: 0; Tier B: ${tiers['tier-b'] ?? 0}; legacy v1: ${tiers['legacy-v1-fallback'] ?? 0}).`
+    `Tier A baru: 0; Tier B: ${tiers['tier-b'] ?? 0}; legacy v1: ${tiers['legacy-v1-fallback'] ?? 0}; ` +
+    `hybrid v2 identity: ${tiers['hybrid-v2-identity'] ?? 0}).`
 );

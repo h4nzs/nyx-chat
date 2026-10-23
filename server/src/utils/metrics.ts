@@ -620,3 +620,19 @@ export const OHTTP_OPS = defineCounter(
   'Operasi OHTTP (config/relay/gateway/token), per jalur dan hasil',
   ['route', 'result']
 );
+
+/**
+ * [docs/35 Fase 8 residual] Jalur legacy v1 yang masih benar-benar dipakai.
+ *
+ * Denylist baru boleh menjadi literal 0 setelah tidak ada klien/data v1. Audit
+ * DB (`scripts/audit-v1-residuals.ts`) menangkap artefak tersimpan; counter ini
+ * menangkap jalur yang TIDAK meninggalkan jejak di DB — pemulihan dengan tanda
+ * tangan Ed25519 saja, bundel pre-key v1, dan tautan perangkat tanpa kunci
+ * verifikasi ML-DSA. Label = enum pendek (bukan id/versi klien), jadi tidak ada
+ * deret waktu per pengguna.
+ */
+export const LEGACY_V1_USAGE = defineCounter(
+  'nyx_legacy_v1_usage_total',
+  'Pemakaian jalur legacy v1 yang diamati server, per jenis',
+  ['path']
+);

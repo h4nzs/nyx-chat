@@ -1,5 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// [E2E DB terpisah] Bila `NYX_E2E_DATABASE_URL` diset, server E2E memakai DB
+// itu — bukan DATABASE_URL aplikasi di server/.env. Di selfhost keduanya bisa
+// menunjuk DB yang sama, dan reset global akan menghapus data aplikasi.
+const e2eDatabaseEnv = process.env.NYX_E2E_DATABASE_URL
+  ? { env: { DATABASE_URL: process.env.NYX_E2E_DATABASE_URL } }
+  : {};
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -30,6 +37,7 @@ export default defineConfig({
       url: 'http://localhost:4000/health',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
+      ...e2eDatabaseEnv,
     },
     {
       command: 'pnpm --filter nyx-web dev',

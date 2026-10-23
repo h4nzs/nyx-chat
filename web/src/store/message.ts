@@ -1028,7 +1028,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       try {
         const { getSodium } = await import('@lib/sodiumInitializer');
         const sodium = await getSodium();
-        const { worker_crypto_box_seal } = await import('@lib/crypto-worker-proxy');
 
         const myAuthUser = useAuthStore.getState().user;
         let myName = 'Someone';
@@ -1153,17 +1152,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                }
             }
 
-            const { resolvePqV2Enabled } = await import('@lib/pqCapability');
             const { sealForDevice } = await import('@lib/pqBoxSeal');
-            const usePqV2Push = resolvePqV2Enabled();
 
-            await Promise.all(sealTargets.map(async ({ deviceId, pubBytes, pqBytes }) => {
+            await Promise.all(sealTargets.map(async ({ deviceId, pqBytes }) => {
                 try {
-                    // v2 hanya bila kill switch mengizinkan DAN perangkat punya kunci PQ;
-                    // selain itu jalur classical lama dipertahankan persis.
-                    const sealed = usePqV2Push && pqBytes
-                        ? await sealForDevice(pushDataBytes, pqBytes, pubBytes)
-                        : await worker_crypto_box_seal(pushDataBytes, pubBytes);
+                    // [PQ-only] Push payload wajib sealed box v2 (X-Wing).
+                    // Perangkat tanpa kunci PQ tidak mendapat payload; tidak ada
+                    // lagi fallback `crypto_box_seal`.
+                    if (!pqBytes) throw new Error('device tanpa kunci PQ');
+                    const sealed = await sealForDevice(pushDataBytes, pqBytes);
                     pushPayloads[deviceId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
                 } catch (e) {
                     console.error(`Failed to seal push for device ${deviceId}`, e);

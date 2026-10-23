@@ -4,7 +4,6 @@ import { transportClient, connectSocket } from '../lib/transportClient';
 import { api } from '../lib/api';
 import { worker_burner_dr_init_guest, worker_burner_dr_encrypt, worker_burner_dr_decrypt } from '../lib/crypto-worker-proxy';
 import { getSodiumLib } from '../utils/crypto';
-import { resolvePqV2Enabled } from '../lib/pqCapability';
 import { useAuthStore } from './auth';
 // Burner file metadata arrives in TWO schemas depending on which UI sent it:
 // - Guest (/drop BurnerChat): { fileUrl, fileName, fileType, fileSize, fileKey }
@@ -229,11 +228,9 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       const hostDeviceId = parts[2] ?? '';
       const hostPqPk = parts[3] ?? '';
       const hostClassicalPk = parts[4] ?? '';
-      // [PQ v2 Fase 1.8] Bagian ke-6 opsional: `2` = burner v2 (X-Wing saja,
-      // tanpa X25519). Hanya dihormati bila VITE_PQ_V2 aktif; kalau tidak,
-      // link tetap diproses sebagai v1 (hostClassicalPk masih ada di link).
-      const linkBurnerVersion = parts[5] === '2' ? 2 : 1;
-      const usePqV2 = linkBurnerVersion === 2 && resolvePqV2Enabled();
+      // [PQ-only 2026-10-23] Burner v1 (X25519 || X-Wing) dihapus. Link lama
+      // tanpa penanda `2` tetap diproses sebagai v2 — tidak ada jalur klasik.
+      const usePqV2 = true;
 
       // [BURNER 2026-10-18] GERBANG DESTROY. Dulu satu-satunya tanda "room
       // sudah dihancurkan" adalah event realtime `burner:terminated`; kalau
@@ -441,9 +438,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       try {
         const payload = JSON.parse(cipherString);
         const { header, ciphertext: ciphertextB64, guestClassicalPk } = payload;
-        // [PQ v2 Fase 1.8] Sesi v2 mengirim guestClassicalPk kosong dan
-        // menandai versi; hanya hormati v2 bila gerbang PQ aktif.
-        const incomingBurnerVersion = payload.burnerVersion === 2 && resolvePqV2Enabled() ? 2 : 1;
+        // [PQ-only 2026-10-23] Semua sesi burner adalah v2 (X-Wing murni).
+        const incomingBurnerVersion = 2;
 
         const sodium = await getSodiumLib();
 
@@ -677,6 +673,6 @@ export async function generateBurnerLink(): Promise<string> {
   // Link format: #<RoomID>:<HostUserId>:<HostDeviceID>:<HostPQPublicKey>:<HostClassicalPublicKey>[:<BurnerVersion>]
   // [PQ v2 Fase 1.8] Bagian ke-6 `2` = burner v2 (X-Wing saja). Guest build
   // lama hanya membaca 5 bagian pertama sehingga tetap kompatibel.
-  const linkPqVersion = resolvePqV2Enabled() ? 2 : 1;
+  const linkPqVersion = 2;
   return `${window.location.origin}/drop/#${roomId}:${myUserId}:${myDeviceId}:${encodeURIComponent(myPqPkB64)}:${encodeURIComponent(b64Classical)}:${linkPqVersion}`;
 }

@@ -1,24 +1,28 @@
 # 35 — Rencana Migrasi Post-Quantum (Tier A)
 
-> **Status (2026-10-22): Fase 0–8 selesai di kode.** Fase 0–7 landed di kode
-> (Fase 4 kecuali PIR yang ditunda, Fase 5 kecuali riset BRaccoon, Fase 6 default
-> mati; Fase 7 = log KT ML-DSA + dual-write, **belum cutover baca**). Fase 8
-> mendaratkan KAT resmi **ML-DSA-65 ACVP** + **X-Wing draft-06**, KAT
-> lintas-implementasi X3DH v2/group v4/KT v2, **registry exception** legacy
-> v1/Tier B, dan `bench:pq` desktop. Denylist Tier A **baru** = 0; 13 berkas
-> legacy v1 tetap ada sebagai exception tervalidasi (`scripts/pq-only-exceptions.json`)
-> karena pembaca v1 tidak boleh dihapus (§35.9 langkah 8). Fitur PQ klien berada
-> di balik gerbang `VITE_PQ_V2`/`VITE_ANON_CREDENTIALS` yang **default mati**:
-> jalur v1 tetap default dan tetap terbaca. **Belum di-deploy dan belum pernah
-> dinyalakan di produksi.**
+> **Status (2026-10-23): cutover PQ-only selesai di kode — belum commit/deploy.**
+> Fase 0–8 selesai di kode (Fase 4 kecuali PIR; Fase 7 = log KT ML-DSA +
+> dual-write, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
+> ACVP** + **X-Wing draft-06**, KAT lintas-implementasi X3DH v2/group v4/KT v2,
+> `bench:pq`, audit residual v1, dan E2E recovery/device-linking/OHTTP.
 >
-> Format di §35.6 **bukan lagi usulan**: yang tertulis di sana adalah bentuk
-> yang benar-benar diimplementasikan (koreksi terhadap proposal awal ditandai di
-> tiap butir). Sisa Fase 8 adalah residual non-kode: denylist legacy v1 menjadi
-> literal 0 (menunggu tidak ada sesi/pesan v1), benchmark perangkat
-> rendah/baterai + keputusan liboqs, E2E browser pelengkap
-> recovery/device-linking/credential/OHTTP, dan review kriptografi eksternal
-> (§35.8, §35.10, §35.11).
+> **Cutover PQ-only 2026-10-23:** Fase 5 (credential suite) dan Fase 6 (anonymous
+> issuance) **dihapus dari kode** karena suite credential PQ belum lolos gate;
+> grup memakai delivery token. Jalur v1 (X3DH, `crypto_box_seal`, recovery
+> Ed25519, migrasi QR v1) juga dihapus, jadi **arsip v1 lama tidak dapat
+> didekripsi oleh build ini** — ini break kompatibilitas yang disengaja, bukan
+> klaim bahwa v1 masih terbaca. Denylist Tier A baru = 0; tersisa **2 berkas
+> `hybrid-v2-identity`** (`scripts/pq-only-exceptions.json`): X25519 identity
+> yang terikat di transkrip X3DH v2 dan `signingKey` Ed25519 non-nullable yang
+> tidak lagi ditandatangani. Gerbang `VITE_PQ_V2`/`VITE_ANON_CREDENTIALS`
+> **diabaikan/dihapus**; PQ selalu aktif. **Belum di-deploy.**
+>
+> Format di §35.6 adalah desain historis; bagian credential (§35.2.3, §35.6.6,
+> §35.6.7) **tidak lagi menggambarkan kode**. Sisa Fase 8 adalah residual
+> non-kode: benchmark perangkat rendah/baterai, review kriptografi eksternal,
+> KT v2 read cutover, dan keputusan BRaccoon/blind UOV bila credential PQ
+> dihidupkan lagi. Tiga alur browser pelengkap (recovery, device-linking,
+> OHTTP) punya spec Playwright; spec credential ikut dihapus.
 >
 > Dokumen terkait: `docs/03`, `docs/04`, `docs/26`, `docs/28`, `docs/33`,
 > `docs/34`.
@@ -32,19 +36,15 @@
 | 2 | KT Scope A: nilai log v2, verifikasi tiga kunci, pin config TOFU | **landed** (inti) | §35.7 Fase 2 |
 | 3 | Metadata (OHTTP, cover traffic 1:1) | **landed di kode** 2026-10-21 — OHTTP dipakai jalur pencarian lewat token scoped, rotasi 2 slot, metrik; λ adaptif + budget, jitter/batching, chaff visibility-aware. Default mati, belum di-deploy | §35.7 Fase 3 |
 | 4 | Discovery (tutup R5, OHTTP search, PIR spike) | **landed kecuali PIR** 2026-10-21 — R5 penuh (shareId terpisah dari blind index), search lewat OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa mengonsumsi OTPK. PIR **ditunda** dengan kriteria go (§35.11 #3) | §35.7 Fase 4 |
-| 5 | Credential PQ (suite abstraction, BRaccoon) | **landed kecuali riset v2** 2026-10-21 — suite abstraction, kolom `*.suite`, persist IndexedDB (Dexie v15), await commit, revoke saat leave. BRaccoon/blind UOV + kick-revoke tetap riset | §35.7 Fase 5, `groupCredentialPersistence.test.ts` |
-| 6 | Anonymous issuance | **landed di kode** 2026-10-21 — bank token (SHA-256 di Redis, kuota harian), redeem tanpa JWT via `X-Group-Token`, commit ticket single-use. Default mati (`VITE_ANON_CREDENTIALS`) | §35.6.7, §35.7 Fase 6 |
+| 5 | Credential PQ (suite abstraction, BRaccoon) | **dihapus 2026-10-23** — cutover PQ-only menghapus suite credential blind RSA, endpoint, persist Dexie, dan tesnya. Tidak ada pengganti PQ; BRaccoon/blind UOV tetap riset | §35.2.3, §35.6.6 |
+| 6 | Anonymous issuance | **dihapus 2026-10-23** — bank token/redeem/commit ikut dihapus bersama credential; tidak ada endpoint `/api/credentials/*` | §35.6.7 |
 | 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
-| 8 | Removal, audit, dokumentasi | **sebagian** 2026-10-22 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop; denylist legacy 13 belum 0 | §35.8, §35.10 |
+| 8 | Removal, audit, dokumentasi | **selesai di kode** 2026-10-23 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop + throttle, audit residual v1, E2E recovery/device-linking/OHTTP; denylist baru 0, sisa 2 exception `hybrid-v2-identity` | §35.8, §35.10 |
 
-Gerbang rollout: `VITE_PQ_V2=1` mengaktifkan **pengiriman dan advertising** v2;
-`resolvePqV2Enabled()` hanya membandingkan nilai itu, jadi tanpa variabel (atau
-nilai lain) klien tetap mengirim/mengiklankan v1 sambil **tetap bisa membaca**
-v2. `.env.example` memuat `VITE_PQ_V2=1` **dengan sengaja** (bukan sisa
-percobaan): dengan gerbang menyala, alur perpesanan **1:1 dan grup** sudah
-diverifikasi manual berjalan normal. Konsekuensinya build dev/E2E yang menyalin
-template mengiklankan v2. **Produksi tetap harus memilih nilainya eksplisit** —
-sampai sekarang belum ada build produksi dengan gerbang hidup.
+**PQ-only:** `resolvePqV2Enabled()` selalu `true`; `VITE_PQ_V2` tidak lagi
+mengubah perilaku dan `VITE_ANON_CREDENTIALS` sudah tidak dipakai. Tidak ada
+fallback v1 untuk handshake/pesan baru. **Data v1 lama tidak punya pembaca di
+build ini**; jangan deploy ke instalasi yang masih membutuhkan arsip v1.
 
 ## 35.1 Tujuan dan definisi selesai
 
@@ -128,7 +128,11 @@ Sisa pemakaian classical-only yang masih disengaja sekarang dijaga
 `PQ-only guard` di job `lint`), sehingga call classical-only baru menggagalkan
 gate alih-alih menumpang di daftar ini.
 
-### 35.2.3 Credentials
+### 35.2.3 Credentials (dihapus 2026-10-23 — historis)
+
+> **Tidak ada lagi di kode.** Seluruh suite credential (blind RSA, endpoint,
+> persist Dexie, tes) dihapus pada cutover PQ-only. Bagian di bawah adalah
+> catatan desain/baseline lama, bukan status implementasi.
 
 - Suite: `RSABSSA-SHA384-PSS-Randomized` (RFC 9474), modulus 2048.
 - Message: `nyx-grp-cred:v1:<conversationId>:<32 hex random>`.
@@ -301,10 +305,10 @@ Catatan:
 
 ## 35.6 Format v2 (diimplementasikan)
 
-> Bagian ini **sudah diimplementasikan** di balik `VITE_PQ_V2` (2026-10-20).
-> Yang tertulis di bawah adalah bentuk yang benar-benar ada di kode — koreksi
-> terhadap proposal awal ditandai “koreksi”. Format v1 di §35.4 tetap beku dan
-> tetap dibaca.
+> Bagian ini **sudah diimplementasikan** (2026-10-20). Sejak cutover PQ-only
+> 2026-10-23 gerbang `VITE_PQ_V2` dihapus; yang tertulis di bawah adalah bentuk
+> yang benar-benar ada di kode — koreksi terhadap proposal awal ditandai
+> “koreksi”. Format v1 di §35.4 tetap beku, tetapi build ini tidak lagi membacanya.
 
 ### 35.6.1 Bundle v2
 
@@ -460,7 +464,12 @@ total         = 3238 B                      // v1 (1286 B) + 1952 B
 - `/api/keys/kt/config` harus dipin ke build/release manifest; config dari
   server tidak boleh dipercaya mentah-mentah.
 
-### 35.6.6 Credential suite abstraction (Fase 5 — implemented)
+### 35.6.6 Credential suite abstraction (Fase 5 — dihapus 2026-10-23)
+
+> **Dihapus.** Interface/suite di bawah adalah desain historis. Cutover PQ-only
+> menghapus blind RSA beserta client/server/persistensinya karena tidak ada suite
+> PQ yang lolos gate; grup memakai delivery token. Jangan menganggap kode ini
+> ada saat mengerjakan BRaccoon/blind UOV.
 
 Interface yang dibutuhkan:
 
@@ -498,7 +507,12 @@ cuma diketahui pemiliknya; perlu distribusi serial antar-anggota di metadata
 (belum ada). Suite v2 (BRaccoon/blind UOV) tetap riset: jangan implementasi
 lattice sendiri sebelum test vector paper + benchmark + audit + dual verify.
 
-### 35.6.7 Anonymous issuance (Fase 6 — implemented)
+### 35.6.7 Anonymous issuance (Fase 6 — dihapus 2026-10-23)
+
+> **Dihapus.** Bank token, redeem tanpa JWT, dan commit ticket dihapus bersama
+> fitur credential. Endpoint `/api/credentials/*` tidak ada lagi. Bagian di
+> bawah adalah desain historis; residualnya tidak berlaku sampai credential PQ
+> dihidupkan kembali.
 
 Tujuan: issuance/commit credential tidak lagi menyimpan `user ↔ conversation`
 di jalur baru. Dua bagian:
@@ -550,9 +564,9 @@ Acceptance:
 - schema push terverifikasi,
 - capability parity shared ↔ Rust ↔ client.
 
-Status (2026-10-19): **selesai, belum di-deploy.** `@noble/post-quantum@0.7.1`
+Status (2026-10-19; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **selesai, belum di-deploy.** `@noble/post-quantum@0.7.1`
 (pinned exact), `cryptoSuite.ts`, capability `pq-v2` (shared + Rust + client
-lewat `advertisedPqCapabilities()` dengan `VITE_PQ_V2=1`, default mati), kolom
+lewat `advertisedPqCapabilities()`, dulu `VITE_PQ_V2=1`), kolom
 schema aditif (`Device.signingKeyV2`/`cryptoVersion`,
 `PreKeyBundle.signatureV2`/`cryptoVersion`, `GroupCredential.suite`,
 `CredentialIssuerKey.suite`), dan `scripts/check-pq-only.mjs` +
@@ -594,7 +608,7 @@ Acceptance:
 - oracle Go menghasilkan session key yang sama,
 - tidak ada classical-only call baru di jalur v2.
 
-Status (2026-10-20): **seluruh langkah 1–9 selesai di kode**, termasuk residual cross-check `signingKeyV2` payload vs bundle, tanda tangan pesan + metadata grup v4, envelope distribusi grup v4 (kunci verifikasi ter-seal di dalam envelope), burner v2, recovery/device-linking/migration/push v2, test vector lintas-implementasi (oracle Go) untuk X3DH v2, dan audit persistensi/relay yang mengunci `signingKeyV2`/`senderKeyId` di state grup. Belum di-deploy dan gerbang `VITE_PQ_V2` masih default mati.
+Status (2026-10-20; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **seluruh langkah 1–9 selesai di kode**, termasuk residual cross-check `signingKeyV2` payload vs bundle, tanda tangan pesan + metadata grup v4, envelope distribusi grup v4 (kunci verifikasi ter-seal di dalam envelope), burner v2, recovery/device-linking/migration/push v2, test vector lintas-implementasi (oracle Go) untuk X3DH v2, dan audit persistensi/relay yang mengunci `signingKeyV2`/`senderKeyId` di state grup. Belum di-deploy; sejak PQ-only tidak ada fallback v1.
 - Langkah 1–3 (ML-DSA, device key v2, bundle v2) selesai; lihat status Fase 0 dan catatan KT Scope A.
 - Langkah 4 (X3DH v2) selesai untuk **jalur 1:1** — satu-satunya jalur yang memakai X3DH (grup memakai distribusi sender key, bukan handshake per-anggota):
   - `packages/shared/src/pqHandshake.ts` mendefinisikan wire v2 (`HANDSHAKE_V2_VERSION = 0x02`,
@@ -607,8 +621,8 @@ Status (2026-10-20): **seluruh langkah 1–9 selesai di kode**, termasuk residua
     dengan ML-DSA (`PQ_V2_DOMAINS.HANDSHAKE`); penerima memverifikasi dengan `signingKeyV2`
     inisiator dari payload, **dan** `messagePipeline` menolak bila `signingKeyV2` payload ≠
     `signingKeyV2` bundle peer (yang sudah dicek terhadap KT).
-  - Gerbang: `resolvePqV2Enabled()` (`VITE_PQ_V2=1`) **dan** bundle peer memuat `signingKeyV2`.
-    Default OFF; jalur v1 tetap utuh dan dipakai bila gerbang mati.
+  - Gerbang (historis; dihapus 2026-10-23): `resolvePqV2Enabled()` (`VITE_PQ_V2=1`) **dan** bundle peer memuat `signingKeyV2`.
+    Dulu default OFF; sekarang PQ selalu aktif dan fallback v1 tidak ada.
   - Payload `x3dh` kini membawa opsional `handshakeVersion` + `initiatorSigningKeyV2`
     (`drProtocol.DrHandshakePayload`, `typeGuards.isX3dhHeader`, `messagePipeline`, kelompok state DR).
 - Langkah 5 (sealed box v2) selesai:
@@ -959,16 +973,12 @@ Acceptance:
 - commit failure tidak menghasilkan credential “sukses”,
 - credential v2 tidak diklaim PQ sebelum audit.
 
-Status (2026-10-21): **seluruh pekerjaan Fase 5 yang tidak bergantung riset
-selesai di kode.** Suite abstraction (issuer key → worker `blind(suite)` →
-verifikasi server v1-aware), kolom `*.suite` terisi, persist IndexedDB
-(Dexie v15, `ENC1:`), commit di-await + validasi serial hex SHA-384, dan revoke
-saat leave (sebelum `/leave`) landed. Tes: `groupCredentialPersistence.test.ts`
-(6, termasuk reload tanpa issuance ulang dan commit-failure) plus 30 tes server
-(`credentialIssuance`/`groupCredentials`/`credentialAuth`/`credentialSuite`).
-BRaccoon/blind UOV tetap **riset** (butuh test vector paper, benchmark, audit
-eksternal, dual verify + kill switch). Fase 6 (issuance token-only) sudah landed
-di kode (lihat di bawah). Deviasi kick-vs-revoke tercatat di §35.6.6.
+Status (2026-10-23): **dihapus.** Cutover PQ-only menghapus suite credential
+blind RSA, endpoint issuance/commit, persist Dexie, dan seluruh tesnya
+(`credentialSuite`, `groupCredentials`, `credentialIssuance`,
+`groupCredentialPersistence`). Acceptance di atas tidak lagi berlaku. Grup
+memakai delivery token. BRaccoon/blind UOV tetap riset dan harus dibangun dari
+nol bila credential PQ dihidupkan kembali.
 
 ### Fase 6 — Anonymous issuance
 
@@ -988,18 +998,10 @@ Acceptance:
 - ✅ replay token ditolak (Lua GET+DEL),
 - ✅ kuota dan revocation tetap berfungsi.
 
-Status (2026-10-21): **landed di kode, default mati.** Bank token
-(`POST /api/credentials/tokens`, kuota 5 token/hari per `identityTag`, token
-hanya SHA-256 di Redis TTL 24 jam), redeem anonim
-(`POST /api/credentials/issuance` tanpa JWT, hanya `X-Group-Token`, token
-dikonsumsi atomik, `commitTicket` TTL 10 menit), dan
-`POST /api/credentials/commit` (ticket single-use terikat conversation).
-Klien memakai jalur ini hanya bila `VITE_ANON_CREDENTIALS=1` **dan** authSecret
-grup tersedia; tanpa itu jalur lama. CSRF dikecualikan hanya untuk dua path
-redeem (bank tetap di bawah CSRF). Tes: `server/tests/anonymousCredentials.test.ts`
-(7, helper + wiring) dan `web/src/lib/__tests__/credentialTokens.test.ts`
-(5, klien). Residual: akuisisi batch masih menghubungkan batch ↔ user; endpoint
-lama tetap ada untuk klien lama; BRaccoon tetap menunggu riset/audit.
+Status (2026-10-23): **dihapus.** Bank token, redeem anonim, commit ticket, dan
+klien `credentialTokens.ts` dihapus bersama Fase 5. Tidak ada endpoint
+`/api/credentials/*`; `VITE_ANON_CREDENTIALS` tidak dipakai. Acceptance di atas
+adalah catatan historis, bukan status kode.
 
 ### Fase 7 — KT Scope B
 
@@ -1054,32 +1056,79 @@ Status (2026-10-22): **selesai di kode, dengan residual non-kode**. Yang sudah l
   2026-10-22 (20 iterasi, p95): ML-DSA-65 keygen 11,33 ms, sign 82,79 ms,
   verify 18,17 ms; X-Wing keypair 4,42 ms, encaps 2,63 ms, decaps 5,34 ms.
   Ukuran: ML-DSA pk/sk/sig = 1952/4032/3309 B; X-Wing pk/ct/ss =
-  1216/1120/32 B. Ini **bukan** pengukuran perangkat rendah atau baterai.
-- **Registry exception**: `scripts/pq-only-exceptions.json` mendaftarkan seluruh
-  13 berkas baseline dengan `tier`, `rationale`, dan `removalGate`. Guard
-  `scripts/check-pq-only.mjs` menolak entri hilang/usang, tier tak dikenal, atau
-  rationale/removal gate kosong, lalu mencetak
-  `Tier A baru: 0; Tier B: 5; legacy v1: 8`.
+  1216/1120/32 B.
+- **Proxy perangkat rendah** (2026-10-23): `bench:pq:throttle` menjalankan
+  harness yang sama di Chromium dengan CPU throttling CDP 1x/4x/6x (5 iterasi,
+  p95). 6x: ML-DSA keygen 79,1 ms, sign 186,5 ms, verify 71,3 ms; X-Wing
+  keypair 10,8 ms, encaps 8,1 ms, decaps 10,3 ms. 1x pada run yang sama:
+  22,0 / 38,1 / 11,3 ms dan X-Wing ≤ 2,7 ms. Ukuran output identik di semua
+  laju (kalau berubah, yang diukur bukan primitif yang sama). Ini pendekatan
+  "HP kelas bawah", **bukan** pengukuran baterai/perangkat nyata — residual itu
+  tetap terbuka.
+- **Harness perangkat fisik** (2026-10-23): halaman `/bench/pq`
+  (`web/src/pages/PqDeviceBenchPage.tsx`) menjalankan `runPqBenchmark` di
+  browser HP, menampilkan p95 vs `PQ_BENCH_BUDGET`, ukuran output, dan konteks
+  baterai (`navigator.getBattery()`, hanya Chromium/Android dan dibulatkan 1%).
+  Halaman nonaktif pada build default; aktif lewat dev server `--host` atau
+  `pnpm --filter nyx-web run build:pq-bench`. Level baterai adalah proxy kasar
+  konsumsi energi, bukan pengukuran mWh — angka p95 tetap skor utamanya.
+- **Registry exception**: `scripts/pq-only-exceptions.json` sekarang hanya
+  menyimpan **2 berkas `hybrid-v2-identity`** dengan `tier`, `rationale`, dan
+  `removalGate`. Guard `scripts/check-pq-only.mjs` menolak entri hilang/usang,
+  tier tak dikenal, atau rationale/removal gate kosong, lalu mencetak
+  `Tier A baru: 0; Tier B: 0; legacy v1: 0; hybrid v2 identity: 2`.
+  - `web/src/store/auth.ts`: X25519 identity terikat di transkrip X3DH v2; dua
+    tanda tangan Ed25519 prekey tersisa karena kolom bundle/DB belum nullable
+    dan server tidak lagi memverifikasinya.
+  - `web/src/workers/crypto.worker.ts`: `signingKey` Ed25519 masih diturunkan
+    dari device seed untuk kontrak bundle/Device non-nullable; tidak ada
+    signature baru setelah cutover.
+- **E2E browser pelengkap** (2026-10-23): tiga alur yang sebelumnya hanya
+  dijaga unit test kini punya spec Playwright — `recovery.spec.ts` (frasa dari
+  vault → `/restore`, dan request `POST /api/auth/recover` wajib membawa
+  `signatureV2` + `signingKeyV2` yang diterima server 200),
+  `deviceLinking.spec.ts` (QR perangkat lama → claim → approve → login perangkat
+  baru), dan `ohttp.spec.ts` (pencarian lewat `POST /api/ohttp/relay` berisi
+  amplop `message/ohttp-req`, pin key gateway tersimpan, dan **tidak ada**
+  request `GET /api/users/search` langsung). Spec credential grup dihapus
+  bersama fiturnya. OHTTP memakai stack sendiri:
+  `web/playwright.ohttp.config.ts` menyalakan API 4100 + Vite 5273 dengan
+  `OHTTP_ENABLED=1` dan kunci P-256 yang dibuat saat config dimuat (tidak ada
+  kunci privat di repo); jalankan `pnpm --filter nyx-web run test:e2e:ohttp`.
+  Spec OHTTP di suite utama skip dengan alasan tertulis karena server default
+  memang mematikan gateway. Run selfhost 2026-10-23 (DB kosong): recovery +
+  deviceLinking **2 passed (6,7 m)**, OHTTP **1 passed (2,7 m)**; run itu
+  terjadi **sebelum** credential dihapus dan belum diulang setelah cutover.
+  Stack OHTTP mematikan `METRICS_PORT` supaya tidak bentrok dengan API dev di
+  9464.
 - **Dokumentasi**: status/angka di `docs/35`, `docs/README`, `docs/30`,
   `docs/32`, `docs/34`, `AGENTS`, dan `README` sudah diselaraskan dengan kode.
   `docs/04`, `docs/26`, `docs/28`, `docs/33` tidak memuat klaim status usang.
 
 Residual non-kode (tidak memblokir Fase 8 di repo):
 
-- **Denylist literal 0**: 8 berkas `legacy-v1-fallback` masih bisa aktif untuk
-  peer/perangkat v1, dan 5 berkas `tier-b` adalah credential RSABSSA v1.
-  Menghapusnya sekarang melanggar §35.9 langkah 8; `removalGate` per berkas
-  menunggu semua sesi/pesan/credential v1 habis. Yang dijamin guard: tidak ada
-  simbol Tier A baru.
-- **E2E browser pelengkap**: `web/e2e/pqV2.spec.ts` menutup X3DH v2, group
-  `sigV:2`, dan burner PQ-only. Recovery/device-linking dilindungi unit test +
-  alur UI, credential di server/unit test, OHTTP di server test HTTP nyata;
-  belum ada spec Playwright khusus untuk empat alur itu.
+- **Dua exception `hybrid-v2-identity`**: bukan Tier A baru. X25519 identity
+  masih terikat di transkrip X3DH v2, dan `signingKey` Ed25519 masih ada di
+  kontrak bundle/Device non-nullable. Removal gate: kolom signature nullable +
+  handshake v3 untuk identitas X25519, serta drop `signingKey` + re-key migrasi.
+  Tidak ada sesi/pesan/credential v1 yang menjadi alasan exception ini.
+  Agar sisa artefak v1 terukur (bukan diasumsikan), jalankan
+  `pnpm --filter nyx-server run audit:v1`
+  (`server/scripts/audit-v1-residuals.ts`, read-only). Skrip menghitung agregat:
+  Device tanpa `signingKeyV2`, PreKeyBundle tanpa `signatureV2`, OneTimePreKey
+  klasik, GroupCredential bersuite NULL, dan amplop pesan X3DH v1 / grup
+  `sigV` v1. `--json` untuk diproses mesin, `--check` keluar 1 selama masih ada
+  sisa v1. Tidak ada id/username/isi pesan yang dicetak.
 - **Benchmark perangkat rendah/baterai**, termasuk keputusan tetap di noble atau
-  pindah ke liboqs (§35.11 #1).
-- **Review kriptografi eksternal** sebelum produksi (§35.11).
-- **Tier B exception dan residual** tetap dicatat di §35.10; jangan dihapus dari
-  dokumen saat mengejar denylist 0.
+  pindah ke liboqs (§35.11 #1). E2E yang baru berjalan di mesin dev/CI, bukan
+  pengukuran perangkat pengguna.
+- **Review kriptografi eksternal** sebelum produksi (§35.11). Paketnya sudah
+  disusun di `docs/36`: ruang lingkup, klaim yang diminta diverifikasi, bukti
+  yang bisa dijalankan ulang, residual, dan pertanyaan spesifik. Dokumen itu
+  **bukan** hasil audit; status review tetap belum dilakukan.
+- **Tier B platform** (TLS/QUIC, WebRTC DTLS-SRTP, WebAuthn, VAPID, sertifikat
+  WebTransport) tetap classical/hybrid dan dicatat di §35.10; bukan exception
+  denylist aplikasi.
 
 ## 35.8 Test dan CI
 
@@ -1116,33 +1165,35 @@ Test yang sudah ada (Fase 0–7):
   `groupMetadata.test.ts`, `keychainDbPersistence.test.ts`.
 - KT value v2 + config pin: `ktBundleProof.test.ts`, `ktConfigPin.test.ts`.
 - Recovery/burner: `recoveryV2Signature.test.ts`, `burnerV2RootKey.test.ts`.
-- End-to-end: `web/e2e/pqV2.spec.ts` (X3DH v2, grup `sigV: 2`, burner PQ-only;
-  **skip dengan alasan tertulis** bila `VITE_PQ_V2` mati). CI menjalankannya di
-  **step terpisah** pada job `e2e` dengan `VITE_PQ_V2=1`, sehingga suite utama
-  tetap menguji default v1 — spec ini tidak lagi hanya skip.
+- End-to-end: `web/e2e/pqV2.spec.ts` (X3DH v2, grup `sigV: 2`, burner PQ-only).
+  Tidak ada lagi skip gate `VITE_PQ_V2`: klien selalu PQ-only. CI tetap
+  menjalankannya di **step terpisah** pada job `e2e`.
 
 Belum ada (fase lanjut):
-- Benchmark perangkat rendah dan baterai (desktop `bench:pq` sudah ada).
-- BRaccoon/blind UOV + dual verify/kill switch untuk suite credential baru
-  (suite abstraction v1 sudah landed; replay/quota token sudah diuji).
-- OHTTP E2E lewat relay nyata (unit test menutup format, bukan topologi).
+- Benchmark perangkat rendah dan baterai (desktop + throttle proxy sudah ada).
+- BRaccoon/blind UOV + dual verify/kill switch untuk credential PQ. Fitur
+  credential v1 **sudah dihapus**; suite baru harus dibangun dari nol.
+- Migrasi/arsip data v1 lama — build PQ-only ini tidak punya pembaca v1.
 - Interop `cmd/kt-client` upstream dan dua implementasi auditor berdampingan.
 - PIR record lookup (spike; sengaja ditunda, §35.11 #3).
 
 ## 35.9 Rollout dan rollback
 
-Status urutan ini (2026-10-20): langkah **1–2 sudah ada di kode** (schema aditif
-dan server yang memverifikasi/menerima v2), langkah **3 belum dijalankan** — belum
-ada build produksi dengan `VITE_PQ_V2=1`, dan client default tetap v1.
+Status (2026-10-23): **rollout bertahap di bawah tidak dipakai lagi.** Cutover
+PQ-only menghapus fallback v1, jadi tidak ada lagi “aktifkan v2 per fitur” atau
+kill switch yang kembali ke v1. Build ini hanya boleh dipasang pada instalasi
+yang tidak membutuhkan arsip v1.
 
-1. Deploy schema additive.
-2. Deploy server yang menerima v2 tetapi belum mengirim v2.
-3. Deploy client dengan `pq-v2` capability; v2 hanya untuk peer yang mendukung.
-4. Aktifkan v2 per fitur: 1:1 → group → burner → recovery → device linking.
+1. Deploy schema additive (riwayat; kolom v2 tetap ada).
+2. Deploy server yang menerima v2 (riwayat).
+3. Deploy client PQ-only; semua handshake/pesan baru wajib v2.
+4. Jangan mengaktifkan `VITE_PQ_V2`/`VITE_ANON_CREDENTIALS` — keduanya sudah
+   tidak berpengaruh.
 5. Pantau error handshake/decrypt, ukuran pesan, latensi, dan crash worker.
-6. Kill switch per fitur: berhenti mengirim/mengadvertise v2, tetap membaca v2.
-7. Rollback server: client v2 tetap bisa membaca; jangan hapus kolom/schema.
-8. Jangan pernah menghapus v1 reader selama masih ada pesan/sesi v1.
+6. Rollback = deploy ulang build sebelumnya yang masih punya pembaca v1; jangan
+   menghapus kolom/schema.
+7. Jangan menjalankan build ini pada data v1 yang belum diarsipkan — v1 reader
+   sudah dihapus dan tidak ada jalur migrasi di kode saat ini.
 
 ## 35.10 Risiko dan residual
 
@@ -1150,29 +1201,35 @@ ada build produksi dengan `VITE_PQ_V2=1`, dan client default tetap v1.
 |---|---|---|
 | X-Wing tetap memuat X25519 | klaim “nol EC” tidak tercapai | dokumentasikan sebagai hedge; target “no classical-only” |
 | ML-DSA memperbesar pesan | group +3,3 KB, bundle +5,2 KB | resize schema/state; benchmark; batasi group metadata |
-| BRaccoon belum produksi | credential PQ tertunda | research spike + audit; fallback blind UOV; RSA v1 exception |
+| BRaccoon belum produksi | tidak ada credential PQ; fitur credential v1 sudah dihapus | bangun ulang + audit + dual verify; fallback blind UOV; jangan hidupkan RSA v1 |
 | KT v1 classical | log auth belum PQ | Scope A cepat; Scope B service terpisah |
 | Config KT dari server | server bisa forge log | pin config di build/release; fail-closed |
 | PIR kompleks | discovery privacy tertunda | OHTTP/exact-hash dulu; PIR spike |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
-| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms — benchmark perangkat rendah/baterai masih terbuka |
-| v1/v2 state bercampur | decrypt gagal | version scoping, archive cap, test migrasi |
+| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi, benchmark baterai/perangkat nyata masih terbuka |
+| v1/v2 state bercampur | arsip v1 lama tidak terbaca | arsipkan sebelum deploy; rollback = build lama; jangan hapus kolom/schema |
 
 Residual yang harus ditulis jujur:
 - metadata (graph, timing, volume) tidak hilang hanya dengan PQ,
 - KT v1 tetap classical sampai Scope B,
 - Tier B tetap hybrid/classical,
-- BRaccoon/blind UOV belum tentu lolos audit,
-- X-Wing bukan “pure ML-KEM”.
+- credential v1 dihapus; build ini tidak punya credential PQ,
+- BRaccoon/blind UOV belum tentu lolos audit (hanya relevan jika credential dibangun ulang),
+- X-Wing bukan “pure ML-KEM”,
+- arsip v1 lama tidak terbaca oleh build ini.
 
 ## 35.11 Keputusan yang masih terbuka
 
 1. ~~ML-DSA runtime: `@noble/post-quantum` vs `@oqs/liboqs-js`.~~ **Diputuskan:**
    `@noble/post-quantum@0.7.1` (pinned exact) dipakai di web, worker, dan server.
-   Yang masih terbuka: benchmark di perangkat rendah dan keputusan pindah ke
-   liboqs bila budget gagal.
-2. BRaccoon: go/no-go setelah spike + audit; fallback blind UOV.
+   Proxy CPU throttling 6x (`bench:pq:throttle`, 2026-10-23) masih di bawah
+   200 ms untuk sign dan budget desktop terpenuhi; pindah ke liboqs **tidak**
+   dipicu. Yang masih terbuka hanya pengukuran baterai/perangkat fisik — bukan
+   keputusan library.
+2. BRaccoon: credential v1 sudah dihapus; fitur credential tidak ada di build
+   PQ-only ini. BRaccoon/blind UOV hanya relevan jika credential dibangun ulang
+   dari nol — go/no-go setelah spike + audit, fallback blind UOV.
 3. PIR: library vs service sendiri; kapan ambang direktori membuat PIR wajib.
    **Diputuskan (2026-10-21): tunda — no-go untuk implementasi sekarang.**
    PIR hanya menyembunyikan *record mana* yang diambil dari gateway/operator

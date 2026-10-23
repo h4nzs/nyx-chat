@@ -300,20 +300,27 @@ jobs:
           # logika aplikasi, bukan menunggu QUIC yang tidak punya uplink.
           VITE_FORCE_WSS: '1'
         run: pnpm exec playwright test --project=chromium
-      # [docs/35 §35.8] PQ v2 hanya dikirim/diiklankan saat gerbang menyala, dan
-      # `pqV2.spec` skip dengan alasan tertulis bila flag mati. Tanpa step ini
-      # jalur X3DH v2 / grup `sigV:2` / burner PQ-only tidak punya bukti otomatis
-      # sama sekali. Dijalankan terpisah supaya suite utama tetap menguji default
-      # v1; web/.env tidak ada di CI, jadi nilainya murni dari env step ini.
-      - name: Run E2E PQ v2 (gerbang VITE_PQ_V2=1)
+      # [docs/35 §35.9] Build ini PQ-only: `VITE_PQ_V2` sudah tidak berpengaruh
+      # dan tidak ada fallback v1. Step terpisah ini tetap ada supaya jalur X3DH
+      # v2 / grup `sigV:2` / burner PQ-only punya bukti otomatis; suite utama
+      # menguji alur yang sama, bukan default v1.
+      - name: Run E2E PQ v2 (PQ-only, tanpa gerbang)
         working-directory: web
         env:
-          VITE_PQ_V2: '1'
           # Job ini tidak menjalankan sidecar Rust; paksa WSS seperti step E2E
           # utama. Tes burner PQ-only butuh WebTransport nyata dan dijalankan
           # di job `e2e-chrome` (sidecar hidup), bukan di sini.
           VITE_FORCE_WSS: '1'
         run: pnpm exec playwright test --project=chromium e2e/pqV2.spec.ts
+      # [docs/35 Fase 8] Gateway OHTTP hanya dipasang saat OHTTP_ENABLED=1, jadi
+      # suite utama men-skip spec ini. Step ini menyalakan stack terpisah (API
+      # 4100 + Vite 5273, kunci P-256 dibuat saat config dimuat) dan membuktikan
+      # pencarian keluar lewat relay berisi amplop — bukan /api/users/search.
+      - name: Run E2E OHTTP (gateway nyata, port terpisah)
+        working-directory: web
+        env:
+          VITE_FORCE_WSS: '1'
+        run: pnpm exec playwright test --config playwright.ohttp.config.ts --project=chromium
       # [docs/30 WS-G(2)] Lapis "scrape nyata" dari drill alert: exporter hidup di
       # 127.0.0.1:9464 milik proses ini sendiri (Postgres/Redis sudah siap di job
       # ini). Menolak nama metrik yang terkirim tapi tidak dideklarasikan —
@@ -450,6 +457,4 @@ jobs:
 
       - name: Run E2E PQ v2 burner (WebTransport nyata)
         working-directory: web
-        env:
-          VITE_PQ_V2: '1'
         run: pnpm exec playwright test --project=chrome e2e/pqV2.spec.ts -g "burner init PQ-only"

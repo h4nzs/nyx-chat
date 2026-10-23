@@ -245,20 +245,6 @@ export interface KtConfigRow {
   blob: string; // JSON ter-seal (ENC1:)
 }
 
-/**
- * [docs/35 §35.6.6 — Fase 5] Credential keanggotaan grup per percakapan.
- *
- * Credential blind RSA (RSABSSA) adalah artefak RAHASIA yang membuktikan
- * keanggotaan tanpa mengungkap identitas; ia harus bertahan lintas reload —
- * kalau hilang, klien meminta issuance baru dan pola issuance menjadi sinyal.
- * Satu baris per percakapan, isi JSON ter-seal `ENC1:` (masterSeed), pola yang
- * sama dengan `ktConfig`/`ktGossip`.
- */
-export interface GroupCredentialRow {
-  id: string; // PK = conversationId
-  blob: string; // JSON ter-seal (ENC1:)
-}
-
 export interface ContactRow {
   userId: UserId; // PK
   data: string; // ENCRYPTED JSON ContactRecord (base64 envelope)
@@ -311,9 +297,6 @@ export class NyxDatabase extends Dexie {
 
   // [docs/34 §34.5] Pin konfigurasi log KT (TOFU) — satu baris ter-seal.
   ktConfig!: Table<KtConfigRow, string>;
-
-  // [docs/35 §35.6.6] Credential keanggotaan grup per percakapan (ter-seal).
-  groupCredentials!: Table<GroupCredentialRow, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -451,6 +434,13 @@ export class NyxDatabase extends Dexie {
     // tetap jalan (baris tak terlihat oleh versi skema sebelumnya).
     this.version(15).stores({
       groupCredentials: 'id'
+    });
+
+    // [PQ-only 2026-10-23] Credential keanggotaan (blind RSA) dihapus dari
+    // klien karena tidak ada suite PQ yang menggantikannya. Tabel dibuang,
+    // bukan dibiarkan berisi artefak v1; `null` = hapus store saat upgrade.
+    this.version(16).stores({
+      groupCredentials: null
     });
   }
 }

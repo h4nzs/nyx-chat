@@ -2,6 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧪 E2E residual Fase 8: recovery, device-linking, credential grup, OHTTP + fix blind RSA (2026-10-23)
+
+> **Koreksi (2026-10-23):** cutover PQ-only menghapus seluruh fitur credential
+> (`groupCredential.spec.ts`, `/api/credentials/*`, suite RSA, client
+> `groupCredentials`). Spec credential dan hasil “3 passed” di bawah adalah
+> historis sebelum penghapusan; E2E yang tersisa: recovery, deviceLinking,
+> OHTTP. Jangan menganggap credential grup tersedia di build ini.
+
+Empat alur browser yang sebelumnya hanya dijaga unit test kini punya spec
+Playwright: pemulihan akun (`recovery.spec.ts`) mengambil frasa dari vault,
+memulihkan lewat `/restore`, dan mewajibkan request `POST /api/auth/recover`
+membawa `signatureV2`/`signingKeyV2` (ML-DSA-65) yang diterima server 200;
+tautan perangkat (`deviceLinking.spec.ts`) menjalankan QR perangkat lama →
+claim → approve → login perangkat baru di dua konteks; credential grup
+(`groupCredential.spec.ts`) membuktikan issuance nyata, persist `ENC1:` di
+IndexedDB, dan presentasi `X-Group-Credentials` saat sync setelah reload;
+OHTTP (`ohttp.spec.ts`) membuktikan pencarian keluar lewat
+`POST /api/ohttp/relay` berisi amplop `message/ohttp-req`, key gateway dipin,
+dan **tidak ada** `GET /api/users/search` langsung dari halaman.
+
+OHTTP tidak bisa memakai dev server biasa (gateway hanya dipasang saat
+`OHTTP_ENABLED=1`), jadi `playwright.ohttp.config.ts` menyalakan stack sendiri
+di API 4100 + Vite 5273 dengan kunci P-256 yang dibuat saat config dimuat (tidak
+ada kunci privat yang di-commit) dan `NYX_E2E_API_PROXY_TARGET` untuk proxy.
+Jalankan `pnpm --filter nyx-web run test:e2e:ohttp`; di suite utama spec itu
+skip dengan alasan tertulis karena default produksi memang mematikan OHTTP.
+
+Untuk gerbang denylist legacy, `server/scripts/audit-v1-residuals.ts`
+(`pnpm --filter nyx-server run audit:v1`) menghitung agregat artefak v1 yang
+bisa diamati server — Device tanpa `signingKeyV2`, PreKeyBundle tanpa
+`signatureV2`, OneTimePreKey klasik, GroupCredential bersuite NULL, dan amplop
+pesan X3DH/grup v1 — sehingga "menunggu v1 habis" bisa diukur. Skrip read-only,
+`--json` untuk mesin, `--check` exit 1 selama masih ada sisa.
+
+Untuk pengukuran di HP sungguhan ada harness `/bench/pq`
+(`web/src/pages/PqDeviceBenchPage.tsx`, build `build:pq-bench`): menjalankan
+`runPqBenchmark`, menampilkan p95 vs budget, ukuran output, dan konteks baterai
+(level/charging; proxy kasar, bukan mWh). Halaman nonaktif pada build default.
+Keempat spec E2E di atas dijalankan di selfhost 2026-10-23: recovery +
+deviceLinking + groupCredential **3 passed (6,7 m)**, OHTTP **1 passed (2,7 m)**.
+
+Benchmark perangkat rendah kini punya proxy yang bisa diulang:
+`bench:pq:throttle` menjalankan ML-DSA-65 + X-Wing di Chromium dengan CPU
+throttling CDP 1x/4x/6x. Pada 6x (p95): keygen 79,1 ms, sign 186,5 ms, verify
+71,3 ms; X-Wing keypair/encaps/decaps 10,8/8,1/10,3 ms — budget desktop tetap
+terpenuhi, jadi keputusan tetap di noble (liboqs tidak dipicu). Ini bukan
+pengukuran baterai/perangkat fisik.
+
+Jalur v1 yang tidak meninggalkan jejak di DB (recovery Ed25519 saja, pre-key
+bundle v1, tautan perangkat tanpa kunci ML-DSA) sekarang dihitung lewat counter
+event-only `nyx_legacy_v1_usage_total{path=…}`; labelnya enum pendek dan nilai
+berbentuk identitas ditolak seperti metrik lain.
+
+Paket review kriptografi eksternal disusun di `docs/36` (ruang lingkup Tier A +
+KT v2, klaim, bukti, residual, pertanyaan reviewer). Status review tetap
+**belum dilakukan**.
+
+Spec credential langsung menemukan regresi nyata dari bump dependensi:
+`@cloudflare/blindrsa-ts` 0.4.6 mengekspor kunci ke JWK di dalam
+`blind()`/`blindSign()`, sehingga kunci yang di-import non-extractable membuat
+issuance gagal dengan `key is not extractable`. Klien (`credential_blind`,
+`credential_finalize`) dan server (kunci privat issuer) sekarang meng-import
+dengan `extractable: true`; tanpa fix ini credential grup tidak bisa diterbitkan
+sama sekali.
+
 ## 🔏 Fase 7 landed: log Key Transparency v2 (ML-DSA) + dual-write, cutover baca belum (2026-10-21)
 
 Log KT v2 berjalan berdampingan dengan v1: crate fork lokal

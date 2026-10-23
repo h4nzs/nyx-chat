@@ -223,26 +223,19 @@ export async function encryptGroupMetadata(
       const { workerXChaChaSeal } = await import('@lib/crypto-worker-proxy');
       const ct = await workerXChaChaSeal(metaKey, payload);
       const ctBytes = sodium.from_base64(ct, sodium.base64_variants.URLSAFE_NO_PADDING);
-      // [PQ v4 Fase 1.5] Bila v2 aktif, tandatangani byte `ct` dengan ML-DSA-65
-      // (context `PQ_V2_DOMAINS.GROUP`) dan set `sigV: 2`. Jalur v1 (Ed25519)
-      // tetap dipakai bila gerbang mati — `sigV: 1`.
-      const signingV2 = resolvePqV2Enabled() ? await useAuthStore.getState().getSigningV2KeyPair() : undefined;
-      let signature: string;
-      let sigV: 1 | 2;
-      if (signingV2) {
-          const { mlDsaSign, PQ_V2_DOMAINS } = await import('@nyx/shared');
-          signature = sodium.to_base64(
-              mlDsaSign(ctBytes, new Uint8Array(signingV2.secretKey), PQ_V2_DOMAINS.GROUP),
-              sodium.base64_variants.URLSAFE_NO_PADDING
-          );
-          sigV = 2;
-      } else {
-          signature = sodium.to_base64(
-              sodium.crypto_sign_detached(ctBytes, new Uint8Array(signingPriv as unknown as ArrayLike<number>)),
-              sodium.base64_variants.URLSAFE_NO_PADDING
-          );
-          sigV = 1;
+      // [PQ-only 2026-10-23] Metadata grup WAJIB ditandatangani ML-DSA-65
+      // (context `PQ_V2_DOMAINS.GROUP`). Jalur tanda tangan Ed25519 (`sigV: 1`)
+      // dihapus; device tanpa kunci v2 tidak boleh menulis metadata grup.
+      const signingV2 = await useAuthStore.getState().getSigningV2KeyPair();
+      if (!signingV2) {
+          throw new Error('Metadata grup wajib signingKeyV2 (PQ-only)');
       }
+      const { mlDsaSign, PQ_V2_DOMAINS } = await import('@nyx/shared');
+      const signature = sodium.to_base64(
+          mlDsaSign(ctBytes, new Uint8Array(signingV2.secretKey), PQ_V2_DOMAINS.GROUP),
+          sodium.base64_variants.URLSAFE_NO_PADDING
+      );
+      const sigV = 2;
       // [docs/28 Tier 4] `senderId` (userId penulis) DIHAPUS dari wrapper v2:
       // reader v2 merutekan lewat `chainId` + `senderDeviceKey` dan memverifikasi
       // tanda tangan hanya atas byte `ct`, jadi field itu tidak dipakai — dan ia
@@ -360,10 +353,9 @@ export async function decryptGroupMetadata(
                     PQ_V2_DOMAINS.GROUP
                 );
             } else {
-                const signingKeyForSender = record.signingKey ?? (await resolveOnce()).signingKey;
-                if (!signingKeyForSender) continue;
-                const signingPubBytes = sodium.from_base64(signingKeyForSender, sodium.base64_variants.URLSAFE_NO_PADDING);
-                valid = sodium.crypto_sign_verify_detached(signatureBytes, ctBytes, signingPubBytes);
+                // [PQ-only 2026-10-23] Wrapper `sigV: 1` tidak lagi diverifikasi
+                // (tanda tangan Ed25519 dihapus) — lewati era lama.
+                continue;
             }
             if (!valid) continue;
 
@@ -933,34 +925,6 @@ export async function getSodiumLib() {
 
 export async function getMyEncryptionKeyPair(): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
   return useAuthStore.getState().getEncryptionKeyPair();
-}
-
-export async function decryptSessionKeyForUser(
-  encryptedSessionKeyStr: string,
-  publicKey: Uint8Array,
-  privateKey: Uint8Array
-): Promise<Uint8Array> {
-  const sodium = await getSodiumLib();
-  const { worker_crypto_box_seal_open } = await getWorkerProxy();
-
-  if (!privateKey || privateKey.length !== sodium.crypto_box_SECRETKEYBYTES) {
-    throw new TypeError("Invalid privateKey length for session key decryption.");
-  }
-  if (!publicKey || publicKey.length !== sodium.crypto_box_PUBLICKEYBYTES) {
-    throw new TypeError("Invalid publicKey length for session key decryption.");
-  }
-
-  const encryptedSessionKey = sodium.from_base64(encryptedSessionKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
-  try {
-      const sessionKey = await worker_crypto_box_seal_open(encryptedSessionKey, publicKey, privateKey);
-      if (!sessionKey) {
-        throw new Error("Failed to decrypt session key, likely due to incorrect key pair or corrupted data.");
-      }
-      return sessionKey;
-  } catch (e) {
-      console.warn("Failed to decrypt session key via worker, ignoring:", e);
-      throw e;
-  }
 }
 
 // --- Session Ratcheting and Key Retrieval ---
@@ -1999,14 +1963,7 @@ async function doEncryptMessage(
 
           const bundle = await fetchPreKeyBundle(getParticipantUserId(peer));
           
-          const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
-          if (!signingPrivateKey) throw new Error("My signing key missing");
-          const mySigningKey = {
-              publicKey: signingPrivateKey.slice(32),
-              privateKey: signingPrivateKey
-          };
-
-          const { sessionKey, initiatorCiphertexts, otpkId, identityChanged, handshakeVersion, initiatorSigningKeyV2 } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peer.id);
+          const { sessionKey, initiatorCiphertexts, otpkId, identityChanged, handshakeVersion, initiatorSigningKeyV2 } = await establishSessionFromPreKeyBundle(bundle, peer.id);
 
           // [SECURITY WARNING] Insert system message if identity changed
           if (identityChanged) {
@@ -2057,11 +2014,10 @@ async function doEncryptMessage(
           });
 
           x3dhData = {
-              initiatorSigningKey: sodium.to_base64(mySigningKey.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
               initiatorCiphertexts: sodium.to_base64(initiatorCiphertexts, sodium.base64_variants.URLSAFE_NO_PADDING),
               otpkId,
               handshakeVersion,
-              ...(handshakeVersion === 2 ? { initiatorSigningKeyV2 } : {})
+              initiatorSigningKeyV2,
           };
       }
 
@@ -3078,12 +3034,11 @@ async function tryReceiveAdminToken(payload: ReceiveKeyPayload): Promise<string 
 // --- Pre-Key Handshake (Full X3DH with OTPK) ---
 
 export async function establishSessionFromPreKeyBundle(
-  mySigningKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   preKeyBundle: PreKeyBundle,
   peerUserId: string
 ): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array, otpkId?: number, identityChanged: boolean, handshakeVersion: number, initiatorSigningKeyV2?: string }> {
   const sodium = await getSodiumLib();
-  const { worker_x3dh_initiator, worker_x3dh_v2_initiator } = await getWorkerProxy();
+  const { worker_x3dh_v2_initiator } = await getWorkerProxy();
 
   if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
       throw new Error("Post-Quantum Handshake Mandatory");
@@ -3106,15 +3061,11 @@ export async function establishSessionFromPreKeyBundle(
   }
   
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   const theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  let theirOneTimePreKey: Uint8Array | undefined;
   let theirPqOneTimePreKey: Uint8Array | undefined;
   if (!preKeyBundle.oneTimePreKey) {
     // [MID-SESSION REFILL] Bundle tanpa OTPK = stok PEER habis (server tidak
@@ -3123,92 +3074,65 @@ export async function establishSessionFromPreKeyBundle(
     // sesi berikutnya). Fire-and-forget, tidak boleh menggagalkan handshake.
     scheduleOtpkTopUpCheck();
   } else {
-    theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
     if (!preKeyBundle.oneTimePreKey.pqKey) {
       throw new Error("Post-Quantum Handshake Mandatory");
     }
     theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   }
 
-  // [docs/35 Fase 1.4] Jalur v2 (X-Wing murni + tanda tangan ML-DSA) dipilih bila
-  // fitur aktif DAN bundle peer membawa `signingKeyV2` (penanda peer v2-capable).
-  // v2 tidak memakai DH X25519 sama sekali; autentikasi inisiator lewat tanda
-  // tangan transkrip yang diverifikasi penerima dengan `signingKeyV2` kita.
-  if (resolvePqV2Enabled() && preKeyBundle.signingKeyV2) {
-    const signingV2 = await useAuthStore.getState().getSigningV2KeyPair();
-    if (!signingV2) {
-      throw new Error("X3DH v2 diaktifkan tetapi device tidak memiliki kunci signingKeyV2");
-    }
-    const theirIdentityKeyV2 = new Uint8Array(theirIdentityKey);
-    const theirPqIdentityKeyV2 = new Uint8Array(theirPqIdentityKey);
-    const theirPqSignedPreKeyV2 = new Uint8Array(theirPqSignedPreKey);
-
-    const v2Result = await worker_x3dh_v2_initiator({
-      mySigningV2: { publicKey: signingV2.publicKey, secretKey: signingV2.secretKey },
-      theirIdentityKey: theirIdentityKeyV2,
-      theirPqIdentityKey: theirPqIdentityKeyV2,
-      theirPqSignedPreKey: theirPqSignedPreKeyV2,
-      theirPqOneTimePreKey: theirPqOneTimePreKey ? new Uint8Array(theirPqOneTimePreKey) : undefined,
-    });
-
-    const initiatorSigningKeyV2 = sodium.to_base64(signingV2.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    return {
-      sessionKey: v2Result.sessionKey,
-      initiatorCiphertexts: v2Result.initiatorCiphertexts,
-      otpkId: preKeyBundle.oneTimePreKey?.keyId,
-      identityChanged,
-      handshakeVersion: 2,
-      initiatorSigningKeyV2,
-    };
+  // [PQ-only 2026-10-23] X3DH v2 (X-Wing murni + tanda tangan ML-DSA) WAJIB.
+  // Bundle peer tanpa `signingKeyV2` tidak bisa diajak berkomunikasi: tidak ada
+  // lagi jalur DH X25519 fallback. `pqSignature` sengaja tidak dibaca —
+  // autentikasi signed prekey v2 ada di dalam ML-DSA handshake.
+  if (!preKeyBundle.signingKeyV2) {
+    throw new Error("X3DH v2 wajib: bundle peer tidak membawa signingKeyV2");
+  }
+  const signingV2 = await useAuthStore.getState().getSigningV2KeyPair();
+  if (!signingV2) {
+    throw new Error("X3DH v2 wajib tetapi device tidak memiliki kunci signingKeyV2");
   }
 
-  const result = await worker_x3dh_initiator({
-    mySigningKey: mySigningKeyPair,
-    theirIdentityKey,
-    theirPqIdentityKey,
-    theirSignedPreKey,
-    theirPqSignedPreKey,
-    theirSigningKey,
-    signature,
-    pqSignature,
-    theirOneTimePreKey,
-    theirPqOneTimePreKey
+  const v2Result = await worker_x3dh_v2_initiator({
+    mySigningV2: { publicKey: signingV2.publicKey, secretKey: signingV2.secretKey },
+    theirIdentityKey: new Uint8Array(theirIdentityKey),
+    theirPqIdentityKey: new Uint8Array(theirPqIdentityKey),
+    theirPqSignedPreKey: new Uint8Array(theirPqSignedPreKey),
+    theirPqOneTimePreKey: theirPqOneTimePreKey ? new Uint8Array(theirPqOneTimePreKey) : undefined,
   });
 
   return {
-    sessionKey: result.sessionKey,
-    initiatorCiphertexts: result.initiatorCiphertexts,
+    sessionKey: v2Result.sessionKey,
+    initiatorCiphertexts: v2Result.initiatorCiphertexts,
     otpkId: preKeyBundle.oneTimePreKey?.keyId,
     identityChanged,
-    handshakeVersion: 1,
+    handshakeVersion: 2,
+    initiatorSigningKeyV2: sodium.to_base64(signingV2.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
   };
 }
 
 export async function deriveSessionKeyAsRecipient(
   myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
-  mySignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   myPqIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   myPqSignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
-  initiatorSigningKeyStr: string,
   initiatorCiphertextsInput: string | Uint8Array,
   otpkId?: number,
   handshakeVersion?: number,
   initiatorSigningKeyV2?: string
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
-  const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
 
-  const theirSigningKey = sodium.from_base64(initiatorSigningKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
-  
   // Handle both string (Base64) and binary input for backward compatibility
   const initiatorCiphertexts = typeof initiatorCiphertextsInput === 'string' 
     ? sodium.from_base64(initiatorCiphertextsInput, sodium.base64_variants.URLSAFE_NO_PADDING)
     : initiatorCiphertextsInput;
   
-  // [docs/35 Fase 1.4] Jalur v2 (X-Wing murni): verifikasi tanda tangan ML-DSA
-  // inisiator atas transkrip handshake dengan `signingKeyV2`-nya, lalu decaps
-  // X-Wing. Tidak menyentuh `crypto_scalarmult` sama sekali.
-  if (handshakeVersion === 2) {
+  // [PQ-only 2026-10-23] X3DH v2 (X-Wing murni): verifikasi tanda tangan
+  // ML-DSA inisiator atas transkrip handshake, lalu decaps X-Wing. Handshake v1
+  // (DH1–DH4 X25519) tidak lagi diterima.
+  if (handshakeVersion !== 2) {
+    throw new Error("X3DH v2 wajib: handshake v1 tidak lagi didukung");
+  }
+  {
     if (!initiatorSigningKeyV2) {
       throw new Error("X3DH v2: kunci verifikasi inisiator (signingKeyV2) tidak tersedia");
     }
@@ -3247,42 +3171,6 @@ export async function deriveSessionKeyAsRecipient(
     return sessionKeyV2;
   }
 
-  // [LINT 2026-10-11] `let myOneTimePreKey` dihapus: tidak pernah di-assign
-  // (selalu undefined) dan jalur OTPK sudah ditangani worker regenerate di bawah;
-  // meneruskan `undefined` ke worker identik dengan menghilangkan argumennya.
-
-  if (otpkId !== undefined) {
-    const masterSeed = await getMasterSeedOrThrow();
-    try {
-        const { worker_x3dh_recipient_regenerate } = await getWorkerProxy();
-        const sessionKey = await worker_x3dh_recipient_regenerate({
-            keyId: otpkId,
-            masterSeed,
-            myIdentityKey: myIdentityKeyPair,
-            mySignedPreKey: mySignedPreKeyPair,
-            myPqIdentityKey: myPqIdentityKeyPair,
-            myPqSignedPreKey: myPqSignedPreKeyPair,
-            theirSigningKey,
-            initiatorCiphertexts
-        });
-        return sessionKey;
-    } catch (e) {
-        console.error('[X3DH] Failed to regenerate OTPK:', otpkId, e);
-    }
-  }
-
-  const sessionKey = await worker_x3dh_recipient({
-    myIdentityKey: myIdentityKeyPair,
-    mySignedPreKey: mySignedPreKeyPair,
-    myPqIdentityKey: myPqIdentityKeyPair,
-    myPqSignedPreKey: myPqSignedPreKeyPair,
-    theirSigningKey,         // Hapus baris theirIdentityKey dan theirEphemeralKey, ganti dengan ini
-    initiatorCiphertexts    // Tambahkan baris ini
-  });
-  if (otpkId !== undefined) {
-    await deleteOneTimePreKey(otpkId);
-  }
-  return sessionKey;
 }
 
 // --- Key Recovery & Fulfillment ---
@@ -3530,10 +3418,8 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
 
                 newSessionKey = await deriveSessionKeyAsRecipient(
                     myIdentityKeyPair,
-                    mySignedPreKeyPair,
                     myPqIdentityKeyPair,
                     myPqSignedPreKeyPair,
-                    initiatorSigningKey,
                     initiatorCiphertextsStr,
                     metadata.otpkId,
                     metadata.handshakeVersion,
@@ -3543,23 +3429,17 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
                 throw new Error("Invalid X3DH payload");
             }
         } catch (e) {
-            console.error("X3DH derivation failed, falling back to legacy decrypt:", e);
-            if (encryptedKey.length > 20 && !encryptedKey.trim().startsWith('{')) {
-                const { publicKey, privateKey } = await getMyEncryptionKeyPair();
-                newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
-            } else {
-                console.warn("[Crypto] Skipping decryption for invalid/placeholder or JSON key.");
-                return;
-            }
+            // [PQ-only 2026-10-23] Fallback `crypto_box_seal` v1 dihapus: kunci
+            // sesi yang gagal diderivasi dengan X3DH v2 tidak punya jalur
+            // klasik. Lebih baik terlihat gagal daripada diam-diam memakai v1.
+            console.error("X3DH v2 derivation failed (no legacy fallback):", e);
+            return;
         }
     } else {
-        if (!encryptedKey || encryptedKey.length < 20 || encryptedKey.trim().startsWith('{')) {
-             console.warn("[Crypto] Received empty, short, or JSON session key where base64 was expected. Ignoring.");
-             return;
-        }
-
-        const { publicKey, privateKey } = await getMyEncryptionKeyPair();
-        newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+        // [PQ-only 2026-10-23] `crypto_box_seal` v1 dihapus: kunci sesi wajib
+        // berupa payload X3DH v2 (JSON). Base64 mentah dari klien lama ditolak.
+        console.warn("[Crypto] Session key bukan payload X3DH v2 — diabaikan (PQ-only).");
+        return;
     }
 
     if (newSessionKey) {

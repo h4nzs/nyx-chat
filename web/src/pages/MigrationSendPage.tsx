@@ -133,21 +133,19 @@ export default function MigrationSendPage() {
       const prepared = archiveRef.current;
       if (!prepared) throw new Error(t('common:migration.read_vault_failed', 'Gagal membaca brankas data.'));
 
-      const { roomId, pubKey, pqPubKey } = JSON.parse(qrText) as { roomId: string; pubKey: string; pqPubKey?: string };
+      const { roomId, pqPubKey } = JSON.parse(qrText) as { roomId: string; pqPubKey?: string };
       const sodium = await getSodium();
-      const receiverPubKeyBytes = sodium.from_base64(pubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      if (!pqPubKey) {
+        throw new Error(t('common:migration.qr_v1_unsupported', 'QR lama tidak didukung — perbarui perangkat tujuan.'));
+      }
 
-      // 1. Seal the backup key using Receiver's Public Key (arsip tetap ber-frame).
-      // [docs/35 Fase 1.5] Bila QR penerima memuat kunci PQ, pakai choke point
-      // v1/v2 (v2 = X-Wing murni saat VITE_PQ_V2 aktif); QR v1 lama jatuh ke
-      // jalur X25519 klasik.
-      const sealedKeyBytes = pqPubKey
-        ? await sealForDevice(
-            prepared.key,
-            sodium.from_base64(pqPubKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-            receiverPubKeyBytes
-          )
-        : sodium.crypto_box_seal(prepared.key, receiverPubKeyBytes);
+      // 1. Seal the backup key dengan kunci X-Wing penerima (sealed box v2).
+      // [PQ-only 2026-10-23] QR tanpa `pqPubKey` (v1) ditolak; tidak ada lagi
+      // `crypto_box_seal` X25519.
+      const sealedKeyBytes = await sealForDevice(
+        prepared.key,
+        sodium.from_base64(pqPubKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+      );
       const sealedKey = sodium.to_base64(sealedKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       setStatus('sending');

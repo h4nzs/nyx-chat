@@ -100,65 +100,6 @@ const recipientFields = {
 const plaintextBytes = (text: string) => new Uint8Array(Array.from(text, (c) => c.charCodeAt(0)));
 
 describe.skipIf(!goAvailable)('interop NYX → oracle (Go: circl + x/crypto)', () => {
-  it('sessionKey inisiator NYX == sessionKey sisi penerima oracle', async () => {
-    const initiator = await callWorker<{ sessionKey: Uint8Array; initiatorCiphertexts: Uint8Array }>('x3dh_initiator', {
-      mySigningKey: {
-        publicKey: b64uToBytes(aliceSigningPublicKey),
-        privateKey: b64uToBytes(aliceSigningPrivateKey),
-      },
-      theirIdentityKey: b64uToBytes(bob.identityKey!.publicKey),
-      theirPqIdentityKey: b64uToBytes(bob.pqIdentityKey!.publicKey),
-      theirSignedPreKey: b64uToBytes(bob.signedPreKey!.publicKey),
-      theirPqSignedPreKey: b64uToBytes(bob.pqSignedPreKey!.publicKey),
-      theirSigningKey: b64uToBytes(bobSigningPublicKey),
-      signature: b64uToBytes(signedPreKeySignature),
-      pqSignature: b64uToBytes(pqSignedPreKeySignature),
-      theirOneTimePreKey: b64uToBytes(bob.otpkClassical!.publicKey),
-      theirPqOneTimePreKey: b64uToBytes(bob.otpkPq!.publicKey),
-    });
-
-    expect(initiator.sessionKey.length).toBe(32);
-    expect(initiator.initiatorCiphertexts.length).toBe(4 + 32 + 1120 * 3);
-
-    const reply = runOracle('-recipient', {
-      aliceSigningPublicKey,
-      bob: recipientFields,
-      initiatorCiphertexts: bytesToB64u(initiator.initiatorCiphertexts),
-      sessionKey: bytesToB64u(initiator.sessionKey),
-    });
-    expect(reply.error ?? null).toBe(null);
-    expect(reply.ok).toBe(true);
-    expect(reply.sessionKey).toBe(bytesToB64u(initiator.sessionKey));
-  }, 60000);
-
-  it('kontrol negatif: sessionKey NYX diubah → oracle MENOLAK', async () => {
-    const initiator = await callWorker<{ sessionKey: Uint8Array; initiatorCiphertexts: Uint8Array }>('x3dh_initiator', {
-      mySigningKey: {
-        publicKey: b64uToBytes(aliceSigningPublicKey),
-        privateKey: b64uToBytes(aliceSigningPrivateKey),
-      },
-      theirIdentityKey: b64uToBytes(bob.identityKey!.publicKey),
-      theirPqIdentityKey: b64uToBytes(bob.pqIdentityKey!.publicKey),
-      theirSignedPreKey: b64uToBytes(bob.signedPreKey!.publicKey),
-      theirPqSignedPreKey: b64uToBytes(bob.pqSignedPreKey!.publicKey),
-      theirSigningKey: b64uToBytes(bobSigningPublicKey),
-      signature: b64uToBytes(signedPreKeySignature),
-      pqSignature: b64uToBytes(pqSignedPreKeySignature),
-      theirOneTimePreKey: b64uToBytes(bob.otpkClassical!.publicKey),
-      theirPqOneTimePreKey: b64uToBytes(bob.otpkPq!.publicKey),
-    });
-    const tampered = new Uint8Array(initiator.sessionKey);
-    tampered[0] = tampered[0]! ^ 0x01;
-
-    const reply = runOracleExpectingFailure('-recipient', {
-      aliceSigningPublicKey,
-      bob: recipientFields,
-      initiatorCiphertexts: bytesToB64u(initiator.initiatorCiphertexts),
-      sessionKey: bytesToB64u(tampered),
-    });
-    expect(reply.ok).toBe(false);
-  }, 60000);
-
   it('ratchet + AEAD dua arah: oracle membuka ciphertext NYX, NYX membuka ciphertext oracle', async () => {
     const sessionKey = b64uToBytes((vector.sessionKey as string));
     const plaintext = 'interop-nyx-frozen-ratchet-v1';

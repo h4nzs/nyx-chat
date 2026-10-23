@@ -12,6 +12,10 @@ const require = createRequire(import.meta.url);
 
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
+  // [E2E OHTTP] Target proxy bisa di-override supaya stack uji OHTTP berjalan di
+  // port sendiri (lihat playwright.ohttp.config.ts) tanpa menyentuh dev server
+  // 4000 yang mungkin sedang dipakai. Default tetap 4000.
+  const apiProxyTarget = process.env.NYX_E2E_API_PROXY_TARGET || 'http://localhost:4000';
 
   return {
   plugins: [
@@ -123,19 +127,19 @@ export default defineConfig(({ mode }) => {
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
+        target: apiProxyTarget,
         changeOrigin: true,
         secure: false,
       },
       '/uploads': {
-        target: 'http://localhost:4000',
+        target: apiProxyTarget,
         changeOrigin: true,
         secure: false,
       },
       // Fallback WSS memakai origin aplikasi (sama seperti nginx produksi);
       // tanpa entri ini socket.io menabrak Vite dan koneksi tidak pernah jadi.
       '/socket.io': {
-        target: 'http://localhost:4000',
+        target: apiProxyTarget,
         changeOrigin: true,
         ws: true,
       },

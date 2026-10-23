@@ -250,13 +250,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       // [T3b] Kirim delivery tokens milik saya — discovery via possession token.
       const { collectMyDeliveryTokens } = await import('@lib/groupPseudonyms');
       const myTokens = collectMyDeliveryTokens();
-      // [26.8.1] Presentasi credential untuk grup yang sudah punya credential —
-      // server verifikasi tanda tangan tanpa tahu siapa pemiliknya.
-      const { buildCredentialPresentationHeader } = await import('@lib/groupCredentials');
-      const credHeader = await buildCredentialPresentationHeader(localIds.filter(id => id.startsWith('g') || id.includes('-')));
       const syncHeaders: Record<string, string> = {};
       if (myTokens.length > 0) syncHeaders['X-Delivery-Tokens'] = myTokens.map(t => String(t)).join(',');
-      if (credHeader) syncHeaders['X-Group-Credentials'] = credHeader;
       const hasHeaders = Object.keys(syncHeaders).length > 0;
       if (localIds.length > 0) {
         rawConversations = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`, { headers: hasHeaders ? syncHeaders : undefined });
@@ -478,15 +473,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           console.warn('[ContactStore] Warm/restore kontak gagal (non-fatal):', e);
         }
       })();
-
-      // [26.8.1] Fire-and-forget issuance: grup v2 yang belum punya credential
-      // mendapatkannya di latar belakang (blind RSA — server tak tahu isinya).
-      // Gagal bersifat non-fatal; sync tetap berjalan via delivery-token.
-      import('@lib/groupCredentials').then(({ ensureCredential }) => {
-        for (const c of reconciledConversations) {
-          if (c.isGroup) ensureCredential(c.id).catch(() => {});
-        }
-      }).catch(() => {});
 
       // [26.9 RBAC] Muat admin capability token dari kvStore (terenkripsi
       // at-rest) ke store — agar guard UI & header X-Admin-Token hidup setelah
@@ -1354,15 +1340,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         const { getSodiumLib } = await import('@utils/crypto');
         const sodium = await getSodiumLib();
         
-        const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
-        if (!signingPrivateKey) throw new Error("My signing key missing");
-        
-        const mySigningKey = {
-            publicKey: signingPrivateKey.slice(32),
-            privateKey: signingPrivateKey
-        };
-
-        const { sessionKey, initiatorCiphertexts, identityChanged } = await establishSessionFromPreKeyBundle(mySigningKey, bundle, peerId);
+        const { sessionKey, initiatorCiphertexts, identityChanged } = await establishSessionFromPreKeyBundle(bundle, peerId);
 
         // [SECURITY WARNING] Insert system message if identity changed
         if (identityChanged) {

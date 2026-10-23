@@ -31,7 +31,8 @@ import type { RatchetWireVersion } from './spqrNegotiation';
 export interface DrProtocolStateView {
   peerSessionConfirmed?: boolean;
   pendingHandshake?: {
-    initiatorSigningKey: string;
+    /** @deprecated v1 reader dihapus (PQ-only); masih dibaca untuk state lama. */
+    initiatorSigningKey?: string;
     initiatorCiphertexts: string;
     otpkId?: number;
     /** 2 = handshake X-Wing murni + tanda tangan ML-DSA (docs/35 Fase 1.4). */
@@ -58,7 +59,8 @@ export interface DrProtocolStateView {
 
 /** Payload x3dh yang menempel di wrapper pesan (plaintext envelope). */
 export interface DrHandshakePayload {
-  initiatorSigningKey: string;
+  /** @deprecated v1 reader dihapus (PQ-only); field lama tetap diabaikan. */
+  initiatorSigningKey?: string;
   initiatorCiphertexts: string;
   otpkId?: number;
   handshakeVersion?: number;

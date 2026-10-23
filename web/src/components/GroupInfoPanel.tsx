@@ -323,13 +323,6 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
         }
       }
 
-      // [docs/35 §35.6.6 — Fase 5] Cabut credential kita SEBELUM leave: bukti
-      // X-Group-Token masih berlaku, dan setelah keluar kita tidak boleh lagi
-      // muncul sebagai anggota sah. Best-effort (revokeMyCredential menelan
-      // error) — tidak boleh menggagalkan leave.
-      const { revokeMyCredential } = await import('@lib/groupCredentials');
-      await revokeMyCredential(conversation.id, groupToken);
-
       await api(`/api/conversations/${conversation.id}/leave`, {
         method: 'DELETE',
         // [BUGFIX 2026-10-02] X-Group-Token opsional — tanpa metadata, server

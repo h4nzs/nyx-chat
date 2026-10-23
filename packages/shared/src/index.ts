@@ -4,8 +4,6 @@ export * from './types.js';
 export * from './socket.js';
 export * from './constants.js';
 export * from './transport.js';
-export * from './credentials.js';
-export * from './credentialSuite.js';
 export * from './cryptoSuite.js';
 export * from './mlDsa.js';
 export * from './pqBundle.js';

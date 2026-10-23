@@ -44,20 +44,6 @@ function modelBody(schema: string, model: string): string {
   return match[1]!;
 }
 
-test('D1: kunci privat issuer grup tidak boleh kembali ke DB', () => {
-  const schema = read('../prisma/schema.prisma');
-  const issuer = modelBody(schema, 'CredentialIssuerKey');
-
-  assert.doesNotMatch(schema, /privateKeyPkcs8/, 'private key TIDAK boleh jadi kolom DB (dump = bisa memalsukan keanggotaan grup)');
-  assert.match(issuer, /publicKeyJwk\s+String/, 'DB hanya menyimpan material publik');
-  assert.match(schema, /publicKeyJwk/, 'row publik tetap ada untuk verifikasi & distribusi klien');
-
-  // Private key hidup di env / file dev 0600 (gitignored).
-  const lib = read('../src/lib/groupCredentials.ts');
-  assert.match(lib, /GROUP_ISSUER_KEY_PKCS8/, 'private key dibaca dari env');
-  assert.match(read('../.gitignore'), /\.nyx-issuer-key/, 'file dev 0600 tidak boleh bisa di-commit');
-});
-
 test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConversation', () => {
   const handlers = read('../src/network/realtimeHandlers.ts');
   const schema = read('../prisma/schema.prisma');
@@ -97,12 +83,15 @@ test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConve
 
 test('D3/D4: secret otoritas disimpan sebagai hash (token) atau sealed (nilai yang perlu dibaca)', () => {
   const conversations = read('../src/routes/conversations.ts');
+  // [PQ-only 2026-10-23] Perbandingan token grup pindah ke `groupAccess.ts`
+  // setelah endpoint credential dihapus.
+  const groupAccess = read('../src/utils/groupAccess.ts');
   const handlers = read('../src/network/realtimeHandlers.ts');
 
   assert.match(conversations, /authSecret: hashCredentialToken\(authSecret\)/, 'authSecret grup = hash SHA-256');
   assert.match(handlers, /deleteSecret: deleteSecret \? hashCredentialToken\(deleteSecret\) : null/, 'deleteSecret pesan = hash SHA-256');
   assert.doesNotMatch(conversations, /safeEqualStrings\(conversation\.authSecret/, 'perbandingan token lewat helper dual-mode timing-safe');
-  assert.match(conversations, /credentialTokenMatches\(conversation\.authSecret/, 'authSecret dibandingkan via credentialTokenMatches');
+  assert.match(groupAccess, /credentialTokenMatches\(conversation\.authSecret/, 'authSecret dibandingkan via credentialTokenMatches');
   assert.doesNotMatch(read('../src/routes/messages.ts'), /safeEqualStrings\(message\.deleteSecret/, 'deleteSecret lewat helper dual-mode');
 
   const tenantAuth = read('../src/middleware/tenantAuth.ts');

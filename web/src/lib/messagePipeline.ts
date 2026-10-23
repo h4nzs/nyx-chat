@@ -346,7 +346,7 @@ export async function decryptMessageObject(
                 if (mk) {
                     contentToDecrypt = payload.ciphertext;
                 } else if (payload.x3dh && payload.ciphertext) {
-                    const { initiatorSigningKey, initiatorCiphertexts, otpkId, handshakeVersion, initiatorSigningKeyV2 } = payload.x3dh;
+                    const { initiatorCiphertexts, otpkId, handshakeVersion, initiatorSigningKeyV2 } = payload.x3dh;
                     const ciphertext = payload.ciphertext;
 
                     // [SECURITY] Fetch peer's PreKeyBundle to verify identity and update keychain
@@ -401,18 +401,15 @@ export async function decryptMessageObject(
                     }
 
                     const myIdentityKeyPair = await getMyEncryptionKeyPair();
-                    const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
-                    const mySignedPreKeyPair = await getSignedPreKeyPair();
+                    const { getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
 
                     const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
                     const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
 
                     const sessionKey = await deriveSessionKeyAsRecipient(
                         myIdentityKeyPair,
-                        mySignedPreKeyPair,
                         myPqIdentityKeyPair,
                         myPqSignedPreKeyPair,
-                        initiatorSigningKey,
                         initiatorCiphertexts,
                         otpkId,
                         handshakeVersion,
@@ -732,15 +729,8 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                                   
                                   if (existingKey && bundle.identityKey !== existingKey) {
                                       // The sender has finished uploading their new keys!
-                                      const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
-                                      if (!signingPrivateKey) throw new Error("Missing signing key");
-                                      const mySigningKey = {
-                                          publicKey: signingPrivateKey.slice(32),
-                                          privateKey: signingPrivateKey
-                                      };
-                                      
                                       // Establish a new session proactively so we have their new identity key cached
-                                      await establishSessionFromPreKeyBundle(mySigningKey, bundle, senderId);
+                                      await establishSessionFromPreKeyBundle(bundle, senderId);
                                       
                                       const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
                                       const peer = conv?.participants.find(p => (p.userId || p.user?.id || p.id) === senderId);

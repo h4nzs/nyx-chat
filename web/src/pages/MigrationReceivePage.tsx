@@ -30,7 +30,7 @@ export default function MigrationReceivePage() {
   const [status, setStatus] = useState<'waiting' | 'receiving' | 'decrypting' | 'success'>('waiting');
   const navigate = useNavigate();
   
-  const keysRef = useRef<{ publicKey: Uint8Array, privateKey: Uint8Array, pqPublicKey: Uint8Array, pqPrivateKey: Uint8Array } | null>(null);
+  const keysRef = useRef<{ pqPublicKey: Uint8Array, pqPrivateKey: Uint8Array } | null>(null);
   const chunksRef = useRef<string[]>([]);
   const metaRef = useRef<{ roomId: string, totalChunks: number, sealedKey: string } | null>(null);
   const migrationStartedRef = useRef(false);
@@ -50,18 +50,18 @@ export default function MigrationReceivePage() {
       const sodium = await getSodium();
       if (!isMounted) return;
       
-      const keypair = sodium.crypto_box_keypair();
+      // [PQ-only 2026-10-23] QR migrasi hanya membawa kunci X-Wing. Pasangan
+      // `crypto_box` v1 tidak dibuat lagi; kunci klasik tidak dipakai di mana pun.
       const pqKeypair = sodium.crypto_kem_xwing_keypair();
-      keysRef.current = { ...keypair, pqPublicKey: pqKeypair.publicKey, pqPrivateKey: pqKeypair.privateKey };
+      keysRef.current = { pqPublicKey: pqKeypair.publicKey, pqPrivateKey: pqKeypair.privateKey };
       
       const roomId = `mig_${uuidv4()}`;
-      const pubKeyB64 = sodium.to_base64(keypair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       const pqPubKeyB64 = sodium.to_base64(pqKeypair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       
       if (!transportClient.connected) connectSocket();
       
       transportClient.sendEvent('migration:join', roomId);
-      setQrData(JSON.stringify({ roomId, pubKey: pubKeyB64, pqPubKey: pqPubKeyB64 }));
+      setQrData(JSON.stringify({ roomId, pqPubKey: pqPubKeyB64 }));
 
       // Listeners
       transportClient.on('migration:start', (payload) => {
@@ -105,7 +105,7 @@ export default function MigrationReceivePage() {
       // 1. Buka kunci arsip 32 byte memakai private key perangkat ini.
       // [docs/35 Fase 1.5] v2 (X-Wing murni) dideteksi dari magic envelope; QR
       // v1 lama (tanpa pqPubKey) tetap dibuka lewat jalur X25519.
-      const key = await openSealedForDevice(sealedKeyBytes, keysRef.current!.pqPrivateKey, keysRef.current!.privateKey);
+      const key = await openSealedForDevice(sealedKeyBytes, keysRef.current!.pqPrivateKey);
       
       // 2. Rakit ulang chunk base64 menjadi arsip ber-frame utuh.
       const chunksDecoded = chunksRef.current.map(c => sodium.from_base64(c, sodium.base64_variants.URLSAFE_NO_PADDING));

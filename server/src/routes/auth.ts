@@ -53,7 +53,7 @@ import { enforceRegistrationBurst, mayWaiveAttestation } from '../utils/registra
 // [docs/30 §30.12 WS-H] Attestation yang DITOLAK harus terlihat tanpa membaca log:
 // `root_not_trusted` = bundle root operator ketinggalan, `rejected`/`accepted` =
 // laju penolakan (ops/prometheus/alerts.yml grup `nyx-attestation`).
-import { ATTESTATION_REGISTRATION, OHTTP_OPS, incCounter } from '../utils/metrics.js'
+import { ATTESTATION_REGISTRATION, LEGACY_V1_USAGE, OHTTP_OPS, incCounter } from '../utils/metrics.js'
 // [docs/35 Fase 3] Token carriage OHTTP (umur 120 detik, scope allowlist).
 import { OHTTP_TOKEN_TTL_SEC, signOhttpToken } from '../utils/ohttpToken.js'
 import { isOhttpEnabled } from '../ohttp/config.js'
@@ -910,14 +910,16 @@ router.post('/recover', authLimiter, zodValidate({
     pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
     signingKeyV2: validateKey(ML_DSA_65_PUBLIC_KEY_BYTES).optional(),
-    signature: z.string(),
+    // [PQ-only 2026-10-23] `signature` (Ed25519) masih diterima bentuknya agar
+    // klien lama tidak kena 400 schema, tetapi TIDAK diverifikasi.
+    signature: z.string().optional(),
     signatureV2: z.string().optional(),
     timestamp: z.number(),
     nonce: z.string()
   })
 }), async (req, res, next) => {
   try {
-    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, pqPublicKey, signingKey, signingKeyV2, signature, signatureV2, timestamp, nonce } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, pqPublicKey, signingKey, signingKeyV2, signatureV2, timestamp, nonce } = req.body;
 
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
@@ -948,8 +950,6 @@ router.post('/recover', authLimiter, zodValidate({
     const pqKeyStr = pqPublicKey || "";
     const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}:${publicKey}:${pqKeyStr}:${signingKey}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
-    const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-    
     // [PQ v2 Fase 1.5 langkah 9] Pemulihan bisa ditandatangani ML-DSA (v1 tetap diterima).
     let signatureV2Bytes: Uint8Array | null = null;
     if (signatureV2) {
@@ -960,29 +960,26 @@ router.post('/recover', authLimiter, zodValidate({
         }
     }
 
+    // [PQ-only 2026-10-23] Pemulihan WAJIB ditandatangani ML-DSA (v2). Tanda
+    // tangan Ed25519 v1 tidak lagi diverifikasi — `signature` tetap diterima di
+    // body hanya agar klien lama mendapat 401 yang jelas, bukan 400 schema.
+    if (!signatureV2Bytes) {
+        throw new ApiError(401, "Recovery signatureV2 (ML-DSA) wajib.");
+    }
     let isValid = false;
     for (const device of user.devices) {
+        if (!device.signingKeyV2) continue;
         try {
-            const publicKeyBytes = new Uint8Array(device.signingKey);
-            if (sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes)) {
+            if (verifyMlDsaSignature({
+                signature: signatureV2Bytes,
+                message: new Uint8Array(messageBytes),
+                publicKey: new Uint8Array(device.signingKeyV2),
+                domain: PQ_V2_DOMAINS.RECOVERY,
+            })) {
                 isValid = true;
                 break;
             }
-        } catch(e) { console.warn("[Auth] Recovery signature verification error:", e); }
-
-        if (!isValid && signatureV2Bytes && device.signingKeyV2) {
-            try {
-                if (verifyMlDsaSignature({
-                    signature: signatureV2Bytes,
-                    message: new Uint8Array(messageBytes),
-                    publicKey: new Uint8Array(device.signingKeyV2),
-                    domain: PQ_V2_DOMAINS.RECOVERY,
-                })) {
-                    isValid = true;
-                    break;
-                }
-            } catch(e) { console.warn("[Auth] Recovery v2 signature verification error:", e); }
-        }
+        } catch(e) { console.warn("[Auth] Recovery v2 signature verification error:", e); }
     }
 
     if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
@@ -1086,6 +1083,10 @@ router.post('/link/claim', authLimiter, zodValidate({
 }), async (req, res, next) => {
   try {
     const { token, publicKey, pqPublicKey, signingKey, signingKeyV2, encryptedPrivateKey, deviceName } = req.body;
+    // [docs/35 Fase 8 residual] Perangkat baru tanpa kunci verifikasi ML-DSA =
+    // klien v1 yang masih menautkan device; penghapusan fallback ini harus
+    // menunggu angka ini nol.
+    if (!signingKeyV2) incCounter(LEGACY_V1_USAGE, { path: 'device-link' });
 
     // Token sekali pakai: dibakar walaupun langkah berikutnya gagal. Tanpa ini,
     // token yang sempat terlihat (mis. screenshot QR) bisa dipakai ulang.

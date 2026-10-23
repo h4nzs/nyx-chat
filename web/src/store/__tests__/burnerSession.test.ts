@@ -238,10 +238,10 @@ describe('burner.initializeFromHash — gerbang room yang sudah dihancurkan', ()
   });
 });
 
-describe('burner v2 (PQ-only) — gerbang VITE_PQ_V2', () => {
+describe('burner v2 (PQ-only) — gerbang VITE_PQ_V2 diabaikan', () => {
   const HASH_V2 = `${HASH}:2`;
 
-  it('link v2 + VITE_PQ_V2=1 → initGuest dipanggil pqOnly:true, sesi bertanda v2', async () => {
+  it('link v2 → initGuest dipanggil pqOnly:true, sesi bertanda v2', async () => {
     vi.stubEnv('VITE_PQ_V2', '1');
     h.api.mockResolvedValue({ roomId: ROOM, terminated: false });
     h.initGuest.mockResolvedValue({ state: DR_STATE, guestClassicalPk: '', burnerVersion: 2 });
@@ -253,16 +253,16 @@ describe('burner v2 (PQ-only) — gerbang VITE_PQ_V2', () => {
     vi.unstubAllEnvs();
   });
 
-  it('link v2 + VITE_PQ_V2 mati → tetap v1 (pqOnly tidak diset)', async () => {
+  it('link v2 + VITE_PQ_V2 mati → tetap v2 (PQ-only, bukan fallback v1)', async () => {
     vi.stubEnv('VITE_PQ_V2', '');
     h.api.mockResolvedValue({ roomId: ROOM, terminated: false });
-    h.initGuest.mockResolvedValue({ state: DR_STATE, guestClassicalPk: 'guestpk', burnerVersion: 1 });
+    h.initGuest.mockResolvedValue({ state: DR_STATE, guestClassicalPk: '', burnerVersion: 2 });
 
     await useBurnerStore.getState().initializeFromHash(HASH_V2);
 
     const arg = h.initGuest.mock.calls.at(-1)?.[0] as { pqOnly?: boolean } | undefined;
-    expect(arg?.pqOnly).toBeFalsy();
-    expect(useBurnerStore.getState().activeSessions[ROOM]?.burnerVersion).toBe(1);
+    expect(arg?.pqOnly).toBe(true);
+    expect(useBurnerStore.getState().activeSessions[ROOM]?.burnerVersion).toBe(2);
     vi.unstubAllEnvs();
   });
 

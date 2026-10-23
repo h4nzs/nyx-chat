@@ -133,26 +133,6 @@ export const searchIpLimiter = rateLimit({
   })
 })
 
-/**
- * [docs/35 Fase 6] Redeem token credential anonim: per IP, 60/menit.
- * Jalur ini tidak punya akun (tanpa JWT), jadi IP adalah satu-satunya kunci;
- * kuota sebenarnya ada di bank token (per user per hari).
- */
-export const anonCredentialLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: skipRules,
-  keyGenerator: secureKeyGenerator,
-  validate: { trustProxy: false },
-  message: { error: 'CREDENTIAL_RATE_LIMITED: Too many anonymous credential requests.' },
-  store: new RedisStore({
-    prefix: 'rl:cred-anon:',
-    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
-  })
-})
-
 export const adminCleanupLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,

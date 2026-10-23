@@ -12,13 +12,12 @@ describe('kapabilitas pq-v2', () => {
     expect(SERVER_CAPABILITIES).toContain(CLIENT_CAPABILITIES.PQ_V2);
   });
 
-  it('klien tidak mengiklankan v2 secara default', () => {
-    expect(resolvePqV2Enabled({})).toBe(false);
-    expect(advertisedPqCapabilities()).toEqual([]);
-  });
-
-  it('iklannya hanya lewat env eksplisit', () => {
-    expect(resolvePqV2Enabled({ VITE_PQ_V2: '1' })).toBe(true);
-    expect(advertisedPqCapabilities(true)).toEqual([CLIENT_CAPABILITIES.PQ_V2]);
+  it('PQ-only: v2 selalu aktif dan selalu diiklankan', () => {
+    // [PQ-only 2026-10-23] Jalur v1 dihapus; gerbang env tidak lagi mematikan
+    // v2. Test ini mengunci bahwa tidak ada build yang jatuh ke v1 diam-diam.
+    expect(resolvePqV2Enabled({})).toBe(true);
+    expect(resolvePqV2Enabled({ VITE_PQ_V2: '0' })).toBe(true);
+    expect(advertisedPqCapabilities()).toEqual([CLIENT_CAPABILITIES.PQ_V2]);
+    expect(advertisedPqCapabilities(false)).toEqual([]);
   });
 });

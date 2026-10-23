@@ -274,30 +274,6 @@ export function worker_crypto_secretbox_xchacha20poly1305_open_easy(ciphertext: 
     return sendToWorker('crypto_secretbox_xchacha20poly1305_open_easy', { ciphertext: asBuffer(ciphertext), nonce: asBuffer(nonce), key: asBuffer(key) });
 }
 
-export function worker_crypto_box_seal(message: CryptoBuffer, publicKey: CryptoBuffer): Promise<Uint8Array> {
-    return sendToWorker('crypto_box_seal', { message: asBuffer(message), publicKey: asBuffer(publicKey) });
-}
-
-export function worker_crypto_box_seal_open(ciphertext: CryptoBuffer, publicKey: CryptoBuffer, privateKey: CryptoBuffer): Promise<Uint8Array> {
-    return sendToWorker('crypto_box_seal_open', { ciphertext: asBuffer(ciphertext), publicKey: asBuffer(publicKey), privateKey: asBuffer(privateKey) });
-}
-
-export function worker_pq_box_seal(message: CryptoBuffer | string, pqPublicKey: CryptoBuffer, classicalPublicKey: CryptoBuffer): Promise<Uint8Array> {
-    return sendToWorker('pq_box_seal', { 
-        message: typeof message === 'string' ? message : asBuffer(message), 
-        pqPublicKey: asBuffer(pqPublicKey), 
-        classicalPublicKey: asBuffer(classicalPublicKey) 
-    });
-}
-
-export function worker_pq_box_seal_open(combinedPayload: CryptoBuffer, pqPrivateKey: CryptoBuffer, classicalPrivateKey: CryptoBuffer): Promise<Uint8Array> {
-    return sendToWorker('pq_box_seal_open', { 
-        combinedPayload: asBuffer(combinedPayload), 
-        pqPrivateKey: asBuffer(pqPrivateKey), 
-        classicalPrivateKey: asBuffer(classicalPrivateKey) 
-    });
-}
-
 export function worker_pq_box_seal_v2(message: CryptoBuffer | string, pqPublicKey: CryptoBuffer): Promise<Uint8Array> {
     return sendToWorker('pq_box_seal_v2', {
         message: typeof message === 'string' ? message : asBuffer(message),
@@ -313,83 +289,6 @@ export function worker_pq_box_seal_v2_open(combinedPayload: CryptoBuffer, pqPriv
 }
 
 // --- PQ-X3DH INITIALIZATION PROXY FUNCTIONS ---
-
-export function worker_x3dh_initiator(payload: {
-    mySigningKey: SodiumKeyPair,
-    theirIdentityKey: CryptoBuffer,
-    theirPqIdentityKey: CryptoBuffer,
-    theirSignedPreKey: CryptoBuffer,
-    theirPqSignedPreKey: CryptoBuffer,
-    theirSigningKey: CryptoBuffer,
-    signature: CryptoBuffer,
-    pqSignature: CryptoBuffer,
-    theirOneTimePreKey?: CryptoBuffer,
-    theirPqOneTimePreKey?: CryptoBuffer
-}): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array }> {
-    return sendToWorker<{ sessionKey: ArrayBuffer, initiatorCiphertexts: ArrayBuffer }>('x3dh_initiator', {
-      mySigningKey: { privateKey: asBuffer(payload.mySigningKey.privateKey) },
-      theirIdentityKey: asBuffer(payload.theirIdentityKey),
-      theirPqIdentityKey: payload.theirPqIdentityKey ? asBuffer(payload.theirPqIdentityKey) : undefined,
-      theirSignedPreKey: asBuffer(payload.theirSignedPreKey),
-      theirPqSignedPreKey: payload.theirPqSignedPreKey ? asBuffer(payload.theirPqSignedPreKey) : undefined,
-      theirSigningKey: asBuffer(payload.theirSigningKey),
-      signature: asBuffer(payload.signature),
-      pqSignature: payload.pqSignature ? asBuffer(payload.pqSignature) : undefined,
-      theirOneTimePreKey: payload.theirOneTimePreKey ? asBuffer(payload.theirOneTimePreKey) : undefined,
-      theirPqOneTimePreKey: payload.theirPqOneTimePreKey ? asBuffer(payload.theirPqOneTimePreKey) : undefined
-    }).then(res => ({
-        sessionKey: asU8(res.sessionKey),
-        initiatorCiphertexts: asU8(res.initiatorCiphertexts)
-    }));
-}
-
-export function worker_x3dh_recipient(payload: {
-    myIdentityKey: SodiumKeyPair,
-    mySignedPreKey: SodiumKeyPair,
-    myPqIdentityKey: SodiumKeyPair,
-    myPqSignedPreKey: SodiumKeyPair,
-    theirSigningKey: CryptoBuffer,
-    initiatorCiphertexts: Uint8Array,
-    myOneTimePreKey?: { privateKey: CryptoBuffer }
-}): Promise<Uint8Array> {
-    const transfer: Transferable[] = [payload.initiatorCiphertexts.buffer];
-    
-    return sendToWorker<ArrayBuffer>('x3dh_recipient', {
-      myIdentityKey: { privateKey: asBuffer(payload.myIdentityKey.privateKey) },
-      mySignedPreKey: { privateKey: asBuffer(payload.mySignedPreKey.privateKey) },
-      myPqIdentityKey: { privateKey: asBuffer(payload.myPqIdentityKey.privateKey) },
-      myPqSignedPreKey: { privateKey: asBuffer(payload.myPqSignedPreKey.privateKey) },
-      theirSigningKey: asBuffer(payload.theirSigningKey),
-      initiatorCiphertexts: payload.initiatorCiphertexts,
-      myOneTimePreKey: payload.myOneTimePreKey ? { privateKey: asBuffer(payload.myOneTimePreKey.privateKey) } : undefined
-    }, transfer).then(res => new Uint8Array(res));
-}
-
-export function worker_x3dh_recipient_regenerate(payload: {
-    keyId: number,
-    masterSeed: CryptoBuffer,
-    myIdentityKey: { privateKey: Uint8Array },
-    mySignedPreKey: { privateKey: Uint8Array },
-    myPqIdentityKey: { privateKey: Uint8Array },
-    myPqSignedPreKey: { privateKey: Uint8Array },
-    theirSigningKey: CryptoBuffer,
-    initiatorCiphertexts: Uint8Array
-}): Promise<Uint8Array> {
-    const transfer: Transferable[] = [payload.initiatorCiphertexts.buffer];
-
-    return sendToWorker<ArrayBuffer>('x3dh_recipient_regenerate', { 
-        keyId: payload.keyId, 
-        masterSeed: asBuffer(payload.masterSeed),
-        myIdentityKey: { privateKey: asBuffer(payload.myIdentityKey.privateKey) },
-        mySignedPreKey: { privateKey: asBuffer(payload.mySignedPreKey.privateKey) },
-        myPqIdentityKey: { privateKey: asBuffer(payload.myPqIdentityKey.privateKey) },
-        myPqSignedPreKey: { privateKey: asBuffer(payload.myPqSignedPreKey.privateKey) },
-        theirSigningKey: asBuffer(payload.theirSigningKey),
-        initiatorCiphertexts: payload.initiatorCiphertexts
-    }, transfer).then(res => new Uint8Array(res));
-}
-
-// --- X3DH v2 (X-Wing-only + ML-DSA initiator signature) ---
 
 export function worker_x3dh_v2_initiator(payload: {
     mySigningV2: { publicKey: CryptoBuffer, secretKey: CryptoBuffer },
@@ -745,26 +644,4 @@ export function worker_burner_dr_decrypt(payload: {
     plaintext: new Uint8Array(res.plaintext),
     mk: new Uint8Array(res.mk)
   }));
-}
-// [26.8.1] Blind RSA (RFC 9474) credential helpers — group membership.
-// Server hanya melihat blinded message; finalisasi memakai `inv` yang tidak
-// pernah meninggalkan klien.
-
-export function worker_credential_blind(payload: {
-  publicJwk: JsonWebKey;
-  message: string;
-  /** [docs/35 §35.6.6 — Fase 5] suite dari issuer; worker menolak yang asing. */
-  suite: string;
-}): Promise<{ preparedMsgB64: string; blindedMsgB64: string; inv: string }> {
-  return sendToWorker<{ preparedMsgB64: string; blindedMsgB64: string; inv: string }>('credential_blind', payload);
-}
-
-export function worker_credential_finalize(payload: {
-  publicJwk: JsonWebKey;
-  preparedMsgB64: string;
-  blindSigB64: string;
-  inv: string;
-  suite: string;
-}): Promise<{ preparedMsgB64: string; signatureB64: string }> {
-  return sendToWorker<{ preparedMsgB64: string; signatureB64: string }>('credential_finalize', payload);
 }

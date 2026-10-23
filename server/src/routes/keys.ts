@@ -45,6 +45,8 @@ import {
   PQ_V2_DOMAINS,
 } from '@nyx/shared'
 import { verifyMlDsaSignature } from '../utils/mlDsa.js'
+// [docs/35 Fase 8 residual] Penghitung pemakaian jalur v1 (tanpa identitas).
+import { LEGACY_V1_USAGE, incCounter } from '../utils/metrics.js'
 
 // === Kuota harian konsumsi OTPK per pasangan (requester, target) ===
 // Lua INCR+EXPIRE atomik — pola yang sama dengan limiter lain di repo.
@@ -171,6 +173,10 @@ router.post(
           cryptoVersion: CRYPTO_VERSION_V2,
         };
       }
+
+      // Bundle tanpa material v2 = klien v1 masih mempublikasikan pre-key.
+      // Selama angka ini bergerak, `signatureV2`/jalur v1 belum boleh dihapus.
+      if (!v2Bundle) incCounter(LEGACY_V1_USAGE, { path: 'prekey-bundle' });
 
       // [docs/30 §30.5 WS-A] Material identitas SEBELUM update — dasar keputusan
       // "kunci benar-benar berubah" (upload ulang bundle yang sama bukan rotasi).
