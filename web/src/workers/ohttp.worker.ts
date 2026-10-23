@@ -28,6 +28,8 @@ interface OhttpWorkerRequest {
   url: string;
   headers: [string, string][];
   bodyB64?: string;
+  csrfToken?: string;
+  installationId?: string;
 }
 
 interface OhttpWorkerSuccess {
@@ -80,10 +82,18 @@ ctx.onmessage = async (event: MessageEvent<OhttpWorkerRequest>) => {
       content: message.bodyB64 ? base64ToBytes(message.bodyB64) : new Uint8Array(),
     });
 
+    const relayHeaders: Record<string, string> = {
+      'content-type': 'message/ohttp-req',
+      ...clientVersionHeaders(),
+    };
+    if (message.csrfToken) relayHeaders['csrf-token'] = message.csrfToken;
+    if (message.installationId) relayHeaders['x-nyx-installation-id'] = message.installationId;
+
     const relayResponse = await fetch(message.relayUrl, {
       method: 'POST',
       // Relay adalah route `/api/*` — gerbang versi klien berlaku juga di sini.
-      headers: { 'content-type': 'message/ohttp-req', ...clientVersionHeaders() },
+      headers: relayHeaders,
+      credentials: 'include',
       // Salinan ke ArrayBuffer baru: BodyInit menolak Uint8Array<ArrayBufferLike>.
       body: new Uint8Array(sealed.body).buffer,
     });

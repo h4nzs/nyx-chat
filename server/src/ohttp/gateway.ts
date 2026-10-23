@@ -80,6 +80,7 @@ export async function handleOhttpGateway(
   encapsulatedRequest: Uint8Array,
   dispatch: OhttpDispatcher,
   allowlist?: readonly OhttpAllowRule[],
+  options: { injectedAuthorization?: string } = {},
 ): Promise<Uint8Array> {
   // Rotasi: key id ada di byte pertama amplop, jadi gateway tidak menebak.
   // Kunci yang tidak dikenal = amplop dari klien yang salah konfigurasi /
@@ -101,9 +102,22 @@ export async function handleOhttpGateway(
   // Sanitasi DI SINI, bukan hanya di dispatcher default: gateway adalah batas
   // kepercayaan, jadi dispatcher apa pun (termasuk test/driver lain) menerima
   // request yang sudah bebas header identitas jaringan.
+  const sanitizedHeaders = sanitizeOhttpForwardHeaders(sealed.request.headers).filter(
+    ([name]) => name.toLowerCase() !== 'x-nyx-ohttp-internal',
+  );
+  let forwardHeaders = sanitizedHeaders;
+  if (options.injectedAuthorization) {
+    // Token di-inject oleh relay tepercaya; header auth/cookie dari dalam amplop
+    // tidak pernah boleh menang atas identitas yang sudah diverifikasi relay.
+    forwardHeaders = sanitizedHeaders.filter(([name]) => {
+      const lower = name.toLowerCase();
+      return lower !== 'authorization' && lower !== 'cookie';
+    });
+    forwardHeaders.push(['authorization', options.injectedAuthorization]);
+  }
   const request: OhttpRequest = {
     ...sealed.request,
-    headers: sanitizeOhttpForwardHeaders(sealed.request.headers),
+    headers: forwardHeaders,
   };
 
   let response: OhttpResponse;

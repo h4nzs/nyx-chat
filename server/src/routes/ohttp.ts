@@ -11,10 +11,13 @@
  * (tidak ada open proxy / SSRF). Tidak ada logging isi request di sini.
  */
 
-import express, { type Router } from 'express';
+import express, { type RequestHandler, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { encodeOhttpKeyConfigCollection } from '@nyx/shared';
 import { OHTTP_OPS, incCounter } from '../utils/metrics.js';
+import { signOhttpToken } from '../utils/ohttpToken.js';
+import { newJti } from '../utils/jwt.js';
+import { safeEqualStrings } from '../utils/validate.js';
 import type { OhttpConfig } from '../ohttp/config.js';
 import { createLoopbackDispatcher, handleOhttpGateway, type OhttpDispatcher } from '../ohttp/gateway.js';
 
@@ -24,12 +27,19 @@ const OHTTP_RESPONSE_TYPE = 'message/ohttp-res';
 export interface OhttpRouterOptions {
   /** Dispatcher target; default loopback ke API sendiri. */
   dispatch?: OhttpDispatcher;
+  /** Guard auth+CSRF untuk /relay saat token mode off. */
+  relayGuards?: RequestHandler[];
 }
 
 export default function createOhttpRouter(config: OhttpConfig, options: OhttpRouterOptions = {}): Router {
   const router = express.Router();
   const port = process.env.PORT ?? '4000';
   const dispatch = options.dispatch ?? createLoopbackDispatcher(`http://127.0.0.1:${port}`);
+  const tokenMode = config.tokenMode ?? 'on';
+  const relayGuards = tokenMode === 'off' ? options.relayGuards ?? [] : [];
+  if (tokenMode === 'off' && relayGuards.length === 0) {
+    throw new Error('OHTTP: token mode off membutuhkan relayGuards (auth + CSRF)');
+  }
   // Semua body OHTTP adalah biner opaque; jangan pernah di-parse JSON.
   const rawBody = express.raw({ type: () => true, limit: '128kb' });
   // Relay/gateway tidak punya sesi, jadi limiter ini satu-satunya penahan
@@ -50,7 +60,7 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
     incCounter(OHTTP_OPS, { route: 'config', result: 'ok' });
   });
 
-  router.post('/relay', ohttpLimiter, rawBody, async (req, res, next) => {
+  router.post('/relay', ohttpLimiter, ...relayGuards, rawBody, async (req, res, next) => {
     try {
       const body = req.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
@@ -58,9 +68,22 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
         res.status(400).json({ error: 'OHTTP_REQUEST_BODY_REQUIRED' });
         return;
       }
+      const upstreamHeaders: Record<string, string> = { 'content-type': OHTTP_REQUEST_TYPE };
+      if (tokenMode === 'off') {
+        if (!req.user || !config.internalToken) {
+          res.status(401).json({ error: 'OHTTP_RELAY_AUTH_REQUIRED' });
+          return;
+        }
+        upstreamHeaders.authorization = `Bearer ${signOhttpToken({
+          userId: req.user.id,
+          deviceId: req.deviceId,
+          jti: newJti(),
+        })}`;
+        upstreamHeaders['x-nyx-ohttp-internal'] = config.internalToken;
+      }
       const upstream = await fetch(config.relayTarget, {
         method: 'POST',
-        headers: { 'content-type': OHTTP_REQUEST_TYPE },
+        headers: upstreamHeaders,
         body: new Uint8Array(body).buffer,
       });
       const bytes = Buffer.from(await upstream.arrayBuffer());
@@ -79,7 +102,29 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
         res.status(400).json({ error: 'OHTTP_REQUEST_BODY_REQUIRED' });
         return;
       }
-      const encapsulated = await handleOhttpGateway(config, new Uint8Array(body), dispatch, config.allowlist);
+      let injectedAuthorization: string | undefined;
+      if (tokenMode === 'off') {
+        const internal = req.get('x-nyx-ohttp-internal');
+        if (!config.internalToken || !internal || !safeEqualStrings(internal, config.internalToken)) {
+          incCounter(OHTTP_OPS, { route: 'gateway', result: 'forbidden' });
+          res.status(403).json({ error: 'OHTTP_GATEWAY_FORBIDDEN' });
+          return;
+        }
+        const authorization = req.get('authorization');
+        if (!authorization?.startsWith('Bearer ')) {
+          incCounter(OHTTP_OPS, { route: 'gateway', result: 'forbidden' });
+          res.status(403).json({ error: 'OHTTP_GATEWAY_FORBIDDEN' });
+          return;
+        }
+        injectedAuthorization = authorization;
+      }
+      const encapsulated = await handleOhttpGateway(
+        config,
+        new Uint8Array(body),
+        dispatch,
+        config.allowlist,
+        { injectedAuthorization },
+      );
       incCounter(OHTTP_OPS, { route: 'gateway', result: 'ok' });
       res.type(OHTTP_RESPONSE_TYPE).send(Buffer.from(encapsulated));
     } catch (error) {

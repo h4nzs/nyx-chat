@@ -75,7 +75,7 @@ let onAuthFailure: (() => Promise<void>) | null = null;
 // kalau beda, token CSRF di-generate & divalidasi dengan id berbeda → 403.
 let clientInstallationIdPromise: Promise<string> | null = null;
 
-function getClientInstallationId(): Promise<string> {
+export function getClientInstallationId(): Promise<string> {
   if (!clientInstallationIdPromise) {
     clientInstallationIdPromise = import('@utils/fingerprint')
       .then(m => m.getPersistentInstallationId())

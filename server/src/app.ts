@@ -36,6 +36,7 @@ import callTokensRouter from "./routes/callTokens.js";
 // [docs/35 Fase 3] OHTTP — router hanya dipasang bila OHTTP_ENABLED=1.
 import createOhttpRouter from "./routes/ohttp.js";
 import { loadOhttpConfig } from "./ohttp/config.js";
+import { requireAuth } from "./middleware/auth.js";
 import adminRouter from "./routes/admin.js";
 import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
@@ -401,14 +402,20 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getCsrfTokenFromRequest: (req) => String(req.headers['csrf-token'] ?? ''),
 });
 
-// [docs/35 Fase 3] OHTTP di-mount SEBELUM lapisan CSRF: amplopnya opaque dan
-// tidak membawa cookie/header yang bisa diverifikasi di sini. Header target
-// (termasuk token CSRF) ikut DI DALAM request terenkripsi dan diverifikasi
-// ulang oleh API setelah gateway melakukan dispatch. Tanpa OHTTP_ENABLED=1,
-// router tidak dipasang sama sekali (jalur 404, bukan 403).
+// [docs/35 Fase 3] OHTTP di-mount SEBELUM lapisan CSRF global: amplopnya opaque
+// dan gateway tidak membawa cookie/header yang bisa diverifikasi di sini. Untuk
+// `OHTTP_TOKEN_MODE=off`, hanya `/relay` yang dipasangi auth + CSRF; token
+// scoped dicetak server dan gateway memvalidasi header internal relay. Tanpa
+// OHTTP_ENABLED=1, router tidak dipasang sama sekali (jalur 404, bukan 403).
 const ohttpConfig = loadOhttpConfig();
 if (ohttpConfig) {
-  app.use("/api/ohttp", createOhttpRouter(ohttpConfig));
+  app.use(
+    "/api/ohttp",
+    createOhttpRouter(ohttpConfig, {
+      relayGuards:
+        ohttpConfig.tokenMode === "off" ? [requireAuth, doubleCsrfProtection] : [],
+    }),
+  );
 }
 
 app.use((req, res, next) => {

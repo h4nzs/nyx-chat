@@ -18,6 +18,7 @@
  * semua klien pindah, slot lama dikosongkan dan key id 3 boleh dibuat.
  */
 
+import { randomBytes } from 'node:crypto';
 import {
   OHTTP_AEAD_AES256_GCM,
   OHTTP_GATEWAY_KEY_BYTES,
@@ -34,6 +35,8 @@ export interface OhttpKeySlot {
   privateKey: Uint8Array;
 }
 
+export type OhttpTokenMode = 'on' | 'off';
+
 export interface OhttpConfig {
   /** Slot yang diterima gateway, urut naik berdasarkan key id. */
   keys: readonly OhttpKeySlot[];
@@ -43,6 +46,10 @@ export interface OhttpConfig {
   relayTarget: string;
   /** Allowlist target; default dari shared bila tidak di-override. */
   allowlist?: readonly OhttpAllowRule[];
+  /** `off` = relay mencetak token sendiri; klien tidak mengambil token. */
+  tokenMode?: OhttpTokenMode;
+  /** Rahasia proses untuk membedakan relay internal dari pemanggil luar. */
+  internalToken?: string;
 }
 
 function decodeKey(name: string, value: string | undefined, expected: number): Uint8Array {
@@ -52,6 +59,24 @@ function decodeKey(name: string, value: string | undefined, expected: number): U
     throw new Error(`OHTTP: ${name} harus ${expected} byte (didapat ${bytes.length})`);
   }
   return bytes;
+}
+
+function parseTokenMode(value: string | undefined): OhttpTokenMode {
+  if (value === undefined || value === '' || value === 'on') return 'on';
+  if (value === 'off') return 'off';
+  throw new Error('OHTTP: OHTTP_TOKEN_MODE harus on atau off');
+}
+
+function assertLoopbackRelayTarget(target: string): void {
+  let hostname: string;
+  try {
+    hostname = new URL(target).hostname;
+  } catch {
+    throw new Error('OHTTP: OHTTP_RELAY_TARGET bukan URL yang valid');
+  }
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost' && hostname !== '::1' && hostname !== '[::1]') {
+    throw new Error('OHTTP: OHTTP_TOKEN_MODE=off hanya mengizinkan relay loopback');
+  }
 }
 
 function publicConfigFor(keyId: number, publicKey: Uint8Array): OhttpKeyConfig {
@@ -77,6 +102,9 @@ export function loadOhttpConfig(env: NodeJS.ProcessEnv = process.env): OhttpConf
   if (env.OHTTP_ENABLED !== '1') return null;
 
   const port = env.PORT ?? '4000';
+  const tokenMode = parseTokenMode(env.OHTTP_TOKEN_MODE);
+  const relayTarget = env.OHTTP_RELAY_TARGET ?? `http://127.0.0.1:${port}/api/ohttp/gateway`;
+  if (tokenMode === 'off') assertLoopbackRelayTarget(relayTarget);
   const slots: OhttpKeySlot[] = [];
   const publicConfigs: OhttpKeyConfig[] = [];
 
@@ -106,6 +134,8 @@ export function loadOhttpConfig(env: NodeJS.ProcessEnv = process.env): OhttpConf
   return {
     keys: slots,
     publicConfigs,
-    relayTarget: env.OHTTP_RELAY_TARGET ?? `http://127.0.0.1:${port}/api/ohttp/gateway`,
+    relayTarget,
+    tokenMode,
+    internalToken: tokenMode === 'off' ? randomBytes(32).toString('base64url') : undefined,
   };
 }

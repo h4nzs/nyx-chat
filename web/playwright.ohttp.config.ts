@@ -68,6 +68,7 @@ export default defineConfig({
       env: {
         PORT: String(API_PORT),
         OHTTP_ENABLED: '1',
+        OHTTP_TOKEN_MODE: 'off',
         OHTTP_PRIVATE_KEY: keys.privateKey,
         OHTTP_PUBLIC_KEY: keys.publicKey,
         // Browser melihat origin Vite (5273); tanpa ini middleware CORS
@@ -87,6 +88,7 @@ export default defineConfig({
       timeout: 180 * 1000,
       env: {
         VITE_OHTTP_ENABLED: '1',
+        VITE_OHTTP_TOKEN_MODE: 'off',
         // `api.ts` memakai VITE_API_URL bila ada (web/.env dev menunjuk 4000),
         // jadi arahkan ke origin Vite sendiri agar semua trafik lewat proxy ke
         // API 4100 — tanpa ini request langsung ke 4000 dan diblokir CORS.

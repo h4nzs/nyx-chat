@@ -340,3 +340,81 @@ test('relay nyata: klien → relay → gateway → dispatch → response terbuka
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('relay token-off: guard auth, token dicetak server, cookie klien tidak diteruskan', async () => {
+  const config: OhttpConfig = {
+    ...(await makeConfig()),
+    tokenMode: 'off',
+    internalToken: 'internal-secret',
+  };
+  let received: OhttpRequest | null = null;
+  const app = express();
+  app.use('/api/ohttp', createOhttpRouter(config, {
+    relayGuards: [
+      (req, _res, next) => {
+        req.user = { id: 'user-1' };
+        req.deviceId = 'dev-1';
+        next();
+      },
+    ],
+    dispatch: async (request) => {
+      received = request;
+      return {
+        status: 200,
+        headers: [['content-type', 'application/json']],
+        content: new TextEncoder().encode('{"users":[]}'),
+      };
+    },
+  }));
+
+  const server: Server = await new Promise((resolve) => {
+    const instance = createServer(app).listen(0, '127.0.0.1', () => resolve(instance as unknown as Server));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const base = `http://127.0.0.1:${address.port}`;
+  (config as { relayTarget: string }).relayTarget = `${base}/api/ohttp/gateway`;
+
+  try {
+    const configResponse = await fetch(`${base}/api/ohttp/config`);
+    const published = decodeOhttpKeyConfigCollection(
+      new Uint8Array(await configResponse.arrayBuffer()),
+    );
+    const client = await encapsulateOhttpRequest(published[0]!, {
+      ...sampleRequest,
+      headers: [
+        ['authorization', 'Bearer client-forged'],
+        ['cookie', 'session=secret'],
+      ],
+    });
+
+    const relayResponse = await fetch(`${base}/api/ohttp/relay`, {
+      method: 'POST',
+      headers: { 'content-type': 'message/ohttp-req' },
+      body: Buffer.from(client.body),
+    });
+    assert.equal(relayResponse.status, 200);
+    const opened = await client.openResponse(new Uint8Array(await relayResponse.arrayBuffer()));
+    assert.equal(opened.status, 200);
+
+    assert.ok(received);
+    const forwarded = (received as OhttpRequest).headers;
+    assert.deepEqual(forwarded.map(([name]) => name.toLowerCase()), ['authorization']);
+    const authorization = forwarded.find(([name]) => name.toLowerCase() === 'authorization')?.[1];
+    assert.match(authorization ?? '', /^Bearer /);
+    const payload = jwt.verify(authorization!.slice('Bearer '.length), env.jwtSecret) as Record<string, unknown>;
+    assert.equal(payload.id, 'user-1');
+    assert.equal(payload.deviceId, 'dev-1');
+    assert.equal(payload.scope, 'ohttp');
+
+    const direct = await fetch(`${base}/api/ohttp/gateway`, {
+      method: 'POST',
+      headers: { 'content-type': 'message/ohttp-req' },
+      body: Buffer.from(client.body),
+    });
+    assert.equal(direct.status, 403);
+    assert.match(await direct.text(), /OHTTP_GATEWAY_FORBIDDEN/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

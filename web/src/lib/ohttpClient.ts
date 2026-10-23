@@ -20,7 +20,7 @@
  */
 
 import { decodeOhttpKeyConfigCollection, isOhttpTargetAllowed } from '@nyx/shared';
-import { authFetch } from '@lib/api';
+import { authFetch, getClientInstallationId, getCsrfToken } from '@lib/api';
 import { clientVersionHeaders } from './clientVersion';
 import { evaluateOhttpConfigPin, OHTTP_CONFIG_PIN_KEY } from './ohttpPin';
 
@@ -161,6 +161,15 @@ function ensureWorker(): Worker {
 }
 
 /**
+ * Mode token carriage. `off` = relay yang sudah diautentikasi cookie+CSRF
+ * mencetak token scoped di server; klien tidak pernah memanggil
+ * `/api/auth/ohttp-token`. Hanya aman untuk relay loopback/same-host.
+ */
+function ohttpTokenMode(): 'on' | 'off' {
+  return import.meta.env.VITE_OHTTP_TOKEN_MODE === 'off' ? 'off' : 'on';
+}
+
+/**
  * Kirim satu request melalui OHTTP. URL boleh relatif (di-resolve terhadap
  * origin saat ini). Target di luar allowlist ditolak di klien sebelum enkripsi —
  * gateway juga menolaknya, jadi ini hanya gagal-cepat, bukan kontrol keamanan.
@@ -175,8 +184,23 @@ export async function ohttpFetch(
   if (url.origin !== window.location.origin) throw new Error('OHTTP_CROSS_ORIGIN');
   if (!isOhttpTargetAllowed(method, url.pathname)) throw new Error('OHTTP_TARGET_NOT_ALLOWED');
 
+  const tokenMode = ohttpTokenMode();
   const headers: [string, string][] = [...(init.headers ?? [])];
-  if (init.withToken !== false && !headers.some(([name]) => name.toLowerCase() === 'authorization')) {
+  let csrfToken: string | undefined;
+  let installationId: string | undefined;
+
+  if (tokenMode === 'off') {
+    // Jangan pernah menaruh Authorization dari klien di dalam amplop: gateway
+    // hanya menerima token yang dicetak relay.
+    for (let i = headers.length - 1; i >= 0; i -= 1) {
+      const header = headers[i];
+      if (header && header[0].toLowerCase() === 'authorization') headers.splice(i, 1);
+    }
+    [csrfToken, installationId] = await Promise.all([getCsrfToken(), getClientInstallationId()]);
+  } else if (
+    init.withToken !== false &&
+    !headers.some(([name]) => name.toLowerCase() === 'authorization')
+  ) {
     headers.push(['authorization', `Bearer ${await getOhttpToken()}`]);
   }
 
@@ -191,6 +215,8 @@ export async function ohttpFetch(
     url: url.toString(),
     headers,
     bodyB64: init.body ? bytesToBase64(init.body) : undefined,
+    csrfToken,
+    installationId,
   };
 
   return new Promise<OhttpHttpResult>((resolve, reject) => {

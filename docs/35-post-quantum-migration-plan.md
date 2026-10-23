@@ -161,8 +161,8 @@ gate alih-alih menumpang di daftar ini.
 - `GET /api/keys/prekey-bundle/:userId` memakai userId langsung; server melihat
   requester → target.
 - OHTTP **sudah dipakai alur aplikasi** untuk `GET /api/users/search` bila
-  diaktifkan (carriage token scoped 120 s; §35.7 Fase 3). Default mati di kedua
-  sisi. PIR sengaja ditunda (§35.11 #3).
+  diaktifkan (token scoped 120 s dengan mode `on`/`off`; §35.7 Fase 3).
+  Default mati di kedua sisi. PIR sengaja ditunda (§35.11 #3).
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
   - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
@@ -825,10 +825,12 @@ Status (2026-10-21): **seluruh pekerjaan Fase 3 landed di kode, default mati,
 belum di-deploy.** Ringkas:
 
 - **OHTTP dipakai alur aplikasi** untuk `GET /api/users/search` (dan siap untuk
-  prekey): token bearer 120 detik ber-scope `ohttp` diletakkan DI DALAM amplop,
-  diterbitkan `POST /api/auth/ohttp-token` (cookie + CSRF). `requireAuth`
-  menolak token itu di luar allowlist/method GET, jadi token yang bocor tidak
-  bisa dipakai untuk mutasi. Tanpa fallback diam-diam ke HTTP biasa.
+  prekey): token bearer 120 detik ber-scope `ohttp` diletakkan DI DALAM amplop.
+  Mode `on` (default) menerbitkannya lewat `POST /api/auth/ohttp-token`
+  (cookie + CSRF); mode `off` mewajibkan auth+CSRF di `/relay` dan server
+  mencetak token di relay. `requireAuth` menolak token itu di luar
+  allowlist/method GET, jadi token yang bocor tidak bisa dipakai untuk mutasi.
+  Tanpa fallback diam-diam ke HTTP biasa.
 - **Rotasi kunci dua slot**: `/api/ohttp/config` mempublikasikan key id 1 dan 2,
   gateway memilih slot dari byte pertama amplop, klien mem-pin per key id
   (kunci yang sudah dipin tidak boleh berubah; kunci baru hanya diadopsi setelah
@@ -882,19 +884,23 @@ client ──message/ohttp-req──▶ relay /api/ohttp/relay
 - **Pin config:** klien mengambil `/api/ohttp/config` (`application/ohttp-keys`)
   dan mem-pin SHA-256-nya di `localStorage` (TOFU). Config berubah tanpa rotasi
   eksplisit → `OHTTP_CONFIG_CHANGED`, fail-closed (pola yang sama dengan pin KT).
-- **Carriage token (landed):** cookie sesi `HttpOnly` tidak bisa dibaca JS,
-  jadi klien menukar sesi menjadi token bearer scoped berumur 120 s lewat
-  `POST /api/auth/ohttp-token`, lalu memasukkannya ke amplop OHTTP. Inilah yang
-  membuat OHTTP benar-benar dipakai jalur aplikasi (`GET /api/users/search`).
+- **Carriage token (`OHTTP_TOKEN_MODE`, landed 2026-10-23):** cookie sesi
+  `HttpOnly` tidak bisa dibaca JS. Mode `on` (default) menukar sesi menjadi
+  token bearer scoped 120 s lewat `POST /api/auth/ohttp-token`, lalu
+  memasukkannya ke amplop. Mode `off` tidak memanggil endpoint itu: `/relay`
+  wajib auth+CSRF, server mencetak token scoped di relay, dan gateway hanya
+  menerimanya lewat header internal dari relay loopback. Mode `off` hanya untuk
+  relay loopback/same-host; token tetap 120 s dan scope GET allowlist.
 - **Aktivasi:** `OHTTP_ENABLED=1` + `OHTTP_PRIVATE_KEY`/`OHTTP_PUBLIC_KEY`
   (`pnpm --filter nyx-server run ohttp-key:generate`), klien
-  `VITE_OHTTP_ENABLED=1`. Default mati di kedua sisi: saat mati router tidak
-  dipasang (404). Rotasi kunci dua slot dan metrik `nyx_ohttp_ops_total` sudah
-  landed.
+  `VITE_OHTTP_ENABLED=1`. Untuk token-off same-host: `OHTTP_TOKEN_MODE=off` dan
+  `VITE_OHTTP_TOKEN_MODE=off` (relay wajib loopback; `/relay` tetap auth+CSRF).
+  Default mati di kedua sisi: saat mati router tidak dipasang (404). Rotasi
+  kunci dua slot dan metrik `nyx_ohttp_ops_total` sudah landed.
 
 Pekerjaan (semua ✅ landed di kode, default mati):
 - ✅ OHTTP client worker + relay/gateway untuk REST.
-- ✅ Carriage token (scoped, 120 s) sehingga OHTTP dipakai jalur pencarian.
+- ✅ Carriage token (scoped, 120 s) dengan mode `on`/`off`; OHTTP dipakai jalur pencarian.
 - ✅ Rotasi kunci dua slot + metrik `nyx_ohttp_ops_total`.
 - ✅ Cover traffic 1:1 opt-in + adaptive λ + budget byte harian.
 - ✅ Batch/jitter real message 200–800 ms pada mode “Maximum”.
