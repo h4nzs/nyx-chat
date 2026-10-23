@@ -77,6 +77,11 @@ packages/keytrans-wasm-v2/Cargo.toml
 !packages/keytrans-wasm-v2/dist/
 !packages/keytrans-wasm-v2/dist/keytrans-v2.wasm
 
+# PIR sidecar (docs/35 Fase 4b): target Cargo dan snapshot direktori lokal
+# mengandung record pengguna; keduanya artefak, bukan sumber.
+server/pir-sidecar/target/
+server/pir-snapshot.json
+
 # Layanan baca/tulis Key Transparency NYX (docs/32 §32.8): biner hasil build
 # tidak di-commit (modul upstream-nya sendiri di-vendor di
 # `server/kt-query/vendor/`, lihat NOTICE).
@@ -100,3 +105,6 @@ tools/dr-oracle/nyx-dr-oracle
 # [docs/30 WS-G(2)] Binari alat drill yang diunduh skrip (`promtool`,
 # scripts/drill-alerts.sh) — jangan di-commit: ~110MB dan terikat platform.
 .cache/
+
+# [deepwork] state sesi lokal, bukan deliverable
+.slim/deepwork/

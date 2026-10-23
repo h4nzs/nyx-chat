@@ -109,6 +109,25 @@ jobs:
           # PrismaClient melempar sebelum test sempat memakai fake DB.
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
 
+  pir-sidecar:
+    name: PIR sidecar (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: rustfmt, clippy
+      - name: Format
+        working-directory: server/pir-sidecar
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        working-directory: server/pir-sidecar
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        working-directory: server/pir-sidecar
+        run: cargo test --locked
+
   lint:
     # [2026-10-11, diperbarui 2026-10-14] Lint BLOCKING lewat oxlint (Rust; tidak
     # terikat versi TS). Rule level error = kelas bug/keamanan (no-eval,

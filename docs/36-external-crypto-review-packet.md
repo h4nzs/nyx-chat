@@ -33,6 +33,7 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 | Anonymous issuance | Bank token, redeem tanpa JWT, commit ticket single-use | `server/src/routes/conversations.ts`, `web/src/lib/credentialTokens.ts`, `utils/credentialAuth.ts` |
 | KT v2 | Log ML-DSA-65 + indeks SHA-256, verifier WASM, monitor/gossip | `packages/keytrans-v2`, `server/kt-query`, `web/src/lib/ktMonitoring.ts`, `ktGossip.ts` |
 | Metadata | OHTTP (RFC 9458, P-256 HPKE), cover traffic 1:1 | `packages/shared/src/ohttp.ts`, `server/src/ohttp/*`, `web/src/lib/coverTraffic.ts` |
+| PIR direktori | ChalametPIR keyword PIR (LWE), record 2 KB, epoch + hint | `server/pir-sidecar/*`, `server/src/pir/*`, `server/src/routes/pir.ts` |
 | At-rest | XChaCha20-Poly1305 + `ENC1:`, Argon2id, domain-separated seed | `web/src/lib/keychainDb.ts`, worker `storePrivateKeys` |
 
 **Tidak termasuk (out of scope, sengaja):**
@@ -40,7 +41,9 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 - **Tier B** yang memang masih classical/hybrid: TLS/QUIC, WebRTC DTLS-SRTP,
   WebAuthn, Web Push VAPID, sertifikat WebTransport. Ini exception yang
   didokumentasikan, bukan bug yang perlu "dipost-quantum-kan" di review ini.
-- **PIR** — belum diimplementasikan (keputusan tunda, `docs/35` §35.11 #3).
+- **PIR client/WASM (4c) dan benchmark/audit eksternal (4d)** — service 4b
+  (ChalametPIR sidecar + proxy) sudah ada tetapi default mati; klien
+  Rust→WASM/worker, OHTTP POST/binary, benchmark produksi, dan audit belum.
 - **BRaccoon / blind UOV** — riset, belum ada kode produksi.
 - Format v1/frozen (`docs/04`) — reviewer boleh memeriksa apakah jalur baca v1
   melemahkan jalur v2, tetapi perubahan format v1 di luar cakupan.
@@ -90,6 +93,7 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 | KT v1/v2 | `cd server/kt-query && bash build.sh test` + `web/src/lib/__tests__/keyTransparency.test.ts`, `ktMonitoring.test.ts`, `ktGossip.test.ts` | Proof/read, auditor, snapshot, fail-closed monitor, split-view |
 | E2E browser | `cd web && pnpm exec playwright test --project=chromium` | X3DH v2, grup `sigV:2`, burner PQ-only, recovery ML-DSA, device linking, credential grup, OHTTP |
 | Benchmark | `pnpm --filter nyx-web run bench:pq` dan `bench:pq:throttle` | Desktop + proxy CPU throttling 6x |
+| PIR service | `cd server/pir-sidecar && cargo test && cargo clippy --all-targets -- -D warnings`; `cd server && npx tsx --test tests/pir.test.ts tests/pirSnapshot.test.ts` | Snapshot/epoch, query opaque, proxy auth/rate-limit, end-to-end ChalametPIR |
 | Guard klasik | `node scripts/check-pq-only.mjs` | 0 simbol Tier A baru; 13 exception legacy terdaftar dengan `removalGate` |
 
 Angka saat paket ini ditulis: server suite 561+ test (0 gagal), KAT 11 test,
@@ -102,15 +106,21 @@ Ini bukan "catatan kaki" — semuanya membatasi klaim keamanan:
 
 - **Metadata tidak hilang dengan PQ.** Graf sosial, timing, volume, dan pola
   online tetap ada; OHTTP/cover traffic hanya mengurangi sebagian.
+- **PIR 4b baru service + proxy.** Klien WASM/worker, OHTTP POST/binary,
+  benchmark produksi, dan audit belum; hint ~9,85 MB untuk N=1000/record 2 KB;
+  default mati. Staleness epoch (user baru belum masuk snapshot) belum
+  ditangani. Jangan klaim produksi.
 - **KT v1 masih classical** (Ed25519 + ECVRF) dan **masih dipakai untuk baca**;
   KT v2 berjalan dual-write. Cutover baca belum dilakukan.
 - **Tier B** tetap hybrid/classical (lihat §36.2).
 - **Blind RSA v1 masih diterbitkan** sampai suite credential PQ ada
   (BRaccoon belum lolos riset/audit).
 - **X-Wing bukan ML-KEM murni**; ia hedge dengan X25519.
-- **PIR ditunda.** `/search` terautentikasi masih mengembalikan profil + public
-  key (dibatasi rate limit per akun/IP), dan `usernameHash` masih dipakai
-  sebagai ID berbagi untuk tautan lama (R5 residual).
+- **PIR 4b sudah ada tetapi default mati.** `/api/pir/*` hanya proxy ke
+  sidecar ChalametPIR loopback; klien WASM/worker, OHTTP POST, benchmark
+  produksi, dan audit belum. Jalur `/search` terautentikasi masih mengembalikan
+  profil + public key (dibatasi rate limit per akun/IP), jadi enumerasi
+  terautentikasi belum tertutup oleh PIR.
 - **Legacy v1 tetap terbaca** (pesan/sesi/credential lama). Denylist baru boleh
   0 setelah audit v1 bersih; lihat `pnpm --filter nyx-server run audit:v1`.
 - **Benchmark perangkat nyata/baterai** belum ada; hanya desktop + proxy

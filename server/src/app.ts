@@ -36,6 +36,9 @@ import callTokensRouter from "./routes/callTokens.js";
 // [docs/35 Fase 3] OHTTP — router hanya dipasang bila OHTTP_ENABLED=1.
 import createOhttpRouter from "./routes/ohttp.js";
 import { loadOhttpConfig } from "./ohttp/config.js";
+// [docs/35 Fase 4b] PIR — proxy ke sidecar ChalametPIR, hanya bila PIR_ENABLED=1.
+import createPirRouter from "./routes/pir.js";
+import { loadPirConfig } from "./pir/config.js";
 import { requireAuth } from "./middleware/auth.js";
 import adminRouter from "./routes/admin.js";
 import engineRouter from "./routes/engine.js";
@@ -408,6 +411,7 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
 // scoped dicetak server dan gateway memvalidasi header internal relay. Tanpa
 // OHTTP_ENABLED=1, router tidak dipasang sama sekali (jalur 404, bukan 403).
 const ohttpConfig = loadOhttpConfig();
+const pirConfig = loadPirConfig();
 if (ohttpConfig) {
   app.use(
     "/api/ohttp",
@@ -435,6 +439,10 @@ app.use("/api/keys/kt", ktQueryRouter);
 // (cookie SameSite=None + form urlencoded tanpa preflight).
 app.use("/api/keys", keysRouter);
 app.use("/api/call-tokens", callTokensRouter);
+// PIR butuh CSRF (POST query), jadi dipasang setelah lapisan di atas.
+if (pirConfig) {
+  app.use("/api/pir", createPirRouter(pirConfig));
+}
 
 app.get("/api/csrf-token", (req: Request, res: Response) => {
   const csrfToken = generateCsrfToken(req, res);
