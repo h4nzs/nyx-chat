@@ -12,6 +12,10 @@ datasource db {
 model User {
   id               String  @id @default(uuid())
   usernameHash     String  @unique
+  // [docs/35 Fase 4a] Index pencarian dari OPRF (ristretto255-SHA512).
+  // NULL untuk baris legacy / saat PIR_OPRF_ENABLED mati. usernameHash tetap
+  // dipertahankan karena KT membutuhkan identifier Argon2id mentah.
+  oprfIndex        String? @unique
   // [docs/28 §R5] ID publik acak untuk tautan berbagi (`/u/<shareId>`),
   // terpisah dari blind index. NULL untuk baris legacy; diisi sekali saat
   // register atau lazily saat login/GET /me. Memakai usernameHash sebagai ID

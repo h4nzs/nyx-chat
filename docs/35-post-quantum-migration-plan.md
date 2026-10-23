@@ -1,8 +1,9 @@
 # 35 — Rencana Migrasi Post-Quantum (Tier A)
 
 > **Status (2026-10-23): cutover PQ-only selesai di kode — belum commit/deploy.**
-> Fase 0–8 selesai di kode (Fase 4 kecuali PIR; Fase 7 = log KT ML-DSA +
-> dual-write, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
+> Fase 0–8 selesai di kode (Fase 4a OPRF landed dan ter-wire hibrida ke
+> `oprfIndex` register/login/search; PIR penuh 4b–4d belum; Fase 7 = log KT
+> ML-DSA + dual-write, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
 > ACVP** + **X-Wing draft-06**, KAT lintas-implementasi X3DH v2/group v4/KT v2,
 > `bench:pq`, audit residual v1, dan E2E recovery/device-linking/OHTTP.
 >
@@ -35,7 +36,7 @@
 | 1 | Core PQ: ML-DSA-65, bundle v2, X3DH v2, sealed box v2, grup v4, burner, recovery/linking/migration/push v2 | **landed** 2026-10-20 | §35.7 Fase 1, `web/e2e/pqV2.spec.ts` |
 | 2 | KT Scope A: nilai log v2, verifikasi tiga kunci, pin config TOFU | **landed** (inti) | §35.7 Fase 2 |
 | 3 | Metadata (OHTTP, cover traffic 1:1) | **landed di kode** 2026-10-21 — OHTTP dipakai jalur pencarian lewat token scoped, rotasi 2 slot, metrik; λ adaptif + budget, jitter/batching, chaff visibility-aware. Default mati, belum di-deploy | §35.7 Fase 3 |
-| 4 | Discovery (tutup R5, OHTTP search, PIR spike) | **landed kecuali PIR** 2026-10-21 — R5 penuh (shareId terpisah dari blind index), search lewat OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa mengonsumsi OTPK. PIR **ditunda** dengan kriteria go (§35.11 #3) | §35.7 Fase 4 |
+| 4 | Discovery (tutup R5, OHTTP search, PIR) | **landed sebagian** — R5 penuh, OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa OTPK. **4a OPRF landed 2026-10-23** (`ristretto255-SHA512`, endpoint default mati); kolom `oprfIndex` diisi register/login dan dipakai search saat gate aktif, `usernameHash` legacy tetap; PIR long-record, hint/WASM belum | §35.7 Fase 4 |
 | 5 | Credential PQ (suite abstraction, BRaccoon) | **dihapus 2026-10-23** — cutover PQ-only menghapus suite credential blind RSA, endpoint, persist Dexie, dan tesnya. Tidak ada pengganti PQ; BRaccoon/blind UOV tetap riset | §35.2.3, §35.6.6 |
 | 6 | Anonymous issuance | **dihapus 2026-10-23** — bank token/redeem/commit ikut dihapus bersama credential; tidak ada endpoint `/api/credentials/*` | §35.6.7 |
 | 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
@@ -162,7 +163,7 @@ gate alih-alih menumpang di daftar ini.
   requester → target.
 - OHTTP **sudah dipakai alur aplikasi** untuk `GET /api/users/search` bila
   diaktifkan (token scoped 120 s dengan mode `on`/`off`; §35.7 Fase 3).
-  Default mati di kedua sisi. PIR sengaja ditunda (§35.11 #3).
+  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati) (§35.11 #3).
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
   - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
@@ -915,7 +916,7 @@ Acceptance:
 
 ### Fase 4 — Discovery
 
-Status (2026-10-21): **R5 ditutup.** `identifierLookupCandidates` tidak lagi
+Status (2026-10-23): **R5 ditutup; 4a OPRF landed + ter-wire hibrida.** `identifierLookupCandidates` tidak lagi
 mengembalikan nilai kiriman mentah — 43-char hash klien di-pepper (satu
 kandidat), 64-hex (blind index yang di-echo server) dipakai apa adanya. Route
 `GET /api/users/search` menolak apa pun yang bukan kedua bentuk hash dengan 400
@@ -944,20 +945,33 @@ Pekerjaan:
   login/`GET /me`; `/api/users/search` me-lookup kolom itu untuk handle `s1_…`;
   tautan baru `/u/<shareId>`. Tautan lama 43-char/64-hex tetap dibaca (jalur
   migrasi); penghapusan kandidat kedua dari jalur auth menunggu deprekasi.
-- ⏸ PIR spike: direktori `usernameHash → encryptedProfile + device keys`,
-  padding ~2 KB, evaluasi SimplePIR/OnionPIRv2, client hint + WASM.
-  **Diputuskan tunda** (2026-10-21, §35.11 #3): PIR tidak menutup enumerasi
-  terautentikasi maupun residual R5, jadi R5 penuh (shareId terpisah) dan
-  pengurangan daya enumerasi dikerjakan lebih dulu; PIR baru dimulai bila
-  ambang + benchmark + audit di §35.11 #3 terpenuhi.
+- 🟡 **4a OPRF (landed + wired 2026-10-23):** `packages/shared/src/searchOprf.ts`
+  (blind/evaluate/finalize `ristretto255-SHA512`, RFC 9497 via `@noble/curves`,
+  output index `SHA-256(domain || OPRF(...))` 64-hex),
+  `server/src/utils/searchOprf.ts` (seed = `HMAC(NYX_AT_REST_PEPPER, …)`, opsi
+  `NYX_OPRF_SEED`), dan `POST /api/users/search/oprf` (auth + limiter pencarian,
+  default **mati** lewat `PIR_OPRF_ENABLED`). Hibrida: `User.oprfIndex`
+  (`String? @unique`) diisi saat register dan di-backfill sekali saat login;
+  `GET /api/users/search` mencocokkan `oprfIndex` ATAU `usernameHash` legacy.
+  Klien `VITE_PIR_OPRF_ENABLED=1` mengubah hash 43-char menjadi index 64-hex
+  sebelum search; 64-hex legacy diteruskan. Baris lama tanpa `oprfIndex` baru
+  bisa ditemukan lewat jalur OPRF setelah pemiliknya login (backfill); server
+  tidak bisa menurunkan index dari `usernameHash` ter-pepper. **`usernameHash` ter-pepper tetap
+  disimpan** karena KT butuh identifier Argon2id mentah; ini bukan cutover penuh.
+- ⏸ **4b PIR service:** direktori record ~2 KB, dataset epoch + hint,
+  SimplePIR/OnionPIRv2. **4c client:** Rust→WASM, worker, hint cache, epoch
+  retry, OHTTP POST + binary response. **4d:** benchmark/audit eksternal.
+  PIR tidak menutup enumerasi terautentikasi; gunakan bersama rate limit/OHTTP
+  (lihat §35.11 #3).
 
 Acceptance:
 - ✅ R5 tertutup: nilai mentah tidak lagi dicari,
 - ✅ R5 penuh: ID berbagi terpisah dari blind index (`shareId`),
 - ✅ link lama yang memakai 64-hex punya jalur migrasi,
 - ✅ pembacaan bundle untuk PIR tidak menguras OTPK,
-- ⏸ PIR tidak masuk default; keputusan **tunda** + kriteria go tercatat di
-  §35.11 #3 (2026-10-21).
+- 🟡 OPRF teruji dan mengubah jalur pencarian saat gate aktif, tetapi
+  `usernameHash` legacy tetap (dibutuhkan KT); cutover penuh + PIR 4b–4d belum.
+- ⏸ PIR penuh tetap default mati; keputusan lanjut + batasannya di §35.11 #3.
 
 ### Fase 5 — Credentials PQ
 
@@ -1181,7 +1195,8 @@ Belum ada (fase lanjut):
   credential v1 **sudah dihapus**; suite baru harus dibangun dari nol.
 - Migrasi/arsip data v1 lama — build PQ-only ini tidak punya pembaca v1.
 - Interop `cmd/kt-client` upstream dan dua implementasi auditor berdampingan.
-- PIR record lookup (spike; sengaja ditunda, §35.11 #3).
+- PIR penuh (4b–4d): service record ~2 KB, hint/WASM, benchmark/audit.
+  4a OPRF sudah landed dan ter-wire hibrida; `usernameHash` legacy tetap.
 
 ## 35.9 Rollout dan rollback
 
@@ -1210,7 +1225,7 @@ yang tidak membutuhkan arsip v1.
 | BRaccoon belum produksi | tidak ada credential PQ; fitur credential v1 sudah dihapus | bangun ulang + audit + dual verify; fallback blind UOV; jangan hidupkan RSA v1 |
 | KT v1 classical | log auth belum PQ | Scope A cepat; Scope B service terpisah |
 | Config KT dari server | server bisa forge log | pin config di build/release; fail-closed |
-| PIR kompleks | discovery privacy tertunda | OHTTP/exact-hash dulu; PIR spike |
+| PIR kompleks | discovery privacy tertunda | 4a OPRF + `oprfIndex` hybrid (default mati); PIR 4b–4d belum; OHTTP/rate limit tetap aktif |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
 | Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi, benchmark baterai/perangkat nyata masih terbuka |
@@ -1237,18 +1252,16 @@ Residual yang harus ditulis jujur:
    PQ-only ini. BRaccoon/blind UOV hanya relevan jika credential dibangun ulang
    dari nol — go/no-go setelah spike + audit, fallback blind UOV.
 3. PIR: library vs service sendiri; kapan ambang direktori membuat PIR wajib.
-   **Diputuskan (2026-10-21): tunda — no-go untuk implementasi sekarang.**
-   PIR hanya menyembunyikan *record mana* yang diambil dari gateway/operator
-   (OHTTP sudah menyembunyikan *pemanggil*); ia tidak menutup enumerasi oleh
-   akun terautentikasi (`/search` 30/menit mengembalikan profil + public key)
-   maupun residual R5 penuh (`usernameHash` masih dipakai sebagai ID berbagi).
-   Keduanya lebih murah dan dikerjakan lebih dulu. Syarat go: (a) direktori
-   username melewati ambang ~100k akun **atau** traffic pencarian cukup untuk
-   membangun graf, (b) benchmark membuktikan biaya hint/download, latensi, dan
-   staleness (user baru tidak langsung ketemu) dapat diterima untuk record
-   ~2 KB dengan hint client O(√N), (c) audit eksternal tersedia. Pilihan
-   library vs service diputuskan SETELAH benchmark — jangan menulis kripto PIR
-   sendiri.
+   **Diputuskan ulang 2026-10-23 (user): lanjut PIR v1 penuh**, menggantikan
+   keputusan tunda 2026-10-21. 4a OPRF sudah landed dan ter-wire hibrida
+   (`oprfIndex`, default mati); 4b–4d belum. PIR hanya menyembunyikan *record mana* yang diambil dari
+   gateway/operator (OHTTP menyembunyikan *pemanggil*); ia tidak menutup
+   enumerasi oleh akun terautentikasi (`/search` 30/menit mengembalikan profil
+   + public key), jadi rate limit/OHTTP tetap wajib. Sebelum produksi:
+   benchmark hint/download, latensi, staleness (user baru tidak langsung
+   ketemu) untuk record ~2 KB dengan hint O(√N), plus audit eksternal.
+   Pilihan library vs service tetap diputuskan SETELAH benchmark — jangan
+   menulis kripto PIR sendiri.
 4. ~~OHTTP: relay/gateway self-host vs Cloudflare.~~ **Diputuskan:** self-host,
    dua peran (`/api/ohttp/relay` + `/api/ohttp/gateway`, default mati).
    Yang masih terbuka: apakah relay dipindah ke host/operator lain (hanya

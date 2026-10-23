@@ -19,7 +19,7 @@ import { searchIpLimiter, searchLimiter } from '../middleware/rateLimiter.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
-import { asUserId, type UserId } from '@nyx/shared'
+import { asUserId, SEARCH_OPRF_SUITE, type UserId } from '@nyx/shared'
 import { AuthJwtPayload } from '../types/auth.js';
 import {
   deviceInstallationTag,
@@ -39,6 +39,7 @@ import {
 import { deriveBackupObjectKey } from '../utils/backupObject.js';
 // [docs/30 §30.5 WS-A] Rotasi kunci identitas → entri log KT (verifikasi kepemilikan identifier).
 import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js';
+import { evaluateSearchOprf, isSearchOprfEnabled } from '../utils/searchOprf.js';
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -554,6 +555,34 @@ router.post('/me/logout', async (req, res, next) => {
 
 // --- PARAMETERIZED ROUTES (Must be last) ---
 
+// [docs/35 Fase 4a] Evaluasi OPRF untuk blind index pencarian. Klien mengirim
+// elemen ter-blind; server tidak pernah melihat identifier atau index akhir.
+// Default mati sampai cutover penuh (PIR_OPRF_ENABLED=1).
+router.post('/search/oprf', searchIpLimiter, searchLimiter, async (req, res, next) => {
+  try {
+    if (!isSearchOprfEnabled()) throw new ApiError(503, 'PIR_OPRF_DISABLED')
+    const { blinded } = req.body ?? {}
+    if (typeof blinded !== 'string' || blinded.length !== 43 || !/^[A-Za-z0-9_-]+$/.test(blinded)) {
+      throw new ApiError(400, 'INVALID_OPRF_BLINDED')
+    }
+    const blindedBytes = Buffer.from(blinded, 'base64url')
+    if (blindedBytes.length !== 32 || blindedBytes.toString('base64url') !== blinded) {
+      throw new ApiError(400, 'INVALID_OPRF_BLINDED')
+    }
+    let evaluated: Uint8Array
+    try {
+      evaluated = evaluateSearchOprf(new Uint8Array(blindedBytes))
+    } catch {
+      throw new ApiError(400, 'INVALID_OPRF_BLINDED')
+    }
+    res.setHeader('Cache-Control', 'no-store')
+    res.json({
+      suite: SEARCH_OPRF_SUITE,
+      evaluated: Buffer.from(evaluated).toString('base64url'),
+    })
+  } catch (error) { next(error) }
+})
+
 // SEARCH users (Blind Indexing)
 router.get('/search', searchIpLimiter, searchLimiter, async (req, res, next) => {
   try {
@@ -579,7 +608,14 @@ router.get('/search', searchIpLimiter, searchLimiter, async (req, res, next) => 
     const users = await prisma.user.findMany({
       where: shareLookup
         ? { shareId: q.trim() }
-        : { usernameHash: { in: identifierLookupCandidates(q) } },
+        : {
+            // [docs/35 Fase 4a] Prioritaskan index OPRF untuk hash 64-hex,
+            // tanpa memutus baris legacy yang masih memakai usernameHash.
+            OR: [
+              { usernameHash: { in: identifierLookupCandidates(q) } },
+              { oprfIndex: q },
+            ],
+          },
       take: shareLookup ? 1 : 20,
       select: { 
         id: true, 

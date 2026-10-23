@@ -77,6 +77,7 @@ import {
 } from '../utils/keyTransparency.js'
 // [docs/30 §30.5 WS-A] Rotasi kunci identitas di jalur login → entri log KT.
 import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js'
+import { searchOprfIndexForIdentifier } from '../utils/searchOprf.js'
 // [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru (gerbang sybil).
 import {
   attestationPolicyFromEnv,
@@ -454,6 +455,8 @@ async (req, res, next) => {
     const user = await prisma.user.create({
       data: {
         usernameHash: pepperedIdentifier(usernameHash),
+        // [docs/35 Fase 4a] Index OPRF untuk pencarian; NULL bila gate mati.
+        oprfIndex: searchOprfIndexForIdentifier(usernameHash),
         // [docs/28 §R5] ID publik terpisah dari blind index.
         shareId: generateShareId(),
         passwordHash,
@@ -572,6 +575,19 @@ router.post('/login', authLimiter, zodValidate({
 
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
+
+    // [docs/35 Fase 4a] Backfill baris legacy sekali saat login. Gagal backfill
+    // tidak boleh menggagalkan login; pencarian legacy tetap memakai usernameHash.
+    if (!user.oprfIndex) {
+      const oprfIndex = searchOprfIndexForIdentifier(usernameHash);
+      if (oprfIndex) {
+        try {
+          await prisma.user.update({ where: { id: user.id }, data: { oprfIndex } });
+        } catch (error) {
+          console.warn('[OPRF] gagal backfill oprfIndex saat login:', error);
+        }
+      }
+    }
 
     let activeDeviceId = '';
     let activeEncryptedPrivateKey = '';

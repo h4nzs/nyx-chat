@@ -12,3 +12,4 @@ export * from './pqHandshake.js';
 export * from './pqSeal.js';
 export * from './groupEnvelope.js';
 export * from './ohttp.js';
+export * from './searchOprf.js';

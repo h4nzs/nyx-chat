@@ -18,6 +18,7 @@
 
 import type { MinimalProfile } from '@nyx/shared';
 import { api } from './api';
+import { isRawIdentifierHash, oprfSearchEnabled, oprfSearchIndex } from './searchOprfClient';
 
 export interface UserSearchHit {
   id: string;
@@ -57,7 +58,13 @@ export function paddedSearchPath(hashedQuery: string, rng: () => number = Math.r
 }
 
 export async function searchUsersByHash(hashedQuery: string): Promise<UserSearchHit[]> {
-  const path = paddedSearchPath(hashedQuery);
+  // [docs/35 Fase 4a] Saat gate aktif, 43-char Argon2id diubah ke index OPRF;
+  // 64-hex (legacy / share echo) diteruskan apa adanya.
+  const effectiveQuery =
+    oprfSearchEnabled() && isRawIdentifierHash(hashedQuery)
+      ? await oprfSearchIndex(hashedQuery)
+      : hashedQuery;
+  const path = paddedSearchPath(effectiveQuery);
   const { ohttpEnabled, ohttpJson } = await import('./ohttpClient');
   if (ohttpEnabled()) {
     return ohttpJson<UserSearchHit[]>(path);

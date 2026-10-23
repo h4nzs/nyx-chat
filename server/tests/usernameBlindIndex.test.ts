@@ -101,6 +101,7 @@ test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kand
   const engine = read('../src/routes/engine.ts');
 
   assert.match(auth, /usernameHash: pepperedIdentifier\(usernameHash\)/, 'register menyimpan index ter-pepper');
+  assert.match(auth, /oprfIndex: searchOprfIndexForIdentifier\(usernameHash\)/, 'register mengisi index OPRF hibrida');
   assert.equal(
     (auth.match(/where: \{ usernameHash: \{ in: identifierLookupCandidates\(usernameHash\) \} \}/g) || []).length,
     3,
@@ -116,6 +117,7 @@ test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kand
   assert.match(auth, /for \(const candidate of identifierLookupCandidates\(usernameHash\)\)/, 'verify menerima bentuk legacy/echo');
 
   assert.match(users, /\{ usernameHash: \{ in: identifierLookupCandidates\(q\) \} \}/, 'pencarian user memakai kandidat');
+  assert.match(users, /oprfIndex: q/, 'pencarian juga mencocokkan index OPRF');
   assert.match(users, /isShareId\(q\)/, 'shareId (docs/28 §R5) dikenali terpisah');
   assert.match(users, /shareId: q\.trim\(\)/, 'shareId dicari di kolomnya sendiri, bukan blind index');
   assert.match(users, /isSearchableIdentifier\(q\)/, 'search hanya menerima hash identifier');
