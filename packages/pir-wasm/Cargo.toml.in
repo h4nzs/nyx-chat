@@ -1,0 +1,24 @@
+[package]
+name = "nyx-pir-wasm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "AGPL-3.0-or-later"
+description = "NYX PIR v1 client WASM (ChalametPIR, raw ABI)"
+
+[lib]
+name = "nyx_pir_wasm"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+chalametpir_client = { version = "=0.8.0", default-features = false, features = ["wasm"] }
+
+[dev-dependencies]
+chalametpir_server = "=0.8.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

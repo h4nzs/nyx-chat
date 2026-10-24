@@ -40,8 +40,13 @@ import {
   clearKtDedupeForTests,
   decodeKtValue,
 } from '../src/utils/keyTransparency.js';
-import { identityKeysChanged, publishIdentityKeyChange } from '../src/utils/ktIdentityLog.js';
+import {
+  backfillKtV2IdentityOnLogin,
+  identityKeysChanged,
+  publishIdentityKeyChange,
+} from '../src/utils/ktIdentityLog.js';
 import { pepperedIdentifier } from '../src/utils/atRestSecrets.js';
+import { ML_DSA_65_PUBLIC_KEY_BYTES, parseKtValueBytes } from '@nyx/shared';
 import { renderMetricsText, resetMetricsForTests } from '../src/utils/metrics.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -334,4 +339,57 @@ test('wiring: tiga jalur rotasi memanggil penulis log (fire-and-forget)', () => 
       `${file}: ${label} tidak boleh menahan respons`
     );
   }
+});
+
+
+test('backfill login: hanya menulis v2 dengan nilai ML-DSA-65 dan label registrasi', async () => {
+  clearKtDedupeForTests();
+  const v2 = fakeTransport();
+  const signingKeyV2 = new Uint8Array(ML_DSA_65_PUBLIC_KEY_BYTES).fill(0x44);
+
+  const result = await backfillKtV2IdentityOnLogin(
+    {
+      usernameHash: USERNAME_HASH_B64,
+      identityKey: IDENTITY_KEY,
+      pqIdentityKey: PQ_KEY,
+      signingKey: SIGNING_KEY,
+      signingKeyV2,
+    },
+    { v2Transport: v2.transport, now: 42_000 }
+  );
+
+  assert.equal(result.ok, true, `backfill v2 gagal: ${result.reason ?? 'unknown'}`);
+  assert.equal(v2.state.calls, 1);
+  const value = parseKtValueBytes(valueFromRequest(v2.state.values[0]!));
+  assert.equal(value.version, 2);
+  assert.equal(value.keyVersion, KT_KEY_VERSION_REGISTRATION);
+  assert.deepEqual(Array.from(value.signingKeyV2 ?? []), Array.from(signingKeyV2));
+  clearKtDedupeForTests();
+});
+
+test('backfill login: perangkat tanpa ML-DSA-65 dilewati, bukan menulis nilai v1 ke v2', async () => {
+  clearKtDedupeForTests();
+  const v2 = fakeTransport();
+  const result = await backfillKtV2IdentityOnLogin(
+    {
+      usernameHash: USERNAME_HASH_B64,
+      identityKey: IDENTITY_KEY,
+      pqIdentityKey: PQ_KEY,
+      signingKey: SIGNING_KEY,
+      signingKeyV2: new Uint8Array(32),
+    },
+    { v2Transport: v2.transport }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'V2_SIGNING_KEY_INVALID');
+  assert.equal(v2.state.calls, 0);
+});
+
+
+test('wiring: login memanggil backfill v2 secara opt-in dan fire-and-forget', () => {
+  const auth = read('../src/routes/auth.ts');
+  assert.match(auth, /backfillKtV2IdentityOnLogin\(/, 'login harus memanggil backfill v2');
+  assert.match(auth, /void backfillKtV2IdentityOnLogin\(/, 'backfill tidak boleh menahan login');
+  assert.match(auth, /KT_V2_BACKFILL_ON_LOGIN/, 'backfill harus opt-in');
+  assert.doesNotMatch(auth, /await backfillKtV2IdentityOnLogin\(/);
 });

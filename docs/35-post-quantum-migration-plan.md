@@ -1,9 +1,10 @@
 # 35 — Rencana Migrasi Post-Quantum (Tier A)
 
-> **Status (2026-10-23): cutover PQ-only selesai di kode — belum commit/deploy.**
+> **Status (2026-10-24): cutover PQ-only selesai di kode — belum commit/deploy.**
 > Fase 0–8 selesai di kode (Fase 4a OPRF landed dan ter-wire hibrida ke
-> `oprfIndex` register/login/search; **PIR 4b service+proxy landed, 4c–4d
-> belum**; Fase 7 = log KT ML-DSA + dual-write, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
+> `oprfIndex` register/login/search; **PIR 4b service+proxy + 4c client landed,
+> 4d benchmark harness landed 2026-10-24, audit + angka produksi belum**; Fase 7
+> = log KT ML-DSA + dual-write + backfill login opt-in, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
 > ACVP** + **X-Wing draft-06**, KAT lintas-implementasi X3DH v2/group v4/KT v2,
 > `bench:pq`, audit residual v1, dan E2E recovery/device-linking/OHTTP.
 >
@@ -36,7 +37,7 @@
 | 1 | Core PQ: ML-DSA-65, bundle v2, X3DH v2, sealed box v2, grup v4, burner, recovery/linking/migration/push v2 | **landed** 2026-10-20 | §35.7 Fase 1, `web/e2e/pqV2.spec.ts` |
 | 2 | KT Scope A: nilai log v2, verifikasi tiga kunci, pin config TOFU | **landed** (inti) | §35.7 Fase 2 |
 | 3 | Metadata (OHTTP, cover traffic 1:1) | **landed di kode** 2026-10-21 — OHTTP dipakai jalur pencarian lewat token scoped, rotasi 2 slot, metrik; λ adaptif + budget, jitter/batching, chaff visibility-aware. Default mati, belum di-deploy | §35.7 Fase 3 |
-| 4 | Discovery (tutup R5, OHTTP search, PIR) | **landed sebagian** — R5 penuh, OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa OTPK. **4a OPRF landed 2026-10-23** (`ristretto255-SHA512`, endpoint default mati); kolom `oprfIndex` diisi register/login dan dipakai search saat gate aktif, `usernameHash` legacy tetap. **4b PIR landed di kode** (ChalametPIR sidecar + proxy, snapshot 2 KB, default mati); klien WASM/hint (4c), benchmark/audit (4d) belum | §35.7 Fase 4 |
+| 4 | Discovery (tutup R5, OHTTP search, PIR) | **landed sebagian** — R5 penuh, OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa OTPK. **4a OPRF landed 2026-10-23** (`ristretto255-SHA512`, endpoint default mati); kolom `oprfIndex` diisi register/login dan dipakai search saat gate aktif, `usernameHash` legacy tetap. **4b PIR landed di kode** (ChalametPIR sidecar + proxy, snapshot 2 KB, default mati) dan **4c client landed** (WASM/worker, hint cache, epoch retry, OHTTP POST biner); **4d benchmark harness landed 2026-10-24** (`bench:pir`, N=1k/10k), audit + angka produksi belum | §35.7 Fase 4 |
 | 5 | Credential PQ (suite abstraction, BRaccoon) | **dihapus 2026-10-23** — cutover PQ-only menghapus suite credential blind RSA, endpoint, persist Dexie, dan tesnya. Tidak ada pengganti PQ; BRaccoon/blind UOV tetap riset | §35.2.3, §35.6.6 |
 | 6 | Anonymous issuance | **dihapus 2026-10-23** — bank token/redeem/commit ikut dihapus bersama credential; tidak ada endpoint `/api/credentials/*` | §35.6.7 |
 | 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
@@ -163,7 +164,7 @@ gate alih-alih menumpang di daftar ini.
   requester → target.
 - OHTTP **sudah dipakai alur aplikasi** untuk `GET /api/users/search` bila
   diaktifkan (token scoped 120 s dengan mode `on`/`off`; §35.7 Fase 3).
-  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati), **4b ChalametPIR sidecar + proxy `/api/pir/*` landed tetapi default mati; klien WASM (4c) dan benchmark/audit (4d) belum** (§35.11 #3).
+  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati), **4b ChalametPIR sidecar + proxy `/api/pir/*` landed tetapi default mati; klien WASM/worker (4c) landed; 4d benchmark harness landed (`bench:pir`), audit + angka produksi belum** (§35.11 #3).
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
   - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
@@ -963,14 +964,26 @@ Pekerjaan:
   ~2 KB per OPRF index, arity 3 default). Snapshot epoch offline + `/params`
   (hint/filter/seed) + `/query` opaque + `/admin/rebuild` loopback; proxy
   Node `/api/pir/*` hanya meneruskan byte setelah auth + rate limit, tanpa
-  kripto PIR di JS. Default **mati** (`PIR_ENABLED=1`). Snapshot dibangun
-  oleh `pnpm --filter nyx-server run pir:snapshot`. **4c client:** Rust→WASM,
-  worker, hint cache, epoch retry, OHTTP POST + binary response. **4d:**
-  benchmark produksi/audit eksternal. Benchmark lokal N=1000, record 2 KB,
-  arity 3 (Celeron N2940 tanpa AVX): setup 17,6 s, hint 9,85 MB, client setup
-  95 ms, query 42 ms/5,6 KB, respond 1,7 ms/5,6 KB, process 65 µs — bukan
-  angka produksi. PIR tidak menutup enumerasi terautentikasi; gunakan bersama
-  rate limit/OHTTP (lihat §35.11 #3).
+  kripto PIR di JS. Default **mati** (`PIR_ENABLED=1`). Snapshot awal
+  dibangun manual lewat `pnpm --filter nyx-server run pir:snapshot`; job
+  harian `pirSnapshot` (04:15) membangun ulang snapshot dari user ber-
+  `oprfIndex`, menulis atomik ke `PIR_SNAPSHOT_PATH` (absolut, dibaca
+  sidecar), lalu memanggil `/admin/rebuild` — staleness maksimum ~24 jam.
+  **4c client (landed
+  2026-10-23):** Rust→WASM (`packages/pir-wasm`, artefak masuk manifest
+  reprodusibel), worker, hint cache, epoch retry, OHTTP POST + binary response;
+  unit test `pirParams`/`pirClient`, wiring `userSearch` di balik
+  `VITE_PIR_ENABLED` dan tetap fail-closed (tanpa OHTTP tidak ada fallback
+  plaintext). **4d benchmark harness landed 2026-10-24** (`pnpm --filter
+  nyx-server run bench:pir`): sidecar asli + WASM klien, mengukur snapshot/
+  startup/RSS/hint/params serta setup/query/respond/process. Angka Celeron
+  N2940, record 2 KB, arity 3: N=1000 startup 20,6 s, hint 9,39 MB, setup
+  75,6 ms, query 150 ms/5,5 KB, respond 12,2 ms/5,4 KB, process 357 µs;
+  N=10.000 startup ~18,2 menit (setup superlinear), hint 10,25 MB, setup
+  600 ms, query 1,53 s/50 KB, respond 30,6 ms/5,9 KB. N=100.000 hanya opt-in —
+  setup bisa berjam-jam; direktori besar butuh sharding/epoch inkremental.
+  Audit eksternal + angka host produksi belum. PIR tidak menutup enumerasi
+  terautentikasi; gunakan bersama rate limit/OHTTP (lihat §35.11 #3).
 
 Acceptance:
 - ✅ R5 tertutup: nilai mentah tidak lagi dicari,
@@ -979,9 +992,11 @@ Acceptance:
 - ✅ pembacaan bundle untuk PIR tidak menguras OTPK,
 - 🟡 OPRF teruji dan mengubah jalur pencarian saat gate aktif, tetapi
   `usernameHash` legacy tetap (dibutuhkan KT); cutover penuh belum.
-- 🟡 PIR 4b service + proxy + snapshot builder lolos tes, tetapi default mati;
-  klien WASM/worker (4c), OHTTP POST/binary, benchmark produksi, dan audit
-  eksternal (4d) belum. Batasan lengkap di §35.11 #3.
+- 🟡 PIR 4b service + proxy + snapshot builder + 4c client (WASM/worker,
+  hint cache, epoch retry, OHTTP POST/binary) landed dan lolos unit test,
+  tetapi default mati; job refresh harian membatasi staleness ~24 jam,
+  benchmark harness 4d sudah landed, sedangkan angka host produksi dan audit
+  eksternal belum. Batasan lengkap di §35.11 #3.
 
 ### Fase 5 — Credentials PQ
 
@@ -1063,6 +1078,12 @@ Status implementasi (2026-10-21, belum di-deploy):
   9469), unit systemd + deploy gated `systemctl is-enabled`.
 - Server menulis ke v1 dan v2 bila `KT_V2_SERVER_URL` diisi (dedupe/metrik
   terpisah); pembacaan pindah dengan mengarahkan `KT_QUERY_URL` ke :8089.
+- **Backfill populasi v2 (opt-in):** `KT_V2_BACKFILL_ON_LOGIN=1` menulis entri
+  v2 saat login untuk akun yang sudah ada tetapi belum pernah masuk log v2.
+  Login membawa `usernameHash` mentah (server tidak bisa menurunkannya dari DB),
+  dan hanya perangkat dengan `signingKeyV2` (ML-DSA-65) yang ditulis; perangkat
+  lama tanpa kunci PQ dilewati dan harus rotasi/upgrade dulu. Flag ini jembatan
+  populasi, bukan cutover: cutover baca tetap manual dan dimatikan setelahnya.
 - Vektor lintas implementasi: Go fixtures → Rust verifier + WASM klien.
 - Residual: index v2 tetap deterministik (SHA-256 tanpa VRF), jadi server yang
   memegang log bisa menguji tebakan `searchKey`; ini **lebih lemah dari ECVRF
@@ -1205,10 +1226,14 @@ Belum ada (fase lanjut):
   credential v1 **sudah dihapus**; suite baru harus dibangun dari nol.
 - Migrasi/arsip data v1 lama — build PQ-only ini tidak punya pembaca v1.
 - Interop `cmd/kt-client` upstream dan dua implementasi auditor berdampingan.
-- PIR penuh (4c–4d): klien Rust→WASM/worker, hint cache, epoch retry,
-  OHTTP POST + binary response, benchmark produksi/audit. 4b service + proxy
-  sudah landed (`server/pir-sidecar`, ChalametPIR) dan default mati; 4a OPRF
-  sudah ter-wire hibrida; `usernameHash` legacy tetap.
+- PIR 4d: angka host produksi dan audit eksternal. Benchmark harness sudah
+  landed 2026-10-24 (`pnpm --filter nyx-server run bench:pir`) untuk sidecar
+  asli + WASM klien; 4c client (WASM/worker, hint cache, epoch retry, OHTTP
+  POST + binary response) dan 4b service/proxy juga landed (`server/pir-sidecar`,
+  ChalametPIR), semuanya default mati. 4a OPRF sudah ter-wire hibrida;
+  `usernameHash` legacy tetap. Setup PIR superlinear (N=1k→10k: 20,6 s→~18,2
+  menit), jadi N=100k hanya opt-in dan direktori besar butuh sharding/epoch
+  inkremental.
 
 ## 35.9 Rollout dan rollback
 
@@ -1237,7 +1262,7 @@ yang tidak membutuhkan arsip v1.
 | BRaccoon belum produksi | tidak ada credential PQ; fitur credential v1 sudah dihapus | bangun ulang + audit + dual verify; fallback blind UOV; jangan hidupkan RSA v1 |
 | KT v1 classical | log auth belum PQ | Scope A cepat; Scope B service terpisah |
 | Config KT dari server | server bisa forge log | pin config di build/release; fail-closed |
-| PIR kompleks | discovery privacy tertunda | 4a OPRF + `oprfIndex` hybrid; **4b ChalametPIR sidecar+proxy landed, default mati**; 4c klien/WASM + 4d benchmark/audit belum; OHTTP/rate limit tetap aktif |
+| PIR kompleks | discovery privacy tertunda | 4a OPRF + `oprfIndex` hybrid; **4b ChalametPIR sidecar+proxy + 4c klien/WASM landed, default mati**; 4d harness landed, audit + angka produksi belum; setup superlinear → sharding/epoch inkremental untuk direktori besar; OHTTP/rate limit tetap aktif |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
 | Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi, benchmark baterai/perangkat nyata masih terbuka |
@@ -1271,26 +1296,38 @@ Residual yang harus ditulis jujur:
    Rust `server/pir-sidecar` menyimpan record ~2 KB per OPRF index, dengan
    snapshot epoch + hint (`/params`) dan `/query` opaque; proxy Node
    `/api/pir/*` hanya meneruskan byte dengan auth + rate limit. Snapshot
-   dibangun offline lewat `pnpm --filter nyx-server run pir:snapshot`; default
-   mati (`PIR_ENABLED=1`). Benchmark N=1000/2 KB/arity 3 di host ini: setup
-   17,6 s, hint 9,85 MB, client setup 95 ms, query 42 ms/5,6 KB, respond
-   1,7 ms/5,6 KB, process 65 µs; hint tumbuh lambat dengan N, bukan O(N), dan
-   ini bukan angka produksi. **4c belum:** klien Rust→WASM, worker, hint
-   cache, epoch retry, OHTTP POST + binary response. **4d belum:** benchmark
+   awal dibangun manual lewat `pnpm --filter nyx-server run pir:snapshot`;
+   job harian `pirSnapshot` (04:15) membangun ulang dari user ber-`oprfIndex`,
+   menulis atomik ke `PIR_SNAPSHOT_PATH` (absolut), lalu memanggil
+   `/admin/rebuild`, sehingga user baru tertinggal maksimum ~24 jam. Job aktif
+   hanya bila `PIR_ENABLED=1` dan `PIR_ADMIN_TOKEN` terisi. Default mati. **4d benchmark harness landed 2026-10-24:**
+   `pnpm --filter nyx-server run bench:pir` menjalankan sidecar asli + WASM
+   klien. Angka Celeron N2940, record 2 KB, arity 3: N=1000 startup 20,6 s,
+   hint 9,39 MB, setup 75,6 ms, query 150 ms/5,5 KB, respond 12,2 ms/5,4 KB,
+   process 357 µs; N=10.000 startup ~18,2 menit (setup superlinear), hint
+   10,25 MB, setup 600 ms, query 1,53 s/50 KB, respond 30,6 ms/5,9 KB.
+   N=100.000 hanya opt-in — setup bisa berjam-jam; direktori besar butuh
+   sharding/epoch inkremental. Hint tumbuh lambat dengan N, bukan O(N). Ini
+   bukan angka produksi. **4c landed 2026-10-23:** klien Rust→WASM,
+   worker, hint cache, epoch retry, OHTTP POST + binary response; artefak
+   `packages/pir-wasm/dist/pir-client.wasm` masuk manifest reprodusibel dan
+   unit test `pirParams`/`pirClient` hijau. **4d tersisa:** angka host
    produksi dan audit eksternal. PIR hanya menyembunyikan *record mana* yang
    diambil dari gateway/operator (OHTTP menyembunyikan *pemanggil*); ia tidak
    menutup enumerasi oleh akun terautentikasi (`/search` 30/menit
    mengembalikan profil + public key), jadi rate limit/OHTTP tetap wajib.
-   Staleness epoch (user baru belum masuk snapshot) harus ditangani 4c/4d.
-   Jangan klaim produksi sebelum audit.
+   Staleness epoch ditangani job refresh harian (batas ~24 jam); rebuild
+   manual tetap tersedia. Jangan klaim produksi sebelum audit.
 4. ~~OHTTP: relay/gateway self-host vs Cloudflare.~~ **Diputuskan:** self-host,
    dua peran (`/api/ohttp/relay` + `/api/ohttp/gateway`, default mati).
    Yang masih terbuka: apakah relay dipindah ke host/operator lain (hanya
    mengganti `OHTTP_RELAY_TARGET`), dan kapan carriage token diaktifkan.
 5. Kapan cutover **baca** KT ke v2 (`KT_QUERY_URL` diarahkan ke `:8089`)
    setelah populasi log v2 cukup. Scope B sudah dimulai dan berjalan sebagai
-   **dual-write** (`KT_V2_SERVER_URL`); pembacaan masih v1, dan rollback baca
-   setelah klien mem-pin ABI 2 bersifat satu arah sampai ada jalur reset pin.
+   **dual-write** (`KT_V2_SERVER_URL`); akun lama dapat di-backfill opt-in saat
+   login (`KT_V2_BACKFILL_ON_LOGIN=1`, hanya perangkat ber-`signingKeyV2`),
+   tetapi pembacaan masih v1. Rollback baca setelah klien mem-pin ABI 2
+   bersifat satu arah sampai ada jalur reset pin.
 
 ## 35.12 Referensi
 

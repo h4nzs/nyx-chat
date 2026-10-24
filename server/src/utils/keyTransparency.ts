@@ -504,20 +504,26 @@ interface WriteTarget {
   transport: KtTransport;
 }
 
-function configuredTargets(options: { transport?: KtTransport; v2Transport?: KtTransport }): WriteTarget[] {
+function configuredTargets(options: {
+  transport?: KtTransport;
+  v2Transport?: KtTransport;
+  targets?: readonly KtLogTarget[];
+}): WriteTarget[] {
+  const allowed = (name: KtLogTarget) => !options.targets || options.targets.includes(name);
   // Transport eksplisit = mode uji: jangan sentuh env/jaringan nyata.
-  if (options.transport) {
-    const targets: WriteTarget[] = [{ name: 'v1', transport: options.transport }];
+  if (options.transport || options.v2Transport) {
+    const targets: WriteTarget[] = [];
+    if (options.transport) targets.push({ name: 'v1', transport: options.transport });
     if (options.v2Transport) targets.push({ name: 'v2', transport: options.v2Transport });
-    return targets;
+    return targets.filter((target) => allowed(target.name));
   }
 
   const targets: WriteTarget[] = [];
   const timeoutMs = Number(process.env.KT_TIMEOUT_MS) || 5000;
   const v1Endpoint = process.env.KT_SERVER_URL;
   const v2Endpoint = process.env.KT_V2_SERVER_URL;
-  if (v1Endpoint) targets.push({ name: 'v1', transport: createGrpcKtTransport({ endpoint: v1Endpoint, timeoutMs }) });
-  if (v2Endpoint) targets.push({ name: 'v2', transport: createGrpcKtTransport({ endpoint: v2Endpoint, timeoutMs }) });
+  if (v1Endpoint && allowed('v1')) targets.push({ name: 'v1', transport: createGrpcKtTransport({ endpoint: v1Endpoint, timeoutMs }) });
+  if (v2Endpoint && allowed('v2')) targets.push({ name: 'v2', transport: createGrpcKtTransport({ endpoint: v2Endpoint, timeoutMs }) });
   return targets;
 }
 
@@ -573,7 +579,12 @@ async function writeToTarget(target: WriteTarget, entry: KtLogEntry, now: number
  */
 export async function commitKeyTransparencyEntry(
   entry: KtLogEntry,
-  options: { transport?: KtTransport; v2Transport?: KtTransport; now?: number } = {}
+  options: {
+    transport?: KtTransport;
+    v2Transport?: KtTransport;
+    targets?: readonly KtLogTarget[];
+    now?: number;
+  } = {}
 ): Promise<KtCommitResult> {
   const targets = configuredTargets(options);
   if (targets.length === 0) return { ok: false, skipped: 'DISABLED' };
@@ -608,9 +619,14 @@ export async function commitKeyTransparencyEntry(
  */
 export async function publishKeyTransparencyEntry(
   input: KtLogEntryInput,
-  options: { transport?: KtTransport; v2Transport?: KtTransport; now?: number } = {}
+  options: {
+    transport?: KtTransport;
+    v2Transport?: KtTransport;
+    targets?: readonly KtLogTarget[];
+    now?: number;
+  } = {}
 ): Promise<KtCommitResult> {
-  if (!process.env.KT_SERVER_URL && !process.env.KT_V2_SERVER_URL && !options.transport) {
+  if (!process.env.KT_SERVER_URL && !process.env.KT_V2_SERVER_URL && !options.transport && !options.v2Transport) {
     return { ok: false, skipped: 'DISABLED' };
   }
 

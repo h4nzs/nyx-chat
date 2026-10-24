@@ -15,9 +15,10 @@
 > penjadwal (§34.6b), auditor pihak ketiga dilayani `server/kt-query`
 > (`audit.go`), dan tree head di-gossip antar klien (§34.6c). Log v1 tetap
 > frozen; log v2 (ML-DSA-65, port/metrik terpisah) didokumentasikan di
-> `docs/35` §35.7 Fase 7. Yang **belum**: interop `cmd/kt-client` upstream, dua
-> implementasi auditor (Java referensi vs port Go) berdampingan, auditor masih
-> satu host dengan log, banner UI saat KT tidak tersedia, dan cutover baca ke
+> `docs/35` §35.7 Fase 7. Banner "KT tidak tersedia" **landed 2026-10-24**
+> (`web/src/lib/ktAvailability.ts`, wired ke loop monitor). Yang **belum**:
+> interop `cmd/kt-client` upstream, dua implementasi auditor (Java referensi vs
+> port Go) berdampingan, auditor masih satu host dengan log, dan cutover baca ke
 > v2 — server masih membaca v1 via `KT_QUERY_URL` (§34.6 poin 3).
 
 Rencana & gate: `docs/30` §30.5. Sisi penulis log: `docs/32`.
@@ -269,11 +270,15 @@ menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
    tidak dijalankan (`package main`, tidak di-vendor) — perannya diambil
    `nyx-kt-check`; pelaksanaan dua auditor (Java referensi vs port ini) berdampingan
    juga belum; dan auditor berjalan di host yang sama dengan log.
-4. **Degradasi terlihat** — bila KT mati: klien jalan dengan TOFU; verdict-nya
-   tersimpan di baris pin (`ktLastVerdict`) dan setiap permintaan bukti dihitung
-   di `nyx_kt_queries_total{result="disabled"|"error"}`. **Tidak ada banner**
-   "verifikasi kunci tidak tersedia" — yang tampil ke user hanya toast rotasi
-   kunci; banner diagnostik adalah pekerjaan UI, bukan perilaku yang sudah ada.
+4. ~~**Degradasi terlihat**~~ — **banner landed 2026-10-24.** Bila KT mati:
+   klien jalan dengan TOFU; verdict-nya tersimpan di baris pin (`ktLastVerdict`)
+   dan setiap permintaan bukti dihitung di
+   `nyx_kt_queries_total{result="disabled"|"error"}`. Loop monitor di `App.tsx`
+   kini memanggil `reportKtUnavailable()` saat gagal dan `reportKtAvailable()`
+   saat pulih (`web/src/lib/ktAvailability.ts`): banner warning global, tidak
+   menimpa banner admin/personal lain, mengabaikan `KT_QUERY_DISABLED`, dan bisa
+   di-dismiss per hari lewat mekanisme `SystemBanner` yang sudah ada. 5 test di
+   `ktAvailability.test.ts`.
 5. **Rollback** — jalur nyatanya adalah **mengosongkan `KT_QUERY_URL`**: endpoint
    `/api/keys/kt/*` menjawab 503 dan setiap verdict menjadi `unavailable` (TOFU),
    tanpa perubahan kode klien. Kapabilitas `KT_LITE` di
@@ -286,6 +291,11 @@ menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
    `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 11,
    `ktSubject.test.ts` 8, `ktBundleProof.test.ts` 6) + jalur hidup manual
    (`docs/32` §32.8).
+7. **Backfill populasi v2** — akun lama tidak bisa diturunkan `searchKey`-nya
+   dari DB. `KT_V2_BACKFILL_ON_LOGIN=1` (opt-in) memakai `usernameHash` yang
+   dikirim saat login untuk menulis entri v2; hanya perangkat ber-`signingKeyV2`
+   (ML-DSA-65) yang ikut, perangkat lama dilewati sampai rotasi. Ini jembatan
+   menuju cutover baca, bukan cutover itu sendiri.
 
 ## 34.6c Auditor + gossip (landed 2026-10-14)
 

@@ -41,7 +41,7 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
     throw new Error('OHTTP: token mode off membutuhkan relayGuards (auth + CSRF)');
   }
   // Semua body OHTTP adalah biner opaque; jangan pernah di-parse JSON.
-  const rawBody = express.raw({ type: () => true, limit: '128kb' });
+  const rawBody = express.raw({ type: () => true, limit: '8mb' });
   // Relay/gateway tidak punya sesi, jadi limiter ini satu-satunya penahan
   // penyalahgunaan. Angka konservatif: klien hanya memakai OHTTP untuk
   // endpoint yang di-allowlist (pencarian/prekey), bukan untuk semua trafik.

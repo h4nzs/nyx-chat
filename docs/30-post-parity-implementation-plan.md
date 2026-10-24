@@ -255,9 +255,10 @@ rencana — itu bukan KT, hanya TOFU kolektif).
    nilai yang memetakan ke akun tanpa `usernameHash` (yang sudah memory-hard).
 5. Degradasi terlihat: `nyx-kt` mati → klien jalan dengan TOFU (verdict
    `unavailable` tersimpan + dicatat, backoff 5 menit; metrik
-   `nyx_kt_queries_total{result="disabled"|"error"}`). **Tidak ada banner** —
-   yang tampil ke user hanya toast saat `keyVersion` naik; banner akan ditambah
-   bila audit UI menuntutnya.
+   `nyx_kt_queries_total{result="disabled"|"error"}`). **Banner landed
+   2026-10-24**: `web/src/lib/ktAvailability.ts` menampilkan warning global dari
+   loop monitor, mengabaikan `KT_QUERY_DISABLED`, dan membersihkannya saat KT
+   pulih.
 6. Rollback: **`KT_QUERY_URL` dikosongkan** → `/api/keys/kt/*` menjawab 503 dan
    klien kembali ke TOFU tanpa perubahan kode. Kapabilitas
    `CLIENT_CAPABILITIES.KT_LITE` (`packages/shared/src/transport.ts`) masih

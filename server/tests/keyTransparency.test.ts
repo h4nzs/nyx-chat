@@ -667,3 +667,39 @@ test('live: penulisan nyata ke binary KT (opt-in NYX_KT_LIVE_WRITE=1)', { skip: 
   assert.equal(result.ok, true, `penulisan KT gagal: ${result.reason ?? 'unknown'}`);
   assert.ok(result.treeSize !== null && result.treeSize >= 1n, 'ukuran pohon harus bertambah setelah update');
 });
+
+
+test('targets: pilih v2 saja tanpa menyentuh v1', async () => {
+  clearKtDedupeForTests();
+  let v1Calls = 0;
+  let v2Calls = 0;
+  const entry = buildKtLogEntry({
+    usernameHash: USERNAME_HASH_B64,
+    identityKey: IDENTITY_KEY,
+    pqIdentityKey: PQ_KEY,
+    signingKey: SIGNING_KEY,
+    keyVersion: 1,
+    updatedAtDay: 20_000,
+  });
+  const result = await commitKeyTransparencyEntry(entry, {
+    transport: {
+      async update() {
+        v1Calls++;
+        return new Uint8Array(0);
+      },
+    },
+    v2Transport: {
+      async update() {
+        v2Calls++;
+        return new Uint8Array(0);
+      },
+    },
+    targets: ['v2'],
+    now: 1_000,
+  });
+  assert.equal(v1Calls, 0);
+  assert.equal(v2Calls, 1);
+  assert.equal(result.ok, true);
+  assert.equal(result.v2?.ok, true);
+  clearKtDedupeForTests();
+});

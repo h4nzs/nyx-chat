@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 declare let self: ServiceWorkerGlobalScope;
 
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import { cleanupOutdatedCaches, precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { clientsClaim } from 'workbox-core';
 import { createMutexRegistry, handleMutexRequest, type MutexRequest } from './lib/swMutexCore';
 
@@ -14,6 +15,21 @@ cleanupOutdatedCaches();
 
 // 3. Precache Resources
 precacheAndRoute(self.__WB_MANIFEST);
+
+// 3b. Navigation fallback (app shell) — saat server/jaringan mati, navigasi tetap
+// dilayani dari index.html yang di-precache, sehingga SPA bisa boot dan menampilkan
+// ServerDownPage sendiri. Hanya shell statis; API/uploads TIDAK pernah di-cache
+// (lihat poin 4). Denylist memastikan endpoint server tidak pernah dibalas shell.
+try {
+  registerRoute(
+    new NavigationRoute(createHandlerBoundToURL('/index.html'), {
+      denylist: [/^\/api(\/|$)/, /^\/api-docs/, /^\/\.well-known\//, /^\/uploads\//],
+    }),
+  );
+} catch (err) {
+  // Mode dev: index.html belum ada di manifest precache → lewati, jangan matikan SW.
+  console.warn('[sw] navigation fallback dinonaktifkan:', err);
+}
 
 // 4. API Caching Strategy - REMOVED FOR PRIVACY (No caching of sensitive data)
 

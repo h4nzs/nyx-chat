@@ -14,6 +14,8 @@ import { env } from "./config.js";
 import path from "path";
 import crypto from "crypto";
 import { prisma } from "./lib/prisma.js";
+import { redisClient } from "./lib/redis.js";
+import { checkReadiness } from "./utils/readiness.js";
 import { purgeSealedUserRows } from "./utils/routingIdentity.js";
 import { authorizeAdminCleanup } from "./utils/adminCleanupAuth.js";
 import { runCleanup } from "./jobs/cleanup.js";
@@ -504,6 +506,34 @@ app.use("/.well-known", wellKnownRouter);
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok bang" });
+});
+
+// Liveness: proses Node hidup (tanpa dependensi) — alias eksplisit untuk probe.
+app.get("/health/live", (_req: Request, res: Response) => {
+  res.set("Cache-Control", "no-store");
+  res.json({ status: "live" });
+});
+
+// Readiness: Redis + Postgres benar-benar menjawab. Dipakai pemantau EKSTERNAL
+// (di luar VPS). 503 saat salah satu gagal/timeout; detail hanya ke log server,
+// bodi publik sengaja minimal agar tidak membocorkan topologi.
+app.get("/health/ready", async (_req: Request, res: Response) => {
+  res.set("Cache-Control", "no-store");
+  const { ok, failed } = await checkReadiness([
+    {
+      name: "redis",
+      run: async () => {
+        if (!redisClient.isReady) throw new Error("redis not ready");
+        await redisClient.ping();
+      },
+    },
+    { name: "postgres", run: () => prisma.$queryRaw`SELECT 1` },
+  ]);
+  if (!ok) {
+    console.warn("[health] not ready:", failed.join(","));
+    return res.status(503).json({ status: "unready" });
+  }
+  res.json({ status: "ready" });
 });
 
 // === GENERIC ERROR HANDLING ===

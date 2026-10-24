@@ -34,10 +34,12 @@
  * `pqIdentityKey`, `signingKey`, label alur, bucket harian).
  */
 
+import { ML_DSA_65_PUBLIC_KEY_BYTES } from '@nyx/shared';
 import { incCounter, KT_WRITES } from './metrics.js';
 import { dayBucket } from './temporalBucket.js';
 import { identifierLookupCandidates } from './atRestSecrets.js';
 import {
+  KT_KEY_VERSION_REGISTRATION,
   KT_KEY_VERSION_ROTATION,
   publishKeyTransparencyEntry,
   type KtCommitResult,
@@ -178,4 +180,53 @@ export function identityKeysChanged(
           Buffer.from(after.signingKeyV2 ?? new Uint8Array(0))
         );
   return !(sameIdentity && sameSigning && sameV2);
+}
+
+
+/**
+ * Backfill v2 pada login (opsional, `KT_V2_BACKFILL_ON_LOGIN=1`).
+ *
+ * Akun yang mendaftar sebelum log v2 ada tidak pernah masuk v2; cutover baca
+ * tidak bisa dilakukan selama populasi v2 tertinggal. Login membuktikan
+ * kepemilikan identifier dan membawa kunci perangkat saat ini, jadi entri
+ * registrasi bisa ditulis **hanya ke v2**. Nilai v2 wajib punya ML-DSA-65
+ * (`signingKeyV2`); perangkat lama tanpa kunci itu dilewati — mereka harus
+ * rotasi ke v2 dulu. Update KT idempoten per `(searchKey, keyVersion, value)`,
+ * jadi login berulang tidak menambah daun baru.
+ */
+export interface KtV2BackfillInput {
+  usernameHash: string;
+  identityKey: Uint8Array;
+  pqIdentityKey?: Uint8Array | null;
+  signingKey: Uint8Array;
+  signingKeyV2: Uint8Array;
+}
+
+export interface KtV2BackfillDeps {
+  v2Transport?: KtTransport;
+  now?: number;
+}
+
+export async function backfillKtV2IdentityOnLogin(
+  input: KtV2BackfillInput,
+  deps: KtV2BackfillDeps = {}
+): Promise<KtCommitResult> {
+  if (input.signingKeyV2.length !== ML_DSA_65_PUBLIC_KEY_BYTES) {
+    return { ok: false, reason: 'V2_SIGNING_KEY_INVALID' };
+  }
+  if (!process.env.KT_V2_SERVER_URL && !deps.v2Transport) {
+    return { ok: false, skipped: 'DISABLED' };
+  }
+  return publishKeyTransparencyEntry(
+    {
+      usernameHash: input.usernameHash,
+      identityKey: input.identityKey,
+      pqIdentityKey: input.pqIdentityKey ?? new Uint8Array(0),
+      signingKey: input.signingKey,
+      signingKeyV2: input.signingKeyV2,
+      keyVersion: KT_KEY_VERSION_REGISTRATION,
+      updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
+    },
+    { v2Transport: deps.v2Transport, targets: ['v2'], now: deps.now }
+  );
 }

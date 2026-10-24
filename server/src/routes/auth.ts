@@ -76,7 +76,11 @@ import {
   publishKeyTransparencyEntry
 } from '../utils/keyTransparency.js'
 // [docs/30 §30.5 WS-A] Rotasi kunci identitas di jalur login → entri log KT.
-import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js'
+import {
+  backfillKtV2IdentityOnLogin,
+  identityKeysChanged,
+  publishIdentityKeyChange
+} from '../utils/ktIdentityLog.js'
 import { searchOprfIndexForIdentifier } from '../utils/searchOprf.js'
 // [docs/30 §30.12 WS-H] Attestation perangkat untuk akun baru (gerbang sybil).
 import {
@@ -591,6 +595,7 @@ router.post('/login', authLimiter, zodValidate({
 
     let activeDeviceId = '';
     let activeEncryptedPrivateKey = '';
+    let identityChanged = false;
 
     if (publicKey && signingKey && encryptedPrivateKey) {
       let device = null;
@@ -654,13 +659,12 @@ router.post('/login', authLimiter, zodValidate({
       // terlihat di log. Kepemilikan identifier di sini terbukti oleh login itu
       // sendiri: `usernameHash` dari body dipakai `identifierLookupCandidates`
       // untuk menemukan akun ini, dan password sudah diverifikasi di atas.
-      if (
-        identityKeysChanged(previousIdentity, {
-          identityKey: Buffer.from(publicKey, 'base64url'),
-          signingKey: Buffer.from(signingKey, 'base64url'),
-          signingKeyV2: previousIdentity?.signingKeyV2 ?? undefined,
-        })
-      ) {
+      identityChanged = identityKeysChanged(previousIdentity, {
+        identityKey: Buffer.from(publicKey, 'base64url'),
+        signingKey: Buffer.from(signingKey, 'base64url'),
+        signingKeyV2: previousIdentity?.signingKeyV2 ?? undefined,
+      });
+      if (identityChanged) {
         void publishIdentityKeyChange({
           userId: user.id,
           usernameHash,
@@ -716,6 +720,27 @@ router.post('/login', authLimiter, zodValidate({
           // We must force the client into the recovery flow to establish a new device identity.
           activeDeviceId = '';
           activeEncryptedPrivateKey = '';
+      }
+    }
+
+    // [docs/34 §34.6] Populasi v2 untuk akun lama, opt-in. Hanya bila kunci
+    // tidak berubah (rotasi sudah menulis v2 sendiri) dan perangkat punya
+    // ML-DSA-65; login sudah membuktikan kepemilikan identifier.
+    if (
+      !identityChanged &&
+      activeDeviceId &&
+      process.env.KT_V2_BACKFILL_ON_LOGIN === '1' &&
+      process.env.KT_V2_SERVER_URL
+    ) {
+      const activeDevice = user.devices.find((d) => d.id === activeDeviceId);
+      if (activeDevice?.signingKeyV2?.length) {
+        void backfillKtV2IdentityOnLogin({
+          usernameHash,
+          identityKey: activeDevice.publicKey,
+          pqIdentityKey: activeDevice.pqPublicKey,
+          signingKey: activeDevice.signingKey,
+          signingKeyV2: activeDevice.signingKeyV2,
+        });
       }
     }
 

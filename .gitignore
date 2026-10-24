@@ -77,6 +77,13 @@ packages/keytrans-wasm-v2/Cargo.toml
 !packages/keytrans-wasm-v2/dist/
 !packages/keytrans-wasm-v2/dist/keytrans-v2.wasm
 
+# PIR client WASM (docs/35 Fase 4c): crate crates.io chalametpir-client,
+# Cargo.toml di-generate build.sh; artefak dist tetap DI-commit dan diverifikasi manifest.
+packages/pir-wasm/target/
+packages/pir-wasm/Cargo.toml
+!packages/pir-wasm/dist/
+!packages/pir-wasm/dist/pir-client.wasm
+
 # PIR sidecar (docs/35 Fase 4b): target Cargo dan snapshot direktori lokal
 # mengandung record pengguna; keduanya artefak, bukan sumber.
 server/pir-sidecar/target/

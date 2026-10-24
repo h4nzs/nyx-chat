@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_TRANSPORT_CERT_HASH: string;
   readonly VITE_OHTTP_TOKEN_MODE?: string;
   readonly VITE_PIR_OPRF_ENABLED?: string;
+  readonly VITE_PIR_ENABLED?: string;
 }
 
 interface ImportMeta {

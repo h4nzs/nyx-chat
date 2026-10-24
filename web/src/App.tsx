@@ -38,6 +38,8 @@ import PrivacyCloak from './components/PrivacyCloak';
 import { Spinner } from './components/Spinner';
 import { SystemBanner } from './components/SystemBanner';
 import { MaintenancePage } from './pages/MaintenancePage';
+import { ServerDownPage } from './pages/ServerDownPage'; // statis (bukan lazy): harus bisa tampil saat server mati
+import { reportKtAvailable, reportKtUnavailable } from './lib/ktAvailability';
 
 const ConfirmModal = lazy(() => import('@components/ConfirmModal'));
 const UserInfoModal = lazy(() => import('@components/UserInfoModal'));
@@ -166,8 +168,9 @@ const AppContent = () => {
   const isCallActive = useCallStore(s => s.callState !== 'idle');
 
   // --- System Status (Banner & Maintenance) ---
-  const { maintenance, checkStatus } = useSystemStore(useShallow(s => ({
+  const { maintenance, serverUnreachable, checkStatus } = useSystemStore(useShallow(s => ({
     maintenance: s.maintenance,
+    serverUnreachable: s.serverUnreachable,
     checkStatus: s.checkStatus
   })));
 
@@ -394,7 +397,16 @@ const AppContent = () => {
         ]);
         if (cancelled) return;
         stop = startKtMonitorLoop({
-          run: () => monitorKeyTransparency(),
+          run: async () => {
+            try {
+              const outcome = await monitorKeyTransparency();
+              reportKtAvailable();
+              return outcome;
+            } catch (error) {
+              reportKtUnavailable(error);
+              throw error;
+            }
+          },
           onChanged: (changes) => {
             // Kenaikan `keyVersion` di log = kandidat rotasi kunci; pesan yang
             // datang dari kunci lama akan tampil `keyVersion` lama + terdeteksi
@@ -490,12 +502,15 @@ const AppContent = () => {
   }, [user, location.pathname, isDeviceFlow]);
 
   // --- CEGAT RENDER JIKA MODE MAINTENANCE AKTIF ---
-  if (maintenance) {
+  // Server tak terjangkau menang atas flag maintenance lama (flag itu bisa basi).
+  if (maintenance && !serverUnreachable) {
     return <MaintenancePage onRetry={checkStatus} />;
   }
 
   return (
     <>
+      {/* Overlay server-down: app tetap ter-mount di bawahnya (state tidak hilang). */}
+      {serverUnreachable && <ServerDownPage onRetry={checkStatus} />}
       <Toaster
         position="top-center"
         reverseOrder={false}

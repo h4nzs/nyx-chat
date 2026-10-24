@@ -19,6 +19,8 @@
 import type { MinimalProfile } from '@nyx/shared';
 import { api } from './api';
 import { isRawIdentifierHash, oprfSearchEnabled, oprfSearchIndex } from './searchOprfClient';
+import { pirEnabled, pirSearch } from './pirClient';
+import { PirError } from './pirParams';
 
 export interface UserSearchHit {
   id: string;
@@ -64,6 +66,13 @@ export async function searchUsersByHash(hashedQuery: string): Promise<UserSearch
     oprfSearchEnabled() && isRawIdentifierHash(hashedQuery)
       ? await oprfSearchIndex(hashedQuery)
       : hashedQuery;
+  if (pirEnabled()) {
+    if (isRawIdentifierHash(hashedQuery) && !oprfSearchEnabled()) {
+      throw new PirError('PIR_REQUIRES_OPRF');
+    }
+    const record = await pirSearch(effectiveQuery);
+    return record ? [record] : [];
+  }
   const path = paddedSearchPath(effectiveQuery);
   const { ohttpEnabled, ohttpJson } = await import('./ohttpClient');
   if (ohttpEnabled()) {

@@ -196,6 +196,15 @@
     "description": "Arsitektur Nyx Core sedang mengalami peningkatan keamanan dan stabilitas. Kami akan segera kembali dalam beberapa saat.",
     "retryButton": "Cek Status Sekarang"
   },
+  "serverDown": {
+    "title": "NYX sedang tidak dapat dijangkau",
+    "description": "Kami tidak dapat menjangkau server saat ini. Data Anda tetap terenkripsi di perangkat Anda. Halaman ini akan hilang otomatis begitu kami kembali.",
+    "offlineTitle": "Anda sedang offline",
+    "offlineDescription": "Perangkat Anda tidak tersambung ke internet. Data Anda tetap terenkripsi di perangkat Anda. Kami akan menyambung kembali otomatis saat Anda online.",
+    "retryButton": "Coba lagi",
+    "checking": "Memeriksa…",
+    "nextCheck": "Pengecekan otomatis berikutnya {{seconds}} dtk"
+  },
   "notifications_enabled": "Notifikasi diaktifkan!",
   "notifications_disabled": "Notifikasi dinonaktifkan",
   "profile_updated": "Profil diperbarui!",

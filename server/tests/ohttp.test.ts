@@ -149,6 +149,8 @@ test('allowlist: hanya target sempit yang boleh lewat gateway', () => {
   assert.equal(isOhttpTargetAllowed('GET', '/api/users/search'), true);
   assert.equal(isOhttpTargetAllowed('GET', '/api/keys/prekey-bundle/user-1'), true);
   assert.equal(isOhttpTargetAllowed('POST', '/api/users/search'), false);
+  assert.equal(isOhttpTargetAllowed('POST', '/api/pir/query'), true);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/pir/query'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/admin/cleanup'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/ohttp/gateway'), false);
 });

@@ -46,7 +46,7 @@ export const OHTTP_PRIVATE_KEY_BYTES = 32;
 export const OHTTP_ENC_BYTES = 65;
 export const OHTTP_HEADER_BYTES = 7;
 export const OHTTP_RESPONSE_NONCE_BYTES = 32; // max(Nk, Nn) untuk AES-256-GCM
-export const OHTTP_MAX_MESSAGE_BYTES = 64 * 1024;
+export const OHTTP_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 export class OhttpError extends Error {
   constructor(message: string) {
@@ -79,7 +79,7 @@ export function encodeVarint(value: number): Uint8Array {
   }
   if (value < 0x40) return Uint8Array.of(value);
   if (value < 0x4000) return Uint8Array.of(0x40 | (value >> 8), value & 0xff);
-  // Batas scaffold: pesan OHTTP dibatasi OHTTP_MAX_MESSAGE_BYTES (64 KiB), jadi
+  // Batas keras: PIR query bisa beberapa MB (hint tetap di luar OHTTP), jadi
   // varint 8-byte tidak diperlukan dan ditolak alih-alih di-encode setengah benar.
   if (value > 0x3fffffff) throw new OhttpError(`varint terlalu besar: ${value}`);
   return Uint8Array.of(0x80 | (value >> 24), (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff);
@@ -388,6 +388,7 @@ export interface OhttpAllowRule {
 export const OHTTP_DEFAULT_ALLOWLIST: readonly OhttpAllowRule[] = [
   { method: 'GET', path: /^\/api\/users\/search$/ },
   { method: 'GET', path: /^\/api\/keys\/prekey-bundle\/[A-Za-z0-9_-]{1,64}$/ },
+  { method: 'POST', path: /^\/api\/pir\/query$/ },
 ];
 
 export function isOhttpTargetAllowed(

@@ -44,6 +44,15 @@
     "description": "A arquitetura Nyx Core está passando por atualizações de segurança e estabilidade. Voltaremos em breve.",
     "retryButton": "Verificar Status Agora"
   },
+  "serverDown": {
+    "title": "O NYX está temporariamente indisponível",
+    "description": "Não conseguimos acessar nossos servidores agora. Seus dados continuam criptografados no seu dispositivo. Esta tela some sozinha assim que voltarmos.",
+    "offlineTitle": "Você está offline",
+    "offlineDescription": "Seu dispositivo está sem conexão com a internet. Seus dados continuam criptografados no seu dispositivo. Reconectaremos automaticamente quando você voltar a ficar online.",
+    "retryButton": "Tentar novamente",
+    "checking": "Verificando…",
+    "nextCheck": "Próxima verificação automática em {{seconds}}s"
+  },
   "action": {
     "abort": "ABORTAR",
     "unlock": "DESBLOQUEAR",

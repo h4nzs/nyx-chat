@@ -11,6 +11,10 @@ const envUrl = import.meta.env.VITE_API_URL || "";
 // Hasilnya bersih: "https://api.domain.com"
 const API_URL = envUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
 
+export function getApiBaseUrl(): string {
+  return API_URL;
+}
+
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;
 

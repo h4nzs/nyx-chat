@@ -15,6 +15,9 @@ async function main() {
   // [docs/10 §10.13] Unggah harian arsip snapshot log KT dari dir milik
   // `nyx-kt-query` ke R2 (kredensial objek hanya hidup di proses ini).
   const { startKtSnapshotUploader } = await import('./jobs/ktSnapshot.js')
+  // [docs/35 Fase 4d] Cegah user baru hilang dari snapshot PIR: bangun ulang
+  // snapshot harian lalu hot-swap index sidecar.
+  const { startPirSnapshotRefresher } = await import('./jobs/pirSnapshot.js')
   // [docs/30 WS-G] Metrik event-only, diekspos hanya di loopback.
   const { startMetricsServer, stopMetricsServer } = await import('./utils/metricsEndpoint.js')
 
@@ -63,6 +66,7 @@ async function main() {
   startMessageSweeper()
   startSystemSweeper()
   startKtSnapshotUploader()
+  startPirSnapshotRefresher()
 
   const PORT = Number(process.env.PORT || 4000)
   // Bind loopback by default: only cloudflared (same host) needs to reach us.

@@ -196,6 +196,15 @@
     "description": "Nyx Core architecture is currently undergoing security and stability upgrades. We will be right back shortly.",
     "retryButton": "Check Status Now"
   },
+  "serverDown": {
+    "title": "NYX is temporarily unreachable",
+    "description": "We can't reach our servers right now. Your data stays encrypted on your device. This page will disappear automatically as soon as we're back.",
+    "offlineTitle": "You're offline",
+    "offlineDescription": "Your device has no internet connection. Your data stays encrypted on your device. We'll reconnect automatically when you're back online.",
+    "retryButton": "Try again",
+    "checking": "Checking…",
+    "nextCheck": "Next automatic check in {{seconds}}s"
+  },
   "notifications_enabled": "Notifications enabled!",
   "notifications_disabled": "Notifications disabled",
   "profile_updated": "Profile updated!",
