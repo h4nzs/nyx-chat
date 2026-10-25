@@ -229,8 +229,12 @@ describe('wiring klien', () => {
   });
 
   it('[docs/33 §33.7] jalur WSS menegosiasikan kapabilitas — bukan lagi selalu legacy', () => {
-    // Klien mengiklankan kapabilitas di handshake socket.io…
-    expect(client).toMatch(/auth: \{ capabilities: ANNOUNCED_CLIENT_CAPABILITIES \}/);
+    // Klien mengiklankan kapabilitas di handshake socket.io, lewat callback
+    // `auth` (bukan objek statis) supaya access token yang di-refresh ikut
+    // terkirim pada setiap percobaan konek — lihat docs/10 §10.20.
+    expect(client).toMatch(/auth: \(cb\) => cb\(\{/);
+    expect(client).toMatch(/token: useAuthStore\.getState\(\)\.accessToken/);
+    expect(client).toMatch(/capabilities: ANNOUNCED_CLIENT_CAPABILITIES,/);
     // …menunggu balasan gateway (`capabilities`) dan bisa jatuh ke legacy
     // (server lama) — dua jalur, satu cara menutup negosiasi.
     expect(client).toMatch(/socket\.on\('capabilities'/);

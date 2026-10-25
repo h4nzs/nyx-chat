@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🚨 Realtime mati setelah login: cookie sesi host-only + `NODE_ENV` VPS (2026-10-25)
+
+Setelah registrasi, dasbor `/chat` tertahan di banner `ESTABLISHING_UPLINK`.
+Dari log jaringan pengguna: `WebTransport connection rejected` 2× → fallback
+`wss://api.nyx-app.my.id/socket.io` dijawab **101**, lalu tidak ada apa pun lagi
+(tidak ada `users/me/devices`, tidak ada `conversations`). Terverifikasi dengan
+probe socket.io-client: gateway menolak dengan `connect_error: unauthorized` dan
+**tidak** melakukan `reconnect_attempt` — kegagalan middleware memang tidak
+di-retry, jadi gejalanya menggantung alih-alih gagal-ulang.
+
+Sebabnya dua:
+
+- `at`/`rt` diterbitkan `app.nyx-app.my.id` (REST relatif `/api`) **tanpa**
+  `Domain`, jadi browser tidak mengirimnya ke `api.nyx-app.my.id` — host yang
+  dipakai `resolveApiOrigin()`. Cookie CSRF punya `domain`, cookie sesi tidak.
+- `deploy.yml` menjalankan `pm2 start …` tanpa `NODE_ENV`, sehingga
+  `env.nodeEnv = 'development'` di VPS: cookie kehilangan `Secure`/`SameSite=None`
+  dan cabang `domain: isProd ? …` tidak pernah aktif (terbukti dari `Set-Cookie`
+  CSRF produksi tanpa `Domain`).
+
+Perbaikan: env baru **`COOKIE_DOMAIN`** dipakai satu sumber oleh set **dan** clear
+cookie sesi (`authCookieOptions()`), plus cookie CSRF; jalur WSS kini mengirim
+`handshake.auth.token` sehingga tidak lagi bergantung pada cookie lintas-subdomain;
+`connect_error` socket.io dicatat dan status koneksi dibuat jujur; klien melewati
+percobaan WebTransport bila tidak ada URL absolut (fallback hardcoded
+`api…/transport` selalu ditolak). Langkah operator + peringatan `NODE_ENV`:
+`docs/10` §10.20.
+
 ## 🔎 Pencarian privat dinyalakan: OHTTP + PIR + OPRF (selfhost, 2026-10-25)
 
 Di selfhost `~/nyx-selfhost` ketiga gerbang sekarang **aktif** (default repo tetap

@@ -207,6 +207,16 @@ export function initSocketListeners() {
     setTimeout(pollSyncMessages, 300);
   });
 
+  // [AUDIT 2026-10-25] Handshake ditolak gateway (mis. `unauthorized`). Tidak
+  // ada reconnect otomatis untuk kasus ini (token/cookie-nya yang salah, bukan
+  // jaringan), jadi jangan pakai setStatus('disconnected') — itu menjadwalkan
+  // timer reconnect yang pasti gagal lagi. Status dibuat jujur supaya banner
+  // tidak berbohong "ESTABLISHING_UPLINK" selamanya.
+  transportClient.on('connect_error', (message) => {
+    console.warn(`[Transport] Realtime tidak terautentikasi: ${message}`);
+    useConnectionStore.setState({ status: 'disconnected' });
+  });
+
   transportClient.on('disconnect', (reason) => {
     useConnectionStore.getState().setStatus('disconnected');
 

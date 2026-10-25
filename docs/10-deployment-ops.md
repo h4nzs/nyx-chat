@@ -175,7 +175,7 @@ tetap manual — lihat §10.15.
 | Var | Purpose |
 |---|---|
 | `VITE_API_URL` | Origin REST API |
-| `VITE_TRANSPORT_URL` | Origin WebTransport; kosong = diturunkan dari `VITE_API_URL` (http→https) |
+| `VITE_TRANSPORT_URL` | Origin WebTransport (mis. `https://rt.nyx-app.my.id:33333`); kosong = diturunkan dari `VITE_API_URL` **hanya bila absolut**. Dengan `VITE_API_URL` relatif, WebTransport dilewati dan klien langsung memakai WSS (§10.20) |
 | `VITE_TRANSPORT_CERT_HASH` | Pin sertifikat sidecar untuk **dev/localhost** (produksi memakai trust CA `rt.nyx-app.my.id`) |
 | `VITE_TURNSTILE_SITE_KEY` | Situs Turnstile — satu-satunya secret yang di-assert `deploy.yml` |
 | `VITE_VAPID_PUBLIC_KEY` | Kunci publik Web Push |
@@ -1319,3 +1319,63 @@ CSRF. Jangan melonggarkan aturan itu ke path lain tanpa alasan yang sama.
 **Rollback.** Hapus `PIR_ENABLED` (router hilang, 404) dan `PIR_OPRF_ENABLED`
 (search kembali ke `usernameHash` legacy), lalu restart API. Sidecar boleh
 dibiarkan mati.
+
+## 10.20 Cookie sesi lintas subdomain — insiden realtime 2026-10-25
+
+**Gejala.** Setelah login, dasbor `/chat` menampilkan banner kuning
+`ESTABLISHING_UPLINK` terus-menerus; konsol mencatat `WebTransport connection
+rejected` dua kali, lalu `wss://api.nyx-app.my.id/socket.io` **101 Switching
+Protocols** tanpa satu pun error lanjutan. Tidak ada `GET /api/users/me/devices`
+maupun `GET /api/conversations` sesudahnya — realtime memang tidak pernah naik.
+
+**Sebab (dua lapis).**
+
+1. **Cookie sesi host-only.** `web/src/lib/api.ts` memakai basis relatif (`/api`),
+   jadi `at`/`rt` diterbitkan oleh `app.nyx-app.my.id`. `setAuthCookies` tidak
+   pernah menyetel `Domain`, sehingga browser **tidak** mengirimkannya ke
+   `api.nyx-app.my.id` — host yang dipakai socket.io (`resolveApiOrigin()`).
+   Gateway lalu menjawab `44{"message":"unauthorized"}` dan menutup transport.
+   socket.io **tidak** mencoba ulang untuk error middleware, jadi gejalanya
+   diam-diam menggantung, bukan gagal-ulang (terverifikasi: `connect_error`
+   `unauthorized` tanpa satu pun `reconnect_attempt`).
+2. **`NODE_ENV` tidak pernah `production` di VPS.** `deploy.yml` menjalankan
+   `pm2 start server/dist/index.js --name nyx-api -i max` **tanpa** NODE_ENV,
+   sedangkan `pm2` tidak menebaknya. Akibatnya `env.nodeEnv = 'development'`:
+   cookie `at` kehilangan `Secure`/`SameSite=None`, dan `cookieOptions.domain`
+   (dulu `isProd ? '.nyx-app.my.id' : undefined`) tidak pernah aktif — terbukti
+   dari `Set-Cookie` CSRF produksi yang tidak membawa `Domain`.
+
+**Perbaikan yang sudah masuk repo.**
+
+- `COOKIE_DOMAIN` (`server/src/config.ts`) — satu nilai untuk cookie sesi
+  (`authCookieOptions()` di `utils/sessionUtils.ts`, dipakai set **dan** clear)
+  dan cookie CSRF. Isi `.nyx-app.my.id` pada deployment yang memisah REST dan
+  realtime; kosongkan pada self-host satu domain.
+- Jalur WSS kini juga mengirim `handshake.auth.token` (access token di memori),
+  jadi handshake tidak lagi bergantung pada cookie lintas-subdomain. Gateway
+  sudah menerimanya sebagai cadangan.
+- `connect_error` socket.io sekarang dicatat + status koneksi dibuat jujur
+  (dulu sunyi total, klien tertinggal di `connecting`).
+
+**Langkah operator (sekali).**
+
+```bash
+# 1. /root/nyx-app/.env  (di-overwrite deploy dari sini, jadi aman)
+#    COOKIE_DOMAIN=.nyx-app.my.id
+#    NODE_ENV=production            # lihat peringatan di bawah
+# 2. deploy ulang, lalu verifikasi dari browser:
+#    - Set-Cookie `at` membawa Domain=.nyx-app.my.id; Secure
+#    - wss://api.nyx-app.my.id/socket.io menerima CONNECT (tidak ada 44 unauthorized)
+#    - banner hilang setelah <=2 dtk dan `GET /api/users/me/devices` muncul
+```
+
+> ⚠ **Menyalakan `NODE_ENV=production` mengaktifkan guard `config.ts`**: API
+> **menolak boot** bila `JWT_SECRET` kosong/`dev-secret`, dan `CSRF_SECRET`
+> menjadi wajib. Periksa dulu `JWT_SECRET` + `CSRF_SECRET` di `.env` VPS sebelum
+> menyalakannya, karena kegagalan di sini = crash-loop `nyx-api`.
+
+> Catatan WebTransport: dengan `VITE_API_URL` relatif, `VITE_TRANSPORT_URL`
+> **harus** absolut (`https://rt.nyx-app.my.id:33333`). Klien sekarang melewati
+> percobaan WT bila tidak ada URL absolut (dulu mencoba
+> `https://api.nyx-app.my.id/transport` yang tidak menyajikan sidecar, sehingga
+> setiap sesi ditolak) dan langsung memakai WSS.

@@ -134,6 +134,11 @@ type TransportEvents = {
   'group:key_request_failed': [data: { conversationId: string; reason: string }];
   'session:request_key_failed': [data: { sessionId: string; targetId: string; reason: string }];
   'handshake:completed': [success: boolean, error?: string];
+  // [AUDIT 2026-10-25] Kegagalan handshake socket.io (mis. middleware gateway
+  // menolak `unauthorized`). Tanpa event ini penolakan itu tidak pernah
+  // dilaporkan: socket tidak "connect" dan tidak ada yang mencatat apa pun,
+  // sehingga status klien tertinggal di 'connecting' selamanya.
+  'connect_error': [message: string];
   
   // Burner Chats
   'burner:receive': [payload: { roomId?: string, ciphertext: string }];
@@ -227,6 +232,18 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       this.connectWss();
       return;
     }
+    // [AUDIT 2026-10-25] Tanpa URL WebTransport yang benar-benar menunjuk
+    // sidecar, percobaan WT hanya membuang ~1,5 dtk + dua error konsol sebelum
+    // jatuh ke WSS. Lebih jujur langsung memakai WSS.
+    if (!resolveTransportUrl(url)) {
+      console.info(
+        '[Transport] VITE_TRANSPORT_URL tidak diset (dan VITE_API_URL relatif) — ' +
+          'WebTransport dilewati, memakai WebSocket.'
+      );
+      this.mode = 'wss';
+      this.connectWss();
+      return;
+    }
     await this.connectWt(url, token, certificateHash);
   }
 
@@ -242,7 +259,12 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     // → counter gagal tercemar oleh race, bukan kegagalan jaringan sungguhan).
     if (this.wtConnecting) return;
     this.lastConnectParams = { url, token, certificateHash };
-    const rawUrl = url || import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
+    // [AUDIT 2026-10-25] Tidak ada lagi fallback hardcoded
+    // `https://api.nyx-app.my.id/transport`: host itu tidak menyajikan jalur
+    // sidecar, sehingga sesi SELALU ditolak ("WebTransport connection
+    // rejected") di deployment dengan VITE_API_URL relatif. Lihat
+    // resolveTransportUrl().
+    const rawUrl = resolveTransportUrl(url)!;
     
     // 1. Get Temporary Transport Ticket for better browser compatibility (Brave/Safari fallback)
     let finalUrlWithTicket = rawUrl;
@@ -321,7 +343,19 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       // SERVER_CAPABILITIES). Sebelum ini jalur WSS selalu "legacy", sehingga
       // jalur ratchet v2 (braid SPQR) tidak pernah dipakai di sini walau kedua
       // peer sudah saling menyatakan mampu in-band (`ackV`).
-      auth: { capabilities: ANNOUNCED_CLIENT_CAPABILITIES },
+      //
+      // [AUDIT 2026-10-25] `token` ikut dikirim: jalur WSS dulu HANYA bergantung
+      // pada cookie `at`. Cookie itu host-only (kecuali COOKIE_DOMAIN di-set),
+      // sedangkan socket menuju `api.nyx-app.my.id` sementara REST dilayani
+      // relatif di `app.nyx-app.my.id` → handshake tanpa cookie → gateway
+      // menjawab `unauthorized` dan klien berhenti di ESTABLISHING_UPLINK.
+      // Gateway sudah menerima `handshake.auth.token` sebagai cadangan
+      // (server/src/realtime/gateway.ts). Dibuat callback supaya token yang
+      // di-refresh tetap terpakai saat reconnect.
+      auth: (cb) => cb({
+        token: useAuthStore.getState().accessToken || undefined,
+        capabilities: ANNOUNCED_CLIENT_CAPABILITIES,
+      }),
     });
     this.socket = socket;
 
@@ -352,6 +386,17 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     socket.on('disconnect', (reason: string) => {
       this.connected = false;
       this.emit('disconnect', reason);
+    });
+
+    // [AUDIT 2026-10-25] Penolakan middleware gateway (mis. `unauthorized`
+    // karena cookie sesi tidak ikut di handshake — lihat COOKIE_DOMAIN di
+    // server/src/config.ts). socket.io TIDAK mencoba ulang untuk error
+    // middleware, jadi tanpa handler ini penolakan tersebut sepenuhnya senyap
+    // dan klien diam di status 'connecting' (banner ESTABLISHING_UPLINK).
+    socket.on('connect_error', (err: Error) => {
+      const message = err?.message || 'connect_error';
+      console.warn(`[Transport] WebSocket ditolak gateway: ${message}`);
+      this.emit('connect_error', message);
     });
 
     // Tangkap semua event masuk dan teruskan ke TransportEvents.
@@ -883,6 +928,23 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       }
     };
   }
+}
+
+/**
+ * URL WebTransport yang benar-benar bisa dipakai, atau '' bila tidak ada.
+ *
+ * Urutan: parameter eksplisit → `VITE_TRANSPORT_URL` → turunan `VITE_API_URL`
+ * (hanya bila absolut). `VITE_API_URL` relatif (`/api`, gaya deploy satu domain)
+ * TIDAK bisa diturunkan menjadi origin WT — dulu hasilnya diteruskan apa adanya
+ * lalu jatuh ke host hardcoded yang tidak menyajikan sidecar.
+ */
+export function resolveTransportUrl(url: string): string {
+  if (url && /^https?:\/\//i.test(url)) return url;
+  const configured = String(import.meta.env.VITE_TRANSPORT_URL || '').trim();
+  if (configured) return configured;
+  const apiUrl = String(import.meta.env.VITE_API_URL || '').trim();
+  if (/^https?:\/\//i.test(apiUrl)) return apiUrl.replace(/^http/i, 'https');
+  return '';
 }
 
 export const transportClient = new NyxWebTransportClient();

@@ -31,6 +31,11 @@ flowchart LR
 - Terminates WebTransport; **one user = one device** (a new session kicks the previous with `KICK` / "Logged in on another device").
 - **Server-initiated `KICK` (opcode `0x07`) is forwarded as a frame *before* the connection is closed** (payload intact: `{reason?, deviceId?}`) and only then torn down with "Kicked by server". The client maps that payload to the same device-scoped `force_logout` flow the WSS gateway uses (`SESSION_REVOKED`, session revoke, device kick, hardware mismatch → `auth:banned` when the payload carries only a `reason`). Without the frame the WT path could never log a revoked device out immediately — it only saw a generic disconnect reason.
 - Two auth paths: URL `?ticket=` JWT (HS256, 15 s) or the bidi AUTH frame.
+- **WSS fallback auth:** `handshake.auth.token` (access token di memori) selain
+  cookie `at`. Sejak 2026-10-25 jalur WSS selalu mengirim keduanya — cookie saja
+  tidak cukup ketika REST dan relay berada di subdomain berbeda dan cookie sesi
+  host-only (`docs/10` §10.20). `connect_error` dari gateway kini dicatat dan
+  menurunkan status koneksi klien (dulu sunyi, klien diam di `connecting`).
 - Three parallel reader loops (bidi / uni-stream / datagram) publish frames to `nyx:upstream:<opcode>`; chaff `0x00` is dropped.
 - Subscribes `nyx:downstream`, frames `[op|len|payload]` back to the target session (datagram vs stream via `is_datagram`).
 - On connection close, publishes opcode `99` (disconnect) for Node cleanup.

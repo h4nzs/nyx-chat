@@ -32,6 +32,32 @@ if (!backupKeySecretRaw && process.env.NODE_ENV === 'production') {
   console.warn('⚠️  BACKUP_KEY_SECRET not set. Falling back to JWT_SECRET for backup object keys; rotating JWT_SECRET will orphan existing cloud backups. Set BACKUP_KEY_SECRET to an independent stable random value in your PRODUCTION .env file.');
 }
 
+/**
+ * [OPS 2026-10-25] Domain untuk cookie sesi (`at`/`rt`) dan cookie CSRF.
+ *
+ * Deployment resmi memecah origin: REST dilayani di `app.nyx-app.my.id`
+ * (relatif `/api`), sedangkan relay realtime dilayani di `api.nyx-app.my.id`.
+ * Cookie tanpa `Domain` bersifat **host-only**: browser hanya mengirimkannya
+ * kembali ke host yang menerbitkannya. Akibatnya handshake socket.io ke
+ * `api.nyx-app.my.id` tidak membawa `at`, gateway menolak (`unauthorized`),
+ * dan klien berhenti di `ESTABLISHING_UPLINK` selamanya — insiden 2026-10-25.
+ *
+ * Kosong = perilaku lama (host-only). Deployment satu-domain (self-host)
+ * memang tidak perlu menyetel nilai ini.
+ */
+function normalizeCookieDomain(raw: string | undefined): string | undefined {
+  const value = (raw || '').trim();
+  if (!value) return undefined;
+  if (/^https?:\/\//i.test(value) || value.includes('/')) {
+    console.warn('⚠️  COOKIE_DOMAIN harus berupa domain (mis. `.nyx-app.my.id`), bukan URL — diabaikan.');
+    return undefined;
+  }
+  // `Domain=.localhost` ditolak browser; titik hanya ditambahkan pada nama
+  // domain bertitik (subdomain) supaya bentuk baku `.example.tld` tetap dipakai.
+  if (value.includes('.') && !value.startsWith('.')) return `.${value}`;
+  return value;
+}
+
 export const env = {
   port: parseInt(process.env.PORT || '4000', 10),
   corsOrigin: (process.env.CORS_ORIGIN || 'https://app.nyx-app.my.id')
@@ -56,6 +82,7 @@ export const env = {
   })(),
   uploadDir: process.env.UPLOAD_DIR || 'uploads',
   nodeEnv: process.env.NODE_ENV || 'development',
+  cookieDomain: normalizeCookieDomain(process.env.COOKIE_DOMAIN),
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
   chatSecret: process.env.CHAT_SECRET || '',

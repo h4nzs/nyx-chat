@@ -8,7 +8,7 @@ import { ApiError } from '../utils/errors.js'
 import { newJti, refreshExpiryDate, signAccessToken, verifyJwt, signTransportTicket } from '../utils/jwt.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
-import { clearAuthCookies, isEphemeralGuestSubject, revokeFamily } from '../utils/sessionUtils.js'
+import { authCookieOptions, clearAuthCookies, isEphemeralGuestSubject, revokeFamily } from '../utils/sessionUtils.js'
 // [BUGFIX 2026-10-18] Klasifikasi replay rotasi refresh token (lihat util-nya).
 import {
   classifyRefreshReplay,
@@ -149,8 +149,10 @@ const rpID = getRpID()
 const expectedOrigin = env.corsOrigin || 'https://nyx-app.my.id'
 
 function setAuthCookies (res: Response, { access, refresh }: { access: string; refresh: string }) {
-  const isProd = env.nodeEnv === 'production'
-  const cookieOptions: CookieOptions = { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', path: '/' }
+  // [OPS 2026-10-25] Opsi (termasuk `domain` dari COOKIE_DOMAIN) dipakai bersama
+  // `clearAuthCookies` supaya cookie tidak “set di satu domain, hapus di domain
+  // lain”. Lihat utils/sessionUtils.ts.
+  const cookieOptions: CookieOptions = authCookieOptions()
   res.cookie('at', access, { ...cookieOptions, maxAge: 1000 * 60 * 15 })
   res.cookie('rt', refresh, { ...cookieOptions, maxAge: 1000 * 60 * 60 * 24 * 30 })
 }

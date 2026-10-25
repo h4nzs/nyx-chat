@@ -1,10 +1,30 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import type { Response } from 'express'
+import type { CookieOptions, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { redisClient } from '../lib/redis.js'
 import { env } from '../config.js'
+
+/**
+ * Opsi cookie sesi — SATU sumber untuk `setAuthCookies` (routes/auth.ts) dan
+ * `clearAuthCookies` di bawah. Kalau kedua sisi menyimpang (mis. `domain`
+ * hanya ada saat set), cookie tidak pernah benar-benar terhapus.
+ *
+ * [OPS 2026-10-25] `domain` (COOKIE_DOMAIN) wajib ada pada deployment yang
+ * memisahkan REST (`app.*`) dari relay realtime (`api.*`): cookie host-only
+ * tidak dikirim ke `api.*` sehingga handshake socket.io ditolak `unauthorized`.
+ */
+export function authCookieOptions (): CookieOptions {
+  const isProd = env.nodeEnv === 'production'
+  return {
+    path: '/',
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    ...(env.cookieDomain ? { domain: env.cookieDomain } : {}),
+  }
+}
 
 /**
  * Hapus cookie auth (access + refresh) dengan opsi yang SAMA PERSIS dengan
@@ -12,8 +32,7 @@ import { env } from '../config.js'
  * (mis. sameSite 'strict' vs 'lax') → cookie bisa gagal terhapus.
  */
 export function clearAuthCookies (res: Response): void {
-  const isProd = env.nodeEnv === 'production'
-  const options = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' as const : 'lax' as const }
+  const options = authCookieOptions()
   res.clearCookie('at', options)
   res.clearCookie('rt', options)
 }

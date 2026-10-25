@@ -20,7 +20,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { isEphemeralGuestSubject } from '../src/utils/sessionUtils.js';
+import { authCookieOptions, isEphemeralGuestSubject } from '../src/utils/sessionUtils.js';
+import { env } from '../src/config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +33,47 @@ test('isEphemeralGuestSubject: hanya subjek `guest_*` yang ephemeral', () => {
   assert.equal(isEphemeralGuestSubject(undefined), false);
   assert.equal(isEphemeralGuestSubject(null), false);
   assert.equal(isEphemeralGuestSubject(42), false);
+});
+
+// [OPS 2026-10-25] Insiden realtime: cookie sesi host-only tidak dikirim ke
+// `api.nyx-app.my.id` (host socket.io) sehingga handshake ditolak `unauthorized`.
+// Test ini mengunci dua hal: COOKIE_DOMAIN benar-benar masuk ke opsi cookie, dan
+// set/clear memakai SATU sumber opsi (kalau `domain` hanya ada saat set, logout
+// meninggalkan cookie yang tak pernah terhapus).
+test('authCookieOptions: COOKIE_DOMAIN ikut ke cookie sesi; kosong = host-only', () => {
+  const original = env.cookieDomain;
+  try {
+    env.cookieDomain = undefined;
+    assert.equal(
+      authCookieOptions().domain,
+      undefined,
+      'tanpa COOKIE_DOMAIN cookie tetap host-only (benar untuk self-host satu domain)'
+    );
+
+    env.cookieDomain = '.nyx-app.my.id';
+    const options = authCookieOptions();
+    assert.equal(options.domain, '.nyx-app.my.id');
+    assert.equal(options.path, '/');
+    assert.equal(options.httpOnly, true);
+  } finally {
+    env.cookieDomain = original;
+  }
+});
+
+test('guardrail: set dan clear cookie sesi memakai authCookieOptions() yang sama', () => {
+  const sessionSrc = readFileSync(path.join(here, '../src/utils/sessionUtils.ts'), 'utf8');
+  assert.match(
+    sessionSrc,
+    /export function clearAuthCookies[\s\S]{0,300}authCookieOptions\(\)/,
+    'clearAuthCookies harus memakai authCookieOptions()'
+  );
+
+  const authSrc = readFileSync(path.join(here, '../src/routes/auth.ts'), 'utf8');
+  assert.match(
+    authSrc,
+    /function setAuthCookies[\s\S]{0,600}authCookieOptions\(\)/,
+    'setAuthCookies harus memakai authCookieOptions()'
+  );
 });
 
 test('guardrail: /api/auth/refresh menolak guest TANPA clearAuthCookies', () => {

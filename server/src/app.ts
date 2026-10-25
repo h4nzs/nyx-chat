@@ -370,7 +370,11 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
     sameSite: "none", 
     secure: true, 
     path: "/",
-    domain: isProd ? ".nyx-app.my.id" : undefined, 
+    // [OPS 2026-10-25] Dulu `isProd ? ".nyx-app.my.id" : undefined` — domain
+    // tetap hilang di produksi karena proses pm2 di VPS tidak pernah diberi
+    // NODE_ENV=production (lihat deploy.yml). Sekarang eksplisit: ikut
+    // COOKIE_DOMAIN, sama dengan cookie sesi (`authCookieOptions`).
+    domain: env.cookieDomain,
   },
   size: 64,
   ignoredMethods: ["GET", "HEAD", "OPTIONS"],
