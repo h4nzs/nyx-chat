@@ -32,6 +32,10 @@ import type { Server as HttpServer } from 'http';
 import { redisClient } from '../lib/redis.js';
 import { prisma } from '../lib/prisma.js';
 import { verifyAuth } from '../middleware/auth.js';
+// [AUDIT 2026-10-24] Gerbang token (blacklist JTI + ban) dipakai bersama REST.
+import { evaluateTokenGate, type TokenGateDb } from '../utils/authGate.js';
+// [AUDIT 2026-10-24] Satu allowlist origin untuk REST dan WSS.
+import { isAllowedOrigin as isOriginAllowed } from '../utils/allowedOrigin.js';
 import { env } from '../config.js';
 import { TransportOpCode } from '@nyx/shared';
 import type { AuthPayload } from '../types/auth.js';
@@ -59,46 +63,8 @@ import {
   type RealtimeContext,
 } from '../network/realtimeHandlers.js';
 
-// --- CORS allowlist (mirrors app.ts isAllowedOrigin) ---
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function isAllowedOrigin(origin: string): boolean {
-  if (!origin) return true;
-  const isProd = env.nodeEnv === 'production';
-  const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
-  const allowedOrigins = [
-    ...baseOrigins,
-    'https://nyx-app.my.id',
-    'https://www.nyx-app.my.id',
-    'https://api.nyx-app.my.id',
-    'https://app.nyx-app.my.id',
-    'https://rt.nyx-app.my.id',
-    'https://storage.nyx-app.my.id',
-    ...(!isProd
-      ? [
-          'http://localhost:5173',
-          'http://localhost:4173',
-          'http://nyx-app.my.id',
-          'http://www.nyx-app.my.id',
-          'http://app.nyx-app.my.id',
-          'http://api.nyx-app.my.id',
-          'http://rt.nyx-app.my.id',
-          'http://storage.nyx-app.my.id',
-        ]
-      : []),
-  ];
-  return allowedOrigins.some((allowedOrigin) => {
-    if (allowedOrigin.includes('*')) {
-      const escapedOrigin = escapeRegExp(allowedOrigin);
-      const pattern = escapedOrigin.replace(/\\\*/g, '.*');
-      const regex = new RegExp('^' + pattern + '$');
-      return regex.test(origin);
-    }
-    return allowedOrigin === origin;
-  });
-}
+// [AUDIT 2026-10-24] Allowlist origin dipakai bersama REST
+// (`utils/allowedOrigin.ts`) — tidak ada salinan kedua di sini.
 
 // --- Manual cookie parser (no new dependency) ---
 function parseAtCookie(cookieHeader?: string): string | null {
@@ -220,7 +186,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
     path: '/socket.io',
     cors: {
       origin: (origin, callback) => {
-        if (isAllowedOrigin(origin || '')) callback(null, true);
+        if (isOriginAllowed(origin || '', { corsOrigin: env.corsOrigin, isProd: env.nodeEnv === 'production' })) callback(null, true);
         else {
           console.warn(`[WS-Gateway] Blocked by CORS: ${origin}`);
           callback(null, false);
@@ -247,15 +213,35 @@ export function attachWssGateway(httpServer: HttpServer): void {
       socket.disconnect(true);
       return next(new Error('unauthorized'));
     }
-    socket.data.user = payload;
-    // [docs/29 §5.6 / docs/33 §33.7] Kapabilitas klien WSS dibaca dari handshake
-    // dan TIDAK pernah menggagalkan koneksi: bentuk cacat = legacy (`[]`).
-    // Nilai mentah disimpan apa adanya karena validasi/irisan terjadi di
-    // `utils/transportCapability.ts` (satu tempat, bisa diuji tanpa socket).
-    socket.data.announcedCapabilities = parseAnnouncedCapabilities(
-      socket.handshake.auth?.capabilities
-    );
-    next();
+
+    // [AUDIT 2026-10-24] Verify tanda tangan saja tidak cukup: token yang sudah
+    // di-revoke (`revoked_jti`) atau akun yang sudah di-ban sebelumnya lolos di
+    // sini, jadi ban/revokasi hanya memutus koneksi yang sedang hidup (KICK) —
+    // klien reconnect dengan cookie `at` yang sama dan diterima lagi sampai
+    // tokennya kedaluwarsa. Cek per KONEKSI (bukan per pesan), sama seperti REST.
+    void evaluateTokenGate(payload, { redis: redisClient, db: prisma as unknown as TokenGateDb })
+      .then((gate) => {
+        if (!gate.ok) {
+          console.warn(`[WS-Gateway] Koneksi ditolak: ${gate.error}`);
+          socket.disconnect(true);
+          return next(new Error('unauthorized'));
+        }
+        socket.data.user = payload;
+        // [docs/29 §5.6 / docs/33 §33.7] Kapabilitas klien WSS dibaca dari handshake
+        // dan TIDAK pernah menggagalkan koneksi: bentuk cacat = legacy (`[]`).
+        // Nilai mentah disimpan apa adanya karena validasi/irisan terjadi di
+        // `utils/transportCapability.ts` (satu tempat, bisa diuji tanpa socket).
+        socket.data.announcedCapabilities = parseAnnouncedCapabilities(
+          socket.handshake.auth?.capabilities
+        );
+        next();
+      })
+      .catch((err) => {
+        // Gerbang yang error tak terduga tidak boleh meloloskan sesi: tolak.
+        console.error('[WS-Gateway] Gagal memeriksa status token:', err);
+        socket.disconnect(true);
+        next(new Error('unauthorized'));
+      });
   });
 
   io.on('connection', (socket: Socket) => {

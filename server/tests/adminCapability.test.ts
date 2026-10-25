@@ -8,7 +8,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { extractHeader, hashAdminToken, isAdminTokenValid } from '../src/utils/adminCapability.js'
+import {
+  extractHeader,
+  hashAdminToken,
+  isAdminTokenValid,
+  requireAdminCapability,
+  type AdminCapabilityDb,
+} from '../src/utils/adminCapability.js'
 import { safeEqualStrings } from '../src/utils/validate.js'
 
 // --- hashAdminToken ---
@@ -100,3 +106,49 @@ test('hash dipresentasikan sebagai token (salah arah) → false', () => {
   // Penyerang mengirim HASH sebagai token: SHA-256(hash) ≠ hash → ditolak.
   assert.equal(isAdminTokenValid(hashAdminToken(token), hashAdminToken(token)), false)
 })
+
+// --- requireAdminCapability ---
+
+function fakeDb(hash: string | null): AdminCapabilityDb {
+  return {
+    conversation: {
+      findUnique: async () => ({ adminSecretHash: hash }),
+    },
+  };
+}
+
+test('requireAdminCapability: conversation hilang → 404', async () => {
+  const missing: AdminCapabilityDb = {
+    conversation: { findUnique: async () => null },
+  };
+  assert.deepEqual(await requireAdminCapability(missing, 'missing', {}), {
+    ok: false,
+    status: 404,
+    error: 'Not found',
+  });
+});
+
+test('requireAdminCapability: token salah/hilang → 403', async () => {
+  const db = fakeDb(hashAdminToken('admin-token'));
+  assert.deepEqual(await requireAdminCapability(db, 'conv', {}), {
+    ok: false,
+    status: 403,
+    error: 'ADMIN_AUTH_REQUIRED: Invalid or missing X-Admin-Token',
+  });
+  assert.deepEqual(
+    await requireAdminCapability(db, 'conv', { 'x-admin-token': 'wrong' }),
+    {
+      ok: false,
+      status: 403,
+      error: 'ADMIN_AUTH_REQUIRED: Invalid or missing X-Admin-Token',
+    }
+  );
+});
+
+test('requireAdminCapability: token valid → ok', async () => {
+  const db = fakeDb(hashAdminToken('admin-token'));
+  assert.deepEqual(
+    await requireAdminCapability(db, 'conv', { 'x-admin-token': 'admin-token' }),
+    { ok: true }
+  );
+});

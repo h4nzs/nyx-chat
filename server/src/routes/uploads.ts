@@ -1,11 +1,12 @@
-import { Router, Request, Response, NextFunction } from 'express'
+import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
-import { ApiError } from '../utils/errors.js'
 import { env } from '../config.js'
 import { nanoid } from 'nanoid'
 import { getPresignedUploadUrl } from '../utils/r2.js' 
 import { uploadLimiter } from '../middleware/rateLimiter.js'
+// [AUDIT 2026-10-24] Batas ukuran ditetapkan server (dan dikunci di presign).
+import { resolveUploadPolicy, validateUploadSize } from '../utils/uploadLimits.js'
 
 const router: Router = Router()
 
@@ -44,26 +45,24 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       return res.status(400).json({ error: "Protocol violation: Only encrypted 'application/octet-stream' payloads are permitted." })
     }
 
-    const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0
-    if (fileSize > 0) {
-      // Unified Zero-Knowledge Limits (in Bytes) based purely on destination folder
-      const AVATAR_LIMIT = 5 * 1024 * 1024;      // 5 MB for avatars
-      const maxAttachmentMB = user.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
-      const ATTACHMENT_LIMIT = maxAttachmentMB * 1024 * 1024; // 100 MB or 500 MB max for chat attachments
-      
-      const maxSize = (targetFolder === 'avatars' || targetFolder === 'groups') ? AVATAR_LIMIT : ATTACHMENT_LIMIT;
-
-      // Encryption Overhead Buffer (IV + Auth Tag + Margin)
-      // AES-GCM adds ~28 bytes. We add 1KB to be safe.
-      const ENCRYPTION_OVERHEAD = 1024; 
-      const allowedMax = maxSize + ENCRYPTION_OVERHEAD;
-
-      if (fileSize > allowedMax) {
-        const allowedMaxMB = (maxSize / (1024 * 1024)).toFixed(0)
-        return res.status(400).json({
-          error: `Payload too large. Maximum size for ${targetFolder} is ${allowedMaxMB}MB.`
-        })
-      }
+    // [AUDIT 2026-10-24] Ukuran ditetapkan server dan ikut ditandatangani
+    // (`ContentLength` → `X-Amz-SignedHeaders`), sehingga R2 menolak body yang
+    // lebih besar/kecil dari yang disetujui. `fileSize` kini WAJIB: tanpa angka
+    // dari klien tidak ada yang bisa dikunci — dan presign tanpa batas adalah
+    // lubang yang sedang ditutup ini.
+    const policy = resolveUploadPolicy(
+      targetFolder === 'avatars' || targetFolder === 'groups' ? targetFolder : 'attachments',
+      user.subscriptionTier
+    );
+    const sizeCheck = validateUploadSize(req.body.fileSize, policy);
+    if (!sizeCheck.ok) {
+      return res.status(400).json({
+        error: sizeCheck.error === 'FILE_SIZE_REQUIRED'
+          ? 'FILE_SIZE_REQUIRED: fileSize (byte) wajib dikirim agar server bisa mengunci ukuran upload.'
+          : `Payload too large. Maximum size for ${targetFolder} is ${sizeCheck.maxMB}MB.`,
+        code: sizeCheck.error,
+        maxMB: sizeCheck.maxMB
+      });
     }
 
     const ext = fileName.split('.').pop()?.toLowerCase()
@@ -88,7 +87,7 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
 
     // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
     // We pass both urlTtl (link expiry) and deleteAt (file metadata expiry)
-    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', urlTtl, deleteAt)
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', urlTtl, sizeCheck.size, deleteAt)
 
     // Safe logging - do not log filename
     // console.log(`[Upload] Presigned URL generated for user ${req.user!.id}`);
@@ -121,17 +120,18 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
       return res.status(400).json({ error: "Protocol violation: Only encrypted 'application/octet-stream' payloads are permitted." })
     }
 
-    const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0
-    if (fileSize > 0) {
-      const ATTACHMENT_LIMIT = 50 * 1024 * 1024; // 50 MB max for burner
-      const ENCRYPTION_OVERHEAD = 1024; 
-      const allowedMax = ATTACHMENT_LIMIT + ENCRYPTION_OVERHEAD;
-
-      if (fileSize > allowedMax) {
-        return res.status(400).json({
-          error: `Payload too large. Maximum size is 50MB.`
-        })
-      }
+    // [AUDIT 2026-10-24] Sama seperti jalur ber-login: angka dari klien dipakai
+    // sebagai `ContentLength` yang ditandatangani, jadi batas 50 MB ditegakkan
+    // R2, bukan hanya dipercaya dari body.
+    const sizeCheck = validateUploadSize(req.body.fileSize, resolveUploadPolicy('burner', null));
+    if (!sizeCheck.ok) {
+      return res.status(400).json({
+        error: sizeCheck.error === 'FILE_SIZE_REQUIRED'
+          ? 'FILE_SIZE_REQUIRED: fileSize (byte) wajib dikirim agar server bisa mengunci ukuran upload.'
+          : 'Payload too large. Maximum size is 50MB.',
+        code: sizeCheck.error,
+        maxMB: sizeCheck.maxMB
+      });
     }
 
     const ext = fileName.split('.').pop()?.toLowerCase()
@@ -147,7 +147,7 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
     }
 
     const key = `burner/${nanoid()}.${ext}`
-    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', 300, deleteAt)
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', 300, sizeCheck.size, deleteAt)
 
     res.json({
       uploadUrl,
@@ -163,33 +163,10 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
 // User avatars are now E2E Encrypted and updated via PUT /api/users/me along with the profile.
 // The server cannot decrypt the profile to extract the old avatar URL, so client must handle garbage collection or rely on orphaned file cleanup.
 
-// === 1. SIMPAN AVATAR GROUP ===
-router.post(
-  '/groups/:id/avatar',
-  uploadLimiter,
-  requireAuth,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { fileUrl } = req.body
-      const groupId = req.params.id
-
-      if (!req.user) throw new ApiError(401, 'Unauthorized')
-      if (!fileUrl) throw new ApiError(400, 'Missing fileUrl.')
-
-      const oldGroup = await prisma.conversation.findUnique({
-        where: { id: String(groupId) }
-      })
-      if (!oldGroup) throw new ApiError(404, 'Group not found')
-
-      // Cukup kembalikan file URL ke klien
-      // Client akan men-generate ulang encryptedMetadata dan memanggil endpoint update.
-      res.json({
-        fileUrl,
-        fileKey: req.file?.key
-      })
-    } catch (e) {
-      next(e)
-    }
-  })
+// [AUDIT 2026-10-24] Route `POST /groups/:id/avatar` DIHAPUS: router ini tidak
+// memasang multer sehingga `req.file` selalu undefined, handler hanya
+// mengembalikan `fileUrl` yang dikirim klien tanpa menulis apa pun, dan avatar
+// grup kini lewat `PUT /api/conversations/:id/details`. Ia hanya memotong
+// kuota `uploadLimiter` (20/jam) milik pengguna.
 
 export default router

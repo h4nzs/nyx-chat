@@ -391,6 +391,23 @@ export const BACKUP_OPS = defineCounter(
   ['op', 'result']
 );
 
+/**
+ * [docs/37 §37.4 P8] Jitter rilis pesan grup (`GROUP_RELEASE_JITTER_MS`).
+ *
+ * Satu-satunya cara membuktikan fitur ini benar-benar bekerja (dan tidak
+ * membuat relay menunggu selamanya) adalah histogram delay yang benar-benar
+ * dipakai. Tanpa label: tidak ada conversationId, jadi deret waktu tidak bisa
+ * dipakai mengorelasikan grup mana yang sedang ramai.
+ *
+ * Bucket dalam milidetik (nama metrik menyebut satuannya); batas atas 2000
+ * sama dengan `MAX_JITTER_MS` di `utils/releaseJitter.ts`.
+ */
+export const GROUP_RELEASE_DELAY_MS = defineHistogram(
+  'nyx_group_release_delay_ms',
+  'Delay jitter rilis pesan grup yang benar-benar dipakai (ms)',
+  [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2000]
+);
+
 /** [docs/30 §30.5 WS-A] Penulisan entri log Key Transparency, per hasil. Tanpa identitas. */
 export const KT_WRITES = defineCounter(
   'nyx_kt_writes_total',
@@ -635,4 +652,40 @@ export const LEGACY_V1_USAGE = defineCounter(
   'nyx_legacy_v1_usage_total',
   'Pemakaian jalur legacy v1 yang diamati server, per jenis',
   ['path']
+);
+
+/**
+ * [docs/37 §37.3.3] Anonymous group sync + rotasi/refresh token.
+ *
+ * Label hanya enum hasil: `ok|stale|rate_limited|refreshed|epoch_rotated|membership_revoked`.
+ * Tidak ada token/hash/conversationId — jalur ini justru dirancang supaya
+ * server tidak bisa mengaitkan aktivitas sync dengan identitas.
+ */
+export const GROUP_SYNC = defineCounter(
+  'nyx_group_sync_total',
+  'Operasi token/sync grup (anonim), per hasil',
+  ['result']
+);
+
+/**
+ * [docs/37 §37.3.3] Privacy Pass: issuance/redemption, per jalur + hasil.
+ * Label hanya enum (`issue|redeem`, `ok|denied|invalid|spent|rate_limited`).
+ * Tidak ada keyId, token, atau conversationId — metrik ini tidak boleh
+ * memulihkan link issuance ↔ redemption.
+ */
+export const PRIVACY_PASS = defineCounter(
+  'nyx_privacy_pass_total',
+  'Operasi issuance/redemption Privacy Pass, per jalur dan hasil',
+  ['route', 'result']
+);
+
+/**
+ * [docs/37 §37.3.5] Presentasi credential, per hasil penolakan.
+ * Label = enum alasan (`ok|bad_magic|epoch_mismatch|suite_not_allowed|…`) —
+ * tidak ada suite/keyVersion/groupId sebagai nilai bebas.
+ */
+export const CREDENTIAL_PRESENT = defineCounter(
+  'nyx_credential_present_total',
+  'Presentasi credential grup, per hasil verifikasi',
+  ['result']
 );

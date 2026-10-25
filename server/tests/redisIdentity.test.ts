@@ -155,10 +155,21 @@ test('D14 wiring: tidak ada jalur tulis Redis yang memakai userId asli', () => {
   const handlers = read('../src/network/realtimeHandlers.ts');
 
   // Member SET yang dipakai sebagai target kirim = seal deterministik.
-  assert.match(handlers, /sAdd\(`burner:room:\$\{roomId\}`, await sealIdentity\(userId\)\)/, 'burner:room memakai member ter-seal');
-  assert.match(handlers, /sAdd\(`migration:room:\$\{data\}`, await sealIdentity\(userId\)\)/, 'migration:room memakai member ter-seal');
+  // [AUDIT 2026-10-24] Penulisan set anggota pindah ke `utils/roomMembership.ts`
+  // (agar disconnect tidak perlu SCAN keyspace). Handler tetap wajib mengirim
+  // member TER-SEAL, dan util wajib menulis nilai itu apa adanya.
+  const membership = read('../src/utils/roomMembership.ts');
+  assert.equal(
+    (handlers.match(/sealedMember: await sealIdentity\(userId\)/g) || []).length,
+    3,
+    'burner/migration join mengirim member ter-seal'
+  );
+  assert.match(membership, /client\.sAdd\(roomKey\(args\.kind, args\.roomId\), args\.sealedMember\)/, 'roomMembership menulis member ter-seal');
+  assert.doesNotMatch(membership, /sAdd\([^)]*userId/, 'roomMembership tidak pernah menulis userId mentah');
   assert.match(handlers, /`migration_owner:\$\{roomId\}`, await sealIdentity\(userId\)/, 'migration_owner ter-seal');
   assert.match(bridge, /sealIdentity\(userId\)/, 'cleanup disconnect menyamakan member ter-seal');
+  assert.match(bridge, /leaveAllRooms\(/, 'cleanup disconnect memakai index per-user, bukan SCAN keyspace');
+  assert.doesNotMatch(bridge, /SCAN.*burner:room/, 'cleanup disconnect tidak lagi memindai keyspace');
 
   // Nilai linking_token memuat identitas → disimpan sebagai ciphertext.
   assert.match(

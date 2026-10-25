@@ -19,7 +19,7 @@ import { powRateKey, resolvePowIdentity } from '../utils/powIdentity.js'
 import { cfAwareClientIp } from '../utils/clientIp.js'
 import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
-import { authLimiter } from '../middleware/rateLimiter.js'
+import { authLimiter, burnerLimiter } from '../middleware/rateLimiter.js'
 import { getSodium } from '../lib/sodium.js'
 import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
 import {
@@ -29,6 +29,7 @@ import {
   openAtRest,
   pepperedIdentifier,
   sealAtRest,
+  sealedLookupCandidates,
 } from '../utils/atRestSecrets.js'
 import { ensureUserShareId } from '../utils/userShareId.js'
 // [LINK 2026-10-18] State machine pairing perangkat lewat QR (token → pending →
@@ -764,7 +765,9 @@ router.post('/login', authLimiter, zodValidate({
  * Endpoint khusus untuk memberikan JWT sementara kepada Guest (Burner Chat).
  * Tanpa password, tanpa registrasi permanen.
  */
-router.post('/burner', async (req, res, next) => {
+// [AUDIT 2026-10-24] Guest = identitas baru + bucket rate limit baru, jadi
+// pembuatannya harus dibatasi per IP (lihat `burnerLimiter`).
+router.post('/burner', burnerLimiter, async (req, res, next) => {
   try {
     const guestId = `guest_${crypto.randomUUID().substring(0, 8)}`;
     const guestDeviceId = `burner_${crypto.randomUUID().substring(0, 8)}`;
@@ -1337,6 +1340,19 @@ router.post('/logout-all', requireAuth, async (req, res, next) => {
       await invalidateActiveDeviceCache(req.user.id, redisClient);
     } catch (_re) {}
 
+    // [AUDIT 2026-10-24] Revokasi token saja TIDAK memutus sesi yang sedang
+    // hidup: relay realtime tidak membaca daftar blacklist per frame, jadi
+    // socket yang sudah terbuka terus mengirim & menerima pesan setelah
+    // "All N sessions terminated". Mirror `DELETE /api/sessions/:jti`
+    // (routes/sessions.ts): beri tahu klien lalu tutup socket-nya.
+    try {
+      const { emitEventToUser, sendJsonToUser } = await import('../network/redisBridge.js');
+      await emitEventToUser(req.user.id, 'force_logout', { reason: 'logout_all' });
+      await sendJsonToUser(req.user.id, TransportOpCode.KICK, { reason: 'LOGOUT_ALL' });
+    } catch (err) {
+      console.error('[Auth] Failed to send KICK/force_logout for logout-all:', err);
+    }
+
     res.json({ message: `All ${updated.count} sessions terminated.` });
   } catch (e) { next(e); }
 });
@@ -1374,7 +1390,8 @@ router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
   if (endpoint) {
     // [docs/28 Tier 1.5 / D10] endpoint tersimpan TER-SEAL → lookup dengan seal.
-    try { await prisma.pushSubscription.deleteMany({ where: { endpointSealed: await sealAtRest(endpoint) } }) } catch (_e) {}
+    // [docs/37 P6] `in` = kandidat kunci aktif + legacy (baris pra-rotasi at-rest).
+    try { await prisma.pushSubscription.deleteMany({ where: { endpointSealed: { in: await sealedLookupCandidates(endpoint) } } }) } catch (_e) {}
   }
   try {
     const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string; sub?: string };

@@ -38,6 +38,11 @@ const CSRF_TIMEOUT_MS = 10_000;
 export interface ApiRequestOptions extends RequestInit {
   /** Override timeout per-call (ms). 0 → tanpa timeout (jalur streaming panjang). */
   timeoutMs?: number;
+  /**
+   * Jalur token-only (sync/mailbox grup): jangan kirim cookie, installation ID,
+   * atau CSRF. Server tidak boleh bisa mengaitkan request ini ke akun.
+   */
+  anonymous?: boolean;
 }
 
 /**
@@ -154,10 +159,11 @@ export async function api<T = unknown>(
   path: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const userHeaders = (options.headers as Record<string, string> | undefined) || {};
+  const { anonymous = false, ...requestOptions } = options;
+  const userHeaders = (requestOptions.headers as Record<string, string> | undefined) || {};
   const hasInstallationId = Object.keys(userHeaders).some(k => k.toLowerCase() === 'x-nyx-installation-id');
   const headers: Record<string, string> = {
-    ...(hasInstallationId ? {} : { 'x-nyx-installation-id': await getClientInstallationId() }),
+    ...(anonymous || hasInstallationId ? {} : { 'x-nyx-installation-id': await getClientInstallationId() }),
     // [R2 2026-10-15] Versi build dikirim di setiap request. Server memakainya
     // untuk menolak klien yang terlalu tua untuk protokol terkini (426
     // `CLIENT_TOO_OLD`) — jalur ini yang membuat "klien lama kehilangan kunci
@@ -166,14 +172,18 @@ export async function api<T = unknown>(
     ...userHeaders,
   };
 
-  // Attach CSRF Token hanya untuk method non-GET (mutasi)
+  // Attach CSRF Token hanya untuk method non-GET (mutasi). Jalur anonim
+  // (token di body) tidak punya cookie/sesi, jadi CSRF tidak berlaku — header
+  // content-type tetap dipasang.
   if (options.method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method.toUpperCase())) {
     if (!(options.body instanceof FormData)) {
         headers['Content-Type'] = 'application/json';
     }
-    // Coba ambil token, kalau gagal lanjut aja (mungkin endpoint public)
-    const token = await getCsrfToken().catch(() => "");
-    if (token) headers['CSRF-Token'] = token;
+    if (!anonymous) {
+      // Coba ambil token, kalau gagal lanjut aja (mungkin endpoint public)
+      const token = await getCsrfToken().catch(() => "");
+      if (token) headers['CSRF-Token'] = token;
+    }
   }
 
   // Timeout mencakup SELURUH siklus request (fetch + pembacaan body) — cancel()
@@ -184,8 +194,8 @@ export async function api<T = unknown>(
   try {
     const res = await fetch(API_URL + path, {
       cache: 'no-store', // Disable browser caching
-      ...options,
-      credentials: "include", // Penting untuk kirim Cookie (RefreshToken/Session)
+      ...requestOptions,
+      credentials: anonymous ? 'omit' : 'include', // Anonim: jangan kirim RefreshToken/Session
       headers,
       // SETELAH spread options: selalu pakai sinyal gabungan (timeout + eksternal)
       signal: combinedSignal,

@@ -13,7 +13,8 @@
  * klien Prisma palsu (`tests/groupAccess.test.ts`), dengan urutan & kode status
  * yang persis sama dengan yang dilayani route:
  *
- *   - anggota (tambah/kick)  : 404 bila conversation hilang → 403 tanpa X-Group-Token
+ *   - anggota (tambah)       : 404 bila conversation hilang → 403 tanpa X-Group-Token
+ *   - kick anggota           : capability admin saja (404 → 403)
  *   - leave                  : 404 → token grup ATAU baris delivery-token sendiri → 403
  *   - tulis metadata details : 403 bila conversation hilang ATAU token salah
  *                              (sengaja TIDAK 404 — kontrak lama, lihat catatan) *   - rotasi kunci           : capability admin saja
@@ -31,8 +32,7 @@
  */
 
 import { credentialTokenMatches } from './atRestSecrets.js';
-import { extractHeader } from './adminCapability.js';
-import { requireAdminCapability, type CredentialAuthDb } from './credentialAuth.js';
+import { extractHeader, requireAdminCapability, type AdminCapabilityDb } from './adminCapability.js';
 import { findMembership, type MembershipLookup } from './routingIdentity.js';
 
 /** Kontrak hasil: `ok`, atau kode status + pesan yang dipakai route apa adanya. */
@@ -55,11 +55,17 @@ export interface GroupAccessDb {
   conversation: {
     findUnique(args: {
       where: { id: string };
-      select: { authSecret?: boolean; adminSecretHash?: boolean; isGroup?: boolean };
+      select: {
+        authSecret?: boolean;
+        adminSecretHash?: boolean;
+        isGroup?: boolean;
+        groupTokenExpiresAt?: boolean;
+      };
     }): Promise<{
       authSecret?: string | null;
       adminSecretHash?: string | null;
       isGroup?: boolean;
+      groupTokenExpiresAt?: Date | null;
     } | null>;
   };
   userHiddenConversation: {
@@ -91,17 +97,26 @@ async function checkGroupToken(
 ): Promise<GroupGate> {
   const conversation = await db.conversation.findUnique({
     where: { id: conversationId },
-    select: { authSecret: true },
+    select: { authSecret: true, groupTokenExpiresAt: true },
   });
   if (!conversation) return { ok: false, status: 404, error: 'Not found' };
-  if (!credentialTokenMatches(conversation.authSecret ?? null, groupToken(headers))) {
+  // TTL group token berlaku juga untuk mutasi anggota/metadata, bukan hanya
+  // mailbox: token bocor tidak boleh tetap bisa menambah anggota selamanya.
+  // `null` = grup lama tanpa TTL (kompatibilitas), bukan fail-open untuk grup baru.
+  const expiresAt = conversation.groupTokenExpiresAt
+    ? new Date(conversation.groupTokenExpiresAt).getTime()
+    : null;
+  if (
+    !credentialTokenMatches(conversation.authSecret ?? null, groupToken(headers)) ||
+    (expiresAt !== null && expiresAt <= Date.now())
+  ) {
     return { ok: false, status: 403, error: BLIND_AUTH_REQUIRED };
   }
   return { ok: true };
 }
 
 /**
- * Tambah anggota (`POST /:id/participants`) & kick (`DELETE /:id/participants/:userId`).
+ * Tambah anggota (`POST /:id/participants`).
  *
  * Opaque Mailbox: server hanya menyiarkan niat; keanggotaan dibuktikan dengan
  * X-Group-Token (possession = anggota), jadi tidak ada join userId di sini.
@@ -112,6 +127,21 @@ export function authorizeMemberMutation(
   headers: Record<string, unknown>
 ): Promise<GroupGate> {
   return checkGroupToken(db, conversationId, headers);
+}
+
+/**
+ * Kick anggota (`DELETE /:id/participants/:userId`).
+ *
+ * Hanya capability admin, bukan X-Group-Token bersama: kick harus mencabut
+ * akses, bukan sekadar membuktikan keanggotaan. Token grup lama tetap valid
+ * untuk anggota lain; route kick merotasinya terpisah.
+ */
+export function authorizeMemberRemoval(
+  db: GroupAccessDb,
+  conversationId: string,
+  headers: Record<string, unknown>
+): Promise<GroupGate> {
+  return requireAdminCapability(db as unknown as AdminCapabilityDb, conversationId, headers);
 }
 
 /**
@@ -157,7 +187,7 @@ export async function authorizeDetailsWrite(
 ): Promise<GroupGate> {
   const tokenGate = await checkGroupToken(db, conversationId, headers);
   // Legacy: conversation hilang pun dijawab 403 (bukan 404) di jalur ini.
-  if (tokenGate.ok) return requireAdminCapability(db as unknown as CredentialAuthDb, conversationId, headers);
+  if (tokenGate.ok) return requireAdminCapability(db as unknown as AdminCapabilityDb, conversationId, headers);
   return { ok: false, status: 403, error: BLIND_AUTH_REQUIRED };
 }
 
@@ -167,7 +197,7 @@ export function authorizeKeyRotation(
   conversationId: string,
   headers: Record<string, unknown>
 ): Promise<GroupGate> {
-  return requireAdminCapability(db as unknown as CredentialAuthDb, conversationId, headers);
+  return requireAdminCapability(db as unknown as AdminCapabilityDb, conversationId, headers);
 }
 
 /**
@@ -192,7 +222,7 @@ export async function authorizeGroupPurge(
     return { ok: false, status: 403, error: BLIND_AUTH_REQUIRED };
   }
 
-  const adminGate = await requireAdminCapability(db as unknown as CredentialAuthDb, conversationId, headers);
+  const adminGate = await requireAdminCapability(db as unknown as AdminCapabilityDb, conversationId, headers);
   if (!adminGate.ok) return adminGate;
 
   const remainingMembers = await db.userHiddenConversation.count({ where: { conversationId } });

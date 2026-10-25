@@ -29,6 +29,7 @@ interface Recorder {
   sessionKeyWhere?: Where;
   subscriptionWhere?: Where;
   storyWhere?: Where;
+  mailboxWhere?: Where;
   userFindWhere?: Where;
   deletedUserIds: string[];
   purgeCalls: string[];
@@ -40,8 +41,9 @@ interface FakeOptions {
   users?: Array<{ id: string; lastActiveDay: Date; autoDestructDays: number | null }>;
   subscriptions?: number;
   stories?: number;
+  mailboxItems?: number;
   purgeFailsFor?: string[];
-  failStep?: 'refresh_token' | 'session_key' | 'subscription' | 'story';
+  failStep?: 'refresh_token' | 'session_key' | 'subscription' | 'story' | 'group_mailbox';
 }
 
 function makeDb(options: FakeOptions = {}): { db: CleanupDb; rec: Recorder } {
@@ -76,6 +78,13 @@ function makeDb(options: FakeOptions = {}): { db: CleanupDb; rec: Recorder } {
         const where = args.where as { id: string };
         rec.deletedUserIds.push(where.id);
         return { count: 1 };
+      },
+    },
+    groupMailboxItem: {
+      async deleteMany(args) {
+        if (options.failStep === 'group_mailbox') throw new Error('mailbox table tidak ada');
+        rec.mailboxWhere = args.where as Where;
+        return { count: options.mailboxItems ?? 0 };
       },
     },
     story: {
@@ -206,9 +215,10 @@ test('runCleanup: database bersih → nol, tanpa error', async () => {
       accounts: report.accounts,
       subscriptions: report.subscriptions,
       stories: report.stories,
+      mailboxItems: report.mailboxItems,
       errors: report.errors,
     },
-    { refreshTokens: 0, sessionKeys: 0, accounts: 0, subscriptions: 0, stories: 0, errors: [] }
+    { refreshTokens: 0, sessionKeys: 0, accounts: 0, subscriptions: 0, stories: 0, mailboxItems: 0, errors: [] }
   );
 });
 

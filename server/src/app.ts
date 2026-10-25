@@ -24,6 +24,8 @@ import { ADMIN_CLEANUP, incCounter } from "./utils/metrics.js";
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
 import conversationsRouter from "./routes/conversations.js";
+// [docs/37 §37.3.3] Sync/token grup anonim — sengaja TANPA cookie/JWT.
+import groupsRouter from "./routes/groups.js";
 import messagesRouter from "./routes/messages.js";
 import uploadsRouter from "./routes/uploads.js";
 import backupRouter from "./routes/backup.js";
@@ -52,6 +54,8 @@ import { clientVersionGate } from "./middleware/clientVersion.js";
 import { cfAwareClientIp, clientIpTag } from "./utils/clientIp.js";
 import { reportRoutes } from "./routes/reports.js";
 import systemRouter from "./routes/system.js";
+// [AUDIT 2026-10-24] Allowlist origin bersama REST ↔ gateway socket.io.
+import { isAllowedOrigin as isOriginAllowed } from "./utils/allowedOrigin.js";
 import wellKnownRouter from "./routes/wellKnown.js";
 
 // Set VAPID keys for web-push notifications
@@ -170,56 +174,16 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper to escape regex special characters
-function escapeRegExp(string: string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
-}
-
-// Fungsi untuk memvalidasi origins yang diizinkan
-const isAllowedOrigin = (origin: string): boolean => {
-  if (!origin) return true;
-
-  // 👇 PERBAIKAN: Ratakan array jika env.corsOrigin berbentuk array
-  const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
-
-  const allowedOrigins = [
-    ...baseOrigins, // 👈 PERBAIKAN: Gunakan spread operator (...)
-    // IZINKAN HTTP & HTTPS UNTUK CLOUDFLARE TUNNEL
-    "https://nyx-app.my.id",
-    "https://www.nyx-app.my.id",
-    "https://api.nyx-app.my.id",
-    "https://app.nyx-app.my.id",
-    "https://rt.nyx-app.my.id",
-    "https://storage.nyx-app.my.id",
-    // Varian HTTP & localhost HANYA untuk development (mencegah mixed-content
-    // origin diterima di production)
-    ...(!isProd ? [
-      "http://localhost:5173",
-      "http://localhost:4173",
-      "http://nyx-app.my.id",
-      "http://www.nyx-app.my.id",
-      "http://app.nyx-app.my.id",
-      "http://api.nyx-app.my.id",
-      "http://rt.nyx-app.my.id",
-      "http://storage.nyx-app.my.id",
-    ] : []),
-  ];
-
-  return allowedOrigins.some(allowedOrigin => {
-    if (allowedOrigin.includes('*')) {
-      const escapedOrigin = escapeRegExp(allowedOrigin);
-      const pattern = escapedOrigin.replace(/\\\*/g, '.*'); 
-      const regex = new RegExp('^' + pattern + '$');
-      return regex.test(origin);
-    }
-    return allowedOrigin === origin;
-  });
-};
+// [AUDIT 2026-10-24] Allowlist origin hidup di SATU tempat
+// (`utils/allowedOrigin.ts`). Dulu daftar ini disalin identik di gateway
+// socket.io; menambah origin di satu sisi membuat transport lain memblokir
+// tanpa error yang jelas (kasus `x-group-token` tercatat di riwayat file ini).
+const originPolicy = { corsOrigin: env.corsOrigin, isProd };
 
 const corsMiddleware = cors({
   origin: (originHeader, callback) => {
     const origin = originHeader || '';
-    if (isAllowedOrigin(origin)) {
+    if (isOriginAllowed(origin, originPolicy)) {
       callback(null, true);
     } else {
       console.warn(`Blocked by CORS: ${origin}`);
@@ -303,6 +267,12 @@ app.use("/api", generalLimiter);
 // bila `MIN_CLIENT_VERSION` tidak diset, dan klien yang tidak mengirim header
 // versi tetap lolos — lihat `utils/clientVersion.ts` untuk alasan lengkapnya.
 app.use("/api", clientVersionGate(() => ({ minimumVersion: process.env.MIN_CLIENT_VERSION })));
+
+// [docs/37 §37.3.3] Router grup token-first dipasang SEBELUM lapisan CSRF:
+// seluruh endpoint-nya diautentikasi possession token di body (sync/refresh/
+// membership) atau capability admin di header, jadi tidak ada cookie sesi yang
+// bisa dipakai untuk CSRF. Jangan menaruh route ber-cookie di prefix ini.
+app.use("/api/groups", groupsRouter);
 
 app.use((req, res, next) => {
   res.setTimeout(30000, () => {
@@ -420,13 +390,32 @@ if (ohttpConfig) {
     createOhttpRouter(ohttpConfig, {
       relayGuards:
         ohttpConfig.tokenMode === "off" ? [requireAuth, doubleCsrfProtection] : [],
+      // [docs/37 §37.4 P7] Dengan relay proses terpisah (`nyx-ohttp-relay`),
+      // API tidak memasang /relay: klien memakai VITE_OHTTP_RELAY_URL, dan
+      // tidak ada jalur kedua yang melewati proses ini.
+      exposeRelay: process.env.OHTTP_RELAY_EXTERNAL !== "1",
     }),
   );
+}
+
+/** Cookie yang bisa mengautentikasi request (lihat `requireAuth`). */
+const SESSION_COOKIES = ['at', 'rt', 'embed_at'] as const;
+
+function hasSessionCookie(req: Request): boolean {
+  return SESSION_COOKIES.some((name) => Boolean(req.cookies?.[name]));
 }
 
 app.use((req, res, next) => {
   // [PAYMENTS CRYPTO-ONLY] Exempt Tripay webhook dihapus — hanya NOWPayments.
   if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
+    return next();
+  }
+  // [docs/35 Fase 4b] Query PIR lewat OHTTP tidak membawa cookie: relay membuang
+  // header klien dan identitasnya adalah token OHTTP ber-scope DI DALAM amplop
+  // (`requireAuth` menolak token itu di luar allowlist OHTTP). CSRF adalah
+  // proteksi terhadap ambient authority cookie, jadi dilewati HANYA bila tidak
+  // ada cookie sesi sama sekali — kalau ada, jalur cookie tetap wajib CSRF.
+  if (req.path === '/api/pir/query' && !hasSessionCookie(req)) {
     return next();
   }
   doubleCsrfProtection(req, res, next);
@@ -441,7 +430,9 @@ app.use("/api/keys/kt", ktQueryRouter);
 // (cookie SameSite=None + form urlencoded tanpa preflight).
 app.use("/api/keys", keysRouter);
 app.use("/api/call-tokens", callTokensRouter);
-// PIR butuh CSRF (POST query), jadi dipasang setelah lapisan di atas.
+// PIR dipasang setelah lapisan CSRF: query lewat OHTTP tidak membawa cookie dan
+// dikecualikan secara eksplisit di atas (hanya tanpa cookie sesi); request
+// berbasis cookie tetap wajib CSRF.
 if (pirConfig) {
   app.use("/api/pir", createPirRouter(pirConfig));
 }

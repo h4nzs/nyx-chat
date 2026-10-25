@@ -53,7 +53,7 @@ Every device row stores `fingerprint` (browser signals, SHA-256) and `installati
 
 ## 3.5 Rate limiting & anti-abuse
 
-- Global/auth/upload/OTP limiters via `express-rate-limit` + RedisStore; IP extraction prefers `req.ip` (never trusts a spoofable `cf-connecting-ip` header alone).
+- Global/auth/upload/OTP limiters via `express-rate-limit` + RedisStore. Keying IP memakai `cfAwareClientIp()` (`server/src/utils/clientIp.ts`): **`CF-Connecting-IP` didahulukan**, `req.ip` hanya cadangan — edge Cloudflare selalu menimpanya, dan API hanya bisa dijangkau lewat tunnel (Express bind loopback), jadi header itu tidak bisa diisi klien. Alasan lengkap, verifikasi, dan syarat topologinya: `docs/10` §10.10 Step 6 — jangan menukar urutannya tanpa membaca bagian itu (`X-Forwarded-For` di depan bisa dipalsukan).
 - Socket-level events use an **atomic Lua INCR+EXPIRE** (`redisBridge.RATE_LIMIT_LUA`) — never a separate INCR then EXPIRE (race = permanent limit).
 - Sandbox for unverified users: 3 new chats/day (same atomic pattern).
 - PoW: client-side BLAKE2b/Argon2id puzzle (`/api/auth/pow/*`), Turnstile for registration (with 5s timeout on verify).

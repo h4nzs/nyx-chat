@@ -9,7 +9,7 @@ import { env } from '../config.js';
 import { redisClient } from '../lib/redis.js';
 import { emitEventToUser, sendJsonToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
-import { sealAtRest, openAtRest } from '../utils/atRestSecrets.js';
+import { atRestStatus, sealAtRest, openAtRest } from '../utils/atRestSecrets.js';
 
 const router = Router();
 
@@ -51,7 +51,18 @@ router.get('/system-status', requireAuth, requireAdmin, async (req, res) => {
       totalSizeMB: (totalSize / 1024 / 1024).toFixed(2) + ' MB'
     };
 
-    res.json({ vps, db, storage });
+    // [docs/37 §37.4 P6] Status custody at-rest: kunci mana yang aktif, berapa
+    // kunci di ring, dan dari mana materinya dibaca. TIDAK memuat nilai kunci —
+    // yang dibutuhkan operator hanyalah "apakah rotasi sudah aktif". Key ring
+    // yang rusak dilaporkan sebagai error, bukan disembunyikan sebagai legacy.
+    let atRest: Record<string, unknown>;
+    try {
+      atRest = { ok: true, ...atRestStatus() };
+    } catch (error) {
+      atRest = { ok: false, error: error instanceof Error ? error.message : 'UNKNOWN' };
+    }
+
+    res.json({ vps, db, storage, atRest });
   } catch (error) {
     console.error("System status error:", error);
     res.status(500).json({ error: 'Failed to fetch system metrics' });

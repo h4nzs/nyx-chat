@@ -11,7 +11,7 @@ import { useUserProfile } from "@hooks/useUserProfile";
 import { DecryptedProfile } from "@store/profile";
 import type { ConversationId, GroupRole } from '@nyx/shared';
 import { parseGroupMembers } from '@nyx/shared';
-import { getGroupMembers } from '@lib/groupPseudonyms';
+import { getGroupMembers, getMyAdminToken } from '@lib/groupPseudonyms';
 import { useEffect } from 'react';
 import { useProfileStore, hydrateProfileForPlainId } from '@store/profile';
 import { useTranslation } from 'react-i18next';
@@ -93,28 +93,41 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, my
         try {
           const { useConversationStore } = await import('@store/conversation');
           const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-          // [26.8.1] Blind auth: kick = mutasi grup, wajib X-Group-Token.
-          const groupToken = (conv?.decryptedMetadata as { authSecret?: string } | undefined)?.authSecret;
-          if (!groupToken) throw new Error('Group token unavailable (metadata not decrypted)');
+          // [26.9 RBAC] Kick = pencabutan akses: capability admin, bukan token
+          // grup bersama. Server merotasi authSecret dan mengembalikannya.
+          const adminToken = getMyAdminToken(conversationId);
+          if (!adminToken) throw new Error('Admin capability unavailable');
           const removeRecipients = conv?.participants?.filter(p => p.id !== participant.id)?.map(p => p.id) || [];
-          await api(`/api/conversations/${conversationId}/participants/${participant.id}`, {
+          const kickResult = await api<{ authSecret?: string }>(`/api/conversations/${conversationId}/participants/${participant.id}`, {
             method: 'DELETE',
-            headers: { 'X-Group-Token': groupToken },
+            headers: { 'X-Admin-Token': adminToken },
             body: JSON.stringify({ targetRecipients: removeRecipients }),
           });
+          const newAuthSecret = kickResult?.authSecret;
+          if (!newAuthSecret) throw new Error('Server did not rotate the group token');
           // [T4 RACE FIX] Hapus dari store SEKARANG (jangan tunggu event socket
           //): rotateGroupKey di bawah membaca participants store — kalau
           // kicked member masih ada di store saat rotasi, metadata v3 baru
           // terenkripsi DENGAN dia masih di roster (bug: kicked user tetap
           // "Already a member" di modal add setelah kick).
           useConversationStore.getState().removeParticipant(conversationId, participant.id);
+          // Simpan token baru lebih dulu: kalau re-encrypt metadata gagal,
+          // admin masih bisa retry tanpa kehilangan token hasil rotasi.
+          if (conv?.decryptedMetadata) {
+            useConversationStore.getState().updateConversation(conversationId, {
+              decryptedMetadata: {
+                ...(conv.decryptedMetadata as Record<string, unknown>),
+                authSecret: newAuthSecret,
+              } as typeof conv.decryptedMetadata,
+            });
+          }
           // [T1 FIX 2026-09-28] Rotasi AKTIF oleh admin: hapus kicked member
           // dari metadata (peta baru, generation+1) + distribusikan kunci era
           // baru SEKARANG — kicked member tak bisa mengikuti era kunci baru.
           // (Sebelumnya hanya lazy: menunggu tiap member kirim pesan.)
           try {
             const { rotateGroupKey } = await import('@utils/crypto');
-            await rotateGroupKey(conversationId, 'membership_change', true);
+            await rotateGroupKey(conversationId, 'membership_change', true, newAuthSecret);
           } catch (rotErr) {
             console.warn('[T1] Active rotation after kick failed (will retry lazily):', rotErr);
           }

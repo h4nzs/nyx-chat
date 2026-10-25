@@ -389,7 +389,24 @@ export const OHTTP_DEFAULT_ALLOWLIST: readonly OhttpAllowRule[] = [
   { method: 'GET', path: /^\/api\/users\/search$/ },
   { method: 'GET', path: /^\/api\/keys\/prekey-bundle\/[A-Za-z0-9_-]{1,64}$/ },
   { method: 'POST', path: /^\/api\/pir\/query$/ },
+  // [docs/37 §37.4 P3] Sync grup anonim: token di body, tanpa cookie/JWT — satu-
+  // satunya jalur tulis yang memang tidak membawa identitas, jadi aman lewat
+  // gateway. Posting/pull mailbox sengaja BELUM di sini (jalur terpisah).
+  { method: 'POST', path: /^\/api\/groups\/sync$/ },
 ];
+
+/**
+ * Batas body untuk target POST di allowlist (saat ini hanya sync grup).
+ * Amplop OHTTP sendiri boleh sampai 8 MB; batas ini menjaga satu target
+ * "kecil" tidak menjadi jalur upload besar yang menyamar sebagai sync.
+ */
+export const OHTTP_SYNC_MAX_BODY_BYTES = 64 * 1024;
+
+/** Path target yang punya batas body khusus. */
+export function ohttpBodyLimitFor(path: string): number | null {
+  const pathname = path.split('?')[0] ?? '';
+  return pathname === '/api/groups/sync' ? OHTTP_SYNC_MAX_BODY_BYTES : null;
+}
 
 export function isOhttpTargetAllowed(
   method: string,

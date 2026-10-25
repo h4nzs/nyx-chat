@@ -1,0 +1,44 @@
+# NYX — relay OHTTP proses terpisah, unit **user** (self-host `~/nyx-selfhost`).
+#
+# Unit sistem ada di `ops/systemd/nyx-ohttp-relay.service` (VPS/pm2). Mesin
+# selfhost ini memakai systemd tingkat user: `systemctl --user`, tanpa root.
+#
+# Kenapa proses terpisah: selama relay dan gateway berada di proses (dan log)
+# yang sama, "relay melihat IP, gateway melihat isi" hanya klaim arsitektur.
+# Proses ini tidak memegang DB/Redis/Prisma; ia hanya meneruskan amplop opaque
+# ke gateway loopback dan membuang seluruh header klien.
+#
+# Pasang:
+#   install -d -m 0750 ~/nyx-selfhost/ohttp
+#   install -m 0600 ~/nyx-chat/ops/systemd/nyx-ohttp-relay.env.example \
+#           ~/nyx-selfhost/ohttp/relay.env      # isi OHTTP_GATEWAY_TARGET
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now nyx-ohttp-relay
+#   curl -fsS http://127.0.0.1:4100/healthz
+#
+# Setelah relay hidup: set OHTTP_RELAY_EXTERNAL=1 di server/.env, restart
+# nyx-api, dan pastikan nginx meneruskan `/api/ohttp/relay` ke :4100.
+# JANGAN enable unit ini selama OHTTP_ENABLED belum diset — relay tanpa gateway
+# aktif hanya menambah proses yang menjawab 502.
+
+[Unit]
+Description=NYX OHTTP relay (proses terpisah dari API)
+Documentation=file:///home/ken/nyx-selfhost/README.md
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ken/nyx-chat/server
+# Env terpisah: relay tidak boleh mewarisi DATABASE_URL/JWT_SECRET dari
+# server/.env (kalau itu terjadi, ada tanggung jawab yang salah tempat).
+EnvironmentFile=-/home/ken/nyx-selfhost/ohttp/relay.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /home/ken/nyx-chat/server/dist/ohttp/relay.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

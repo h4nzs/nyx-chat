@@ -105,6 +105,7 @@ WebTransport in the first place: "always zero" is not a degradation.
 | `packages/shared/src/transport.ts` | `TransportOpCode` (canonical opcode source) |
 | `packages/shared/src/socket.ts` | event maps |
 | `packages/shared/src/schemas.ts` | Zod validation + jitless |
+| `packages/shared/src/ohttp.ts` | OHTTP/HPKE (RFC 9458) client + gateway, Binary HTTP, key-config collection, dan `OHTTP_DEFAULT_ALLOWLIST` (dipakai klien, gateway, dan `requireAuth` token ber-scope) |
 | `packages/shared/src/brands.ts` | branded id types |
 | `server/transport-sidecar/src/main.rs` | QUIC termination, session map, kick, chaff |
 | `server/transport-sidecar/src/protocol.rs` | pure frame/HELLO decisions (unit + fuzz tested) |

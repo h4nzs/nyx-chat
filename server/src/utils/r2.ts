@@ -14,8 +14,12 @@ export const s3Client = new S3Client({
 
 // Generate URL upload yang valid selama 5 menit (default)
 // urlTtl: Berapa lama LINK upload valid (detik)
+// contentLength: Ukuran body yang diizinkan. WAJIB untuk upload dari klien:
+//   nilainya ikut ditandatangani (`X-Amz-SignedHeaders` berisi
+//   `content-length`), jadi R2 menolak PUT yang body-nya lebih besar/kecil dari
+//   yang disetujui server — bukan sekadar percaya `fileSize` dari body request.
 // deleteAt: Kapan FILE harus dianggap kadaluarsa (untuk Lifecycle Rules / Metadata)
-export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 600, deleteAt?: Date) => {
+export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 600, contentLength?: number, deleteAt?: Date) => {
   const commandInput: PutObjectCommandInput = {
     Bucket: env.r2BucketName,
     Key: key,
@@ -23,6 +27,11 @@ export const getPresignedUploadUrl = async (key: string, contentType: string, ur
     // [FIX] Ensure we don't include checksums in the signature as the frontend won't send them
     ChecksumAlgorithm: undefined 
   };
+
+  // [AUDIT 2026-10-24] Ukuran ditetapkan server (lihat utils/uploadLimits.ts).
+  if (typeof contentLength === 'number' && contentLength > 0) {
+    commandInput.ContentLength = contentLength;
+  }
 
   // Jika ada jadwal penghapusan (Disappearing Messages / Cleanup)
   // Kita pasang Custom Metadata 'delete-at'. 

@@ -16,10 +16,9 @@
 
 1. **Kripto inti NYX setara atau di atas Signal pada beberapa sumbu.** PQX3DH
    (X-Wing/ML-KEM-768) wajib, DR hybrid, sender-key v2 yang meniru
-   `sender_keys.rs` libsignal, plus **blind RSA membership credential** (RFC 9474)
-   — yang notabene adalah jawaban untuk celah "presentation moment" yang di
-   docs/26.8.1 dulu dinyatakan *tidak* dibangun. NYX tidak perlu merasa kalah
-   di layer protokol.
+   `sender_keys.rs` libsignal, plus **token-first group membership**. Blind RSA
+   credential pernah ada (RFC 9474) tetapi dihapus 2026-10-23; catatan historis
+   ada di §4.3/§7.1. NYX tidak perlu merasa kalah di layer protokol.
 2. **Celah terbesar NYX bukan kripto, tapi *kepercayaan pada server* dan
    *perangkat*.** Tiga hal: (a) **key transparency** — belum ada sama sekali,
    jadi server tetap bisa menyajikan prekey bundle palsu secara terarah dan
@@ -79,7 +78,7 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 | 2 | Key agreement PQ | PQX3DH X-Wing wajib, tolak downgrade klasik | PQXDH + Kyber, PQ opsional-per-kapabilitas | **≈** (NYX lebih ketat) |
 | 3 | Ratchet 1:1 | DR hybrid (KEMs/KEMr/savedCt) — PQ **FS**; jalur v2 **braid SPQR** (PQ **FS + PCS**) sudah live berdampingan, dipilih lewat deklarasi peer (`docs/33` §33.10) | DR + **SPQR** (ML-KEM Braid) — PQ **FS + PCS**, terverifikasi formal | **≈** (kripto setara; formal verification masih SIG+) |
 | 4 | Grup | sender key v2 (model libsignal) + rotasi era, pseudonym, metadata-key terpisah | Sender Keys + zkgroup GroupSendEndorsement, sedang menuju QR/MLS | **≈** |
-| 5 | Kredensial keanggotaan anonim | **blind RSA (RFC 9474)** — ada, tapi issuance tidak di-gate (§7) | zkgroup (pairing, redemption time, presentation context) | **≈** (NYX lebih sederhana, kurang binding) |
+| 5 | Kredensial keanggotaan anonim | **token-first** (group/delivery token); blind RSA dihapus 2026-10-23 (§4.3 historis) | zkgroup (pairing, redemption time, presentation context) | **≈** (NYX lebih sederhana, tanpa unlinkability) |
 | 6 | Key transparency | tidak ada | key-transparency-server (Merkle log, VRF, monitor) + klien `keytrans` | **SIG+** (celah terbesar) |
 | 7 | Verifikasi kunci user | TOFU warning + safety number manual, state di localStorage | otomatis + monitor, manual jadi opsional | **SIG+** |
 | 8 | Contact discovery | tukar link / cari usernameHash persis; tanpa social graph | SGX/Icelake PSI atas nomor telepon; username links | **SIG+** (fitur) / NYX+ (privasi terhadap Intel) |
@@ -121,14 +120,20 @@ Kombinasi "seal nilai identitas di DB + buka saat relay" adalah pola yang Signal
 **tidak** terapkan (Signal menyembunyikan pengirim di *transit*, bukan di kolom).
 Pertahankan, dan jadikan rujukan saat menambah fitur baru.
 
-**4.3 Blind RSA membership credential (26.8.1) — sudah ada.**
+**4.3 Blind RSA membership credential (26.8.1) — historis, dihapus 2026-10-23.**
+> **Dihapus pada cutover PQ-only.** `groupCredentials.ts`, endpoint issuance/
+> commit/revoke, dan persist Dexie tidak ada lagi. Grup memakai token-first;
+> bagian di bawah hanya catatan desain lama dan tidak boleh dijadikan acuan
+> implementasi.
+
 `server/src/lib/groupCredentials.ts` + `web/src/lib/groupCredentials.ts` +
 op worker `credential_blind`/`credential_finalize`. Ini menjawab kebutuhan
 "presentation moment" (docs/26.8.1) tanpa pairing/BBS+: suite
 `RSABSSA-SHA384-PSS-Randomized` (RFC 9474), private key issuer **wajib dari env**
 (`GROUP_ISSUER_KEY_PKCS8`), fail-closed di production, DB hanya menyimpan material
 publik. Revocation = hapus row serial. Dibanding zkgroup Signal: lebih kecil,
-lebih standar, tapi **kurang binding** (lihat §7).
+lebih standar, tapi **kurang binding** (lihat §7). Klaim rotasi key yang
+membatalkan credential lama juga tidak ditegakkan oleh `verifyPresentation`.
 
 **4.4 Timing/covers & deniability.** Chaff 1000B/3s (`CHAFF = 0x00`, sidecar
 mengabaikan), padding 8KB, cover traffic T4 opt-in (docs/26.10), panic password,
@@ -412,8 +417,8 @@ akun.
    (PQ-DR, RAM-only) — tidak ada padanannya di Signal.
 5. **Cover traffic T4 + chaff** — Signal menolak trade-off ini.
 6. **Operabilitas**: bisa dijalankan satu orang di satu VPS.
-7. **Blind RSA credential** yang lebih sederhana & berbasis RFC (vs pairing/BBS
-   zkgroup) dan private key-nya fail-closed di luar DB.
+7. **Group membership token-first** yang sederhana (blind RSA pernah ada,
+   dihapus 2026-10-23; private key issuer klasik tidak lagi dipakai).
 8. **Verifikasi safety number tidak wajib** di Signal karena KT — tapi NYX punya
    *manual* verification + safety number sendiri; bila KT lite dibangun, NYX
    bisa menyamai sambil tetap tanpa PII.
@@ -441,7 +446,12 @@ akun.
 
 ## 7. Temuan konkret saat audit lintas-baca (perlu tindakan)
 
-### 7.1 `POST /api/conversations/credential-issuance` tidak memverifikasi keanggotaan — **HIGH**
+### 7.1 `POST /api/conversations/credential-issuance` tidak memverifikasi keanggotaan — **HIGH (historis, dihapus 2026-10-23)**
+
+> **Resolved by deletion.** Endpoint, blind RSA, dan seluruh alur credential
+> dihapus pada cutover PQ-only. Temuan ini disimpan sebagai catatan audit; jangan
+> menghidupkan kembali credential tanpa memperbaiki gating keanggotaan dan
+> binding issuance/commit.
 
 `server/src/routes/conversations.ts` (blok issuance, ±baris 66–114): body
 `{ conversationId, blindedMsg }`, dibatasi hanya oleh `req.user` + kuota Redis
@@ -574,7 +584,7 @@ dikerjakan dan diganti KT penuh (§30.3, §30.5).
 
 | # | Item | Test/bukti pengunci | Catatan penting |
 |---|---|---|---|
-| 1 | Gate + binding credential | `server/tests/credentialIssuance.test.ts` | issuance butuh bukti keanggotaan + tiket; presentasi context-bound ke conversation |
+| 1 | Gate + binding credential | `server/tests/credentialIssuance.test.ts` (**dihapus 2026-10-23** bersama credential blind RSA — grup kini token-first, lihat docs/26 banner + docs/35 Fase 6) | issuance butuh bukti keanggotaan + tiket; presentasi context-bound ke conversation |
 | 2 | Verification state ke keychain + hard gate | `web/src/lib/__tests__/peerIdentityTrust.test.ts` | kunci berubah → kirim diblokir sampai konfirmasi; pin lama TIDAK ditimpa dan tersimpan terenkripsi |
 | 3 | Tanpa STUN pihak ketiga | `server/tests/turnIceServers.test.ts` | kegagalan TURN = error eksplisit + kunci `call_no_turn` di 4 bahasa |
 | 4 | Metadata lokal di-bucket / `ENC1:` | `web/src/lib/__tests__/localAtRest.test.ts`, `localOrderKey.test.ts`, `dexieMigration.test.ts` (IndexedDB nyata), `vaultSeqPersistence.test.ts`, `vaultReactionsPersistence.test.ts`, `contactStore.test.ts` | `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`isGroup`/`Message.reactions`/`ContactRow.updatedAt`/`ProfileCacheRecord.updatedAt` tidak lagi plaintext, `lastMessageAt` dipotong 15 menit (baris lama plaintext tetap terbaca + di-seal saat unlock) |

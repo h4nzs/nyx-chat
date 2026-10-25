@@ -425,4 +425,41 @@ jobs:
                 echo "ℹ️  nyx-kt-auditor-v2.service belum di-enable — auditor v2 belum dipasang (ops/systemd/README.md)"
             fi
 
+            # 12. RELAY OHTTP PROSES TERPISAH (docs/37 §37.4 P7, docs/10 §10.18)
+            #     Dipasang seperti unit lain, tetapi hanya disentuh bila operator
+            #     sudah `enable` (pemasangan pertama manual: env + systemd).
+            echo "🛰️  Deploying OHTTP relay (nyx-ohttp-relay)..."
+            if [ -f "$TARGET_DIR/ops/systemd/nyx-ohttp-relay.service" ]; then
+                install -m 644 "$TARGET_DIR/ops/systemd/nyx-ohttp-relay.service" /etc/systemd/system/nyx-ohttp-relay.service
+                systemctl daemon-reload
+            fi
+            if systemctl is-enabled --quiet nyx-ohttp-relay 2>/dev/null; then
+                if [ ! -f "$TARGET_DIR/server/dist/ohttp/relay.js" ]; then
+                    echo "::error::dist/ohttp/relay.js tidak ada — relay OHTTP tidak bisa dijalankan"
+                    exit 1
+                fi
+                systemctl restart nyx-ohttp-relay
+                sleep 2
+                if systemctl is-active --quiet nyx-ohttp-relay; then
+                    echo "✅ nyx-ohttp-relay aktif"
+                    curl -fsS --max-time 5 http://127.0.0.1:4100/healthz; echo
+                else
+                    systemctl status nyx-ohttp-relay --no-pager -l || true
+                    echo "::error::nyx-ohttp-relay gagal start setelah deploy"
+                    exit 1
+                fi
+            else
+                echo "ℹ️  nyx-ohttp-relay.service belum di-enable — relay masih dilayani API (OHTTP_RELAY_EXTERNAL tidak diset)"
+            fi
+
+            # 13. VERIFIKASI SALINAN SELFHOST (non-blocking): config nginx dan unit
+            #     systemd di repo adalah sumber; ~/nyx-selfhost hanya salinan.
+            #     Drift dicatat sebagai peringatan supaya deploy tidak gagal karena
+            #     mesin selfhost yang memang dikelola operator.
+            if [ -d /root/nyx-selfhost ] && [ -f "$TARGET_DIR/scripts/sync-selfhost.sh" ]; then
+                echo "🔍 Checking selfhost copy drift..."
+                SELFHOST_DIR=/root/nyx-selfhost bash "$TARGET_DIR/scripts/sync-selfhost.sh" --check \
+                    || echo "::warning::Salinan ops di /root/nyx-selfhost berbeda dari repo — jalankan scripts/sync-selfhost.sh --apply"
+            fi
+
             echo "✅ Deployment Success!"

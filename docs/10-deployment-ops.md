@@ -9,13 +9,15 @@
 | WebTransport | `https://rt.nyx-app.my.id:33333` | pm2 `nyx-sidecar` (Rust, satu fork) |
 | Marketing | `https://nyx-app.my.id` | `/var/www/nyx-marketing` |
 | Key Transparency | `127.0.0.1:8085` (HTTP baca), `127.0.0.1:8081` (gRPC tulis), `127.0.0.1:8082` (gRPC auditor) | binary Go `nyx-kt-query` + LevelDB miliknya — **satu-satunya** pemilik log KT; binary + unit systemd dikirim `deploy.yml` (config + kunci log tetap owner ops, §10.15) |
+| Relay OHTTP | `127.0.0.1:4100` (proses terpisah) | unit `nyx-ohttp-relay` dikirim `deploy.yml` dan di-restart hanya bila `enabled`; klien memakai `/api/ohttp/relay` di origin API → nginx (§10.18) |
+| Sidecar PIR | `127.0.0.1:9470` (loopback) | binary `server/pir-sidecar`; **tidak** ikut `deploy.yml` (belum ada unit produksi) — jalankan manual bila `PIR_ENABLED=1` (§10.19) |
 | DB | `127.0.0.1:5432/nyx_app` (user `nyx`) | Local PostgreSQL 18 on the VPS (versi prod terkonfirmasi dari dump — `docs/28` §28.7) |
 | Redis | `127.0.0.1:6379` | pub/sub bridge + caches |
 | Storage | Cloudflare R2 | Encrypted blobs + arsip snapshot KT (`kt-snapshots/`) |
 | TURN (WebRTC) | coturn `:3478/udp+tcp`, `:5349/tls` + rentang relay | **primer** untuk kredensial `/api/keys/turn`; Cloudflare TURN hanya cadangan; prosesnya systemd = owner ops (§10.9) |
 | Observability | NYX `127.0.0.1:9464`, sidecar `:9465`, auditor KT `:9466`, log KT `:9467`, log KT v2 `:9468`, auditor KT v2 `:9469`; Prometheus (default `:9090`); Alertmanager `:9093` + relay ntfy `:9095`; exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | semuanya loopback; konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
 
-`deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, dan binary + unit systemd `nyx-kt-query`**. Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `web/nginx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
+`deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, binary + unit systemd `nyx-kt-query`/v2, dan unit `nyx-ohttp-relay`** (relay di-restart hanya bila unitnya `enabled`). Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `ops/nginx/nyx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
 
 VPS: Debian 13, **4 core / 8GB RAM / 4GB swap** (upgraded 2026-10 from 1 core / 1GB RAM), `vm.swappiness=10`, PostgreSQL re-tuned for the larger box (see §10.11). The principle from docs/26 §26.9 still applies: the upgrade buys margin for privacy features, not bloat.
 
@@ -44,10 +46,11 @@ Push to `main` triggers:
 
 - **Guards (gagal cepat, sebelum install):** `scripts/check-wasm-artifacts.sh` (artefak WASM ter-commit + cocok hash manifest `packages/wasm-artifacts.json`) dan `scripts/check-vendor.sh` (sumber Signal ter-vendor cocok pin `NOTICE`) — tanpa keduanya, clone bersih tidak bisa dibangun ulang.
 1. Install (frozen lockfile) → assert secrets (`VITE_TURNSTILE_SITE_KEY` — satu-satunya yang di-assert hari ini) → build shared → web → marketing → server (incl. `prisma generate`) → Rust sidecar (`cargo build --release`) → binary layanan log KT (`bash server/kt-query/build.sh`, dari vendor; §10.15).
-2. Package ke `nyx-deploy.zip`: manifest root + `packages/shared` (+ `dist`) + `web/dist` + `marketing/dist` + `server/{src,dist,package.json,tsconfig.json,prisma}` + binary sidecar + `server/kt-query/{nyx-kt-query,nyx-kt-check}` + `ops/systemd/`. **Tidak** ikut: `web/nginx.conf`, `ops/{prometheus,grafana}`, `scripts/`, `docker-compose.yml`.
+2. Package ke `nyx-deploy.zip`: manifest root + `packages/shared` (+ `dist`) + `web/dist` + `marketing/dist` + `server/{src,dist,package.json,tsconfig.json,prisma}` + binary sidecar + `server/kt-query/{nyx-kt-query,nyx-kt-check}` + `ops/systemd/`. **Tidak** ikut: `ops/nginx/nyx.conf`, `ops/{prometheus,grafana}`, `scripts/`, `docker-compose.yml`.
 3. SCP to VPS (`root@…`) → `pm2 stop nyx-api nyx-sidecar` → binary KT lama disimpan sebagai `nyx-kt-query.prev` (rollback cepat) → unzip ke `/root/nyx-app` (menimpa; `server/{src,dist}`, `web/`, `marketing/` dihapus lebih dulu).
 4. On VPS: `pnpm install --frozen-lockfile` → **copy `/root/nyx-app/.env` → `server/.env`** (prod secrets live only on the VPS) → `prisma generate` → `prisma db push` (consent env, `|| true`) → deploy web/marketing to `/var/www/…` → reload nginx → `pm2 delete` + `pm2 start` `nyx-api` (`-i max`, `--max-old-space-size=1024`) dan `nyx-sidecar` → `pm2 save --force`.
 5. Layanan log KT (§10.15): binary di-`chmod +x`, unit `/etc/systemd/system/nyx-kt-query.service` disegarkan dari `ops/systemd/` + `systemctl daemon-reload`. Kalau unit **`enabled`**: `systemctl restart nyx-kt-query` → tunggu 2 s → `is-active` + `curl 127.0.0.1:8085/healthz`; gagal ⇒ deploy berhenti **merah** (log KT mati = kunci identitas baru tidak ter-audit). Kalau belum `enabled`: hanya pesan informatif — pemasangan pertama ada di `ops/systemd/README.md`.
+6. Relay OHTTP (§10.18): unit `/etc/systemd/system/nyx-ohttp-relay.service` disegarkan dari `ops/systemd/`. Kalau unit **`enabled`**: pastikan `server/dist/ohttp/relay.js` ada, `systemctl restart nyx-ohttp-relay`, lalu `is-active` + `curl 127.0.0.1:4100/healthz`; gagal ⇒ deploy merah. Kalau belum `enabled`: pesan informatif (relay masih dilayani API bila `OHTTP_RELAY_EXTERNAL` tidak diset). Sidecar PIR **tidak** ikut deploy (belum ada unit sistem/pm2).
 
 > ⚠ Any change to `.env` on the VPS will be **overwritten from `/root/nyx-app/.env`** on the next deploy. Edit the root file, not `server/.env`.
 
@@ -106,9 +109,8 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `CORS_ORIGIN` | Origin yang diizinkan, dipisah koma (default produksi `https://app.nyx-app.my.id`) |
 | `JWT_SECRET` | Token signing (≥32 chars). Produksi menolak boot bila kosong / bernilai `dev-secret` |
 | `CSRF_SECRET` | CSRF state secret. Kosong di produksi → jatuh ke `JWT_SECRET` + peringatan boot (isolasi lebih lemah) |
-| `NYX_AT_REST_PEPPER` | [docs/28 Tier 0] Pepper hash identifier at-rest + kunci seal deterministik. **Wajib**: `utils/atRestSecrets.ts` melempar error di produksi tanpa ini; bocor = dump DB bisa dibalik |
-| `GROUP_ISSUER_KEY_PKCS8` | [docs/28 Tier 0.1] Private key issuer blind RSA grup (base64 PKCS#8). Wajib di produksi (fail-closed) karena kunci keanggotaan grup **tidak** disimpan di DB. Buat: `pnpm --filter nyx-server run issuer-key:generate` |
-| `GROUP_ISSUER_KEY_VERSION` | Versi kunci issuer (default `1`); naikkan untuk rotasi — row publik dibuat otomatis |
+| `NYX_AT_REST_PEPPER` | [docs/28 Tier 0] Pepper hash identifier at-rest + kunci seal legacy (id `0`). **Wajib**: `utils/atRestSecrets.ts` melempar error di produksi tanpa ini; bocor = dump DB bisa dibalik |
+| `NYX_AT_REST_KEYRING` / `NYX_AT_REST_KEYRING_FILE` | [docs/37 P6, docs/10 §10.17] Key ring seal ber-versi (`ENC2:<keyId>:…`). Kosong = kunci legacy saja. Isi JSON `{active,keys}` atau path file 0400. Rotasi + re-seal lewat `scripts/reseal-at-rest.ts` |
 | `NODE_ENV` | `production` |
 
 **Perilaku & fitur** (kosong = fitur mati / degradasi yang terlihat):
@@ -124,6 +126,8 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `BACKUP_KEY_SECRET` | HMAC kunci objek backup R2 (fallback `JWT_SECRET` + peringatan; harus **STABIL** — rotasi JWT_SECRET akan membuat backup awan lama tak ditemukan, `docs/31` §31.6b) |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PUBLIC_DOMAIN` | Cloudflare R2: blob terenkripsi + arsip snapshot KT |
 | `UPLOAD_DIR` | Direktori fallback upload lokal bila tidak memakai bucket R2 (default `uploads`) |
+| `GROUP_RELEASE_JITTER_MS` | [docs/37 P8] Jitter rilis pesan grup (ms, default kosong = mati, clip 2000). Menambah latensi ACK? Tidak — ACK dikirim dulu; hanya relay yang ditunda. Metrik `nyx_group_release_delay_ms` |
+| `OHTTP_RELAY_EXTERNAL` | [docs/37 P7] `1` = relay OHTTP dijalankan proses terpisah; API tidak memasang `/api/ohttp/relay`. Butuh `nyx-ohttp-relay`; klien memakai default same-origin `/api/ohttp/relay` (nginx → `:4100`), `VITE_OHTTP_RELAY_URL` hanya bila relay berada di origin lain (§10.18) |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify (register/PoW) |
 | `VAPID_SUBJECT` / `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web Push |
 | `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. `docs/30` §30.9 |
@@ -185,7 +189,7 @@ tetap manual — lihat §10.15.
 - `.env` files are gitignored; `.env.example` (root) and `server/.env.example` are the templates — setiap var di §10.6 punya komentarnya di sana.
 - GitHub Actions secrets: `VPS_HOST/PORT/USER/PASSWORD`, `VITE_API_URL`, `VITE_TRANSPORT_URL`, `VITE_TURNSTILE_SITE_KEY` (di-assert saat deploy), `VITE_APP_SECRET`, `VITE_VAPID_PUBLIC_KEY`, `INDEXNOW_API_KEY`, `CI_DATABASE_URL` (optional). `VITE_TRANSPORT_CERT_HASH` **bukan** secret deploy — ia di-parse dari banner sidecar hanya di job `e2e-chrome` dan untuk dev lokal.
 - Do not commit: DB passwords (VPS: `/root/.nyx_db_pass`), VAPID private keys, R2 secret keys, sidecar private keys (`*.der`).
-- Kunci yang **wajib** ada hanya di `.env` produksi (bukan di DB, bukan di backup): `NYX_AT_REST_PEPPER`, `GROUP_ISSUER_KEY_PKCS8`, dan config YAML `nyx-kt-query` (kunci `signing-key`/`vrf-key`/`prefix-key`/`opening-key` log KT). Bocornya pepper = identifier at-rest bisa dibalik; bocornya issuer key = keanggotaan grup bisa dipalsukan; bocornya kunci log KT = log bisa ditulis oleh pihak lain.
+- Kunci yang **wajib** ada hanya di `.env` produksi (bukan di DB, bukan di backup): `NYX_AT_REST_PEPPER` dan config YAML `nyx-kt-query` (kunci `signing-key`/`vrf-key`/`prefix-key`/`opening-key` log KT). Bocornya pepper = identifier at-rest bisa dibalik; bocornya kunci log KT = log bisa ditulis oleh pihak lain.
 
 ## 10.8 Rollback
 
@@ -194,13 +198,13 @@ tetap manual — lihat §10.15.
 
 ## 10.9 Security hardening sync (2026-08-23)
 
-Remediation of `SECURITY-ASSESSMENT-2026-08-23.md` (plan: `.omo/plans/security-remediation.md`) landed in commits `d0ba35b0` (H1/H2/M1/M3), `9d520856` (M2 OTPK quota), `32814663` (L2 CSP), `9a6584d5` (nginx real_ip/XFF), `dd00d425` (I1 metadata). Everything below is **manual ops** — `deploy.yml` does **not** ship `web/nginx.conf`, so the VPS nginx config must be synced by hand, and it must be re-synced every time that file changes in the repo.
+Remediation of `SECURITY-ASSESSMENT-2026-08-23.md` (plan: `.omo/plans/security-remediation.md`) landed in commits `d0ba35b0` (H1/H2/M1/M3), `9d520856` (M2 OTPK quota), `32814663` (L2 CSP), `9a6584d5` (nginx real_ip/XFF), `dd00d425` (I1 metadata). Everything below is **manual ops** — `deploy.yml` does **not** ship `ops/nginx/nyx.conf`, so the VPS nginx config must be synced by hand, and it must be re-synced every time that file changes in the repo.
 
 > ⚠ **Ordering matters:** commit `d0ba35b0` sets Express `trust proxy = 2`. On the *current* (pre-sync) prod chain, `req.ip` resolves to the leftmost, attacker-forgeable XFF entry — the H1 rate-limit bypass is only fully closed **after** this nginx sync. Do the sync promptly; verify with the curls in step 4.
 
 ### Step 1 — Refresh Cloudflare IP ranges
 
-The `set_real_ip_from` block in `web/nginx.conf` was fetched from <https://www.cloudflare.com/ips/> on 2026-08-23 and is marked VERIFY-AT-SYNC-TIME. Re-fetch and update any changed ranges before syncing:
+The `set_real_ip_from` block in `ops/nginx/nyx.conf` was fetched from <https://www.cloudflare.com/ips/> on 2026-08-23 and is marked VERIFY-AT-SYNC-TIME. Re-fetch and update any changed ranges before syncing:
 
 ```bash
 curl -s https://www.cloudflare.com/ips-v4; echo ---; curl -s https://www.cloudflare.com/ips-v6
@@ -208,7 +212,7 @@ curl -s https://www.cloudflare.com/ips-v4; echo ---; curl -s https://www.cloudfl
 
 ### Step 2 — Syntax check locally
 
-`web/nginx.conf` is an http-context **snippet** (starts with `include mime.types`), not a full main config — mounting it directly as `/etc/nginx/nginx.conf` fails with `"types" directive is not allowed here`. Wrap it:
+`ops/nginx/nyx.conf` is an http-context **snippet** (starts with `include mime.types`), not a full main config — mounting it directly as `/etc/nginx/nginx.conf` fails with `"types" directive is not allowed here`. Wrap it:
 
 ```bash
 cat > /tmp/opencode/nginx-wrap.conf <<'EOF'
@@ -216,7 +220,7 @@ events { worker_connections 16; }
 http { include /check/nginx.conf; }
 EOF
 docker run --rm --add-host=server:127.0.0.1 \
-  -v "$PWD/web/nginx.conf":/check/nginx.conf:ro \
+  -v "$PWD/ops/nginx/nyx.conf":/check/nginx.conf:ro \
   -v /tmp/opencode/nginx-wrap.conf:/etc/nginx/nginx.conf:ro \
   nginx:alpine nginx -t
 # expect: syntax is ok / test is successful
@@ -229,7 +233,7 @@ docker run --rm --add-host=server:127.0.0.1 \
 ```bash
 ssh -i <key> root@<VPS> 'nginx -T 2>/dev/null | grep -m1 "configuration file"'   # locate active conf path
 ssh -i <key> root@<VPS> 'cp <conf-path> <conf-path>.bak.$(date +%F)'
-scp -i <key> web/nginx.conf root@<VPS>:<conf-path>
+scp -i <key> ops/nginx/nyx.conf root@<VPS>:<conf-path>
 ssh -i <key> root@<VPS> 'nginx -t && systemctl reload nginx'
 ```
 
@@ -574,7 +578,7 @@ proses hidup):
 ```bash
 curl -s 127.0.0.1:9090/-/ready                       # "Prometheus Server is Ready."
 curl -s 127.0.0.1:9090/api/v1/targets | grep -o '"health":"[a-z]*"' | sort | uniq -c
-curl -s 127.0.0.1:9090/api/v1/rules   | grep -o '"name":"nyx[^"]*"' | wc -l   # 35 aturan
+curl -s 127.0.0.1:9090/api/v1/rules   | grep -o '"name":"nyx[^"]*"' | wc -l   # 39 aturan
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-auditor"}'
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-query"}'
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-sidecar"}'
@@ -809,7 +813,11 @@ langkah.
 pengaturan per-pesan), lalu memberi tahu klien lewat event
 `message:deleted_batch` supaya barisnya hilang dari UI tanpa menunggu reload.
 Job ini tidak muncul di metrik sweeper harian — kalau retensi macet, satu-satunya
-gejala adalah tabel `Message` yang tumbuh.
+gejala adalah tabel `Message` yang tumbuh. Urutannya `expiresAt` paling lama
+dulu (NULL = baris >14 hari, didahulukan) dan satu run menguras sampai 20 halaman
+× 500 baris (10.000 pesan/menit); kalau batas itu tercapai, log menulis
+`Message Sweeper mencapai batas … halaman`. Backlog yang terus tersisa berarti
+burst kedaluwarsa > 10k/menit — naikkan batas, jangan mengandalkan run berikutnya.
 
 - Respons endpoint memuat hitungan per jenis + `errors`. **HTTP 500 bila ada
   langkah gagal** — jangan membaca 200 sebagai "semua bersih".
@@ -1124,3 +1132,190 @@ dipin: `428` → upacara WebAuthn → `201` dengan `isVerified` + baris
 `Authenticator`. Yang **belum** dibuktikan: kunci privat di dalam silikon
 sungguhan (TPM/SE/Titan) dan rantai vendor nyata — keduanya butuh perangkat fisik
 + bundle root dari `ops/attestation/README.md`, bukan kode baru.
+
+## 10.17 Rotasi kunci at-rest (`ENC2` + key ring) — added 2026-10-25, docs/37 P6
+
+Kolom ter-seal (`UserHiddenConversation.userId`, `Story.authorTag`,
+`BlockedUser.*Tag`, `Message.senderId|sessionId|repliedToId`, `Device.nameSealed`,
+`Tenant.apiKey`, `PushSubscription.endpointSealed`, device id di `content` SYSTEM)
+dulu memakai satu kunci turunan `NYX_AT_REST_PEPPER` dan envelope tanpa versi.
+Sekarang envelope ber-versi dan kuncinya bisa dirotasi **tanpa downtime**.
+
+**Format.** Legacy (tanpa prefiks) = kunci id `0` (turunan pepper) dan selalu
+tetap terbaca. Baru: `ENC2:<keyId>:<base64url(nonce‖ct)>`. Key id yang tidak ada
+di ring → `openAtRest` mengembalikan `null` (gagal baca terlihat), bukan
+plaintext/tebakan.
+
+**Konfigurasi.**
+
+```bash
+# /root/nyx-app/.env (jangan commit; JANGAN disimpan di DB)
+NYX_AT_REST_KEYRING='{"active":"k2026-11","keys":{"k2026-11":"<32+ char>","k2026-10":"<lama>"}}'
+# atau custody file (systemd-creds, izin 0400/0600):
+# NYX_AT_REST_KEYRING_FILE=/run/credentials/nyx-api.service/at-rest-keyring.json
+```
+
+Id `0` dicadangkan. Key ring yang **ada tetapi tidak valid** (JSON rusak, id
+aktif tidak ada, materi <16 char) membuat request gagal — bukan diam-diam
+kembali ke legacy. Status aman dilihat di `GET /api/admin/system-status` →
+`atRest: { ok, activeKeyId, keyCount, envelope, custody, legacyReadable }`.
+
+**Prosedur rotasi (urut, jangan dibalik).**
+
+1. Backup DB **dan** key ring lama (dua tempat terpisah).
+2. Tambah slot baru di key ring, `active` = slot baru, restart `nyx-api`.
+   Tulisan baru langsung `ENC2`, baris lama tetap terbaca (lookup ganda).
+3. Dry-run re-seal dari `server/`:
+   `pnpm exec tsx scripts/reseal-at-rest.ts` → catat `legacy` dan `unreadable`.
+   `unreadable > 0` = berhenti; ada nilai yang tak bisa dibuka (kunci hilang),
+   jangan hapus apa pun.
+4. Terapkan: `pnpm exec tsx scripts/reseal-at-rest.ts --apply`
+   (batch 500 baris, idempoten, boleh dihentikan dan diulang).
+5. Verifikasi: jalankan dry-run lagi → `0 legacy`, `0 ditulis`. Baru setelah itu
+   slot lama boleh dihapus dari key ring.
+6. Cek fungsional: kirim pesan 1:1 & grup, buka daftar perangkat, blokir/unblock,
+   story, logout (hapus push), admin tenants.
+
+**Rollback.** Kembalikan `active` ke slot lama — **jangan** mengosongkan key
+ring setelah ada baris `ENC2`: nilai yang ditulis dengan slot baru hanya bisa
+dibuka bila slot itu masih ada di `keys`, dan tanpa key ring `openAtRest`
+mengembalikan `null` (gagal baca, tercatat sebagai peringatan `kunci … tidak ada
+di key ring`). Mengosongkan ring hanya aman **sebelum** langkah 4 dijalankan.
+Karena itu jangan menghapus slot mana pun sebelum langkah 5 hijau.
+
+**Yang tidak ikut berubah.** Blind index (`HMAC(pepper, nilai)`), tag instalasi,
+tag receipt, dan seed OPRF tetap memakai pepper: HMAC satu arah + plaintext tidak
+disimpan server, jadi tidak bisa di-reindex dari sisi server (docs/28 §R4).
+Menjadwalkan "rotasi pepper" dengan harapan kolom itu berganti adalah kesalahan.
+
+**Batas jujur.** Ini bukan KMS/HSM: kunci ada di memori `nyx-api` dan root host
+bisa membacanya. Custody `file` hanya memindahkan materi dari environment ke file
+terbatas izin (`utils/keyCustody.ts`); belum ada Vault/TPM di mesin ini.
+
+## 10.18 Relay OHTTP proses terpisah (`nyx-ohttp-relay`) — added 2026-10-25, docs/37 P7
+
+Sebelumnya `/api/ohttp/relay` dan `/api/ohttp/gateway` berada di proses `nyx-api`
+yang sama. Itu membuat klaim "relay melihat IP, gateway melihat isi" hanya
+arsitektur di atas kertas: satu proses (dan satu log) bisa mengorelasikan
+keduanya. Sekarang relay bisa dijalankan sebagai proses sendiri.
+
+**Komponen.**
+
+| Bagian | Berkas | Catatan |
+|---|---|---|
+| App relay | `server/src/ohttp/relayApp.ts` | `POST /relay` + `GET /healthz`; meneruskan **byte** amplop, membuang seluruh header klien |
+| Unit user (selfhost) | `ops/systemd/user/nyx-ohttp-relay.service` | `systemctl --user`, tanpa root |
+| Entrypoint | `server/src/ohttp/relay.ts` | baca env, validasi loopback, listen; tanpa DB/Redis/JWT |
+| Script | `pnpm --filter nyx-server run relay` | dev lokal |
+| Unit | `ops/systemd/nyx-ohttp-relay.service` + `.env.example` | VPS/pm2 (`/etc/systemd/system`) |
+
+**Menyalakan.**
+
+```bash
+# 1. relay (loopback). Hanya host loopback yang diterima untuk gateway target.
+install -d -m 0750 /etc/nyx/ohttp
+install -m 0600 ops/systemd/nyx-ohttp-relay.env.example /etc/nyx/ohttp/nyx-ohttp-relay.env
+#    isi OHTTP_GATEWAY_TARGET=http://127.0.0.1:4000/api/ohttp/gateway
+install -m 0644 ops/systemd/nyx-ohttp-relay.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now nyx-ohttp-relay
+curl -fsS http://127.0.0.1:4100/healthz
+
+# 2. API berhenti memasang /relay sendiri
+#    /root/nyx-app/.env: OHTTP_RELAY_EXTERNAL=1  → restart nyx-api
+
+# 3. nginx meneruskan jalur publik ke relay (bukan ke API)
+#    location = /api/ohttp/relay { proxy_pass http://127.0.0.1:4100/relay; … }
+
+# 4. klien: default memakai `/api/ohttp/relay` di origin sendiri (nginx → :4100),
+#    jadi tidak perlu env apa pun. Set VITE_OHTTP_RELAY_URL hanya bila relay
+#    berada di origin/host lain.
+```
+
+**Batasan yang ditegakkan saat boot.** Target gateway non-loopback ditolak
+(relay akan menjadi open proxy) kecuali host itu disebut eksplisit di
+`OHTTP_GATEWAY_TRUSTED_HOSTS` (Docker: `server`); `OHTTP_TOKEN_MODE=off` ditolak
+(relay tidak punya sesi/DB untuk mencetak token); bind non-loopback ditolak
+kecuali `OHTTP_RELAY_ALLOW_PUBLIC_BIND=1` (dipakai compose — bind lebar di
+jaringan container, nginx yang mengekspos). Body kosong = 400; upstream
+mati/timeout = 502 tanpa detail internal.
+
+**Selfhost (`~/nyx-selfhost`, systemd user).** `scripts/sync-selfhost.sh`
+memasang `ops/nginx/nyx.conf` (setelah transformasi path) dan
+`ops/systemd/user/nyx-ohttp-relay.service`; symlink unit ke
+`~/.config/systemd/user/`, `systemctl --user daemon-reload`, lalu
+`systemctl --user enable --now nyx-ohttp-relay`. Env terpisah:
+`~/nyx-selfhost/ohttp/relay.env` (jangan mewarisi `server/.env`). Reload nginx:
+`systemctl --user reload nyx-nginx`. Jangan enable selama `OHTTP_ENABLED` belum
+diset.
+
+**Docker (`docker-compose.yml`).** Service `ohttp-relay` sudah ada: build dari
+`./server`, `command: pnpm run relay`, `OHTTP_GATEWAY_TARGET=http://server:4000/api/ohttp/gateway`,
+`OHTTP_GATEWAY_TRUSTED_HOSTS=server`, `OHTTP_RELAY_HOST=0.0.0.0` +
+`OHTTP_RELAY_ALLOW_PUBLIC_BIND=1`. nginx meneruskan `location = /api/ohttp/relay`
+ke `http://ohttp-relay:4100/relay`. Jangan lupa `OHTTP_RELAY_EXTERNAL=1` pada
+service `server`.
+
+**Rollback.** Hapus `OHTTP_RELAY_EXTERNAL` (API memasang `/relay` lagi), hentikan
+unit, kembalikan `VITE_OHTTP_RELAY_URL`. Tidak ada state.
+
+**Batas jujur.** Kedua proses tetap di host yang sama bila dijalankan begitu;
+operator host masih bisa mengorelasikan lewat jaringan/waktu. Yang hilang adalah
+korelasi di log/state aplikasi. Pemisahan fisik = jalankan relay di host lain
+dan ubah `OHTTP_GATEWAY_TARGET` (butuh perubahan kode karena validasi loopback
+saat ini sengaja ketat).
+
+## 10.19 PIR sidecar lokal (`nyx-pir-sidecar`) — added 2026-10-25, docs/35 Fase 4b
+
+Pencarian PIR (ChalametPIR) membutuhkan **index** yang dibangun dari `User.oprfIndex`
+dan sebuah proses yang menjawab `/params` (hint/filter/seed) serta `/query` biner.
+Node tidak memegang kripto PIR: `server/src/routes/pir.ts` hanya mem-proxy byte ke
+loopback, dan router `/api/pir` **tidak dipasang** tanpa `PIR_ENABLED=1` (404).
+
+**Komponen.**
+
+| Bagian | Berkas | Catatan |
+|---|---|---|
+| Sidecar | `server/pir-sidecar` (`pir-service`) | Rust; index in-memory, snapshot JSON |
+| Unit user (selfhost) | `ops/systemd/user/nyx-pir-sidecar.service` | `systemctl --user`, env terpisah |
+| Proxy API | `server/src/routes/pir.ts` | auth + rate limit pencarian, byte opaque |
+| Snapshot | `pnpm --filter nyx-server run pir:snapshot` | tulis atomik dari `User.oprfIndex` |
+| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, hot-swap `/admin/rebuild` |
+| Klien | `web/src/lib/pirClient.ts` + worker WASM | wajib `VITE_OHTTP_ENABLED=1` |
+
+**Env yang harus cocok (tiga tempat).**
+
+- `server/.env`: `PIR_ENABLED=1`, `PIR_SERVICE_URL=http://127.0.0.1:9470`,
+  `PIR_ADMIN_TOKEN`, `PIR_SNAPSHOT_PATH`, `PIR_OPRF_ENABLED=1` (gate OPRF; tanpa ini
+  register/login tidak mengisi `oprfIndex` dan snapshot akan kosong).
+- Env sidecar: `PIR_BIND` (loopback), `PIR_MASTER_SECRET`, `PIR_ADMIN_TOKEN` (**sama**
+  dengan server), `PIR_SNAPSHOT_PATH` (**sama**), `PIR_ARITY`, `PIR_MAX_ENTRIES`,
+  `PIR_RECORD_BYTES`.
+- `web/.env`: `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`, `VITE_OHTTP_ENABLED=1`.
+
+**Menyalakan (selfhost).**
+
+```bash
+cd server/pir-sidecar && cargo build --release --locked
+pnpm --filter nyx-server run pir:snapshot          # butuh >=1 user ber-oprfIndex
+install -d -m 0750 ~/nyx-selfhost/pir
+install -m 0600 <env> ~/nyx-selfhost/pir/pir.env
+systemctl --user daemon-reload
+systemctl --user enable --now nyx-pir-sidecar
+curl -fsS http://127.0.0.1:9470/health
+```
+
+Snapshot hanya dimuat **saat boot**. Setelah user baru mendaftar, index tidak
+berubah sampai cron `04:15` (hot-swap) atau operator menjalankan `pir:snapshot`
+lalu `systemctl --user restart nyx-pir-sidecar`. Tanpa salah satu itu, pencarian
+PIR untuk akun baru mengembalikan "tidak ditemukan"; klien sengaja **tidak**
+punya fallback diam-diam ke `/api/users/search` (lihat `web/src/lib/userSearch.ts`).
+
+**CSRF pada query PIR.** `POST /api/pir/query` lewat OHTTP tidak membawa cookie
+(relay membuang header klien); identitasnya token OHTTP ber-scope di dalam amplop.
+Karena itu lapisan CSRF global melewati jalur ini **hanya** bila request tidak
+membawa cookie sesi sama sekali (`app.ts`); request berbasis cookie tetap wajib
+CSRF. Jangan melonggarkan aturan itu ke path lain tanpa alasan yang sama.
+
+**Rollback.** Hapus `PIR_ENABLED` (router hilang, 404) dan `PIR_OPRF_ENABLED`
+(search kembali ke `usernameHash` legacy), lalu restart API. Sidecar boleh
+dibiarkan mati.

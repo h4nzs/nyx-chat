@@ -8,6 +8,8 @@ import { sendJsonToUser, emitEventToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
 import { SubscriptionTier } from '@nyx/shared';
 import { safeEqualStrings } from '../utils/validate.js';
+// [AUDIT 2026-10-24] Kunci idempotensi + awal periode baru: logika murni, diuji.
+import { nextSubscriptionExpiry, resolveWebhookPaymentKey } from '../utils/subscriptionWebhook.js';
 
 const router: Router = Router();
 
@@ -18,6 +20,11 @@ const router: Router = Router();
 
 const nowPaymentsApiKey = process.env.NOWPAYMENTS_API_KEY || '';
 const nowPaymentsIpnSecret = process.env.NOWPAYMENTS_IPN_SECRET || '';
+
+// [AUDIT 2026-10-24] Penanda "IPN ini sudah diproses" — 90 hari (lebih lama dari
+// retry NOWPayments maupun masa satu periode langganan).
+const IPN_PROCESSED_PREFIX = 'nowpayments:ipn:processed:';
+const IPN_PROCESSED_TTL_SEC = 90 * 24 * 60 * 60;
 
 // Create Crypto Transaction (NOWPayments)
 router.post('/create-crypto-transaction', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
@@ -71,7 +78,18 @@ router.post('/create-crypto-transaction', requireAuth, async (req: Request, res:
 
 // NOWPayments Webhook
 router.post('/nowpayments-webhook', async (req: Request, res: Response, next: NextFunction) => {
+  // Bila update DB gagal setelah penanda idempotensi dipegang, penanda dilepas
+  // lagi di `catch` bawah supaya retry NOWPayments berikutnya tetap bisa masuk.
+  let reservedKey: string | null = null;
   try {
+    // [AUDIT 2026-10-24] Fail-closed: tanpa secret, HMAC-SHA512 dihitung dengan
+    // kunci kosong — nilai yang bisa dihitung siapa pun, jadi siapa pun bisa
+    // menerbitkan PRO gratis. Tolak sebelum menyentuh tanda tangan.
+    if (!nowPaymentsIpnSecret) {
+      console.error('[NOWPayments] NOWPAYMENTS_IPN_SECRET belum diset — webhook ditolak (fail-closed).');
+      return res.status(503).json({ error: 'WEBHOOK_NOT_CONFIGURED' });
+    }
+
     const signature = req.headers['x-nowpayments-sig'];
     if (!signature || typeof signature !== 'string') {
       return res.status(403).json({ error: 'Missing signature' });
@@ -111,9 +129,44 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
     const userId = orderIdParts.slice(2, orderIdParts.length - 1).join('-');
 
     if (paymentStatus === 'finished') {
-      // Success
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 30);
+      // [AUDIT 2026-10-24] Idempotensi: NOWPayments mengulang IPN, dan tanda
+      // tangannya tidak bertimestamp — body+sig yang sama tetap sah selamanya,
+      // sehingga tanpa penanda satu pembayaran memperpanjang langganan setiap
+      // kali dikirim ulang. SET NX atomik memastikan hanya kiriman pertama
+      // yang menaikkan tier.
+      const idempotencyKey = `${IPN_PROCESSED_PREFIX}${resolveWebhookPaymentKey(payload, orderId)}`;
+      let reserved: string | null;
+      try {
+        reserved = await redisClient.set(idempotencyKey, new Date().toISOString(), {
+          NX: true,
+          EX: IPN_PROCESSED_TTL_SEC
+        });
+      } catch (error) {
+        // Jangan menaikkan langganan tanpa penanda: 503 membuat NOWPayments
+        // mencoba lagi setelah Redis pulih.
+        console.error('[NOWPayments] Idempotency store unavailable:', error);
+        return res.status(503).json({ error: 'SUBSCRIPTION_STORE_UNAVAILABLE' });
+      }
+      if (reserved === null) {
+        console.log('[Subscription] IPN duplikat diabaikan (finished sudah diproses)');
+        return res.status(200).json({ message: 'OK', duplicate: true });
+      }
+      reservedKey = idempotencyKey;
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { subscriptionExpiresAt: true }
+      });
+      if (!user) {
+        // Akun sudah dihapus (dead-man's switch): tidak ada yang bisa dinaikkan,
+        // dan 200 menghentikan retry NOWPayments untuk pesanan ini.
+        console.warn('[Subscription] IPN untuk akun yang tidak ada — diabaikan');
+        return res.status(200).json({ message: 'OK' });
+      }
+
+      // [AUDIT 2026-10-24] Periode baru mulai dari SISA langganan, bukan dari
+      // "sekarang": pembayaran kedua tidak boleh menghapus hari yang tersisa.
+      const expiresAt = nextSubscriptionExpiry(user.subscriptionExpiresAt, new Date());
 
       await prisma.user.update({
         where: { id: userId },
@@ -144,6 +197,9 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
 
     res.status(200).json({ message: 'OK' });
   } catch (error) {
+    // Lepas penanda: kalau tidak, pembayaran yang sudah dibayar tapi gagal
+    // tersimpan akan dianggap "sudah diproses" selamanya oleh retry berikutnya.
+    if (reservedKey) await redisClient.del(reservedKey).catch(() => {});
     console.error('[NOWPayments Webhook Error]:', error);
     next(error); // Return 500
   }

@@ -60,8 +60,8 @@ COPY public."MessageStatus" (id, "messageId", "userId", status) FROM stdin;
 st-1\t${MSG}\t${HASH}\tREAD
 \\.
 
-COPY public."UserHiddenConversation" (id, "userId", "conversationId", "deliveryToken") FROM stdin;
-m-1\t${SEAL_ALICE}\tconv-1\ttok-1
+COPY public."UserHiddenConversation" (id, "userId", "conversationId", "tokenHash", "tokenEpoch", "expiresAt") FROM stdin;
+m-1\t${SEAL_ALICE}\tconv-1\t${HASH}\t0\t2026-01-01T00:00:00Z
 \\.
 
 COPY public."Story" (id, "authorTag") FROM stdin;

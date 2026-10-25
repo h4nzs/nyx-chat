@@ -21,9 +21,10 @@
  * supaya sealing konsisten.
  */
 
-import { openAtRest, sealAtRest } from './atRestSecrets.js'
+import { openAtRest, sealAtRest, sealedLookupCandidates } from './atRestSecrets.js'
+import { hashGroupToken, memberTokenExpiry } from './groupTokens.js'
 
-/** Nilai kanonik untuk kolom routing (deterministik). */
+/** Nilai kanonik untuk kolom routing (deterministik, kunci seal aktif). */
 export function routingIdentity(userId: string): Promise<string> {
   return sealAtRest(userId)
 }
@@ -31,9 +32,14 @@ export function routingIdentity(userId: string): Promise<string> {
 /**
  * Nilai lookup kanonik (selalu ter-seal).
  * [2026-10 legacy purge] Cabang "apa adanya" untuk baris plaintext dibuang.
+ *
+ * [docs/37 §37.4 P6] Setelah key ring aktif, baris lama (`ENC1`-style, kunci id
+ * `0`) dan baru (`ENC2:<keyId>:…`) hidup berdampingan sampai job re-seal selesai.
+ * Karena itu kandidatnya **dua nilai** (kunci aktif + legacy) selama rotasi;
+ * semua pemanggil sudah memakai `where: { kolom: { in: kandidat } }`.
  */
 export async function routingCandidates(userId: string): Promise<string[]> {
-  return [await sealAtRest(userId)]
+  return sealedLookupCandidates(userId)
 }
 
 /**
@@ -51,9 +57,15 @@ export async function resolveRoutingUser(stored: string | null | undefined): Pro
  */
 export interface MembershipPrisma extends MembershipLookup {
   userHiddenConversation: MembershipLookup['userHiddenConversation'] & {
-    update(args: { where: { id: string }; data: { deliveryToken: string } }): Promise<unknown>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
     create(args: {
-      data: { userId: string; conversationId: string; deliveryToken: string };
+      data: {
+        userId: string
+        conversationId: string
+        tokenHash: string
+        tokenEpoch: number
+        expiresAt: Date
+      };
     }): Promise<unknown>;
     deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
   };
@@ -75,15 +87,26 @@ export interface MembershipLookup {
 }
 
 /**
- * Upsert baris keanggotaan (conversation + delivery token) untuk seorang user.
+ * Upsert baris keanggotaan (conversation + member token) untuk seorang user.
+ *
+ * [docs/37 §37.3.1] Token mentah TIDAK disimpan: yang ditulis hanya
+ * `tokenHash` (SHA-256) + epoch + expiry. Pemanggil tetap mengirim token mentah
+ * karena token itu dipegang klien, tapi nilai DB tidak bisa dipakai ulang
+ * untuk ikut sync (dump DB saja tidak cukup).
  *
  * Memakai findFirst + nilai kanonik (bukan upsert compound-unique) supaya baris
- * yang sudah ada ter-upgrade di tempat, bukan bikin duplikat — `deliveryToken`
+ * yang sudah ada ter-upgrade di tempat, bukan bikin duplikat — `tokenHash`
  * unik, jadi duplikat akan gagal tanpa jejak yang jelas.
  */
 export async function upsertMembership(
   prisma: MembershipPrisma,
-  input: { userId: string; conversationId: string; deliveryToken: string }
+  input: {
+    userId: string
+    conversationId: string
+    token: string
+    tokenEpoch?: number
+    expiresAt?: Date
+  }
 ): Promise<void> {
   const candidates = await routingCandidates(input.userId)
   const existing = await prisma.userHiddenConversation.findFirst({
@@ -91,10 +114,14 @@ export async function upsertMembership(
     select: { id: true },
   })
 
+  const tokenHash = hashGroupToken(input.token)
+  const tokenEpoch = input.tokenEpoch ?? 0
+  const expiresAt = input.expiresAt ?? memberTokenExpiry()
+
   if (existing?.id) {
     await prisma.userHiddenConversation.update({
       where: { id: existing.id },
-      data: { deliveryToken: input.deliveryToken },
+      data: { tokenHash, tokenEpoch, expiresAt },
     })
     return
   }
@@ -103,7 +130,9 @@ export async function upsertMembership(
     data: {
       userId: candidates[0]!,
       conversationId: input.conversationId,
-      deliveryToken: input.deliveryToken,
+      tokenHash,
+      tokenEpoch,
+      expiresAt,
     },
   })
 }
@@ -127,6 +156,14 @@ export async function findMembership(
  */
 export const storyAuthorTag = routingIdentity
 
+/**
+ * [docs/37 §37.4 P6] Kandidat tag untuk `Story.authorTag` dan `BlockedUser`.
+ * Nilainya sama dengan `routingIdentity`, tetapi lookup harus menerima format
+ * lama dan baru selama re-seal — memakai `storyAuthorTag(userId)` tunggal akan
+ * kehilangan baris lama tepat setelah rotasi kunci.
+ */
+export const tagCandidates = sealedLookupCandidates
+
 /** [docs/28 D9] Tag identitas untuk kolom `blockerTag`/`blockedTag`. */
 export const blockedUserTag = routingIdentity
 
@@ -146,12 +183,14 @@ export async function purgeSealedUserRows(
   prisma: SealedOwnedRowsPrisma,
   userId: string
 ): Promise<void> {
-  const tag = await routingIdentity(userId)
-  // Keanggotaan grup user (baris token-first), nilai kanonik ter-seal.
-  const membership = await routingCandidates(userId)
-  await prisma.userHiddenConversation.deleteMany({ where: { userId: { in: membership } } })
-  await prisma.story.deleteMany({ where: { authorTag: tag } })
-  await prisma.blockedUser.deleteMany({ where: { OR: [{ blockerTag: tag }, { blockedTag: tag }] } })
+  // Satu daftar kandidat dipakai untuk semua kolom ter-seal (semua memakai
+  // kunci seal yang sama), jadi rotasi key ring tidak meninggalkan baris yatim.
+  const candidates = await routingCandidates(userId)
+  await prisma.userHiddenConversation.deleteMany({ where: { userId: { in: candidates } } })
+  await prisma.story.deleteMany({ where: { authorTag: { in: candidates } } })
+  await prisma.blockedUser.deleteMany({
+    where: { OR: [{ blockerTag: { in: candidates } }, { blockedTag: { in: candidates } }] },
+  })
 }
 
 /** Revocation (kick/leave): hapus baris keanggotaan user pada conversation. */

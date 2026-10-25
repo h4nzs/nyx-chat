@@ -40,7 +40,33 @@ services:
     networks:
       - nyx-net
 
-  # 4. Frontend (Web + Nginx Reverse Proxy)
+  # 4. Relay OHTTP proses terpisah (docs/37 §37.4 P7, docs/10 §10.18).
+  #    Klien memakai `/api/ohttp/relay` (nginx → service ini → gateway di API).
+  #    `OHTTP_GATEWAY_TRUSTED_HOSTS=server` adalah SATU-SATUNYA alasan relay mau
+  #    meneruskan ke host non-loopback; jangan longgarkan tanpa memahami bahwa
+  #    relay yang meneruskan ke sembarang host = open proxy.
+  #    Set `OHTTP_RELAY_EXTERNAL=1` di environment `server` agar API berhenti
+  #    memasang /api/ohttp/relay sendiri.
+  ohttp-relay:
+    build: ./server
+    container_name: nyx-ohttp-relay
+    restart: always
+    depends_on:
+      - server
+    environment:
+      OHTTP_GATEWAY_TARGET: http://server:4000/api/ohttp/gateway
+      OHTTP_GATEWAY_TRUSTED_HOSTS: server
+      OHTTP_RELAY_HOST: 0.0.0.0
+      # Bind lebar di jaringan container = disengaja (nginx yang mengekspos).
+      OHTTP_RELAY_ALLOW_PUBLIC_BIND: "1"
+      OHTTP_RELAY_PORT: 4100
+      OHTTP_RELAY_RATE_LIMIT: 120
+      NODE_ENV: production
+    command: ["pnpm", "run", "relay"]
+    networks:
+      - nyx-net
+
+  # 5. Frontend (Web + Nginx Reverse Proxy)
   web:
     build: ./web
     container_name: nyx-web

@@ -22,6 +22,20 @@ CSRF state is keyed **per client** via the `x-nyx-installation-id` header. The c
 ### Sweeper errors every minute (`messageSweeper`)
 Usually a DB connectivity symptom (see above). If it's a query error, check `Message.expiresAt` index exists (`prisma db push` after schema changes).
 
+### `POST /api/pir/query → 403 Invalid CSRF token` (lewat OHTTP)
+Amplop OHTTP **tidak membawa cookie**: relay membuang header klien, dan identitasnya token ber-scope di dalam amplop. Lapisan CSRF global (`server/src/app.ts`) melewati `/api/pir/query` hanya bila request tidak punya cookie sesi (`at`/`rt`/`embed_at`). Kalau 403 ini muncul, berarti ada cookie sesi yang ikut terkirim di dalam amplop (klien menambahkan `cookie` manual) atau pengecualian di `app.ts` hilang. Jangan melebarkan pengecualiannya ke path lain.
+
+### `/api/pir/*` → 404 atau `503 PIR_UNAVAILABLE`
+- 404 = `PIR_ENABLED` kosong; router memang tidak dipasang (bukan 403).
+- 503 = `PIR_SERVICE_URL` salah atau sidecar mati: `curl -fsS http://127.0.0.1:9470/health`, `systemctl --user status nyx-pir-sidecar`.
+- Sidecar hidup tetapi params menolak: snapshot kosong/tidak ada. `pnpm --filter nyx-server run pir:snapshot` **menolak 0 user ber-oprfIndex** — pastikan `PIR_OPRF_ENABLED=1` sejak akun didaftarkan, lalu jalankan ulang dan `systemctl --user restart nyx-pir-sidecar`.
+
+### Pencarian user yang baru mendaftar tidak menemukan apa pun (PIR aktif)
+Index PIR dibangun dari snapshot, bukan dibaca live dari DB. Akun baru masuk paling lambat lewat cron `04:15` (hot-swap `/admin/rebuild`) atau manual: `pnpm --filter nyx-server run pir:snapshot && systemctl --user restart nyx-pir-sidecar`. Klien sengaja **tidak** punya fallback diam-diam ke `/api/users/search` (`web/src/lib/userSearch.ts`).
+
+### `/api/users/search/oprf → 503 PIR_OPRF_DISABLED`
+`PIR_OPRF_ENABLED` kosong. Nyalakan di server **dan** `VITE_PIR_OPRF_ENABLED=1` di klien (bangun ulang web), lalu restart API. Seed OPRF default = `HMAC(NYX_AT_REST_PEPPER, "NYX_OPRF_SEED_V1")` — mengganti pepper/`NYX_OPRF_SEED` setelah ada akun membuat `oprfIndex` lama tidak cocok lagi.
+
 ## Frontend
 
 ### Lazy-loaded feature "blinks" (full-screen Suspense) on first use

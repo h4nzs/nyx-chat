@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
 import { useConversationStore, type Conversation } from '../store/conversation';
 import { authFetch } from '../lib/api';
-import { setSecureCookie } from '../lib/tokenStorage';
+import { setEmbedAccessCookie } from '../lib/tokenStorage';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '../components/Spinner';
 import ChatWindow from '../components/ChatWindow';
@@ -27,7 +27,10 @@ export default function EmbedChatPage() {
       }
 
       if (token) {
-        setSecureCookie('at', token);
+        // [AUDIT 2026-10-24] Jangan tulis cookie `at` dari JS: nama itu milik
+        // cookie HttpOnly server. `embed_at` dibaca `requireAuth` sebagai
+        // fallback dan mati bersama `exp` tokennya (bukan 7 hari).
+        setEmbedAccessCookie(token);
         useAuthStore.getState().setAccessToken(token);
       }
 

@@ -77,6 +77,21 @@ describe('header versi klien (R2)', () => {
     expect(headers['x-nyx-installation-id']).toBe('iid-test')
   })
 
+  it('jalur anonim tidak mengirim cookie, installation ID, atau CSRF', async () => {
+    fetchMock.mockResolvedValue(okResponse({ ok: true }))
+
+    await api('/api/groups/sync', { method: 'POST', body: '{}', anonymous: true, timeoutMs: 1000 })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const init = (fetchMock.mock.calls[0]?.[1] ?? {}) as RequestInit
+    expect(init.credentials).toBe('omit')
+    const headers = init.headers as Record<string, string>
+    expect(headers['x-nyx-installation-id']).toBeUndefined()
+    expect(headers['CSRF-Token']).toBeUndefined()
+    expect(headers['Content-Type']).toBe('application/json')
+    expect(headers[CLIENT_VERSION_HEADER]).toBe(CLIENT_VERSION_VALUE)
+  })
+
   it('versi build yang dikirim benar-benar versi nyata, bukan string kosong', () => {
     // Kalau define Vite hilang, `__APP_VERSION__` menjadi undefined dan server
     // memperlakukannya sebagai "klien tanpa penanda versi" — gerbang jadi bisu

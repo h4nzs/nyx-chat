@@ -253,6 +253,12 @@ without identifying the presenter, even then.
 **Concretely:** T3 tokens are the enabler. Upgrade path = re-issue tokens as blind
 signatures via an issuance sub-protocol, keep verification semantics identical.
 
+> **REMOVED 2026-10-23 — historical record.** Blind RSA, issuance/commit,
+> revocation, client storage, and Dexie `groupCredentials` were deleted in the
+> PQ-only cutover. Group auth is now token-first. The text below is retained as
+> design history; its rotation claim was not enforced by `verifyPresentation`
+> (old key versions remained valid while their public row existed).
+
 **[IMPLEMENTED 2026-09-27 — blind RSA execution record]** All three trigger
 conditions closed: #1 by the T3b token-first work (token-only sync), #2 by
 policy (single-VPS timing logs accepted as out of scope, documented in 26.3/26.10.6),
@@ -386,6 +392,93 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
   (3) `group:participants_changed` (emitted by the server on add/kick/leave)
   had NO client listener — non-admin members never learned of membership
   changes until reload; they now refresh metadata + mark key rotation needed.
+
+### 26.8.4 Future: token epochs + anonymous sync (design only, 2026-10-24)
+
+**Status update 2026-10-25 — poin 1, 2, dan 4 SUDAH di kode; poin 3 tetap
+fail-closed tanpa issuer.** Detail lengkap: `docs/37` (37.2, 37.3, §37.9). Yang
+sudah jalan: token grup ber-epoch + TTL/hash-at-rest (`utils/groupTokens.ts`),
+`POST /api/groups/sync` tanpa cookie/JWT (dipasang sebelum lapisan CSRF),
+mailbox grup pengganti graf distribusi kunci, Privacy Pass (blind RSA) untuk
+anti-abuse sync, OHTTP termasuk relay proses terpisah (opsional), rotasi epoch
+terjadwal 24 jam/500 pesan plus rotasi manual admin, dan verifier credential
+biner yang menolak semuanya sampai operator memasang suite (allowlist kosong).
+Yang **belum**: issuer PQ (spike BRaccoon ditutup, `docs/37` §37.9) dan
+revocation per-anggota (masih epoch-wide). Jangan menghidupkan blind RSA lagi.
+
+Teks di bawah adalah desain awal 2026-10-24; angka/klaim di dalamnya sudah
+digantikan oleh `docs/37` bila berbeda.
+
+**Status asli (2026-10-24): not implemented.** This is the agreed direction for the next group-privacy
+step, not a commitment to a credential primitive. Order matters: token epochs →
+anonymous sync + OHTTP → credential presentation. Do not revive blind RSA or write
+lattice/UOV crypto in-house.
+
+#### 1. Token epoch + TTL
+
+- Group token: opaque 256-bit random; server stores only `SHA-256(token)` plus
+  `groupId`, `epoch`, and `expiresAt`. Do not store the raw token.
+- Per-member delivery token: separate 256-bit opaque token with its own
+  `expiresAt`; never reuse the group token for delivery.
+- Kick: increment `Conversation.groupEpoch`, rotate the group token, delete the
+  target’s delivery-token row. Old group tokens die immediately; in-flight
+  requests authenticated with the old epoch are rejected.
+- Leave: delete the member’s delivery token; do not increment the epoch.
+- TTL: short (e.g. 24 h) with rotation before expiry. Clock skew and offline
+  clients need an explicit grace/refresh rule.
+- Migration: current group token is 256-bit hash-only but has no epoch/expiry;
+  delivery token is 128-bit with no expiry. Adding columns and rotating on
+  deploy is a breaking membership change — plan it, do not mix with unrelated
+  releases.
+
+#### 2. Anonymous sync
+
+- `POST /api/groups/sync` with the token in the **body**, not a JWT header.
+  The server resolves `SHA-256(token)` → group + epoch and returns envelopes;
+  it must not write a `userId` for this path.
+- Wrap with OHTTP relay/gateway (RFC 9458/9292). OHTTP hides the caller from the
+  app server; it does not hide the account if the request still carries a JWT.
+- Anti-abuse is an explicit trade-off:
+  - per-token bucket: simple, but the app server can correlate token + timing;
+  - Privacy Pass (RFC 9576/9577): unlinkable issuance, but adds an issuance
+    service and token bank;
+  - start with per-token + OHTTP, measure abuse, then decide whether Privacy
+    Pass is worth the complexity. Document the choice; do not silently add
+    identity.
+- Replay/idempotency, pagination, response-size limits, and rate-limit metrics
+  must be designed before implementation.
+
+#### 3. Credential presentation (later)
+
+- Use a binary POST body, never `X-Group-Credentials` headers: PQ signatures are
+  too large for header limits.
+- Bind the signed message to `groupId + epoch + keyVersion + suite + expiry`.
+- Suite allowlist, fail-closed on unknown/removed suites; no RSA fallback.
+- Only after anonymous sync + OHTTP is live and a reviewed PQ blind-signature
+  primitive exists. Until then, token-first is the authorization path.
+
+#### 4. Revocation
+
+- Admin capability raises the group epoch; that invalidates all old tokens and
+  (later) all credentials bound to the old epoch. Do not authorize revocation
+  with the shared group token.
+- Holder-initiated revoke on leave; never log serials, tokens, or signed
+  messages. Metrics count events only.
+- Epoch rotation is group-wide; per-member revocation still needs a serial list
+  or short TTL. State the trade-off explicitly.
+
+#### 5. Key custody
+
+- Use KMS/HSM for server signing/issuer keys when the primitive supports it.
+- PQ blind-signature HSM support is not generally available. If a software key
+  is the only option, say so, seal it, rotate it, and do not claim HSM-grade
+  custody.
+- Current deployment keeps keys in env; there is no KMS/HSM integration and no
+  group issuer key (blind RSA removed 2026-10-23).
+
+Open questions: TTL/grace, epoch storage/migration, OHTTP relay operator,
+token-bucket vs Privacy Pass, per-member vs group-wide revocation, and the PQ
+primitive. None of these is settled by code today.
 
 ## 26.9 Resource-scaling appendix (post-VPS-upgrade)
 

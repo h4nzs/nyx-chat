@@ -8,7 +8,7 @@
  * source:
  *
  *   POST   /:id/participants          → authorizeMemberMutation
- *   DELETE /:id/participants/:userId  → authorizeMemberMutation
+ *   DELETE /:id/participants/:userId  → authorizeMemberRemoval (admin-only)
  *   DELETE /:id/leave                 → authorizeMemberLeave
  *   PUT    /:id/details               → authorizeDetailsWrite
  *   POST   /:id/key-rotation          → authorizeKeyRotation
@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 
 import {
   authorizeMemberMutation,
+  authorizeMemberRemoval,
   authorizeMemberLeave,
   authorizeDetailsWrite,
   authorizeKeyRotation,
@@ -55,6 +56,8 @@ interface FakeOptions {
   adminSecretHash?: string | null;
   /** Pemanggil punya baris delivery-token sendiri? (leave tanpa group token) */
   ownsDeliveryToken?: boolean;
+  /** Group token sudah lewat TTL? Default false (tanpa `groupTokenExpiresAt`). */
+  groupTokenExpired?: boolean;
 }
 
 function fakeDb(options: FakeOptions = {}): {
@@ -71,6 +74,7 @@ function fakeDb(options: FakeOptions = {}): {
     remainingMembers = 0,
     adminSecretHash = hashAdminToken(ADMIN_TOKEN),
     ownsDeliveryToken = false,
+    groupTokenExpired = false,
   } = options;
 
   const calls = {
@@ -88,6 +92,9 @@ function fakeDb(options: FakeOptions = {}): {
           authSecret: hashCredentialToken(GROUP_TOKEN),
           adminSecretHash,
           isGroup,
+          groupTokenExpiresAt: groupTokenExpired
+            ? new Date(Date.now() - 60_000)
+            : new Date(Date.now() + 60_000),
         };
       },
     },
@@ -144,12 +151,40 @@ test('tambah/kick anggota: tanpa token, token salah, atau token tipe salah → 4
   }
 });
 
+test('tambah anggota: group token lewat TTL → 403 walau hash cocok', async () => {
+  const { db } = fakeDb({ groupTokenExpired: true });
+  assert.deepEqual(await authorizeMemberMutation(db, CONVERSATION_ID, headers()), {
+    ok: false,
+    status: 403,
+    error: BLIND_AUTH_REQUIRED,
+  });
+});
+
 test('tambah/kick anggota: X-Group-Token benar → ok', async () => {
   const { db, calls } = fakeDb();
   assert.deepEqual(await authorizeMemberMutation(db, CONVERSATION_ID, headers()), { ok: true });
   // Jalur anggota tidak boleh menyentuh capability admin / hitungan anggota.
   assert.ok(calls.conversationSelects.every((s) => s.adminSecretHash !== true), 'tidak membaca hash admin');
   assert.equal(calls.memberCounts.length, 0, 'tidak menghitung anggota');
+});
+
+// ─── Kick anggota (admin-only) ─────────────────────────────────────────────
+
+test('kick anggota: token grup saja ditolak; X-Admin-Token benar → ok', async () => {
+  const { db } = fakeDb();
+  assert.deepEqual(await authorizeMemberRemoval(db, CONVERSATION_ID, headers()), {
+    ok: false,
+    status: 403,
+    error: 'ADMIN_AUTH_REQUIRED: Invalid or missing X-Admin-Token',
+  });
+  assert.deepEqual(
+    await authorizeMemberRemoval(db, CONVERSATION_ID, headers({ 'x-admin-token': ADMIN_TOKEN })),
+    { ok: true }
+  );
+  assert.deepEqual(
+    await authorizeMemberRemoval(db, GHOST_CONVERSATION_ID, { 'x-admin-token': ADMIN_TOKEN }),
+    { ok: false, status: 404, error: 'Not found' }
+  );
 });
 
 // ─── Leave ─────────────────────────────────────────────────────────────────

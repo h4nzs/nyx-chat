@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { DELIVERY_TOKEN_RE } from './credentialAuth.js'
+
+const DELIVERY_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
 
 /**
  * Skema body untuk membuat percakapan (`POST /api/conversations`).
@@ -17,7 +18,7 @@ import { DELIVERY_TOKEN_RE } from './credentialAuth.js'
  *
  * Dipisah dari route supaya bisa diuji sebagai perilaku tanpa Postgres/Redis
  * (`tests/conversationCreateSchema.test.ts`) — pola yang sama dengan
- * `utils/groupAccess.ts` dan `utils/credentialAuth.ts`.
+ * `utils/groupAccess.ts` dan `utils/adminCapability.ts`.
  */
 export const conversationSchema = z.object({
   id: z.string().optional(),
@@ -49,7 +50,7 @@ export const createConversationBodySchema = conversationSchema
     initialSession: initialSessionSchema.optional(),
     // [T3b] Map userId -> delivery token, issued client-side by the creator.
     // NOTE Zod 4: argumen pertama z.record = schema KEY (userId), jadi harus
-    // string biasa — `deliveryTokenSchema` hanya untuk VALUE (token 22-char).
+    // string biasa — `deliveryTokenSchema` hanya untuk VALUE (token 43-char, 256-bit).
     deliveryTokens: z.record(z.string().min(1), deliveryTokenSchema).optional(),
     // [26.9 RBAC] SHA-256 hex dari admin capability token buatan creator.
     // Sengaja hanya `z.string()`: pemeriksaan bentuk (64-hex lowercase) tetap di

@@ -432,7 +432,58 @@ const AppContent = () => {
     };
   }, [user, hasRestoredKeys]);
 
-  // 3. Apply Theme
+  // 2c. [docs/37 §37.3.6] Rotasi era grup terjadwal (PCS kasar tanpa MLS).
+  //
+  // Hanya grup tempat kita admin yang benar-benar berputar (dicek di dalam),
+  // dan rotasi memakan bandwidth (metadata + distribusi kunci), jadi jadwalnya
+  // 15 menit dengan jeda awal 2 menit — bukan tiap tick mailbox.
+  useEffect(() => {
+    if (!user || !hasRestoredKeys) return;
+
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { startGroupEpochLoop } = await import('@lib/groupEpochRotation');
+        if (cancelled) return;
+        stop = startGroupEpochLoop();
+      } catch (error) {
+        console.warn('[Epoch] Loop rotasi era grup tidak bisa dimulai:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [user, hasRestoredKeys]);
+
+  // 2d. [docs/37 §37.3.2] Poll mailbox grup (distribusi kunci tanpa graf).
+  //
+  // Envelope kunci grup sekarang ditulis ke mailbox percakapan, bukan direlai
+  // `group:fulfilled_key` (yang membocorkan requester→fulfiller + menyimpan
+  // `targetDeviceKey`). Tanpa poll ini kunci baru tidak akan pernah sampai ke
+  // anggota lain — jadi loop ini bagian dari jalur kirim, bukan pelengkap.
+  useEffect(() => {
+    if (!user || !hasRestoredKeys) return;
+
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { startGroupMailboxLoop } = await import('@lib/groupMailbox');
+        if (cancelled) return;
+        stop = startGroupMailboxLoop();
+      } catch (error) {
+        console.warn('[Mailbox] Loop mailbox grup tidak bisa dimulai:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [user, hasRestoredKeys]);
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');

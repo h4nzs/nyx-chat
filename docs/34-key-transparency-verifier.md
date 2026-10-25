@@ -16,10 +16,17 @@
 > (`audit.go`), dan tree head di-gossip antar klien (§34.6c). Log v1 tetap
 > frozen; log v2 (ML-DSA-65, port/metrik terpisah) didokumentasikan di
 > `docs/35` §35.7 Fase 7. Banner "KT tidak tersedia" **landed 2026-10-24**
-> (`web/src/lib/ktAvailability.ts`, wired ke loop monitor). Yang **belum**:
-> interop `cmd/kt-client` upstream, dua implementasi auditor (Java referensi vs
-> port Go) berdampingan, auditor masih satu host dengan log, dan cutover baca ke
-> v2 — server masih membaca v1 via `KT_QUERY_URL` (§34.6 poin 3).
+> (`web/src/lib/ktAvailability.ts`, wired ke loop monitor).
+>
+> **Cutover baca v2 = operasional, bukan flag kode (2026-10-25).** Selfhost
+> sekarang menjalankan `nyx-kt-query-v2` (:8089 baca / :8087 tulis) dan
+> `nyx-kt-auditor-v2` (:8088), dan `KT_QUERY_URL` di `.env` server menunjuk v2 —
+> API hanya meneruskan protobuf mentah, jadi tidak ada `KT_READ_MODE` di kode.
+> Rollback = arahkan `KT_QUERY_URL` kembali ke v1 **dan** reset pin KT klien
+> (`resetKtPin`), karena klien sudah mem-pin konfigurasi v2.
+> Yang **belum**: interop `cmd/kt-client` upstream, dua implementasi auditor
+> (Java referensi vs port Go) berdampingan, dan auditor masih satu host dengan
+> log.
 
 Rencana & gate: `docs/30` §30.5. Sisi penulis log: `docs/32`.
 

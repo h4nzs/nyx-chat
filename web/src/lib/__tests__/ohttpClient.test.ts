@@ -113,6 +113,7 @@ describe('ohttpClient', () => {
   });
 
   it('menolak semua request saat fitur mati (default)', async () => {
+    vi.stubEnv('VITE_OHTTP_ENABLED', '0');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 

@@ -15,6 +15,7 @@ import {
   OhttpError,
   decapsulateOhttpRequest,
   isOhttpTargetAllowed,
+  ohttpBodyLimitFor,
   sanitizeOhttpForwardHeaders,
   type OhttpAllowRule,
   type OhttpHeader,
@@ -97,6 +98,13 @@ export async function handleOhttpGateway(
 
   if (!isOhttpTargetAllowed(sealed.request.method, sealed.request.path, allowlist)) {
     return sealed.sealResponse(jsonResponse(403, { error: 'OHTTP_TARGET_NOT_ALLOWED' }));
+  }
+
+  // Target "kecil" (mis. sync grup) punya batas body sendiri: amplop 8 MB tidak
+  // boleh dipakai mengirim upload besar dengan menyamar sebagai sync.
+  const bodyLimit = ohttpBodyLimitFor(sealed.request.path);
+  if (bodyLimit !== null && sealed.request.content.length > bodyLimit) {
+    return sealed.sealResponse(jsonResponse(413, { error: 'OHTTP_BODY_TOO_LARGE' }));
   }
 
   // Sanitasi DI SINI, bukan hanya di dispatcher default: gateway adalah batas

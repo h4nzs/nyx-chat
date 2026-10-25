@@ -236,7 +236,13 @@ model Conversation {
   id                String  @id @default(uuid())
   isGroup           Boolean @default(false)
   encryptedMetadata String?
-  authSecret        String? // Secret token for blind authorization (Opaque Mailbox)
+  authSecret        String? // SHA-256 hex token grup era ini (blind auth, Opaque Mailbox)
+  // [docs/37 §37.3.1] Epoch membership. Kick/revoke menaikkan nilai ini dan
+  // merotasi `authSecret`; token era lama langsung ditolak (tanpa perlu hapus
+  // baris per anggota). Rotasi terjadwal juga menaikkannya (PCS kasar).
+  groupEpoch        Int       @default(0)
+  groupTokenExpiresAt DateTime?
+  epochRotatedAt    DateTime?
   // [26.9 RBAC] SHA-256 hex dari admin capability token. Server TIDAK menyimpan
   // token-nya (hanya hash) — kepemilikan token = bukti role ADMIN/OWNER tanpa
   // server tahu roster/role. Hash boleh plaintext-kolom (input 256-bit random).
@@ -361,9 +367,13 @@ model UserHiddenConversation {
   // `purgeSealedUserRows` (lihat utils/routingIdentity.ts).
   userId         String?
   conversationId String
-  // Opaque per-(group, member) delivery token. Wajib: setiap baris keanggotaan
-  // diterbitkan klien (creator) — server tidak bisa membuatnya sendiri.
-  deliveryToken  String       @unique
+  // [docs/37 §37.3.1] SHA-256 hex token anggota (256-bit, dipegang klien).
+  // Token mentah TIDAK pernah persist — dump DB tidak bisa dipakai untuk ikut
+  // sync/menerima pesan. Epoch + expiry membuat pencabutan tidak bergantung
+  // pada penghapusan baris semata.
+  tokenHash      String       @unique
+  tokenEpoch     Int          @default(0)
+  expiresAt      DateTime
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
@@ -371,34 +381,26 @@ model UserHiddenConversation {
   @@index([conversationId])
 }
 
-// [26.8.1 ZKGROUP-STYLE CREDENTIALS — blind RSA / RFC 9474]
-// Serial 64-hex dari credential yang SUDAH diterbitkan server (blind-signed).
-// Disimpan untuk: (a) dedupe issuance, (b) presentasi = cek keanggotaan.
-// Serial tidak membawa identitas — klien yang membawa (msg, sig) valid dianggap
-// anggota. Baris dihapus saat revocation (kick/leave) → credential mati.
-model GroupCredential {
+// [docs/37 §37.3.2] Mailbox grup: distribusi kunci tanpa graf.
+//
+// Server hanya menyimpan blob opaque + `tag` (HMAC token penerima) untuk item
+// yang perlu dialamatkan. TIDAK ADA kolom pengirim/userId: posting dan pull
+// diautentikasi possession token grup, jadi operator tidak bisa merekonstruksi
+// "siapa meminta/mengirim kunci ke siapa". TTL 7 hari; pengirim tidak
+// identik dengan penerima di mata server.
+model GroupMailboxItem {
   id             String   @id @default(uuid())
-  serial         String   @unique // 64-hex = SHA-384 dari prepared message
   conversationId String
-  keyVersion     Int // versi issuer key yang menandatangani
-  suite          String?
-  issuedAt       DateTime @default(now())
+  epoch          Int
+  kind           String // KEY_REQUEST | KEY_ENVELOPE | META | COVER
+  tag            String? // HMAC-SHA256(token penerima) base64url 43 char
+  payload        String // ciphertext opaque (base64url)
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
 
-  @@index([conversationId])
-}
-
-// State issuer key blind RSA. Satu row aktif (keyVersion tertinggi).
-// [docs/28 Tier 0 — D1 KRITIS] PRIVATE key TIDAK BOLEH ada di DB: dump DB =
-// akar kepercayaan keanggotaan grup ikut bocor (siapa pun bisa menandatangani
-// credential → masuk grup mana pun). Private key hidup di env
-// `GROUP_ISSUER_KEY_PKCS8` (opsional: file dev 0600 di server/.nyx-issuer-key),
-// lihat lib/groupCredentials.ts + scripts/issuer-key.ts. Row ini hanya memuat
-// material PUBLIK (untuk verifikasi presentasi & distribusi ke klien).
-model CredentialIssuerKey {
-  keyVersion      Int      @id
-  publicKeyJwk    String // JSON Web Key (public) — dibagikan ke klien
-  suite           String?
-  createdAt       DateTime @default(now())
+  @@index([conversationId, createdAt])
+  @@index([conversationId, tag])
+  @@index([expiresAt])
 }
 
 model Authenticator {

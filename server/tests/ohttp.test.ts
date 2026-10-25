@@ -12,6 +12,7 @@ import {
   OHTTP_KEM_P256_SHA256,
   OHTTP_KEY_ID,
   OHTTP_MAX_MESSAGE_BYTES,
+  OHTTP_SYNC_MAX_BODY_BYTES,
   OhttpError,
   assertOhttpKeyPair,
   decodeBinaryHttpRequest,
@@ -153,6 +154,30 @@ test('allowlist: hanya target sempit yang boleh lewat gateway', () => {
   assert.equal(isOhttpTargetAllowed('GET', '/api/pir/query'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/admin/cleanup'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/ohttp/gateway'), false);
+  // [docs/37 §37.4 P3] Sync anonim boleh POST, tapi hanya path persisnya.
+  assert.equal(isOhttpTargetAllowed('POST', '/api/groups/sync'), true);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/groups/sync'), false);
+  assert.equal(isOhttpTargetAllowed('POST', '/api/groups/sync/anything'), false);
+  assert.equal(isOhttpTargetAllowed('POST', '/api/groups/conv-1/mailbox'), false);
+});
+
+test('gateway: body sync di atas 64 KB ditolak 413 terenkripsi', async () => {
+  const config = await makeConfig();
+  const client = await encapsulateOhttpRequest(config.publicConfigs[0]!, {
+    ...sampleRequest,
+    method: 'POST',
+    path: '/api/groups/sync',
+    content: new Uint8Array(OHTTP_SYNC_MAX_BODY_BYTES + 1).fill(0x61),
+  });
+  let dispatched = false;
+  const encapsulatedResponse = await handleOhttpGateway(config, client.body, async () => {
+    dispatched = true;
+    return { status: 200, headers: [], content: new Uint8Array() };
+  });
+  const response = await client.openResponse(encapsulatedResponse);
+  assert.equal(dispatched, false);
+  assert.equal(response.status, 413);
+  assert.match(new TextDecoder().decode(response.content), /OHTTP_BODY_TOO_LARGE/);
 });
 
 test('gateway: header identitas jaringan dibuang sebelum dispatch', () => {
@@ -270,12 +295,15 @@ test('token carriage: umur pendek, scope ohttp, hanya untuk target allowlist GET
     OHTTP_TOKEN_TTL_SEC,
   );
 
-  // Allowlist: hanya pencarian & prekey bundle, hanya GET.
+  // Allowlist: pencarian/prekey (GET) + PIR & sync grup (POST) — pasangan
+  // method+path yang menentukan, bukan method saja.
   assert.equal(isOhttpScopeRequestAllowed('GET', '/api/users/search?q=abc'), true);
   assert.equal(isOhttpScopeRequestAllowed('GET', '/api/keys/prekey-bundle/u1'), true);
   assert.equal(isOhttpScopeRequestAllowed('POST', '/api/users/search'), false);
   assert.equal(isOhttpScopeRequestAllowed('GET', '/api/messages'), false);
   assert.equal(isOhttpScopeRequestAllowed('GET', '/api/admin/cleanup'), false);
+  assert.equal(isOhttpScopeRequestAllowed('POST', '/api/groups/sync'), true);
+  assert.equal(isOhttpScopeRequestAllowed('POST', '/api/groups/sync/other'), false);
 });
 
 test('relay nyata: klien → relay → gateway → dispatch → response terbuka', async () => {

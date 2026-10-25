@@ -87,6 +87,9 @@ CSRF_SECRET=<random>
 NODE_ENV=development
 
 # web/.env
+# Relatif (kosong) = origin sendiri lewat proxy Vite/nginx. Absolut hanya untuk
+# dev yang menembak API langsung; bila aplikasi disajikan nginx, CSP
+# `connect-src 'self'` memblokir localhost:4000 dan cookie terpecah antar-host.
 VITE_API_URL=http://localhost:4000
 VITE_TRANSPORT_URL=http://localhost:33333
 VITE_TRANSPORT_CERT_HASH=<from sidecar banner>

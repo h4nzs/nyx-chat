@@ -37,6 +37,7 @@ import {
   routingCandidates,
   routingIdentity,
   storyAuthorTag,
+  tagCandidates,
   type SealedOwnedRowsPrisma,
 } from '../src/utils/routingIdentity.js';
 
@@ -99,17 +100,23 @@ test('D2/D8/D9: purgeSealedUserRows membersihkan keanggotaan, Story & BlockedUse
 
   await purgeSealedUserRows(fake, 'u-han');
 
-  const tag = await storyAuthorTag('u-han');
-  const membershipCandidates = await routingCandidates('u-han');
+  // [docs/37 §37.4 P6] Satu daftar kandidat (kunci seal aktif + legacy) dipakai
+  // untuk semua kolom ter-seal, supaya rotasi key ring tidak meninggalkan baris
+  // yatim yang tak terlihat.
+  const candidates = await routingCandidates('u-han');
   assert.deepEqual(
     calls[0],
-    { model: 'userHiddenConversation', where: { userId: { in: membershipCandidates } } },
+    { model: 'userHiddenConversation', where: { userId: { in: candidates } } },
     'keanggotaan grup dihapus via kandidat sealed + legacy'
   );
-  assert.deepEqual(calls[1], { model: 'story', where: { authorTag: tag } }, 'story dihapus berdasarkan tag penulis');
+  assert.deepEqual(
+    calls[1],
+    { model: 'story', where: { authorTag: { in: candidates } } },
+    'story dihapus berdasarkan seluruh tag penulis yang mungkin'
+  );
   assert.deepEqual(
     calls[2],
-    { model: 'blockedUser', where: { OR: [{ blockerTag: tag }, { blockedTag: tag }] } },
+    { model: 'blockedUser', where: { OR: [{ blockerTag: { in: candidates } }, { blockedTag: { in: candidates } }] } },
     'block dihapus di KEDUA arah relasi'
   );
 });
@@ -156,11 +163,24 @@ test('D8: tag ter-seal TIDAK pernah dikirim ke klien (whitelist respons)', () =>
 test('D9: endpoint block memakai pasangan tag & tetap mengembalikan identitas untuk UI', () => {
   const users = read('../src/routes/users.ts');
 
-  assert.match(users, /where: \{ blockerTag_blockedTag: \{ blockerTag, blockedTag \} \}/, 'block = upsert pasangan tag');
+  // [docs/37 §37.4 P6] Blokir tidak lagi `upsert` compound-unique: setelah
+  // rotasi key ring, pasangan yang sudah ada bisa memakai kunci seal lain, dan
+  // upsert akan membuat baris duplikat alih-alih menemukannya.
+  assert.match(users, /blockedUser\.findFirst\(\{/, 'block = cek pasangan tag lebih dulu (dua format kunci)');
+  assert.match(
+    users,
+    /data: \{ blockerTag: blockerCandidates\[0\]!, blockedTag: blockedCandidates\[0\]! \}/,
+    'baris baru memakai tag kunci aktif'
+  );
   assert.doesNotMatch(users, /blockerId_blockedId/, 'regresi D9: compound key lama berbasis identitas');
-  assert.match(users, /where: \{ blockerTag: await blockedUserTag\(userId\) \}/, 'list blocked memakai tag');
+  assert.match(users, /where: \{ blockerTag: \{ in: await tagCandidates\(userId\) \} \}/, 'list blocked memakai kandidat tag');
   assert.match(users, /resolveRoutingUser\(r\.blockedTag\)/, 'identitas diblokir dibuka untuk respons (kontrak klien)');
   assert.match(users, /purgeSealedUserRows\(prisma as unknown as SealedOwnedRowsPrisma, userId\)/, 'hapus akun membersihkan baris tanpa FK');
+
+  // Unblock & gating story juga harus menerima kedua format kunci.
+  assert.match(users, /blockedUser\.deleteMany\(\{[\s\S]*?tagCandidates\(blockerId\)/, 'unblock menghapus kedua format');
+  const stories = read('../src/routes/stories.ts');
+  assert.match(stories, /blockerTag: \{ in: await tagCandidates\(targetId\) \}/, 'gating story = kandidat tag');
 });
 
 test('D8/D9: dead man’s switch juga membersihkan baris milik user', () => {

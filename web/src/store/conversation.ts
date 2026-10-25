@@ -245,19 +245,30 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const localConversations = await shadowVault.getAllConversations();
       const localIds = localConversations.map(c => c.id);
 
-      // 2. Sync with server by local IDs (or discover new conversations for fresh users)
+      // 2. Discovery ANONIM lewat token (docs/37 §37.3.3) + metadata by id.
+      //    `POST /api/groups/sync` tidak memakai cookie/JWT: server hanya melihat
+      //    hash token, tidak tahu akun mana yang memanggil. Jalur JWT
+      //    (`/api/conversations/sync?ids=`) tetap dipakai untuk percakapan yang
+      //    id-nya sudah kita miliki (1:1/metadata).
       let rawConversations: Conversation[] = [];
-      // [T3b] Kirim delivery tokens milik saya — discovery via possession token.
-      const { collectMyDeliveryTokens } = await import('@lib/groupPseudonyms');
+      const { collectMyDeliveryTokens, getMyGroupToken } = await import('@lib/groupPseudonyms');
       const myTokens = collectMyDeliveryTokens();
-      const syncHeaders: Record<string, string> = {};
-      if (myTokens.length > 0) syncHeaders['X-Delivery-Tokens'] = myTokens.map(t => String(t)).join(',');
-      const hasHeaders = Object.keys(syncHeaders).length > 0;
+      if (myTokens.length > 0) {
+        // [docs/37 §37.4 P3] Sync lewat OHTTP bila aktif, dengan bukti Privacy
+        // Pass dari grup mana pun yang metadata-nya sudah ter-dekripsi.
+        const { syncGroupMemberships } = await import('@lib/groupSync');
+        const proofGroup = get().conversations.find(c => c.isGroup && getMyGroupToken(c.id));
+        const sync = await syncGroupMemberships(myTokens.map(t => String(t)), {
+          conversationId: proofGroup?.id,
+        });
+        rawConversations = Array.isArray(sync?.conversations) ? sync.conversations : [];
+      }
       if (localIds.length > 0) {
-        rawConversations = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`, { headers: hasHeaders ? syncHeaders : undefined });
-      } else {
-        // New user with no local conversations — discover from UserHiddenConversation
-        rawConversations = await api<Conversation[]>('/api/conversations/sync', { headers: hasHeaders ? syncHeaders : undefined });
+        const byId = await api<Conversation[]>(`/api/conversations/sync?ids=${localIds.join(',')}`);
+        if (Array.isArray(byId)) {
+          const known = new Set(rawConversations.map(c => c.id));
+          rawConversations = [...rawConversations, ...byId.filter(c => !known.has(c.id))];
+        }
       }
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 

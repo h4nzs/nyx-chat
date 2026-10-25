@@ -1,16 +1,17 @@
 import { Router } from 'express'
-import crypto from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { ApiError } from '../utils/errors.js'
-import { z } from 'zod'
-import { zodValidate, safeEqualStrings } from '../utils/validate.js'
+import { zodValidate } from '../utils/validate.js'
 import { emitEventToUsers, emitEventToUser } from '../network/redisBridge.js'
 import { redisClient } from '../lib/redis.js'
 import { hoistConvoKeys, toConversation, asConversationId, asUserId, type RawConversationData } from '../utils/mappers.js'
 import { hashCredentialToken } from '../utils/atRestSecrets.js'
+// [docs/37 §37.3.1] Epoch + TTL token grup; rotasi memakai helper yang sama
+// dengan `POST /api/groups/:id/epoch` supaya semantiknya tidak bercabang.
+import { groupTokenExpiry, newOpaqueToken, rotateGroupToken, type GroupTokenDb } from '../utils/groupTokens.js'
 import {
-  authorizeMemberMutation, authorizeMemberLeave, authorizeDetailsWrite,
+  authorizeMemberMutation, authorizeMemberRemoval, authorizeMemberLeave, authorizeDetailsWrite,
   authorizeKeyRotation, authorizeGroupPurge, type GroupAccessDb,
 } from '../utils/groupAccess.js'
 // [docs/28 Tier 4] identitas at-rest: key Redis ber-tag + metadata grup tanpa userId penulis.
@@ -37,32 +38,17 @@ const groupDb = prisma as unknown as GroupAccessDb
 
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
-// [T3b TOKEN-FIRST] Discovery = possession of a delivery token — NO userId
-// join. Klien mengirim token miliknya via `X-Delivery-Tokens` (base64url,
-// 22-char, cap 500). Ketiga sumber lain (ids eksplisit dari klien, backfill
-// SessionKey) tetap ada karena bersifat client-supplied, bukan identity join.
-// Ini menutup trigger condition #1 upgrade 26.8.1 (token-only endpoints).
+// [docs/37 §37.3.3] Discovery token-first sudah PINDAH ke `POST /api/groups/sync`
+// (anonim: token di body, tanpa JWT). Endpoint ini sekarang hanya mengembalikan
+// percakapan berdasarkan **id eksplisit dari klien** (1:1/metadata) dan
+// backfill SessionKey; header `X-Delivery-Tokens` dihapus total (hard cut)
+// supaya tidak ada dua jalur discovery dengan jaminan privasi berbeda.
 router.get('/sync', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     
     const ids = String(req.query.ids ?? '');
-    let conversationIds: string[] = ids ? ids.split(',') : [];
-
-    // Token-presented conversations: exact-match against deliveryToken
-    // (unique index). Timing-safe not required — tokens are random 128-bit
-    // values looked up by unique index; a wrong guess is just a miss.
-    const tokenHeader = req.headers['x-delivery-tokens'];
-    if (typeof tokenHeader === 'string' && tokenHeader.length > 0) {
-      const tokens = tokenHeader.split(',').map(t => t.trim()).filter(t => /^[A-Za-z0-9_-]{22}$/.test(t)).slice(0, 500);
-      if (tokens.length > 0) {
-        const tokenRows = await prisma.userHiddenConversation.findMany({
-          where: { deliveryToken: { in: tokens } },
-          select: { conversationId: true }
-        });
-        conversationIds.push(...tokenRows.map(r => r.conversationId));
-      }
-    }
+    const conversationIds: string[] = ids ? ids.split(',') : [];
 
     // [T3b TOKEN-FIRST] userId join DIHAPUS — membership tidak didiscovery
     // dari identitas akun. Backfill SessionKey (per-device, client-derived)
@@ -146,7 +132,7 @@ return current
     // menyimpannya di encryptedMetadata), tapi server HANYA menyimpan hash-nya
     // (pola adminSecretHash) — dump DB tidak bisa lagi dipakai untuk ikut bicara
     // di grup. Bandingkan lewat credentialTokenMatches (hash-only).
-    const authSecret = crypto.randomBytes(32).toString('hex');
+    const authSecret = newOpaqueToken();
     // [26.9 RBAC] Creator-generated admin capability token dikirim sebagai HASH
     // (SHA-256 hex) — token asli tidak pernah menyentuh server; ia di-seal
     // pairwise ke device creator + admin lain oleh klien.
@@ -174,6 +160,11 @@ return current
             // metadata v2 — reader tidak memakainya.
             encryptedMetadata: isGroup ? sanitizeGroupMetadataBlob(encryptedMetadata) : null,
             authSecret: hashCredentialToken(authSecret),
+            // [docs/37 §37.3.1] Era awal + TTL token grup. Grup lama tidak ada
+            // (hard cut 2026-10-24) — tidak ada backfill yang perlu ditebak.
+            groupEpoch: 0,
+            groupTokenExpiresAt: isGroup === true ? groupTokenExpiry() : null,
+            epochRotatedAt: isGroup === true ? new Date() : null,
             adminSecretHash,
             // [docs/28 Tier 4 / B3] createdAt grup dipotong 15 menit: presisi
             // penuh memberi urutan/tebakan kapan grup dibuat.
@@ -226,7 +217,8 @@ return current
         if (!token) continue;
         // [docs/28 Tier 1.2] kolom userId berisi routing identity ter-seal.
         upsertMembership(prisma as unknown as MembershipPrisma, {
-            userId: uid, conversationId: newConversation.id, deliveryToken: token
+            userId: uid, conversationId: newConversation.id, token,
+            tokenEpoch: newConversation.groupEpoch ?? 0
         }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
     
@@ -295,7 +287,7 @@ router.post('/:id/participants', async (req, res, next) => {
   // Mailbox: klien mengisi roster dari metadata terenkripsi) + sertakan
   // encryptedMetadata TERKINI agar anggota baru langsung bisa decrypt tanpa
   // fetch ulang (dulu kosong → "Unknown Group" sampai offline sync).
-  const currentConv = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { encryptedMetadata: true } });
+  const currentConv = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { encryptedMetadata: true, groupEpoch: true } });
   const safeConv = toConversation({ id: conversationId, isGroup: true, encryptedMetadata: currentConv?.encryptedMetadata ?? undefined, createdAt: new Date(), updatedAt: new Date() } as unknown as RawConversationData);
   safeConv.participants = [];
 
@@ -308,7 +300,8 @@ router.post('/:id/participants', async (req, res, next) => {
       if (!token) continue;
       // [docs/28 Tier 1.2] kolom userId berisi routing identity ter-seal.
       upsertMembership(prisma as unknown as MembershipPrisma, {
-        userId: uid, conversationId, deliveryToken: token
+        userId: uid, conversationId, token,
+        tokenEpoch: currentConv?.groupEpoch ?? 0
       }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
     }
   }
@@ -328,8 +321,10 @@ router.post('/:id/participants', async (req, res, next) => {
 router.delete('/:id/participants/:userId', async (req, res, next) => {
   const { id: conversationId, userId } = req.params;
 
-  // [docs/30 WS-G(4)] Kick = mutasi anggota; gate yang sama dengan add.
-  const kickGate = await authorizeMemberMutation(groupDb, conversationId, req.headers as Record<string, unknown>);
+  // [docs/30 WS-G(4)] Kick = pencabutan akses, bukan sekadar mutasi anggota:
+  // hanya capability admin, dan token grup dirotasi agar anggota yang dikeluarkan
+  // tidak bisa memakai token lama untuk add/kick/mutasi.
+  const kickGate = await authorizeMemberRemoval(groupDb, conversationId, req.headers as Record<string, unknown>);
   if (!kickGate.ok) return res.status(kickGate.status).json({ error: kickGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
@@ -338,10 +333,15 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     await emitEventToUsers(removeRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(removeRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
-  // [T3b] Token revocation = delete row (doc 26.2): kicked member's delivery
-  // token dies — they can no longer discover the conversation via sync.
-  deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId })
-    .catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
+  // [T3b + docs/37 §37.3.4] Revocation dua lapis dalam SATU transaksi:
+  // (1) baris member token target dihapus → sync/routing langsung mati;
+  // (2) epoch grup naik + token grup dirotasi → token era lama tidak sah lagi
+  // untuk mutasi, tanpa perlu menyentuh baris anggota lain.
+  const rotated = await prisma.$transaction(async (tx) => {
+    const next = await rotateGroupToken(tx as unknown as GroupTokenDb, conversationId);
+    await deleteMembership(tx as unknown as MembershipPrisma, { userId, conversationId });
+    return next;
+  });
   // [BUGFIX 2026-10-18] Kick ≠ hapus permanen. `reason: 'removed'` memberi tahu
   // klien bahwa riwayat lokal (pesan + kunci era) HARUS dipertahankan: klien
   // lama mengabaikan field ini (perilaku lama), klien baru menyembunyikan chat
@@ -350,7 +350,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     id: asConversationId(conversationId),
     reason: 'removed',
   });
-  res.status(204).end();
+  // Caller (admin) must put this into re-encrypted metadata; clients that ignore
+  // it cannot mutate with the old token (`authSecret` = token mentah baru).
+  res.json({ authSecret: rotated.token, epoch: rotated.epoch, expiresAt: rotated.expiresAt.toISOString() });
 });
 
 router.delete('/:id/leave', async (req, res, next) => {
@@ -380,8 +382,8 @@ router.delete('/:id/leave', async (req, res, next) => {
 // anggota tersisa (guard: nol delivery token). Client memanggil ini SETELAH
 // /leave sukses (leave menghapus row token milik sendiri). Anggota lain yang
 // masih punya delivery token membuat endpoint ini menolak (409) — grup tidak
-// bisa dihancurkan di belakang punggung anggota aktif. Purge: GroupCredential
-// dihapus manual (tanpa FK), sisanya cascade (messages, sessionKeys, hiddenBy).
+// bisa dihancurkan di belakang punggung anggota aktif. Sisanya cascade
+// (messages, sessionKeys, hiddenBy).
 router.delete('/:id/group', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
@@ -392,7 +394,6 @@ router.delete('/:id/group', async (req, res, next) => {
     const purgeGate = await authorizeGroupPurge(groupDb, id, req.headers as Record<string, unknown>)
     if (!purgeGate.ok) return res.status(purgeGate.status).json({ error: purgeGate.error })
 
-    await prisma.groupCredential.deleteMany({ where: { conversationId: id } })
     await prisma.conversation.delete({ where: { id } })
     res.status(204).end()
   } catch (error) {

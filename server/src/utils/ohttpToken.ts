@@ -9,8 +9,9 @@
  * Solusinya token bearer berumur SANGAT pendek yang diletakkan DI DALAM amplop:
  *
  *  - `scope: 'ohttp'` + `aud: 'ohttp'`, TTL 120 detik (`OHTTP_TOKEN_TTL_SEC`);
- *  - hanya berlaku untuk target allowlist OHTTP dan hanya method GET — token
- *    yang bocor tidak bisa dipakai untuk mengirim pesan/mengubah apa pun;
+ *  - hanya berlaku untuk target allowlist OHTTP (GET search/prekey, POST
+ *    `/api/pir/query` dan `/api/groups/sync`) — token yang bocor tidak bisa
+ *    dipakai untuk mengirim pesan/mengubah apa pun;
  *  - punya `jti` sehingga bisa dicabut lewat blacklist Redis yang sudah ada
  *    (`revoked_jti:<jti>`) tanpa mekanisme baru;
  *  - tidak pernah ditulis ke storage klien (hanya di memori modul klien).
@@ -56,8 +57,9 @@ export function isOhttpScopedPayload(payload: { scope?: unknown } | null | undef
 /**
  * Token OHTTP hanya sah untuk endpoint yang sama dengan allowlist gateway.
  * Dipanggil `requireAuth`, jadi token yang dicoba di luar jalur itu ditolak
- * walaupun tanda tangannya valid.
+ * walaupun tanda tangannya valid. Method tidak dikunci ke GET lagi: allowlist
+ * pasangan method+path yang menentukan (docs/37 §37.4 P3).
  */
 export function isOhttpScopeRequestAllowed(method: string, originalUrl: string): boolean {
-  return method.toUpperCase() === 'GET' && isOhttpTargetAllowed(method, originalUrl);
+  return isOhttpTargetAllowed(method, originalUrl);
 }

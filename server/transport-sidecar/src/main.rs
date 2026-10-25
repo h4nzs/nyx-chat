@@ -173,7 +173,12 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let _ = dotenv();
 
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
+    // [AUDIT 2026-10-24] Kegagalan-tertutup: JANGAN memakai default. Dulu nilai
+    // cadangan literal "secret" dipakai bila env hilang, sehingga sidecar tetap
+    // start (sedangkan server Node menolak boot) dan menerima HS256 yang
+    // ditandatangani dengan kunci publik di repo → impersonasi anyone.
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .context("JWT_SECRET wajib diset (sidecar tidak punya nilai cadangan)")?;
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
     let prod_cert_path = std::env::var("PROD_CERT_PATH").unwrap_or_default();

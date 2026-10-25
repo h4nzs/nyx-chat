@@ -35,7 +35,8 @@ export type CleanupStep =
   | 'session_key'
   | 'account'
   | 'subscription'
-  | 'story';
+  | 'story'
+  | 'group_mailbox';
 
 export interface CleanupCounts {
   /** RefreshToken kadaluarsa / sudah di-revoke. */
@@ -48,6 +49,8 @@ export interface CleanupCounts {
   subscriptions: number;
   /** Story yang sudah kedaluwarsa. */
   stories: number;
+  /** [docs/37 §37.3.2] Item mailbox grup yang lewat TTL. */
+  mailboxItems: number;
 }
 
 export interface CleanupReport extends CleanupCounts {
@@ -98,6 +101,10 @@ export interface CleanupDb {
   story: {
     deleteMany(args?: unknown): Promise<{ count: number }>;
   };
+  // [docs/37 §37.3.2] Mailbox grup: item lewat TTL dihapus job harian.
+  groupMailboxItem: {
+    deleteMany(args?: unknown): Promise<{ count: number }>;
+  };
 }
 
 export interface CleanupOptions {
@@ -136,6 +143,7 @@ export async function runCleanup(db: CleanupDb, options: CleanupOptions = {}): P
     accounts: 0,
     subscriptions: 0,
     stories: 0,
+    mailboxItems: 0,
     errors: [],
   };
 
@@ -212,6 +220,13 @@ export async function runCleanup(db: CleanupDb, options: CleanupOptions = {}): P
     });
     report.subscriptions = downgraded.count;
     if (downgraded.count > 0) log(`[Cleanup] ${downgraded.count} langganan jatuh tempo → FREE.`);
+  });
+
+  // 5b. Mailbox grup kadaluarsa (docs/37 §37.3.2): TTL 7 hari.
+  await step('group_mailbox', async () => {
+    const deleted = await db.groupMailboxItem.deleteMany({ where: { expiresAt: { lte: now } } });
+    report.mailboxItems = deleted.count;
+    if (deleted.count > 0) log(`[Cleanup] ${deleted.count} item mailbox grup kadaluarsa dihapus.`);
   });
 
   // 5. Story kadaluarsa: hapus fisik (dulu menumpuk selamanya; audit temuan #9).

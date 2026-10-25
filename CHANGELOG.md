@@ -2,6 +2,157 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔎 Pencarian privat dinyalakan: OHTTP + PIR + OPRF (selfhost, 2026-10-25)
+
+Di selfhost `~/nyx-selfhost` ketiga gerbang sekarang **aktif** (default repo tetap
+mati): gateway OHTTP dengan keypair P-256 baru, relay OHTTP sebagai proses
+terpisah (`:4100`), sidecar ChalametPIR (`:9470`), dan `PIR_OPRF_ENABLED=1`
+sehingga register/login mengisi `User.oprfIndex`. Klien dibangun ulang dengan
+`VITE_OHTTP_ENABLED=1`, `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`.
+
+**Perbaikan wiring yang ditemukan saat menyalakan:** `POST /api/pir/query` lewat
+OHTTP selalu `403 Invalid CSRF token` karena amplop tidak membawa cookie. Lapisan
+CSRF global kini melewati path itu **hanya bila request tidak membawa cookie sesi
+sama sekali** — request berbasis cookie tetap wajib CSRF (token di dalam amplop
+sudah ber-scope dan `requireAuth` menolaknya di luar allowlist OHTTP).
+
+**Perubahan lain:** `web/.env` memakai `VITE_API_URL=` (relatif) — nilai absolut
+`http://localhost:4000` diblokir CSP `connect-src 'self'` nginx dan memecah cookie
+antara `127.0.0.1` dan `localhost`; `vite.config.ts` mem-proxy
+`/api/ohttp/relay` → `:4100/relay` (dev + preview) di atas `/api`; unit baru
+`ops/systemd/user/nyx-pir-sidecar.service`; docs/10 §10.19, docs/12 (endpoint
+`/api/ohttp/*`, `/api/pir/*`, `/api/auth/ohttp-token`, `/api/users/search/oprf`),
+docs/13 (gejala CSRF/404/503/snapshot basi), docs/37 (port PIR 9470). Diverifikasi
+end-to-end: login → OPRF → token OHTTP → amplop → relay → gateway → search, dan
+params → query WASM → OHTTP → record PIR (bukan hanya unit test).
+
+## 🛰️ Relay OHTTP proses terpisah + angka PIR diperbarui (2026-10-25)
+
+**Relay OHTTP tidak lagi harus satu proses dengan API.** `server/src/ohttp/relay.ts`
+(+ `relayApp.ts`) menjalankan `POST /relay` tanpa DB/Redis/Prisma: ia hanya
+meneruskan byte amplop ke gateway loopback dan **membuang seluruh header klien**
+(cookie, authorization, x-forwarded-for, user-agent). Boot menolak gateway
+non-loopback (kecuali host disebut eksplisit di `OHTTP_GATEWAY_TRUSTED_HOSTS`,
+untuk Docker), menolak `OHTTP_TOKEN_MODE=off` (relay tanpa sesi), dan menolak
+bind non-loopback tanpa `OHTTP_RELAY_ALLOW_PUBLIC_BIND=1`. `OHTTP_RELAY_EXTERNAL=1`
+membuat API berhenti memasang `/relay`; nginx meneruskan `location =
+/api/ohttp/relay` ke `ohttp-relay:4100`. Unit: `ops/systemd/nyx-ohttp-relay.service`,
+compose service `ohttp-relay`. Tes `tests/ohttpRelay.test.ts` (7) + proses relay
+dijalankan nyata (healthz, 502 upstream mati, 400 body kosong). Batas jujur: masih
+satu host pada default — yang hilang adalah korelasi di log/state aplikasi.
+
+Angka PIR diukur ulang di mesin ini: N=1000 (query 138 ms/5,5 KB, startup 20,6 s)
+dan N=10.000 (startup **886 s**, query 1,92 s/50 KB, RSS 128 MB) — konsisten
+dengan catatan 2026-10-24, dan menegaskan startup superlinear sebagai alasan PIR
+butuh sharding sebelum dipakai luas. Bukan angka produksi, belum diaudit.
+
+## ⏱️ Jitter rilis grup + ops nginx/unit masuk repo (2026-10-25)
+
+**Waktu terima pesan grup tidak lagi sama dengan waktu kirim.** Dengan
+`GROUP_RELEASE_JITTER_MS` (default mati, clip 2000 ms), relay pesan grup ditunda
+acak 0..N ms **setelah ACK** — pengirim tidak menunggu, isi/padding 8 KB tidak
+berubah, dan 1:1 tidak tersentuh. Delay yang benar-benar dipakai dicatat di
+histogram `nyx_group_release_delay_ms` (tanpa label), jadi fitur yang hidup
+terlihat di scrape dan fitur mati tidak menghasilkan deret palsu. Berlaku di
+kedua jalur kirim (WT + REST). Ini **bukan batching**: volume tetap terlihat.
+
+Config nginx dan unit systemd sekarang bersumber dari repo: `ops/nginx/nyx.conf`
+(+ `README.md`, termasuk `location = /api/ohttp/relay`; master `nginx.conf` tetap
+lokal), `ops/systemd/*`, `ops/systemd/user/*`, dan `scripts/sync-selfhost.sh`
+(profil `selfhost`/`docker`, dry-run default, `--apply`, `--check` exit 1 saat
+beda). `deploy.yml` memasang unit relay bila sudah `enabled` dan mencatat drift
+selfhost sebagai peringatan tanpa menggagalkan deploy.
+
+## 🔑 At-rest `ENC2` + key ring seal + job re-seal (2026-10-25)
+
+**Kunci at-rest sekarang bisa dirotasi tanpa downtime, dan formatnya ber-versi.**
+Nilai ter-seal ditulis sebagai `ENC2:<keyId>:<b64url(nonce||ct)>` dengan kunci
+dari key ring (`NYX_AT_REST_KEYRING` atau file custody `NYX_AT_REST_KEYRING_FILE`);
+format lama (tanpa prefiks) tetap terbaca sebagai kunci id `0` turunan
+`NYX_AT_REST_PEPPER`, jadi deploy build ini sendirian tidak mengubah satu byte
+pun. Tanpa key ring, semua tulisan tetap legacy. Key id yang
+tidak ada di ring menghasilkan `null` (gagal baca terlihat), bukan plaintext;
+key ring yang rusak melempar, tidak diam-diam jatuh ke legacy.
+
+Karena satu plaintext menghasilkan ciphertext berbeda per kunci, semua lookup
+kesetaraan pindah ke `sealedLookupCandidates` (kunci aktif + legacy): routing
+keanggotaan, `Story.authorTag`, pasangan `BlockedUser`, dan
+`PushSubscription.endpointSealed` (subscribe kini cek-lalu-update, bukan upsert
+yang akan menduplikasi baris lama). `scripts/reseal-at-rest.ts` memindahkan
+baris lama ke kunci aktif secara batch dan idempoten (dry-run default, `--apply`,
+exit 2 bila ada nilai tak terbaca); runbook di `docs/10` §10.17. Custody provider
+`env`/`file` + status tanpa rahasia ada di `/api/admin/system-status` (`atRest`).
+Blind index HMAC **tidak** ikut dirotasi — HMAC satu arah, plaintext tidak
+disimpan server (dicatat di `docs/28` §R4). Verifikasi: 21 tes at-rest/custody
+baru, 638 tes server hijau.
+
+## 🔬 Spike BRaccoon ditutup tanpa implementasi (2026-10-25)
+
+**Credential PQ tidak dihidupkan, dan alasannya sekarang terukur.** Spike
+BRaccoon (ePrint 2026/1084) selesai dengan satu keputusan: signature Raccoon
+level 1 berukuran 11,5 KB, sementara `CREDENTIAL_MAX_BYTES` 8 KiB — sebelum
+satu byte proof pun masuk. Total komunikasi issuance diestimasi penulis ≈862 KB
+(butuh ≥14 body OHTTP 64 KB), dan belum ada implementasi publik, test vector,
+atau audit. Verifier tetap fail-closed dengan allowlist suite kosong; wire
+format credential tidak berubah, jadi suite PQ kelak bisa masuk tanpa migrasi
+bila signature-nya muat. Gate untuk membuka kembali (implementasi referensi,
+≤8 KiB, ≤64 KB, proving WASM p95 ≤2 s, audit, dual-verify + kill switch) ada di
+`docs/37` §37.9.5.
+
+## 🔄 Rotasi era grup terjadwal (PCS kasar) + rotasi manual yang menaikkan epoch (2026-10-24)
+
+**Rotasi era tidak lagi hanya manual dan tidak lagi hanya mengganti rantai sender
+key.** `maybeRotateGroupEpoch` (`web/src/lib/groupEpochRotation.ts`, loop 15 menit
+di `App.tsx`) membaca `GET /api/groups/:id/epoch` (admin capability), memutuskan
+lewat kebijakan murni `groupEpochPolicy.ts` — **24 jam** sejak rotasi terakhir
+atau **500 pesan** sejak baseline lokal — lalu `POST /api/groups/:id/epoch`
+(epoch += 1, token grup baru) dan menulis ulang metadata v3 dengan token itu
+(`rotateGroupKey(..., 'periodic_rotation', true, token)`), sehingga era kunci
+baru terdistribusi lewat mailbox. Token baru disimpan sebagai `pendingToken`
+**sebelum** metadata ditulis: kalau PUT metadata gagal, percobaan ulang memakai
+token yang sama alih-alih merotasi dua kali dan meninggalkan anggota dengan
+token basi.
+
+Tombol **Rotate keys** di Group Info kini memakai jalur yang sama, jadi rotasi
+manual juga menaikkan epoch dan mematikan token grup lama (sebelumnya hanya
+rantai sender key yang berganti). Header `GET /:id/epoch` mengembalikan
+`{epoch, rotatedAt, createdAt, messageSeq}`; `GroupTokenConversationRow`
+diperluas untuk kolom itu. Verifikasi: 15 tes baru (`groupEpochPolicy` 8,
+`groupEpochRotation` 7 — termasuk skenario kegagalan PUT + pemulihan token) dan
+server 628 tes tetap hijau.
+
+## 📬 Mailbox grup + Privacy Pass klien + OHTTP POST untuk sync anonim (2026-10-24)
+
+**Distribusi kunci grup tidak lagi membentuk graf.** Envelope sender-key sekarang
+ditulis ke mailbox percakapan (`web/src/lib/groupMailbox.ts`) dengan tag alamat
+`HMAC(memberTokenPenerima, "nyx-mailbox-v1")` — server hanya melihat "grup G
+menerima item", bukan tepi requester→fulfiller. Envelope diproses lewat jalur
+dekripsi yang sudah ada (`storeReceivedSessionKey`), dengan hint perangkat agar
+satu user ber-multi-device tidak mencoba membuka amplop device lain. Poll loop
+(10 detik, satu tick pada satu waktu) hidup selama sesi di `App.tsx`. Jalur lama
+`group:fulfilled_key` hanya dipakai bila metadata/token grup belum tersedia
+(mis. distribusi pertama saat createGroup) supaya kunci tidak hilang.
+
+**Privacy Pass sisi klien** (`web/src/lib/privacyPass.ts`): issuance Blind RSA
+(RFC 9474) memakai `@cloudflare/blindrsa-ts` yang sama dengan server, token
+diverifikasi ulang secara lokal sebelum disimpan (token tak terverifikasi =
+tidak disimpan), tersimpan ter-seal di `kvStore` dengan TTL 24 jam, dan
+dihabiskan tepat satu per sync. Issuance saat stok kosong berjalan di latar —
+sync tidak menunggu blind RSA.
+
+**Sync anonim lewat OHTTP POST** (`web/src/lib/groupSync.ts`): allowlist gateway
+bertambah `POST /api/groups/sync` (body ≤ 64 KB ditolak 413 di dalam amplop) dan
+token OHTTP mengikuti pasangan method+path, bukan hanya GET. Klien memakai
+amplop bila `VITE_OHTTP_ENABLED=1`, lalu jatuh ke jalur langsung bila gagal.
+
+Server: `POST /api/groups/sync` menerima `proofs` (satu token = satu sync,
+terikat `conversationId`); `PP_SYNC_REQUIRED=1` membuat sync tanpa bukti sah
+dijawab `403 PP_PROOF_REQUIRED` (default: bukti dihabiskan bila dikirim, tidak
+wajib). `PP_ISSUER_PRIVATE_JWK` didokumentasikan di `.env.example` bersama flag
+itu. Verifikasi: server **628 tes / 0 fail** (+5 `syncProofs`), web **965 tes /
+0 fail** di `lib`/`store`/`utils` (mailbox 15, Privacy Pass 8 dengan RSA asli,
+group sync 4), plus smoke live `post→pull→403→400` terhadap API selfhost.
+
 ## 🧪 E2E residual Fase 8: recovery, device-linking, credential grup, OHTTP + fix blind RSA (2026-10-23)
 
 > **Koreksi (2026-10-23):** cutover PQ-only menghapus seluruh fitur credential

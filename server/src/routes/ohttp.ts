@@ -29,6 +29,12 @@ export interface OhttpRouterOptions {
   dispatch?: OhttpDispatcher;
   /** Guard auth+CSRF untuk /relay saat token mode off. */
   relayGuards?: RequestHandler[];
+  /**
+   * [docs/37 §37.4 P7] `false` = relay dijalankan proses terpisah
+   * (`nyx-ohttp-relay`), jadi API tidak memasang `/relay` (404). Klien memakai
+   * `VITE_OHTTP_RELAY_URL`. Default `true` = perilaku lama.
+   */
+  exposeRelay?: boolean;
 }
 
 export default function createOhttpRouter(config: OhttpConfig, options: OhttpRouterOptions = {}): Router {
@@ -60,7 +66,17 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
     incCounter(OHTTP_OPS, { route: 'config', result: 'ok' });
   });
 
-  router.post('/relay', ohttpLimiter, ...relayGuards, rawBody, async (req, res, next) => {
+  const exposeRelay = options.exposeRelay ?? true;
+  if (!exposeRelay) {
+    // Relay terpisah: endpoint ini sengaja TIDAK ada, supaya tidak ada jalur
+    // kedua yang melewati proses relay (dan log aplikasi).
+    router.post('/relay', (_req, res) => {
+      incCounter(OHTTP_OPS, { route: 'relay', result: 'forbidden' });
+      res.status(404).json({ error: 'OHTTP_RELAY_EXTERNAL' });
+    });
+  }
+
+  if (exposeRelay) router.post('/relay', ohttpLimiter, ...relayGuards, rawBody, async (req, res, next) => {
     try {
       const body = req.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {

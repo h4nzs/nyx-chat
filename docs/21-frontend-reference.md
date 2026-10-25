@@ -38,7 +38,13 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 | `theme.ts` | `theme`, `accent` | `toggleTheme`, `setAccent` |
 | `verification.ts` | `verifiedStatus` | `loadInitialStatus`, `setVerified`, `unsetVerified`, `computeFingerprint` |
 
-## 21.3 Lib modules (`lib/`, 26 files)
+## 21.3 Lib modules (`lib/`, 89 files)
+
+**Pencarian privat & grup anonim (docs/10 §10.18–§10.19):**
+- `ohttpClient.ts` / `ohttpPin.ts` — ambil `application/ohttp-keys`, pin digest per key id (fail-closed bila config berubah tanpa rotasi), minta token 120 dtk lalu kirim amplop lewat `/api/ohttp/relay` (default same-origin).
+- `pirParams.ts` / `pirClient.ts` — params PIR (`ETag`, cache 60 dtk, hint/filter/seed), query/process lewat worker WASM; `PIR_REQUIRES_OHTTP` bila OHTTP mati (tidak ada fallback ke `/search`).
+- `searchOprfClient.ts` / `userSearch.ts` — blind index OPRF (43-char Argon2id → 64-hex) dan **satu pintu** pencarian: OPRF → PIR bila aktif, lalu OHTTP, tanpa fallback diam-diam.
+- `groupSync.ts` / `groupMailbox.ts` / `groupPseudonyms.ts` / `privacyPass.ts` — sync grup anonim (token di body + OHTTP POST, opsional Privacy Pass Blind RSA yang disegel di `kvStore`).
 
 **Crypto / storage**
 - `crypto-worker-proxy.ts` — main↔worker proxy: `deriveKeyFromPassword`, `registerAndGenerateKeys`, `generateNewKeys`, `retrievePrivateKeys`, `restoreFromPhrase`, `recoverAccountWithSignature`, `getRecoveryPhrase`, `encryptProfile`/`decryptProfile`/`generateProfileKey`, `hashUsername`, `minePoW`, `generateSafetyNumber`, `worker_crypto_secretbox_xchacha20poly1305_*`, `worker_crypto_box_seal(_open)`, `worker_pq_box_seal(_open)`, `worker_file_encrypt/decrypt`, `reEncryptBundleFromMasterKey`.
@@ -51,7 +57,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 - `localOrderKey.ts` (+ leaf `localOrderBucket.ts`) — two-layer message ordering: plaintext `orderBucketMs` (range-scannable) + sealed `createdAtSealed` (precision). Readers must take the boundary bucket WHOLE; see `docs/30` §30.20.
 - `searchIndex.ts` — in-memory search index built from already-decrypted messages while the vault is open (no plaintext FTS on disk); `searchBench.ts` measures index build + memory.
 - `fuzzParsers.ts` — deterministic fuzz campaign for untrusted-input parsers (`parseTransportHello`, backup header/archive/chunk/padding); runner + self-test in `__tests__/fuzzParsers.test.ts` (`docs/11` §11.1c).
-- `tokenStorage.ts` — cookie helpers.
+- `tokenStorage.ts` — cookie helpers: `EMBED_ACCESS_COOKIE` (`embed_at`) + `setEmbedAccessCookie` (expiry follows the token's `exp`), `eraseCookie`, `clearAuthCookies`. Never writes the session cookie name `at`.
 - `biometricUnlock.ts` — WebAuthn PRF setup/unlock.
 - `sodiumInitializer.ts` — `getSodium`, `initializeSodium`.
 - `refreshLock.ts` — `runExclusive` cross-tab mutex.
@@ -74,11 +80,11 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 - `offlineQueueDb.ts` — offline send queue.
 - `storyCrypto.ts` — story encrypt/decrypt.
 
-## 21.4 Pages (`pages/`, 16)
+## 21.4 Pages (`pages/`, 20)
 
-`Login`, `Register`, `Restore`, `Chat`, `SettingsPage`, `KeyManagementPage`, `SessionManagerPage`, `ProfilePage`, `AdminDashboard`, `BurnerChat` (`/drop`), `ConnectPage`, `EmbedChatPage`, `MigrationReceivePage`, `MigrationSendPage`, `MaintenancePage`, `NotFoundPage`. (See the page table in `06-frontend.md` §6.8 and feature docs.)
+`Login`, `Register`, `Restore`, `Chat`, `SettingsPage`, `KeyManagementPage`, `SessionManagerPage`, `ProfilePage`, `AdminDashboard`, `BurnerChat` (`/drop`), `ConnectPage`, `EmbedChatPage`, `MigrationReceivePage`, `MigrationSendPage`, `MaintenancePage`, `NotFoundPage`, `LinkDevicePage` (QR perangkat baru), `UsernameLinkPage`, `ServerDownPage`, `PqDeviceBenchPage`. (See the page table in `06-frontend.md` §6.8 and feature docs.)
 
-## 21.5 Components (`components/`, 72 + `ui/`)
+## 21.5 Components (`components/`, 67 + 5 `ui/`)
 
 - **Global modals (lazy in App.tsx):** `ConfirmModal`, `UserInfoModal`, `PasswordPromptModal`, `ChatInfoModal`, `DynamicIsland`, `CommandPalette`, `ContextMenu`, `CallOverlay`, `SystemInitModal`.
 - **Chat core:** `ChatList`, `ChatWindow`, `ChatItem` (conversation row), `MessageItem`, `MessageBubble`, `MessageInput`, `MessageSkeleton`, `TypingIndicator`, `Reactions`, `FileAttachment`, `LazyImage`, `LinkPreviewCard`, `VoiceMessagePlayer`, `MarkdownMessage`, `NewMessageToast`, `EncryptionStatusNotification`, `AuthForm` (shared login/register form).
@@ -88,13 +94,15 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 ## 21.6 Workers (`workers/`)
 
-- `crypto.worker.ts` (2453 L) — 45+ operations: identity keys, XChaCha primitives, Argon2id KDF, PoW, profiles, PQX3DH, Double Ratchet, group sender-key, burner PQ-DR, file secretstream, safety number. Protocol `{id,type,payload}` → `{id,success,result,error}`.
-- `transport.worker.ts` (356 L) — WebTransport QUIC: CONNECT/DISCONNECT/SEND_STREAM/SEND_DATAGRAM/START_HANDSHAKE; chaffing loop; frame parsing.
+- `ohttp.worker.ts` (120 L) — bungkus/buka amplop OHTTP (HPKE + Binary HTTP) di worker supaya kunci sesi tidak menyentuh main thread.
+- `pir.worker.ts` (138 L) — ABI WASM ChalametPIR (`setup`/`query`/`process`), memuat `pir-client.wasm` dari asset URL (bukan bundle utama).
+- `crypto.worker.ts` (2498 L) — 45+ operations: identity keys, XChaCha primitives, Argon2id KDF, PoW, profiles, PQX3DH, Double Ratchet, group sender-key, burner PQ-DR, file secretstream, safety number. Protocol `{id,type,payload}` → `{id,success,result,error}`.
+- `transport.worker.ts` (472 L) — WebTransport QUIC: CONNECT/DISCONNECT/SEND_STREAM/SEND_DATAGRAM/START_HANDSHAKE; chaffing loop; frame parsing.
 
-## 21.7 Hooks (`hooks/`, 8) & utils (`utils/`, 13 + tests)
+## 21.7 Hooks (`hooks/`, 10) & utils (`utils/`, 17 + tests)
 
-- Hooks: `useChatList`, `useConversation`, `useEdgeSwipe`, `useGlobalEscape`, `useGlobalShortcut`, `useOrientation`, `usePushNotifications`, `useUserProfile`.
-- Utils: `crypto.ts` (1934 L — the key engine), `safetyNumber.ts`, `fingerprint.ts`, `typeGuards.ts`, `sanitize.ts`, `url.ts`, `verification.ts`, `systemAlerts.ts`, `feedback.ts`, `date.ts`, `color.ts`, `canvasUtils.ts`, `blobCache.ts`.
+- Hooks: `useChatList`, `useConversation`, `useEdgeSwipe`, `useGlobalEscape`, `useGlobalShortcut`, `useOrientation`, `usePushNotifications`, `useUserProfile`, `useUserSearch` (OPRF/PIR path), `usePresenceSubscription`.
+- Utils: `crypto.ts` (engine kunci utama), `safetyNumber.ts`, `fingerprint.ts`, `typeGuards.ts`, `sanitize.ts`, `url.ts`, `systemAlerts.ts`, `feedback.ts`, `date.ts`, `color.ts`, `canvasUtils.ts`, `blobCache.ts`, `messageOrder.ts`, `messagePreview.ts`, `modalPreload.ts`, `tempId.ts`, `usernameLink.ts`.
 
 ## 21.7b Types & test setup
 
@@ -107,6 +115,6 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 - Locales `public/locales/{en,es,id,pt-BR}` × 7 namespaces (`common, auth, errors, chat, settings, modals, admin`) — exactly matching the `ns` array in `i18n.ts`. Every key must exist in all four languages. (Former `privacy/help/landing` namespaces were dead copies of the marketing site's locales and were removed — the marketing Astro site keeps its own under `marketing/src/locales`.)
 - PWA: `vite-plugin-pwa` injectManifest, source `src/sw.ts`; no `/api` runtime caching by design.
 
-## 21.9 E2E (`e2e/`, 7 specs + global setup)
+## 21.9 E2E (`e2e/`, 14 specs + global setup)
 
-`auth` (register/login), `chat` (2-page messaging), `profile` (name/bio), `security` (sessions), `settings` (emergency eject), `transport` (WebTransport latency + unsend, auto-skip when unsupported), `global.setup` (DB+Redis reset). Run serially (`workers: 1`).
+`auth` (register/login), `chat` (2-page messaging), `profile` (name/bio), `security` (sessions), `settings` (emergency eject), `transport` (WebTransport latency + unsend, auto-skip when unsupported), `call` (coturn relay nyata, skip tanpa TURN), `deviceLinking` (QR), `recovery` (phrase restore), `regression` (burner/story/jebakan UI), `spqr` (ratchet v2 + rollback), `pqV2`, `pqBenchThrottle`, `ohttp` (jalur relay→gateway di stack terpisah, `playwright.ohttp.config.ts`), `global.setup` (DB+Redis reset). Run serially (`workers: 1`).

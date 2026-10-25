@@ -9,7 +9,7 @@ How group conversations are created, how metadata and messages are encrypted, ho
 > |---|---|---|
 > | **T1** | Sender pseudonyms — group `senderId` is a per-group random pseudonym (metadata v2 `pseudonymMap`, generation counter); server stores verbatim | replaces 16.4 routing notes |
 > | **T3a** | Group `MessageStatus.userId` stores the reader's **pseudonym**, not the account id | new |
-> | **T3b** | Blinded membership discovery via per-member **delivery tokens** (`UserHiddenConversation.deliveryToken`, dual-accept sync) | extends 16.5 |
+> | **T3b** | Blinded membership discovery via per-member **delivery tokens** (`UserHiddenConversation.tokenHash` + `tokenEpoch`/`expiresAt`, anonymous sync) | extends 16.5 |
 > | **T2** | Sender keys distributed **inside pairwise DR sessions** (`GROUP_KEY` silent control, virtual `<group>:pw:<peer>` conv id); `messages:distribute_keys` is now the legacy fallback | supersedes 16.4 delivery |
 > | **T4** | Opt-in application-level **cover traffic** (Poisson scheduler, `COVER` silent type, drop-after-decrypt) | new |
 >
@@ -73,10 +73,11 @@ All membership changes force a sender-key rotation so removed members cannot rea
 The server never learns roles (Opaque Mailbox), so authorization = possession of a capability:
 
 - **Creation:** `createGroup` generates a random 256-bit admin token client-side; the server receives only its SHA-256 hex (`Conversation.adminSecretHash`, validated `^[a-f0-9]{64}$`). The client caches the plaintext token per conversation in kvStore `nyx_group_admin_tokens` (at-rest `ENC1:`), hydrated in `loadConversations`.
-- **Guard:** `requireAdminCapability` (`server/src/utils/adminCapability.ts`) gates `PUT /:id/details`, `POST /:id/key-rotation`, and `DELETE /:id/group` via header `X-Admin-Token` (constant-time compare against the stored hash). **NULL hash = fail-closed** (2026-10 legacy purge) — the create route rejects a group without `adminSecretHash`, and a row with a NULL hash can no longer perform any admin op. All clients therefore send `X-Admin-Token` alongside `X-Group-Token` on group metadata writes.
+- **Guard:** `requireAdminCapability` (`server/src/utils/adminCapability.ts`) gates `PUT /:id/details`, `POST /:id/key-rotation`, `DELETE /:id/participants/:userId` (kick), and `DELETE /:id/group` via header `X-Admin-Token` (constant-time compare against the stored hash). **NULL hash = fail-closed** (2026-10 legacy purge) — the create route rejects a group without `adminSecretHash`, and a row with a NULL hash can no longer perform any admin op. All clients therefore send `X-Admin-Token` alongside `X-Group-Token` on group metadata writes.
 - **Where the checks live (WS-G(4)):** every group-route decision is a testable util
 (`server/src/utils/groupAccess.ts` for membership/leave/details/rotation/purge,
-`credentialAuth.ts` for issuance/admin) and `server/tests/groupAccess.test.ts`
+`adminCapability.ts` for admin); credential issuance was removed 2026-10-23.
+`server/tests/groupAccess.test.ts`
 locks the exact status codes, the message strings (`BLIND_AUTH_REQUIRED: …`,
 `ADMIN_AUTH_REQUIRED: …`, `MEMBERS_REMAIN: …`) and the ORDER of the gates
 (token → admin → member count). `PUT /:id/details` keeps its legacy behaviour of
@@ -87,7 +88,7 @@ client contract change.
 - **UI gating:** rotate-key button (`amIAdmin`), "Delete Group" menu/swipe entry (`canDeleteGroup`), and the solo-leave dialog variant all check admin status locally; the server-side guard is the source of truth.
 - **Trade-off:** the server cannot distinguish between admins and a stolen token stays valid until the next rotation — mitigated by re-sealing on every membership change.
 
-**[T3b — implemented]** Adds/leaves/kicks also write or delete the member's **delivery token** row (`UserHiddenConversation.deliveryToken`): tokens are issued by the inviter at add-time and revoked (= row deleted) on kick/leave, so kicked members lose discovery access without any identity join. Full design: docs 26.2 / 26.10.
+**[T3b — implemented]** Adds/leaves/kicks also write or delete the member's **delivery token** row (`UserHiddenConversation.tokenHash`): tokens are issued by the inviter at add-time and revoked (= row deleted) on kick/leave, so kicked members lose discovery access without any identity join. Kick also rotates the group `authSecret` atomically, bumps `groupEpoch`, and moves every remaining member row to the new epoch; leave does not rotate it. Tokens are 256-bit (`tokenHash` unique), with `tokenEpoch` + `expiresAt` (7 days, 24-hour refresh grace); the group token has its own 24-hour TTL. See docs/37 §37.3.1 for the current model.
 
 ## 16.6 Group info & UI
 

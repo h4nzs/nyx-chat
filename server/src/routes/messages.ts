@@ -22,6 +22,9 @@ import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentit
 import { reserveMessageSeq, parseMessageCursor, type SeqPrismaClient } from '../utils/messageSequence.js'
 // [docs/28 Tier 2 — B3] bucket waktu pesan (createdAt/expiresAt kasar).
 import { messageTimeBucket } from '../utils/temporalBucket.js'
+// [AUDIT 2026-10-24] Cap penerima khusus guest (paritas dengan jalur realtime).
+import { maxRecipientsFor } from '../utils/guestPolicy.js'
+import { applyGroupReleaseJitter } from '../utils/releaseJitter.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -175,7 +178,7 @@ router.post('/', zodValidate({
     targetRecipients: z.array(z.string()).max(500).optional(),
     // [T3b] Delivery tokens (dual-write saat invite relay) — jalur REST fallback
     // [T3b] Key = userId, value = token (Zod 4: argumen pertama z.record = schema KEY).
-    targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
+    targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{43}$/)).optional()
     // repliedToId dihapus validasinya karena relasi DB sudah diputus
   }).refine(data => data.content, { message: "Message must contain content" })
 }), async (req, res, next) => {
@@ -193,6 +196,30 @@ router.post('/', zodValidate({
         ? expiresIn * 1000
         : 14 * 24 * 60 * 60 * 1000;
     const finalExpiresAt = new Date(messageAt.getTime() + ttlMs);
+
+    // [AUDIT 2026-10-24] Tolak lebih awal dengan 404 bila room tidak ada.
+    // Sebelumnya `reserveMessageSeq` (UPDATE Conversation) melempar P2025 untuk
+    // id tak dikenal dan error generik menjawab 500 — klien membacanya sebagai
+    // "server rusak" lalu me-retry. Jalur realtime sudah 404-style sejak awal.
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      // [docs/37 §37.4 P8] `isGroup` dibutuhkan untuk jitter rilis grup.
+      // `groupEpoch` menjaga baris keanggotaan baru tidak langsung basi.
+      select: { id: true, isGroup: true, groupEpoch: true }
+    })
+    if (!conversation) {
+      throw new ApiError(404, 'Conversation not found')
+    }
+
+    // [AUDIT 2026-10-24] Cap penerima = aturan yang sama dengan jalur realtime
+    // (`utils/guestPolicy.ts`): guest hanya boleh menyebut sedikit penerima,
+    // karena identitasnya bisa dibuat berulang tanpa biaya. Diperiksa SEBELUM
+    // insert supaya pesan yang tidak boleh direlay tidak tersimpan.
+    const targetRecipients = req.body.targetRecipients as string[] | undefined
+    const recipientCap = maxRecipientsFor(senderId)
+    if (Array.isArray(targetRecipients) && targetRecipients.length > recipientCap) {
+      throw new ApiError(400, `Too many recipients (max ${recipientCap})`)
+    }
 
     // SIMPAN KE "KANTOR POS" SEMENTARA
     // [docs/28 Tier 2 — B1] seq atomik per-conversation (urutan tak lagi dari
@@ -237,8 +264,10 @@ router.post('/', zodValidate({
     res.status(201).json(safeMessage)
 
     // EMIT & PUSH NOTIFICATION (Opaque Mailbox: explicit targetRecipients from client)
-    const targetRecipients = req.body.targetRecipients as string[] | undefined;
     if (Array.isArray(targetRecipients) && targetRecipients.length > 0) {
+        // [docs/37 §37.4 P8] Jitter rilis grup — setelah respons terkirim ke
+        // pengirim, hanya menunda relay ke penerima. Default mati.
+        await applyGroupReleaseJitter(conversation.isGroup === true)
         // PARALEL: relay ke semua penerima sekaligus (sebelumnya sequential)
         await Promise.all(targetRecipients.map(async (targetIdRaw) => {
             const targetId = String(targetIdRaw);
@@ -252,7 +281,8 @@ router.post('/', zodValidate({
                 if (targetToken) {
                     // [docs/28 Tier 1.2] routing identity ter-seal (nilai DB tidak lagi userId asli).
                     upsertMembership(prisma as unknown as MembershipPrisma, {
-                        userId: targetId, conversationId, deliveryToken: targetToken
+                        userId: targetId, conversationId, token: targetToken,
+                        tokenEpoch: conversation.groupEpoch ?? 0
                     }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
                 }
             }

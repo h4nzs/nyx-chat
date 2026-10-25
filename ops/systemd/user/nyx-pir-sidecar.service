@@ -1,0 +1,45 @@
+# NYX — sidecar PIR ChalametPIR, unit **user** (self-host `~/nyx-selfhost`).
+#
+# Unit sistem setara ada di docs/35 Fase 4b (VPS/pm2 tidak memakai ini karena
+# sidecar belum di-deploy ke produksi). Mesin selfhost memakai systemd tingkat
+# user: `systemctl --user`, tanpa root.
+#
+# Kenapa proses terpisah: index PIR memegang hint/filter yang bisa menjawab
+# query pencarian; ia harus terpisah dari API yang memegang sesi. API hanya
+# mem-proxy byte opaque ke loopback (lihat `server/src/routes/pir.ts`).
+#
+# Pasang:
+#   cd ~/nyx-chat/server/pir-sidecar && cargo build --release --locked
+#   install -d -m 0750 ~/nyx-selfhost/pir
+#   install -m 0600 /path/pir.env ~/nyx-selfhost/pir/pir.env   # lihat di bawah
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now nyx-pir-sidecar
+#   curl -fsS http://127.0.0.1:9470/health
+#
+# `pir.env` wajib memuat PIR_BIND (loopback), PIR_MASTER_SECRET, PIR_ADMIN_TOKEN
+# (sama dengan `PIR_ADMIN_TOKEN` di server/.env), PIR_SNAPSHOT_PATH (sama dengan
+# `PIR_SNAPSHOT_PATH` server), PIR_ARITY, PIR_MAX_ENTRIES, PIR_RECORD_BYTES.
+# Snapshot ditulis `pnpm --filter nyx-server run pir:snapshot`; sidecar memuatnya
+# saat boot (restart unit setelah snapshot baru dibuat bila tidak lewat
+# `/admin/rebuild`).
+
+[Unit]
+Description=NYX PIR sidecar (ChalametPIR, loopback)
+Documentation=file:///home/ken/nyx-selfhost/README.md
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ken/nyx-chat/server
+# Env terpisah: sidecar tidak butuh DATABASE_URL/Redis/JWT_SECRET, dan tidak
+# boleh mewarisinya dari server/.env.
+EnvironmentFile=-/home/ken/nyx-selfhost/pir/pir.env
+ExecStart=/home/ken/nyx-chat/server/pir-sidecar/target/release/pir-service
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

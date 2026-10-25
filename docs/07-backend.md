@@ -15,7 +15,7 @@
 | `requireAdmin` | `middleware/auth.ts` | Role gate |
 | `generalLimiter`/`authLimiter`/`uploadLimiter` | `middleware/rateLimiter.ts` | RedisStore; key = `clientIpTag(req)` — **HMAC pepper** dari alamat klien (CF-Connecting-IP dulu, lalu `ipKeyGenerator`), bukan alamat mentah → key Redis tidak menyimpan IP (`docs/30` §30.12 WS-H) |
 | `tenantAuth` | `middleware/tenantAuth.ts` | B2B tenant API key gate (engine routes) |
-| CSRF | `app.ts` | `csrf-csrf`, state keyed per `x-nyx-installation-id` |
+| CSRF | `app.ts` | `csrf-csrf`, state keyed per `x-nyx-installation-id`. `/api/pir/query` dilewati **hanya** bila request tidak membawa cookie sesi (`at`/`rt`/`embed_at`) — jalur OHTTP membawa token ber-scope di amplop, bukan cookie |
 
 ## 7.3 Route modules
 
@@ -38,13 +38,20 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 | `reports.ts` | Report user/bug (Discord webhook) |
 | `system.ts` | `/status` (VPS metrics) |
 | `wellKnown.ts` | RFC 9727 API catalog + OAuth/OIDC/MCP discovery docs |
+| `ohttp.ts` | OHTTP relay + gateway (`/api/ohttp/config`, `/relay`, `/gateway`), hanya dipasang bila `OHTTP_ENABLED=1` |
+| `pir.ts` | Proxy byte opaque ke sidecar ChalametPIR (`/api/pir/params`, `/query`), hanya bila `PIR_ENABLED=1` |
+| `groups.ts` | Sync anonim grup (token di body, tanpa cookie/JWT), mailbox + epoch |
+| `callTokens.ts` | Token relay panggilan (userId tidak masuk envelope) |
+| `ktQuery.ts` | Proxy bukti Key Transparency (protobuf base64url, tanpa parsing) |
 
 ## 7.4 Jobs
 
 | Job | Schedule | Behavior |
 |---|---|---|
-| `messageSweeper` | every minute (`noOverlap`) | Deletes expired (or >14d) messages, notifies recipients via `message:deleted_batch`; fetches affected `UserHiddenConversation` rows in ONE query |
+| `messageSweeper` | every minute (`noOverlap`) | Deletes expired (or >14d) messages **oldest `expiresAt` first**, page size 500, draining up to 20 pages per run (10k/min) so a burst never builds a backlog; notifies recipients via `message:deleted_batch`; fetches affected `UserHiddenConversation` rows in ONE query |
 | `systemSweeper` | daily 00:00 | Expired session keys, stale devices/OTPKs, Dead-Man's-Switch account deletion |
+| `ktSnapshot` | daily 03:30 | Unggah snapshot KT terverifikasi ke R2 (retensi 30 hari) |
+| `pirSnapshot` | daily 04:15 | Bangun snapshot `oprfIndex` + hot-swap sidecar PIR (`/admin/rebuild`) |
 
 ## 7.5 Redis inventory
 

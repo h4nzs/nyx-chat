@@ -29,6 +29,10 @@ dan metadata temporal.**
 
 ## 28.1 Inventaris — 17 tabel & perannya
 
+> **Update 2026-10-23.** `GroupCredential`, `CredentialIssuerKey`, blind RSA, dan
+> anonymous issuance dihapus. Referensi ke model/kunci itu di bawah adalah
+> baseline historis; jangan dipakai sebagai status operasional.
+
 > **Baseline pra-perbaikan.** Kolom yang disebut di sini (mis. `Device.name`,
 > `Device.installationId`, `User.externalId`, `PushSubscription.endpoint`,
 > `Conversation.metadata`, `CredentialIssuerKey.privateKeyPkcs8`,
@@ -53,9 +57,7 @@ erDiagram
     Conversation ||--o{ Message : contains
     Conversation ||--o{ SessionKey : has
     Conversation ||--o{ UserHiddenConversation : hidden_by
-    Conversation ||--o{ GroupCredential : "serial (anonim)"
     Message ||--o{ MessageStatus : statuses
-    CredentialIssuerKey ||--o{ GroupCredential : "keyVersion"
 ```
 
 Catatan: `Message.senderId` **bukan** FK (pseudonym untuk grup v2, `NULL` untuk
@@ -72,12 +74,12 @@ Catatan: `Message.senderId` **bukan** FK (pseudonym untuk grup v2, `NULL` untuk
 | `RefreshToken` | `jti`, `familyId`, `ipAddress`, `userAgent`, `deviceId`, rantai rotasi | Ya — metadata sesi |
 | `SessionKey` | `encryptedKey`, `initiatorCiphertexts` (terenkripsi masterSeed) | Tidak (opaque) — tapi graph sesi terlihat |
 | `PushSubscription` | `endpoint`, `p256dh`, `auth`, `deviceId` | Ya — identifier perangkat push |
-| `Conversation` | `isGroup`, `encryptedMetadata`, `authSecret` (plaintext), `adminSecretHash`, `lastMessageAt`, `metadata` (JSON tenant) | Ya untuk `authSecret` & timestamp |
+| `Conversation` | `isGroup`, `encryptedMetadata`, `authSecret` (SHA-256 token), `groupTokenExpiresAt`, `adminSecretHash`, `lastMessageAt`, `metadata` (JSON tenant) | Hash/timestamp saja; token asli tidak |
 | `Message` | `content` (ciphertext E2EE), `deleteSecret` (plaintext), `senderId` (pseudonym/NULL), `sessionId`, `repliedToId`, `isViewOnce/isViewed`, `createdAt`, `expiresAt` | Ciphertext tidak; secret & metadata ya |
 | `MessageStatus` | `userId` (asli untuk 1:1), `status`, `updatedAt` | Ya — pembaca + waktu baca |
-| `UserHiddenConversation` | `userId` (asli, routing-only), `deliveryToken` | Ya — keanggotaan grup |
-| `GroupCredential` | `serial` (64-hex), `conversationId`, `keyVersion` | Ya — tanpa identitas (desainnya sudah benar) |
-| `CredentialIssuerKey` | `publicKeyJwk`, **`privateKeyPkcs8` (PLAINTEXT)** | Ya — **akar kepercayaan** |
+| `UserHiddenConversation` | `userId` (ter-seal, routing-only), `tokenHash`, `tokenEpoch`, `expiresAt` | Ya — keanggotaan grup (token asli tidak) |
+| `GroupCredential` (historis; model dihapus 2026-10-23) | `serial` (64-hex), `conversationId`, `keyVersion` | Ya — tanpa identitas |
+| `CredentialIssuerKey` (historis; model dihapus 2026-10-23) | `publicKeyJwk`, **`privateKeyPkcs8` (PLAINTEXT)** | Ya — **akar kepercayaan** |
 | `Authenticator` | `credentialID`, `credentialPublicKey`, `counter`, `transports`, `credentialDeviceType` | Ya — perangkat/biometrik |
 | `BlockedUser` | `blockerId`, `blockedId` | Ya — edge sosial eksplisit |
 | `Story` | `senderId` (FK!), `encryptedPayload`, `expiresAt` | Author↔story terlihat |
@@ -305,11 +307,10 @@ temporal di DB.
 `Authenticator.counter` DIPERTAHANKAN dengan sadar (deteksi kloning WebAuthn)
 — lihat §28.9.
 
-### D12 — RENDAH/CATATAN: `GroupCredential.serial`
-`serial = SHA-384(prepared message)` (`server/src/lib/groupCredentials.ts:95`),
-tidak membawa identitas — desain sudah benar. Risiko tersisa: serial yang bocor
-dari log/klien = bukti keanggotaan (presentasi). Pastikan serial tidak pernah
-masuk log.
+### D12 — RENDAH/CATATAN: `GroupCredential.serial` (historis)
+**STATUS: DIHAPUS 2026-10-23** bersama model dan kode blind RSA. Catatan ini
+dipertahankan sebagai rujukan bila credential dihidupkan lagi: serial adalah
+bukti keanggotaan bearer, jadi jangan pernah masuk log.
 
 ### D13 — RENDAH: material kunci publik
 `PreKeyBundle`/`OneTimePreKey` memang publik; `SessionKey.encryptedKey`/
@@ -364,8 +365,8 @@ tidak mengekspos presence 'online/last seen' sama sekali).
 
 - `Message.senderId` `NULL` (1:1 / sealed sender) & pseudonym (grup v2/T1) — dan
   `userId` **TER-SEAL** untuk fallback legacy (Tier 4, 2026-10-09).
-- Token-first membership (`UserHiddenConversation.deliveryToken` unik, wajib
-  diterbitkan klien) — discovery = kepemilikan token.
+- Token-first membership (`UserHiddenConversation.tokenHash` unik, wajib
+  diterbitkan klien, epoch + TTL) — discovery = kepemilikan token.
 - `Conversation.adminSecretHash` = hash dari token 256-bit (pola benar).
 - Isi pesan/story/profil/kontak = opaque (E2EE); `passwordHash` Argon2id
   per-user salt; `SessionKey` terenkripsi masterSeed.
@@ -379,7 +380,7 @@ Setiap tier berdiri sendiri dan bisa di-commit terpisah.
 ### Tier 0 — operabilitas & rahasia (tanpa perubahan protokol klien)
 | # | Perubahan | Acceptance |
 |---|---|---|
-| 0.1 | Pindahkan `CredentialIssuerKey.privateKeyPkcs8` ke env (`GROUP_ISSUER_KEY_PKCS8`) / file 0600; baca env dulu, fallback kolom selama transisi; migrasi + `ALTER TABLE ... DROP COLUMN` setelah aman (db push) | `rg privateKeyPkcs8 server/prisma` kosong; test issuing credential tetap lulus; dump tanpa kolom kunci tidak bisa menandatangani |
+| 0.1 (historis; credential dihapus 2026-10-23) | ~~Pindahkan `CredentialIssuerKey.privateKeyPkcs8` ke env (`GROUP_ISSUER_KEY_PKCS8`) / file 0600; baca env dulu, fallback kolom selama transisi; migrasi + `ALTER TABLE ... DROP COLUMN` setelah aman (db push)~~ | Tidak berlaku; model dan fitur credential sudah dihapus. |
 | 0.2 | Pepper server-side untuk blind index: simpan `HMAC(USERNAME_INDEX_PEPPER, clientHash)`; lookup pakai nilai ter-pepper; dual-read legacy lalu upgrade baris | login user lama tetap sukses (test); dump tanpa pepper tidak bisa membangun rainbow table |
 | 0.3 | Berhenti menyimpan `RefreshToken.ipAddress` + `userAgent` (atau `HMAC(pepper, ip)` saja); tampilkan sesi saat ini dari token, bukan dari perbandingan IP | `sessions.ts` tetap menandai sesi aktif; tidak ada kolom IP plaintext/hash-tanpa-kunci |
 | 0.4 | `Device.fingerprint` → `HMAC(pepper, fingerprint)` (tetap deterministik untuk binding) atau hapus kolom; nilai mentah tak pernah persist | login device lama tetap lolos (test); dump tidak memuat sidik jari perangkat |
@@ -591,7 +592,7 @@ presence menjadi **per-kontak/langganan**.
 
 | # | Temuan | Perubahan |
 |---|---|---|
-| 0.1 | D1 KRITIS | `CredentialIssuerKey.privateKeyPkcs8` **dihapus dari schema**; private key dari env `GROUP_ISSUER_KEY_PKCS8` (dev: file `server/.nyx-issuer-key` 0600, dibuat otomatis non-production, gitignored). Row DB hanya `publicKeyJwk` + `keyVersion`; mismatch env↔DB = fail fast; production tanpa env = fail-closed. Script: `pnpm --filter nyx-server run issuer-key:generate` / `issuer-key:export` (ekspor kolom legacy via raw SQL — jalankan SEBELUM drop kolom) |
+| 0.1 (historis; credential dihapus 2026-10-23) | D1 KRITIS | `CredentialIssuerKey.privateKeyPkcs8` **dihapus dari schema**; private key dari env `GROUP_ISSUER_KEY_PKCS8` (dev: file `server/.nyx-issuer-key` 0600, dibuat otomatis non-production, gitignored). Row DB hanya `publicKeyJwk` + `keyVersion`; mismatch env↔DB = fail fast; production tanpa env = fail-closed. Script `issuer-key:generate`/`issuer-key:export` sudah dihapus bersama fitur credential. |
 | 0.3 | D5 | `RefreshToken.ipAddress` & `userAgent` **dihapus** dari schema + semua jalur tulis (auth issueTokens, refresh, engine iframe). `GET /api/sessions` memakai `Device.name` + `isCurrent`; UI sesi ikut disesuaikan (dedupe per `deviceId`, bukan UA) |
 | 0.4 | D7 | `Device.fingerprint` disimpan ter-index (`HMAC(pepper, fingerprint)`): auth register/login/recovery, `PUT /api/users/keys`, dan cek hardware-binding di `redisBridge` |
 | 0.5 | D4 | `Tenant.apiKey` disimpan **sealed** (AEAD deterministik) → lookup tetap jalan; admin tetap melihat key asli (di-unseal di endpoint admin-only, key asli dikembalikan sekali saat create) |
@@ -632,10 +633,9 @@ dibandingkan dengan sebelum: Argon2id salt statis = rainbow table global).
 Efek yang tersisa: nilai itu tetap **identifier stabil** antar penerima link
 (pseudonim publik), sama seperti sebelumnya — bukan penurunan privasi baru.
 
-**Urutan operasi produksi (0.1):** (1) `issuer-key:export` → simpan ke
-`/root/nyx-app/.env`; (2) restart `nyx-api`; (3) verifikasi issuance credential
-grup; (4) baru `prisma db push` yang menghapus kolom `privateKeyPkcs8`.
-`GROUP_ISSUER_KEY_PKCS8` ikut ditambahkan ke `.env.example` (root + server).
+> **Historis:** prosedur operasi 0.1 di atas tidak berlaku. Fitur credential,
+model `GroupCredential`/`CredentialIssuerKey`, dan env `GROUP_ISSUER_KEY_*`
+dihapus 2026-10-23; group auth sekarang token-first.
 
 ## 28.9 Keputusan Tier 2 — metadata temporal (2026-10-08)
 
@@ -658,7 +658,7 @@ Mem-bucket kolom ini langsung merusak urutan/scroll-history/jam.
 | B2 ✅ | **Mendarat.** Waktu kirim presisi dikirim di dalam plaintext (`sentAt`), bukan kolom server. Send: `store/message.ts` menyuntik `sentAt: Date.now()` ke objek JSON terenkripsi; decrypt: `captureSentAt()` di `messagePipeline.ts` (jalur self-decrypt + `stripProfileKey`) menyalin ke `Message.sentAt` **lalu menghapus field** (wajib — logika collapse `Object.keys(parsed).length === 1`). Tampilan memakai `sentAt` (bubble, jendela edit, ChatList, search) dengan fallback `createdAt`; `sentAt` dipersist lokal. Test: `web/src/lib/__tests__/sentAtCapture.test.ts` (5) | Format beku (`ENCRYPT_DATA`/amplop/padding/opcode) TIDAK tersentuh. **Butuh verifikasi E2E** dekripsi nyata. **[2026-10-16]** Persistensi lokal `sentAt` kini **ter-seal `ENC1:`** (`docs/30` WS-F): presisi ms per pesan tidak lagi plaintext di IndexedDB — ciphertext tetap satu-satunya bentuk `sentAt` yang meninggalkan perangkat |
 | B3 ✅ | **Mendarat.** `Message.createdAt` dipotong 15 menit (`messageTimeBucket`) di semua jalur create (REST, WT chat_message, 2 SYSTEM) dan `expiresAt` **diturunkan dari waktu kasar yang sama** (kalau tidak, `expiresAt − TTL` membocorkan createdAt). `Conversation.lastMessageAt` ikut waktu kasar yang sama. Vault lokal memakai `sentAt` presisi sebagai indeks bila ada. Test: `tests/temporalBucket.test.ts` | Toleransi TTL sweeper ≤1 bucket (15 mnt). `MessageStatus.updatedAt` **juga** dikasar: `@updatedAt` dihapus & nilainya ditulis eksplisit (`messageTimeBucket()`) di kedua jalur receipt |
 | B4 ✅ | **Mendarat.** `User.lastActiveAt` → `lastActiveDay` (bucket **hari**, UTC) + index disesuaikan; ditulis di `user.create` (auth & engine) dan `issueTokens` (updateMany no-op bila hari sama) — sekaligus memperbaiki bug DMS yang dulu memakai nilai basi. `Device.lastActiveAt` di-bucket **15 menit** (`deviceActivityBucket`) di semua jalur write, dengan tie-break deterministik `[{lastActiveAt desc},{createdAt desc}]` di semua pembaca. Util: `utils/temporalBucket.ts`. Test: `tests/temporalBucket.test.ts` (10) | Pemilihan device "terbaru" kini seri dalam 1 bucket → tie-break `createdAt`; perilaku DMS berubah (kini benar-benar mengikuti aktivitas) |
-| B5 ✅ | **Mendarat.** `Message.id` → `@default(uuid())` (non-time-ordered); id `cuid()` lama tetap valid (opaque bagi klien). Id eksplisit SYSTEM metadata `msg_sys_meta_<Date.now()>_…` diganti `sys_meta_<randomUUID>`. Guard di `tests/temporalBucket.test.ts`. **Tuntas untuk SEMUA model ber-default PK**: User, Conversation, Device, Tenant, MessageStatus, SessionKey, RefreshToken, PushSubscription, OneTimePreKey, UserHiddenConversation, BlockedUser semuanya `@default(uuid())` — tak ada `cuid()` tersisa di schema (D11). Validator `keys.ts` (dulu `.cuid()`) dilonggarkan agar user lama (cuid) & baru (uuid) sama-sama lolos | `Authenticator.id`/`CredentialIssuerKey.keyVersion` memang PK eksplisit (bukan id acak) |
+| B5 ✅ | **Mendarat.** `Message.id` → `@default(uuid())` (non-time-ordered); id `cuid()` lama tetap valid (opaque bagi klien). Id eksplisit SYSTEM metadata `msg_sys_meta_<Date.now()>_…` diganti `sys_meta_<randomUUID>`. Guard di `tests/temporalBucket.test.ts`. **Tuntas untuk SEMUA model ber-default PK**: User, Conversation, Device, Tenant, MessageStatus, SessionKey, RefreshToken, PushSubscription, OneTimePreKey, UserHiddenConversation, BlockedUser semuanya `@default(uuid())` — tak ada `cuid()` tersisa di schema (D11). Validator `keys.ts` (dulu `.cuid()`) dilonggarkan agar user lama (cuid) & baru (uuid) sama-sama lolos | `Authenticator.id` memang PK eksplisit (bukan id acak) |
 
 **Catatan migrasi B1 (backfill `seq`):** baris `Message` yang ada sebelum migrasi
 punya `seq = 0`. Urutan & paginasi tetap benar lewat tie-break `createdAt`,
@@ -782,17 +782,29 @@ dirusak): setiap tujuan sudah dipisah lewat label HMAC —
 | Nonce deterministik | `HMAC(pepper, "NYX_AT_REST_SEAL_V1:nonce:" ‖ plaintext)` | tidak pernah sama dengan keluaran di atas |
 | Tag receipt/instalasi | `HMAC(pepper, "receipt:…" / "install:…")` | domain-separated, tak bisa dikorelasikan lintas percakapan |
 
-Yang **belum** ditutup: (a) envelope `base64url(nonce‖ct)` tidak membawa byte
-versi, jadi penambahan format baru tidak bisa dibedakan dari nilai rusak; (b)
-tidak ada jalur rotasi pepper — rotasi berarti re-seal + re-hash seluruh kolom,
-dan lookup lama gagal; (c) satu rahasia untuk dua peran (identifier vs seal).
+**Status 2026-10-25 — (a) dan (b) untuk kolom seal sudah ditutup, (c) dan rotasi
+blind index tetap terbuka:**
 
-**Prosedur yang berlaku sekarang (rotasi = operasi pemeliharaan, bukan
-hot-rotate):** simpan pepper di tempat yang ikut di-backup **terpisah dari
-backup DB** (kalau pepper hilang bersamaan DB, tidak ada yang bisa dipulihkan;
-kalau pepper bocor, dump menjadi setara plaintext). Rotasi pepper hanya boleh
-dilakukan dengan **reset akun/DB** sampai ada envelope ber-versi — jangan
-menjalankan rotasi parsial.
+- (a) ✅ Envelope sekarang **ber-versi**: `ENC2:<keyId>:<base64url(nonce‖ct)>`,
+  sedangkan format lama (tanpa prefiks) dibaca sebagai kunci id `0`. Nilai
+  rusak vs format baru jadi bisa dibedakan (`sealedKeyId`, `openAtRest` → null
+  untuk key id tak dikenal). Lihat `server/src/utils/atRestSecrets.ts`.
+- (b) ✅ Key ring seal: `NYX_AT_REST_KEYRING` (JSON `{active, keys}`) atau file
+  custody (`NYX_AT_REST_KEYRING_FILE`), plus job idempoten
+  `server/scripts/reseal-at-rest.ts` (dry-run default, `--apply`). Lookup ganda
+  (`sealedLookupCandidates` = kunci aktif + legacy) membuat baris lama tetap
+  ditemukan selama re-seal berjalan.
+- (c) ❌ Blind index (`HMAC(pepper, nilai)`) **tidak bisa dirotasi dari server**:
+  HMAC satu arah dan plaintext tidak disimpan. Rotasi kolom itu hanya mungkin
+  dari klien (atau reset akun), jadi jangan menjadwalkan rotasi pepper dengan
+  harapan semua kolom ikut berganti.
+
+**Prosedur yang berlaku sekarang:** simpan pepper **dan** key ring di tempat yang
+ikut di-backup **terpisah dari backup DB** (kalau hilang bersamaan DB, tidak ada
+yang bisa dipulihkan; kalau bocor, dump menjadi setara plaintext). Rotasi kunci
+seal = tambah slot baru di key ring → deploy → re-seal (`--apply`) → verifikasi
+dry-run 0 legacy/0 tak terbaca → baru hapus slot lama. Jangan memulai rotasi
+tanpa backup DB + key ring lama.
 
 ### R5 — kandidat lookup "nilai apa adanya" di jalur hidup
 

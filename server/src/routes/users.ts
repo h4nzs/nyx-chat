@@ -31,7 +31,7 @@ import {
 } from '../utils/atRestSecrets.js';
 import { ensureUserShareId } from '../utils/userShareId.js';
 import {
-  blockedUserTag, purgeSealedUserRows, resolveRoutingUser, routingCandidates,
+  purgeSealedUserRows, resolveRoutingUser, routingCandidates, tagCandidates,
   type SealedOwnedRowsPrisma
 } from '../utils/routingIdentity.js';
 // [docs/31 §31.6b] Kunci objek backup akun (HMAC tanpa userId) — dihapus saat
@@ -122,7 +122,8 @@ router.get('/me/blocked', async (req, res, next) => {
     // tag di sini supaya kontrak klien (`{id}[]`) tidak berubah, sementara dump DB
     // tidak memuat pasangan identitas.
     const rows = await prisma.blockedUser.findMany({
-      where: { blockerTag: await blockedUserTag(userId) },
+      // [docs/37 P6] kandidat kunci aktif + legacy (baris pra-rotasi).
+      where: { blockerTag: { in: await tagCandidates(userId) } },
       select: { blockedTag: true }
     })
 
@@ -296,12 +297,25 @@ router.post('/:id/block', async (req, res, next) => {
     if (!targetUser) throw new ApiError(404, 'User not found.');
 
     // [docs/28 D9] pasangan disimpan sebagai tag ter-seal (deterministik).
-    const [blockerTag, blockedTag] = [await blockedUserTag(blockerId), await blockedUserTag(blockedId)];
-    await prisma.blockedUser.upsert({
-      where: { blockerTag_blockedTag: { blockerTag, blockedTag } },
-      create: { blockerTag, blockedTag },
-      update: {}
+    // [docs/37 P6] pasangan lama bisa memakai kunci seal berbeda setelah rotasi,
+    // jadi cek kandidat dulu — `upsert` by compound unique akan membuat baris
+    // duplikat untuk pasangan yang sudah diblokir sebelum re-seal.
+    const [blockerCandidates, blockedCandidates] = [
+      await tagCandidates(blockerId),
+      await tagCandidates(blockedId),
+    ];
+    const existingBlock = await prisma.blockedUser.findFirst({
+      where: {
+        blockerTag: { in: blockerCandidates },
+        blockedTag: { in: blockedCandidates },
+      },
+      select: { id: true },
     });
+    if (!existingBlock) {
+      await prisma.blockedUser.create({
+        data: { blockerTag: blockerCandidates[0]!, blockedTag: blockedCandidates[0]! },
+      });
+    }
 
     res.json({ message: 'User blocked successfully', blockedId });
   } catch (error) {
@@ -317,8 +331,12 @@ router.delete('/:id/block', async (req, res, next) => {
     const blockedId = req.params.id;
 
     // [docs/28 D9] unblock = hapus baris berdasarkan pasangan tag.
+    // [docs/37 P6] kedua kandidat kunci, supaya baris lama ikut terhapus.
     await prisma.blockedUser.deleteMany({
-      where: { blockerTag: await blockedUserTag(blockerId), blockedTag: await blockedUserTag(blockedId) }
+      where: {
+        blockerTag: { in: await tagCandidates(blockerId) },
+        blockedTag: { in: await tagCandidates(blockedId) },
+      },
     });
 
     res.json({ message: 'User unblocked successfully', blockedId });

@@ -80,8 +80,6 @@ async function reset() {
       prisma.userHiddenConversation.deleteMany(),
       prisma.conversation.deleteMany(),
       prisma.story.deleteMany(),
-      prisma.groupCredential.deleteMany(),
-      prisma.credentialIssuerKey.deleteMany(),
       prisma.sessionKey.deleteMany(),
       prisma.oneTimePreKey.deleteMany(),
       prisma.preKeyBundle.deleteMany(),

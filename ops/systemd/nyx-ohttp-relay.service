@@ -1,0 +1,55 @@
+# NYX — relay OHTTP proses terpisah (`nyx-ohttp-relay`).
+#
+# Kenapa proses terpisah: selama relay dan gateway berada di proses (dan log)
+# yang sama, "relay melihat IP, gateway melihat isi" hanya klaim arsitektur.
+# Unit ini menjalankan relay tanpa DB/Redis/Prisma; ia hanya meneruskan amplop
+# opaque ke gateway loopback dan membuang seluruh header klien.
+#
+# Instalasi (manual, sekali):
+#   install -d -m 0750 /etc/nyx/ohttp
+#   install -m 0600 ops/systemd/nyx-ohttp-relay.env.example /etc/nyx/ohttp/nyx-ohttp-relay.env
+#   # isi OHTTP_GATEWAY_TARGET, lalu:
+#   install -m 0644 ops/systemd/nyx-ohttp-relay.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now nyx-ohttp-relay
+#   # butuh hasil build server: cd /root/nyx-app && pnpm --filter nyx-server run build
+#   curl -fsS http://127.0.0.1:4100/healthz
+#
+# Setelah relay hidup, set `OHTTP_RELAY_EXTERNAL=1` di `/root/nyx-app/.env` agar
+# API berhenti memasang `/api/ohttp/relay` (404) dan klien memakai
+# Klien default memakai `/api/ohttp/relay` di origin sendiri (nginx → :4100);
+# `VITE_OHTTP_RELAY_URL` hanya bila relay berada di origin lain.
+#
+# Batas jujur: kedua proses tetap di host yang sama; operator host bisa
+# mengorelasikan lewat jaringan/waktu. Yang hilang adalah korelasi di log/state
+# aplikasi, bukan pemisahan fisik.
+
+[Unit]
+Description=NYX OHTTP relay (process terpisah dari API)
+Documentation=file:///root/nyx-app/docs/37-privacy-closure-plan.md
+Documentation=file:///root/nyx-app/docs/10-deployment-ops.md
+After=network-online.target nyx-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/nyx-app/server
+EnvironmentFile=-/etc/nyx/ohttp/nyx-ohttp-relay.env
+Environment=NODE_ENV=production
+# Jalankan hasil build (`tsc` → dist), sama seperti pm2 menjalankan
+# `server/dist/index.js`. Jangan memakai tsx di produksi: ia devDependency dan
+# bisa tidak terpasang saat deploy hanya memasang dependensi produksi.
+ExecStart=/usr/bin/node /root/nyx-app/server/dist/ohttp/relay.js
+Restart=always
+RestartSec=3
+# Relay tidak menyimpan apa pun: batasi blast radius bila proses disusupi.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

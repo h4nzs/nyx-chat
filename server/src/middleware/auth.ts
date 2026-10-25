@@ -5,11 +5,17 @@ import { AuthPayload } from '../types/auth.js'
 import { redisClient } from '../lib/redis.js'
 import { prisma } from '../lib/prisma.js'
 import { isOhttpScopeRequestAllowed, isOhttpScopedPayload } from '../utils/ohttpToken.js'
+import { evaluateTokenGate, type TokenGateDb } from '../utils/authGate.js'
 
 // === Middleware untuk REST API ===
 export async function requireAuth (req: Request, res: Response, next: NextFunction) {
   // Prioritaskan pembacaan token dari cookie
-  const token = req.cookies?.at || // access token dari cookie
+  const token = req.cookies?.at || // access token dari cookie HttpOnly (sesi normal)
+    // [AUDIT 2026-10-24] Fallback halaman embed (`/embed/:id?token=…`): token
+    // dikirim lewat query string, jadi klien menyimpannya sebagai cookie bernama
+    // LAIN (`embed_at`, non-HttpOnly, umur = `exp` token). Dulu klien menulis
+    // nama `at` — bertabrakan dengan cookie sesi HttpOnly.
+    req.cookies?.embed_at ||
     (req.headers.authorization?.startsWith('Bearer ')
       ? req.headers.authorization.split(' ')[1]
       : null)
@@ -29,64 +35,18 @@ export async function requireAuth (req: Request, res: Response, next: NextFuncti
       return res.status(403).json({ error: 'OHTTP_SCOPE_DENIED' })
     }
 
-    // ========== REDIS TOKEN BLACKLIST CHECK ==========
-    if (payload.jti) {
-      try {
-        const blacklisted = await redisClient.get(`revoked_jti:${payload.jti}`)
-        if (blacklisted) {
-          return res.status(401).json({ error: 'Token revoked. Please login again.' })
-        }
-      } catch (_redisErr) {
-        console.warn('[Auth] Redis unavailable — skipping token blacklist check')
-      }
-    }
-
-    // ========== BAN CHECK (with Redis caching) ==========
-    try {
-      const banCacheKey = `ban_status:${payload.id}`
-      const cachedStatus = await redisClient.get(banCacheKey)
-
-      if (cachedStatus === 'BANNED') {
-        return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.' })
-      }
-
-      if (!cachedStatus) {
-        // Cache miss — query database
-        const user = await prisma.user.findUnique({
-          where: { id: payload.id },
-          select: { bannedAt: true, banReason: true }
-        })
-
-        if (user?.bannedAt) {
-          // Cache ban status 15 menit (di-invalidate saat ban/unban di routes/admin.ts)
-          await redisClient.setEx(banCacheKey, 900, 'BANNED').catch(() => {})
-          return res.status(403).json({
-            error: 'ACCESS DENIED: Your account has been suspended.',
-            reason: user.banReason || undefined
-          })
-        }
-
-        // Cache non-ban status 15 menit (mengurangi DB query per user per menit)
-        await redisClient.setEx(banCacheKey, 900, 'OK').catch(() => {})
-      }
-    } catch (_cacheErr) {
-      console.warn('[Auth] Ban cache unavailable — falling back to direct DB query')
-      // Redis unavailable — fallback to direct DB query
-      try {
-        const user = await prisma.user.findUnique({
-          where: { id: payload.id },
-          select: { bannedAt: true, banReason: true }
-        })
-        if (user?.bannedAt) {
-          return res.status(403).json({
-            error: 'ACCESS DENIED: Your account has been suspended.',
-            reason: user.banReason || undefined
-          })
-        }
-      } catch (_dbErr) {
-        console.error('[Auth] Redis AND DB unavailable — skipping ban check entirely')
-        // DB also unavailable — degrade gracefully (allow through)
-      }
+    // ========== BLACKLIST + BAN: satu aturan untuk REST dan realtime ==========
+    // Dulu blok ini hanya hidup di sini, sehingga pintu socket menerima token
+    // yang sudah di-revoke / akun yang sudah di-ban. Logikanya kini di
+    // `utils/authGate.ts` dan dipakai juga oleh `realtime/gateway.ts`.
+    const gate = await evaluateTokenGate(payload, {
+      redis: redisClient,
+      db: prisma as unknown as TokenGateDb,
+    })
+    if (!gate.ok) {
+      return res.status(gate.status).json(
+        gate.reason ? { error: gate.error, reason: gate.reason } : { error: gate.error }
+      )
     }
 
     req.user = payload

@@ -33,6 +33,8 @@ Everything at the repository root that isn't the web/server/shared/marketing cod
 | `scripts/update-md.mjs` | Version-bump hook (`pnpm version`) — updates version strings in `README.md`, `web/package.json`, `server/package.json`, `marketing/package.json`, `packages/shared/package.json` |
 | `scripts/vendor-signal.sh` | Re-vendor the Signal sources (`vendor/signal/spqr`, `vendor/signal/libsignal-keytrans`) from checkouts at the pins in `NOTICE` / `docs/30` §30.2, materializing libsignal-keytrans' `Cargo.toml` (every `workspace = true` → explicit version) and rewriting `vendor/README.md`. `SIGNAL_ROOT=<dir>` relocates the checkouts, `--force` continues on a pin mismatch. |
 | `scripts/check-vendor.sh` | Guard: vendored manifests are present and materialized, `vendor/README.md` carries every `Pinned commit:` from `NOTICE`, `server/kt-query/go.mod` has no `replace`, every package in `server/kt-query/vendor/modules.txt` exists, and all of it is git-tracked. |
+| `scripts/sync-selfhost.sh` | Menyegarkan salinan nginx + unit systemd selfhost dari repo (profil `selfhost` default, `docker` alternatif; `--check` exit 1 bila drift). Sumber kebenaran ada di `ops/nginx/nyx.conf` dan `ops/systemd/**` — jangan edit salinan di `~/nyx-selfhost` (docs/10 §10.18). |
+| `scripts/drill-alerts.sh` | Drill alert: `promtool check config`/`check rules`/`test rules` (tiap aturan wajib punya kasus menyala DAN tidak menyala) + kontrak metrik (`nyx_*` di aturan harus dideklarasikan di salah satu exporter) + coverage aturan baru; dipakai job CI `alerts`. |
 | `scripts/check-wasm-artifacts.sh` | Guard: `packages/*/dist/*.wasm` exist, are non-trivially sized, are git-tracked, **and their SHA-256 matches `packages/wasm-artifacts.json`**. |
 | `scripts/wasm-repro-build.sh` | Rebuilds both committed `.wasm` artifacts from `vendor/signal/*` at the canonical root `/tmp/nyx-wasm-repro` (`--update` writes `packages/wasm-artifacts.json`; `--verify` rebuilds and compares hashes). CI job `wasm` runs `--verify`, so the shipped binaries are provably built from the pinned sources. Reproducibility needs the fixed root because cargo's unit hash embeds the package path. |
 | `server/scripts/reset-test-env.ts` | E2E DB+Redis wipe (guardrail: refuses in production / non-local DB) |
@@ -40,14 +42,17 @@ Everything at the repository root that isn't the web/server/shared/marketing cod
 
 ## 25.4 Docker Compose (local dev alternative)
 
-`docker-compose.yml` defines four services for a containerized local environment:
+`docker-compose.yml` defines five services for a containerized local environment:
 
 | Service | Image | Notes |
 |---|---|---|
 | `postgres` | `postgres:18-alpine` | env `POSTGRES_USER/PASSWORD/DB` from `.env`; persisted volume `postgres_data` |
 | `redis` | `redis:alpine` | cache + pub/sub |
 | `server` | `./server` (Dockerfile) | port 4000; `REDIS_URL=redis://redis:6379` (service hostname) |
+| `ohttp-relay` | `./server` (Dockerfile) | `pnpm run relay` di `:4100`; `OHTTP_GATEWAY_TARGET=http://server:4000/api/ohttp/gateway` + `OHTTP_GATEWAY_TRUSTED_HOSTS=server` (docs/10 §10.18) |
 | `web` | `./web` (Dockerfile) | nginx + PWA, exposed on host port 3000 |
+
+Sidecar PIR **belum** punya service Compose (jalankan binary `server/pir-sidecar` manual atau tambahkan service sendiri) — docs/10 §10.19.
 
 Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + Cloudflare Tunnel).
 
@@ -56,7 +61,7 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 | Workflow | Purpose |
 |---|---|
 | `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit (web+server) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → drill pemulihan log KT (`kt-recovery`) → `pnpm audit --prod` → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata) |
-| `deploy.yml` | On push to `main`: guard → build web + marketing + server + Rust sidecar + `nyx-kt-query` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd `nyx-kt-query` dari `ops/systemd/` dan restart+verifikasi **bila unit sudah `enabled`** (gagal ⇒ deploy merah) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
+| `deploy.yml` | On push to `main`: guard → build web + marketing + server + Rust sidecar + `nyx-kt-query` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd `nyx-kt-query`/v2 dan `nyx-ohttp-relay` dari `ops/systemd/`, lalu restart+verifikasi **bila unitnya sudah `enabled`** (gagal ⇒ deploy merah; relay butuh `server/dist/ohttp/relay.js`) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
 | `codeql.yml` | Static security analysis |
 | `gemini-dispatch.yml` | Route issues/PRs to the Gemini agent |
 | `gemini-invoke.yml` | Invoke the agent for a task |
@@ -100,14 +105,17 @@ The `.well-known` endpoints themselves are documented in `22-backend-reference.m
 
 | File | Purpose |
 |---|---|
-| `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback: `nyx-api` :9464, sidecar Rust :9465, auditor KT :9466, log KT :9467, + exporter node/postgres/redis. Blok `alerting:` menunjuk Alertmanager `127.0.0.1:9093` |
-| `ops/prometheus/alerts.yml` | 35 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query`, `nyx-kt-auditor`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
+| `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback: `nyx-api` :9464, sidecar Rust :9465, auditor KT :9466, log KT :9467, log KT v2 :9468, auditor KT v2 :9469, + exporter node/postgres/redis. Blok `alerting:` menunjuk Alertmanager `127.0.0.1:9093` |
+| `ops/prometheus/alerts.yml` | 39 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query`, `nyx-kt-auditor`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
 | `ops/prometheus/tests.yml` | Kasus uji `promtool test rules` — tiap aturan punya kasus MENYALA dan TIDAK MENYALA; dijalankan `scripts/drill-alerts.sh` (job CI `alerts` + versi scrape-nyata di job `e2e`) |
 | `ops/alertmanager/` | `alertmanager.yml` (tanpa rahasia: receiver = relay loopback), `ntfy-relay.mjs` (Alertmanager → ntfy, prioritas dari `severity`, `--self-test`), `ntfy-relay.env.example` (topik + token, 0600 di VPS) |
 | `server/src/utils/transportLatency.ts` | Pembungkus pengukuran ingress jalur WSS (`nyx_wss_ingress_seconds`); dipisah dari `gateway.ts` supaya bagian yang bisa salah (satu observasi per pengerjaan, error tidak dihitung, satuan detik) bisa diuji tanpa soket |
 | `ops/grafana/dashboards/nyx-overview.json` | Dashboard Grafana (impor manual, ambang disamakan dengan `alerts.yml`); bukan teks PromQL di dokumen |
 | `ops/systemd/nyx-kt-query.service` | Unit systemd layanan log Key Transparency — satu proses (flock LevelDB), `ProtectSystem=strict` + `ReadWritePaths` |
 | `ops/systemd/nyx-kt-query.env.example` | Template `EnvironmentFile` (alamat baca/tulis/auditor loopback + setelan snapshot) |
+| `ops/systemd/nyx-kt-query-v2.service`, `nyx-kt-auditor-v2.service` (+ `.env.example`) | Unit log/auditor KT **v2** (ML-DSA, LevelDB + key ring sendiri) selama dual-write |
+| `ops/systemd/nyx-ohttp-relay.service` + `nyx-ohttp-relay.env.example` | Relay OHTTP proses terpisah (loopback `:4100`, tanpa DB/Redis/JWT) — docs/10 §10.18 |
+| `ops/systemd/user/*.service` | Unit **user** untuk selfhost `~/nyx-selfhost` (`systemctl --user`): `nyx-ohttp-relay`, `nyx-pir-sidecar`; disalin `scripts/sync-selfhost.sh` |
 | `ops/systemd/README.md` | Runbook pemasangan pertama, verifikasi, rollback (`.prev`), dan tabel troubleshooting |
 
 Hanya `ops/systemd/` yang ikut dikirim `deploy.yml` (unit disalin ke VPS).

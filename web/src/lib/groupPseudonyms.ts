@@ -20,15 +20,18 @@ import { useConversationStore } from '@store/conversation';
 import { useSettingsStore } from '@store/settings';
 import { isBurnerConversation } from '@lib/coverTraffic';
 
-const PSEUDONYM_BYTES = 16; // 22-char base64url
+const PSEUDONYM_BYTES = 16; // 22-char base64url (sender pseudonym)
+// [docs/37 §37.3.1] Member token 256-bit (43-char base64url). Server menyimpan
+// SHA-256-nya saja; ini menaikkan entropi dari 128-bit (22-char) ke 256-bit.
+const MEMBER_TOKEN_BYTES = 32;
 
 // --- [T3b] Delivery tokens (doc 26.2) ---
 
-/** Random per-(group, member) delivery token (base64url of 16 random bytes). */
+/** Random per-(group, member) delivery token (base64url of 32 random bytes). */
 export async function generateDeliveryToken(): Promise<DeliveryToken> {
   const { getSodium } = await import('./sodiumInitializer');
   const sodium = await getSodium();
-  const raw = sodium.randombytes_buf(PSEUDONYM_BYTES);
+  const raw = sodium.randombytes_buf(MEMBER_TOKEN_BYTES);
   try {
     return asDeliveryToken(sodium.to_base64(raw, sodium.base64_variants.URLSAFE_NO_PADDING));
   } finally {

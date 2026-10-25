@@ -1321,7 +1321,47 @@ export async function sendGroupSenderKeyDistribution(
     }
   }
   if (distributionKeys.length > 0) {
-    await sendGroupKeyDistributionPairwise(conversationId, distributionKeys);
+    // [docs/37 §37.3.2] Jalur UTAMA = mailbox grup: item tanpa kolom pengirim,
+    // dialamatkan lewat tag HMAC(member token penerima), jadi server tidak bisa
+    // merekonstruksi graf distribusi. Jalur `group:fulfilled_key` tetap dipakai
+    // hanya untuk envelope yang TIDAK bisa dikirim lewat mailbox (metadata/token
+    // belum tersedia — mis. distribusi pertama saat createGroup sebelum metadata
+    // masuk store) supaya kunci tidak hilang.
+    let delivered: Set<string> | undefined;
+    try {
+      const { postGroupKeyEnvelopes } = await import('@lib/groupMailbox');
+      delivered = await postGroupKeyEnvelopes(
+        conversationId,
+        distributionKeys.map((dk) => {
+          const entry = dk as {
+            userId?: string; key?: string; targetDeviceKey?: string;
+            senderId?: string; senderDeviceKey?: string;
+            senderSigningKey?: string; senderSigningKeyV2?: string;
+          };
+          return {
+            userId: String(entry.userId ?? ''),
+            key: String(entry.key ?? ''),
+            targetDeviceKey: entry.targetDeviceKey,
+            senderId: entry.senderId,
+            senderDeviceKey: entry.senderDeviceKey,
+            senderSigningKey: entry.senderSigningKey,
+            senderSigningKeyV2: entry.senderSigningKeyV2,
+          };
+        })
+      );
+    } catch (e) {
+      console.warn('[Distribution] Mailbox tidak tersedia, memakai jalur lama:', e);
+    }
+
+    const remaining = delivered && delivered.size > 0
+      ? distributionKeys.filter((dk) => {
+          const userId = (dk as { userId?: string }).userId;
+          return !userId || !delivered!.has(userId);
+        })
+      : distributionKeys;
+    if (remaining.length > 0) {
+      await sendGroupKeyDistributionPairwise(conversationId, remaining);
+    }
   }
   return distributionKeys;
 }
@@ -1685,7 +1725,8 @@ export async function rotateGroupKey(
   // [T1 FIX 2026-09-28] 'true' = dipanggil oleh ADMIN saat kick/add (rotasi
   // AKTIF — peta baru + metadata re-encrypt + distribusi kunci baru SEKARANG,
   // bukan menunggu kirim pesan berikutnya). 'false' = periodic (lazy).
-  isActive: boolean = false
+  isActive: boolean = false,
+  newAuthSecret?: string
 ): Promise<void> {
   // [AUDIT FIX 2026-10-05 — MULTI-ERA ALA LIBSIGNAL] JANGAN hapus receiver
   // states/arsip/skipped keys (dulu deleteGroupStates — hapus SEMUA):
@@ -1710,7 +1751,10 @@ export async function rotateGroupKey(
     console.error(`[crypto] Failed to notify server about key rotation for ${conversationId}:`, error);
   }
 
-  if (reason !== 'membership_change') return;
+  // [docs/37 §37.3.6] Rotasi terjadwal membawa token grup era baru: metadata
+  // WAJIB ditulis ulang supaya anggota menerima token itu. Tanpa `newAuthSecret`
+  // rotasi periodik tetap murah (sender state baru saja, metadata tidak disentuh).
+  if (reason !== 'membership_change' && !newAuthSecret) return;
 
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation) return;
@@ -1723,6 +1767,7 @@ export async function rotateGroupKey(
   // distribusi tak konsisten dengan metadata baru. Kicked member tidak ada di
   // peta baru → era kunci baru tak bisa dia ikuti (doc 26.5/26.7.1).
   const existingMeta = conversation.decryptedMetadata as ({ v?: number; authSecret?: string } & RotationSourceMetadata) | undefined;
+  const effectiveAuthSecret = newAuthSecret ?? existingMeta?.authSecret;
   if (existingMeta && (existingMeta.v === 2 || existingMeta.v === 3)) {
     try {
       // [P2 NORMALISASI] getParticipantUserId (dulu p.userId||p.id — kandidat
@@ -1735,18 +1780,21 @@ export async function rotateGroupKey(
       // sehingga anggota baru tidak pernah masuk peta → dia bisa menerima tapi
       // gagal mengirim (`requireGroupSenderIdentity` undefined). Helper membuang
       // peta itu supaya encryptGroupMetadata meregenerasi untuk roster baru.
-      const { metadata: rotatedMeta } = buildRotatedGroupMetadata(existingMeta, participantIds);
+      const { metadata: rotatedMeta } = buildRotatedGroupMetadata(
+        effectiveAuthSecret ? { ...existingMeta, authSecret: effectiveAuthSecret } : existingMeta,
+        participantIds
+      );
       const newEncrypted = await encryptGroupMetadata(
         rotatedMeta as Parameters<typeof encryptGroupMetadata>[0],
         conversationId
       );
       // authSecret dari metadata (blind authorization untuk PUT details).
-      if (existingMeta.authSecret) {
+      if (effectiveAuthSecret) {
         const { getMyAdminToken } = await import('@lib/groupPseudonyms');
         await authFetch(`/api/conversations/${conversationId}/details`, {
           method: 'PUT',
           headers: {
-            'X-Group-Token': existingMeta.authSecret,
+            'X-Group-Token': effectiveAuthSecret,
             // [26.9 RBAC] Re-encrypt metadata = mutasi roster (guard server).
             'X-Admin-Token': getMyAdminToken(conversationId) ?? '',
           },

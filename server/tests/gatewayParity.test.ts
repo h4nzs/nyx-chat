@@ -235,7 +235,6 @@ test('rate limit jalur data hidup di HANDLER, bukan di gateway (satu hitungan un
   }
 
   const expectations: Array<[string, string]> = [
-    ['chat_message', 'CHAT_RATE_LIMIT'],
     ['message_ack_delivered', 'ACK_RATE_LIMIT'],
     ['presence_update', 'PRESENCE_RATE_LIMIT'],
   ];
@@ -248,7 +247,25 @@ test('rate limit jalur data hidup di HANDLER, bukan di gateway (satu hitungan un
   }
   // Angka bucket dikunci sekali di sini (nilai efektifnya juga diuji perilaku
   // di realtimeHandlers.test.ts).
+  // [AUDIT 2026-10-24] chat_message memilih bucket per subjek (tamu lebih
+  // ketat), tetapi tetap SATU panggilan di handler dan tetap memakai konstanta
+  // — bukan angka lepas yang bisa menyimpang antar transport.
+  assert.match(
+    handlersSource,
+    /checkRateLimit\(userId, 'chat_message', chatLimit\.limit, chatLimit\.windowSeconds\)/,
+    "handler harus menegakkan bucket 'chat_message' untuk KEDUA transport"
+  );
+  assert.match(
+    handlersSource,
+    /const chatLimit = isEphemeralGuestSubject\(userId\) \? GUEST_CHAT_RATE_LIMIT : CHAT_RATE_LIMIT/,
+    'chat_message memakai jatah tamu untuk subjek ephemeral'
+  );
   assert.match(handlersSource, /CHAT_RATE_LIMIT = \{ limit: 120, windowSeconds: 60 \} as const/);
+  assert.match(
+    handlersSource,
+    /GUEST_CHAT_RATE_LIMIT,/,
+    'jatah tamu diambil dari utils/guestPolicy (angka dikunci di guestPolicy.test.ts)'
+  );
   assert.match(handlersSource, /ACK_RATE_LIMIT = \{ limit: 240, windowSeconds: 60 \} as const/);
   assert.match(handlersSource, /PRESENCE_RATE_LIMIT = \{ limit: 30, windowSeconds: 60 \} as const/);
 });

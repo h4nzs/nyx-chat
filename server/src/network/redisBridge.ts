@@ -18,6 +18,10 @@ import { handleChatMessage, handleKeySync, handlePresence, handleWebRtcRelay, ty
 // [docs/30 WS-G] Metrik event-only: label hanya enum pendek (opcode/reason),
 // tidak pernah userId/deviceId — penjaganya ada di utils/metrics.ts.
 import { incCounter, RELAY_OPS, SECURITY_BLOCKS } from '../utils/metrics.js';
+// [AUDIT 2026-10-24] Penegakan ban di jalur WebTransport (tanpa requireAuth).
+import { isUserBanned, type TokenGateDb } from '../utils/authGate.js';
+// [AUDIT 2026-10-24] Index room per-user (pengganti SCAN keyspace saat disconnect).
+import { leaveAllRooms, type RoomRedisClient } from '../utils/roomMembership.js';
 // [docs/30 §30.9 WS-E(2)] Relay panggilan dialamatkan lewat token relay buram,
 // bukan userId — payload relay & `nyx:downstream` tidak lagi memuat identitas.
 // (Logika relay-nya kini di realtimeHandlers.handleWebRtcRelay, dipakai kedua jalur.)
@@ -76,7 +80,7 @@ export async function initializeRedisBridge() {
       const opCode = parseInt(channel.split(':').pop() || '0', 10);
       const data = JSON.parse(message) as { user_id: string; device_id: string; op_code: number; payload: string; msgId?: string };
 
-      await handleUpstreamMessage(data.user_id, data.device_id, opCode, data.payload, data.msgId);
+      await handleUpstreamMessage(data.user_id, data.device_id, opCode, data.payload);
     } catch (error) {
       incCounter(RELAY_OPS, { op: relayOpLabel(channel), result: 'error' });
       console.error('❌ Error processing upstream message:', error);
@@ -168,7 +172,8 @@ function relayOpLabel(opCode: number | string): string {
   return `0x${Number.isFinite(numeric) ? numeric.toString(16) : 'unknown'}`;
 }
 
-async function handleUpstreamMessage(userId: string, deviceId: string, opCode: number, base64Payload: string, _msgIdFromWrapper?: string) {  const buffer = Buffer.from(base64Payload, 'base64');
+async function handleUpstreamMessage(userId: string, deviceId: string, opCode: number, base64Payload: string) {
+  const buffer = Buffer.from(base64Payload, 'base64');
   const payloadStr = buffer.toString('utf-8');
   let payload: Record<string, unknown>;
 
@@ -191,6 +196,19 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       console.warn(`[Security] Blocked opcode ${opCode} from non-active device ${sanitizeForLog(deviceId)} (user ${sanitizeForLog(userId)})`);
       return;
     }
+
+    // [AUDIT 2026-10-24] Jalur WT tidak pernah melewati `requireAuth`, jadi ban
+    // dulu hanya terasa lewat KICK pada koneksi yang sedang hidup: akun yang
+    // di-ban bisa reconnect dengan access token yang sama (≤15 menit) dan tetap
+    // mengirim. Cek memakai cache Redis yang sama dengan REST (satu query DB
+    // per user per 15 menit), jadi biayanya satu GET per frame.
+    if ((await isUserBanned({ redis: redisClient, db: prisma as unknown as TokenGateDb }, userId)).banned) {
+      incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'banned' });
+      incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'blocked' });
+      console.warn(`[Security] Blocked opcode ${opCode} from banned user (user ${sanitizeForLog(userId)})`);
+      return;
+    }
+
     // Operasi lolos gate keamanan → diteruskan ke handler.
     incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'accepted' });
   }
@@ -216,18 +234,26 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       break;
     case 0x00: // AUTH (Lapis 1 & 2 Security: Session & Hardware Binding)
       try {
-        // Payload OpCode 0x00 sekarang adalah JSON string: { token: string, identity: { fingerprint, installationId } }
-        let authData: { token: string, identity?: { fingerprint: string, installationId: string } };
+        // [AUDIT 2026-10-24] Payload 0x00 di sini HANYA dipakai untuk `identity`
+        // (fingerprint + installationId) pada Lapis 2. Verifikasi JWT sudah
+        // terjadi SEBELUM frame sampai ke wadah Redis ini: sidecar Rust memeriksa
+        // token pada bidi control stream, dan gateway WSS pada
+        // `socket.handshake.auth` — `userId`/`deviceId` di sini sudah hasil
+        // verifikasi itu. Dulu blok ini juga mem-parse field `token` (termasuk
+        // fallback "klien lama" untuk payload string mentah) yang tidak pernah
+        // dibaca siapa pun: 25 baris yang terlihat seperti autentikasi tapi bukan.
+        // Jangan menambahkan verifikasi token di sini — satu-satunya sumber
+        // kebenaran adalah gerbang transport di atas.
+        let authData: { identity?: { fingerprint: string, installationId: string } } = {};
         try {
-           const parsed = JSON.parse(payloadStr) as unknown;
-           if (typeof parsed === 'object' && parsed !== null && 'token' in parsed) {
-             authData = parsed as { token: string, identity?: { fingerprint: string, installationId: string } };
-           } else {
-             authData = { token: payloadStr };
-           }
-        } catch (e) {
-           // Fallback untuk klien lama yang hanya mengirim token sebagai string mentah
-           authData = { token: payloadStr };
+          const parsed = JSON.parse(payloadStr) as unknown;
+          if (typeof parsed === 'object' && parsed !== null && 'identity' in parsed) {
+            authData = parsed as { identity?: { fingerprint: string, installationId: string } };
+          }
+        } catch {
+          // Klien lama mengirim token mentah (bukan JSON) → tanpa identity.
+          // Perilakunya sama seperti sebelumnya: device dengan fingerprint
+          // terdaftar akan di-KICK `HARDWARE_MISMATCH` di Lapis 2 bawah.
         }
 
         // 🛡️ LAPIS 1: SINGLE ACTIVE DEVICE CHECK
@@ -315,27 +341,17 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     console.warn('[Presence] Gagal mengirim sinyal leave ke watcher:', e);
   }
 
-  // Optional: Best-effort cleanup for burner/migration rooms
+  // Best-effort cleanup for burner/migration rooms
   try {
-    // [docs/28 Tier 1.5 / D14] member SET = nilai ter-seal (dulu userId plaintext).
+    // [AUDIT 2026-10-24] Dulu dua `SCAN` seluruh keyspace dijalankan pada SETIAP
+    // disconnect — biayanya linear terhadap jumlah room dan muncul tepat saat
+    // banyak koneksi putus bersamaan. Sekarang cukup set milik user ini
+    // (`utils/roomMembership.ts`). Member tetap nilai TER-SEAL (docs/28 D14).
     const sealedMember = await sealIdentity(userId);
-    let cursor = '0';
-    do {
-      const result = await pubClient.scan(cursor, { MATCH: 'burner:room:*', COUNT: 100 });
-      cursor = result.cursor;
-      for (const key of result.keys) {
-        await pubClient.sRem(key, sealedMember);
-      }
-    } while (cursor !== '0');
-
-    cursor = '0';
-    do {
-      const result = await pubClient.scan(cursor, { MATCH: 'migration:room:*', COUNT: 100 });
-      cursor = result.cursor;
-      for (const key of result.keys) {
-        await pubClient.sRem(key, sealedMember);
-      }
-    } while (cursor !== '0');
+    await leaveAllRooms(pubClient as unknown as RoomRedisClient, {
+      sealedMember,
+      memberTag: identityTag(userId),
+    });
   } catch (e) {
     console.error('[RedisBridge] Room cleanup error:', e);
   }

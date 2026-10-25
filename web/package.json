@@ -28,6 +28,7 @@
     "fuzz:parsers:hour": "NYX_FUZZ_SECONDS=3600 vitest run src/lib/__tests__/fuzzParsers.test.ts"
   },
   "dependencies": {
+    "@cloudflare/blindrsa-ts": "0.4.6",
     "@marsidev/react-turnstile": "^1.6.1",
     "@noble/post-quantum": "0.7.1",
     "@nyx/shared": "workspace:*",

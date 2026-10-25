@@ -38,7 +38,7 @@ import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { getSodium } from '../lib/sodium.js';
-import { credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js';
+import { credentialTokenMatches, hashCredentialToken, sealAtRest, sealedLookupCandidates } from '../utils/atRestSecrets.js';
 import { collectPresencePeers, type PresenceMembershipClient } from '../utils/presencePeers.js';
 // [docs/28 Tier 1.5 / D14] presence lazy (langganan in-memory) + identitas Redis
 // yang tidak lagi memuat userId asli.
@@ -57,6 +57,7 @@ import {
 } from '../utils/redisIdentity.js';
 import { conversationScopedTag } from '../utils/atRestSecrets.js';
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js';
+import { applyGroupReleaseJitter } from '../utils/releaseJitter.js';
 // [docs/28 Tier 4] identitas pengirim at-rest: pseudonym klien dipakai apa
 // adanya, selain itu userId disimpan TER-SEAL dan dibuka lagi di jalur baca.
 import {
@@ -70,6 +71,15 @@ import { sanitizeGroupMetadataBlob } from '../utils/groupMetadataBlob.js';
 import { relayCallSignal } from '../utils/callRelayTokens.js';
 // [docs/30 WS-G] Metrik event-only: label = opcode pendek, tidak pernah userId.
 import { incCounter, SECURITY_BLOCKS } from '../utils/metrics.js';
+// [AUDIT 2026-10-24] Batas khusus GUEST (identitas burner bisa dibuat berulang)
+// dan index room per-user supaya pembersihan disconnect tidak memindai keyspace.
+import { isEphemeralGuestSubject } from '../utils/sessionUtils.js';
+import {
+  BURNER_EVENT_RATE_LIMIT,
+  GUEST_CHAT_RATE_LIMIT,
+  maxRecipientsFor,
+} from '../utils/guestPolicy.js';
+import { joinRoom, type RoomRedisClient } from '../utils/roomMembership.js';
 
 /**
  * Dependency-injection context. Every helper the extracted handlers need is
@@ -256,7 +266,10 @@ export async function handleChatMessage(
   // [PARITY] Rate limit sebelum menyentuh DB — berlaku di jalur WT & WSS.
   // Ditolak = hening (tanpa ACK) supaya perilakunya sama dengan WSS sebelumnya;
   // pesan yang tertahan di klien akan diretry oleh watchdog yang sudah ada.
-  if (!await ctx.checkRateLimit(userId, 'chat_message', CHAT_RATE_LIMIT.limit, CHAT_RATE_LIMIT.windowSeconds)) {
+  // [AUDIT 2026-10-24] Guest dapat jatah lebih kecil: identitasnya bisa dibuat
+  // berulang tanpa biaya, jadi bucket per-user saja tidak membatasi siapa pun.
+  const chatLimit = isEphemeralGuestSubject(userId) ? GUEST_CHAT_RATE_LIMIT : CHAT_RATE_LIMIT;
+  if (!await ctx.checkRateLimit(userId, 'chat_message', chatLimit.limit, chatLimit.windowSeconds)) {
     console.warn('[RateLimit] chat_message ditolak untuk', sanitizeForLog(userId));
     return;
   }
@@ -271,6 +284,16 @@ export async function handleChatMessage(
   }
 
   const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId, targetRecipients, deleteSecret, senderPseudonym, targetDeliveryTokens } = validatedPayload;
+
+  // [AUDIT 2026-10-24] Cap penerima diperiksa SEBELUM insert: pesan yang tidak
+  // boleh direlay tidak perlu disimpan (dulu >500 tersimpan lalu hanya dapat
+  // ACK error). Guest dibatasi lebih ketat — burner = satu lawan bicara.
+  const recipientCap = maxRecipientsFor(userId);
+  if (Array.isArray(targetRecipients) && targetRecipients.length > recipientCap) {
+    console.warn('[Security] User', sanitizeForLog(userId), 'attempted to send message to', targetRecipients.length, 'recipients (max', recipientCap, ')');
+    if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: `Too many recipients (max ${recipientCap})` });
+    return;
+  }
 
   try {
     // --- IDEMPOTENSI: reserve slot dedupe sebelum menyentuh DB ---
@@ -375,13 +398,16 @@ export async function handleChatMessage(
     // Acknowledge the sender
     if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, msg: safeMessage });
 
+    // [docs/37 §37.4 P8] Jitter rilis grup. Dijalankan SETELAH ACK supaya
+    // pengirim tidak menunggu, dan hanya menyentuh waktu relay (isi/padding
+    // tidak berubah). Default mati; opt-in lewat GROUP_RELEASE_JITTER_MS.
+    if (conversation.isGroup === true && Array.isArray(targetRecipients) && targetRecipients.length > 0) {
+      await applyGroupReleaseJitter(true);
+    }
+
     // Relay to target recipients explicitly passed by the sender (Opaque Mailbox routing)
+    // Cap penerima sudah diperiksa SEBELUM insert (lihat atas).
     if (Array.isArray(targetRecipients)) {
-        if (targetRecipients.length > 500) {
-            console.warn('[Security] User', sanitizeForLog(userId), 'attempted to send message to', targetRecipients.length, 'recipients (max 500)');
-            if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'Too many recipients (max 500)' });
-            return;
-        }
         // PARALEL: publish ke semua penerima sekaligus (sebelumnya sequential per recipient)
         await Promise.all(targetRecipients.map(async (targetIdRaw) => {
             const targetId = String(targetIdRaw);
@@ -402,7 +428,8 @@ export async function handleChatMessage(
                 if (targetToken) {
                     // [docs/28 Tier 1.2] routing identity ter-seal (lihat util-nya).
                     upsertMembership(ctx.prisma as unknown as MembershipPrisma, {
-                        userId: targetId, conversationId, deliveryToken: targetToken
+                        userId: targetId, conversationId, token: targetToken,
+                        tokenEpoch: conversation.groupEpoch ?? 0
                     }).catch((e: unknown) => console.warn('[OpaqueMailbox] Failed to upsert UserHiddenConversation:', e));
                 }
             }
@@ -810,12 +837,24 @@ export async function handleKeySync(
          // [docs/28 Tier 1.5 / D10] endpoint FCM/APNs = identifier perangkat →
          // disimpan TER-SEAL (deterministik) supaya uniqueness & upsert tetap
          // bekerja, tetapi dump tidak memuat endpoint aslinya.
-         const endpointSealed = await sealAtRest(endpoint);
-         await ctx.prisma.pushSubscription.upsert({
-           where: { endpointSealed },
-           update: { p256dh: keys.p256dh, auth: keys.auth, deviceId },
-           create: { endpointSealed, p256dh: keys.p256dh, auth: keys.auth, deviceId }
+         // [docs/37 P6] `endpointSealed` unik per kunci seal. Setelah rotasi,
+         // baris lama memakai kunci id 0 — `upsert` by nilai aktif akan gagal
+         // menemukannya dan membuat duplikat push (satu mati setelah re-seal).
+         const endpointCandidates = await sealedLookupCandidates(endpoint);
+         const existingSubscription = await ctx.prisma.pushSubscription.findFirst({
+           where: { endpointSealed: { in: endpointCandidates } },
+           select: { id: true },
          });
+         if (existingSubscription) {
+           await ctx.prisma.pushSubscription.update({
+             where: { id: existingSubscription.id },
+             data: { p256dh: keys.p256dh, auth: keys.auth, deviceId },
+           });
+         } else {
+           await ctx.prisma.pushSubscription.create({
+             data: { endpointSealed: endpointCandidates[0]!, p256dh: keys.p256dh, auth: keys.auth, deviceId },
+           });
+         }
          break;
        }
 
@@ -840,16 +879,35 @@ export async function handleKeySync(
       //      `burner:room:*`) — tanpa ini, destroy setelah satu reconnect tidak
       //      pernah sampai ke guest.
       case 'burner:join': {
+        // [AUDIT 2026-10-24] Event burner dulu tanpa batas sama sekali, padahal
+        // `burner:reply` mem-fan-out ke SEMUA anggota room.
+        if (!await ctx.checkRateLimit(userId, 'burner_join', BURNER_EVENT_RATE_LIMIT.limit, BURNER_EVENT_RATE_LIMIT.windowSeconds)) {
+          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'RATE_LIMITED' });
+          return;
+        }
         const { roomId } = data as { roomId?: string };
         if (!roomId) return;
         const terminated = (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) === 1;
         // [docs/28 Tier 1.5 / D14] member = userId TER-SEAL (harus bisa dipulihkan
         // untuk routing, tapi tidak boleh terbaca dari dump Redis).
-        if (!terminated) await ctx.pubClient.sAdd(`burner:room:${roomId}`, await sealIdentity(userId));
+        // [AUDIT 2026-10-24] Index per-user dicatat agar disconnect tidak perlu
+        // memindai seluruh keyspace (`utils/roomMembership.ts`).
+        if (!terminated) {
+          await joinRoom(ctx.pubClient as unknown as RoomRedisClient, {
+            kind: 'burner',
+            roomId,
+            sealedMember: await sealIdentity(userId),
+            memberTag: identityTag(userId),
+          });
+        }
         if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, terminated });
         break;
       }
       case 'burner:send': {
+        if (!await ctx.checkRateLimit(userId, 'burner_message', BURNER_EVENT_RATE_LIMIT.limit, BURNER_EVENT_RATE_LIMIT.windowSeconds)) {
+          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'RATE_LIMITED' });
+          return;
+        }
         const { roomId, targetDeviceId, hostUserId, ciphertext } = data as { roomId: string, targetDeviceId?: string, hostUserId: string, ciphertext: string };
         if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) {
           if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'ROOM_TERMINATED' });
@@ -858,7 +916,12 @@ export async function handleKeySync(
 
         // Self-heal membership (lihat catatan di atas) supaya broadcast destroy
         // berikutnya menemukan guest ini.
-        await ctx.pubClient.sAdd(`burner:room:${roomId}`, await sealIdentity(userId)).catch(() => {});
+        await joinRoom(ctx.pubClient as unknown as RoomRedisClient, {
+          kind: 'burner',
+          roomId,
+          sealedMember: await sealIdentity(userId),
+          memberTag: identityTag(userId),
+        }).catch(() => {});
 
         // Broadcast to all active sessions of the host if specific device ID fails or isn't strictly required
         await ctx.sendJsonToUser(hostUserId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } }, false, targetDeviceId);
@@ -867,6 +930,10 @@ export async function handleKeySync(
         break;
       }
       case 'burner:reply': {
+        if (!await ctx.checkRateLimit(userId, 'burner_message', BURNER_EVENT_RATE_LIMIT.limit, BURNER_EVENT_RATE_LIMIT.windowSeconds)) {
+          if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'RATE_LIMITED' });
+          return;
+        }
         const { roomId, ciphertext } = data as { roomId: string, ciphertext: string };
         if (await ctx.redisClient.exists(`burner:terminated:${roomId}`)) {
           if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: false, error: 'ROOM_TERMINATED' });
@@ -908,7 +975,14 @@ export async function handleKeySync(
          break;
        }
        case 'migration:join': {
-         if (data) await ctx.pubClient.sAdd(`migration:room:${data}`, await sealIdentity(userId));
+         if (data) {
+           await joinRoom(ctx.pubClient as unknown as RoomRedisClient, {
+             kind: 'migration',
+             roomId: String(data),
+             sealedMember: await sealIdentity(userId),
+             memberTag: identityTag(userId),
+           });
+         }
          break;
        }
        case 'migration:start': {

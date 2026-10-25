@@ -3,19 +3,19 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * T3b delivery tokens (doc 26.2) — unit tests.
+ * [docs/37 §37.3.1–§37.3.4] Kontrak token keanggotaan grup.
  *
- * Prisma REST handlers tidak mudah di-unit-test tanpa instance Express penuh,
- * jadi test ini mengunci KONTRAK di level source + Prisma schema:
- *   1. Schema TOKEN-FIRST: `deliveryToken` WAJIB & unique; `userId` nullable
- *      (routing-only) — discovery adalah possession token, bukan join userId
- *      (26.8.1 trigger #1 tertutup).
- *   2. Sync endpoint menerima header `X-Delivery-Tokens` dan mem-match via
- *      `deliveryToken in (...)` (token possession) — TANPA userId join.
- *   3. Create/invite/relay menyimpan token-keyed rows (userId routing-only).
- *   4. Revocation: kick/leave menghapus row (token mati).
- *   5. Client token maps hidup di encrypted metadata v2 (deliveryTokenMap),
- *      bukan di field plaintext payload.
+ * Test ini mengunci hal-hal yang mudah "dikembalikan" tanpa sadar saat refactor:
+ *   1. Schema: token mentah TIDAK ada kolomnya — hanya `tokenHash` (unique),
+ *      `tokenEpoch`, `expiresAt`; `userId` tetap nullable routing-only.
+ *   2. Token 256-bit (43-char base64url), sama di klien & schema payload.
+ *   3. Sync anonim ada di `routes/groups.ts`, token di body, tanpa `requireAuth`
+ *      dan tanpa menyentuh `userId`.
+ *   4. Penyimpanan token di semua titik invite melewati `upsertMembership`
+ *      (hash di dalam util).
+ *   5. Revocation: kick menaikkan epoch + merotasi token grup + menghapus baris;
+ *      leave menghapus baris.
+ *   6. Klien tidak lagi memakai header `X-Delivery-Tokens`.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,81 +26,125 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(path.join(here, p), 'utf8');
 
-const TOKEN = 'AAAAAAAAAAAAAAAAAAAAAA'; // 22-char base64url
-const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
+const TOKEN = 'A'.repeat(43); // 43-char base64url (256-bit)
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
-test('T3b TOKEN-FIRST: schema — deliveryToken wajib unique, userId nullable routing-only', () => {
+test('schema: hanya hash token yang disimpan, plus epoch & expiry', () => {
   const schema = read('../prisma/schema.prisma');
   const modelStart = schema.indexOf('model UserHiddenConversation');
   assert.ok(modelStart >= 0, 'model UserHiddenConversation harus ada');
   const model = schema.slice(modelStart, schema.indexOf('}', modelStart));
 
-  assert.match(model, /deliveryToken\s+String\s+@unique/, 'deliveryToken WAJIB (setiap baris membership kunci token)');
+  assert.match(model, /tokenHash\s+String\s+@unique/, 'tokenHash WAJIB & unique (lookup sync)');
+  assert.match(model, /tokenEpoch\s+Int\s+@default\(0\)/, 'epoch per baris keanggotaan');
+  assert.match(model, /expiresAt\s+DateTime/, 'TTL token anggota');
   assert.match(model, /userId\s+String\?/, 'userId nullable (routing-only, bukan discovery key)');
-  assert.match(model, /@@index\(\[conversationId\]\)/, 'index conversationId untuk sync per-token lookup');
+  assert.doesNotMatch(model, /deliveryToken/, 'token mentah tidak boleh punya kolom');
 });
 
-test('T3b: format token = 22-char base64url (16 random bytes), konsisten dengan shared schemas', () => {
-  const schemas = read('../../packages/shared/src/schemas.ts');
-  // zod 4: z.record(keySchema, valueSchema) — KEY = userId (string bebas),
-  // VALUE = 22-char base64url. (Fix: key dulu salah divalidasi sebagai token,
-  // bikin POST /conversations & relay grup selalu 400.)
-  assert.match(schemas, /targetDeliveryTokens:\s*z\.record\(z\.string\(\)\.min\(1\),\s*z\.string\(\)\.regex\(\/\^\[A-Za-z0-9_-]\{22\}\$\/\)\)/,
-    'MessageSendPayloadSchema memvalidasi targetDeliveryTokens (key=userId, value=token 22-char)');
+test('schema Conversation: epoch + expiry token grup', () => {
+  const schema = read('../prisma/schema.prisma');
+  const modelStart = schema.indexOf('model Conversation');
+  const model = schema.slice(modelStart, schema.indexOf('model Message ', modelStart));
+  assert.match(model, /groupEpoch\s+Int\s+@default\(0\)/);
+  assert.match(model, /groupTokenExpiresAt\s+DateTime\?/);
+  assert.match(model, /epochRotatedAt\s+DateTime\?/);
+  assert.match(model, /authSecret\s+String\?/, 'authSecret = SHA-256 token grup (bukan token mentah)');
+});
+
+test('format token: 43-char base64url (256-bit), konsisten di shared & server schema', () => {
+  const shared = read('../../packages/shared/src/schemas.ts');
+  assert.match(
+    shared,
+    /targetDeliveryTokens:\s*z\.record\(z\.string\(\)\.min\(1\),\s*z\.string\(\)\.regex\(\/\^\[A-Za-z0-9_-\]\{43\}\$\/\)\)/,
+    'MessageSendPayloadSchema memvalidasi token 43-char'
+  );
+  const schemes = read('../src/utils/conversationSchemas.ts');
+  assert.match(schemes, /DELIVERY_TOKEN_RE = \/\^\[A-Za-z0-9_-\]\{43\}\$\//);
   assert.ok(TOKEN_RE.test(TOKEN));
-  assert.ok(!TOKEN_RE.test('short'), 'token terlalu pendek ditolak');
-  assert.ok(!TOKEN_RE.test('contains+plus-and/slash0000'), 'karakter non-base64url ditolak');
+  assert.ok(!TOKEN_RE.test('A'.repeat(22)), 'token 22-char (128-bit) lama ditolak');
 });
 
-test('T3b TOKEN-FIRST: sync endpoint — token possession TANPA userId join', () => {
-  const src = read('../src/routes/conversations.ts');
-  assert.match(src, /x-delivery-tokens/i, 'sync membaca header X-Delivery-Tokens');
-  assert.match(src, /deliveryToken:\s*\{\s*in:\s*tokens\s*\}/, 'lookup by token possession (unique index), bukan join userId');
-  assert.match(src, /slice\(0,\s*500\)/, 'jumlah token per request di-cap 500 (anti amplifikasi)');
-  // userId join untuk MEMBERSHIP di sync DIHAPUS: tidak ada lagi
-  // userHiddenConversation.findMany({ where: { userId: req.user.id } }).
-  // (Backfill Device/SessionKey per-device boleh — bukan identity join membership.)
-  const syncIdx = src.indexOf("router.get('/sync'");
-  const syncSrc = src.slice(syncIdx, src.indexOf("router.post('/'", syncIdx));
-  assert.doesNotMatch(syncSrc, /userHiddenConversation\.findMany\(\s*\{\s*where:\s*\{\s*userId:/, 'sync TIDAK boleh discovery membership via userId join');
+test('sync anonim: token di body, tanpa requireAuth, tanpa userId', () => {
+  const src = read('../src/routes/groups.ts');
+  assert.match(src, /router\.post\('\/sync'/);
+  assert.doesNotMatch(src, /requireAuth/, 'jalur sync tidak boleh memakai sesi');
+  assert.doesNotMatch(src, /req\.user/, 'jalur sync tidak boleh membaca identitas akun');
+  assert.doesNotMatch(src, /userHiddenConversation[\s\S]{0,200}userId/, 'sync tidak boleh query kolom userId');
+  assert.match(src, /MAX_SYNC_TOKENS/, 'jumlah token per request di-cap');
+  assert.match(src, /tokens:\s*z\.array\(tokenSchema\)/, 'token diterima dari body');
 });
 
-test('T3b TOKEN-FIRST: token-keyed rows di semua titik invite (create, invite REST, chat relay WT & REST)', () => {
+test('sync dipasang SEBELUM CSRF (tidak ada cookie di jalur ini)', () => {
+  const app = read('../src/app.ts');
+  const groupsIdx = app.indexOf('app.use("/api/groups"');
+  const csrfIdx = app.indexOf('doubleCsrfProtection(req, res, next)');
+  assert.ok(groupsIdx >= 0, 'router /api/groups dipasang');
+  assert.ok(csrfIdx > groupsIdx, 'router grup harus di atas lapisan CSRF');
+});
+
+test('token-keyed rows di semua titik invite (create, invite REST, chat relay WT & REST)', () => {
   const conversationsRoute = read('../src/routes/conversations.ts');
   const messagesRoute = read('../src/routes/messages.ts');
   const handlers = read('../src/network/realtimeHandlers.ts');
 
-  // Create/invite: row dibuat HANYA bila token ada (skip tanpa token)
   assert.match(conversationsRoute, /if \(!token\) continue;/, 'create/invite: anggota tanpa token tidak didaftarkan');
-  // Chat relay (WT + REST fallback): upsert token-keyed
   assert.match(handlers, /if \(targetToken\)/, 'WT relay: row hanya saat token ada');
   assert.match(messagesRoute, /if \(targetToken\)/, 'REST relay: row hanya saat token ada');
 });
 
-test('T3b: revocation — kick/leave menghapus row token', () => {
-  // [docs/28 Tier 1.2] revocation kini lewat deleteMembership() (deleteMany +
-  // kandidat lookup) karena kolom userId berisi routing identity ter-seal dan
-  // baris legacy plaintext harus ikut terhapus.
-  const src = read('../src/routes/conversations.ts');
-  const matches = src.match(/deleteMembership\(/g) ?? [];
-  assert.ok(matches.length >= 2, 'kick (DELETE participants) dan leave (/leave) keduanya menghapus row');
+test('token grup awal 43-char; rotasi memindahkan epoch semua baris anggota', () => {
+  const conversationsRoute = read('../src/routes/conversations.ts');
+  assert.match(conversationsRoute, /const authSecret = newOpaqueToken\(\)/, 'token grup awal 43-char base64url');
+  assert.doesNotMatch(conversationsRoute, /randomBytes\(32\)\.toString\('hex'\)/, 'jangan kembali ke 64-hex (ditolak schema mailbox)');
 
-  const util = read('../src/utils/routingIdentity.ts');
-  assert.match(util, /deleteMany\(\{[\s\S]{0,120}userId: \{ in: candidates \}/, 'deleteMembership: hapus kandidat sealed + legacy');
+  const tokens = read('../src/utils/groupTokens.ts');
+  assert.match(tokens, /data: \{ tokenEpoch: epoch \}/, 'rotasi harus memindahkan baris anggota ke epoch baru');
+  assert.match(tokens, /where: \{ conversationId \}/, 'updateMany dibatasi ke percakapan yang dirotasi');
 });
 
-test('T3b: token maps HIDUP di encrypted metadata v2 — tidak ada plaintext delivery di payload publik', () => {
-  const sharedTypes = read('../../packages/shared/src/types.ts');
-  assert.match(sharedTypes, /deliveryTokenMap\?:\s*Record<string, string>/,
-    'GroupMetadataV2.deliveryTokenMap (di dalam encrypted metadata)');
+test('mailbox pull menerima member token era berjalan (anti-deadlock rotasi)', () => {
+  const src = read('../src/routes/groups.ts');
+  const start = src.indexOf("router.post('/:id/mailbox/pull'");
+  const route = src.slice(start, src.indexOf("router.get('/:id/epoch'", start));
+  assert.ok(start >= 0 && route.length > 0, 'route mailbox pull harus ada');
+  assert.match(route, /evaluateMemberToken\(member, conversation\.groupEpoch/, 'fallback memakai status epoch member token');
+  assert.match(route, /member\.conversationId !== conversationId/, 'member token grup lain tidak boleh membaca mailbox');
+  assert.match(route, /GROUP_AUTH_REQUIRED/, 'tetap 403 bila keduanya tidak sah');
+
+  const client = read('../../web/src/lib/groupMailbox.ts');
+  assert.match(
+    client,
+    /getMyGroupToken\(conversationId\) \?\? getMyDeliveryToken\(conversationId\)/,
+    'klien jatuh ke member token saat group token lama sudah mati'
+  );
+});
+
+test('revocation: kick merotasi epoch + menghapus baris, leave menghapus baris', () => {
+  const src = read('../src/routes/conversations.ts');
+  assert.match(src, /rotateGroupToken\(tx as unknown as GroupTokenDb/, 'kick menaikkan epoch + rotasi token grup dalam transaksi');
+  assert.match(src, /res\.json\(\{ authSecret: rotated\.token, epoch: rotated\.epoch/, 'kick mengembalikan token era baru ke admin');
+
+  const matches = src.match(/deleteMembership\(/g) ?? [];
+  assert.ok(matches.length >= 2, 'kick dan leave menghapus baris keanggotaan');
+
+  const groupsRoute = read('../src/routes/groups.ts');
+  assert.match(groupsRoute, /router\.delete\('\/:id\/membership'/, 'holder-initiated revoke tersedia');
+  assert.match(groupsRoute, /router\.post\('\/:id\/epoch'/, 'admin capability bisa menaikkan epoch');
+  assert.match(groupsRoute, /router\.get\('\/:id\/epoch'/, 'status era dibaca admin untuk keputusan rotasi PCS');
+});
+
+test('klien: sync anonim, bukan header X-Delivery-Tokens', () => {
+  const store = read('../../web/src/store/conversation.ts');
+  assert.doesNotMatch(store, /X-Delivery-Tokens/, 'header lama dihapus (hard cut)');
+  // [docs/37 §37.4 P3] Transport-nya kini di `lib/groupSync.ts` (OHTTP POST bila
+  // aktif, bukti Privacy Pass opsional); store hanya memanggil helper itu.
+  assert.match(store, /syncGroupMemberships\(/, 'loadConversations memakai sync anonim');
+  const groupSync = read('../../web/src/lib/groupSync.ts');
+  assert.match(groupSync, /'\/api\/groups\/sync'/, 'endpoint anonim');
+  assert.match(groupSync, /JSON\.stringify\(\{ tokens,/, 'token dikirim di body');
+  assert.match(groupSync, /ohttpFetch\('\/api\/groups\/sync'/, 'sync lewat OHTTP POST');
 
   const pseudonyms = read('../../web/src/lib/groupPseudonyms.ts');
-  assert.match(pseudonyms, /getMyDeliveryToken/, 'client helper mengambil token milik sendiri dari peta');
-  assert.match(pseudonyms, /collectMyDeliveryTokens/, 'client mengumpulkan semua token miliknya untuk sync header');
-});
-
-test('T3b: client sync mengirim X-Delivery-Tokens (transisi dual-path)', () => {
-  const store = read('../../web/src/store/conversation.ts');
-  assert.match(store, /X-Delivery-Tokens/, 'loadConversations mengirim header token');
-  assert.match(store, /deliveryTokens/, 'createGroup mengirim creator-issued tokens');
+  assert.match(pseudonyms, /MEMBER_TOKEN_BYTES = 32/, 'token anggota 256-bit');
 });

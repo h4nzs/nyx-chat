@@ -79,7 +79,30 @@ export const uploadLimiter = rateLimit({
   })
 })
 
-// 4. [R6 2026-10-15] Admin cleanup limiter.
+// 4. [AUDIT 2026-10-24] Pembuatan identitas GUEST (`POST /api/auth/burner`).
+//
+// Tanpa limiter khusus, satu IP bisa membuat ratusan guest (generalLimiter
+// 300/15 menit) dan tiap guest punya bucket chat sendiri — jadi semua batas
+// per-user tidak membatasi siapa pun. 30/jam cukup untuk manusia yang membuka
+// beberapa link burner, dan menutup pembuatan identitas massal.
+export const burnerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
+  message: {
+    error: 'Too many burner sessions from this network. Try again later.'
+  },
+  store: new RedisStore({
+    prefix: 'rl:burner:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
+// 5. [R6 2026-10-15] Admin cleanup limiter.
 //
 // Endpoint `POST /api/admin/cleanup` kini benar-benar menghapus baris (termasuk
 // akun dorman), jadi menebak `x-admin-key` harus lambat: 5 percobaan per jam per

@@ -15,6 +15,8 @@ systemd. Repo ini mengirim unit-nya, jadi pembaruan binary tidak lagi manual.
 | `nyx-kt-auditor-v2.env.example` | Template `EnvironmentFile` auditor v2 |
 | `nyx-kt-query` / `nyx-kt-auditor` (binary) | Dibangun CI dari `server/kt-query` (vendor) dan ditaruh `deploy.yml` di `/root/nyx-app/server/kt-query/` |
 | `nyx-kt-query-v2` / `nyx-kt-auditor-v2` / `nyx-kt-v2-init` (binary) | Binary v2 + alat bootstrap; dibangun CI dan dikirim `deploy.yml` |
+| `user/nyx-ohttp-relay.service` | Unit **user** (`systemctl --user`) untuk selfhost `~/nyx-selfhost`: relay OHTTP proses terpisah (docs/10 §10.18) |
+| `user/nyx-pir-sidecar.service` | Unit **user** untuk selfhost: sidecar PIR ChalametPIR :9470 (docs/10 §10.19) |
 
 Yang **otomatis** sejak unit ini ada di repo (`.github/workflows/deploy.yml`, docs/10 §10.3):
 build binary dari vendor → masuk `nyx-deploy.zip` → disalin ke
@@ -256,6 +258,14 @@ Tidak ada port yang perlu dibuka di firewall: ketiga listener loopback
 | `distinguished` tidak maju | `api.distinguished` kosong di config YAML (unit tidak mengoper `-distinguished`); cek log `[kt-query]` saat start |
 | Alert `NyxKtQueryDown` menyala | Proses log mati/terputus. Registrasi **tetap** jalan (fail-open), jadi tidak ada error di aplikasi — cek `systemctl status nyx-kt-query`, `NYX_KT_METRICS_ADDR`, dan `curl -s 127.0.0.1:9467/metrics` |
 | Alert `NyxKtQuerySnapshotStalled` menyala | Snapshot lokal tidak dibuat >48 jam padahal `NYX_KT_SNAPSHOT_DIR` diisi — cek ruang disk + log `snapshot` di journal (arsip dibuat proses yang sama, jadi restart yang terlalu sering juga menutup jalannya) |
+
+## `nyx-ohttp-relay` (relay OHTTP proses terpisah)
+
+Bukan layanan KT, tetapi dipasang dengan pola yang sama dan butuh
+`OHTTP_GATEWAY_TARGET` (loopback). Lihat `nyx-ohttp-relay.env.example` dan
+`docs/10` §10.18. Proses ini tidak memegang DB/Redis/kunci apa pun; kalau
+EnvironmentFile-nya mulai berisi `DATABASE_URL`/`JWT_SECRET`, ada tanggung jawab
+yang salah tempat. Status: `curl -fsS http://127.0.0.1:4100/healthz`.
 
 ## Yang masih belum otomatis (jujur)
 

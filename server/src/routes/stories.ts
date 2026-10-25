@@ -2,7 +2,7 @@ import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
 import { redisClient } from '../lib/redis.js';
-import { storyAuthorTag, blockedUserTag, resolveRoutingUser } from '../utils/routingIdentity.js';
+import { storyAuthorTag, tagCandidates, resolveRoutingUser } from '../utils/routingIdentity.js';
 // [docs/28 Tier 4] key Redis rate-limit tidak menyematkan userId asli.
 import { identityTag } from '../utils/redisIdentity.js';
 
@@ -32,7 +32,12 @@ async function isStoryViewAllowed(requesterId: string, targetId: string): Promis
   // [docs/28 Tier 1.3 — D9] relasi block kini disimpan sebagai pasangan tag
   // ter-seal (deterministik), jadi pengecekannya tetap satu lookup.
   const block = await prisma.blockedUser.findFirst({
-    where: { blockerTag: await blockedUserTag(targetId), blockedTag: await blockedUserTag(requesterId) },
+    // [docs/37 §37.4 P6] `in` kandidat supaya baris lama (kunci id 0) dan baru
+    // (ENC2) sama-sama terbaca selama rotasi kunci at-rest.
+    where: {
+      blockerTag: { in: await tagCandidates(targetId) },
+      blockedTag: { in: await tagCandidates(requesterId) },
+    },
     select: { id: true }
   });
   if (block) return 'blocked';
@@ -117,7 +122,8 @@ router.get('/user/:userId', requireAuth, async (req, res) => {
     const stories = await prisma.story.findMany({
       where: {
         // [docs/28 D8] lookup by tag ter-seal (deterministik) — bukan kolom identitas.
-        authorTag: await storyAuthorTag(userId),
+        // [docs/37 P6] `in` = kandidat kunci aktif + legacy selama re-seal.
+        authorTag: { in: await tagCandidates(userId) },
         expiresAt: { gt: new Date() }, // Only active stories
       },
       orderBy: { createdAt: 'asc' },
@@ -180,8 +186,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     // [docs/28 D8] kepemilikan = tag ter-seal cocok.
     // [2026-10 legacy purge] Cabang pembandingan plaintext (tag = userId) dibuang.
-    const myTag = await storyAuthorTag(userId);
-    const isOwner = story.authorTag === myTag;
+    const myTags = await tagCandidates(userId);
+    const isOwner = myTags.includes(story.authorTag);
     if (!isOwner) {
       return res.status(403).json({ error: 'Unauthorized to delete this story' });
     }

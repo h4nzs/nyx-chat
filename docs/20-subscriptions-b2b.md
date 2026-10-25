@@ -32,7 +32,7 @@ flowchart LR
 
 - Tenants are created by admins (`POST /api/admin/tenants`) with an `apiKey`.
 - `POST /api/engine/rooms` (authenticated by `x-nyx-engine-key` → `requireTenantAuth`): looks up/creates a tenant user (`usernameHash = sha256(tenant:externalId)`), creates a conversation, issues two short-lived iframe tokens, and returns `userAUrl`/`userBUrl` for `EmbedChatPage`.
-- `EmbedChatPage` (`/embed/chat/:id`) renders a bare `ChatWindow` with a token, suitable for an iframe — no sidebar/layout.
+- `EmbedChatPage` (`/embed/chat/:id`) renders a bare `ChatWindow` with a token, suitable for an iframe — no sidebar/layout. The page stores the URL token as the `embed_at` cookie (lifetime = token `exp`); `requireAuth` accepts it after `at` (`docs/14` §14.5).
 
 ## 20.4 Reports & admin
 

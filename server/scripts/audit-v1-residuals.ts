@@ -13,7 +13,6 @@
  *   - Device yang belum punya kunci verifikasi ML-DSA (`cryptoVersion` < 2)
  *   - PreKeyBundle tanpa `signatureV2`
  *   - OneTimePreKey klasik (tanpa `pqPublicKey`)
- *   - GroupCredential bersuite legacy (`suite` NULL)
  *   - Amplop pesan 1:1 X3DH v1 dan pesan grup `sigV` v1
  *
  * Hanya agregat yang dicetak — tidak ada id, username, atau isi pesan. Bila
@@ -54,7 +53,6 @@ interface Report {
   devices: { total: number; legacy: number };
   preKeyBundles: { total: number; legacy: number };
   oneTimePreKeys: { total: number; classicalOnly: number };
-  groupCredentials: { total: number; legacySuite: number };
   messages: ReturnType<typeof emptyEnvelopeCounts>;
 }
 
@@ -81,8 +79,6 @@ async function buildReport(): Promise<Report> {
     bundlesLegacy,
     otpkTotal,
     otpkClassical,
-    credentialsTotal,
-    credentialsLegacy,
   ] = await Promise.all([
     prisma.device.count(),
     prisma.device.count({
@@ -92,8 +88,6 @@ async function buildReport(): Promise<Report> {
     prisma.preKeyBundle.count({ where: { signatureV2: null } }),
     prisma.oneTimePreKey.count(),
     prisma.oneTimePreKey.count({ where: { pqPublicKey: null } }),
-    prisma.groupCredential.count(),
-    prisma.groupCredential.count({ where: { suite: null } }),
   ]);
 
   const messages = emptyEnvelopeCounts();
@@ -103,7 +97,6 @@ async function buildReport(): Promise<Report> {
     devices: { total: devicesTotal, legacy: devicesLegacy },
     preKeyBundles: { total: bundlesTotal, legacy: bundlesLegacy },
     oneTimePreKeys: { total: otpkTotal, classicalOnly: otpkClassical },
-    groupCredentials: { total: credentialsTotal, legacySuite: credentialsLegacy },
     messages,
   };
 }
@@ -113,7 +106,6 @@ function blockersOf(report: Report): Array<[string, number]> {
     ['Device v1 (cryptoVersion<2 / tanpa signingKeyV2)', report.devices.legacy],
     ['PreKeyBundle tanpa signatureV2', report.preKeyBundles.legacy],
     ['OneTimePreKey klasik (tanpa pqPublicKey)', report.oneTimePreKeys.classicalOnly],
-    ['GroupCredential suite legacy (NULL)', report.groupCredentials.legacySuite],
     ['Pesan 1:1 X3DH v1', report.messages['direct-v1']],
     ['Pesan grup sigV v1', report.messages['group-v1']],
   ];
@@ -131,7 +123,6 @@ async function main(): Promise<void> {
     console.log(`  Device            : ${report.devices.legacy}/${report.devices.total} masih v1`);
     console.log(`  PreKeyBundle      : ${report.preKeyBundles.legacy}/${report.preKeyBundles.total} tanpa signatureV2`);
     console.log(`  OneTimePreKey     : ${report.oneTimePreKeys.classicalOnly}/${report.oneTimePreKeys.total} klasik`);
-    console.log(`  GroupCredential   : ${report.groupCredentials.legacySuite}/${report.groupCredentials.total} suite legacy`);
     console.log(
       `  Pesan 1:1         : ${report.messages['direct-v1']} v1, ${report.messages['direct-v2']} v2, ` +
         `${report.messages.other} lain`

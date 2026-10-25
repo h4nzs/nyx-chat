@@ -27,10 +27,8 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 | Bundle pre-key v2 | Identitas ML-KEM (X-Wing) + ML-DSA-65, tanda tangan atas seluruh material | `packages/shared/src/pqBundle.ts`, `server/src/routes/keys.ts`, `utils/mlDsa.ts` |
 | X3DH v2 | **Tanpa DH klasik**; X-Wing sebagai satu-satunya KEM, ML-DSA untuk otentikasi | `packages/shared/src/pqHandshake.ts`, worker op `x3dh_*` |
 | Sealed box v2 | X-Wing + AEAD, satu penerima | `packages/shared/src/pqSeal.ts` |
-| Pesan grup v4 | Sender key + ML-DSA-65 atas header+ciphertext | `packages/shared/src/groupEnvelope.ts`, `web/src/lib/groupCredentials.ts` |
+| Pesan grup v4 | Sender key + ML-DSA-65 atas header+ciphertext | `packages/shared/src/groupEnvelope.ts`, `web/src/utils/crypto.ts` |
 | Ratchet v2 | braid SPQR (ML-KEM), state ter-seal, negosiasi `ackV:2` | `web/src/lib/spqr*.ts`, `packages/spqr-wasm`, `vendor/signal/spqr` |
-| Credential keanggotaan | Blind RSA RSABSSA-SHA384-PSS-Randomized + commit serial | `server/src/lib/groupCredentials.ts`, `web/src/workers/crypto.worker.ts`, `packages/shared/src/credentials.ts` |
-| Anonymous issuance | Bank token, redeem tanpa JWT, commit ticket single-use | `server/src/routes/conversations.ts`, `web/src/lib/credentialTokens.ts`, `utils/credentialAuth.ts` |
 | KT v2 | Log ML-DSA-65 + indeks SHA-256, verifier WASM, monitor/gossip | `packages/keytrans-v2`, `server/kt-query`, `web/src/lib/ktMonitoring.ts`, `ktGossip.ts` |
 | Metadata | OHTTP (RFC 9458, P-256 HPKE), cover traffic 1:1 | `packages/shared/src/ohttp.ts`, `server/src/ohttp/*`, `web/src/lib/coverTraffic.ts` |
 | PIR direktori | ChalametPIR keyword PIR (LWE), record 2 KB, epoch + hint; klien WASM → worker → OHTTP POST biner | `server/pir-sidecar/*`, `server/src/pir/*`, `server/src/routes/pir.ts`, `packages/pir-wasm`, `web/src/lib/pir*.ts`, `web/src/workers/pir.worker.ts` |
@@ -45,6 +43,9 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
   service 4b (ChalametPIR sidecar + proxy) dan klien 4c (Rust→WASM/worker,
   OHTTP POST/binary, hint cache, epoch retry) sudah ada tetapi default mati;
   angka host produksi dan audit belum.
+- **Anonymous group credentials** — blind RSA dan anonymous issuance dihapus
+  2026-10-23; tidak ada endpoint atau kode klien yang tersisa. Kredensial PQ
+  belum ada; BRaccoon/blind UOV tetap riset.
 - **BRaccoon / blind UOV** — riset, belum ada kode produksi.
 - Format v1/frozen (`docs/04`) — reviewer boleh memeriksa apakah jalur baca v1
   melemahkan jalur v2, tetapi perubahan format v1 di luar cakupan.
@@ -64,24 +65,22 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 5. **Grup v4**: tanda tangan mencakup header + ciphertext + `senderKeyId`;
    distribusi sender key tidak membocorkan identitas; rotasi/penghapusan anggota
    benar-benar memutus akses.
-6. **Blind credential tidak linkable** ke anggota, meski server menyimpan
-   `serial ↔ conversationId`: serial dibangun dari random message, bukan
-   identitas; presentasi tidak bisa di-replay lintas percakapan/versi kunci.
-7. **Anonymous issuance** memutus hubungan pembelian token ↔ pemakaian, dan
-   commit ticket single-use tidak bisa dipakai dua kali.
-8. **KT v2**: tree head ditandatangani ML-DSA, verifier fail-closed, monitor
+6. **KT v2**: tree head ditandatangani ML-DSA, verifier fail-closed, monitor
    tidak menulis state sebelum verifikasi, gossip mendeteksi split-view; tidak
    ada downgrade diam-diam ke v1.
-9. **SPQR**: akar sesi berasal dari X3DH v2; v2 hanya dikirim setelah peer
+7. **SPQR**: akar sesi berasal dari X3DH v2; v2 hanya dikirim setelah peer
    membuktikan bisa membaca (`ackV:2`); kill switch menghentikan pengiriman,
    bukan pembacaan.
-10. **Fallback v1 tidak membuka downgrade**: penyerang jaringan/server tidak
-    bisa memaksa v1 tanpa terdeteksi, dan menerima v1 tidak melemahkan sesi v2
-    yang sudah ada.
-11. **OHTTP**: relay tidak melihat isi, gateway tidak melihat IP; token scoped
-    tidak bisa dipakai untuk mutasi; key pin fail-closed pada rotasi tak wajar.
-12. **At-rest**: `ENC1:` memakai kunci turunan master seed dengan pemisahan
+8. **Fallback v1 tidak membuka downgrade**: penyerang jaringan/server tidak
+   bisa memaksa v1 tanpa terdeteksi, dan menerima v1 tidak melemahkan sesi v2
+   yang sudah ada.
+9. **OHTTP**: relay tidak melihat isi, gateway tidak melihat IP; token scoped
+   tidak bisa dipakai untuk mutasi; key pin fail-closed pada rotasi tak wajar.
+10. **At-rest**: `ENC1:` memakai kunci turunan master seed dengan pemisahan
     domain; password/recovery phrase tidak bisa dipulihkan dari DB.
+
+> Blind credential dan anonymous issuance dihapus 2026-10-23; keduanya tidak
+> termasuk klaim yang diminta diverifikasi.
 
 ## 36.4 Bukti yang sudah ada (dapat dijalankan ulang)
 
@@ -120,8 +119,9 @@ Ini bukan "catatan kaki" — semuanya membatasi klaim keamanan:
   (`KT_V2_BACKFILL_ON_LOGIN=1`) untuk perangkat ber-ML-DSA-65. Cutover baca
   belum dilakukan.
 - **Tier B** tetap hybrid/classical (lihat §36.2).
-- **Blind RSA v1 masih diterbitkan** sampai suite credential PQ ada
-  (BRaccoon belum lolos riset/audit).
+- **Blind RSA dan anonymous issuance sudah dihapus 2026-10-23**; group auth
+  sekarang token-first. Kredensial PQ (BRaccoon/blind UOV) belum ada dan belum
+  diaudit.
 - **X-Wing bukan ML-KEM murni**; ia hedge dengan X25519.
 - **PIR 4b + 4c + 4d harness sudah ada tetapi default mati.** `/api/pir/*`
   hanya proxy ke sidecar ChalametPIR loopback; klien WASM/worker dan OHTTP

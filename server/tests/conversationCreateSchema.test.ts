@@ -28,7 +28,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (p: string) => readFileSync(path.join(here, p), 'utf8');
 
 const PEER = '11111111-1111-1111-1111-111111111111';
-const DELIVERY_TOKEN = 'AAAAAAAAAAAAAAAAAAAAAA'; // 22-char base64url
+const DELIVERY_TOKEN = 'A'.repeat(43); // 43-char base64url (256-bit)
 const ADMIN_HASH = 'a'.repeat(64); // SHA-256 hex dari capability token
 
 // Body yang PERSIS dikirim klien pada createGroup (lihat
@@ -84,7 +84,7 @@ test('POST /conversations: key asing & payload tidak sah tetap ditolak/dibuang',
   assert.throws(() => createConversationBodySchema.parse({
     ...clientBody,
     deliveryTokens: { [PEER]: 'short' },
-  }), 'token undangan bukan 22-char base64url ditolak');
+  }), 'token undangan bukan 43-char base64url ditolak');
   assert.throws(() => createConversationBodySchema.parse({
     ...clientBody,
     deliveryTokens: { [PEER]: 123 },

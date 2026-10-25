@@ -39,3 +39,36 @@ export function isAdminTokenValid(adminSecretHash: string | null | undefined, pr
   if (!presentedToken) return false;
   return safeEqualStrings(adminSecretHash, hashAdminToken(presentedToken));
 }
+
+/**
+ * Bentuk minimal klien Prisma untuk guard capability admin.
+ * Dipakai `groupAccess.ts` (routes grup) dan test perilaku.
+ */
+export interface AdminCapabilityDb {
+  conversation: {
+    findUnique(args: {
+      where: { id: string };
+      select: { adminSecretHash?: boolean };
+    }): Promise<{ adminSecretHash?: string | null } | null>;
+  };
+}
+
+/**
+ * Guard capability admin grup: 404 bila conversation hilang, 403 bila token
+ * tidak ada/salah. `ADMIN_AUTH_REQUIRED` adalah kontrak klien.
+ */
+export async function requireAdminCapability(
+  db: AdminCapabilityDb,
+  conversationId: string,
+  headers: Record<string, unknown>
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const conversation = await db.conversation.findUnique({
+    where: { id: conversationId },
+    select: { adminSecretHash: true },
+  });
+  if (!conversation) return { ok: false, status: 404, error: 'Not found' };
+  if (!isAdminTokenValid(conversation.adminSecretHash, extractHeader(headers['x-admin-token']))) {
+    return { ok: false, status: 403, error: 'ADMIN_AUTH_REQUIRED: Invalid or missing X-Admin-Token' };
+  }
+  return { ok: true };
+}

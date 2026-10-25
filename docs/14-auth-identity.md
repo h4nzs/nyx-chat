@@ -76,6 +76,7 @@ sequenceDiagram
 ## 14.5 Refresh token rotation & silent refresh
 
 - Cookies: `at` (access, 15 min) and `rt` (refresh, 30 days), both `httpOnly`, `SameSite=None; Secure` in prod.
+- **Embed pages are the one exception**: `/embed/chat/:id?token=…` receives its token in the URL, so the client writes `embed_at` (`web/src/lib/tokenStorage.ts`). That cookie is not HttpOnly by definition, carries a **different name** than the session cookie `at`, and expires with the token's `exp` — never with a fixed 7-day lifetime. `requireAuth` reads it only as a fallback after `at`.
 - `POST /api/auth/refresh` rotates the refresh token: marks the old one `revokedAt`, creates a new row chained via `replacedById`, same `familyId`.
 - **Reuse detection:** a presented token that is already revoked/replaced is normally a theft signal → the whole family is revoked and the user is force-logged-out. A **5-second grace window** treats a same-device, recently-rotated duplicate as a benign concurrent refresh (multi-tab) and continues the chain instead of revoking.
 - **Client side:** `auth.silentRefresh()` is single-flight per tab (`refreshPromise`) and serialized across tabs via `web/src/lib/refreshLock.ts` (Web Locks API, localStorage fallback). It retries up to 3× before giving up.

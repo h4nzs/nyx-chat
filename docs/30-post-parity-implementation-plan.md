@@ -85,7 +85,7 @@ Status `docs/29` §8 (dengan bukti pengunci):
 
 | # | Item `docs/29` | Status | Bukti |
 |---|---|---|---|
-| 1 | Gate + binding credential (§7.1) | ✅ | `server/tests/credentialIssuance.test.ts` |
+| 1 | Gate + binding credential (§7.1) | ⛔ dihapus 2026-10-23 | `server/tests/credentialIssuance.test.ts` (dihapus; grup kini token-first — docs/26 banner, docs/35 Fase 6) |
 | 2 | Verification state → keychain + hard gate (§7.2) | ✅ | `web/src/lib/__tests__/peerIdentityTrust.test.ts` |
 | 3 | Buang fallback STUN Google (§7) | ✅ | `server/tests/turnIceServers.test.ts` |
 | 4 | Bucket/`ENC1:` metadata lokal (§7.3) | ✅ (subset; penuh di WS-F) | `web/src/lib/__tests__/localAtRest.test.ts` |
@@ -834,7 +834,7 @@ Sebuah item dianggap selesai hanya bila **semuanya** benar:
 | WS-G(2): sinyal operasional | ✅ | Wiring relay per opcode + blokir keamanan + sweeper (durasi, last-run, baris terhapus) |
 | WS-G(2): alert | ✅ (di-drill 2026-10-14) | `ops/prometheus/{prometheus.yml,alerts.yml}` — **14 aturan** (sejak M1: 10, ditambah seri KT + backup/snapshot), termasuk `NyxMetricsIdentityLeakAttempt`. Tiap aturan punya kasus drill (`ops/prometheus/tests.yml`) dan drill-nya dijalankan satu perintah (`scripts/drill-alerts.sh`, 4 lapis); 3 aturan pertama kali di-drill mengeluarkan label yang tidak sesuai dugaan (mis. `NyxSweeperStale` menandai sampel terakhir yang `result="ok"`, `NyxMetricsExporterDown` menambah `job="nyx-api"`) — kelas kesalahan yang hanya terlihat kalau aturan benar-benar dijalankan terhadap seri time |
 | WS-G(3): load test | ✅ (terukur 2026-10-14) | `scripts/load/relay.k6.js` + `scripts/load/run-relay-load.sh` (SMOKE 5 VU dulu, baru beban penuh) + `server/scripts/load-test-user.ts`. **Hasil:** 500 VU, 3.235 iterasi, 6.472 request / 24,6 req/s — send p95 **74,4 ms**, fetch p95 **68,8 ms** (gate < 200 ms), `http_req_failed` **0%**, `nyx_relay_errors` **0%**, checks 6470/6470 |
-| WS-G(4): test perilaku otorisasi | ✅ (sebagian) | `server/tests/credentialAuth.test.ts` — matriks gate §7.1 dengan fake Prisma; logika dipindah ke `server/src/utils/credentialAuth.ts` agar bisa diuji perilaku |
+| WS-G(4): test perilaku otorisasi | ✅ (sebagian) | `server/tests/credentialAuth.test.ts` + `server/src/utils/credentialAuth.ts` **dihapus 2026-10-23** bersama credential; otorisasi grup sekarang di `utils/groupAccess.ts` + `utils/adminCapability.ts` (locked oleh `tests/groupAccess.test.ts`) |
 | WS-G(4): sisa endpoint | ✅ | Ditutup bertahap: `sessions.ts` → `utils/sessionRevocation.ts` (+3 test), jalur admin grup → `utils/groupAccess.ts` (+17 test), dan **`keys.ts` prekey-bundle/OTPK** → `utils/keyBundle.ts` (`toOneTimePreKey`/`toPreKeyBundle`/`requireBundleDevice`, 9 test, termasuk urutan **kuota sebelum konsumsi OTPK** yang gagal-tutup dan kasus OTPK habis yang tetap sah tanpa `oneTimePreKey`) |
 | WS-G(6): vektor DR/sender-key libsignal | ~~⬜~~ **usang — lihat baris M4 "WS-G(6): vektor DR/X3DH lintas-implementasi"** | Rencana libsignal sebagai oracle diganti oracle Go non-libsodium yang bisa dibangun dari repo (`tools/dr-oracle/`) |
 | WS-F: seal sisa kolom struktural | ~~⬜~~ **usang — lihat baris M2 "WS-F: seal kolom struktural"** | Rencana lama (butuh skema urutan terenkripsi eksplisit) digantikan pendekatan yang landed: `orderBucketMs` plaintext sebagai lapis indeks + lapis presisi ter-seal, dan kolom non-pengurutan di-seal di tempat. Sisa satu-satunya: verifikasi E2E di browser (profil pengguna nyata) |

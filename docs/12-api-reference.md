@@ -1,6 +1,6 @@
 # 12 — API Reference (complete catalog)
 
-Base URL: `https://api.nyx-app.my.id/api`. All request bodies are JSON (limit 1MB; uploads 1MB). Cookies: `at` (access, 15m) and `rt` (refresh, 30d), HttpOnly. CSRF: header `CSRF-Token` for non-GET when cookies are used. Most routes require `requireAuth` (cookie or `Authorization: Bearer`).
+Base URL: `https://api.nyx-app.my.id/api`. All request bodies are JSON (limit 1MB; uploads 1MB). Cookies: `at` (access, 15m) and `rt` (refresh, 30d), HttpOnly. `GET /api/engine/rooms` embeds hand the page a token in the URL; the client stores it as `embed_at` — a separate, non-HttpOnly cookie whose lifetime equals the token's `exp` — and `requireAuth` accepts it as a fallback after `at` (`docs/20` §20.3). CSRF: header `CSRF-Token` for non-GET when cookies are used. Most routes require `requireAuth` (cookie or `Authorization: Bearer`).
 
 Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. Responses are JSON; errors use `{ "error": "..." }`.
 
@@ -36,7 +36,8 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | GET | `/pow/challenge` | requireAuth | PoW challenge for trust verification |
 | POST | `/pow/verify` | requireAuth | Submit PoW solution → verified tier |
 | GET | `/transport-ticket` | requireAuth | Short-lived ticket for WebTransport connect |
-| POST | `/burner` | public | Create a burner guest session |
+| POST | `/burner` | public | Create a burner guest session (`burnerLimiter`: 30/jam per IP) |
+| POST | `/ohttp-token` | requireAuth + CSRF | Token bearer 120 dtk, `scope=ohttp`, hanya sah untuk target allowlist OHTTP; diletakkan **di dalam amplop** (cookie `HttpOnly` tidak bisa dibaca JS). `404` bila `OHTTP_ENABLED` kosong |
 
 ## users — `/api/users`
 
@@ -51,7 +52,8 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | GET | `/me/devices` | List own devices |
 | DELETE | `/me/devices/:deviceId` | Remove a device |
 | GET | `/me/blocked` | List blocked users |
-| GET | `/search?q=<hash>` | Search by usernameHash (blind index) |
+| GET | `/search?q=<hash>` | Search by usernameHash (blind index). Hanya hash yang diterima: 43-char base64url (Argon2id) atau 64-hex (index OPRF/legacy) — nilai mentah ditolak `400 INVALID_IDENTIFIER_HASH` |
+| POST | `/search/oprf` | Evaluasi OPRF: `{blinded}` (32 byte base64url) → `{suite, evaluated}`. Publik + CSRF; `503 PIR_OPRF_DISABLED` bila `PIR_OPRF_ENABLED` kosong. Index akhir dihitung klien (`docs/35` Fase 4a) |
 | GET | `/:id` | Public profile + latest device public keys (for safety numbers) |
 | POST | `/:id/block` / DELETE `/:id/block` | Block / unblock |
 
@@ -60,27 +62,43 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/` | Create (1:1 or group). Group create **must** carry `adminSecretHash` (SHA-256 hex of the admin capability token) — missing → 400. Sandbox: 3/day for unverified → `SANDBOX_LIMIT` |
-| GET | `/sync?ids=…` | Fetch conversations (Opaque Mailbox). Token-first discovery: client sends `X-Delivery-Tokens` (base64url, cap 500) — no userId join |
-| GET | `/credential-issuer-key` | Blind-RSA credential issuer public JWK + `keyVersion` (Blueprint 26.8.1) |
-| POST | `/credential-issuance` | `{conversationId, blindedMsg}` (base64url, ≤512B) → `{blindSig, keyVersion}`; server sees only the blinded message; quota 3/(user,conv)/day (429 `CREDENTIAL_QUOTA`) |
-| POST | `/credential-commit` | `{conversationId, keyVersion, serial}` after client finalize — binds serial↔conversation for verification/revocation |
-| POST | `/:id/credential-revoke` | `{serials[]}` (≤500) + `X-Group-Token` — revokes group credentials on kick/leave |
+| GET | `/sync?ids=…` | Fetch conversations **by id** (Opaque Mailbox). Discovery token-first pindah ke `POST /api/groups/sync` (tanpa cookie/JWT, lihat bagian `groups`) |
 | GET | `/:id` | Single conversation |
 | PUT | `/:id/details` | Update `{encryptedMetadata}` — requires `X-Group-Token` (member blind auth) **and** `X-Admin-Token` (checked against `adminSecretHash` via `requireAdminCapability`; NULL hash = fail-closed) |
 | POST | `/:id/participants` | Broadcast participant add intent (blind) |
-| DELETE | `/:id/participants/:userId` | Broadcast participant remove intent |
+| DELETE | `/:id/participants/:userId` | **Admin-only** (`X-Admin-Token`): removes member and atomically rotates group auth secret; returns `{ authSecret }` for encrypted metadata redistribution |
 | DELETE | `/:id/leave` | Leave group (blind token) |
 | POST | `/:id/pin` | Pin/unpin conversation |
 | POST | `/:id/key-rotation` | Request sender-key rotation — requires `X-Admin-Token` (fail-closed when `adminSecretHash` is NULL) |
 | DELETE | `/:id/group` | **Admin-only purge** (`X-Admin-Token`): deletes the conversation + messages + delivery tokens, emits `conversation:deleted`; 409 `MEMBERS_REMAIN` while non-owner delivery tokens still exist |
 | DELETE | `/:id` | Delete/hide conversation |
 
+## groups — `/api/groups` (token-first, tanpa cookie/JWT)
+
+Router dipasang **sebelum** lapisan CSRF (`app.ts`): semua endpoint diautentikasi
+possession token di body, atau capability admin (`X-Admin-Token`) di header. Tidak
+ada handler yang menulis/membaca `userId` (`docs/37` §37.3).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/sync` | Discovery anonim: `{tokens[], ids?, proofs?}` → `{conversations, memberships, unknown}`. `proofs` = token Privacy Pass (satu token = satu sync, terikat `conversationId`). `PP_SYNC_REQUIRED=1` → 403 `PP_PROOF_REQUIRED` tanpa bukti sah. Allowlist OHTTP: `POST` (body ≤ 64 KB) |
+| POST | `/token/refresh` | `{token}` (member token) → `{expiresAt, epoch}`; 410 `TOKEN_STALE` bila era sudah lewat |
+| POST | `/:id/mailbox` | `{token, items[{kind,tag?,payload}]}` — ≤32 item, payload base64url ≤8 KB, kind ∈ `KEY_REQUEST\|KEY_ENVELOPE\|META\|COVER` → 201 `{written, epoch}` |
+| POST | `/:id/mailbox/pull` | `{token, cursor?, limit?}` → `{epoch, items, nextCursor, truncated}` (filter era + TTL 7 hari, ≤200 item) |
+| GET | `/:id/epoch` | Admin capability → `{epoch, rotatedAt, createdAt, messageSeq}` — dasar keputusan rotasi PCS di klien (`docs/37` §37.3.6) |
+| POST | `/:id/epoch` | Admin capability → rotasi group token `{token, epoch, expiresAt}`; token mentah hanya dikembalikan ke pemegang capability |
+| DELETE | `/:id/membership` | Revoke oleh pemegang token: hapus barisnya sendiri (epoch **tidak** naik) |
+| GET | `/pp/issuer` | `{suite, keyId, publicJwk}` — kunci verifikasi Privacy Pass |
+| POST | `/pp/issue` | `{groupToken, memberToken, blinded[]}` → `{signatures, suite, keyId}`; issuer menandatangani pesan ter-blind (tidak melihat isinya) |
+| POST | `/pp/redeem` | `{conversationId, tokens[]}` → `{accepted, spent, invalid}`; 403 bila tidak ada yang diterima |
+| POST | `/:id/credential/present` | Body biner (`application/octet-stream`); verifier fail-closed — build ini tanpa issuer, jadi selalu 403 |
+
 ## messages — `/api/messages`
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/:conversationId?limit=250` | Pending store-and-forward messages (last 14 days) |
-| POST | `/` | Send (blind relay): `{conversationId, content, sessionId?, tempId?, expiresIn?, isViewOnce?, targetRecipients? (≤500)}` |
+| POST | `/` | Send (blind relay): `{conversationId, content, sessionId?, tempId?, expiresIn?, isViewOnce?, targetRecipients? (≤500; ≤2 untuk GUEST)}`. Conversation tak dikenal → **404** (dulu 500) |
 | DELETE | `/:id` | Blind delete — header `X-Delete-Token` must match `deleteSecret` (constant-time); `?r2Key=` cleans the R2 blob |
 
 ## keys — `/api/keys`
@@ -124,9 +142,8 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/presigned` | R2 presigned upload URL (uploadLimiter) |
-| POST | `/burner-presigned` | Presigned upload for burner guests |
-| POST | `/groups/:id/avatar` | Set group avatar URL |
+| POST | `/presigned` | R2 presigned upload URL (`uploadLimiter`). `fileSize` (byte) **wajib**: angka itu dipakai sebagai `ContentLength` yang ikut ditandatangani (`X-Amz-SignedHeaders`), jadi R2 menolak body yang lebih besar/kecil — batas 5 MB avatar/grup, 100/500 MB lampiran (FREE/SUBSCRIBER) |
+| POST | `/burner-presigned` | Presigned upload untuk guest burner (tanpa akun); batas 50 MB, `fileSize` juga dikunci di tanda tangan |
 
 ## backup — `/api/backup`
 
@@ -140,7 +157,7 @@ Backup ber-frame terenkripsi (`.nyxbak`) — lihat `docs/31`. Server hanya melih
 
 Objek backup juga dihapus saat akun dihapus (`DELETE /api/users/me`, langkah 1b): kuncinya tidak memuat userId, sehingga filter lampiran berbasis prefix `${userId}-` tidak pernah mencakupnya.
 
-Batasan yang jujur: kuota ditegakkan terhadap `size` yang **diklaim klien** (sama seperti `/api/uploads/presigned`); penegakan keras ada di kebijakan bucket/lifecycle R2. Rotasi `BACKUP_KEY_SECRET`/`JWT_SECRET` membuat backup awan lama tidak bisa ditemukan lagi.
+Batasan yang jujur: `size` yang dikirim klien dipakai sebagai `ContentLength` yang **ikut ditandatangani**, sehingga satu PUT tidak bisa melebihi ukuran yang disetujui (R2 menolak body dengan panjang berbeda) — sama seperti `/api/uploads/presigned`. Pemakaian kumulatif per akun tetap tidak dihitung server (unggahan berikutnya menimpa objek yang sama); kuota total tetap urusan kebijakan bucket/lifecycle R2. Rotasi `BACKUP_KEY_SECRET`/`JWT_SECRET` membuat backup awan lama tidak bisa ditemukan lagi.
 
 ## burner — `/api/burner`
 
@@ -152,7 +169,7 @@ Status room Burner Chat (`/drop`). Hanya berisi satu bit informasi per room — 
 
 Kenapa ada: destroy hanya disiarkan sebagai event realtime `burner:terminated` ke anggota room yang sedang terhubung. Guest yang offline, belum sempat `burner:join`, atau sudah berganti identitas setelah reload tidak akan pernah menerimanya — dulu halaman `/drop` bahkan tidak punya cara bertanya, sehingga room yang sudah mati tetap bisa dibuka (bahkan setelah refresh). Klien memanggil endpoint ini di `initializeFromHash` dan menolak render bila `terminated: true` (plus menulis penanda lokal `burned_<roomId>`).
 
-Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burner:send` (ACK `{ok}` / `{ok:false, error:'ROOM_TERMINATED'}`), `burner:reply` (ACK `{ok, notified}`), `burner:destroy` (ACK `{ok, notified}`; menyimpan `burner:terminated:<roomId>` TTL 24 jam sebelum menyiarkan `burner:terminated` ke anggota lalu menghapus set room).
+Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burner:send` (ACK `{ok}` / `{ok:false, error:'ROOM_TERMINATED'}`), `burner:reply` (ACK `{ok, notified}`), `burner:destroy` (ACK `{ok, notified}`; menyimpan `burner:terminated:<roomId>` TTL 24 jam sebelum menyiarkan `burner:terminated` ke anggota lalu menghapus set room). Ketiga event kirim dibatasi 30/menit per pengirim, dan guest hanya boleh menyebut ≤2 `targetRecipients` (identitas guest bisa dibuat berulang — lihat `utils/guestPolicy.ts`).
 
 ## previews — `/api/previews`
 
@@ -166,7 +183,7 @@ Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burn
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/create-crypto-transaction` | NOWPayments transaction (requireAuth) |
-| POST | `/nowpayments-webhook` | NOWPayments IPN (HMAC, constant-time) |
+| POST | `/nowpayments-webhook` | NOWPayments IPN (HMAC, constant-time). Idempoten per `payment_id`; 503 `WEBHOOK_NOT_CONFIGURED` bila `NOWPAYMENTS_IPN_SECRET` kosong |
 
 ## engine — `/api/engine` (B2B, tenant auth)
 
@@ -209,6 +226,29 @@ Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burn
 | GET | `/oauth-protected-resource` | Protected-resource metadata |
 | GET | `/mcp/server-card.json` | MCP server card |
 | GET | `/agent-skills/index.json` | AI-agent skill index |
+
+## ohttp — `/api/ohttp` (docs/35 Fase 3, docs/10 §10.18)
+
+Router hanya dipasang bila `OHTTP_ENABLED=1` (tanpa itu semuanya 404). Body adalah biner opaque (`message/ohttp-req`), maksimal 8 MB; tidak pernah di-parse JSON.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/config` | `application/ohttp-keys`: seluruh slot rotasi (key id 1 aktif, id 2 bila `OHTTP_NEXT_*` diisi). Publik |
+| POST | `/relay` | Amplop → gateway. **404 `OHTTP_RELAY_EXTERNAL`** bila relay dijalankan proses terpisah (`OHTTP_RELAY_EXTERNAL=1`, nginx → `:4100/relay`) |
+| POST | `/gateway` | Buka amplop, tolak target di luar allowlist (`403 OHTTP_TARGET_NOT_ALLOWED` di dalam amplop), sanitasi header jaringan, teruskan ke loopback. Key id tak dikenal / amplop rusak → `400 OHTTP_INVALID_REQUEST` |
+
+Rate limit 120/menit per IP. Allowlist default: `GET /api/users/search`, `GET /api/keys/prekey-bundle/:id`, `POST /api/pir/query`, `POST /api/groups/sync` (batas body 64 KB).
+
+## pir — `/api/pir` (docs/35 Fase 4b, docs/10 §10.19)
+
+Router hanya dipasang bila `PIR_ENABLED=1`; server hanya mem-proxy byte ke sidecar ChalametPIR loopback (`PIR_SERVICE_URL`), tidak ada kripto PIR di Node.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/params` | requireAuth. `{epoch, recordBytes, entryCount, suite, arity, seed, hint, filter}` (~11 MB pada index kecil) + `ETag`; `304` bila `If-None-Match` cocok |
+| POST | `/query` | requireAuth + biner opaque (`application/octet-stream`, 8 MB). Dikirim **lewat OHTTP** dengan token ber-scope di amplop; CSRF dilewati hanya bila request tidak membawa cookie sesi. `503 PIR_UNAVAILABLE` bila sidecar mati |
+
+Tidak ada `PIR_SERVICE_URL` valid / sidecar tanpa index = `503`; snapshot kosong tidak bisa dibangun (`pir:snapshot` menolak 0 user ber-`oprfIndex`).
 
 ## Misc
 

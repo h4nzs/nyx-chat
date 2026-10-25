@@ -59,7 +59,6 @@ Definisi selesai untuk Tier A:
    - `crypto_scalarmult` / X25519 DH standalone,
    - `crypto_box_seal` untuk data aplikasi,
    - `crypto_sign_ed25519_*` untuk identity, prekey, group, recovery,
-   - RSA blind signature untuk credential,
    - ECVRF/Ed25519 untuk autentikasi log KT.
 2. X25519 hanya boleh muncul **di dalam X-Wing** sebagai hedge. X-Wing tetap
    dipakai sesuai keputusan pemilik proyek.
@@ -86,7 +85,7 @@ sebagai exception, bukan diabaikan.
 | Group | Sender Key + Ed25519 signature | worker `group_*` |
 | Key delivery | `pq_box_seal` = X25519 + X-Wing | `web/src/utils/crypto.ts` |
 | Burner | v1: X25519 + X-Wing; v2: X-Wing saja (`pqOnly`) | worker `burner_dr_*`, `web/src/store/burner.ts` |
-| Credential | blind RSA 2048 | `server/src/lib/groupCredentials.ts` |
+| Credential | **dihapus 2026-10-23** — token-first delivery token | — |
 | Key Transparency | Ed25519 tree head + ECVRF-Ed25519 | `server/kt-query`, `vendor/signal/libsignal-keytrans` |
 
 Temuan penting: jalur yang disebut “PQ” saat ini hampir selalu **hybrid**.
@@ -286,17 +285,6 @@ model PreKeyBundle {
   cryptoVersion  Int    @default(1)
 }
 
-model CredentialIssuerKey {
-  // existing...
-  suite          String?
-}
-
-model GroupCredential {
-  // existing...
-  suite          String?
-}
-```
-
 Catatan:
 - `Device.pqPublicKey` (X-Wing identity), `PreKeyBundle.pqIdentityKey`
   (X-Wing identity), `PreKeyBundle.pqKey` (X-Wing signed prekey), dan
@@ -487,16 +475,17 @@ interface CredentialSuite {
 }
 ```
 
-- Suite v1 = RSA blind signature; tetap ada selama migrasi.
-- Suite v2 = BRaccoon (pilot) atau blind UOV (fallback).
+- **Dihapus 2026-10-23:** suite v1 (RSA blind signature) dan seluruh credential
+  tidak ada lagi; grup memakai token-first.
+- Suite v2 (BRaccoon/blind UOV) tetap riset; belum ada implementasi.
 - API issuer key mengembalikan `suite`; client memilih suite yang didukung.
 - Credential disimpan di IndexedDB (`ENC1:`), bukan hanya memory.
 - Commit di-await; jika gagal, credential tidak di-cache.
 - Revoke dipanggil saat kick/leave; serial dipersist.
 
-Status (2026-10-21): suite mengalir dari issuer key → `worker_credential_blind`
-(`suite`) → verifikasi server (`GroupCredential.suite`/`CredentialIssuerKey.suite`
-diisi saat issuance; baris legacy nullable tetap v1/RSA). Credential dipersist
+Status historis — **dihapus 2026-10-23** (jangan dijadikan acuan): suite mengalir dari issuer key → `worker_credential_blind`
+(`suite`) → verifikasi server (dulu `GroupCredential.suite`/
+`CredentialIssuerKey.suite`; kedua model sudah dihapus). Credential dipersist
 di Dexie **v15** (`groupCredentials`, blob `ENC1:`), jadi reload tidak memicu
 issuance ulang: `ensureCredential` memuat baris tersimpan sebelum issuance,
 commit **di-await** (gagal → credential tidak di-cache/dipersist dan
@@ -570,8 +559,7 @@ Status (2026-10-19; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **selesai, belum d
 (pinned exact), `cryptoSuite.ts`, capability `pq-v2` (shared + Rust + client
 lewat `advertisedPqCapabilities()`, dulu `VITE_PQ_V2=1`), kolom
 schema aditif (`Device.signingKeyV2`/`cryptoVersion`,
-`PreKeyBundle.signatureV2`/`cryptoVersion`, `GroupCredential.suite`,
-`CredentialIssuerKey.suite`), dan `scripts/check-pq-only.mjs` +
+`PreKeyBundle.signatureV2`/`cryptoVersion`), dan `scripts/check-pq-only.mjs` +
 `scripts/pq-only-baseline.json` + CI step `PQ-only guard` sudah ada. Belum ada
 perubahan wire dan belum ada kode jalur v2. Tiga error oxlint yang sudah merah
 di HEAD ikut diperbaiki agar gate tetap hijau.
@@ -851,6 +839,15 @@ Yang TIDAK diklaim: metadata (graf, timing, volume) tidak hilang oleh fase ini;
 OHTTP/HPKE tetap Tier B classical; relay dan gateway masih di host yang sama
 sehingga operator VPS tetap melihat IP.
 
+**Update 2026-10-25:** relay sekarang bisa dijalankan sebagai **proses
+terpisah** (`server/src/ohttp/relay.ts`, unit `ops/systemd/nyx-ohttp-relay.service`,
+Docker service `ohttp-relay`, `OHTTP_RELAY_EXTERNAL=1` mematikan `/relay` di
+API). Pemisahan ini menghapus korelasi IP↔isi di **log/state aplikasi**, bukan
+pemisahan jaringan: host yang sama masih bisa mengorelasikan lewat waktu.
+Relay membuang seluruh header klien dan menolak gateway target non-loopback
+kecuali host tersebut disebut di `OHTTP_GATEWAY_TRUSTED_HOSTS`. Lihat
+`docs/10` §10.18 dan `docs/37` §37.4 P7.
+
 #### Desain relay & gateway OHTTP (2026-10-20)
 
 Topologi yang dipilih: **self-hosted, dua peran pada jalur yang sama** — tidak
@@ -898,7 +895,10 @@ client ──message/ohttp-req──▶ relay /api/ohttp/relay
   `VITE_OHTTP_ENABLED=1`. Untuk token-off same-host: `OHTTP_TOKEN_MODE=off` dan
   `VITE_OHTTP_TOKEN_MODE=off` (relay wajib loopback; `/relay` tetap auth+CSRF).
   Default mati di kedua sisi: saat mati router tidak dipasang (404). Rotasi
-  kunci dua slot dan metrik `nyx_ohttp_ops_total` sudah landed.
+  kunci dua slot dan metrik `nyx_ohttp_ops_total` sudah landed. Relay proses
+  terpisah (`OHTTP_RELAY_EXTERNAL=1` + `nyx-ohttp-relay`) landed 2026-10-25
+  (docs/10 §10.18). **Di selfhost `~/nyx-selfhost` OHTTP sudah dinyalakan
+  2026-10-25** (gateway + relay + token mode `on`); default repo tetap mati.
 
 Pekerjaan (semua ✅ landed di kode, default mati):
 - ✅ OHTTP client worker + relay/gateway untuk REST.
@@ -964,7 +964,9 @@ Pekerjaan:
   ~2 KB per OPRF index, arity 3 default). Snapshot epoch offline + `/params`
   (hint/filter/seed) + `/query` opaque + `/admin/rebuild` loopback; proxy
   Node `/api/pir/*` hanya meneruskan byte setelah auth + rate limit, tanpa
-  kripto PIR di JS. Default **mati** (`PIR_ENABLED=1`). Snapshot awal
+  kripto PIR di JS. Default **mati** (`PIR_ENABLED=1`). **Di selfhost sudah
+  dinyalakan 2026-10-25** bersama OPRF/OHTTP (docs/10 §10.19); default repo
+  tetap mati. Snapshot awal
   dibangun manual lewat `pnpm --filter nyx-server run pir:snapshot`; job
   harian `pirSnapshot` (04:15) membangun ulang snapshot dari user ber-
   `oprfIndex`, menulis atomik ke `PIR_SNAPSHOT_PATH` (absolut, dibaca
@@ -998,11 +1000,15 @@ Acceptance:
   benchmark harness 4d sudah landed, sedangkan angka host produksi dan audit
   eksternal belum. Batasan lengkap di §35.11 #3.
 
-### Fase 5 — Credentials PQ
+### Fase 5 — Credentials PQ (dihapus 2026-10-23)
+
+> **Dihapus 2026-10-23.** Pekerjaan di bawah adalah rencana historis; tidak ada
+> implementasi aktif. Credential PQ hanya boleh dimulai setelah primitive, test
+> vector, benchmark, dan audit tersedia.
 
 Pekerjaan:
 - Refactor `CredentialSuite` di shared/server/client.
-- `CredentialIssuerKey.suite`, `GroupCredential.suite`, API `suite`.
+- ~~`CredentialIssuerKey.suite`, `GroupCredential.suite`, API `suite`~~ (model dihapus 2026-10-23).
 - Persist credential di IndexedDB; await commit; validasi serial hex.
 - Revoke saat kick/leave; admin capability check.
 - BRaccoon research spike:
@@ -1167,7 +1173,7 @@ Residual non-kode (tidak memblokir Fase 8 di repo):
   `pnpm --filter nyx-server run audit:v1`
   (`server/scripts/audit-v1-residuals.ts`, read-only). Skrip menghitung agregat:
   Device tanpa `signingKeyV2`, PreKeyBundle tanpa `signatureV2`, OneTimePreKey
-  klasik, GroupCredential bersuite NULL, dan amplop pesan X3DH v1 / grup
+  klasik, dan amplop pesan X3DH v1 / grup
   `sigV` v1. `--json` untuk diproses mesin, `--check` keluar 1 selama masih ada
   sisa v1. Tidak ada id/username/isi pesan yang dicetak.
 - **Benchmark perangkat rendah/baterai**, termasuk keputusan tetap di noble atau
@@ -1223,7 +1229,11 @@ Test yang sudah ada (Fase 0–7):
 Belum ada (fase lanjut):
 - Benchmark perangkat rendah dan baterai (desktop + throttle proxy sudah ada).
 - BRaccoon/blind UOV + dual verify/kill switch untuk credential PQ. Fitur
-  credential v1 **sudah dihapus**; suite baru harus dibangun dari nol.
+  credential v1 **sudah dihapus**; suite baru harus dibangun dari nol. Spike
+  BRaccoon sudah dijalankan dan **ditutup tanpa implementasi** (`docs/37`
+  §37.9): signature level 1 11,5 KB > batas 8 KiB, issuance ≈862 KB estimasi
+  penulis, belum ada implementasi/audit. Gate untuk membuka kembali ada di
+  §37.9.5.
 - Migrasi/arsip data v1 lama — build PQ-only ini tidak punya pembaca v1.
 - Interop `cmd/kt-client` upstream dan dua implementasi auditor berdampingan.
 - PIR 4d: angka host produksi dan audit eksternal. Benchmark harness sudah
@@ -1287,7 +1297,10 @@ Residual yang harus ditulis jujur:
    keputusan library.
 2. BRaccoon: credential v1 sudah dihapus; fitur credential tidak ada di build
    PQ-only ini. BRaccoon/blind UOV hanya relevan jika credential dibangun ulang
-   dari nol — go/no-go setelah spike + audit, fallback blind UOV.
+   dari nol — fallback blind UOV. **Spike 2026-10-25: NO-GO untuk sekarang**
+   (`docs/37` §37.9): signature Raccoon level 1 = 11,5 KB > batas credential
+   8 KiB, issuance ≈862 KB estimasi penulis, belum ada implementasi/test
+   vector/audit. Gate untuk membuka kembali ada di `docs/37` §37.9.5.
 3. PIR: **Diputuskan ulang 2026-10-23 (user): lanjut PIR v1 penuh**,
    menggantikan keputusan tunda 2026-10-21. 4a OPRF sudah landed dan ter-wire
    hibrida (`oprfIndex`, default mati). **4b landed di kode 2026-10-23, belum
@@ -1308,7 +1321,17 @@ Residual yang harus ditulis jujur:
    10,25 MB, setup 600 ms, query 1,53 s/50 KB, respond 30,6 ms/5,9 KB.
    N=100.000 hanya opt-in — setup bisa berjam-jam; direktori besar butuh
    sharding/epoch inkremental. Hint tumbuh lambat dengan N, bukan O(N). Ini
-   bukan angka produksi. **4c landed 2026-10-23:** klien Rust→WASM,
+   bukan angka produksi.
+   **Pengukuran ulang 2026-10-25** (host sama, `PIR_BENCH_SIZES=1000,1 iterasi`,
+   kolom yang sebelumnya tidak dicatat): snapshot 293 ms / 2,67 MB, startup
+   20,6 s, RSS 33,4 MB, hint 9,39 MB, params 12,8 MB & fetch 567 ms, WASM setup
+   924 ms, query 138 ms / 5,5 KB, HTTP respond 39,3 ms / 5,4 KB, process 1,83 ms.
+   N=10.000 (1 iterasi, host sama): snapshot 1.561 ms / 26,7 MB, startup 886 s
+   (~14,8 menit), RSS 128 MB, hint 10,25 MB, params 14 MB & fetch 427 ms, WASM
+   setup 8,3 s, query 1,92 s / 50 KB, HTTP respond 114 ms / 5,9 KB. Angka
+   startup/hint/query konsisten dengan catatan 2026-10-24, dan **startup
+   superlinear** itu yang membuat PIR praktis butuh sharding/epoch inkremental
+   sebelum dipakai di direktori besar — bukan sekadar optimasi nice-to-have. **4c landed 2026-10-23:** klien Rust→WASM,
    worker, hint cache, epoch retry, OHTTP POST + binary response; artefak
    `packages/pir-wasm/dist/pir-client.wasm` masuk manifest reprodusibel dan
    unit test `pirParams`/`pirClient` hijau. **4d tersisa:** angka host
@@ -1337,5 +1360,5 @@ Residual yang harus ditulis jujur:
 - `docs/33-spqr-wasm.md` — ratchet PQ, negosiasi, rollback.
 - `docs/34-key-transparency-verifier.md` — KT verifier, monitor, auditor.
 - FIPS 204 — ML-DSA.
-- RFC 9474 — RSA blind signatures.
+- RFC 9474 — RSA blind signatures (historis; credential dihapus 2026-10-23).
 - draft-ietf-ohai-ohttp — OHTTP.

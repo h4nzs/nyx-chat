@@ -113,7 +113,7 @@ export const MessageSendPayloadSchema = z.object({
   // messages so the server can register (conversation, token) rows for offline
   // discovery without learning the roster beyond routing rows.
   // [T3b] Key = userId, value = token (Zod 4: argumen pertama z.record = schema KEY).
-  targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{22}$/)).optional()
+  targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{43}$/)).optional()
 });
 
 export const IncomingMessageSchema = z.object({

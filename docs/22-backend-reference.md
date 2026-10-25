@@ -10,7 +10,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `src/config.ts` | `env` object (port, cors, secrets, R2, VAPID, CF TURN…); CSRF_SECRET trim; prod JWT guard |
 | `src/app.ts` | Express app: CORS, helmet/CSP, compression, CSRF (`csrf-csrf` keyed per `x-nyx-installation-id`), rate limiters, `/api/csrf-token`, `/health`, error handler |
 
-## 22.2 Route modules (`routes/`, 17)
+## 22.2 Route modules (`routes/`, 23)
 
 | Module | Mount | Notable endpoints |
 |---|---|---|
@@ -30,12 +30,18 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `reports.ts` | `/api/reports` | `user`, `POST /` (bug) |
 | `system.ts` | `/api/system` | `status` |
 | `wellKnown.ts` | `/.well-known` | `api-catalog`, `openid-configuration`, `oauth-*`, `mcp/server-card.json`, `agent-skills/index.json` |
+| `groups.ts` | `/api/groups` | `POST /sync` (token di body, tanpa cookie/JWT — satu-satunya jalur tulis yang boleh lewat OHTTP), mailbox/epoch, `tokens` |
+| `callTokens.ts` | `/api/call-tokens` | `POST /` issue, `POST /resolve` (token acak → sesi, userId tidak pernah di envelope) |
+| `ktQuery.ts` | `/api/keys/kt` | proxy bukti KT (protobuf base64url, tanpa parsing di Node) |
+| `backup.ts` | `/api/backup` | arsip terenkripsi klien (header + chunk), R2 |
+| `ohttp.ts` | `/api/ohttp` | `GET /config` (`application/ohttp-keys`), `POST /relay` (404 bila `OHTTP_RELAY_EXTERNAL=1`), `POST /gateway` — docs/10 §10.18 |
+| `pir.ts` | `/api/pir` | `GET /params`, `POST /query` — proxy byte opaque ke sidecar ChalametPIR; tidak dipasang tanpa `PIR_ENABLED=1` (docs/10 §10.19) |
 
 ## 22.3 Middleware (`middleware/`, 3)
 
 | File | Middleware |
 |---|---|
-| `auth.ts` | `requireAuth` (cookie `at` / Bearer; JTI blacklist; ban cache; sets `req.user`/`req.deviceId`), `requireAdmin`, `verifyAuth` |
+| `auth.ts` | `requireAuth` (cookie `at`, fallback `embed_at` for embed pages, / Bearer; JTI blacklist; ban cache; sets `req.user`/`req.deviceId`). Token ber-`scope=ohttp` (120 dtk) hanya diterima untuk target allowlist OHTTP (`utils/ohttpToken.ts`), jadi token dari amplop tidak bisa dipakai memutasi/mengirim apa pun. `requireAdmin`, `verifyAuth` |
 | `rateLimiter.ts` | `generalLimiter` (300/15m), `authLimiter` (20/h), `uploadLimiter` (20/h) — RedisStore, key = `clientIpTag(req)` (HMAC pepper atas alamat klien, **bukan** IP mentah — `docs/30` §30.12 WS-H) |
 | `tenantAuth.ts` | `requireTenantAuth` (validates `x-nyx-engine-key`) |
 
@@ -47,7 +53,9 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 - `handleKeySync` events: `session:request_key`, `session:fulfill_response`, `messages:distribute_keys` (explicit ACK error — legacy path removed), `group:request_key`, `group:fulfilled_key`, `metadata:updated`, `auth:request_linking_qr` (dipakai `LinkDeviceModal` → `auth:linking_qr_ready`; persetujuan lewat REST `/api/auth/link/*`, lihat docs/14 §14.10), `message:unsend`, `message:view_once_opened`, `push:subscribe`/`unsubscribe`, `burner:*`, `migration:*`, `message:*` status events. (`session:request_missing` was removed: no sender, no listener.)
 - `checkRateLimit` (atomic Lua), `isActiveDeviceAllowed` (60 s cache), `sendAck`. Data buckets live in the handlers (`CHAT_RATE_LIMIT`/`ACK_RATE_LIMIT`/`PRESENCE_RATE_LIMIT`), so the WSS gateway and the WT path share one counter each — see `realtime/gateway.ts` (no local buckets) and `tests/gatewayParity.test.ts`.
 
-## 22.5 Utilities (`utils/`, 36) & lib (`lib/`, 4)
+## 22.5 Utilities (`utils/`, 72) & lib (`lib/`, 3)
+
+Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/utils` adalah daftar lengkap (72 berkas, termasuk `privacyPass`, `groupMailbox`/`groupSync`/`groupTokens`, `keyCustody`, `atRestSecrets`, `syncProofs`, `searchOprf`, `ohttpToken`, `allowedOrigin`, `uploadLimits`, `releaseJitter`, `transportCapability`).
 
 | File | Purpose |
 |---|---|
@@ -57,10 +65,12 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `senderIdentity.ts` | identitas pengirim at-rest (docs/28 Tier 4) |
 | `temporalBucket.ts` | `messageTimeBucket` (15 menit) untuk `createdAt`/`expiresAt`/`lastMessageAt`/`MessageStatus.updatedAt` |
 | `messageSequence.ts` | `seq` per-conversation (urutan & kursor paginasi) |
-| `credentialAuth.ts` | Gate keanggotaan issuance credential + `requireAdminCapability` (docs/29 §7.1) |
+| `authGate.ts` | Satu aturan blacklist JTI + ban (dipakai REST `requireAuth` **dan** realtime gateway) |
+| `ohttpToken.ts` | Token carriage OHTTP (scope/aud `ohttp`, 120 dtk) + `isOhttpScopeRequestAllowed` (allowlist yang sama dengan gateway) |
+| `searchOprf.ts` | Kunci OPRF server dari at-rest pepper + `searchOprfIndexForIdentifier` (isi `User.oprfIndex` saat register/login) |
+| `credentialPresentation.ts` | Verifikasi presentasi token grup (menggantikan credential blind RSA yang dihapus 2026-10-23) |
 | `groupAccess.ts` | Otorisasi jalur grup: add/kick anggota, leave, details, rotasi kunci, purge (`BLIND_AUTH_REQUIRED` / `ADMIN_AUTH_REQUIRED` / `MEMBERS_REMAIN`) |
 | `adminCapability.ts` | `hashAdminToken`/`isAdminTokenValid` (SHA-256, constant-time, NULL hash = fail-closed) |
-| `credentialIssuance.ts` | Kuota + tiket issuance credential blind RSA |
 | `keyBundle.ts` | Pemetaan device Prisma → `IDeviceTemplate`/bundle publik |
 | `sessionKeys.ts` / `sessionRevocation.ts` | Blind relay session key; revokasi sesi (ownership 404, family, blacklist TTL) |
 | `encryptedKeysSync.ts` | Salinan `encryptedPrivateKey` terbaru saat bundle di-upload |
@@ -90,12 +100,15 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `lib/redis.ts` | `redisClient`, `connectRedis` |
 | `lib/sodium.ts` | `getSodium` singleton |
 
-## 22.6 Jobs (`jobs/`, 2)
+## 22.6 Jobs (`jobs/`, 5)
 
 | Job | Schedule | Behavior |
 |---|---|---|
-| `messageSweeper.ts` | every minute | delete expired (>expiresAt or >14d) messages; notify via `message:deleted_batch`; single query for affected conversations |
+| `messageSweeper.ts` | every minute | delete expired (>expiresAt or >14d) messages ordered by `expiresAt` asc (nulls first), 500/page, ≤20 pages per run; notify via `message:deleted_batch`; single query for affected conversations |
 | `systemSweeper.ts` | daily 00:00 | purge expired refresh tokens + session keys, Dead-Man's-Switch account deletion, subscriber downgrade |
+| `cleanup.ts` | daily 00:00 | pembersihan retensi (berkas yatim/R2, baris kedaluwarsa) dengan guard `ADMIN_CLEANUP_*` |
+| `ktSnapshot.ts` | daily 03:30 | unggah snapshot KT terverifikasi terbaru ke R2 (retensi 30 hari, hanya bila `KT_SNAPSHOT_DIR` ada) |
+| `pirSnapshot.ts` | daily 04:15 | bangun snapshot `User.oprfIndex`, tulis atomik ke `PIR_SNAPSHOT_PATH`, hot-swap sidecar lewat `/admin/rebuild` (butuh `PIR_ENABLED` + `PIR_ADMIN_TOKEN`) |
 
 ## 22.7 Redis keys
 

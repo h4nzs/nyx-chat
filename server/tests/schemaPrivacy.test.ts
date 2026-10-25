@@ -123,9 +123,7 @@ test('D6/D7: identifier ber-entropi rendah di-index dengan pepper env', () => {
   assert.match(read('../src/routes/users.ts'), /pepperedIdentifier\(_fp\)/, 'fingerprint device ter-index');
 
   const envExample = read('../.env.example');
-  assert.match(envExample, /NYX_AT_REST_PEPPER=/, 'root .env.example mendokumentasikan pepper');
-  assert.match(read('../.env.example'), /GROUP_ISSUER_KEY_PKCS8=/, 'dan private key issuer');
-  assert.match(read('../.env.example'), /GROUP_ISSUER_KEY_PKCS8=/, 'server/.env.example juga');
+  assert.match(envExample, /NYX_AT_REST_PEPPER=/, 'server/.env.example mendokumentasikan pepper');
 });
 
 test('D4/D9/D10 residual: identitas B2B, label device, anchor instalasi & endpoint push ter-seal', () => {
@@ -151,8 +149,11 @@ test('D4/D9/D10 residual: identitas B2B, label device, anchor instalasi & endpoi
   const push = modelBody(schema, 'PushSubscription');
   assert.doesNotMatch(push, /^\s*endpoint\s+\S/m, 'kolom endpoint plaintext dihapus');
   assert.match(push, /^\s*endpointSealed\s+String\s+@unique/m, 'endpoint ter-seal + tetap unik');
-  assert.match(read('../src/routes/auth.ts'), /endpointSealed: await sealAtRest\(endpoint\)/, 'logout menghapus push via nilai ter-seal');
-  assert.match(read('../src/network/realtimeHandlers.ts'), /sealAtRest\(endpoint\)/, 'subscribe menyimpan endpoint ter-seal');
+  // [docs/37 §37.4 P6] Setelah rotasi key ring, endpoint lama dan baru memakai
+  // kunci berbeda → baca/hapus WAJIB lewat kandidat, bukan satu nilai seal.
+  assert.match(read('../src/routes/auth.ts'), /endpointSealed: \{ in: await sealedLookupCandidates\(endpoint\) \}/, 'logout menghapus push via kandidat nilai ter-seal');
+  assert.match(read('../src/network/realtimeHandlers.ts'), /sealedLookupCandidates\(endpoint\)/, 'subscribe mencari endpoint dengan kandidat kunci seal');
+  assert.match(read('../src/network/realtimeHandlers.ts'), /endpointSealed: endpointCandidates\[0\]!/, 'baris baru memakai nilai kunci aktif');
   assert.match(read('../src/utils/sendPushNotification.ts'), /openAtRest\(sub\.endpointSealed\)/, 'endpoint dibuka HANYA saat mengirim push');
 
   // Jalur B2B menulis identitas ter-seal (bukan plaintext).

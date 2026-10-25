@@ -249,13 +249,14 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     const toastId = toast.loading(t('modals:group_info.toasts.rotating_keys'));
     try {
       // [T1 FIX 2026-09-28] Rotasi manual = rotasi aktif penuh: peta pseudonym
-      // baru (generation+1) + metadata re-encrypt + distribusi kunci era baru
-      // (semua di dalam rotateGroupKey, urutan peta-dulu-lalu-kunci).
-      const { rotateGroupKey } = await import('@utils/crypto');
-      await rotateGroupKey(conversation.id, 'membership_change', true);
+      // baru (generation+1) + metadata re-encrypt + distribusi kunci era baru.
+      // [docs/37 §37.3.6] Sejak P4 rotasi manual juga menaikkan epoch + token
+      // grup (POST /:id/epoch), sehingga token era lama langsung mati — bukan
+      // hanya rantai sender key yang berganti.
+      const { rotateGroupEpochNow } = await import('@lib/groupEpochRotation');
+      const outcome = await rotateGroupEpochNow(conversation.id);
+      if (outcome !== 'rotated') throw new Error(`EPOCH_ROTATION_${outcome}`);
       toast.success(t('modals:group_info.toasts.keys_rotated'), { id: toastId });
-      // Catatan: header X-Admin-Token dikirim di dalam rotateGroupKey →
-      // POST /:id/key-rotation (guard server-side RBAC).
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : t('common:errors.unknown');
       toast.error(t('modals:group_info.toasts.rotate_failed', { error: msg }), { id: toastId });

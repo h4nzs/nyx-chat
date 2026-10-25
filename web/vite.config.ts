@@ -16,6 +16,10 @@ export default defineConfig(({ mode }) => {
   // port sendiri (lihat playwright.ohttp.config.ts) tanpa menyentuh dev server
   // 4000 yang mungkin sedang dipakai. Default tetap 4000.
   const apiProxyTarget = process.env.NYX_E2E_API_PROXY_TARGET || 'http://localhost:4000';
+  // [docs/37 P7] Relay OHTTP proses terpisah (nyx-ohttp-relay). Sama seperti
+  // nginx (`location = /api/ohttp/relay`), path ini HARUS di atas '/api' agar
+  // tidak tertelan proxy API — kalau tertelan, jawabannya 404 OHTTP_RELAY_EXTERNAL.
+  const ohttpRelayTarget = process.env.NYX_OHTTP_RELAY_PROXY_TARGET || 'http://127.0.0.1:4100';
 
   return {
   plugins: [
@@ -126,6 +130,12 @@ export default defineConfig(({ mode }) => {
       allow: ['..']
     },
     proxy: {
+      '/api/ohttp/relay': {
+        target: ohttpRelayTarget,
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/ohttp\/relay/, '/relay'),
+      },
       '/api': {
         target: apiProxyTarget,
         changeOrigin: true,
@@ -151,6 +161,12 @@ export default defineConfig(({ mode }) => {
     port: 4173,
     // Tambahkan Proxy di sini agar preview bisa bicara ke backend lokal
     proxy: {
+      '/api/ohttp/relay': {
+        target: ohttpRelayTarget,
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/ohttp\/relay/, '/relay'),
+      },
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,

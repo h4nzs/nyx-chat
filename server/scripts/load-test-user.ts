@@ -128,7 +128,7 @@ async function main() {
   // (dijalankan berkali-kali tidak menumpuk percakapan).
   //
   // `Conversation` tidak punya relasi `participants` lagi dan baris
-  // `UserHiddenConversation` mensyaratkan `deliveryToken` (unik, diterbitkan
+  // `UserHiddenConversation` mensyaratkan `tokenHash` (unik, diterbitkan
   // klien) + `userId` TER-SEAL — jadi roster sengaja TIDAK dibuat di sini: jalur
   // relay yang diukur tidak membacanya (`POST/GET /api/messages` = opaque
   // mailbox). Kalau kelak load test menyentuh discovery/membership, roster harus

@@ -156,7 +156,9 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
         { duration: 5000 }
       );
       onClose();
-      setTimeout(() => window.location.reload(), 1500);
+      setTimeout(() => {
+        if (typeof window !== 'undefined') window.location.reload();
+      }, 1500);
     } catch (err) {
       console.error('[BackupRestore] restore failed:', err);
       const message = err instanceof Error && /Autentikasi|kunci salah/i.test(err.message)

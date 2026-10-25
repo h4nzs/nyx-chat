@@ -48,6 +48,7 @@ import {
 } from '../src/utils/dumpAudit.js';
 import { conversationScopedTag, deviceInstallationTag, sealAtRest } from '../src/utils/atRestSecrets.js';
 import { routingIdentity } from '../src/utils/routingIdentity.js';
+import { hashGroupToken } from '../src/utils/groupTokens.js';
 import { messageTimeBucket } from '../src/utils/temporalBucket.js';
 
 function argValue(flag: string): string | undefined {
@@ -183,7 +184,9 @@ async function runLive(): Promise<number> {
         data: {
           userId: await routingIdentity(uid),
           conversationId: convId,
-          deliveryToken: `token-${uid}`,
+          tokenHash: hashGroupToken(`token-${uid}-${runId}`),
+          tokenEpoch: 0,
+          expiresAt: new Date(Date.now() + 7 * 86400_000),
         },
       });
     }

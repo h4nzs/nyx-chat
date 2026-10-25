@@ -24,6 +24,7 @@ Optional env: `PROD_CERT_PATH` / `PROD_KEY_PATH` (CA-signed cert in prod; self-s
 2. The sidecar validates the JWT (HS256, exp) and verifies device identity fields.
 3. Sessions are stored in a `DashMap` keyed `"userId:deviceId:uuid"`. **One user = one device**: opening a new session for the same user kicks the previous session (`SESSION_REVOKED` KICK).
 4. Per-message device revalidation (against Redis `active_device:`) is done on the **Node side** (`redisBridge.isActiveDeviceAllowed`) — the sidecar checks only at session start.
+5. The Node relay does **not** re-verify the token: by the time a frame arrives on `nyx:upstream:*`, `userId`/`deviceId` are already the verified values from step 2. The AUTH payload is read there only for `identity` (Layer-2 hardware binding in `redisBridge.ts`); the `token` field is intentionally ignored — do not turn that block into a second verifier.
 
 ## 8.4 Frame protocol
 

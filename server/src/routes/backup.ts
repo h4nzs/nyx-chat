@@ -51,7 +51,9 @@ router.post('/presign', requireAuth, uploadLimiter, async (req, res, next) => {
 
     const key = deriveBackupObjectKey(env.backupKeySecret, userId)
     // Content-Type dikunci `application/octet-stream` (arsip terenkripsi).
-    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', decision.urlTtl)
+    // [AUDIT 2026-10-24] Ukuran arsip yang sudah divalidasi ikut dikunci di
+    // tanda tangan, jadi R2 menolak body yang berbeda dari yang disetujui.
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', decision.urlTtl, decision.size)
 
     incCounter(BACKUP_OPS, { op: 'presign', result: 'ok' })
     res.json({

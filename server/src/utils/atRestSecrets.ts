@@ -22,29 +22,82 @@
  *     Token 256-bit tidak bisa di-brute force, jadi pepper tidak dibutuhkan.
  *
  *  3. `sealAtRest()` / `openAtRest()` — AEAD deterministik (XChaCha20-Poly1305,
- *     nonce = HMAC(pepper, plaintext), envelope `base64url(nonce(24)||ct)` —
- *     format yang sama dengan amplop XChaCha di klien). Untuk nilai yang server
- *     HARUS bisa baca kembali (mis. routing identity / API key tenant): sama-sama
- *     tak terbaca dari dump, tapi tetap reversible untuk lookup & fungsionalitas.
+ *     nonce = HMAC(kunci seal, plaintext)). Untuk nilai yang server HARUS bisa
+ *     baca kembali (mis. routing identity / API key tenant): sama-sama tak
+ *     terbaca dari dump, tapi tetap reversible untuk lookup & fungsionalitas.
  *
- * Semua fungsi memakai satu pepper (`NYX_AT_REST_PEPPER`). Di production pepper
- * WAJIB diset; di dev ia jatuh ke turunan JWT_SECRET (dengan peringatan) supaya
- * onboarding tidak putus. Jangan pernah menulis pepper ke DB/backup.
+ * [docs/37 §37.4 P6] Envelope seal sekarang **ber-versi**:
+ *
+ *   - legacy (tanpa prefiks) = kunci id `0`, diturunkan dari `NYX_AT_REST_PEPPER`.
+ *     Semua baris lama berbentuk ini dan **selalu tetap terbaca** — rotasi tidak
+ *     boleh membuat data hilang.
+ *   - baru = `ENC2:<keyId>:<base64url(nonce||ct)>`, kunci dari key ring
+ *     (`NYX_AT_REST_KEYRING` atau file custody-nya, lihat `utils/keyCustody.ts`).
+ *
+ * Karena kunci berbeda menghasilkan ciphertext berbeda, setiap pencarian nilai
+ * ter-seal WAJIB memakai `sealedLookupCandidates()` (kandidat kunci aktif +
+ * legacy), bukan `sealAtRest()` tunggal. Setelah re-seal selesai hanya kandidat
+ * aktif yang cocok, jadi daftar itu tetap benar.
+ *
+ * Pepper (`NYX_AT_REST_PEPPER`) tetap wajib di production untuk: kunci legacy
+ * id `0` (membaca baris lama) dan seluruh blind index HMAC. Di dev ia jatuh ke
+ * turunan JWT_SECRET (dengan peringatan) supaya onboarding tidak putus. Jangan
+ * pernah menulis pepper/keyring ke DB/backup.
+ *
+ * Batas jujur: rotasi **blind index** (`pepperedIdentifier`) tidak ada di sini.
+ * HMAC satu arah + nilai mentah tidak disimpan server, jadi kolom itu tidak bisa
+ * di-reindex tanpa plaintext dari klien (lihat docs/37 §37.4 P6).
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { env } from '../config.js'
 import { getSodium } from '../lib/sodium.js'
+import { readCustodySecret, type KeyCustodyProvider } from './keyCustody.js'
 
 /** Bentuk nilai yang sudah di-hash SHA-256 hex (pola `adminSecretHash`). */
 const HEX64_RE = /^[a-f0-9]{64}$/
 
 const SEAL_KEY_INFO = 'NYX_AT_REST_SEAL_V1'
+const SEAL_KEY_INFO_V2 = 'NYX_AT_REST_SEAL_V2'
 const NONCE_BYTES = 24
 const SEAL_KEY_MAX = 32
 
+/** Prefiks envelope seal ber-versi (docs/37 §37.4 P6). */
+export const AT_REST_ENVELOPE_V2 = 'ENC2'
+export const AT_REST_KEYRING_ENV = 'NYX_AT_REST_KEYRING'
+export const AT_REST_KEYRING_FILE_ENV = 'NYX_AT_REST_KEYRING_FILE'
+/** Id kunci legacy: diturunkan dari pepper, tanpa prefiks envelope. */
+export const LEGACY_SEAL_KEY_ID = '0'
+const KEY_ID_RE = /^[A-Za-z0-9_-]{1,16}$/
+
 let cachedPepper: string | null = null
-let cachedSealKey: Uint8Array | null = null
+let cachedKeyring: AtRestKeyring | null = null
+/** Key id yang sudah diperingatkan (cegah spam log pada jalur baca panas). */
+const warnedUnknownKeyIds = new Set<string>()
+
+function warnUnknownKeyId (keyId: string): void {
+  if (warnedUnknownKeyIds.has(keyId)) return
+  warnedUnknownKeyIds.add(keyId)
+  console.warn(
+    `[atRestSecrets] Ada nilai ter-seal dengan kunci "${keyId}" yang tidak ada di key ring — ` +
+      'nilai itu TIDAK bisa dibaca. Tambahkan kunci tersebut ke NYX_AT_REST_KEYRING ' +
+      '(jangan menjalankan tanpa key ring setelah re-seal; docs/10 §10.17).'
+  )
+}
+
+export interface AtRestSealKey {
+  id: string
+  /** Kunci AEAD XChaCha20-Poly1305 (32 byte). */
+  key: Uint8Array
+  /** Kunci HMAC untuk nonce deterministik per kunci. */
+  nonceKey: Buffer
+}
+
+export interface AtRestKeyring {
+  activeId: string
+  keys: Map<string, AtRestSealKey>
+  custody: { provider: KeyCustodyProvider; source: string | null }
+}
 
 /** Pepper tunggal untuk semua derivasi at-rest. */
 export function getAtRestPepper(): string {
@@ -174,36 +227,142 @@ export function isHashedToken(stored: string | null | undefined): boolean {
   return typeof stored === 'string' && HEX64_RE.test(stored)
 }
 
-function deriveKey(info: string): Uint8Array {
-  return new Uint8Array(createHmac('sha256', getAtRestPepper()).update(info).digest().subarray(0, SEAL_KEY_MAX))
+/** Kunci legacy id `0` — turunan pepper, persis seperti sebelum P6. */
+function legacySealKey(pepper: string): AtRestSealKey {
+  const key = new Uint8Array(
+    createHmac('sha256', pepper).update(SEAL_KEY_INFO).digest().subarray(0, SEAL_KEY_MAX)
+  )
+  return { id: LEGACY_SEAL_KEY_ID, key, nonceKey: Buffer.from(pepper, 'utf8') }
 }
 
-async function getSealKey(): Promise<Uint8Array> {
-  if (cachedSealKey) return cachedSealKey
-  cachedSealKey = deriveKey(SEAL_KEY_INFO)
-  return cachedSealKey
-}
-
-/** Nonce deterministik dari plaintext — nilai sama → nonce sama → ciphertext sama. */
-function deterministicNonce(plaintext: string): Uint8Array {
-  const digest = createHmac('sha256', getAtRestPepper()).update(`${SEAL_KEY_INFO}:nonce:`).update(plaintext).digest()
-  return new Uint8Array(digest.subarray(0, NONCE_BYTES))
+/** Kunci dari materi key ring (string rahasia, bukan pepper). */
+function sealKeyFromMaterial(id: string, material: string): AtRestSealKey {
+  const seed = Buffer.from(material, 'utf8')
+  const key = new Uint8Array(
+    createHmac('sha256', seed).update(SEAL_KEY_INFO_V2).digest().subarray(0, SEAL_KEY_MAX)
+  )
+  const nonceKey = createHmac('sha256', seed).update(`${SEAL_KEY_INFO_V2}:nonce`).digest()
+  return { id, key, nonceKey }
 }
 
 /**
- * Seal deterministik: `base64url(nonce(24)||ciphertext)`. Deterministik supaya
- * kolom tetap bisa di-lookup dengan `where: { kolom: await sealAtRest(nilai) }`.
+ * Parse `NYX_AT_REST_KEYRING`:
+ * `{"active":"<id>","keys":{"<id>":"<materi rahasia ≥16 char>"}}`.
+ *
+ * Id `0` dicadangkan untuk kunci legacy pepper — operator tidak boleh menimpanya,
+ * karena itu akan membuat baris lama tak terbaca tanpa jejak yang jelas.
  */
-export async function sealAtRest(plaintext: string): Promise<string> {
+function parseKeyring(raw: string): { activeId: string; keys: Map<string, AtRestSealKey> } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('bukan JSON yang valid')
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('harus objek JSON {"active","keys"}')
+  }
+
+  const obj = parsed as Record<string, unknown>
+  const activeId = typeof obj.active === 'string' ? obj.active.trim() : ''
+  if (!KEY_ID_RE.test(activeId)) throw new Error('field "active" wajib berupa id 1–16 karakter [A-Za-z0-9_-]')
+  if (activeId === LEGACY_SEAL_KEY_ID) throw new Error('id "0" dicadangkan untuk kunci legacy pepper')
+
+  const keysRaw = obj.keys
+  if (!keysRaw || typeof keysRaw !== 'object' || Array.isArray(keysRaw)) {
+    throw new Error('field "keys" wajib objek id → materi')
+  }
+
+  const keys = new Map<string, AtRestSealKey>()
+  for (const [id, material] of Object.entries(keysRaw as Record<string, unknown>)) {
+    if (!KEY_ID_RE.test(id)) throw new Error(`id kunci "${id}" tidak valid`)
+    if (id === LEGACY_SEAL_KEY_ID) throw new Error('id "0" dicadangkan untuk kunci legacy pepper')
+    if (typeof material !== 'string' || material.trim().length < 16) {
+      throw new Error(`materi kunci "${id}" harus string ≥16 karakter`)
+    }
+    keys.set(id, sealKeyFromMaterial(id, material.trim()))
+  }
+
+  if (!keys.has(activeId)) throw new Error(`kunci aktif "${activeId}" tidak ada di "keys"`)
+  return { activeId, keys }
+}
+
+/**
+ * Key ring aktif. Tanpa key ring → hanya kunci legacy `0`, yaitu perilaku
+ * sebelum P6 (semua tulisan tetap terbaca oleh build lama = rollback aman).
+ *
+ * Key ring yang **ada tapi tidak valid** melempar, bukan jatuh diam-diam ke
+ * legacy: operator yang mengira rotasi aktif padahal semua tulisan masih format
+ * lama adalah kegagalan yang tak terlihat. Kunci legacy selalu ikut dimuat
+ * supaya baris pra-rotasi tetap terbaca dan lookup ganda tetap bekerja.
+ */
+export function getAtRestKeyring(): AtRestKeyring {
+  if (cachedKeyring) return cachedKeyring
+
+  const legacy = legacySealKey(getAtRestPepper())
+  const custody = readCustodySecret({ envVar: AT_REST_KEYRING_ENV, fileVar: AT_REST_KEYRING_FILE_ENV })
+
+  if (!custody.material) {
+    cachedKeyring = {
+      activeId: LEGACY_SEAL_KEY_ID,
+      keys: new Map([[LEGACY_SEAL_KEY_ID, legacy]]),
+      custody: { provider: 'none', source: null },
+    }
+    return cachedKeyring
+  }
+
+  let parsed: { activeId: string; keys: Map<string, AtRestSealKey> }
+  try {
+    parsed = parseKeyring(custody.material)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'UNKNOWN'
+    throw new Error(`[atRestSecrets] ${AT_REST_KEYRING_ENV} tidak valid: ${reason}`)
+  }
+  parsed.keys.set(LEGACY_SEAL_KEY_ID, legacy)
+  cachedKeyring = {
+    ...parsed,
+    custody: { provider: custody.provider, source: custody.source },
+  }
+  return cachedKeyring
+}
+
+/** Status untuk `/api/admin/system-status` — id & jumlah kunci, tanpa nilai. */
+export function atRestStatus(): {
+  envelope: string
+  activeKeyId: string
+  keyCount: number
+  legacyReadable: boolean
+  custody: { provider: KeyCustodyProvider; source: string | null }
+} {
+  const ring = getAtRestKeyring()
+  return {
+    envelope: ring.activeId === LEGACY_SEAL_KEY_ID ? 'legacy-b64url' : `${AT_REST_ENVELOPE_V2}:<keyId>:<payload>`,
+    activeKeyId: ring.activeId,
+    keyCount: ring.keys.size, // termasuk kunci legacy yang selalu dimuat
+    legacyReadable: ring.keys.has(LEGACY_SEAL_KEY_ID),
+    custody: ring.custody,
+  }
+}
+
+/** Nonce deterministik dari plaintext — nilai sama + kunci sama → ciphertext sama. */
+function deterministicNonce(sealKey: AtRestSealKey, plaintext: string): Uint8Array {
+  const info = sealKey.id === LEGACY_SEAL_KEY_ID
+    ? `${SEAL_KEY_INFO}:nonce:`
+    : `${SEAL_KEY_INFO_V2}:nonce:${sealKey.id}:`
+  const digest = createHmac('sha256', sealKey.nonceKey).update(info).update(plaintext).digest()
+  return new Uint8Array(digest.subarray(0, NONCE_BYTES))
+}
+
+/** Body envelope: `base64url(nonce(24)||ciphertext)`. */
+async function sealWith(sealKey: AtRestSealKey, plaintext: string): Promise<string> {
   const sodium = await getSodium()
-  const key = await getSealKey()
-  const nonce = deterministicNonce(plaintext)
+  const nonce = deterministicNonce(sealKey, plaintext)
   const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
     plaintext,
     null,
     null,
     nonce,
-    key
+    sealKey.key
   )
   const combined = new Uint8Array(nonce.length + ciphertext.length)
   combined.set(nonce, 0)
@@ -211,17 +370,67 @@ export async function sealAtRest(plaintext: string): Promise<string> {
   return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING)
 }
 
-/** Buka hasil `sealAtRest`. Mengembalikan null untuk nilai kosong/rusak. */
+/**
+ * Seal deterministik dengan kunci aktif.
+ *
+ * Tanpa key ring hasilnya identik dengan format lama (`base64url(nonce||ct)`),
+ * jadi deploy build ini sendirian tidak mengubah satu byte pun di DB.
+ */
+/** Envelope lengkap untuk sebuah kunci: legacy tanpa prefiks, selain itu `ENC2:<id>:`. */
+async function sealEnvelope(sealKey: AtRestSealKey, plaintext: string): Promise<string> {
+  const body = await sealWith(sealKey, plaintext)
+  return sealKey.id === LEGACY_SEAL_KEY_ID
+    ? body
+    : `${AT_REST_ENVELOPE_V2}:${sealKey.id}:${body}`
+}
+
+export async function sealAtRest(plaintext: string): Promise<string> {
+  const ring = getAtRestKeyring()
+  const sealKey = ring.keys.get(ring.activeId)
+  if (!sealKey) throw new Error(`[atRestSecrets] kunci aktif "${ring.activeId}" hilang dari key ring`)
+  return sealEnvelope(sealKey, plaintext)
+}
+
+/**
+ * Id kunci sebuah nilai ter-seal: `null` bila bukan envelope yang bisa dibaca,
+ * `'0'` untuk format legacy (tanpa prefiks).
+ */
+export function sealedKeyId(sealed: string | null | undefined): string | null {
+  if (!sealed) return null
+  if (!sealed.startsWith(`${AT_REST_ENVELOPE_V2}:`)) return LEGACY_SEAL_KEY_ID
+  const parts = sealed.split(':')
+  if (parts.length !== 3) return null
+  const id = parts[1] ?? ''
+  return KEY_ID_RE.test(id) ? id : null
+}
+
+/**
+ * Buka hasil `sealAtRest` format lama maupun `ENC2:`.
+ * Mengembalikan null untuk nilai kosong/rusak/**kunci tidak dikenal** — kegagalan
+ * baca key id yang hilang harus terlihat (nilai null), bukan diam-diam plaintext.
+ */
 export async function openAtRest(sealed: string | null | undefined): Promise<string | null> {
   if (!sealed) return null
   try {
+    const keyId = sealedKeyId(sealed)
+    if (!keyId) return null
+    const sealKey = getAtRestKeyring().keys.get(keyId)
+    if (!sealKey) {
+      warnUnknownKeyId(keyId)
+      return null
+    }
+
+    const body = sealed.startsWith(`${AT_REST_ENVELOPE_V2}:`)
+      ? sealed.split(':')[2] ?? ''
+      : sealed
+    if (!body) return null
+
     const sodium = await getSodium()
-    const key = await getSealKey()
-    const raw = sodium.from_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING)
+    const raw = sodium.from_base64(body, sodium.base64_variants.URLSAFE_NO_PADDING)
     if (raw.length <= NONCE_BYTES) return null
     const nonce = raw.subarray(0, NONCE_BYTES)
     const ciphertext = raw.subarray(NONCE_BYTES)
-    const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ciphertext, null, nonce, key)
+    const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ciphertext, null, nonce, sealKey.key)
     return sodium.to_string(plaintext)
   } catch {
     return null
@@ -229,12 +438,22 @@ export async function openAtRest(sealed: string | null | undefined): Promise<str
 }
 
 /**
- * Nilai lookup kanonik kolom sealed: SELALU hasil seal deterministik.
- * [2026-10 legacy purge] Cabang "nilai apa adanya" dibuang — tak ada baris
- * plaintext tersisa, jadi lookup tidak perlu lagi mencocokkan dua bentuk.
+ * Nilai lookup kanonik kolom sealed: kunci aktif DULU, lalu semua kunci lain
+ * di key ring (termasuk legacy `0`).
+ *
+ * [docs/37 §37.4 P6] Rotasi key ring bisa meninggalkan baris di beberapa era.
+ * Kandidat harus mencakup SETIAP kunci yang masih dipertahankan, bukan hanya
+ * aktif + legacy — kalau tidak, baris era sebelumnya tetap bisa dibuka
+ * `openAtRest` tetapi tidak pernah ditemukan lookup.
  */
 export async function sealedLookupCandidates(value: string): Promise<string[]> {
-  return [await sealAtRest(value)]
+  const ring = getAtRestKeyring()
+  const active = ring.keys.get(ring.activeId)
+  if (!active) throw new Error(`[atRestSecrets] kunci aktif "${ring.activeId}" hilang dari key ring`)
+
+  const ordered = [active, ...[...ring.keys.values()].filter((key) => key.id !== active.id)]
+  const candidates = await Promise.all(ordered.map((key) => sealEnvelope(key, value)))
+  return [...new Set(candidates)]
 }
 
 /**
@@ -269,5 +488,6 @@ export function deviceInstallationTag(raw: string): string {
 /** Hanya untuk test: buang cache pepper/key supaya env baru terbaca. */
 export function clearAtRestSecretCacheForTests(): void {
   cachedPepper = null
-  cachedSealKey = null
+  cachedKeyring = null
+  warnedUnknownKeyIds.clear()
 }
