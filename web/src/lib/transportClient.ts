@@ -442,6 +442,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     const data = event.data;
     switch (data.type) {
       case 'CONNECTED':
+        // Event WT yang terlambat setelah fallback tidak boleh menghidupkan
+        // kembali status koneksi: WSS adalah transport aktif saat ini.
+        if (this.mode === 'wss') break;
         this.clearWtTimer();
         this.wtConnecting = false;
         this.connected = true;
@@ -459,21 +462,30 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
         this.emit('connect');
         break;
       case 'DISCONNECTED':
+        // [BUG 2026-10-26] Penolakan WT kedua sudah memindahkan mode ke `wss`,
+        // lalu worker yang sama mengirim DISCONNECTED terlambat. Dulu event itu
+        // tetap `emit('disconnect')`, jadi banner merah menimpa koneksi WSS yang
+        // sudah hidup dan tidak ada yang menyambung ulang. Abaikan event WT
+        // setelah fallback; WSS punya event connect/disconnect sendiri.
+        if (this.mode === 'wss') break;
         this.connected = false;
         this.clearHelloTimer();
         resetCapabilityState(false);
         this.emit('disconnect', data.reason);
         // Hitung sebagai kegagalan bila masih menyambung ATAU sesi baru saja
         // terbuka lalu langsung ditutup (ditolak sidecar — pola loop reload).
-        if (this.mode === 'wt' && (this.wtConnecting || this.wasRecentlyConnected())) {
+        if (this.wtConnecting || this.wasRecentlyConnected()) {
           this.handleWtFailure();
         }
         break;
       case 'ERROR':
+        // Setelah fallback, error dari worker WT yang ditinggalkan bukan lagi
+        // kegagalan transport aktif (WSS). Jangan cemari log/penghitung/status.
+        if (this.mode === 'wss') break;
         console.error("Transport Worker Error:", data.error);
         // Hitung sebagai kegagalan WT saat menyambung atau sesi baru saja
         // gagal (bukan error pinggir saat sesi sudah lama stabil).
-        if (this.mode === 'wt' && (this.wtConnecting || this.wasRecentlyConnected())) {
+        if (this.wtConnecting || this.wasRecentlyConnected()) {
           this.handleWtFailure();
         }
         break;

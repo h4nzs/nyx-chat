@@ -291,6 +291,7 @@ describe('paritas jalur WT ↔ WSS (audit 2026-10-18)', () => {
   const mode = webFile('src/lib/transportMode.ts');
   const gateway = repoFile('server/src/realtime/gateway.ts');
   const sidecar = repoFile('server/transport-sidecar/src/main.rs');
+  const sidecarProtocol = repoFile('server/transport-sidecar/src/protocol.rs');
 
   it('sinyal panggilan (WEBRTC_SIGNAL/ICE) punya rute di KEDUA jalur', () => {
     // Keluar (klien WSS): tabel opcode → event, bukan noop (dulu hilang diam-diam).
@@ -307,8 +308,13 @@ describe('paritas jalur WT ↔ WSS (audit 2026-10-18)', () => {
 
   it('KICK di jalur WT: sidecar mengirim frame DULU, klien memetakannya seperti WSS', () => {
     // Sidecar: frame 0x07 ditulis sebelum koneksi ditutup (dulu hanya close).
-    expect(sidecar).toMatch(/frame\.put_u8\(0x07\)/);
+    // [audit D5] Bentuk frame hidup di crate lib (`protocol::kick_frame`), bukan
+    // dua salinan inline; `main.rs` hanya memanggilnya lalu menutup koneksi.
+    expect(sidecar).toMatch(/let frame = kick_frame\(&payload_kick\);/);
     expect(sidecar).toMatch(/let _ = stream\.finish\(\)\.await;[\s\S]{0,120}conn_kick\.close\(1000u32\.into\(\), b"Kicked by server"\)/);
+    expect(sidecarProtocol).toMatch(/pub const KICK_OPCODE: u8 = 0x07;/);
+    expect(sidecarProtocol).toMatch(/pub fn kick_frame\(payload: &\[u8\]\) -> Vec<u8>/);
+    expect(sidecarProtocol).toMatch(/frame\.push\(KICK_OPCODE\);/);
     // Klien: keputusan device-scoped/banned/logout lewat helper murni bersama.
     expect(client).toMatch(/classifyKickPayload\(json, currentDeviceId\)/);
     expect(client).toMatch(/this\.emit\('force_logout', disposition\.payload\)/);

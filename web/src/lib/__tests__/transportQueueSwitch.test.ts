@@ -60,4 +60,25 @@ describe('WT→WSS queue migration (H2)', () => {
     // Hanya pesan user (SEND_STREAM) yang dipindahkan; START_HANDSHAKE dibuang.
     expect((transportClient as any).wssOfflineQueue.length).toBe(1);
   });
+
+  it('mengabaikan event WT terlambat setelah fallback ke wss (banner tidak merah)', () => {
+    const t = transportClient as any;
+    t.mode = 'wss';
+    t.connected = true;
+    const onDisconnect = vi.fn();
+    const onConnect = vi.fn();
+    t.on('disconnect', onDisconnect);
+    t.on('connect', onConnect);
+
+    t.handleWorkerMessage({ data: { type: 'DISCONNECTED', reason: 'late wt close' } });
+    t.handleWorkerMessage({ data: { type: 'CONNECTED' } });
+    t.handleWorkerMessage({ data: { type: 'ERROR', error: 'late wt error' } });
+
+    expect(onDisconnect).not.toHaveBeenCalled();
+    expect(onConnect).not.toHaveBeenCalled();
+    expect(t.connected).toBe(true);
+
+    t.off('disconnect', onDisconnect);
+    t.off('connect', onConnect);
+  });
 });
