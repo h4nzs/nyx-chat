@@ -232,6 +232,42 @@ test('config: default mati, dan miskonfigurasi saat hidup gagal keras', async ()
   assert.deepEqual(rotated.publicConfigs.map((item) => item.keyId), [OHTTP_KEY_ID, OHTTP_KEY_ID + 1]);
 });
 
+test('config: token internal token-off deterministik lintas worker (F-06)', async () => {
+  const keyPair = await generateOhttpKeyPair();
+  const base = {
+    OHTTP_ENABLED: '1',
+    OHTTP_PRIVATE_KEY: Buffer.from(keyPair.privateKey).toString('base64url'),
+    OHTTP_PUBLIC_KEY: Buffer.from(keyPair.publicKey).toString('base64url'),
+    OHTTP_TOKEN_MODE: 'off',
+    JWT_SECRET: 'jwt-secret-yang-sama-di-semua-worker',
+  };
+
+  // Dua "proses" dengan env identik harus menghasilkan token identik; kalau
+  // tidak, relay di worker A ditolak gateway di worker B (403 acak).
+  const a = loadOhttpConfig(base);
+  const b = loadOhttpConfig(base);
+  assert.ok(a?.internalToken);
+  assert.equal(a!.internalToken, b!.internalToken);
+
+  // Env eksplisit menang (dipakai saat relay berjalan sebagai proses sendiri).
+  const explicit = loadOhttpConfig({ ...base, OHTTP_INTERNAL_TOKEN: 'e'.repeat(32) });
+  assert.equal(explicit!.internalToken, 'e'.repeat(32));
+
+  // Tanpa rahasia bersama: boot gagal, bukan token acak per proses.
+  assert.throws(
+    () => loadOhttpConfig({ ...base, JWT_SECRET: '' }),
+    /OHTTP_INTERNAL_TOKEN atau JWT_SECRET/,
+  );
+  assert.throws(
+    () => loadOhttpConfig({ ...base, OHTTP_INTERNAL_TOKEN: 'pendek' }),
+    /minimal 32 karakter/,
+  );
+
+  // Mode `on` tidak memakai token internal sama sekali.
+  const on = loadOhttpConfig({ ...base, OHTTP_TOKEN_MODE: 'on' });
+  assert.equal(on!.internalToken, undefined);
+});
+
 test('gateway: request terenkripsi dibuka, di-dispatch, dan response bisa dibuka klien', async () => {
   const config = await makeConfig();
   const client = await encapsulateOhttpRequest(config.publicConfigs[0]!, sampleRequest);

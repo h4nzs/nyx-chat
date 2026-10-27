@@ -18,7 +18,7 @@
  * semua klien pindah, slot lama dikosongkan dan key id 3 boleh dibuat.
  */
 
-import { randomBytes } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import {
   OHTTP_AEAD_AES256_GCM,
   OHTTP_GATEWAY_KEY_BYTES,
@@ -89,6 +89,38 @@ function publicConfigFor(keyId: number, publicKey: Uint8Array): OhttpKeyConfig {
   };
 }
 
+/**
+ * [audit F-06] Token internal relay → gateway HARUS sama di semua worker.
+ *
+ * Dulu nilainya `randomBytes(32)` per proses, sementara pm2 menjalankan
+ * `-i max`: relay (worker mana pun) mengirim token yang tidak dikenal worker
+ * penerima, jadi gateway menjawab 403 secara acak. Sekarang urutannya:
+ * `OHTTP_INTERNAL_TOKEN` (eksplisit, dipakai juga saat relay berjalan di proses
+ * terpisah) → HMAC `JWT_SECRET` (deterministik, tanpa env baru) → boot gagal.
+ *
+ * Konsekuensi yang harus dipahami operator: token ini bukan rahasia klien,
+ * hanya pembeda "dipanggil relay internal" vs "dipanggil langsung"; ia bisa
+ * dihitung siapa pun yang memegang `JWT_SECRET` (yaitu proses server sendiri).
+ * Klien TIDAK pernah memegang `JWT_SECRET`, dan header ini dibuang OHTTP.
+ */
+function resolveInternalToken (env: NodeJS.ProcessEnv): string {
+  const explicit = (env.OHTTP_INTERNAL_TOKEN ?? '').trim();
+  if (explicit) {
+    if (explicit.length < 32) {
+      throw new Error('OHTTP: OHTTP_INTERNAL_TOKEN minimal 32 karakter');
+    }
+    return explicit;
+  }
+  const secret = (env.JWT_SECRET ?? '').trim();
+  if (!secret) {
+    throw new Error(
+      'OHTTP: OHTTP_TOKEN_MODE=off butuh OHTTP_INTERNAL_TOKEN atau JWT_SECRET ' +
+        'yang sama di semua worker (kalau tidak, relay acak ditolak gateway)'
+    );
+  }
+  return createHmac('sha256', secret).update('nyx-ohttp-internal-token-v1').digest('base64url');
+}
+
 /** Fitur hidup? Dipakai endpoint token agar mati = 404, bukan 403. */
 export function isOhttpEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.OHTTP_ENABLED === '1';
@@ -136,6 +168,6 @@ export function loadOhttpConfig(env: NodeJS.ProcessEnv = process.env): OhttpConf
     publicConfigs,
     relayTarget,
     tokenMode,
-    internalToken: tokenMode === 'off' ? randomBytes(32).toString('base64url') : undefined,
+    internalToken: tokenMode === 'off' ? resolveInternalToken(env) : undefined,
   };
 }
