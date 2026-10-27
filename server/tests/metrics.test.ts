@@ -16,7 +16,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   defineCounter,
@@ -33,7 +38,12 @@ import {
   SWEEPER_DURATION,
   SWEEPER_LAST_RUN,
 } from '../src/utils/metrics.js';
-import { startMetricsServer, stopMetricsServer, metricsHost } from '../src/utils/metricsEndpoint.js';
+import {
+  startMetricsServer,
+  stopMetricsServer,
+  metricsHost,
+  metricsPortFor,
+} from '../src/utils/metricsEndpoint.js';
 
 const rejectedTotal = (text: string, reason: string): number => {
   const match = text.match(new RegExp(`nyx_metrics_rejected_total\\{reason="${reason}"\\} (\\d+)`));
@@ -165,6 +175,7 @@ test('exporter: hidup di loopback, hanya melayani GET /metrics, dan bisa dimatik
 
   process.env.METRICS_PORT = '19464';
   process.env.METRICS_HOST = '127.0.0.1';
+  process.env.NODE_APP_INSTANCE = '0';
   const server = startMetricsServer();
   assert.ok(server, 'exporter harus jalan pada port uji');
   await new Promise<void>((resolve) => server!.once('listening', () => resolve()));
@@ -201,6 +212,14 @@ test('exporter: hidup di loopback, hanya melayani GET /metrics, dan bisa dimatik
   stopMetricsServer();
   delete process.env.METRICS_PORT;
   delete process.env.METRICS_HOST;
+  delete process.env.NODE_APP_INSTANCE;
+});
+
+test('exporter: port worker = METRICS_PORT + NODE_APP_INSTANCE', () => {
+  assert.equal(metricsPortFor({ METRICS_PORT: '19464' }), 19464);
+  assert.equal(metricsPortFor({ METRICS_PORT: '19464', NODE_APP_INSTANCE: '2' }), 19484);
+  assert.equal(metricsPortFor({ METRICS_PORT: '19464', NODE_APP_INSTANCE: 'rusak' }), 19464);
+  assert.equal(metricsPortFor({ METRICS_PORT: '0', NODE_APP_INSTANCE: '2' }), 0);
 });
 
 test('exporter: METRICS_PORT=0 mematikan endpoint secara eksplisit', () => {
@@ -208,4 +227,24 @@ test('exporter: METRICS_PORT=0 mematikan endpoint secara eksplisit', () => {
   const server = startMetricsServer();
   assert.equal(server, null);
   delete process.env.METRICS_PORT;
+});
+
+test('metrics-targets: file_sd berisi satu port per worker; METRICS_PORT=0 kosong', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'nyx-metrics-'));
+  const script = fileURLToPath(new URL('../../scripts/metrics-targets.mjs', import.meta.url));
+  const out = join(dir, 'nyx-api.json');
+  const run = (...args: string[]) =>
+    execFileSync(process.execPath, [script, ...args, '--out', out], { stdio: 'pipe' });
+
+  try {
+    run('--base', '19464', '--workers', '2');
+    assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), [
+      { targets: ['127.0.0.1:19464', '127.0.0.1:19474'] },
+    ]);
+
+    run('--base', '0', '--workers', '2');
+    assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { emitEventToUsers } from '../network/redisBridge.js';
 import { resolveRoutingUser } from '../utils/routingIdentity.js';
+import { runWithJobLock } from '../utils/jobLock.js';
 
 /** Satu halaman query. Cukup kecil supaya insert/notifikasi antar-halaman tetap responsif. */
 const SWEEP_BATCH_SIZE = 500;
@@ -95,7 +96,9 @@ async function sweepBatch (now: Date, fourteenDaysAgo: Date): Promise<number> {
 export const startMessageSweeper = () => {
   console.log('🧹 Message Sweeper started...');
 
-  cron.schedule('* * * * *', async () => {
+  // TTL 600 dtk > backlog maksimum (MAX_SWEEP_BATCHES_PER_RUN halaman);
+  // 120 dtk bisa habis di tengah drain dan membiarkan worker lain menimpa.
+  cron.schedule('* * * * *', () => runWithJobLock('message-sweeper', 600, async () => {
     try {
       const now = new Date();
       const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
@@ -117,5 +120,5 @@ export const startMessageSweeper = () => {
     } catch (error) {
       console.error('❌ Message Sweeper Error:', error);
     }
-  }, { noOverlap: true });
+  }), { noOverlap: true });
 };

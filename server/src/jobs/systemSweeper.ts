@@ -6,6 +6,7 @@ import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { purgeSealedUserRows } from '../utils/routingIdentity.js';
 import { runCleanup } from './cleanup.js';
+import { runWithJobLock } from '../utils/jobLock.js';
 // [docs/30 WS-G] Metrik event-only untuk sweeper: durasi, hasil, jumlah baris
 // yang dibersihkan per jenis (tanpa identitas apa pun).
 import {
@@ -68,8 +69,10 @@ export async function sweepOnce(now: Date = new Date()): Promise<{ result: 'ok' 
 export const startSystemSweeper = () => {
   console.log('🧹 System Sweeper Job scheduled (Daily at 00:00)...');
 
-  cron.schedule('0 0 * * *', async () => {
+  // [audit F-07] Satu worker saja per hari; `sweepOnce` tetap dipakai jalur
+  // manual (`POST /api/admin/cleanup`) yang sengaja TIDAK dikunci.
+  cron.schedule('0 0 * * *', () => runWithJobLock('system-sweeper', 3600, async () => {
     console.log('[Cron] Memulai pembersihan database harian...');
     await sweepOnce();
-  });
+  }));
 };

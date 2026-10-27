@@ -31,7 +31,7 @@ groups:
       # Penjaga privasi: nilai berbentuk identitas pernah dicoba masuk ke metrik.
       # Harus SELALU 0 di produksi.
       - alert: NyxMetricsIdentityLeakAttempt
-        expr: increase(nyx_metrics_rejected_total[15m]) > 0
+        expr: sum by (reason) (increase(nyx_metrics_rejected_total[15m])) > 0
         for: 0m
         labels:
           severity: critical
@@ -61,7 +61,7 @@ groups:
           description: "Cek pm2 nyx-api (cron in-process) dan log '[Cron]'."
 
       - alert: NyxSweeperFailed
-        expr: increase(nyx_sweeper_duration_seconds_count{result="error"}[26h]) > 0
+        expr: sum by (result) (increase(nyx_sweeper_duration_seconds_count{result="error"}[26h])) > 0
         for: 0m
         labels:
           severity: high
@@ -81,7 +81,7 @@ groups:
       # Blokir keamanan sesi melonjak = indikasi kloning sesi / device di-kick
       # massal / klien stuck di device lama.
       - alert: NyxSecurityBlocksSpike
-        expr: increase(nyx_security_blocks_total[30m]) > 25
+        expr: sum by (op, reason) (increase(nyx_security_blocks_total[30m])) > 25
         for: 15m
         labels:
           severity: warning
@@ -117,7 +117,7 @@ groups:
       #     NaN — perbandingannya selalu false tanpa error apa pun, justru saat
       #     semua pendaftaran ditolak.
       - alert: NyxAttestationRootNotTrusted
-        expr: increase(nyx_attestation_registration_total{result="rejected",reason="root_not_trusted"}[1h]) > 0
+        expr: sum by (result, reason) (increase(nyx_attestation_registration_total{result="rejected",reason="root_not_trusted"}[1h])) > 0
         for: 0m
         labels:
           severity: high
@@ -151,7 +151,7 @@ groups:
       # Gauge diisi saat boot dari metadata yang ditulis skrip refresh; tanpa
       # metadata, seri ini tidak ada dan aturan diam (bukan false positive).
       - alert: NyxAttestationRootExpired
-        expr: nyx_attestation_roots_expired_certs > 0
+        expr: max(nyx_attestation_roots_expired_certs) > 0
         for: 1h
         labels:
           severity: high
@@ -160,7 +160,7 @@ groups:
           description: "nyx_attestation_roots_expired_certs > 0: ada anchor yang sudah lewat validTo dan tidak akan pernah bisa memverifikasi rantai baru. Segarkan bundle dengan `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` lalu restart nyx-api agar gauge dan peringatan boot ikut diperbarui."
 
       - alert: NyxAttestationRootBundleStale
-        expr: nyx_attestation_roots_next_update_timestamp_seconds < time()
+        expr: max(nyx_attestation_roots_next_update_timestamp_seconds) < time()
         for: 1h
         labels:
           severity: warning
@@ -611,7 +611,7 @@ groups:
       # tulisan; kegagalan berarti kunci baru tidak punya jejak audit. Hanya
       # menyala bila ADA percobaan tulis (jadi instance sepi tidak salah alarm).
       - alert: NyxKeyTransparencyWriteFailing
-        expr: increase(nyx_kt_writes_total{result="error"}[15m]) > 0
+        expr: sum by (result) (increase(nyx_kt_writes_total{result="error"}[15m])) > 0
         for: 5m
         labels:
           severity: high
@@ -688,7 +688,7 @@ groups:
           description: "Umur arsip terbaru di R2 melewati 36 jam. Cek KT_SNAPSHOT_DIR di server NYX (cron 03:30 + log \"[KtSnapshot]\"), NYX_KT_SNAPSHOT_DIR/NYX_KT_SNAPSHOT_INTERVAL di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan segar di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13)."
 
       - alert: NyxKtSnapshotUploadFailing
-        expr: increase(nyx_kt_snapshot_upload_total{result="error"}[24h]) > 0
+        expr: sum by (result) (increase(nyx_kt_snapshot_upload_total{result="error"}[24h])) > 0
         for: 5m
         labels:
           severity: high
@@ -706,7 +706,7 @@ groups:
       # ini, dan itu memang bukan persoalan produksi — alarm tidak boleh menyala
       # hanya karena metriknya tidak ada.
       - alert: NyxAbuseGuardDisabled
-        expr: nyx_abuse_guard_enabled == 0
+        expr: min by (guard) (nyx_abuse_guard_enabled) == 0
         for: 15m
         labels:
           severity: high

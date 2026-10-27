@@ -10,7 +10,7 @@
 # route Express).
 #
 # Pemasangan (ops R5, docs/10 §10.12):
-#   sudo mkdir -p /etc/prometheus /var/lib/prometheus
+#   sudo mkdir -p /etc/prometheus /var/lib/prometheus /etc/prometheus/file_sd
 #   sudo cp ops/prometheus/prometheus.yml /etc/prometheus/
 #   sudo cp ops/prometheus/alerts.yml /etc/prometheus/
 #   # jalankan prometheus (systemd/docker) dengan --config.file=/etc/prometheus/prometheus.yml
@@ -45,10 +45,14 @@ alerting:
       timeout: 10s
 
 scrape_configs:
-  # Aplikasi NYX (Express + bridge + sweeper). Exporter: METRICS_PORT (default 9464).
+  # Aplikasi NYX (Express + bridge + sweeper). Tiap worker pm2 membuka
+  # METRICS_PORT + NODE_APP_INSTANCE * 10 (default 9464, 9474, ...). File ini dibuat
+  # deploy dengan `scripts/metrics-targets.mjs` setelah pm2 start.
   - job_name: nyx-api
-    static_configs:
-      - targets: ['127.0.0.1:9464']
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/nyx-api.json
+        refresh_interval: 30s
 
   # Auditor pihak ketiga log Key Transparency (`nyx-kt-auditor`, Go, mode 3).
   # Exporter `/metrics` di loopback (NYX_KT_AUDITOR_METRICS_ADDR, default 9466).

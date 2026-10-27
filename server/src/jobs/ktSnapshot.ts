@@ -42,6 +42,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { env } from '../config.js';
 import { deleteR2Files, listR2Objects, putR2Object } from '../utils/r2.js';
+import { runWithJobLock } from '../utils/jobLock.js';
 import {
   incCounter,
   setGauge,
@@ -271,11 +272,13 @@ export const startKtSnapshotUploader = () => {
     return;
   }
   console.log('🔐 KT Snapshot Uploader scheduled (Daily at 03:30)...');
-  cron.schedule('30 3 * * *', async () => {
+  cron.schedule('30 3 * * *', () => runWithJobLock('kt-snapshot', 3600, async () => {
     // Unggahan kemungkinan besar berjalan setelah snapshot lokal jam 00:00–03:00;
     // kalau belum ada arsip baru, manifest terbaru-lah yang diunggah (idempoten).
+    // [audit F-07] Kunci mencegah N worker mengunggah/menghapus bersamaan;
+    // idempoten saja tidak cukup karena dua penghapusan retensi bisa bentrok.
     await uploadLatestKtSnapshot({ dir });
-  });
+  }));
 };
 
 /** Dipakai test & jalur manual (`CHAT_SECRET`-protected) bila diperlukan. */

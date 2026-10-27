@@ -23,6 +23,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../lib/prisma.js';
 import { loadPirConfig } from '../pir/config.js';
+import { runWithJobLock } from '../utils/jobLock.js';
 import {
   buildPirSnapshot,
   parsePirRecordBytes,
@@ -146,7 +147,10 @@ export function startPirSnapshotRefresher(
   }
 
   let running = false;
-  cron.schedule(PIR_REFRESH_CRON, async () => {
+  // [audit F-07] `running` hanya menjaga proses ini; kunci Redis menjaga N
+  // worker pm2. TTL 2 jam > REFRESH_TIMEOUT_MS (60 menit) supaya kunci tidak
+  // kedaluwarsa di tengah rebuild yang lambat.
+  cron.schedule(PIR_REFRESH_CRON, () => runWithJobLock('pir-snapshot', 7200, async () => {
     if (running) {
       console.warn('[PIR] refresh dilewati: putaran sebelumnya masih berjalan');
       return;
@@ -162,7 +166,7 @@ export function startPirSnapshotRefresher(
     } finally {
       running = false;
     }
-  });
+  }));
   console.log(`[PIR] snapshot refresher aktif (${PIR_REFRESH_CRON})`);
   return true;
 }
