@@ -12,13 +12,23 @@
  *   - `/api/metrics`/`/metrics` berada di luar `/api`, jadi tidak tersentuh;
  *   - `/api/admin/cleanup` TIDAK dikecualikan khusus, tapi ia dilindungi kunci
  *     dan dipanggil alat ops (curl), yang tidak mengirim header versi → lolos
- *     lewat jalur `no-header`.
+ *     lewat jalur `no-header` **selama mode ketat mati**. Bila
+ *     `CLIENT_VERSION_REQUIRE_MUTATIONS=1`, alat ops itu ikut ditolak (POST
+ *     tanpa header) — setel `x-nyx-client-version` di perintahnya atau jalankan
+ *     pemeliharaan sebelum menyalakan mode tersebut (§10.14).
  *
  * Status **426 Upgrade Required** (bukan 403): artinya persis "klienmu terlalu
  * tua", bisa dibedakan operator dari penolakan izin, dan ditolak SEBELUM body
  * permintaan disentuh. Yang ditolak dicatat di
  * `nyx_client_version_rejected_total{result}` supaya lonjakan klien lama
  * terlihat di dashboard, bukan hanya di konsol pengguna.
+ *
+ * [D1 2026-10-27] Bila operator menyalakan `CLIENT_VERSION_REQUIRE_MUTATIONS=1`,
+ * **mutasi** tanpa header versi ditolak di sini dengan kode
+ * `CLIENT_VERSION_REQUIRED` (masih 426 + alasan `strict-no-header` di metrik).
+ * Baca tetap lolos: klien lama harus bisa memuat data dan melihat pesan
+ * "perbarui aplikasi" saat mencoba menulis, bukan kehilangan akses baca sama
+ * sekali. Default (tanpa env itu) tidak berubah: tanpa header = lolos.
  */
 
 import type { NextFunction, Request, Response } from 'express';
@@ -49,7 +59,11 @@ export function clientVersionGate(policyFromEnv: () => ClientVersionPolicy) {
       return;
     }
 
-    const decision = evaluateClientVersion(req.headers[CLIENT_VERSION_HEADER], policyFromEnv());
+    const decision = evaluateClientVersion(
+      req.headers[CLIENT_VERSION_HEADER],
+      policyFromEnv(),
+      req.method
+    );
     if (decision.ok) {
       next();
       return;
@@ -57,10 +71,13 @@ export function clientVersionGate(policyFromEnv: () => ClientVersionPolicy) {
 
     incCounter(CLIENT_VERSION_REJECTED, { result: decision.reason });
     console.warn(
-      `[ClientVersion] ditolak: klien ${decision.clientVersion ?? 'tidak diketahui'} < minimum ${decision.minimumVersion ?? '?'} (${req.method} ${req.originalUrl})`
+      `[ClientVersion] ditolak (${decision.reason}): klien ${decision.clientVersion ?? 'tidak diketahui'} < minimum ${decision.minimumVersion ?? '?'} (${req.method} ${req.originalUrl})`
     );
     res.status(426).json({
-      error: 'CLIENT_TOO_OLD',
+      // Kode berbeda supaya operator bisa membedakan "versi terbaca tapi tua"
+      // dari "versi tidak dinyatakan pada request yang mengubah state" tanpa
+      // harus membaca log.
+      error: decision.reason === 'strict-no-header' ? 'CLIENT_VERSION_REQUIRED' : 'CLIENT_TOO_OLD',
       message: clientVersionRejectionMessage(decision),
       clientVersion: decision.clientVersion,
       minimumVersion: decision.minimumVersion,

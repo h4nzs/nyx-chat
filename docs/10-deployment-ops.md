@@ -142,7 +142,8 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `KT_SERVER_URL` / `KT_TIMEOUT_MS` | gRPC test-update log KT; samakan dengan `-write-addr` `nyx-kt-query` (`http://127.0.0.1:8081`). Kosong = penulisan log nonaktif (`docs/32` §32.8) |
 | `KT_QUERY_URL` / `KT_QUERY_TIMEOUT_MS` | Layanan baca KT (`http://127.0.0.1:8085`). Kosong = `/api/keys/kt/*` menjawab 503 `KT_QUERY_DISABLED` dan klien jatuh ke TOFU (metrik `result="disabled"`) |
 | `KT_SNAPSHOT_DIR` | Direktori arsip milik `nyx-kt-query`; diisi = unggahan harian 03:30 ke R2 + retensi 30 hari (§10.13) |
-| `MIN_CLIENT_VERSION` | [R2] Versi klien minimum (mis. `3.0.0`). Klien dengan versi lebih kecil ditolak `426 CLIENT_TOO_OLD` + pesan "perbarui aplikasi" — bukan kehilangan kunci grup secara senyap. Kosong = gerbang mati; klien **tanpa** header versi selalu lolos (§10.14) |
+| `MIN_CLIENT_VERSION` | [R2] Versi klien minimum (mis. `3.0.0`). Klien dengan versi lebih kecil ditolak `426 CLIENT_TOO_OLD` + pesan "perbarui aplikasi" — bukan kehilangan kunci grup secara senyap. Kosong = gerbang mati; klien **tanpa** header versi selalu lolos kecuali `CLIENT_VERSION_REQUIRE_MUTATIONS=1` (§10.14) |
+| `CLIENT_VERSION_REQUIRE_MUTATIONS` | [D1] `1` = **mutasi** (non-GET/HEAD/OPTIONS) tanpa header versi yang bisa dibaca ditolak `426 CLIENT_VERSION_REQUIRED`; baca tetap fail-open. Kosong = perilaku lama (fail-open). Nyatakan hanya saat cutover — lihat §10.14 |
 | `METRICS_HOST` / `METRICS_PORT` | Exporter metrik loopback (default `127.0.0.1:9464`; `0` = mati) — §10.12 |
 | `ABUSE_REGISTRATION_GUARD` | `on` \| `shadow` \| `off`. `on` = guard burst registrasi (per IP ter-HMAC, per instalasi, per ASN) **menahan**; `shadow` = evaluasi penuh tapi tidak menahan siapa pun (mengukur false-positive NAT lewat `nyx_registration_guard_observed_total`); default `off` (no-op). `docs/30` §30.12 |
 | `ABUSE_REQUIRE_ATTESTATION` | `on` = SEMUA akun baru wajib attestation perangkat keras. Heuristik burst sybil per-ASN tetap meminta attestation walau ini `off` |
@@ -461,7 +462,7 @@ akan ditolak lapis kontrak metrik di `scripts/drill-alerts.sh`):
 | `nyx_attestation_roots_next_update_timestamp_seconds` | `nextUpdate` FIDO MDS dari metadata bundle root (alert `NyxAttestationRootBundleStale`); seri tidak ada bila metadata tidak ada |
 | `nyx_admin_cleanup_total{result}` | Pemanggilan `/api/admin/cleanup` — termasuk yang DITOLAK (`forbidden`, `rate_limited`) |
 | `nyx_abuse_guard_enabled{guard}` | 1 = guard menyala saat boot, 0 = off (alert `NyxAbuseGuardDisabled`) |
-| `nyx_client_version_rejected_total{result}` | Request ditolak karena versi klien < `MIN_CLIENT_VERSION` (§10.14) |
+| `nyx_client_version_rejected_total{result}` | Request ditolak gerbang versi (§10.14): `too-old` = versi terbaca tapi < minimum; `strict-no-header` = mutasi tanpa header saat `CLIENT_VERSION_REQUIRE_MUTATIONS=1` |
 | `nyx_metrics_rejected_total{reason}` | Harus **selalu 0** di produksi; >0 = ada kode yang mencoba mengirim identitas ke metrik |
 | `nyx_wss_capability_total{capability}` | Kapabilitas hasil negosiasi jalur WSS (socket.io), per kapabilitas — `none` = klien mengiklankan sesuatu yang tak dikenal gateway (`docs/29` §5.6). Seri datar = tidak ada klien yang mengiklankan apa pun, bukan "semua sudah v2" |
 | `nyx_wss_ingress_seconds` (histogram) | Latensi ingress jalur **WSS**: dari event socket.io diterima sampai handler selesai (validasi + rate limit + perangkat + publish). Pembanding `nyx_transport_ingress_seconds` — lihat "Latensi jalur" di bawah. Rendah tanpa label → tetap dirender (bernilai 0) sejak boot, jadi `rate(..._count[15m])` = **0**, bukan "No data" |
@@ -898,9 +899,28 @@ Dua kelonggaran yang disengaja — jangan "perbaiki" tanpa alasan kuat:
    yang sudah ada. Konsekuensinya gerbang ini mengikat **mulai 3.0.0**, jadi ia
    bukan pengganti catatan migrasi/pemberitahuan rilis.
 
+**Mode ketat untuk mutasi ([D1] 2026-10-27).** Karena kelonggaran #2 membuat
+penyerang bisa lolos hanya dengan tidak mengirim header, gerbang ini **tidak**
+bisa dipakai sebagai kontrol keamanan apa adanya. Setel
+`CLIENT_VERSION_REQUIRE_MUTATIONS=1` bila gerbang perlu mengikat:
+
+- **Mutasi** (`POST`/`PUT`/`PATCH`/`DELETE`, plus metode tak dikenal) tanpa header
+  versi yang bisa diurai → `426 CLIENT_VERSION_REQUIRED`
+  (`nyx_client_version_rejected_total{result="strict-no-header"}`).
+- **Baca** (`GET`/`HEAD`/`OPTIONS`) tetap lolos: klien lama masih bisa memuat
+  data dan melihat pesan "perbarui aplikasi" saat mencoba menulis, alih-alih
+  kehilangan akses baca sekaligus. Versi yang **menyatakan diri** dan terlalu tua
+  tetap `CLIENT_TOO_OLD` di metode apa pun.
+
+Default kosong = perilaku lama persis (fail-open), jadi menyalakannya adalah
+keputusan operator, bukan efek samping upgrade. Urutan yang aman: umumkan rilis →
+set `MIN_CLIENT_VERSION` lebih dulu dan pantau `too-old` → setelah metrik itu
+datar (klien sudah mengirim header), baru set `CLIENT_VERSION_REQUIRE_MUTATIONS=1`.
+
 `/api/health` tidak pernah digerbang (probe liveness). Endpoint ops seperti
-`/api/admin/cleanup` dipanggil `curl` tanpa header versi, jadi ia lolos lewat
-jalur `no-header` dan operasi pemeliharaan tidak ikut terkunci.
+`/api/admin/cleanup` dipanggil `curl` tanpa header versi; dengan mode ketat ia
+**ikut ditolak** (POST tanpa header) — setel header versi di perintah ops atau
+lakukan pemeliharaan sebelum menyalakan mode ini.
 
 **Urutan menaikkan angka ini saat rilis breaking berikutnya:** umumkan dulu →
 beri jeda minimal satu siklus rilis (biar PWA pengguna memperbarui diri) → baru

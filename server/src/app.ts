@@ -272,7 +272,13 @@ app.use("/api", generalLimiter);
 // perilaku setengah jalan (mis. kehilangan kunci grup tanpa error). Gerbang mati
 // bila `MIN_CLIENT_VERSION` tidak diset, dan klien yang tidak mengirim header
 // versi tetap lolos — lihat `utils/clientVersion.ts` untuk alasan lengkapnya.
-app.use("/api", clientVersionGate(() => ({ minimumVersion: process.env.MIN_CLIENT_VERSION })));
+// [D1 2026-10-27] `CLIENT_VERSION_REQUIRE_MUTATIONS=1` membuat mutasi tanpa
+// header versi ditolak (baca tetap lolos). Default mati: perilaku lama tidak
+// berubah sampai operator memilihnya saat cutover.
+app.use("/api", clientVersionGate(() => ({
+  minimumVersion: process.env.MIN_CLIENT_VERSION,
+  requireMutations: process.env.CLIENT_VERSION_REQUIRE_MUTATIONS === '1',
+})));
 
 // [docs/37 §37.3.3] Router grup token-first dipasang SEBELUM lapisan CSRF:
 // seluruh endpoint-nya diautentikasi possession token di body (sync/refresh/

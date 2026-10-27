@@ -21,7 +21,9 @@ import {
   compareClientVersions,
   clientVersionRejectionMessage,
   evaluateClientVersion,
+  isMutationMethod,
   parseClientVersion,
+  type ClientVersionPolicy,
 } from '../src/utils/clientVersion.js';
 import { CLIENT_VERSION_HEADER, clientVersionGate } from '../src/middleware/clientVersion.js';
 
@@ -127,9 +129,12 @@ function makeRes(): FakeResponse {
 
 function runGate(
   req: { path: string; method?: string; originalUrl?: string; headers: Record<string, unknown> },
-  minimumVersion: string | undefined
+  policy: string | undefined | ClientVersionPolicy
 ): { nextCalled: boolean; res: FakeResponse } {
-  const gate = clientVersionGate(() => ({ minimumVersion }));
+  const normalized: ClientVersionPolicy = typeof policy === 'string' || policy === undefined
+    ? { minimumVersion: policy }
+    : policy;
+  const gate = clientVersionGate(() => normalized);
   const res = makeRes();
   let nextCalled = false;
   gate(
@@ -166,6 +171,89 @@ test('middleware: /health tidak pernah digerbang (probe harus tetap bisa memangg
   // Endpoint admin/cleanup dipanggil alat ops (curl) tanpa header versi → lolos
   // lewat jalur `no-header`, jadi operasi pemeliharaan tidak ikut terkunci.
   assert.equal(runGate({ path: '/admin/cleanup', method: 'POST', headers: {} }, '99.0.0').nextCalled, true);
+});
+
+// --- [D1 2026-10-27] Mode ketat: mutasi fail-closed, baca tetap fail-open ----
+
+/**
+ * Kenapa mode ini diuji terpisah: ia satu-satunya jalan gerbang versi menjadi
+ * kontrol keamanan. Kalau salah, kegagalannya berlawanan arah — terlalu longgar
+ * (penyerang cukup tidak mengirim header) atau terlalu ketat (semua klien lama
+ * kehilangan kemampuan mengirim pesan sekaligus). Karena itu yang diuji adalah
+ * **batasnya**: metode mana yang ditolak, metode mana yang tetap lolos, dan
+ * bahwa default tanpa env tidak berubah sama sekali.
+ */
+test('isMutationMethod: hanya GET/HEAD/OPTIONS yang dianggap baca', () => {
+  for (const method of ['GET', 'get', ' HEAD ', 'OPTIONS']) {
+    assert.equal(isMutationMethod(method), false, `${method} harus dianggap baca`);
+  }
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'post', 'TRACE', 'METODE-ASING']) {
+    assert.equal(isMutationMethod(method), true, `${method} harus dianggap mutasi`);
+  }
+  // Metode tak terbaca = mutasi (menolak lebih aman daripada menganggap baca).
+  assert.equal(isMutationMethod(undefined), false, 'tanpa metode → default baca (dipanggil fungsi murni)');
+});
+
+test('evaluateClientVersion: mode ketat menolak mutasi tanpa header, baca tetap lolos', () => {
+  const strict: ClientVersionPolicy = { minimumVersion: '3.0.0', requireMutations: true };
+
+  const post = evaluateClientVersion(undefined, strict, 'POST');
+  assert.equal(post.ok, false);
+  assert.equal(post.reason, 'strict-no-header');
+  assert.equal(post.minimumVersion, '3.0.0');
+  assert.equal(post.clientVersion, undefined, 'tidak ada versi yang bisa dilaporkan');
+  assert.equal(evaluateClientVersion('bukan-versi', strict, 'DELETE').ok, false, 'header tak terbaca = sama dengan tidak ada');
+
+  // Baca tetap fail-open: klien lama harus bisa memuat data & melihat pesan.
+  for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+    const read = evaluateClientVersion(undefined, strict, method);
+    assert.equal(read.ok, true, `${method} tidak boleh diblokir mode ketat`);
+    assert.equal(read.reason, 'no-header');
+  }
+
+  // Versi tua tetap ditolak di metode apa pun (perilaku lama tidak berubah).
+  assert.equal(evaluateClientVersion('2.9.0', strict, 'GET').reason, 'too-old');
+  assert.equal(evaluateClientVersion('2.9.0', strict, 'POST').reason, 'too-old');
+  // Versi yang menyatakan diri dan cukup baru lolos mutasi.
+  assert.equal(evaluateClientVersion('3.0.0', strict, 'POST').ok, true);
+});
+
+test('evaluateClientVersion: TANPA requireMutations, mutasi tanpa header tetap lolos (default tidak berubah)', () => {
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    const decision = evaluateClientVersion(undefined, { minimumVersion: '3.0.0' }, method);
+    assert.equal(decision.ok, true, `${method} tanpa mode ketat harus lolos`);
+    assert.equal(decision.reason, 'no-header');
+  }
+  // Gerbang mati menang atas mode ketat: tanpa minimum, tidak ada yang ditolak.
+  const off = evaluateClientVersion(undefined, { requireMutations: true }, 'POST');
+  assert.equal(off.ok, true);
+  assert.equal(off.reason, 'no-minimum');
+});
+
+test('middleware: mode ketat → 426 CLIENT_VERSION_REQUIRED untuk mutasi, baca tetap diteruskan', () => {
+  const policy: ClientVersionPolicy = { minimumVersion: '3.0.0', requireMutations: true };
+
+  const post = runGate({ path: '/messages', method: 'POST', headers: {} }, policy);
+  assert.equal(post.nextCalled, false);
+  assert.equal(post.res.statusCode, 426);
+  const body = post.res.body as { error: string; message: string; minimumVersion: string };
+  assert.equal(body.error, 'CLIENT_VERSION_REQUIRED');
+  assert.equal(body.minimumVersion, '3.0.0');
+  assert.match(body.message, /Muat ulang/i);
+
+  // Baca & preflight tidak ikut terkunci.
+  assert.equal(runGate({ path: '/messages', method: 'GET', headers: {} }, policy).nextCalled, true);
+  assert.equal(runGate({ path: '/messages', method: 'OPTIONS', headers: {} }, policy).nextCalled, true);
+  // Probe liveness juga, meski metodenya bukan baca.
+  assert.equal(runGate({ path: '/health', method: 'POST', headers: {} }, policy).nextCalled, true);
+  // Klien yang menyatakan versi cukup baru tetap bisa menulis.
+  assert.equal(
+    runGate({ path: '/messages', method: 'POST', headers: { [CLIENT_VERSION_HEADER]: '3.1.0' } }, policy).nextCalled,
+    true
+  );
+  // Versi terbaca tapi tua tetap memakai kode lama (bukan REQUIRED).
+  const old = runGate({ path: '/messages', method: 'POST', headers: { [CLIENT_VERSION_HEADER]: '2.0.0' } }, policy);
+  assert.equal((old.res.body as { error: string }).error, 'CLIENT_TOO_OLD');
 });
 
 // --- Kontrak CORS: setiap header klien WAJIB di-whitelist -------------------
@@ -277,6 +365,41 @@ test('HTTP: gerbang bekerja lewat Express (426 + JSON), /health tetap lolos', as
     const health = await fetch(`${base}/api/health`, { headers: { [CLIENT_VERSION_HEADER]: '0.0.1' } });
     assert.equal(health.status, 200);
     assert.deepEqual(await health.json(), { status: 'ok' });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+// [D1] Bukti lewat HTTP nyata bahwa mutasi tanpa header benar-benar ditolak
+// (bukan hanya di fungsi murni): middleware harus membaca metode request yang
+// sebenarnya, dan klien harus menerima 426 + JSON yang bisa ditindaklanjuti.
+test('HTTP: mode ketat menolak POST tanpa header versi, GET tetap 200', async () => {
+  const app = express();
+  app.use('/api', clientVersionGate(() => ({ minimumVersion: '3.0.0', requireMutations: true })));
+  app.get('/api/messages', (_req, res) => { res.json({ reached: 'read' }); });
+  app.post('/api/messages', (_req, res) => { res.json({ reached: 'write' }); });
+
+  const server = app.listen(0);
+  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  const { port } = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    const read = await fetch(`${base}/api/messages`);
+    assert.equal(read.status, 200, 'baca tanpa header tetap jalan');
+
+    const write = await fetch(`${base}/api/messages`, { method: 'POST' });
+    assert.equal(write.status, 426);
+    const body = await write.json() as { error: string; message: string };
+    assert.equal(body.error, 'CLIENT_VERSION_REQUIRED');
+    assert.match(body.message, /Muat ulang/i);
+
+    const declared = await fetch(`${base}/api/messages`, {
+      method: 'POST',
+      headers: { [CLIENT_VERSION_HEADER]: '3.0.0' },
+    });
+    assert.equal(declared.status, 200);
+    assert.deepEqual(await declared.json(), { reached: 'write' });
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

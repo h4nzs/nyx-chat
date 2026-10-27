@@ -11,7 +11,14 @@ Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. R
 { "error": "CLIENT_TOO_OLD", "message": "...", "clientVersion": "3.0.0", "minimumVersion": "3.1.0" }
 ```
 
-The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without** the header always passes (clients shipped before 3.0.0 do not send it) — see `docs/10` §10.14. `GET /health` is never gated.
+The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without** the header passes (clients shipped before 3.0.0 do not send it) — see `docs/10` §10.14. With `CLIENT_VERSION_REQUIRE_MUTATIONS=1` that leniency applies to reads only: a **mutation** (`POST`/`PUT`/`PATCH`/`DELETE`) with no readable version header is rejected as well:
+
+```http
+426 Upgrade Required
+{ "error": "CLIENT_VERSION_REQUIRED", "message": "...", "minimumVersion": "3.1.0" }
+```
+
+`GET /health` is never gated.
 
 ---
 
