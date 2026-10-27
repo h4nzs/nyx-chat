@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark light">
+<title>NYX</title>
+<style>
+:root{--bg:0 0% 10%;--surface:0 0% 13%;--text:210 40% 98%;--muted:215 20% 70%;--accent:217 91% 60%;
+--sd:0 0% 6%;--sl:0 0% 18%}
+@media (prefers-color-scheme:light){:root{--bg:220 16% 90%;--surface:220 16% 90%;--text:222 47% 11%;--muted:215 25% 45%;
+--sd:220 14% 78%;--sl:0 0% 100%}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;align-items:center;justify-content:center;padding:16px;background:hsl(var(--bg));color:hsl(var(--text));
+font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+.glow{position:fixed;top:50%;left:50%;width:384px;height:384px;transform:translate(-50%,-50%);border-radius:50%;
+background:hsl(var(--accent)/.1);filter:blur(100px);pointer-events:none}
+.card{position:relative;z-index:1;max-width:28rem;width:100%;padding:2rem;border-radius:1.5rem;text-align:center;
+background:hsl(var(--surface));border:1px solid hsl(var(--muted)/.1);
+box-shadow:6px 6px 12px hsl(var(--sd)),-6px -6px 12px hsl(var(--sl))}
+.icon{width:5rem;height:5rem;margin:0 auto 1.5rem;border-radius:50%;display:flex;align-items:center;justify-content:center;
+background:hsl(var(--bg));box-shadow:inset 6px 6px 10px hsl(var(--sd)),inset -6px -6px 10px hsl(var(--sl))}
+.icon svg{width:2rem;height:2rem;stroke:hsl(var(--accent));animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.4}}
+h1{font-size:1.5rem;font-weight:700;margin:0 0 .5rem}
+p{font-size:.875rem;line-height:1.65;color:hsl(var(--muted));margin:0 0 1.5rem}
+button{width:100%;padding:.75rem 1rem;border:0;border-radius:.75rem;font:inherit;font-weight:600;cursor:pointer;
+color:hsl(var(--accent));background:hsl(var(--surface));box-shadow:6px 6px 12px hsl(var(--sd)),-6px -6px 12px hsl(var(--sl))}
+button:active{box-shadow:inset 6px 6px 10px hsl(var(--sd)),inset -6px -6px 10px hsl(var(--sl))}
+button:focus-visible,a:focus-visible{outline:2px solid hsl(var(--accent));outline-offset:3px}
+.meta{margin-top:1.25rem;font-size:.75rem;color:hsl(var(--muted))}
+.meta a{color:hsl(var(--accent));text-decoration:none}
+.meta a:hover{text-decoration:underline}
+#statusRow[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){.icon svg{animation:none}}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<main class="card" role="alert" aria-live="polite">
+  <div class="icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/>
+    </svg>
+  </div>
+  <h1 id="t"></h1>
+  <p id="d"></p>
+  <button id="b" type="button"></button>
+  <div class="meta"><span id="n"></span><span id="statusRow" hidden> · <a id="s" href="__STATUS_URL__" rel="noopener noreferrer"></a></span></div>
+</main>
+<noscript><style>#b{display:none}</style></noscript>
+<script>
+(function(){
+var L={
+en:{t:"NYX is temporarily unreachable",d:"We can't reach our servers right now. Your data stays encrypted on your device. This page reloads automatically as soon as we're back.",b:"Try again",n:"Next check in {n}s",c:"Checking…",s:"Status & updates"},
+id:{t:"NYX sedang tidak dapat dijangkau",d:"Kami tidak dapat menjangkau server saat ini. Data Anda tetap terenkripsi di perangkat Anda. Halaman ini memuat ulang otomatis begitu kami kembali.",b:"Coba lagi",n:"Pengecekan berikutnya {n} dtk",c:"Memeriksa…",s:"Status & kabar terbaru"},
+es:{t:"NYX no está disponible temporalmente",d:"No podemos conectar con nuestros servidores. Tus datos siguen cifrados en tu dispositivo. Esta página se recargará sola cuando volvamos.",b:"Reintentar",n:"Próxima comprobación en {n}s",c:"Comprobando…",s:"Estado y novedades"},
+pt:{t:"O NYX está temporariamente indisponível",d:"Não conseguimos acessar nossos servidores agora. Seus dados continuam criptografados no seu dispositivo. Esta página recarrega sozinha quando voltarmos.",b:"Tentar novamente",n:"Próxima verificação em {n}s",c:"Verificando…",s:"Status e novidades"}
+};
+var lang=(navigator.language||"en").toLowerCase();
+var k=lang.indexOf("id")===0?"id":lang.indexOf("es")===0?"es":lang.indexOf("pt")===0?"pt":"en";
+var T=L[k];document.documentElement.lang=k==="pt"?"pt-BR":k;
+var $=function(i){return document.getElementById(i)};
+$("t").textContent=T.t;$("d").textContent=T.d;$("b").textContent=T.b;
+document.title="NYX — "+T.t;
+var su=$("s").getAttribute("href");
+if(su&&su.indexOf("__")!==0){$("s").textContent=T.s;$("statusRow").hidden=false}
+var delay=15,left=delay,busy=false;
+function jitter(x){return Math.round(x*(0.7+Math.random()*0.6))}
+function check(){
+  if(busy)return;busy=true;$("n").textContent=T.c;
+  fetch("/api/system/status",{cache:"no-store",credentials:"omit"}).then(function(r){
+    var ct=r.headers.get("content-type")||"";
+    if(r.ok&&ct.indexOf("json")>-1){location.reload();return}
+    throw 0;
+  }).catch(function(){
+    busy=false;delay=Math.min(120,Math.round(delay*1.5));left=jitter(delay);tick();
+  });
+}
+function tick(){$("n").textContent=T.n.replace("{n}",left)}
+setInterval(function(){
+  if(busy||document.hidden)return;
+  left--;if(left<=0){check()}else{tick()}
+},1000);
+$("b").addEventListener("click",function(){delay=15;check()});
+tick();
+})();
+</script>
+</body>
+</html>
