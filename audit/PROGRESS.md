@@ -286,3 +286,79 @@ Semua **86** berkas `server/tests/*.test.ts` terdaftar di skrip `test`
 4. **D1/D7** — `MIN_CLIENT_VERSION` dijadikan fail-closed untuk mutasi? Seal at-rest
    tetap fail-open ke plaintext (didokumentasikan di `docs/04` §4.8) atau berubah jadi
    melempar/melewati penulisan?
+
+## Keputusan maintainer + implementasinya (2026-10-27, working tree)
+
+Tiga jawaban maintainer atas §"Yang butuh keputusan maintainer" dikerjakan.
+Jawaban mentah: (1) skema produksi **sudah** memuat kolom barunya; (2) Privacy
+Pass **dipertahankan dan dinyalakan**; (3) paket hardening yang dipilih **D7**.
+
+### 1. F-04 — tidak ada migrasi/reset tambahan
+
+Produksi sudah ter-deploy dengan kolom baru, jadi tidak ada backfill atau reset
+yang perlu ditulis. Yang tetap berlaku: Batch 3 (push gagal = deploy merah,
+verifikasi `information_schema`, proses lama tetap hidup). Dicatat di
+`07-fix-plan.md`; tidak ada perubahan kode.
+
+### 2. Privacy Pass — dipertahankan, disiapkan untuk `PP_SYNC_REQUIRED=1`
+
+F-01 (anti-replay `SET {EX,NX}`) sudah benar; yang kurang adalah jalur **hidup**:
+
+- **Cold start klien** (`web/src/lib/privacyPass.ts`, `groupSync.ts`):
+  `ensurePrivacyPassProof()` menerbitkan bukti **sinkron**, dan `syncBatch`
+  mengulang **sekali** saat server menjawab `403 PP_PROOF_REQUIRED`
+  (sebelumnya gate itu mematikan discovery untuk perangkat baru / stok kosong
+  sampai issuance latar kebetulan selesai). Retry kedua tetap dilempar —
+  tidak ada loop.
+- **Rotasi kunci issuer**: `PP_ISSUER_KEY_CHANGED` membuang cache dan mencoba
+  sekali lagi; sebelumnya klien gagal permanen sampai reload halaman.
+- **Observability**: alert `NyxPrivacyPassDenied` (rasio `denied` > 20% selama
+  15 menit, `clamp_min` untuk pembagian nol) + 2 kasus drill (menyala/tidak).
+  Drill: 40 aturan, semua punya kasus, kontrak metrik tetap 31 metrik.
+- **Runbook** `docs/10` §10.22 (prasyarat, generate `pp-key:generate --write`,
+  verifikasi metrik, rotasi, rollback, batas jujur) + baris env
+  `PP_ISSUER_PRIVATE_JWK`/`PP_SYNC_REQUIRED` di tabel §10.6 + `docs/37`
+  §37.3.3/§37.9.4 menyatakan gate dipertahankan.
+- Test: `privacyPass.test.ts` (issuance sinkron + rotasi issuer),
+  `groupSync.test.ts` (retry 403 + tidak ada loop).
+
+### 3. D7 — seal at-rest fail-closed (bukan lagi fail-open ke plaintext)
+
+`web/src/lib/keychainDb.ts`: `encryptValueAtRest` **melempar**
+`AtRestSealUnavailableError` bila `masterSeed` belum tersedia dan membiarkan
+error worker naik — tidak pernah mengembalikan plaintext (dulu `return value`
++ `console.warn`). Konsekuensi yang disengaja: penulisan yang tidak bisa
+disegel **dilewati** (baris pesan/kontak dilewati, bukan diturunkan
+jaminannya), sedangkan **pembacaan** baris lama plaintext tetap jalan
+(`decryptValueAtRest` tidak berubah) dan migrasi saat unlock men-seal ulang.
+
+- `localAtRest.ts` mewarisi sifat itu (dokumentasi helper diperbarui).
+- `saveKtIdentifier` (identifier akun) dan `upsertContact` menangkap error itu
+  dan **melewati penulisan** dengan satu peringatan — dua jalur yang dulu
+  menulis plaintext di localStorage/IndexedDB tanpa try/catch.
+- Test baru `web/src/lib/__tests__/atRestFailClosed.test.ts` (7 kasus): vault
+  terkunci → melempar; worker gagal → error naik; sukses → envelope `ENC1:`
+  yang bisa dibuka; baris lama tetap terbaca; helper `sealLocal*` mewarisi;
+  nilai kosong tetap `null`.
+- `docs/04` §4.8 diperbarui: "fail-open (known limitation)" → **fail-closed**.
+
+### Verifikasi sesi ini
+
+- `npx tsc -b --noEmit` (web) bersih.
+- `privacyPass.test.ts` 10 lulus; `groupSync.test.ts` 9 lulus;
+  `atRestFailClosed.test.ts` 7 lulus.
+- 118 tes vault/at-rest/kontak/profil (`localAtRest`, `localOrderKey`,
+  `contactStore`, `profileStore`, `dexieMigration`, `shadowVaultOrderIndex`,
+  `vaultSeq/Reactions/Statuses`, `autoDeletePersistence`) lulus.
+- `drill-alerts.sh` (SKIP_LIVE): 40 aturan valid, semua punya kasus drill.
+- Catatan flake (bukan regresi): `ktMonitoring.test.ts` > "tanpa state siap"
+  timeout 5 detik saat 7 berkas dijalankan paralel (1891 ms sendirian,
+  lulus dengan `--no-file-parallelism`); `pqBench.test.ts` sudah tercatat
+  sebelumnya (benchmark wall-clock — 106,64 ms vs ambang 100 ms saat suite
+  penuh, 40,19 ms sendirian).
+- Suite web penuh setelah perubahan: **126 berkas / 1030 tes, 1029 lulus, 1 gagal
+  (= pqBench flake di atas)**, 482 dtk. `keychainDbPersistence.test.ts` yang
+  semula mengandalkan fallback plaintext (mock "masterSeed terkunci") kini
+  menyediakan seed + stub crypto dan menambah kasus "nilai tersimpan benar-benar
+  ter-seal".
+- Angka `docs/11` §11.1 diperbarui lagi ke 126 berkas / 1030 tes (total 212).

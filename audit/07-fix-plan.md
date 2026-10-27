@@ -154,12 +154,24 @@ audit --prod` 0 vuln, `node scripts/check-pq-only.mjs` lulus (Tier B: 2 untuk
 
 ## Yang butuh keputusan maintainer (jangan diputuskan sendiri)
 
-1. **Hard cut token grup**: produksi di-reset (kehilangan riwayat) atau
-   backfill? Ini menentukan isi Batch 3.
-2. **Privacy Pass**: anti-abuse ini mau dipertahankan (perbaiki F-01) atau
-   dimatikan (`PP_SYNC_REQUIRED` tidak pernah dinyalakan)? Kalau dimatikan,
-   hapus kode + exception PQ-nya (lebih kecil).
-3. **Metrik**: exporter multi-proses (butuh agregasi/Prometheus federation)
-   atau satu proses metrik terpisah? F-07 hanya menutup gejala.
-4. **`NODE_ENV=production`**: siap menanggung risiko crash-loop bila
-   `JWT_SECRET`/`CSRF_SECRET` di VPS bukan nilai aman? Cek dulu, jangan tebak.
+1. **Hard cut token grup** — **diputuskan 2026-10-27:** skema produksi sudah
+   memuat kolom barunya (deploy sebelumnya sukses), jadi tidak ada reset/backfill
+   tambahan. Yang berlaku tetap jalur fail-closed Batch 3 (push gagal =
+   deploy merah + verifikasi `information_schema`).
+2. **Privacy Pass** — **diputuskan 2026-10-27: dipertahankan dan disiapkan untuk
+   dinyalakan.** Anti-replay F-01 sudah benar; yang ditambahkan: cold-start klien
+   (`ensurePrivacyPassProof` + retry sekali pada 403 `PP_PROOF_REQUIRED`), muat
+   ulang issuer saat rotasi kunci, alert `NyxPrivacyPassDenied`, dan runbook
+   `docs/10` §10.22 (generate kunci, verifikasi metrik, rotasi, rollback).
+3. **Metrik klaster** — masih terbuka: eksporter terpisah/agregasi penuh, atau
+   cukup satu worker + `NODE_APP_INSTANCE` (kondisi sekarang)? F-07 menutup
+   gejala (target per-worker + job lock), bukan penggantinya.
+4. **`NODE_ENV=production`** — **diputuskan 2026-10-27 (sudah diimplementasikan di
+   Batch 4 dengan guard pra-restart):** deploy memverifikasi `JWT_SECRET` sebelum
+   `pm2 delete`, jadi crash-loop terjadi sebelum proses lama dimatikan.
+5. **D7 (seal at-rest gagal-terbuka)** — **diputuskan 2026-10-27: fail-closed.**
+   `encryptValueAtRest` melempar `AtRestSealUnavailableError` (tidak pernah
+   mengembalikan plaintext); penulisan dilewati, baris lama tetap terbaca.
+   Test: `web/src/lib/__tests__/atRestFailClosed.test.ts`.
+6. **D1 (`MIN_CLIENT_VERSION` fail-open), D6 (test paritas berbasis teks
+   sumber)** — belum diputuskan; keduanya perubahan perilaku/test, bukan bug.
