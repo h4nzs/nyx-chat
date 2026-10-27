@@ -215,7 +215,7 @@ device list per akun, dan satu `storage service` untuk sinkronisasi
 setelan/kontak antar perangkat.
 
 **Yang sudah ada di NYX (modal awal):** amplop **per-device** sudah jadi norma
-(`pq_box_seal` + `targetDeviceId`/`targetDeviceKey` di envelope sender-key v2),
+(`pq_box_seal_v2` + `targetDeviceId`/`targetDeviceKey` di envelope sender-key v2/v4),
 `SessionKey` per device, `contactStore` sudah terenkripsi dan kuncinya
 deterministik dari identity key (jadi bisa di-restore/di-sync lintas perangkat),
 dan alur QR (`auth:request_linking_qr`, `migration:start|chunk|ack`) sudah ada
@@ -568,7 +568,7 @@ manual ke enam spec.
 |---|---|---|---|
 | 1 | Gate + binding credential (§7.1) | `server/src/routes/conversations.ts`, `server/src/lib/groupCredentials.ts`, `web/src/lib/groupCredentials.ts` | Test perilaku: issuance tanpa token → 403; convId mismatch → ditolak; presentasi context-bound |
 | 2 | Pindahkan verification state ke keychain + hard gate perubahan kunci | `web/src/utils/verification.ts`, `web/src/utils/crypto.ts`, `web/src/lib/messagePipeline.ts` | Perubahan identitas → kirim diblokir sampai konfirmasi; state tahan reload & wipe terkelola |
-| 3 | Buang fallback Google STUN | `server/src/routes/keys.ts:590,607,610`, `web/src/lib/webrtc.ts:29` | Tidak ada `google.com` di jalur ICE; kegagalan TURN jadi error eksplisit |
+| 3 | Buang fallback Google STUN — **landed**: `keys.ts` tidak lagi menyebut STUN pihak ketiga; urutan coturn → Cloudflare → `ICE_STUN_URLS` → 503/502 | `server/src/routes/keys.ts`, `web/src/lib/webrtc.ts` | Tidak ada `google.com` di jalur ICE; kegagalan TURN jadi error eksplisit |
 | 4 | Bucket/`ENC1:` metadata lokal | `web/src/lib/db.ts`, `shadowVaultDb.ts`, `keychainDb.ts` | Tidak ada `lastMessageAt` presisi & `seq` plaintext di IndexedDB |
 | 5 | Nyalakan kembali lint (alias TS 5 untuk lint atau oxlint) — **landed 2026-10-15**: oxlint menggantikan ESLint sepenuhnya; config ESLint dihapus | `.oxlintrc.json`, `package.json` (per paket `lint: oxlint src`) | `pnpm run lint` jalan; rule `error` + kategori `correctness` blocking di CI (0 temuan) |
 | 6 | Test vector lintas-implementasi (DR/sender-key/era) | `web/src/lib/__tests__/`, `server/tests/`, `tools/dr-oracle/` | Vektor dari libsignal/SPQR lulus untuk primitif yang identik. **Landed:** KAT primitif (`cryptoKnownAnswer`, `argonKnownAnswer`) **plus** oracle Go non-libsodium dua arah untuk X3DH/KEM/kdfChain/AEAD (`docs/30` WS-G(6)); **residual:** sender-key chain / skipped key / `SessionRecord` tetap internal |

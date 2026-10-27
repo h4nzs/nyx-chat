@@ -6,7 +6,7 @@
 nyx-chat/
 ├── web/                      # React 19 + Vite 8 PWA (the messenger client)
 │   ├── src/
-│   │   ├── components/       # UI components (~90 files)
+│   │   ├── components/       # UI components (77 files)
 │   │   ├── pages/            # Lazy-loaded route pages (Login, Register, Chat, Settings…)
 │   │   ├── store/            # 21 Zustand stores
 │   │   ├── hooks/            # Reusable React hooks
@@ -20,10 +20,10 @@ nyx-chat/
 │   └── e2e/                  # Playwright specs
 ├── server/                   # Express 5 API (ESM TS, run via tsx)
 │   ├── src/
-│   │   ├── routes/           # 17 route modules
+│   │   ├── routes/           # 21 mounted route modules
 │   │   ├── middleware/       # requireAuth, rateLimiter, tenantAuth
 │   │   ├── network/          # redisBridge.ts — Redis pub/sub ↔ Rust sidecar
-│   │   ├── jobs/             # messageSweeper, systemSweeper (node-cron)
+│   │   ├── jobs/             # messageSweeper, systemSweeper, cleanup, ktSnapshot, pirSnapshot (node-cron)
 │   │   ├── lib/              # prisma.ts, redis.ts, sodium.ts
 │   │   └── utils/            # sessionUtils, validate (safeEqualStrings), mappers, jwt…
 │   ├── prisma/               # schema.prisma, seed, migrations (baseline 0_init)

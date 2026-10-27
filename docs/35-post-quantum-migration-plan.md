@@ -41,7 +41,7 @@
 | 5 | Credential PQ (suite abstraction, BRaccoon) | **dihapus 2026-10-23** — cutover PQ-only menghapus suite credential blind RSA, endpoint, persist Dexie, dan tesnya. Tidak ada pengganti PQ; BRaccoon/blind UOV tetap riset | §35.2.3, §35.6.6 |
 | 6 | Anonymous issuance | **dihapus 2026-10-23** — bank token/redeem/commit ikut dihapus bersama credential; tidak ada endpoint `/api/credentials/*` | §35.6.7 |
 | 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
-| 8 | Removal, audit, dokumentasi | **selesai di kode** 2026-10-23 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop + throttle, audit residual v1, E2E recovery/device-linking/OHTTP; denylist baru 0, sisa 2 exception `hybrid-v2-identity` | §35.8, §35.10 |
+| 8 | Removal, audit, dokumentasi | **selesai di kode** 2026-10-23 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop + throttle, audit residual v1, E2E recovery/device-linking/OHTTP; denylist baru 0, sisa 2 exception `hybrid-v2-identity` + 2 `tier-b` (Privacy Pass) | §35.8, §35.10 |
 
 **PQ-only:** `resolvePqV2Enabled()` selalu `true`; `VITE_PQ_V2` tidak lagi
 mengubah perilaku dan `VITE_ANON_CREDENTIALS` sudah tidak dipakai. Tidak ada
@@ -1129,17 +1129,24 @@ Status (2026-10-22): **selesai di kode, dengan residual non-kode**. Yang sudah l
   Halaman nonaktif pada build default; aktif lewat dev server `--host` atau
   `pnpm --filter nyx-web run build:pq-bench`. Level baterai adalah proxy kasar
   konsumsi energi, bukan pengukuran mWh — angka p95 tetap skor utamanya.
-- **Registry exception**: `scripts/pq-only-exceptions.json` sekarang hanya
-  menyimpan **2 berkas `hybrid-v2-identity`** dengan `tier`, `rationale`, dan
-  `removalGate`. Guard `scripts/check-pq-only.mjs` menolak entri hilang/usang,
-  tier tak dikenal, atau rationale/removal gate kosong, lalu mencetak
-  `Tier A baru: 0; Tier B: 0; legacy v1: 0; hybrid v2 identity: 2`.
+- **Registry exception**: `scripts/pq-only-exceptions.json` menyimpan **2
+  berkas `hybrid-v2-identity`** dan **2 berkas `tier-b`** dengan `tier`,
+  `rationale`, dan `removalGate`. Guard `scripts/check-pq-only.mjs` menolak
+  entri hilang/usang, tier tak dikenal, atau rationale/removal gate kosong,
+  lalu mencetak
+  `Tier A baru: 0; Tier B: 2; legacy v1: 0; hybrid v2 identity: 2`.
   - `web/src/store/auth.ts`: X25519 identity terikat di transkrip X3DH v2; dua
     tanda tangan Ed25519 prekey tersisa karena kolom bundle/DB belum nullable
     dan server tidak lagi memverifikasinya.
   - `web/src/workers/crypto.worker.ts`: `signingKey` Ed25519 masih diturunkan
     dari device seed untuk kontrak bundle/Device non-nullable; tidak ada
     signature baru setelah cutover.
+  - `server/src/utils/privacyPass.ts` + `web/src/lib/privacyPass.ts`
+    (`tier-b`): Privacy Pass blind RSA (RFC 9474) adalah bukti anti-abuse untuk
+    sync anonim, bukan kriptografi pesan/kunci. Penggantinya (BRaccoon/blind
+    UOV) ditutup tanpa implementasi (`docs/37` §37.9), jadi tier ini hanya bisa
+    hilang bersama keenam gate §37.9.5. Baseline `RSABSSA` dicatat eksplisit
+    (4 server / 3 web), bukan `--write` global.
 - **E2E browser pelengkap** (2026-10-23): tiga alur yang sebelumnya hanya
   dijaga unit test kini punya spec Playwright — `recovery.spec.ts` (frasa dari
   vault → `/restore`, dan request `POST /api/auth/recover` wajib membawa

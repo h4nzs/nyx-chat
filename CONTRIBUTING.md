@@ -19,9 +19,9 @@ Before you write any code, understand our architectural boundaries:
 
 1. **Fork the repo** and create your branch from `main`.
 2. **Install dependencies:** `pnpm install`
-3. **Run local environment:** Setup your `.env` (see README) and run `pnpm dev`.
+3. **Run local environment:** Setup your `.env` (see README), then start the two dev servers separately — there is **no** root `dev` script: `pnpm --filter nyx-server dev` (Express :4000) and `pnpm --filter nyx-web dev` (Vite :5173). WebTransport needs the Rust sidecar running too (`docs/08`); without it the client falls back to WSS.
 4. **Make your changes:** Keep commits atomic and use Conventional Commits (e.g., `feat: add markdown support`, `fix: decrypt worker memory leak`).
-5. **Test your code:** Ensure building works (`pnpm run build` in both `/web` and `/server`).
+5. **Test your code:** `pnpm -r run build`, plus `pnpm -r --if-present run test`, `pnpm run lint` (oxlint), and `node scripts/check-pq-only.mjs`. After editing `packages/shared/src`, rebuild it first (`pnpm --filter @nyx/shared run build`) or typechecks see stale `dist/`.
 6. **Issue a PR:** Use the provided Pull Request template.
 
 ## 🧾 Third-party attribution & committed artifacts (Signal)

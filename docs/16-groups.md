@@ -51,7 +51,7 @@ sequenceDiagram
 
 - Each sender maintains its own chain `{CK, N, initialCK, chainId, metadataKey}` per conversation (`groupSenderStates`); each recipient maintains **one receiver state per `(conversation, senderDeviceKey)`** carrying `{CK, N, eraCK, chainId, metadataKey, skippedKeys, signingKey}` (`groupReceiverStates`) — all encrypted at rest with the `ENC1:` envelope.
 - **[T2 — implemented]** Distribution runs through the single `sendGroupSenderKeyDistribution` path → `group:fulfilled_key` → `session:new_key` → `storeReceivedSessionKey` (realtime **and** persisted as a SYSTEM `GROUP_KEY` row, 7-day TTL, for offline catch-up). The old pairwise-DR control-message transport and `messages:distribute_keys` are removed.
-- **[V2 — 2026-10-02]** The distribution envelope is a libsignal `SenderKeyDistributionMessage` v2: `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]` (77 bytes), sealed per device (`pq_box_seal`). See §16.7.2.
+- **[V2 — 2026-10-02]** The distribution envelope is a libsignal `SenderKeyDistributionMessage` v2: `[0x02][chainId(8)][u32 iter][CK(32)][metadataKey(32)]` (77 bytes), sealed per device (`pq_box_seal_v2`, X-Wing). Current senders emit **v4** (2037 bytes, `+ senderKeyId(8) + signingKeyV2(1952)`) when they hold a PQ v2 signing key; v2 remains for peers without one — see `docs/04` §4.6. See §16.7.2.
 - **[T1 — implemented]** Group senders sign/route with a per-group pseudonym (metadata v2); receiver states key off the sender **device identity key** (stable across pseudonym rotations).
 - **Rotation invariants (fixed 2026-10):** `fulfillGroupKeyRequest` always seals the chain key at its **initial state `(initialCK, N=0)`** (`GroupSenderState.initialCK` is persisted at rest) so late joiners decrypt metadata again; metadata mutations redistribute the **same** era via `redistributeCurrentGroupKey` instead of minting a second era per change (the old double-era bug left new members in `waiting_for_key` forever). A fresh era is only created when the sender state is empty.
 - **Rotation** (`rotateGroupKey`, admin-only active path): replaces **only the local sender state** (era sources of other senders and their archives are preserved — multi-era, see §16.7.1), re-encrypts metadata v2/v3 with a fresh pseudonym map (generation+1), `PUT /details` **and emits `metadata:updated`** so every member receives the new blob + roster in real time (2026-10-05 — previously only the PUT happened and other members kept the old roster until reload). Delivery-token maps are inherited, never rotated.
@@ -84,7 +84,7 @@ locks the exact status codes, the message strings (`BLIND_AUTH_REQUIRED: …`,
 answering **403 (not 404)** for a missing conversation — do not "fix" it without a
 client contract change.
 
-**Distribution:** the token is sealed pairwise (`pq_box_seal`) to each member and relayed via `group:fulfilled_key` with the `adminToken: true` flag (realtime + offline sync branch in `message.ts` — processed as a capability, never as a chain key). Done at group creation, on MEMBER→ADMIN promotion, re-sealed to all other admins on every `rotateGroupKey`, and transferred to the successor admin when the owner leaves.
+**Distribution:** the token is sealed pairwise (`pq_box_seal_v2`) to each member and relayed via `group:fulfilled_key` with the `adminToken: true` flag (realtime + offline sync branch in `message.ts` — processed as a capability, never as a chain key). Done at group creation, on MEMBER→ADMIN promotion, re-sealed to all other admins on every `rotateGroupKey`, and transferred to the successor admin when the owner leaves.
 - **UI gating:** rotate-key button (`amIAdmin`), "Delete Group" menu/swipe entry (`canDeleteGroup`), and the solo-leave dialog variant all check admin status locally; the server-side guard is the source of truth.
 - **Trade-off:** the server cannot distinguish between admins and a stolen token stays valid until the next rotation — mitigated by re-sealing on every membership change.
 
@@ -173,8 +173,8 @@ planned changes, all implemented:
    mirror for v1 data still in prod.
 4. **One distribution path: `sendGroupSenderKeyDistribution`.**
    `SenderKeyDistributionMessage v2` =
-   `[0x02][chainId(8)][u32 iter=0][CK(32)][metadataKey(32)]`, pq_box_seal per
-   device — used by create (`ensureGroupSession`), rotate
+   `[0x02][chainId(8)][u32 iter=0][CK(32)][metadataKey(32)]`, `pq_box_seal_v2`
+   per device (v4/2037 B when the sender has `signingV2`) — used by create (`ensureGroupSession`), rotate
    (`redistributeCurrentGroupKey`), fulfill (`fulfillGroupKeyRequest`) and the
    SYSTEM_KEY_REQUEST reply (which now just calls fulfill). The duplicated
    manual seal loops are deleted.

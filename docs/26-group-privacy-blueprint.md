@@ -89,7 +89,7 @@ a fundamental limit for all designs incl. Signal V2 — accepted, documented.
 **Goal:** the server never again sees a sender→target key-delivery graph, and sender
 keys gain transport forward secrecy.
 
-**Today:** `ensureGroupSession` seals the sender key with `pq_box_seal` to each
+**Today:** `ensureGroupSession` seals the sender key with `pq_box_seal_v2` (X-Wing) to each
 member's **static** device keys, then the server relays per-target envelopes and
 persists them as 7-day SYSTEM messages. If a device's static private key is
 compromised *later*, stored envelopes can be re-opened (defeats the FS the 1:1
@@ -102,7 +102,7 @@ Double Ratchet already provides).
 ensureGroupSession:
   for each member-device:
     1. ensure pairwise DR session with that device (ensureSpqrSessionWithPeer — exists)
-    2. inner = pq_box_seal(senderKey, devicePq, deviceIdentity)   ← unchanged inner seal
+    2. inner = pq_box_seal_v2(senderKey, devicePq)   ← X-Wing only (classical key param ignored)
     3. send via pairwise DR as a control message (GROUP_KEY_DISTRIBUTION)
 ```
 
@@ -130,7 +130,7 @@ non-upgraded clients). Feature-flag per conversation version.
 > client never had a receiver hook (`decryptWithSpqrSession` existed but had zero
 > call sites) — group keys NEVER reached recipients. Executed fix: distribution
 > now goes through the fully-wired `group:fulfilled_key` → `session:new_key` →
-> `storeReceivedSessionKey` path (same inner `pq_box_seal` per-device envelope;
+> `storeReceivedSessionKey` path (same inner `pq_box_seal_v2` per-device envelope;
 > server still sees only opaque envelopes + routing). The dormant SPQR session
 > helpers were deleted. **Trade-off accepted:** `fulfilled_key` routes by real
 > userId, so the server can still observe the key-delivery graph (pseudonym is
@@ -505,7 +505,7 @@ load is itself a privacy property; relaxing it amplifies traffic signatures).
 2. **Batched/jittered release:** server holds outgoing messages for a random
    200–800ms window (per-group "maximum privacy mode" opt-in) to decorrelate
    sender→recipient timing.
-3. **Parallel key fan-out (T2 enabler):** per-device pq_box_seal under
+3. **Parallel key fan-out (T2 enabler):** per-device pq_box_seal_v2 under
    `p-limit`-style concurrency instead of serial awaits — 20-member distribution
    drops from ~200ms to ~20ms.
 4. **Noisy prekey-bundle cache:** prefetch bundles for likely contacts (co-members of

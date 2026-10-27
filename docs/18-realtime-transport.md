@@ -56,7 +56,7 @@ flowchart LR
 
 - Signaling (SDP/ICE) is relayed through the transport (`WEBRTC_SIGNAL`/`WEBRTC_ICE`), wrapped in E2EE (`encryptCallSignal`). The server only pathfinds; media flows P2P.
 - `callStore.ts` manages call state (incoming/outgoing, video/audio, streams); `CallOverlay` is the UI.
-- TURN credentials come from `GET /api/keys/turn` (Cloudflare TURN; Google STUN fallback).
+- TURN credentials come from `GET /api/keys/turn`: coturn self-host primer (`TURN_URLS` + `TURN_STATIC_AUTH_SECRET`, HMAC time-limited) → Cloudflare TURN → STUN milik operator (`ICE_STUN_URLS`) → 503/502. **Tidak ada** STUN pihak ketiga (Google STUN sudah dihapus, `docs/29` §5.7).
 
 ## 18.7 Push notifications
 
