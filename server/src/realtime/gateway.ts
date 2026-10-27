@@ -181,6 +181,129 @@ export const WSS_KEYS_SYNC_EVENTS = [
   'migration:ack',
 ] as const;
 
+/**
+ * [D6 2026-10-27] Jalur inbound **tetap** (bukan KEY_SYNC), satu sumber
+ * kebenaran registrasi. Sebelumnya daftar ini hanya hidup sebagai empat
+ * pemanggilan `guardedOn('…')` literal, sehingga test paritas harus memindai
+ * teks sumber untuk membuktikannya — dan refactor yang setara (mis. memindahkan
+ * handler ke tabel) memerahkan test tanpa ada perilaku yang berubah.
+ */
+export const WSS_FIXED_EVENTS = [
+  'message:send',
+  'message:ack_delivered',
+  'presence:update',
+  'webrtc:secure_signal',
+] as const;
+
+export type WssInboundKind = 'chat' | 'ack' | 'presence' | 'webrtc' | 'keysync';
+
+export interface WssInboundEntry {
+  event: string;
+  kind: WssInboundKind;
+}
+
+/**
+ * Tabel registrasi inbound gateway WSS — dipakai `attachWssGateway` **dan** dibaca
+ * test sebagai perilaku (bukan regex atas sumber). Setiap event hanya boleh
+ * muncul sekali: registrasi ganda berarti handler berjalan dua kali untuk satu
+ * payload (ACK dobel, pesan dobel).
+ */
+export function wssInboundTable(): WssInboundEntry[] {
+  return [
+    { event: 'message:send', kind: 'chat' },
+    { event: 'message:ack_delivered', kind: 'ack' },
+    { event: 'presence:update', kind: 'presence' },
+    { event: 'webrtc:secure_signal', kind: 'webrtc' },
+    ...WSS_KEYS_SYNC_EVENTS.map((event): WssInboundEntry => ({ event, kind: 'keysync' })),
+  ];
+}
+
+/**
+ * Pemetaan envelope `nyx:downstream` → event socket.io + payload yang dikirim.
+ *
+ * Murni supaya bisa diuji tanpa socket: bug aslinya (WEBRTC_SIGNAL/ICE jatuh ke
+ * cabang default lalu dikirim sebagai `message:new`) hanya terlihat dari
+ * pemetaan ini, dan test berbasis teks sumber tidak bisa membedakan "cabang ada"
+ * dari "cabang benar".
+ */
+export function wssDownstreamRoute(
+  opCode: number,
+  json: Record<string, unknown>
+): { event: string; payload: unknown } {
+  switch (opCode) {
+    case TransportOpCode.CHAT_MESSAGE:
+      return { event: 'message:new', payload: json };
+    case TransportOpCode.PRESENCE:
+      return { event: 'presence:update', payload: json };
+    case TransportOpCode.KICK:
+      return { event: 'force_logout', payload: json };
+    case TransportOpCode.ACK:
+      // sendAck publishes { msgId, data } on opcode 0x06 (no `event` field) —
+      // the client resolves pendingAcks from this event.
+      return { event: 'message:ack_delivered', payload: json };
+    case TransportOpCode.WEBRTC_SIGNAL:
+    case TransportOpCode.WEBRTC_ICE:
+      // [PARITY 2026-10-18] Envelope relay = `{ from, type, payload }` (TIDAK
+      // punya field `event`), jadi cabang default dulu meng-emit-nya sebagai
+      // `message:new` → klien mencoba mem-parse sinyal panggilan sebagai pesan
+      // chat dan membuangnya. Sekarang dipetakan ke event yang sama dengan jalur
+      // WT (`webrtc:signal` di klien, `transportClient.handleIncomingWss`).
+      return { event: 'webrtc:secure_signal', payload: json };
+    default:
+      // KEY_SYNC and other opcodes carry { event, data } — passthrough.
+      return {
+        event: typeof json.event === 'string' && json.event.length > 0 ? json.event : 'message:new',
+        payload: json.data,
+      };
+  }
+}
+
+/**
+ * [D6] Pembungkus handler async socket.io — diekstrak supaya bisa diuji tanpa
+ * server socket.io. Rejection yang lepas dari handler (error Redis/DB di
+ * checkRateLimit / isActiveDeviceAllowed / handle*) tidak boleh menjadi
+ * `unhandledRejection` (node ≥15 membunuh PROSES untuk satu klien yang
+ * memicu error infra). Error diteruskan ke `onError`, yang mencatat, membalas
+ * callback klien bila ada, lalu memutus koneksi bermasalah itu saja.
+ */
+export function makeGuardedOn (
+  socket: Pick<Socket, 'on' | 'disconnect'>,
+  onError: (event: string, err: unknown, maybeCb: unknown) => void
+): (event: string, handler: (...args: unknown[]) => Promise<void>) => void {
+  return (event, handler) => {
+    socket.on(event, (...args: unknown[]) => {
+      const maybeCb = args[args.length - 1];
+      void (async () => {
+        await measureWssIngress(() => handler(...args));
+      })().catch((err) => {
+        onError(event, err, maybeCb);
+      });
+    });
+  };
+}
+
+/**
+ * Reaksi standar gateway saat handler gagal: catat, balas callback klien bila
+ * ada (supaya UI tidak menggantung sampai timeout), lalu putus koneksi yang
+ * bermasalah — hanya itu, bukan seluruh proses.
+ */
+export function createHandlerFailureReporter (
+  socket: Pick<Socket, 'disconnect'>,
+  userId: string
+): (event: string, err: unknown, maybeCb: unknown) => void {
+  return (event, err, maybeCb) => {
+    console.error(`[WS-Gateway] Handler ${event} gagal untuk user ${userId}:`, err);
+    if (typeof maybeCb === 'function') {
+      try {
+        (maybeCb as (payload: unknown) => void)({ ok: false, error: 'INTERNAL_ERROR' });
+      } catch {
+        // klien mungkin sudah pergi
+      }
+    }
+    socket.disconnect(true);
+  };
+}
+
 export function attachWssGateway(httpServer: HttpServer): void {
   const io = new Server(httpServer, {
     path: '/socket.io',
@@ -282,20 +405,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
     // WebTransport melambat" hanya bisa dibandingkan dengan ambang mutlak yang
     // berbeda-beda per host; dengan keduanya, pertanyaannya jadi faktual:
     // apakah jalur cepat masih lebih cepat daripada jalur cadangannya?
-    const guardedOn = (event: string, handler: (...args: unknown[]) => Promise<void>) => {
-      socket.on(event, (...args: unknown[]) => {
-        const maybeCb = args[args.length - 1];
-        void (async () => {
-          await measureWssIngress(() => handler(...args));
-        })().catch((err) => {
-          console.error(`[WS-Gateway] Handler ${event} gagal untuk user ${userId}:`, err);
-          if (typeof maybeCb === 'function') {
-            try { maybeCb({ ok: false, error: 'INTERNAL_ERROR' }); } catch { /* klien mungkin sudah pergi */ }
-          }
-          socket.disconnect(true); // sesi bermasalah direset; proses tetap hidup
-        });
-      });
-    };
+    const guardedOn = makeGuardedOn(socket, createHandlerFailureReporter(socket, userId));
 
     // --- Inbound: CHAT_MESSAGE ---
     // [PARITY 2026-10-18] Rate limit TIDAK lagi di sini: bucket `chat_message`
@@ -303,7 +413,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
     // `realtimeHandlers` supaya klien WebTransport — yang tidak pernah lewat
     // gateway ini — mendapat batas yang sama. Memasangnya di dua tempat akan
     // menghitung ganda bucket yang sama (limit efektif jadi separuh).
-    guardedOn('message:send', async (payload: unknown) => {
+    const chatHandler = async (payload: unknown) => {
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       // Paritas dengan jalur WT: client menempelkan msgId (UUID) pada payload
       // message:send untuk korelasi ACK. Tanpa ini, callback pendingAcks di
@@ -320,19 +430,19 @@ export function attachWssGateway(httpServer: HttpServer): void {
         payload,
         typeof msgId === 'string' ? msgId : undefined
       );
-    });
+    };
 
     // --- Inbound: ACK (delivery receipt) --- (limit ada di handleAck)
-    guardedOn('message:ack_delivered', async (payload: unknown) => {
+    const ackHandler = async (payload: unknown) => {
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handleAck(wsCtx, userId, deviceId, payload as { conversationId: string; messageId: string; targetRecipient?: string });
-    });
+    };
 
     // --- Inbound: PRESENCE --- (limit ada di handlePresence)
-    guardedOn('presence:update', async (payload: unknown) => {
+    const presenceHandler = async (payload: unknown) => {
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handlePresence(wsCtx, userId, payload as { event: string; conversationId?: string });
-    });
+    };
 
     // --- Inbound: WEBRTC signaling (paritas dengan opcode 0x03/0x04 jalur WT) ---
     // [PARITY 2026-10-18] Sebelumnya event ini tidak terdaftar sama sekali di
@@ -341,7 +451,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
     // panggilan keluar hilang tanpa jejak. Payload = `{ to, type, payload }`
     // dengan `to` adalah TOKEN relay buram (bukan userId); validasi token +
     // keputusan drop fail-closed ada di `handleWebRtcRelay`.
-    guardedOn('webrtc:secure_signal', async (payload: unknown) => {
+    const webRtcHandler = async (payload: unknown) => {
       if (!await isActiveDeviceAllowed(userId, deviceId)) return;
       await handleWebRtcRelay(
         wsCtx,
@@ -350,7 +460,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
         (payload ?? {}) as { to?: string; type?: string; payload?: string },
         TransportOpCode.WEBRTC_SIGNAL
       );
-    });
+    };
 
     // --- Inbound: KEY_SYNC sub-events (rate limits enforced inside handleKeySync) ---
     // [PARITY FIX] Semua event KEY_SYNC diteruskan ke handleKeySync agar fallback
@@ -368,12 +478,29 @@ export function attachWssGateway(httpServer: HttpServer): void {
         await handleKeySync(wsCtx, userId, deviceId, { event, msgId: typeof msgId === 'string' ? msgId : '', data });
       };
 
-    // [ROBUSTNESS] Semua event KEY_SYNC lewat guard yang sama — satu loop,
-    // satu sumber kebenaran (WSS_KEYS_SYNC_EVENTS). Nama event socket.io ===
-    // nama `event` di payload handleKeySync, dan msgId (arg ke-2, opsional
-    // dari client) diteruskan untuk korelasi ACK.
-    for (const event of WSS_KEYS_SYNC_EVENTS) {
-      guardedOn(event, keySyncHandler(event));
+    // [ROBUSTNESS] Semua event lewat guard yang sama — satu loop atas
+    // `wssInboundTable()`, satu sumber kebenaran untuk nama event + jenis
+    // dispatch. Nama event socket.io === nama `event` di payload handleKeySync,
+    // dan msgId (arg ke-2, opsional dari client) diteruskan untuk korelasi ACK.
+    // Tabel diuji sebagai perilaku (gatewayParity.test.ts), bukan sebagai teks.
+    for (const entry of wssInboundTable()) {
+      switch (entry.kind) {
+        case 'chat':
+          guardedOn(entry.event, chatHandler);
+          break;
+        case 'ack':
+          guardedOn(entry.event, ackHandler);
+          break;
+        case 'presence':
+          guardedOn(entry.event, presenceHandler);
+          break;
+        case 'webrtc':
+          guardedOn(entry.event, webRtcHandler);
+          break;
+        case 'keysync':
+          guardedOn(entry.event, keySyncHandler(entry.event));
+          break;
+      }
     }
   });
 
@@ -393,36 +520,11 @@ export function attachWssGateway(httpServer: HttpServer): void {
         const { user_id, device_id, op_code, payload } = env;
         const json = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8')) as Record<string, unknown>;
 
+        // Pemetaan opcode → event + payload hidup di `wssDownstreamRoute()`
+        // (murni, diuji perilaku). Loop ini hanya mengirim hasilnya.
         const deliver = (sock: Socket) => {
-          switch (op_code) {
-            case TransportOpCode.CHAT_MESSAGE:
-              sock.emit('message:new', json);
-              break;
-            case TransportOpCode.PRESENCE:
-              sock.emit('presence:update', json);
-              break;
-            case TransportOpCode.KICK:
-              sock.emit('force_logout', json);
-              break;
-            case TransportOpCode.ACK:
-              // sendAck publishes { msgId, data } on opcode 0x06 (no `event`
-              // field) — the client resolves pendingAcks from this event.
-              sock.emit('message:ack_delivered', json);
-              break;
-            case TransportOpCode.WEBRTC_SIGNAL:
-            case TransportOpCode.WEBRTC_ICE:
-              // [PARITY 2026-10-18] Envelope relay = `{ from, type, payload }`
-              // (TIDAK punya field `event`), jadi cabang default dulu
-              // meng-emit-nya sebagai `message:new` → klien mencoba mem-parse
-              // sinyal panggilan sebagai pesan chat dan membuangnya. Sekarang
-              // dipetakan ke event yang sama dengan jalur WT (`webrtc:signal`
-              // di klien, lihat transportClient.handleIncomingWss).
-              sock.emit('webrtc:secure_signal', json);
-              break;
-            default:
-              // KEY_SYNC and other opcodes carry { event, data } — passthrough.
-              sock.emit((json.event as string) ?? 'message:new', json.data);
-          }
+          const route = wssDownstreamRoute(op_code, json);
+          sock.emit(route.event, route.payload);
         };
 
         const targets = device_id

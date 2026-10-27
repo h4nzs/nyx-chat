@@ -26,6 +26,7 @@ import {
   pepperedIdentifier,
   sealAtRest,
 } from '../src/utils/atRestSecrets.js';
+import { handleKeySync, type RealtimeContext } from '../src/network/realtimeHandlers.js';
 import {
   identityKey,
   identityMatches,
@@ -107,7 +108,165 @@ test('sealIdentity tidak terbaca tanpa pepper yang benar (attacker A1)', async (
   });
 });
 
-test('D14 wiring: tidak ada jalur tulis Redis yang memakai userId asli', () => {
+// ============================================================================
+// [D6 2026-10-27] Wiring yang diuji lewat PERILAKU, bukan teks sumber
+// ============================================================================
+//
+// Dulu bagian ini mencocokkan literal seperti
+// ``sealedMember: await sealIdentity(userId)`` dan `sAdd(\`burner:room:${roomId}\`)`
+// di dalam sumber. Dua kelemahannya: refactor setara (mis. mengekstrak helper)
+// memerahkan test tanpa perubahan perilaku, dan perubahan perilaku lolos selama
+// potongan teks itu masih ada di suatu tempat. Sekarang jalur tulis yang nyata
+// dijalankan dengan Redis palsu yang mencatat setiap perintah, lalu nilai yang
+// ditulis dibuka kembali — buktinya bukan "kodenya berbunyi begini", melainkan
+// "dump Redis berisi ciphertext yang hanya bisa dipetakan dengan pepper".
+
+interface RedisWrite {
+  op: string;
+  key: string;
+  value?: string;
+  opts?: unknown;
+}
+
+/** RealtimeContext minimal + Redis yang mencatat semua tulis. */
+function makeRecordingCtx(): { ctx: RealtimeContext; writes: RedisWrite[] } {
+  const writes: RedisWrite[] = [];
+  const sets = new Map<string, Set<string>>();
+
+  const ctx = {
+    sendToUser: async () => {},
+    sendToDevice: async () => {},
+    broadcastToUsers: async () => {},
+    sendJsonToUser: async () => {},
+    checkRateLimit: async () => true,
+    isActiveDeviceAllowed: async () => true,
+    prisma: new Proxy({}, { get: () => new Proxy({}, { get: () => async () => ({}) }) }),
+    redisClient: new Proxy({}, {
+      get: (_t, method: string) => {
+        if (method === 'set') {
+          return async (key: string, value: string, opts?: unknown) => {
+            writes.push({ op: 'set', key, value, opts });
+            return 'OK';
+          };
+        }
+        if (method === 'setEx') {
+          return async (key: string, ttl: number, value: string) => {
+            writes.push({ op: 'setEx', key, value, opts: ttl });
+            return 'OK';
+          };
+        }
+        if (method === 'exists') return async () => 0;
+        if (method === 'get') return async () => null;
+        if (method === 'del') return async () => 1;
+        return async () => undefined;
+      },
+    }),
+    pubClient: new Proxy({}, {
+      get: (_t, method: string) => {
+        if (method === 'sAdd') {
+          return async (key: string, member: string) => {
+            writes.push({ op: 'sAdd', key, value: member });
+            const set = sets.get(key) ?? new Set<string>();
+            set.add(member);
+            sets.set(key, set);
+            return 1;
+          };
+        }
+        if (method === 'sMembers') return async (key: string) => [...(sets.get(key) ?? [])];
+        if (method === 'expire') {
+          return async (key: string, seconds: number) => {
+            writes.push({ op: 'expire', key, value: String(seconds) });
+            return true;
+          };
+        }
+        if (method === 'sRem') return async () => 1;
+        if (method === 'del') return async () => 1;
+        return async () => undefined;
+      },
+    }),
+  } as unknown as RealtimeContext;
+
+  return { ctx, writes };
+}
+
+test('D14 perilaku: join burner/migration menulis member TER-SEAL, index memakai TAG', async () => {
+  await withPepper('p-redis', async () => {
+    const { ctx, writes } = makeRecordingCtx();
+
+    await handleKeySync(ctx, 'user-77', 'dev-1', { event: 'burner:join', msgId: 'b', data: { roomId: 'burner_abc' } });
+    await handleKeySync(ctx, 'user-77', 'dev-1', { event: 'migration:join', msgId: 'm', data: 'room-mig' });
+
+    const memberWrites = writes.filter(
+      (w) => w.op === 'sAdd' && (w.key.startsWith('burner:room:') || w.key.startsWith('migration:room:'))
+    );
+    assert.equal(memberWrites.length, 2, 'satu join burner + satu join migration');
+    for (const write of memberWrites) {
+      assert.notEqual(write.value, 'user-77', 'member harus ciphertext, bukan userId');
+      assert.equal(await openIdentity(write.value ?? null), 'user-77', 'routing masih bisa memetakan member');
+    }
+
+    const indexWrites = writes.filter((w) => w.op === 'sAdd' && w.key.startsWith('room:member:'));
+    assert.equal(indexWrites.length, 2, 'index per-user dicatat untuk pembersihan disconnect');
+    for (const write of indexWrites) {
+      assert.doesNotMatch(write.key, /user-77/, 'index di-key TAG, bukan userId');
+      assert.equal(write.key, `room:member:${identityTag('user-77')}`);
+    }
+  });
+});
+
+test('D14 perilaku: migration_owner & is_migrating tidak memuat userId asli', async () => {
+  await withPepper('p-redis', async () => {
+    const { ctx, writes } = makeRecordingCtx();
+
+    await handleKeySync(ctx, 'user-88', 'dev-2', { event: 'migration:prepare', msgId: 'p', data: {} });
+    await handleKeySync(ctx, 'user-88', 'dev-2', { event: 'migration:start', msgId: 's', data: { roomId: 'room-1' } });
+
+    const grace = writes.find((w) => w.op === 'set' && w.key.startsWith('is_migrating:'));
+    assert.ok(grace, 'grace period ditulis');
+    assert.doesNotMatch(grace!.key, /user-88/, 'key memakai identityKey (tag)');
+    assert.equal(grace!.key, `is_migrating:${identityTag('user-88')}`);
+
+    const owner = writes.find((w) => w.op === 'set' && w.key === 'migration_owner:room-1');
+    assert.ok(owner, 'owner ditulis');
+    assert.notEqual(owner!.value, 'user-88');
+    assert.equal(await openIdentity(owner!.value ?? null), 'user-88', 'pemilik masih bisa dipulihkan untuk otorisasi chunk');
+    assert.deepEqual(owner!.opts, { EX: 3600 }, 'owner kedaluwarsa (bukan tersimpan selamanya)');
+  });
+});
+
+test('D14 perilaku: linking_token menyimpan {userId, deviceId} TER-SEAL', async () => {
+  await withPepper('p-redis', async () => {
+    const { ctx, writes } = makeRecordingCtx();
+
+    await handleKeySync(ctx, 'user-99', 'dev-3', { event: 'auth:request_linking_qr', msgId: 'q', data: {} });
+
+    const token = writes.find((w) => w.op === 'setEx' && w.key.startsWith('linking_token:'));
+    assert.ok(token, 'token dilahirkan');
+    assert.doesNotMatch(token!.key, /user-99/);
+    assert.notEqual(token!.opts, undefined, 'memakai TTL');
+    assert.doesNotMatch(token!.value ?? '', /user-99/, 'nilai tidak plaintext');
+    assert.deepEqual(
+      JSON.parse((await openIdentity(token!.value ?? null)) ?? 'null'),
+      { userId: 'user-99', deviceId: 'dev-3' },
+      'redeemer bisa memulihkan identitas dari ciphertext'
+    );
+  });
+});
+
+// ============================================================================
+// [statis] Invariant yang tidak bisa diamati dari perilaku
+// ============================================================================
+//
+// Tiga kelas di bawah ini tetap dipindai dari sumber, dan itu disengaja:
+//   • "tidak ada template literal userId di key identitas" — properti tentang
+//     SELURUH berkas, termasuk jalur yang tidak bisa dipanggil unit test (butuh
+//     Postgres/Redis nyata);
+//   • satu bug sejarah (`identityKey` tertutup oleh destructuring req.body)
+//     yang bentuk regresinya hanya terlihat di teks;
+//   • "disconnect tidak memindai keyspace" — properti absen.
+// Perilaku jalur tulisnya sendiri sudah diuji di atas dan di roomMembership.test.ts.
+
+test('D14 statis: key identitas memakai helper, bukan template literal userId', () => {
   const files = [
     '../src/network/redisBridge.ts',
     '../src/network/realtimeHandlers.ts',
@@ -119,7 +278,6 @@ test('D14 wiring: tidak ada jalur tulis Redis yang memakai userId asli', () => {
 
   const joined = files.map((f) => read(f)).join('\n');
 
-  // Key berbasis identitas harus lewat helper, bukan template literal userId.
   assert.doesNotMatch(joined, /active_device:\$\{/, 'active_device memakai identityKey');
   assert.doesNotMatch(joined, /is_migrating:\$\{/, 'is_migrating memakai identityKey');
   assert.doesNotMatch(joined, /cache:keys:[a-z]+:\$\{/, 'cache:keys memakai identityKey');
@@ -132,7 +290,9 @@ test('D14 wiring: tidak ada jalur tulis Redis yang memakai userId asli', () => {
     }
     assert.doesNotMatch(src, /sAdd\('online_users', userId\)/, `${f}: online_users memakai tag`);
   }
+});
 
+test('D14 statis: routes/keys.ts tidak menutupi helper identityKey + invalidasi memakai helper', () => {
   // [BUGFIX 2026-10-09] `routes/keys.ts` pernah men-destructure `identityKey`
   // dari `req.body` → MENUTUPI helper → `identityKey('cache:keys:…', userId)`
   // melempar "identityKey is not a function" (tertangkap try/catch, hanya
@@ -150,34 +310,11 @@ test('D14 wiring: tidak ada jalur tulis Redis yang memakai userId asli', () => {
     2,
     'invalidate cache pre-key memakai helper identityKey() (bundle + public)'
   );
+});
 
+test('D14 statis: disconnect memakai index per-user, bukan SCAN keyspace', () => {
   const bridge = read('../src/network/redisBridge.ts');
-  const handlers = read('../src/network/realtimeHandlers.ts');
-
-  // Member SET yang dipakai sebagai target kirim = seal deterministik.
-  // [AUDIT 2026-10-24] Penulisan set anggota pindah ke `utils/roomMembership.ts`
-  // (agar disconnect tidak perlu SCAN keyspace). Handler tetap wajib mengirim
-  // member TER-SEAL, dan util wajib menulis nilai itu apa adanya.
-  const membership = read('../src/utils/roomMembership.ts');
-  assert.equal(
-    (handlers.match(/sealedMember: await sealIdentity\(userId\)/g) || []).length,
-    3,
-    'burner/migration join mengirim member ter-seal'
-  );
-  assert.match(membership, /client\.sAdd\(roomKey\(args\.kind, args\.roomId\), args\.sealedMember\)/, 'roomMembership menulis member ter-seal');
-  assert.doesNotMatch(membership, /sAdd\([^)]*userId/, 'roomMembership tidak pernah menulis userId mentah');
-  assert.match(handlers, /`migration_owner:\$\{roomId\}`, await sealIdentity\(userId\)/, 'migration_owner ter-seal');
   assert.match(bridge, /sealIdentity\(userId\)/, 'cleanup disconnect menyamakan member ter-seal');
-  assert.match(bridge, /leaveAllRooms\(/, 'cleanup disconnect memakai index per-user, bukan SCAN keyspace');
+  assert.match(bridge, /leaveAllRooms\(/, 'cleanup disconnect memakai index per-user');
   assert.doesNotMatch(bridge, /SCAN.*burner:room/, 'cleanup disconnect tidak lagi memindai keyspace');
-
-  // Nilai linking_token memuat identitas → disimpan sebagai ciphertext.
-  assert.match(
-    handlers,
-    /await sealAtRest\(JSON\.stringify\(\{ userId, deviceId \}\)\)/,
-    'linking_token memuat identitas ter-seal'
-  );
-  // Pembaca harus bisa membuka (dengan toleransi legacy).
-  assert.match(handlers, /openIdentityMembers\(/, 'redeem burner/migration membuka member ter-seal');
-  assert.match(handlers, /identityMatches\(/, 'migration_owner dibandingkan via helper');
 });

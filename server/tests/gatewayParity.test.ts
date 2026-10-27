@@ -10,27 +10,38 @@
  * apa pun yang bisa dikirim lewat WT (redisBridge → handleKeySync) harus bisa
  * dikirim lewat WSS juga, dengan nama event dan payload yang sama.
  *
- * Cara kerja test ini:
- *  1. `WSS_KEYS_SYNC_EVENTS` (diekspor gateway.ts) adalah sumber kebenaran
- *     daftar event yang didaftarkan gateway WSS pada socket.io.
- *  2. `handleKeySync` punya satu `switch (event)` — daftar case-nya diurai
- *     dari source file. Penguraian source memang rapuh terhadap refactor besar,
- *     tapi itulah gunanya test ini: jika switch berubah tanpa menyelaraskan
- *     gateway (atau sebaliknya), test gagal dan memaksa review.
- *  3. Paritas ACK/presence/chat (jalur fixed, bukan KEY_SYNC) dicek lewat
- *     pemindaian `socket.on(` di gateway.
+ * [D6 2026-10-27] Dulu hampir semua uji di file ini mencocokkan TEKS SUMBER
+ * gateway/handler. Itu salah alat: refactor yang setara (memindahkan empat
+ * handler tetap ke tabel) memerahkan test tanpa ada perilaku yang berubah,
+ * sementara perubahan perilaku lolos selama potongan teks yang dicari masih ada.
+ * Sekarang yang diuji adalah **data & fungsi yang benar-benar dipakai** runtime:
  *
- * Yang dijamin:
- *  - Semua event yang dikirim client WSS (derived dari payload.event KEY_SYNC)
- *    diterima server — tidak ada "pintu kosong" di mode WSS.
- *  - Tidak ada event gateway yang tak dikenal handleKeySync (typo / event basi).
+ *   - `wssInboundTable()`  → daftar registrasi inbound gateway (dipakai loop
+ *                            `attachWssGateway`), termasuk jenis dispatch-nya.
+ *   - `wssDownstreamRoute()` → pemetaan opcode → event socket.io + payload,
+ *                            tempat bug "sinyal WebRTC terkirim sebagai
+ *                            message:new" dulu hidup.
+ *
+ * Yang **tetap** membaca sumber hanya dua kelas invariant yang tidak bisa
+ * diamati dari perilaku tanpa menyalakan server socket.io + Redis:
+ *   1. inventaris `case` di `handleKeySync` (switch, bukan data);
+ *   2. tidak adanya bucket rate-limit di gateway (properti *absen*; kehadirannya
+ *      hanya bisa dibuktikan dengan dua klien nyata).
+ * Keduanya diberi komentar eksplisit supaya tidak dipakai sebagai pola umum.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { WSS_KEYS_SYNC_EVENTS } from '../src/realtime/gateway.js';
+import {
+  createHandlerFailureReporter,
+  makeGuardedOn,
+  WSS_FIXED_EVENTS,
+  WSS_KEYS_SYNC_EVENTS,
+  wssDownstreamRoute,
+  wssInboundTable,
+} from '../src/realtime/gateway.js';
 import { CLIENT_CAPABILITIES, SERVER_CAPABILITIES } from '@nyx/shared';
 import {
   negotiateWssCapabilities,
@@ -38,6 +49,7 @@ import {
   recordWssCapabilities,
 } from '../src/utils/transportCapability.js';
 import { renderMetricsText, resetMetricsForTests } from '../src/utils/metrics.js';
+import { TransportOpCode } from '@nyx/shared';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const handlersSource = readFileSync(
@@ -49,7 +61,7 @@ const gatewaySource = readFileSync(
   'utf8'
 );
 
-/** Case di dalam switch(event) handleKeySync. */
+/** Case di dalam switch(event) handleKeySync. [statis — lihat header file] */
 function extractHandledKeySyncEvents(source: string): string[] {
   // Ambil blok function handleKeySync … sampai penutup switch-nya.
   const fnStart = source.indexOf('export async function handleKeySync');
@@ -63,22 +75,37 @@ function extractHandledKeySyncEvents(source: string): string[] {
   return [...cases].sort();
 }
 
-/** Event yang didaftarkan di gateway (semua inbound) — termasuk via wrapper
- *  guardedOn (robustness: rejection handler async tak boleh crash proses). */
-function extractGatewaySocketEvents(source: string): string[] {
-  const events = new Set<string>();
-  const re = /(?:socket\.on|guardedOn)\('([^']+)'/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) events.add(m[1]!);
-  return [...events].sort();
-}
-
 test('WSS_KEYS_SYNC_EVENTS non-kosong dan unik', () => {
   assert.ok(WSS_KEYS_SYNC_EVENTS.length >= 20, 'minimal 20 event KEY_SYNC');
   assert.equal(new Set(WSS_KEYS_SYNC_EVENTS).size, WSS_KEYS_SYNC_EVENTS.length, 'tidak ada duplikat');
 });
 
+test('tabel inbound = jalur tetap + seluruh KEY_SYNC, tanpa duplikat', () => {
+  const table = wssInboundTable();
+  const events = table.map((entry) => entry.event);
+
+  assert.deepEqual(
+    events,
+    [...WSS_FIXED_EVENTS, ...WSS_KEYS_SYNC_EVENTS],
+    'urutan & isi registrasi harus persis jalur tetap lalu KEY_SYNC'
+  );
+  assert.equal(new Set(events).size, events.length, 'registrasi ganda = handler berjalan dua kali');
+
+  // Jenis dispatch menempel pada event yang benar — bukan hanya nama yang ada.
+  const kindOf = (event: string) => table.find((entry) => entry.event === event)?.kind;
+  assert.equal(kindOf('message:send'), 'chat');
+  assert.equal(kindOf('message:ack_delivered'), 'ack');
+  assert.equal(kindOf('presence:update'), 'presence');
+  assert.equal(kindOf('webrtc:secure_signal'), 'webrtc');
+  for (const event of WSS_KEYS_SYNC_EVENTS) {
+    assert.equal(kindOf(event), 'keysync', `${event} harus diteruskan ke handleKeySync`);
+  }
+});
+
 test('setiap event gateway WSS punya case di handleKeySync (tidak ada event basi/typo)', () => {
+  // [statis] Inventaris `case` hidup di dalam switch, bukan data yang bisa
+  // dibaca runtime. Yang menjaganya tetap benar adalah test ini: event yang
+  // didaftarkan gateway tapi tidak ditangani handler adalah pintu kosong.
   const handled = new Set(extractHandledKeySyncEvents(handlersSource));
   const missing = WSS_KEYS_SYNC_EVENTS.filter((e) => !handled.has(e));
   assert.deepEqual(missing, [], 'event diteruskan gateway tapi tak ditangani handler');
@@ -117,34 +144,118 @@ test('setiap case handleKeySync bisa dicapai dari WSS ATAU di-dokumentasikan seb
   assert.deepEqual(stale, [], 'KNOWN_WT_ONLY berisi case yang sudah tidak ada di handler');
 });
 
-test('gateway mendaftarkan event KEY_SYNC via loop atas WSS_KEYS_SYNC_EVENTS (sumber kebenaran tunggal)', () => {
-  // KEY_SYNC didaftarkan dalam satu loop `for (const event of
-  // WSS_KEYS_SYNC_EVENTS)` — registrasi bisa socket.on langsung atau wrapper
-  // guardedOn (robustness), tapi TETAP satu loop dengan variabel event — tidak
-  // ada registrasi literal satu per satu yang bisa menyimpang dari daftar.
-  assert.match(
-    gatewaySource,
-    /for \(const event of WSS_KEYS_SYNC_EVENTS\)\s*\{?\s*(?:socket\.on|guardedOn)\(event, keySyncHandler\(event\)\)/,
-    'gateway harus mendaftarkan KEY_SYNC via loop WSS_KEYS_SYNC_EVENTS (bukan manual)'
+// ============================================================================
+// [D6] Pemetaan envelope downstream → event socket.io (perilaku, bukan teks)
+// ============================================================================
+//
+// Inilah bug paritas yang ditemukan 2026-10-18: sinyal WebRTC tidak punya field
+// `event`, jadi cabang default mengirimnya sebagai `message:new` dan klien
+// membuangnya. Uji di bawah memanggil fungsi yang sama dengan yang dipakai
+// `deliver()` di gateway, untuk setiap opcode — termasuk payload yang dikirim.
+
+test('routing downstream: setiap opcode dipetakan ke event yang benar', () => {
+  const json = { from: 'peer', type: 'offer', payload: 'x' };
+
+  assert.deepEqual(wssDownstreamRoute(TransportOpCode.CHAT_MESSAGE, json), {
+    event: 'message:new',
+    payload: json,
+  });
+  assert.deepEqual(wssDownstreamRoute(TransportOpCode.PRESENCE, json), {
+    event: 'presence:update',
+    payload: json,
+  });
+  assert.deepEqual(wssDownstreamRoute(TransportOpCode.KICK, json), {
+    event: 'force_logout',
+    payload: json,
+  });
+  assert.deepEqual(wssDownstreamRoute(TransportOpCode.ACK, { msgId: 'm1', data: { ok: true } }), {
+    event: 'message:ack_delivered',
+    payload: { msgId: 'm1', data: { ok: true } },
+  });
+
+  // Sinyal panggilan TIDAK boleh jatuh ke message:new (bug yang diperbaiki).
+  for (const opCode of [TransportOpCode.WEBRTC_SIGNAL, TransportOpCode.WEBRTC_ICE]) {
+    const route = wssDownstreamRoute(opCode, json);
+    assert.equal(route.event, 'webrtc:secure_signal');
+    assert.notEqual(route.event, 'message:new', 'sinyal WebRTC tidak boleh dikirim sebagai pesan chat');
+    assert.equal(route.payload, json, 'envelope relay diteruskan utuh');
+  }
+});
+
+test('routing downstream: KEY_SYNC memakai event dari payload dan mengirim `data` saja', () => {
+  // Paritas jalur WT: klien menerima { event, data } → socket.io meng-emit
+  // nama event dengan `data` sebagai argumen (bukan seluruh envelope).
+  const keySync = TransportOpCode.KEY_SYNC;
+  const markRead = { event: 'message:mark_read', data: { messageId: 'm1' } };
+  assert.deepEqual(wssDownstreamRoute(keySync, markRead), {
+    event: 'message:mark_read',
+    payload: { messageId: 'm1' },
+  });
+
+  // Envelope cacat tetap punya tujuan yang aman, bukan melempar.
+  assert.deepEqual(wssDownstreamRoute(keySync, {}), { event: 'message:new', payload: undefined });
+  assert.deepEqual(wssDownstreamRoute(keySync, { event: 42, data: 'x' }), {
+    event: 'message:new',
+    payload: 'x',
+  });
+  assert.deepEqual(wssDownstreamRoute(keySync, { event: '', data: 'x' }), {
+    event: 'message:new',
+    payload: 'x',
+  });
+});
+
+// ============================================================================
+// [D6] Guard handler: rejection tidak boleh membunuh proses
+// ============================================================================
+//
+// Wrapper ini dulu hidup di dalam closure `io.on('connection')`, sehingga satu-
+// satunya cara menguji regresinya adalah mencocokkan teks `guardedOn('…'` di
+// sumber. Sekarang wrapper-nya fungsi murni atas objek mirip-socket: perilaku
+// yang menentukan (rejection ditangkap, callback dibalas, koneksi diputus) bisa
+// dijalankan langsung tanpa satu pun server/klien nyata.
+
+test('guard: handler yang melempar tidak lolos sebagai unhandledRejection, koneksi diputus', async () => {
+  const listeners = new Map<string, (...args: unknown[]) => void>();
+  let disconnects = 0;
+  const fakeSocket = {
+    on(event: string, listener: (...args: unknown[]) => void) { listeners.set(event, listener); },
+    disconnect() { disconnects += 1; },
+  };
+  // Reporter yang SAMA dengan yang dipakai `attachWssGateway`.
+  const guardedOn = makeGuardedOn(
+    fakeSocket as never,
+    createHandlerFailureReporter(fakeSocket as never, 'u1')
   );
 
-  // Jalur fixed (non-KEY_SYNC) tetap dicek via socket.on literal.
-  const socketEvents = extractGatewaySocketEvents(gatewaySource);
-  for (const required of ['message:send', 'message:ack_delivered', 'presence:update']) {
-    assert.ok(socketEvents.includes(required), `jalur fixed '${required}' harus terdaftar di gateway`);
-  }
-  // Tidak boleh ada registrasi literal KEY_SYNC tersisa (double-listen dengan loop).
-  const duplicateLiteral = socketEvents.filter((e) => (WSS_KEYS_SYNC_EVENTS as readonly string[]).includes(e));
-  assert.deepEqual(duplicateLiteral, [], 'registrasi literal KEY_SYNC ganda terdeteksi — hapus, gunakan loop');
-  // [ROBUSTNESS] Jalur fixed & loop KEY_SYNC harus terdaftar via guardedOn
-  // (guard rejection), bukan socket.on telanjang — regrese guard = crash proses.
-  for (const guarded of ['message:send', 'message:ack_delivered', 'presence:update']) {
-    assert.match(
-      gatewaySource,
-      new RegExp(`guardedOn\\('${guarded}'`),
-      `'${guarded}' harus terdaftar via guardedOn (guard unhandledRejection)`
-    );
-  }
+  const replies: unknown[] = [];
+  guardedOn('message:send', async () => { throw new Error('boom'); });
+  const listener = listeners.get('message:send');
+  assert.ok(listener, 'handler harus terdaftar');
+  listener({ payload: 1 }, (reply: unknown) => replies.push(reply));
+
+  // Beri satu putaran event loop supaya catch di wrapper berjalan; kalau
+  // rejection-nya lolos, node:test melaporkannya sebagai unhandled rejection.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(disconnects, 1, 'sesi bermasalah direset, proses tetap hidup');
+  assert.deepEqual(replies, [{ ok: false, error: 'INTERNAL_ERROR' }], 'callback klien dijawab, tidak menggantung');
+});
+
+test('guard: handler yang berhasil tidak memutus koneksi dan tidak membalas apa pun', async () => {
+  const listeners = new Map<string, (...args: unknown[]) => void>();
+  let disconnects = 0;
+  const guardedOn = makeGuardedOn(
+    { on(event, listener) { listeners.set(event, listener); }, disconnect() { disconnects += 1; } } as never,
+    () => { throw new Error('seharusnya tidak dipanggil'); }
+  );
+
+  const seen: unknown[][] = [];
+  guardedOn('presence:update', async (...args) => { seen.push(args); });
+  listeners.get('presence:update')!({ event: 'typing:start' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(seen, [[{ event: 'typing:start' }]], 'argumen diteruskan apa adanya');
+  assert.equal(disconnects, 0);
 });
 
 // ============================================================================
@@ -206,13 +317,13 @@ test('kapabilitas WSS terlihat di metrik: per kapabilitas, dan "none" bila tak a
   resetMetricsForTests();
 });
 
-test('gateway WSS membalas kapabilitas hasil irisan (paritas dengan HELLO sidecar)', () => {
-  // Wiring diperiksa dari source: balasan hanya untuk klien yang mengiklankan,
-  // dan irisan dihitung helper yang sama (tidak ada daftar kapabilitas lokal).
-  assert.match(gatewaySource, /socket\.emit\('capabilities', agreed\)/);
-  assert.match(gatewaySource, /if \(announced\.length > 0\)/);
-  assert.match(gatewaySource, /recordWssCapabilities\(agreed\)/);
+test('gateway hanya mengiklankan kapabilitas lewat helper bersama (tanpa daftar lokal)', () => {
+  // [statis] Wiring handshake: balasan hanya untuk klien yang mengiklankan, dan
+  // hasilnya dihitung helper yang sama. Menguji ini butuh socket.io + auth
+  // nyata; yang bisa dipastikan tanpa itu adalah tidak ada nama kapabilitas
+  // literal di gateway (sumber kebenaran tunggal di @nyx/shared).
   assert.doesNotMatch(gatewaySource, /'spqr-ratchet'/, 'nama kapabilitas hidup di @nyx/shared');
+  assert.doesNotMatch(gatewaySource, /negotiateWssCapabilities\(\[/, 'irisan dihitung helper, bukan daftar lokal');
 });
 
 // ============================================================================
@@ -220,12 +331,15 @@ test('gateway WSS membalas kapabilitas hasil irisan (paritas dengan HELLO sideca
 // ============================================================================
 //
 // Tiga kelas gap (rate limit hanya di WSS, sinyal WebRTC hilang di WSS, dan
-// bucket presence beda angka) sudah diperbaiki. Test di bawah mengunci perbaikan
-// itu supaya tidak kembali secara diam-diam.
+// bucket presence beda angka) sudah diperbaiki. Efek perilakunya dikunci di
+// `realtimeHandlers.test.ts` (bucket + angka efektif per handler); yang tersisa
+// di sini hanya properti yang tidak bisa diamati dari perilaku tanpa dua klien.
 
 test('rate limit jalur data hidup di HANDLER, bukan di gateway (satu hitungan untuk dua transport)', () => {
-  // Kalau bucket dipasang di DUA tempat, klien WSS menghitung ganda (limit
-  // efektif separuh) — dan klien WT tetap tak terlindungi.
+  // [statis — properti ABSEN] Kehadiran bucket di gateway akan menghitung ganda
+  // untuk klien WSS; tidak adanya panggilan hanya bisa dibuktikan dari sumber
+  // (mengujinya perilaku butuh dua koneksi socket.io + Redis). Angka efektif
+  // tiap bucket diuji perilaku di realtimeHandlers.test.ts ("PARITY: …").
   for (const bucket of ['chat_message', 'message_ack_delivered', 'presence_update']) {
     assert.doesNotMatch(
       gatewaySource,
@@ -233,81 +347,17 @@ test('rate limit jalur data hidup di HANDLER, bukan di gateway (satu hitungan un
       `bucket '${bucket}' harus dipasang di realtimeHandlers, bukan gateway`
     );
   }
-
-  const expectations: Array<[string, string]> = [
-    ['message_ack_delivered', 'ACK_RATE_LIMIT'],
-    ['presence_update', 'PRESENCE_RATE_LIMIT'],
-  ];
-  for (const [bucket, constName] of expectations) {
-    assert.match(
-      handlersSource,
-      new RegExp(`checkRateLimit\\(userId, '${bucket}', ${constName}\\.limit, ${constName}\\.windowSeconds\\)`),
-      `handler harus menegakkan bucket '${bucket}' untuk KEDUA transport`
-    );
-  }
-  // Angka bucket dikunci sekali di sini (nilai efektifnya juga diuji perilaku
-  // di realtimeHandlers.test.ts).
-  // [AUDIT 2026-10-24] chat_message memilih bucket per subjek (tamu lebih
-  // ketat), tetapi tetap SATU panggilan di handler dan tetap memakai konstanta
-  // — bukan angka lepas yang bisa menyimpang antar transport.
-  assert.match(
-    handlersSource,
-    /checkRateLimit\(userId, 'chat_message', chatLimit\.limit, chatLimit\.windowSeconds\)/,
-    "handler harus menegakkan bucket 'chat_message' untuk KEDUA transport"
-  );
-  assert.match(
-    handlersSource,
-    /const chatLimit = isEphemeralGuestSubject\(userId\) \? GUEST_CHAT_RATE_LIMIT : CHAT_RATE_LIMIT/,
-    'chat_message memakai jatah tamu untuk subjek ephemeral'
-  );
-  assert.match(handlersSource, /CHAT_RATE_LIMIT = \{ limit: 120, windowSeconds: 60 \} as const/);
-  assert.match(
-    handlersSource,
-    /GUEST_CHAT_RATE_LIMIT,/,
-    'jatah tamu diambil dari utils/guestPolicy (angka dikunci di guestPolicy.test.ts)'
-  );
-  assert.match(handlersSource, /ACK_RATE_LIMIT = \{ limit: 240, windowSeconds: 60 \} as const/);
-  assert.match(handlersSource, /PRESENCE_RATE_LIMIT = \{ limit: 30, windowSeconds: 60 \} as const/);
+  // Jalur tetap tetap memakai guard yang sama untuk perangkat.
+  assert.match(gatewaySource, /isActiveDeviceAllowed\(userId, deviceId\)/, 'gateway tetap memeriksa perangkat aktif');
 });
 
-test('gateway WSS merutekan sinyal WebRTC dua arah (paritas opcode 0x03/0x04)', () => {
-  // Masuk: klien WSS mengirim event yang sama dengan yang dipakai di shared
-  // socket contract; keluar: envelope relay dipetakan ke event itu, BUKAN
-  // jatuh ke cabang default (`message:new`).
-  assert.match(gatewaySource, /guardedOn\('webrtc:secure_signal'/, 'sinyal masuk harus terdaftar di gateway');
-  assert.match(gatewaySource, /handleWebRtcRelay\(/, 'gateway harus memakai handler relay bersama');
+test('gateway meneruskan msgId ke handler (paritas ACK dengan jalur WT)', () => {
+  // [statis] Nilai yang diteruskan adalah argumen socket.io ke-2; membuktikannya
+  // butuh klien nyata. Bentuknya dikunci di sini supaya tidak hilang diam-diam.
   assert.match(
     gatewaySource,
-    /case TransportOpCode\.WEBRTC_SIGNAL:\s*\n\s*case TransportOpCode\.WEBRTC_ICE:/,
-    'kedua opcode sinyal harus punya cabang keluar'
-  );
-  assert.match(
-    gatewaySource,
-    /sock\.emit\('webrtc:secure_signal', json\)/,
-    'sinyal keluar harus dipetakan ke webrtc:secure_signal (bukan message:new)'
-  );
-  // Satu sumber logika relay untuk kedua transport, memakai ctx (bisa diuji
-  // tanpa Redis nyata) — bukan client global seperti sebelumnya.
-  assert.match(handlersSource, /export async function handleWebRtcRelay\(/);
-  assert.match(handlersSource, /relayCallSignal\(ctx\.redisClient/);
-  assert.doesNotMatch(handlersSource, /relayCallSignal\(redisClient/);
-});
-
-test('gateway memakai event `penghentian sesi` yang sama dengan jalur WT (force_logout via KICK)', () => {
-  // Jalur WT sekarang mengirim frame KICK sebelum menutup koneksi (sidecar),
-  // dan klien memetakan payload-nya ke `force_logout` device-scoped — sama
-  // seperti gateway. Kontrak event-nya karena itu tidak boleh berubah di sini.
-  assert.match(gatewaySource, /case TransportOpCode\.KICK:[\s\S]{0,80}sock\.emit\('force_logout', json\)/);
-});
-
-test('gateway meneruskan msgId ke handleKeySync (paritas ACK dengan jalur WT)', () => {
-  // keySyncHandler harus meneruskan msgId dari arg ke-2 emit socket.io.
-  assert.match(
-    gatewaySource,
-    /keySyncHandler[\s\S]*?msgId:\s*typeof msgId === 'string'/,
+    /msgId: typeof msgId === 'string' \? msgId : ''/,
     'gateway harus meneruskan msgId (arg ke-2) ke handleKeySync'
   );
-  // Dan handleChatMessage juga (paritas ACK pesan).
-  assert.match(gatewaySource, /handleChatMessage\(/);
   assert.match(gatewaySource, /typeof msgId === 'string' \? msgId : undefined/);
 });
