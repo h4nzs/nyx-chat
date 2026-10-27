@@ -49,12 +49,30 @@ vi.mock('../db', () => ({
   VaultEntry: {},
 }));
 
-// Master seed terkunci → nilai disimpan plaintext, sehingga test fokus pada
-// mapper field (bukan pada enkripsi at-rest yang sudah dites terpisah).
+// [audit D7] Penulisan at-rest fail-closed: tanpa masterSeed, `encryptValueAtRest`
+// MELEMPAR (dulu nilai disimpan plaintext). Test ini karena itu menyediakan seed
+// + stub crypto supaya mapper field diuji pada jalur yang sebenarnya dipakai.
 vi.mock('@store/auth', () => ({
   useAuthStore: {
-    getState: () => ({ getMasterSeedIfUnlocked: () => undefined }),
+    getState: () => ({ getMasterSeedIfUnlocked: () => new Uint8Array(32).fill(3) }),
   },
+}));
+
+vi.mock('@lib/crypto-worker-proxy', () => ({
+  // Simetris: seal = balik byte, open = balik lagi → round-trip mudah diperiksa.
+  worker_encrypt_session_key: async (bytes: Uint8Array) => bytes.slice().reverse(),
+  worker_decrypt_session_key: async (bytes: Uint8Array) => bytes.slice().reverse(),
+}));
+
+vi.mock('@lib/sodiumInitializer', () => ({
+  getSodium: async () => ({
+    // Lingkungan test tidak punya 'base64url'; bentuk URL-safe disusun manual.
+    to_base64: (bytes: Uint8Array) =>
+      Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''),
+    from_base64: (value: string) =>
+      new Uint8Array(Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64')),
+    base64_variants: { URLSAFE_NO_PADDING: 1 },
+  }),
 }));
 
 import {
@@ -140,6 +158,16 @@ describe('GroupReceiverState persistence', () => {
     expect(all).toHaveLength(1);
     expect(all[0]!.signingKeyV2).toBe(RECEIVER_STATE.signingKeyV2);
     expect(all[0]!.senderKeyId).toBe(RECEIVER_STATE.senderKeyId);
+  });
+
+  it('nilai yang tersimpan benar-benar ter-seal (bukan plaintext) — [audit D7]', async () => {
+    await saveGroupReceiverState(RECEIVER_STATE as never);
+    const row = receiverRows.get(RECEIVER_STATE.id);
+    const state = row!.state as Record<string, unknown>;
+
+    expect(String(state.CK).startsWith('ENC1:')).toBe(true);
+    expect(String(state.CK)).not.toContain(RECEIVER_STATE.CK);
+    expect(String(state.metadataKey).startsWith('ENC1:')).toBe(true);
   });
 
   it('archiveGroupReceiverState tidak membuang kunci v2', async () => {

@@ -247,7 +247,14 @@ const openAtRest = async (value: string): Promise<string | null> =>
  */
 export const saveKtIdentifier = async (usernameHash: string, userId?: string): Promise<void> => {
   if (!usernameHash) return;
-  await set(ktIdentifierSlot(userId ?? ktIdentifierScope()), await sealAtRest(usernameHash));
+  // [audit D7] Identifier akun adalah pengenal stabil: kalau belum bisa disegel
+  // (vault terkunci), lewati penulisan. Dulu nilainya disimpan plaintext, jadi
+  // localStorage memuat hash username tanpa perlindungan sama sekali.
+  try {
+    await set(ktIdentifierSlot(userId ?? ktIdentifierScope()), await sealAtRest(usernameHash));
+  } catch (e) {
+    console.warn('[KeyStorage] Identifier KT tidak disimpan (at-rest seal tidak tersedia):', e);
+  }
 };
 
 /** Baca identifier akun aktif; `undefined` bila belum ada atau vault terkunci. */

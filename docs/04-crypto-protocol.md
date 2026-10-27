@@ -123,7 +123,7 @@ IndexedDB keychain values are wrapped: `"ENC1:" + base64url(worker_encrypt_sessi
 - Applied to: group chain keys, group skipped keys, story keys, 1:1 braid (v2) state rows `nyx_spqr_state_v1:*` (and 1:1 ratchet/session/message keys use the same primitive via their own helpers).
 - Legacy plaintext values are still readable; `migrateKeychainAtRestEncryption()` (triggered on unlock via `saveDeviceAutoUnlockKey`) rewrites them.
 - `decryptValueAtRest` returns the value unchanged when it lacks the prefix (legacy), `null` when decryption fails.
-- **Fail-open on write (known limitation):** `encryptValueAtRest` returns the plaintext unchanged when `masterSeed` is unavailable or sealing throws (console warning only). In that state new structural fields can be stored unsealed; this is a documented limitation, not a guarantee.
+- **Fail-closed on write** ([audit D7, 2026-10-27]): `encryptValueAtRest` **throws** `AtRestSealUnavailableError` when `masterSeed` is unavailable, and lets worker errors propagate; it never returns the plaintext. Callers must skip the write (or let the error abort that row) — the `sealLocal*` helpers in `localAtRest.ts` inherit this, so a locked vault means the structural field is **absent**, not plaintext. Rows written before this change (and legacy plaintext imported from older builds) remain readable; the migration on unlock seals them when the vault is open. `saveKtIdentifier` and `upsertContact` skip their write with a warning instead of downgrading.
 
 ## 4.9 Attachment encryption
 

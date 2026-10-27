@@ -147,11 +147,20 @@ export async function upsertContact(input: {
         lastSeenAt: now,
     };
 
-    await db.contacts.put({
-        userId,
-        data: await encryptRecord(record),
-        updatedAt: (await sealLocalNumber(now)) ?? now,
-    });
+    // [audit D7] Penulisan baru fail-closed: bila vault terkunci sehingga
+    // `updatedAt` tidak bisa disegel, baris kontak **dilewati** (tidak ditulis
+    // plaintext). Kontak yang sudah ada tetap utuh; pembaruan berikutnya saat
+    // vault terbuka akan menulisnya lagi.
+    try {
+        await db.contacts.put({
+            userId,
+            data: await encryptRecord(record),
+            updatedAt: (await sealLocalNumber(now)) ?? 0,
+        });
+    } catch (e) {
+        console.warn('[ContactStore] Kontak tidak disimpan (at-rest seal tidak tersedia):', e);
+        return;
+    }
 
     void scheduleContactBundlePush();
     notifyContactsChanged();

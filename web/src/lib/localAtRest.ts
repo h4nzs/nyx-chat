@@ -29,6 +29,10 @@
  *     tetap terbaca (perangkat user tidak bisa di-reset seperti DB server) dan
  *     ter-upgrade saat ditulis ulang.
  *
+ *  Semua helper `seal*` **melempar** `AtRestSealUnavailableError` bila vault
+ *  terkunci / worker gagal ([audit D7]); pemanggil harus melewati penulisan
+ *  kolom itu (atau membatalkan tulis barisnya), **bukan** menyimpan plaintext.
+ *
  *  3. `sealLocalText()` / `sealLocalFlag()` + pembacanya — [docs/30 WS-F
  *     langkah 3] kolom struktur yang **tidak** dipakai untuk pengurutan/seleksi
  *     (`senderId`, `repliedToId`, `isViewOnce`, `isDeletedLocal`, `expiresAt`,
@@ -58,7 +62,11 @@ export function bucketLocalTimestamp(value: string | Date | null | undefined): s
   return new Date(Math.floor(ms / LOCAL_TIME_BUCKET_MS) * LOCAL_TIME_BUCKET_MS).toISOString();
 }
 
-/** Simpan angka sebagai envelope `ENC1:`. `null`/tak valid → null. */
+/**
+ * Simpan angka sebagai envelope `ENC1:`. `null`/tak valid → null.
+ * Vault terkunci / worker gagal → melempar `AtRestSealUnavailableError`
+ * ([audit D7] tidak ada fallback plaintext).
+ */
 export async function sealLocalNumber(value: number | null | undefined): Promise<string | null> {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return await encryptValueAtRest(String(value));
@@ -86,6 +94,7 @@ type TextLike = string | null | undefined;
 /**
  * Simpan teks pendek (mis. `senderId`, `repliedToId`) sebagai envelope `ENC1:`.
  * String kosong/`null` → `null` (kolom opsional tetap kosong).
+ * Vault terkunci → melempar `AtRestSealUnavailableError`; jangan simpan plaintext.
  */
 export async function sealLocalText(value: TextLike): Promise<string | null> {
   if (typeof value !== 'string' || value.length === 0) return null;
@@ -102,7 +111,10 @@ export async function openLocalText(raw: unknown): Promise<string | null> {
   return await decryptValueAtRest(raw);
 }
 
-/** Simpan boolean sebagai envelope `ENC1:` (`'true'`/`'false'`). */
+/**
+ * Simpan boolean sebagai envelope `ENC1:` (`'true'`/`'false'`).
+ * Vault terkunci → melempar `AtRestSealUnavailableError`; jangan simpan plaintext.
+ */
 export async function sealLocalFlag(value: boolean | null | undefined): Promise<string | null> {
   if (typeof value !== 'boolean') return null;
   return await encryptValueAtRest(value ? 'true' : 'false');

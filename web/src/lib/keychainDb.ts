@@ -14,6 +14,9 @@ import type { ConversationId, UserId, MessageId } from '@nyx/shared';
 // Skema sama dengan ratchet state (worker_encrypt_session_key).
 // Nilai legacy (plaintext, tanpa prefix) tetap terbaca transparan
 // dan dienkripsi ulang lewat migrateKeychainAtRestEncryption().
+// [audit D7] Penulisan BARU fail-closed: kalau masterSeed belum ada
+// atau worker gagal, `encryptValueAtRest` melempar dan penulisan
+// dilewati — nilai tidak pernah ditulis plaintext "diam-diam".
 // ============================================================
 export const AT_REST_PREFIX = 'ENC1:';
 
@@ -29,22 +32,46 @@ async function getMasterSeedOrUndefined(): Promise<Uint8Array | undefined> {
   return useAuthStore.getState().getMasterSeedIfUnlocked();
 }
 
+/**
+ * [audit D7] Dilempar bila sebuah nilai **tidak bisa** disegel: masterSeed belum
+ * tersedia (vault terkunci) atau worker enkripsi gagal.
+ *
+ * Pemanggil wajib **melewati penulisan** (atau membiarkan error naik ke
+ * try/catch yang membatalkan tulis baris itu), bukan menyimpan plaintext.
+ */
+export class AtRestSealUnavailableError extends Error {
+  constructor (message: string) {
+    super(message);
+    this.name = 'AtRestSealUnavailableError';
+  }
+}
+
+/**
+ * Seal satu nilai dengan `masterSeed` → `ENC1:<base64url>`.
+ *
+ * [audit D7] Fail-closed: **tidak ada** fallback plaintext. Sebelumnya nilai
+ * dikembalikan apa adanya (hanya `console.warn`) saat masterSeed tidak tersedia
+ * atau `encrypt_session_key` melempar — akibatnya `Message.seq`, `senderId`,
+ * `repliedToId`, `expiresAt`, `Conversation.isGroup` bisa tersimpan plaintext di
+ * IndexedDB padahal `docs/04` §4.8 menjanjikan baris baru selalu ter-seal
+ * (model ancaman perangkat dicuri, `docs/28`).
+ *
+ * Baris **lama** yang plaintext tetap terbaca: `decryptValueAtRest` mengembalikan
+ * nilai tanpa prefix apa adanya, dan migrasi at-rest men-seal ulang saat vault
+ * terbuka.
+ */
 export async function encryptValueAtRest(value: string): Promise<string> {
   if (value.startsWith(AT_REST_PREFIX)) return value;
-  try {
-    const masterSeed = await getMasterSeedOrUndefined();
-    if (!masterSeed) {
-      console.warn('[KeychainDB] Master seed unavailable — storing value without at-rest encryption');
-      return value;
-    }
-    const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
-    const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-    const bytes = await worker_encrypt_session_key(new TextEncoder().encode(value), masterSeed);
-    return AT_REST_PREFIX + sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING);
-  } catch (e) {
-    console.warn('[KeychainDB] At-rest encryption failed — falling back to plaintext:', e);
-    return value;
+  const masterSeed = await getMasterSeedOrUndefined();
+  if (!masterSeed) {
+    throw new AtRestSealUnavailableError(
+      'masterSeed belum tersedia — nilai tidak disegel dan tidak boleh ditulis plaintext'
+    );
   }
+  const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
+  const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+  const bytes = await worker_encrypt_session_key(new TextEncoder().encode(value), masterSeed);
+  return AT_REST_PREFIX + sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 }
 
 export async function decryptValueAtRest(value: string): Promise<string | null> {
