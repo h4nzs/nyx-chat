@@ -138,8 +138,14 @@ model GroupMailboxItem {
   selama token grup lain masih sah (`PP_SYNC_REQUIRED=1`).
 - **Tidak ada** penulisan `userId`/`routingIdentity` di jalur ini; log hanya
   memuat `conversationId`, `epoch`, `result` (metrik event-only).
-- Rate limit per token-hash (Redis bucket) + batas ukuran respons (≤ 256 KB,
-  ≤ 200 item). Replay: cursor monotonik (`createdAt|id`), TTL item 7 hari.
+- Rate limit per token-hash (Redis bucket) + batas **200 item per request**
+  (`MAX_SYNC_TOKENS` di `server/src/utils/groupSync.ts`, dipaksakan juga oleh
+  skema zod). Respons di atas itu dipotong dan dilaporkan sebagai
+  `truncated: true` — tidak ada paginasi; token di luar 200 pertama tersinkron
+  pada panggilan berikutnya. Batas byte 256 KB **tidak** ditegakkan terpisah:
+  isi per item adalah metadata terenkripsi, dan batas 200 item yang menjaga
+  biaya lookup + ukuran respons. Replay: cursor monotonik (`createdAt|id`),
+  TTL item 7 hari.
 - OHTTP: allowlist `POST /api/groups/sync`; OHTTP token diperluas ke POST
   **hanya path ini**, body ≤ 64 KB.
 
@@ -191,7 +197,13 @@ groupId | expiresAt u64 | sigLen u16 | sig
   `tokenEpoch`, `expiresAt`; `GroupMailboxItem`.
 - **Hard cut 2026-10-24, tanpa backfill/dual-read.** Kolom `deliveryToken`
   dihapus, bukan dimigrasikan: `prisma db push` pada tabel lama akan gagal
-  (kolom wajib baru), jadi DB lokal/selfhost di-reset. Klien lama tidak bisa
+  (kolom wajib baru). Sejak 2026-10-26 (audit F-04) `deploy.yml` **tidak**
+  menelan kegagalan: `prisma db push` yang gagal menghentikan deploy sebelum
+  `pm2` restart, lalu kolom/tabel yang dipakai build ini diverifikasi langsung
+  ke `information_schema` (`UserHiddenConversation.tokenHash`/`tokenEpoch`,
+  `Conversation.adminSecretHash`, `GroupMailboxItem`). Reset DB **tidak**
+  dilakukan otomatis — itu keputusan operator dengan backup terverifikasi.
+  Klien lama tidak bisa
   discovery sampai di-update bersama server. Token grup awal memakai
   `newOpaqueToken()` (43-char base64url), bukan 64-hex.
 - Tes: `tests/groupTokens.test.ts` (hash lookup, epoch, expiry, rotasi

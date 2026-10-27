@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+# [audit F-15] Permission minimum. Deploy hanya membaca repo di runner; semua
+# akses VPS lewat SSH milik step sendiri, bukan token GITHUB.
+permissions:
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -159,7 +164,9 @@ jobs:
       # --- PHASE 5: SHIP TO VPS ---
       # TODO(OPS): Migrasi ke SSH key (secrets.VPS_SSH_KEY) — password auth rentan brute-force.
       - name: 🚀 Upload to VPS via SCP
-        uses: appleboy/scp-action@master
+        # [audit F-15] Dulu `@master`: kode yang memegang kunci SSH bisa berubah
+        # tanpa perubahan di repo. Di-pin ke SHA v1.0.0.
+        uses: 'appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345' # ratchet:appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           port: ${{ secrets.VPS_PORT }}
@@ -170,7 +177,7 @@ jobs:
 
       # --- PHASE 6: EXECUTE ON VPS (PNPM NATIVE INSTALL) ---
       - name: 🔧 Unzip & Restart on VPS
-        uses: appleboy/ssh-action@master
+        uses: 'appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2' # ratchet:appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           port: ${{ secrets.VPS_PORT }}
@@ -234,8 +241,63 @@ jobs:
             echo "⚙️ Generating Prisma Engine..."
             cd $TARGET_DIR/server
             pnpm exec prisma generate
-            echo "🗄️ Syncing Prisma schema (index-only changes)..."
-            PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION="consent for production schema sync via deploy workflow" pnpm exec prisma db push || true
+            # [audit F-04] Skema yang gagal disinkronkan = build ini tidak bisa
+            # jalan (kolom wajib baru → discovery grup & otorisasi admin mati).
+            # Dulu `|| true` membuat deploy HIJAU dengan DB lama; sekarang push
+            # yang gagal menghentikan deploy SEBELUM pm2 restart, sehingga proses
+            # lama tetap melayani sampai skemanya benar.
+            echo "🗄️ Syncing Prisma schema (additive; failure aborts the deploy)..."
+            if ! PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION="consent for production schema sync via deploy workflow" pnpm exec prisma db push; then
+              echo "::error::prisma db push gagal — skema DB tidak cocok dengan build ini; pm2 TIDAK direstart"
+              exit 1
+            fi
+
+            # [audit F-04] `db push` sukses bukan bukti kolomnya ada. Verifikasi
+            # langsung ke information_schema untuk kolom/tabel yang dipakai build
+            # ini; jangan biarkan klien baru menemukannya lewat query 500.
+            echo "🔎 Verifikasi skema yang dibutuhkan build ini (fail-closed)..."
+            # Ditulis DI DALAM server/ (bukan /tmp): resolusi ESM `pg`/`dotenv`
+            # mengikuti lokasi berkas, bukan cwd — skrip di /tmp tidak akan
+            # menemukan node_modules monorepo.
+            cat > $TARGET_DIR/server/nyx-verify-schema.mjs <<'NYX_SCHEMA'
+            import 'dotenv/config';
+            import { Pool } from 'pg';
+
+            const raw = process.env.DIRECT_URL || process.env.DATABASE_URL;
+            if (!raw) {
+              console.error('::error::DIRECT_URL/DATABASE_URL kosong di server/.env — tidak bisa memverifikasi skema');
+              process.exit(1);
+            }
+            // Sama dengan lib/prisma.ts: DB lokal (VPS) plaintext, host lain TLS.
+            const isLocal = /(^|@)(localhost|127\.0\.0\.1)(:|$|\/)/i.test(raw);
+            const url = isLocal ? raw : `${raw}${raw.includes('?') ? '&' : '?'}sslmode=require`;
+
+            const REQUIRED = [
+              ['UserHiddenConversation', 'tokenHash'],
+              ['UserHiddenConversation', 'tokenEpoch'],
+              ['Conversation', 'adminSecretHash'],
+              ['GroupMailboxItem', 'id'],
+            ];
+
+            const pool = new Pool({ connectionString: url });
+            try {
+              for (const [table, column] of REQUIRED) {
+                const { rows } = await pool.query(
+                  'SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2 LIMIT 1',
+                  [table, column],
+                );
+                if (rows.length === 0) {
+                  console.error(`::error::skema DB tidak cocok: ${table}.${column} tidak ada — deploy dihentikan sebelum pm2 restart`);
+                  process.exit(1);
+                }
+              }
+              console.log('✅ Skema terverifikasi: tokenHash, tokenEpoch, adminSecretHash, GroupMailboxItem');
+            } finally {
+              await pool.end();
+            }
+            NYX_SCHEMA
+            node $TARGET_DIR/server/nyx-verify-schema.mjs
+            rm -f $TARGET_DIR/server/nyx-verify-schema.mjs
             
             # 6. DEPLOY FRONTEND
             echo "🌐 Deploying Frontend..."
@@ -253,11 +315,36 @@ jobs:
             # 7. RESTART PM2 (Bersih dan Langsung)
             echo "🚀 Restarting API..."
             
+            # [audit F-02] NODE_ENV=production mengaktifkan semua yang selama ini
+            # hanya ada di dokumen: cookie sesi `Secure`, CSP/HSTS produksi,
+            # penolakan boot untuk JWT_SECRET dev, dan mematikan access log
+            # morgan yang mencetak URL+query. Konsekuensinya config.ts bisa
+            # menolak boot → pm2 crash-loop, jadi rahasia diperiksa DULU, sebelum
+            # proses lama dihapus. Deploy yang gagal di sini tidak menghilangkan
+            # layanan yang sedang jalan.
+            echo "🔐 Verifikasi rahasia produksi sebelum restart..."
+            node --input-type=module -e "
+            import 'dotenv/config';
+            const jwt = (process.env.JWT_SECRET || '').trim();
+            const csrf = (process.env.CSRF_SECRET || '').trim();
+            const cookieDomain = (process.env.COOKIE_DOMAIN || '').trim();
+            if (!jwt || jwt === 'dev-secret' || jwt.length < 32) {
+              console.error('::error::JWT_SECRET kosong/placeholder/<32 karakter — NODE_ENV=production akan crash-loop');
+              process.exit(1);
+            }
+            if (!csrf) console.warn('⚠️  CSRF_SECRET kosong: jatuh ke JWT_SECRET (tidak fail-closed, tapi rahasia terpisah lebih baik).');
+            if (!cookieDomain) console.warn('⚠️  COOKIE_DOMAIN kosong: cookie host-only — gateway realtime di host lain akan menolak sesi.');
+            console.log('✅ JWT_SECRET lolos guard produksi.');
+            "
+            # Verifikasi di atas membaca `server/.env` (dotenv, cwd = server/) —
+            # file yang sama yang dipakai proses nyx-api setelah restart, karena
+            # langkah 4 menyalin `$TARGET_DIR/.env` ke `server/.env`.
+
             # Hapus proses lama biar memori PM2 benar-benar bersih
             pm2 delete nyx-api nyx-sidecar || true
             
             echo "🚀 Starting Node.js API..."
-            pm2 start $TARGET_DIR/server/dist/index.js \
+            NODE_ENV=production pm2 start $TARGET_DIR/server/dist/index.js \
               --name "nyx-api" \
               -i max \
               --node-args="--max-old-space-size=1024" \
@@ -270,6 +357,17 @@ jobs:
               --cwd $TARGET_DIR/server
               
             pm2 save --force
+
+            # Target scrape per-worker. pm2 `-i max` menentukan jumlah worker;
+            # script memakai jumlah CPU host. METRICS_PORT=0 menulis daftar kosong.
+            if [ -d /etc/prometheus ]; then
+              METRICS_BASE=$(grep -E '^METRICS_PORT=' "$TARGET_DIR/server/.env" | tail -n1 | cut -d= -f2- | tr -d '"' || true)
+              node "$TARGET_DIR/scripts/metrics-targets.mjs" \
+                --base "${METRICS_BASE:-9464}" \
+                --out /etc/prometheus/file_sd/nyx-api.json
+            else
+              echo "ℹ️  /etc/prometheus tidak ada — target metrics tidak dibuat."
+            fi
 
             # 8. LAYANAN LOG KT (`nyx-kt-query`) — systemd, bukan pm2: ia memegang
             #    flock LevelDB sehingga harus satu proses dan hidup di luar cluster

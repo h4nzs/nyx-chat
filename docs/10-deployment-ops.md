@@ -111,7 +111,7 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `CSRF_SECRET` | CSRF state secret. Kosong di produksi → jatuh ke `JWT_SECRET` + peringatan boot (isolasi lebih lemah) |
 | `NYX_AT_REST_PEPPER` | [docs/28 Tier 0] Pepper hash identifier at-rest + kunci seal legacy (id `0`). **Wajib**: `utils/atRestSecrets.ts` melempar error di produksi tanpa ini; bocor = dump DB bisa dibalik |
 | `NYX_AT_REST_KEYRING` / `NYX_AT_REST_KEYRING_FILE` | [docs/37 P6, docs/10 §10.17] Key ring seal ber-versi (`ENC2:<keyId>:…`). Kosong = kunci legacy saja. Isi JSON `{active,keys}` atau path file 0400. Rotasi + re-seal lewat `scripts/reseal-at-rest.ts` |
-| `NODE_ENV` | `production` |
+| `NODE_ENV` | `production` — **diset `deploy.yml`** (`NODE_ENV=production pm2 start …`), bukan lagi diandalkan dari `.env`. Menentukan cookie `Secure`, CSP/HSTS produksi, guard `JWT_SECRET`, dan matinya access-log morgan (§10.20) |
 
 **Perilaku & fitur** (kosong = fitur mati / degradasi yang terlihat):
 
@@ -128,6 +128,10 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `UPLOAD_DIR` | Direktori fallback upload lokal bila tidak memakai bucket R2 (default `uploads`) |
 | `GROUP_RELEASE_JITTER_MS` | [docs/37 P8] Jitter rilis pesan grup (ms, default kosong = mati, clip 2000). Menambah latensi ACK? Tidak — ACK dikirim dulu; hanya relay yang ditunda. Metrik `nyx_group_release_delay_ms` |
 | `OHTTP_RELAY_EXTERNAL` | [docs/37 P7] `1` = relay OHTTP dijalankan proses terpisah; API tidak memasang `/api/ohttp/relay`. Butuh `nyx-ohttp-relay`; klien memakai default same-origin `/api/ohttp/relay` (nginx → `:4100`), `VITE_OHTTP_RELAY_URL` hanya bila relay berada di origin lain (§10.18) |
+| `OHTTP_TOKEN_MODE` | `on` (default) \| `off`. `off` = relay mencetak token sendiri (butuh sesi/CSRF, hanya loopback) — wajib `OHTTP_INTERNAL_TOKEN` atau `JWT_SECRET` yang sama di semua worker (§10.18) |
+| `OHTTP_INTERNAL_TOKEN` | [audit F-06] Rahasia relay → gateway saat `OHTTP_TOKEN_MODE=off` (≥32 karakter). Kosong = HMAC(`JWT_SECRET`) deterministik; tanpa keduanya boot gagal. Isi eksplisit bila relay adalah proses/systemd sendiri (§10.18) |
+| `OHTTP_GATEWAY_TARGET` / `OHTTP_GATEWAY_TRUSTED_HOSTS` | [docs/37 P7] Tujuan gateway untuk relay proses terpisah (wajib loopback kecuali host disebut di CSV `TRUSTED_HOSTS`) — §10.18 |
+| `CREDENTIAL_SUITE_ALLOWLIST` | [Fase 5–6 dihapus] CSV suite verifier untuk `POST /api/groups/:id/credential/present`. **Kosong = tolak semua** (fail-closed) dan tidak ada suite di build ini |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify (register/PoW) |
 | `VAPID_SUBJECT` / `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web Push |
 | `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. `docs/30` §30.9 |
@@ -424,9 +428,13 @@ pernah identitas.** Yang menegakkan itu bukan disiplin penulis kode, melainkan
 bind loopback (`METRICS_HOST=127.0.0.1`, `METRICS_PORT=9464`; `0` = mati) —
 **bukan** route Express: jalur publik ke Express (`/api`, `/uploads`,
 `/.well-known` lewat nginx, dan `api.*` yang bahkan melewati nginx) sengaja tidak
-pernah membawa endpoint metrik. Lihat juga temuan `ops/prometheus/` (job scrape
-`nyx-api` → `127.0.0.1:9464`). Jangan membuka port ini ke internet, dan jangan
-menambah relabel Prometheus yang menyuntikkan header/query ke label.
+pernah membawa endpoint metrik. pm2 cluster membuka satu port per worker
+(`METRICS_PORT + NODE_APP_INSTANCE * 10`, jadi 9464, 9474, 9484, … — stride
+10 menghindari sidecar :9465 dan KT :9466–:9469); job `nyx-api` di
+`ops/prometheus/` memakai `file_sd` `/etc/prometheus/file_sd/nyx-api.json` yang
+dibuat deploy dengan `scripts/metrics-targets.mjs` setelah pm2 start. Jangan
+membuka port ini ke internet, dan jangan menambah relabel Prometheus yang
+menyuntikkan header/query ke label.
 
 **Metrik yang tersedia hari ini** (daftar ini harus sama dengan
 `server/src/utils/metrics.ts` — aturan alert yang merujuk metrik tak terdeklarasi
@@ -548,7 +556,7 @@ Semua listener **loopback**: nginx tidak mem-proxy `/metrics`, `:9090`, maupun
 
 ```bash
 # 1. Prometheus — config + aturan dari repo (bukan diedit di server)
-install -d -m 755 /etc/prometheus /var/lib/prometheus
+install -d -m 755 /etc/prometheus /var/lib/prometheus /etc/prometheus/file_sd
 install -m 644 ops/prometheus/prometheus.yml /etc/prometheus/
 install -m 644 ops/prometheus/alerts.yml    /etc/prometheus/
 promtool check config /etc/prometheus/prometheus.yml   # WAJIB: menolak config/aturan rusak
@@ -579,6 +587,8 @@ proses hidup):
 curl -s 127.0.0.1:9090/-/ready                       # "Prometheus Server is Ready."
 curl -s 127.0.0.1:9090/api/v1/targets | grep -o '"health":"[a-z]*"' | sort | uniq -c
 curl -s 127.0.0.1:9090/api/v1/rules   | grep -o '"name":"nyx[^"]*"' | wc -l   # 39 aturan
+# Jumlah target nyx-api = jumlah worker pm2 (-i max); 0 bila METRICS_PORT=0.
+curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=count(up{job="nyx-api"})'
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-auditor"}'
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-query"}'
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-sidecar"}'
@@ -1239,6 +1249,18 @@ kecuali `OHTTP_RELAY_ALLOW_PUBLIC_BIND=1` (dipakai compose — bind lebar di
 jaringan container, nginx yang mengekspos). Body kosong = 400; upstream
 mati/timeout = 502 tanpa detail internal.
 
+**Token internal relay → gateway (`OHTTP_INTERNAL_TOKEN`, audit F-06).** Saat
+`OHTTP_TOKEN_MODE=off`, relay menandai panggilannya dengan header
+`x-nyx-ohttp-internal` dan gateway membandingkannya timing-safe. Nilainya dulu
+`randomBytes(32)` **per proses**, sementara `nyx-api` berjalan `-i max` — relay
+di worker A ditolak gateway di worker B (403 acak). Sekarang: (1)
+`OHTTP_INTERNAL_TOKEN` bila diset (wajib ≥32 karakter; pakai ini bila relay
+adalah proses/systemd sendiri dengan `JWT_SECRET` berbeda), atau (2) HMAC-SHA256
+dari `JWT_SECRET` dengan label tetap — deterministik dan sama di semua worker.
+Tanpa keduanya **boot gagal** (bukan token acak). Header ini bukan rahasia
+klien: ia hanya membedakan "dipanggil relay" dari "dipanggil langsung", dan
+klien tidak pernah memegang `JWT_SECRET`.
+
 **Selfhost (`~/nyx-selfhost`, systemd user).** `scripts/sync-selfhost.sh`
 memasang `ops/nginx/nyx.conf` (setelah transformasi path) dan
 `ops/systemd/user/nyx-ohttp-relay.service`; symlink unit ke
@@ -1344,6 +1366,13 @@ maupun `GET /api/conversations` sesudahnya — realtime memang tidak pernah naik
    cookie `at` kehilangan `Secure`/`SameSite=None`, dan `cookieOptions.domain`
    (dulu `isProd ? '.nyx-app.my.id' : undefined`) tidak pernah aktif — terbukti
    dari `Set-Cookie` CSRF produksi yang tidak membawa `Domain`.
+   **Diperbaiki 2026-10-26** (audit F-02): `deploy.yml` sekarang menjalankan
+   `NODE_ENV=production pm2 start …`, sehingga `Secure`/`SameSite`, CSP/HSTS
+   produksi, penolakan `JWT_SECRET` dev, dan matinya access-log morgan (yang
+   mencetak URL+query) benar-benar aktif. Sebelum `pm2 delete`, deploy
+   memverifikasi `JWT_SECRET` (≥32 karakter, bukan `dev-secret`) dan
+   **menghentikan deploy** bila gagal — supaya crash-loop `nyx-api` tidak pernah
+   menjadi cara menemukan masalahnya.
 
 **Perbaikan yang sudah masuk repo.**
 
@@ -1369,13 +1398,81 @@ maupun `GET /api/conversations` sesudahnya — realtime memang tidak pernah naik
 #    - banner hilang setelah <=2 dtk dan `GET /api/users/me/devices` muncul
 ```
 
-> ⚠ **Menyalakan `NODE_ENV=production` mengaktifkan guard `config.ts`**: API
-> **menolak boot** bila `JWT_SECRET` kosong/`dev-secret`, dan `CSRF_SECRET`
-> menjadi wajib. Periksa dulu `JWT_SECRET` + `CSRF_SECRET` di `.env` VPS sebelum
-> menyalakannya, karena kegagalan di sini = crash-loop `nyx-api`.
+> ⚠ **`NODE_ENV=production` mengaktifkan guard `config.ts`**: API **menolak
+> boot** bila `JWT_SECRET` kosong/`dev-secret`. Sejak 2026-10-26 `deploy.yml`
+> memeriksanya **sebelum** `pm2 delete`, jadi guard ini menghentikan deploy
+> (proses lama tetap jalan) alih-alih menghasilkan crash-loop. `CSRF_SECRET`
+> dan `COOKIE_DOMAIN` hanya **diperingatkan** (CSRF jatuh ke `JWT_SECRET`,
+> cookie jadi host-only) — setel keduanya tetap disarankan.
+>
+> Verifikasi pasca-deploy: `Set-Cookie` `at` membawa `Secure` (+ `Domain` bila
+> `COOKIE_DOMAIN` diset), dan tidak ada baris access-log morgan berisi `?…`.
 
 > Catatan WebTransport: dengan `VITE_API_URL` relatif, `VITE_TRANSPORT_URL`
 > **harus** absolut (`https://rt.nyx-app.my.id:33333`). Klien sekarang melewati
 > percobaan WT bila tidak ada URL absolut (dulu mencoba
 > `https://api.nyx-app.my.id/transport` yang tidak menyajikan sidecar, sehingga
 > setiap sesi ditolak) dan langsung memakai WSS.
+
+## 10.21 Deteksi server down & halaman fallback — added 2026-10-25
+
+Saat VPS/tunnel/nginx mati, web ikut mati (frontend disajikan nginx di VPS yang
+sama). Tiga lapis menangani ini; masing-masing menutup celah yang tidak ditutup
+lapis lain.
+
+| Lapis | Berkas | Melayani | Catatan |
+|---|---|---|---|
+| Worker Cloudflare | `ops/cloudflare/worker/server-down-worker.js` (hasil build) | Pengunjung baru / browser tanpa SW | Berjalan di edge, **di luar VPS** |
+| Service worker | `web/src/sw.ts` (`NavigationRoute` → `/index.html`) | Pengguna yang sudah memuat app (PWA) | Shell statis saja; `/api`, `/uploads`, `/.well-known` tidak pernah dibalas shell |
+| Overlay in-app | `web/src/pages/ServerDownPage.tsx`, `systemStore.checkStatus` | Pengguna yang sedang membuka app | Dibedakan dari `MaintenancePage` (terencana, flag Redis) |
+
+**Worker.** Route `app.nyx-app.my.id/*` dan `nyx-app.my.id/*` (dua route khusus,
+bukan wildcard — wildcard ikut menangkap subdomain lain dan menghabiskan kuota).
+Meneruskan semua request; hanya saat `fetch` gagal / 502·503·504 / 520–530 ia
+mengganti respons: navigasi HTML → halaman fallback (503, `no-store`,
+`Retry-After`), selain itu → JSON 503 `{"error":"server_unreachable"}`. 502/503/504
+untuk non-navigasi diteruskan apa adanya; 500/429 dari app tidak pernah diganti.
+Halaman fallback satu berkas, tanpa sumber eksternal, CSP berbasis hash.
+
+Mengubah teks/tampilan atau menambah tautan status:
+
+```bash
+# edit ops/cloudflare/worker/src/fallback.html, lalu:
+STATUS_URL="https://status.example" node ops/cloudflare/worker/build.mjs
+node --test ops/cloudflare/worker/server-down-worker.test.mjs
+# tempel isi server-down-worker.js ke editor Worker `nyx-server-down` → Deploy
+```
+
+**Jangan edit `server-down-worker.js` langsung.** Hash CSP `style-src`/`script-src`
+dihitung oleh `build.mjs`; HTML yang berubah tanpa build membuat browser memblokir
+skripnya dan halaman tak berfungsi. Test memeriksa kecocokan hash ini.
+
+**Mengetes tanpa mematikan produksi.** Buat record DNS A `down-test` →
+`192.0.2.1` (Proxied) dan route sementara `down-test.nyx-app.my.id/*` ke Worker;
+Cloudflare mengembalikan 522 dan halaman fallback harus muncul. Hapus keduanya
+setelah selesai. Membuka alamat `*.workers.dev` milik Worker menampilkan "There is
+nothing here yet" — itu normal (tak ada origin di belakangnya).
+
+**Deteksi di klien.** `systemStore.checkStatus` memanggil `/api/system/status`
+(timeout 8 dtk) tiap 60 dtk; kegagalan "server tak terjangkau" (`isServerUnreachable`:
+timeout, 502/503/504, 520–530, `TypeError`) dikonfirmasi sekali lagi setelah 2,5 dtk
+sebelum `serverUnreachable=true`. 401/403/404/429/500 **bukan** server-down. Overlay
+mencoba ulang dengan backoff 15→120 dtk + jitter dan hilang sendiri saat pulih.
+Karena `VITE_API_URL` lintas-origin (`api.nyx-app.my.id`), respons error Cloudflare
+tanpa header CORS muncul di browser sebagai `TypeError` — itu sebabnya `TypeError`
+ikut diklasifikasi.
+
+**Pemantauan eksternal.** Prometheus/Alertmanager hidup di VPS yang sama dan ikut
+mati bersamanya, jadi pasang pemantau di luar VPS:
+
+- `GET https://api.nyx-app.my.id/health/ready` — keyword `ready`. Memeriksa Redis
+  (`ping`) dan Postgres (`SELECT 1`), timeout 2 dtk per cek; 503 `{"status":"unready"}`
+  bila gagal (nama dependensi hanya di log server). `/health` tetap liveness murni
+  dan **tidak** mendeteksi Redis/Postgres mati.
+- `GET https://app.nyx-app.my.id/` — HTTP 200 (menangkap nginx/tunnel/frontend mati).
+- Alarm setelah 2 kegagalan beruntun.
+
+Batas yang disengaja: `/api/system/status` tetap menjawab 200 saat Redis mati
+("jangan block user"), sehingga overlay server-down **tidak** muncul bila hanya
+Redis yang mati — hanya `/health/ready` yang mendeteksinya. WebTransport sidecar
+(UDP :33333) dan `nyx-kt-query` tidak tercakup pemantau HTTP ini.
