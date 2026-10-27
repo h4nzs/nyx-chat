@@ -282,7 +282,11 @@ Semua **86** berkas `server/tests/*.test.ts` terdaftar di skrip `test`
    Menentukan apakah `docs/37` §37.4 P0 perlu langkah reset eksplisit.
 2. **Privacy Pass** — perbaiki dan hidupkan (`PP_SYNC_REQUIRED=1`) atau matikan dan hapus
    kode + exception PQ-nya?
-3. **Metrik klaster** — eksporter terpisah/agregasi, atau cukup satu worker + `NODE_APP_INSTANCE`?
+3. **Metrik klaster** — **ditutup 2026-10-27 oleh commit `13e602d5`**: tiap worker membuka
+   `METRICS_PORT + NODE_APP_INSTANCE * 10`, deploy menulis `file_sd` lewat
+   `scripts/metrics-targets.mjs`, Prometheus men-scrape semua target (`docs/10` §10.12,
+   `ops/prometheus/prometheus.yml`). Alert mengagregasi, jadi angka trafik tidak lagi
+   mewakili 1/N proses.
 4. **D1/D7** — `MIN_CLIENT_VERSION` dijadikan fail-closed untuk mutasi? Seal at-rest
    tetap fail-open ke plaintext (didokumentasikan di `docs/04` §4.8) atau berubah jadi
    melempar/melewati penulisan?
@@ -362,3 +366,78 @@ jaminannya), sedangkan **pembacaan** baris lama plaintext tetap jalan
   menyediakan seed + stub crypto dan menambah kasus "nilai tersimpan benar-benar
   ter-seal".
 - Angka `docs/11` §11.1 diperbarui lagi ke 126 berkas / 1030 tes (total 212).
+
+## D1 + D6 (2026-10-27, working tree)
+
+Dua pengamatan desain terakhir yang belum diputuskan dikerjakan. Keduanya bukan
+bug produksi: D1 adalah gerbang yang tidak bisa dipakai sebagai kontrol, D6
+adalah uji yang mengukur teks sumber alih-alih perilaku.
+
+### D1 — `MIN_CLIENT_VERSION` fail-closed untuk mutasi (opt-in)
+
+`utils/clientVersion.ts` mendapat `policy.requireMutations` (env
+`CLIENT_VERSION_REQUIRE_MUTATIONS=1`). Dengan mode ini:
+
+- **mutasi** (semua selain GET/HEAD/OPTIONS, termasuk metode tak dikenal) tanpa
+  header versi yang bisa diurai → `426` + `error: "CLIENT_VERSION_REQUIRED"`
+  + alasan metrik `strict-no-header`;
+- **baca** tetap fail-open (klien lama masih bisa memuat data dan melihat pesan
+  "perbarui aplikasi" saat mencoba menulis);
+- versi yang **menyatakan diri** dan terlalu tua tetap `CLIENT_TOO_OLD`.
+
+Default kosong = perilaku lama persis, jadi tidak ada klien yang terkunci karena
+upgrade. Konsekuensi yang ditulis di `docs/10` §10.14: alat ops `curl` tanpa
+header (mis. `POST /api/admin/cleanup`) **ikut ditolak** saat mode ini menyala.
+
+Berkas: `server/src/utils/clientVersion.ts`, `server/src/middleware/clientVersion.ts`,
+`server/src/app.ts`, `server/tests/clientVersion.test.ts`, `.env.example`,
+`docs/10` (§10.6 tabel env, §10.12 tabel metrik, §10.14), `docs/12`.
+
+Versi 17 tes: 13 lama + 4 baru (`isMutationMethod`, mode ketat murni, default
+lama tidak berubah, middleware 426 `CLIENT_VERSION_REQUIRED`), plus satu tes
+HTTP nyata (`POST` tanpa header → 426, `GET` → 200, `POST` ber-versi → 200).
+
+### D6 — uji paritas lewat perilaku, bukan regex atas sumber
+
+**Gateway WSS (`realtime/gateway.ts`).** Registrasi inbound dan pemetaan
+`nyx:downstream` sekarang data/fungsi yang dipakai runtime:
+
+- `wssInboundTable()` — jalur tetap + seluruh `WSS_KEYS_SYNC_EVENTS` beserta
+  jenis dispatch (`chat|ack|presence|webrtc|keysync`); loop `attachWssGateway`
+  mendaftar dari tabel itu (tidak ada lagi empat `guardedOn('…')` literal).
+- `wssDownstreamRoute(opCode, json)` — pemetaan opcode → `{ event, payload }`,
+  tempat bug "sinyal WebRTC terkirim sebagai `message:new`" dulu hidup.
+- `makeGuardedOn()` / `createHandlerFailureReporter()` — wrapper anti
+  `unhandledRejection` diekstrak dari closure connection.
+
+`gatewayParity.test.ts` kini menguji: isi & urutan tabel, jenis dispatch per
+event, tidak ada duplikat, pemetaan setiap opcode (termasuk WEBRTC ≠
+`message:new`), payload passthrough KEY_SYNC, dan guard (handler melempar →
+callback `INTERNAL_ERROR`, koneksi diputus, tidak ada unhandled rejection;
+handler sukses → tidak memutus). Angka bucket rate-limit tidak lagi dicocokkan
+dari teks: perilakunya sudah dikunci `realtimeHandlers.test.ts` ("PARITY: …").
+Tersisa **dua** pemindaian sumber yang diberi komentar eksplisit — inventaris
+`case` `handleKeySync` (switch, bukan data) dan properti *absen* "bucket tidak
+dipasang di gateway".
+
+**Identitas Redis (`redisIdentity.test.ts`).** Tiga tes baru menjalankan
+`handleKeySync` dengan Redis palsu yang mencatat setiap perintah, lalu membuka
+kembali nilai yang ditulis: `burner:join`/`migration:join` menulis member
+ter-seal (index `room:member:<tag>`), `migration:prepare`/`migration:start`
+menulis `is_migrating:<tag>` dan `migration_owner:*` ter-seal, dan
+`auth:request_linking_qr` menyimpan `{userId, deviceId}` ter-seal dengan TTL.
+Assertion literal (`sealedMember: await sealIdentity(userId)` dihitung 3×,
+regex `migration_owner`) dihapus. Yang tetap statis diberi alasan: pemindaian
+template literal di seluruh berkas, bug sejarah `identityKey` tertutup
+destructuring, dan properti absen "disconnect tidak `SCAN` keyspace".
+
+Berkas: `server/src/realtime/gateway.ts`,
+`server/tests/gatewayParity.test.ts`, `server/tests/redisIdentity.test.ts`.
+
+### Verifikasi
+
+- `server`: `npx tsc --noEmit` bersih; `gatewayParity` 15/15, `redisIdentity`
+  12/12, `clientVersion` 17/17; regresi terkait (`realtimeHandlers`,
+  `burnerRooms`, `gatewayMultiTab`, `transportLatency`, `roomMembership`,
+  `metrics`, `envExample`, `deployWorkflow`, `lintGate`) lulus.
+- `npx oxlint` pada semua berkas yang diubah: 0 warning/0 error.

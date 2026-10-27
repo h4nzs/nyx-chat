@@ -4,7 +4,7 @@
 
 | Package | Runner | Command | Count |
 |---|---|---|---|
-| server | `node:test` via `tsx` (Jest config is dead — ignore it) | `pnpm --filter nyx-server run test` | 86 files / 677 tests (675 pass + 2 skip) |
+| server | `node:test` via `tsx` (Jest config is dead — ignore it) | `pnpm --filter nyx-server run test` | 86 files / 689 tests (687 pass + 2 skip) |
 | web | Vitest (jsdom) | `pnpm --filter nyx-web run test` | 126 files / 1030 tests |
 | kt-query | `go test` lewat `build.sh test` (vendor, tanpa jaringan) | `server/kt-query/build.sh test` | 31 tests |
 | sidecar | `cargo test` (Rust, murni tanpa soket); CI juga menjalankan `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` (job `sidecar`, sama seperti `pir-sidecar`) | `cd server/transport-sidecar && cargo test` | 2 targets / 25 tests (19 lib + 6 sertifikat) |

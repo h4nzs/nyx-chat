@@ -174,4 +174,11 @@ audit --prod` 0 vuln, `node scripts/check-pq-only.mjs` lulus (Tier B: 2 untuk
    mengembalikan plaintext); penulisan dilewati, baris lama tetap terbaca.
    Test: `web/src/lib/__tests__/atRestFailClosed.test.ts`.
 6. **D1 (`MIN_CLIENT_VERSION` fail-open), D6 (test paritas berbasis teks
-   sumber)** — belum diputuskan; keduanya perubahan perilaku/test, bukan bug.
+   sumber)** — **dikerjakan 2026-10-27.** D1: mode ketat opt-in
+   (`CLIENT_VERSION_REQUIRE_MUTATIONS=1`) menolak mutasi tanpa header versi
+   (`426 CLIENT_VERSION_REQUIRED`, metrik `strict-no-header`), baca tetap
+   fail-open; default tidak berubah. D6: registrasi/routing gateway menjadi
+   `wssInboundTable()` + `wssDownstreamRoute()` (diuji perilaku), guard handler
+   diekstrak (`makeGuardedOn`/`createHandlerFailureReporter`), dan wiring
+   identitas Redis diuji dengan Redis pencatat + `openIdentity`. Detail +
+   verifikasi: `PROGRESS.md` §D1 + D6.

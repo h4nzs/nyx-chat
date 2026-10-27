@@ -468,6 +468,10 @@ pertahanan berlapis, ketersediaan, dan drift yang membuat kontrol tampak ada.
   mati), tetapi artinya gate ini tidak bisa dipakai sebagai kontrol keamanan —
   hanya sebagai peringatan. Kalau nanti gate ini dijadikan syarat cutover,
   ia harus fail-closed untuk metode mutasi.
+  **[DITUTUP 2026-10-27]** Mode ketat opt-in `CLIENT_VERSION_REQUIRE_MUTATIONS=1`:
+  mutasi tanpa header versi → `426 CLIENT_VERSION_REQUIRED` (metrik
+  `strict-no-header`), baca tetap fail-open, default tidak berubah
+  (`docs/10` §10.14, `tests/clientVersion.test.ts`).
 - **D2 — REST `GET /api/messages/:conversationId` tanpa cek keanggotaan**
   (trade-off `docs/03` §3.7, Opaque Mailbox) masih seperti yang didokumentasikan.
   Tidak saya laporkan sebagai bug; yang berubah: token grup sekarang tersimpan
@@ -495,6 +499,13 @@ pertahanan berlapis, ketersediaan, dan drift yang membuat kontrol tampak ada.
   dan sebaliknya, perubahan perilaku bisa lolos selama teks yang dicari masih
   ada. Bukan bug; jelaskan di komentar test atau ganti dengan uji perilaku
   (fake Redis yang menghitung INCR).
+  **[DITUTUP 2026-10-27]** Registrasi gateway menjadi `wssInboundTable()` dan
+  routing `nyx:downstream` menjadi `wssDownstreamRoute()` (keduanya dipakai
+  runtime dan diuji sebagai perilaku); guard handler diekstrak
+  (`makeGuardedOn`/`createHandlerFailureReporter`) sehingga bisa dijalankan
+  tanpa socket; wiring identitas Redis diuji dengan Redis pencatat +
+  `openIdentity`, bukan literal. Sisa pemindaian sumber diberi komentar alasan
+  (inventaris `case` dan properti *absen*).
 - **D7 — Seal at-rest gagal-terbuka ke plaintext.** `keychainDb.ts:33-47`
   (`encryptValueAtRest`) mengembalikan nilai **apa adanya** bila `masterSeed`
   tidak tersedia atau `encrypt_session_key` melempar — hanya `console.warn`.
@@ -506,6 +517,9 @@ pertahanan berlapis, ketersediaan, dan drift yang membuat kontrol tampak ada.
   perangkat dicuri (`docs/28`). Bila disengaja (lebih baik plaintext daripada
   gagal menulis), dokumentasikan; bila tidak, lebih aman melempar/melewati
   penulisan daripada menurunkan jaminan diam-diam.
+  **[DITUTUP 2026-10-27]** Fail-closed: `AtRestSealUnavailableError`, penulisan
+  dilewati, baris lama tetap terbaca (`docs/04` §4.8,
+  `web/src/lib/__tests__/atRestFailClosed.test.ts`).
 
 ---
 
