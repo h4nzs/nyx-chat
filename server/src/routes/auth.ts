@@ -583,16 +583,17 @@ router.post('/login', authLimiter, zodValidate({
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
 
-    // [docs/35 Fase 4a] Backfill baris legacy sekali saat login. Gagal backfill
-    // tidak boleh menggagalkan login; pencarian legacy tetap memakai usernameHash.
-    if (!user.oprfIndex) {
-      const oprfIndex = searchOprfIndexForIdentifier(usernameHash);
-      if (oprfIndex) {
-        try {
-          await prisma.user.update({ where: { id: user.id }, data: { oprfIndex } });
-        } catch (error) {
-          console.warn('[OPRF] gagal backfill oprfIndex saat login:', error);
-        }
+    // [docs/35 Fase 4a] Segarkan index OPRF saat login. Login adalah satu-satunya
+    // tempat server menerima hash Argon2 mentah, jadi bila seed OPRF/pepper
+    // berubah, ini kesempatan memperbaiki baris lama (bukan hanya NULL).
+    // Kegagalan tidak boleh menggagalkan login.
+    const oprfIndex = searchOprfIndexForIdentifier(usernameHash);
+    if (oprfIndex && oprfIndex !== user.oprfIndex) {
+      try {
+        await prisma.user.update({ where: { id: user.id }, data: { oprfIndex } });
+        console.info('[OPRF] oprfIndex disegarkan saat login');
+      } catch (error) {
+        console.warn('[OPRF] gagal menyegarkan oprfIndex saat login:', error);
       }
     }
 
@@ -1112,6 +1113,8 @@ const linkStore: LinkingStore = {
     if (keys.length === 0) return 0;
     return redisClient.del(keys);
   },
+  // [audit F-11] Baca-bakar atomik untuk token QR (cek+lalu dihapus bisa balapan).
+  getDel: (key) => redisClient.getDel(key),
 };
 
 const linkSealer: LinkingSealer = { seal: sealAtRest, open: openAtRest };

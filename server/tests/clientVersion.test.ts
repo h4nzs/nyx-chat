@@ -218,7 +218,7 @@ function readAllowedHeaders(): string[] {
 test('CORS: allowedHeaders memuat setiap header yang dikirim klien web', () => {
   const allowed = readAllowedHeaders();
 
-  for (const header of [CLIENT_VERSION_HEADER, 'x-nyx-installation-id', 'x-csrf-token']) {
+  for (const header of [CLIENT_VERSION_HEADER, 'x-nyx-installation-id', 'x-csrf-token', 'if-none-match']) {
     assert.ok(
       allowed.includes(header),
       `"${header}" hilang dari allowedHeaders (server/src/app.ts) → preflight OPTIONS gagal dan browser memblokir SEMUA request API dari origin app`

@@ -108,4 +108,39 @@ describe('pirParams', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response('nope', 503)));
     await expect(getPirParams()).rejects.toMatchObject({ code: 'PIR_PARAMS_HTTP' });
   });
+
+  it('berbagi satu unduhan params untuk panggilan bersamaan', async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn().mockReturnValue(pending);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = getPirParams();
+    const second = getPirParams();
+    release(response(paramsBody()));
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a.epoch).toBe(1);
+    expect(b).toBe(a);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('memetakan body yang abort ke PIR_PARAMS_UNAVAILABLE dan bisa dicoba lagi', async () => {
+    const broken = response('');
+    broken.text = async () => {
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(broken)
+      .mockResolvedValueOnce(response(paramsBody()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getPirParams()).rejects.toMatchObject({ code: 'PIR_PARAMS_UNAVAILABLE' });
+    const retried = await getPirParams();
+    expect(retried.epoch).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

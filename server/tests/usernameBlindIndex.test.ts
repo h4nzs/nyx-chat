@@ -102,6 +102,11 @@ test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kand
 
   assert.match(auth, /usernameHash: pepperedIdentifier\(usernameHash\)/, 'register menyimpan index ter-pepper');
   assert.match(auth, /oprfIndex: searchOprfIndexForIdentifier\(usernameHash\)/, 'register mengisi index OPRF hibrida');
+  assert.match(
+    auth,
+    /if \(oprfIndex && oprfIndex !== user\.oprfIndex\)/,
+    'login menyegarkan index OPRF lama, bukan hanya baris NULL'
+  );
   assert.equal(
     (auth.match(/where: \{ usernameHash: \{ in: identifierLookupCandidates\(usernameHash\) \} \}/g) || []).length,
     3,

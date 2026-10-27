@@ -7,6 +7,8 @@ export const PIR_PARAMS_MAX_AGE_MS = 60_000;
 export const PIR_MIN_RECORD_BYTES = 256;
 export const PIR_MAX_RECORD_BYTES = 16 * 1024;
 
+const PIR_PARAMS_TIMEOUT_MS = 60_000;
+
 const CACHE_KEY = 'https://nyx.invalid/__nyx_pir_params__';
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -37,6 +39,7 @@ interface CachedParams {
 }
 
 let memory: CachedParams | null = null;
+let inflight: Promise<PirParams> | null = null;
 
 function decodeBase64Url(value: string, label: string): Uint8Array {
   if (!BASE64URL_RE.test(value)) throw new PirError('PIR_PARAMS_INVALID', `${label} bukan base64url`);
@@ -144,9 +147,7 @@ async function writeCache(body: string, etag: string): Promise<void> {
   await cache.put(CACHE_KEY, new Response(body, { headers }));
 }
 
-export async function getPirParams(options: { force?: boolean } = {}): Promise<PirParams> {
-  const force = options.force === true;
-  if (!force && memory && Date.now() - memory.storedAt < PIR_PARAMS_MAX_AGE_MS) return memory.params;
+async function fetchPirParams(): Promise<PirParams> {
   if (!memory) memory = await readCache();
 
   const cachedEtag = memory?.params.etag;
@@ -162,7 +163,7 @@ export async function getPirParams(options: { force?: boolean } = {}): Promise<P
       },
       credentials: 'include',
       cache: 'no-store',
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(PIR_PARAMS_TIMEOUT_MS),
     });
   } catch (error) {
     throw new PirError('PIR_PARAMS_UNAVAILABLE', error instanceof Error ? error.message : 'params gagal');
@@ -177,12 +178,29 @@ export async function getPirParams(options: { force?: boolean } = {}): Promise<P
     throw new PirError('PIR_PARAMS_HTTP', `params HTTP ${response.status}`);
   }
 
-  const body = await response.text();
-  const etag = response.headers.get('etag') ?? '';
-  const params = parsePirParams(body, etag);
-  memory = { params, storedAt: Date.now() };
-  await writeCache(body, etag);
-  return params;
+  try {
+    const body = await response.text();
+    const etag = response.headers.get('etag') ?? '';
+    const params = parsePirParams(body, etag);
+    memory = { params, storedAt: Date.now() };
+    await writeCache(body, etag);
+    return params;
+  } catch (error) {
+    if (error instanceof PirError) throw error;
+    throw new PirError('PIR_PARAMS_UNAVAILABLE', error instanceof Error ? error.message : 'params gagal');
+  }
+}
+
+export async function getPirParams(options: { force?: boolean } = {}): Promise<PirParams> {
+  const force = options.force === true;
+  if (!force && memory && Date.now() - memory.storedAt < PIR_PARAMS_MAX_AGE_MS) return memory.params;
+  if (inflight) return inflight;
+
+  // Params ±11 MB: beberapa pencarian bersamaan harus berbagi satu unduhan.
+  inflight = fetchPirParams().finally(() => {
+    inflight = null;
+  });
+  return inflight;
 }
 
 export async function clearPirParams(): Promise<void> {
@@ -193,4 +211,5 @@ export async function clearPirParams(): Promise<void> {
 
 export function _resetPirParamsForTests(): void {
   memory = null;
+  inflight = null;
 }

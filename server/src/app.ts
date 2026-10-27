@@ -210,6 +210,7 @@ const corsMiddleware = cors({
     // "Request header field x-nyx-client-version is not allowed by
     // Access-Control-Allow-Headers" — halaman jadi kosong tanpa pesan jelas.
     "x-nyx-client-version",
+    "if-none-match",
     "x-group-token",
     // [BUGFIX CORS 2026-10-02] Header capability/ blind-auth WAJIB di-whitelist
     // — tanpa ini preflight OPTIONS gagal dan SEMUA request ber-header ini
@@ -217,9 +218,14 @@ const corsMiddleware = cors({
     // details NetworkError → metadata era baru tak pernah sampai ke server →
     // anggota baru gagal decrypt metadata & gagal kirim).
     "x-admin-token",
-    "x-delivery-tokens",
+    // [audit F-14/04 · drift #18] `x-delivery-tokens` dihapus dari protokol
+    // (hard cut token grup per-anggota); menyisakannya hanya memperluas
+    // permukaan preflight tanpa ada klien yang mengirimnya.
     "x-delete-token"
   ],
+  // `/api/pir/params` mengirim ETag; tanpa expose, browser tidak bisa
+  // membacanya dan cache ETag klien tidak pernah terisi.
+  exposedHeaders: ["ETag"],
 });
 
 app.use(corsMiddleware);
