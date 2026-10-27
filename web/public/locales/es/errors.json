@@ -47,5 +47,15 @@
   "registration_attestation_user_verification": "Confirma con tu PIN o biometría para terminar de crear esta cuenta.",
   "registration_attestation_no_platform": "Este dispositivo no tiene autenticador de plataforma (Touch ID, Windows Hello o biometría del teléfono), así que no puede aportar la atestación de dispositivo requerida. Regístrate desde un teléfono o un portátil con biometría integrada y luego inicia sesión aquí.",
   "registration_attestation_cancelled": "La verificación del dispositivo se canceló o caducó. Inténtalo de nuevo y confirma con tu PIN o biometría.",
-  "client_too_old": "Esta versión de NYX es demasiado antigua para seguir funcionando con el servidor (mínimo {{minimum}}). Recarga la página; si sigue igual, cierra y vuelve a abrir la aplicación (PWA) o reinstálala desde el sitio de NYX."
+  "client_too_old": "Esta versión de NYX es demasiado antigua para seguir funcionando con el servidor (mínimo {{minimum}}). Recarga la página; si sigue igual, cierra y vuelve a abrir la aplicación (PWA) o reinstálala desde el sitio de NYX.",
+  "client_version_too_old_title": "Actualiza NYX para continuar",
+  "client_version_too_old_body": "Esta compilación ({{version}}) es más antigua que el mínimo que acepta este servidor ({{minimum}}). Todas las solicitudes se rechazan, así que los mensajes seguirán fallando hasta que actualices la aplicación.",
+  "client_version_required_title": "NYX no puede verificar esta compilación",
+  "client_version_required_body": "Este servidor acepta compilaciones desde {{minimum}} y solo permite cambios (enviar, editar, eliminar) cuando la compilación declara su versión. Esta compilación informa {{version}}. La lectura sigue funcionando; recarga para volver a enviar.",
+  "client_version_current": "Esta compilación",
+  "client_version_minimum": "Mínimo",
+  "client_version_unknown_minimum": "la versión más reciente",
+  "client_version_reload": "Recargar NYX",
+  "client_version_continue": "Continuar sin enviar",
+  "client_version_pwa_hint": "Si al recargar no cambia nada, cierra todas las pestañas de NYX y, si es una aplicación instalada, reinstálala desde el sitio de NYX."
 }

@@ -39,6 +39,9 @@ import { Spinner } from './components/Spinner';
 import { SystemBanner } from './components/SystemBanner';
 import { MaintenancePage } from './pages/MaintenancePage';
 import { ServerDownPage } from './pages/ServerDownPage'; // statis (bukan lazy): harus bisa tampil saat server mati
+// [R2 2026-10-27] Layar gerbang versi klien (426). Statis dengan alasan yang sama:
+// ia harus tampil justru ketika request API sedang ditolak.
+import { ClientVersionRequiredPage } from './pages/ClientVersionRequiredPage';
 import { reportKtAvailable, reportKtUnavailable } from './lib/ktAvailability';
 
 const ConfirmModal = lazy(() => import('@components/ConfirmModal'));
@@ -571,6 +574,9 @@ const AppContent = () => {
 
   return (
     <>
+      {/* Gerbang versi klien lebih dulu: bila server sekaligus tak terjangkau,
+          layar server-down (dirender sesudahnya, z sama) yang tampil di atas. */}
+      <ClientVersionRequiredPage />
       {/* Overlay server-down: app tetap ter-mount di bawahnya (state tidak hilang). */}
       {serverUnreachable && <ServerDownPage onRetry={checkStatus} />}
       <Toaster

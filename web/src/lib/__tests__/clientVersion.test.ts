@@ -3,18 +3,22 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { api, ApiError } from '../api'
 import { CLIENT_VERSION_HEADER, CLIENT_VERSION_VALUE, clientVersionHeaders } from '../clientVersion'
+import { useClientVersionGateStore } from '../../store/clientVersionGate'
 import i18n from '../../i18n'
 import enErrors from '../../../public/locales/en/errors.json'
 import esErrors from '../../../public/locales/es/errors.json'
 import idErrors from '../../../public/locales/id/errors.json'
 import ptBrErrors from '../../../public/locales/pt-BR/errors.json'
 
-// [R2 2026-10-15] Dua sisi kontrak versi klien di klien web:
+// [R2 2026-10-15 · 2026-10-27] Tiga sisi kontrak versi klien di klien web:
 //   1. setiap request REST membawa header `x-nyx-client-version` (tanpa itu
 //      gerbang server tidak punya apa pun untuk diputuskan);
-//   2. jawaban 426 `CLIENT_TOO_OLD` menjadi toast yang MENETAP (bukan pesan
-//      sekilas di konsol) — karena pengguna akan terus kehilangan pesan grup
-//      sampai ia memperbarui.
+//   2. jawaban 426 (`CLIENT_TOO_OLD` / `CLIENT_VERSION_REQUIRED`) menjadi state
+//      yang dirender sebagai LAYAR PENUH, bukan toast — pengguna akan terus
+//      kehilangan pesan grup sampai ia memperbarui, dan kegagalan itu tidak
+//      boleh bisa tertimpa toast lain;
+//   3. kedua kode dibedakan: `too-old` tidak bisa ditutup (semua request gagal),
+//      `version-required` boleh ditutup karena baca masih jalan.
 
 vi.mock('@utils/fingerprint', () => ({
   getPersistentInstallationId: vi.fn(async () => 'iid-test'),
@@ -53,6 +57,7 @@ beforeAll(() => {
 beforeEach(() => {
   fetchMock.mockReset()
   toastError.mockReset()
+  useClientVersionGateStore.getState().reset()
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -101,32 +106,87 @@ describe('header versi klien (R2)', () => {
   })
 })
 
-describe('jawaban 426 CLIENT_TOO_OLD (R2)', () => {
-  it('menampilkan toast menetap dengan id tunggal + menyebut versi minimum', async () => {
+describe('jawaban 426 → layar khusus, bukan toast (R2)', () => {
+  it('CLIENT_TOO_OLD menyalakan layar penuh dengan versi minimum, tanpa toast', async () => {
     fetchMock.mockResolvedValue(
       errorResponse(426, {
         error: 'CLIENT_TOO_OLD',
         message: 'Versi NYX ini tidak lagi didukung',
         minimumVersion: '3.1.0',
+        clientVersion: '2.4.0',
       })
     )
 
     await expect(api('/api/messages', { timeoutMs: 1000 })).rejects.toBeInstanceOf(ApiError)
 
-    expect(toastError).toHaveBeenCalledTimes(1)
-    const call = toastError.mock.calls[0]
-    expect(call).toBeDefined()
-    const message = call?.[0]
-    const options = call?.[1]
-    expect(options).toMatchObject({ id: 'client-too-old', duration: Infinity })
-    expect(String(message)).toContain('3.1.0')
+    // Permintaan tetap gagal ke pemanggil (perilaku lama), tetapi UI-nya milik
+    // store — bukan toast yang bisa tertimpa.
+    expect(toastError).not.toHaveBeenCalled()
+    expect(useClientVersionGateStore.getState().rejection).toEqual({
+      kind: 'too-old',
+      minimumVersion: '3.1.0',
+      clientVersion: '2.4.0',
+    })
   })
 
-  it('status 426 tanpa kode CLIENT_TOO_OLD tidak memicu toast khusus', async () => {
+  it('CLIENT_VERSION_REQUIRED dibedakan dari too-old (hanya mutasi yang ditolak)', async () => {
+    fetchMock.mockResolvedValue(
+      errorResponse(426, { error: 'CLIENT_VERSION_REQUIRED', minimumVersion: '3.2.0' })
+    )
+
+    await expect(api('/api/messages', { method: 'POST', timeoutMs: 1000 })).rejects.toMatchObject({
+      status: 426,
+    })
+
+    expect(useClientVersionGateStore.getState().rejection).toEqual({
+      kind: 'version-required',
+      minimumVersion: '3.2.0',
+      clientVersion: undefined,
+    })
+  })
+
+  it('426 tanpa kode kontrak tidak menyalakan layar', async () => {
     fetchMock.mockResolvedValue(errorResponse(426, { error: 'SOMETHING_ELSE' }))
 
     await expect(api('/api/messages', { timeoutMs: 1000 })).rejects.toMatchObject({ status: 426 })
+    expect(useClientVersionGateStore.getState().rejection).toBeNull()
     expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it('too-old menang atas version-required, tidak bisa ditutup, dan minimum terbaru dipakai', () => {
+    const store = useClientVersionGateStore.getState()
+    store.report('version-required', { minimumVersion: '3.2.0' })
+    store.report('too-old', { minimumVersion: '3.1.0', clientVersion: '2.0.0' })
+
+    // Request berikutnya yang hanya gagal di mutasi tidak boleh menurunkan
+    // layar "semua gagal" menjadi layar yang bisa ditutup.
+    store.report('version-required', { minimumVersion: '3.3.0' })
+    expect(useClientVersionGateStore.getState().rejection).toMatchObject({
+      kind: 'too-old',
+      clientVersion: '2.0.0',
+    })
+
+    store.dismiss()
+    // too-old tidak bisa ditutup: semua request gagal, jadi menyembunyikan
+    // layar hanya menyembunyikan kegagalan.
+    expect(useClientVersionGateStore.getState().dismissed).toBe(false)
+  })
+
+  it('version-required boleh ditutup, dan pengulangan jenis yang sama tidak membukanya lagi', () => {
+    const store = useClientVersionGateStore.getState()
+    store.report('version-required', { minimumVersion: '3.2.0' })
+    store.dismiss()
+    expect(useClientVersionGateStore.getState().dismissed).toBe(true)
+
+    // Setiap percobaan kirim berikutnya akan 426 lagi — layar tidak boleh
+    // berkedip terbuka-tutup untuk setiap pesan yang gagal.
+    store.report('version-required', { minimumVersion: '3.2.0' })
+    expect(useClientVersionGateStore.getState().dismissed).toBe(true)
+
+    // Tapi minimum yang naik tetap terlihat bila layar dibuka lagi.
+    store.report('too-old', { minimumVersion: '3.4.0' })
+    expect(useClientVersionGateStore.getState().rejection).toMatchObject({ minimumVersion: '3.4.0' })
+    expect(useClientVersionGateStore.getState().dismissed).toBe(false)
   })
 })
 
@@ -184,17 +244,39 @@ describe('satu sumber kebenaran untuk header versi (R2)', () => {
   })
 })
 
-describe('kunci i18n client_too_old ada di keempat bahasa (R2)', () => {
+describe('kunci i18n layar versi klien ada di keempat bahasa (R2)', () => {
+  const REQUIRED_KEYS = [
+    'client_too_old',
+    'client_version_too_old_title',
+    'client_version_too_old_body',
+    'client_version_required_title',
+    'client_version_required_body',
+    'client_version_current',
+    'client_version_minimum',
+    'client_version_unknown_minimum',
+    'client_version_reload',
+    'client_version_continue',
+    'client_version_pwa_hint',
+  ] as const
+
   it.each([
     ['en', enErrors],
     ['es', esErrors],
     ['id', idErrors],
     ['pt-BR', ptBrErrors],
   ])('%s', (_lang, bundle) => {
-    const key = (bundle as Record<string, string>).client_too_old
-    expect(typeof key).toBe('string')
-    // Placeholder `{{minimum}}` wajib ada: pesan tanpa versi minimum tidak bisa
-    // ditindaklanjuti pengguna.
-    expect(key).toContain('{{minimum}}')
+    const strings = bundle as Record<string, string>
+    for (const key of REQUIRED_KEYS) {
+      expect(typeof strings[key]).toBe('string')
+      expect(strings[key]?.length ?? 0).toBeGreaterThan(0)
+    }
+
+    // Pesan tanpa versi tidak bisa ditindaklanjuti pengguna: keduanya wajib
+    // menyebut minimum, dan body wajib menyebut build yang sedang dipakai.
+    expect(strings.client_too_old).toContain('{{minimum}}')
+    for (const key of ['client_version_too_old_body', 'client_version_required_body'] as const) {
+      expect(strings[key]).toContain('{{minimum}}')
+      expect(strings[key]).toContain('{{version}}')
+    }
   })
 })

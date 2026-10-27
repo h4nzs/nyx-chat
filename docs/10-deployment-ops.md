@@ -922,6 +922,16 @@ datar (klien sudah mengirim header), baru set `CLIENT_VERSION_REQUIRE_MUTATIONS=
 **ikut ditolak** (POST tanpa header) — setel header versi di perintah ops atau
 lakukan pemeliharaan sebelum menyalakan mode ini.
 
+**Yang dilihat pengguna.** Klien web tidak menampilkan 426 sebagai toast: kedua
+kode (`CLIENT_TOO_OLD`, `CLIENT_VERSION_REQUIRED`) masuk ke store
+`web/src/store/clientVersionGate.ts` dan dirender sebagai layar penuh
+(`web/src/pages/ClientVersionRequiredPage.tsx`) yang menyebut build yang dipakai
++ minimum dari server, dengan tombol muat ulang. `too-old` **tidak** bisa
+ditutup (semua request gagal); `version-required` bisa ditutup untuk melanjutkan
+membaca, dan layar tidak berkedip terbuka lagi pada setiap percobaan kirim.
+Konsekuensi operasional: lonjakan `strict-no-header` di metrik akan tampak
+sebagai layar pada klien, bukan sekadar toast yang lewat.
+
 **Urutan menaikkan angka ini saat rilis breaking berikutnya:** umumkan dulu →
 beri jeda minimal satu siklus rilis (biar PWA pengguna memperbarui diri) → baru
 naikkan `MIN_CLIENT_VERSION` ke versi rilis sebelumnya → pantau

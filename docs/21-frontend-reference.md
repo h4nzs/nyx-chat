@@ -7,12 +7,12 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 | File | Role |
 |---|---|
 | `main.tsx` | Entry: `zodSetup` (must be first) → i18n → render `App` → `registerServiceWorker`; injects `setAuthFailureHandler` (logout on final refresh failure, skipped during bootstrap) |
-| `App.tsx` | BrowserRouter + routes; lazy pages under a routes-level `<Suspense>` (LoadingScreen); each global modal in its own `ModalSuspense` boundary (`fallback={null}`) + `preloadOnIdle` chunk warm-up; `bootstrap()`; socket connect; theme/accent; visibility lock; maintenance gate; toast limiter |
+| `App.tsx` | BrowserRouter + routes; lazy pages under a routes-level `<Suspense>` (LoadingScreen); each global modal in its own `ModalSuspense` boundary (`fallback={null}`) + `preloadOnIdle` chunk warm-up; `bootstrap()`; socket connect; theme/accent; visibility lock; maintenance gate; toast limiter; static overlays for `ServerDownPage` and `ClientVersionRequiredPage` (426) |
 | `zodSetup.ts` | `globalThis.__zod_globalConfig.jitless = true` (direct mutation — `zod.config()` is tree-shaken) |
 | `i18n.ts` | i18next + HttpBackend + LanguageDetector; `load:'languageOnly'`, `fallbackLng:'en'`, 7 runtime namespaces |
 | `index.css` | Tailwind v4 `@theme`, `@custom-variant dark (&:where(.dark,.dark *))`, neumorphic shadows, aurora gradient |
 
-## 21.2 Zustand stores (`store/`, 21 files)
+## 21.2 Zustand stores (`store/`, 22 files)
 
 | Store | Key state | Key actions |
 |---|---|---|
@@ -24,6 +24,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 | `callStore.ts` | `callState`, `remoteUsers/Streams`, `isVideoCall`, `isReceivingCall`, `localStream`, `isMinimized` | `setCallState`, `setIncomingCall`, `setOutgoingCall`, `add/removeRemote*`, `toggleMinimize`, `endCall`, `setCallKey` |
 | `commandPalette.ts` | `isOpen`, `commands[]` | `open`, `close`, `toggle`, `addCommands`, `removeCommands` |
 | `connection.ts` | `status`, `myDevices`, `hasFetchedDevices` | `setStatus`, `fetchMyDevices`; exports `clearReconnectTimer` |
+| `clientVersionGate.ts` | `rejection` (`too-old` \| `version-required`, `minimumVersion`, `clientVersion`), `dismissed` | `report` (severity: `too-old` never downgraded), `dismiss` (only `version-required`), `reset`; `reportClientVersionRejection` maps a 426 body. Rendered by `pages/ClientVersionRequiredPage.tsx` — a full screen, not a toast |
 | `contextMenu.ts` | `isOpen`, `x`, `y`, `options[]`, `reactions` | `openMenu`, `closeMenu` |
 | `dynamicIsland.ts` | `activities[]` | `addActivity`, `updateActivity`, `removeActivity` |
 | `keychain.ts` | `lastUpdated` | `keysUpdated()` |

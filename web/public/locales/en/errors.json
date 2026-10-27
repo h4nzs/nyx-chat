@@ -47,5 +47,15 @@
   "registration_attestation_user_verification": "Confirm with your PIN or biometrics to finish creating this account.",
   "registration_attestation_no_platform": "This device has no platform authenticator (Touch ID, Windows Hello, or phone biometrics), so it cannot provide the required device attestation. Register from a phone or a laptop with built-in biometrics, then sign in here.",
   "registration_attestation_cancelled": "Device verification was cancelled or timed out. Try again and confirm with your PIN or biometrics.",
-  "client_too_old": "This NYX version is too old to keep working with the server (minimum {{minimum}}). Reload the page — if it stays the same, close and reopen the app (PWA) or reinstall it from the NYX site."
+  "client_too_old": "This NYX version is too old to keep working with the server (minimum {{minimum}}). Reload the page — if it stays the same, close and reopen the app (PWA) or reinstall it from the NYX site.",
+  "client_version_too_old_title": "Update NYX to continue",
+  "client_version_too_old_body": "This build ({{version}}) is older than the minimum this server accepts ({{minimum}}). Every request is being refused, so messages will keep failing until the app is updated.",
+  "client_version_required_title": "NYX can't verify this build",
+  "client_version_required_body": "This server accepts builds from {{minimum}} upward and only allows changes (sending, editing, deleting) when the build states its version. This build reports {{version}}. Reading still works; reload to send again.",
+  "client_version_current": "This build",
+  "client_version_minimum": "Minimum",
+  "client_version_unknown_minimum": "the latest release",
+  "client_version_reload": "Reload NYX",
+  "client_version_continue": "Continue without sending",
+  "client_version_pwa_hint": "If reloading changes nothing, close every NYX tab — and if this is an installed app, reinstall it from the NYX site."
 }

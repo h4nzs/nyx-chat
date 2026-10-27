@@ -47,5 +47,15 @@
   "registration_attestation_user_verification": "Confirme com seu PIN ou biometria para concluir a criação desta conta.",
   "registration_attestation_no_platform": "Este dispositivo não tem autenticador de plataforma (Touch ID, Windows Hello ou biometria do celular), então não pode fornecer a atestação de dispositivo exigida. Cadastre-se em um celular ou notebook com biometria integrada e depois entre aqui.",
   "registration_attestation_cancelled": "A verificação do dispositivo foi cancelada ou expirou. Tente novamente e confirme com seu PIN ou biometria.",
-  "client_too_old": "Esta versão do NYX é antiga demais para continuar funcionando com o servidor (mínimo {{minimum}}). Recarregue a página; se continuar igual, feche e reabra o aplicativo (PWA) ou reinstale-o pelo site do NYX."
+  "client_too_old": "Esta versão do NYX é antiga demais para continuar funcionando com o servidor (mínimo {{minimum}}). Recarregue a página; se continuar igual, feche e reabra o aplicativo (PWA) ou reinstale-o pelo site do NYX.",
+  "client_version_too_old_title": "Atualize o NYX para continuar",
+  "client_version_too_old_body": "Esta compilação ({{version}}) é mais antiga que o mínimo aceito por este servidor ({{minimum}}). Todas as requisições são recusadas, então as mensagens vão continuar falhando até o aplicativo ser atualizado.",
+  "client_version_required_title": "O NYX não consegue verificar esta compilação",
+  "client_version_required_body": "Este servidor aceita compilações a partir de {{minimum}} e só permite alterações (enviar, editar, excluir) quando a compilação informa sua versão. Esta compilação informa {{version}}. A leitura continua funcionando; recarregue para enviar novamente.",
+  "client_version_current": "Esta compilação",
+  "client_version_minimum": "Mínimo",
+  "client_version_unknown_minimum": "a versão mais recente",
+  "client_version_reload": "Recarregar o NYX",
+  "client_version_continue": "Continuar sem enviar",
+  "client_version_pwa_hint": "Se recarregar não mudar nada, feche todas as abas do NYX — e, se for um aplicativo instalado, reinstale-o pelo site do NYX."
 }

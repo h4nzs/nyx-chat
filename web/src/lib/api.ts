@@ -3,6 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import toast from 'react-hot-toast'; // Pastikan sudah diinstall
 import { CLIENT_VERSION_HEADER, CLIENT_VERSION_VALUE } from './clientVersion';
+import { reportClientVersionRejection } from '@store/clientVersionGate';
 
 // PERBAIKAN: Baca dari Environment Variable
 const envUrl = import.meta.env.VITE_API_URL || "";
@@ -222,22 +223,15 @@ export async function api<T = unknown>(
         details = { raw: text };
       }
 
-      // 3a. [R2 2026-10-15] Klien terlalu tua (426 `CLIENT_TOO_OLD`). Toast-nya
-      // `duration: Infinity` dan satu id: pesan ini tidak boleh lewat begitu saja
-      // (pengguna akan terus kehilangan pesan grup sampai ia memperbarui), tapi
-      // juga tidak boleh menumpuk jadi puluhan toast dari request paralel.
-      if (res.status === 426 && details?.error === 'CLIENT_TOO_OLD') {
-        // Import dinamis (pola yang sama dengan `@store/auth` di `authFetch`):
-        // menarik i18next + backend HTTP-nya ke graf modul `api.ts` ikut menambah
-        // request nyata untuk memuat berkas locale, dan itu mengacaukan pengukuran
-        // request di modul ini (termasuk uji single-flight CSRF). Jalur ini jarang
-        // terpicu, jadi biayanya nol di operasi normal.
-        const { default: i18n } = await import('../i18n');
-        toast.error(i18n.t('errors:client_too_old', { minimum: details.minimumVersion ?? '' }), {
-          id: 'client-too-old',
-          duration: Infinity,
-          icon: '⬆️',
-        });
+      // 3a. [R2 2026-10-15 · 2026-10-27] Gerbang versi klien (426). Bukan toast:
+      // statusnya disimpan di store dan dirender sebagai layar penuh
+      // (`pages/ClientVersionRequiredPage.tsx`) karena penolakan ini tidak
+      // selesai sendiri — `CLIENT_TOO_OLD` menggagalkan SEMUA request, dan
+      // `CLIENT_VERSION_REQUIRED` menjelaskan bahwa hanya mutasi yang ditolak.
+      // Toast bisa tertimpa toast lain / terlewat, padahal konsekuensinya
+      // "pesan grup hilang terus-menerus" sampai aplikasi diperbarui.
+      if (res.status === 426) {
+        reportClientVersionRejection(details);
       }
 
       // 3b. Handle Rate Limit (429) dengan Toast
@@ -427,6 +421,10 @@ export async function apiUpload<T = unknown>({
     return data;
   } catch (error) {
     if (error instanceof ApiError) {
+      // [R2] Paritas dengan jalur `fetch`: upload juga bisa ditolak gerbang versi.
+      if (error.status === 426) {
+        reportClientVersionRejection(error.details);
+      }
       // Handle 429 di upload juga
       if (error.status === 429) {
         toast.error(error.message, { icon: '⏳', style: { background: '#fee2e2', color: '#b91c1c' } });

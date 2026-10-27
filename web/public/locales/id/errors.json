@@ -47,5 +47,15 @@
   "registration_attestation_user_verification": "Konfirmasi dengan PIN atau biometrik untuk menyelesaikan pembuatan akun ini.",
   "registration_attestation_no_platform": "Perangkat ini tidak punya authenticator platform (Touch ID, Windows Hello, atau biometrik ponsel), jadi tidak bisa memberi attestation perangkat yang diwajibkan. Daftar dari ponsel atau laptop dengan biometrik bawaan, lalu masuk di sini.",
   "registration_attestation_cancelled": "Verifikasi perangkat dibatalkan atau waktu habis. Coba lagi dan konfirmasi dengan PIN atau biometrik.",
-  "client_too_old": "Versi NYX ini terlalu tua untuk terus bekerja dengan server (minimal {{minimum}}). Muat ulang halaman — bila tetap sama, tutup dan buka lagi aplikasi (PWA) atau pasang ulang dari situs NYX."
+  "client_too_old": "Versi NYX ini terlalu tua untuk terus bekerja dengan server (minimal {{minimum}}). Muat ulang halaman — bila tetap sama, tutup dan buka lagi aplikasi (PWA) atau pasang ulang dari situs NYX.",
+  "client_version_too_old_title": "Perbarui NYX untuk melanjutkan",
+  "client_version_too_old_body": "Build ini ({{version}}) lebih tua dari minimum yang diterima server ({{minimum}}). Semua request ditolak, jadi pesan akan terus gagal sampai aplikasi diperbarui.",
+  "client_version_required_title": "NYX tidak bisa memverifikasi build ini",
+  "client_version_required_body": "Server ini menerima build {{minimum}} ke atas dan hanya mengizinkan perubahan (kirim, edit, hapus) bila build menyatakan versinya. Build ini melaporkan {{version}}. Membaca tetap jalan; muat ulang untuk bisa mengirim lagi.",
+  "client_version_current": "Build ini",
+  "client_version_minimum": "Minimum",
+  "client_version_unknown_minimum": "rilis terbaru",
+  "client_version_reload": "Muat ulang NYX",
+  "client_version_continue": "Lanjutkan tanpa mengirim",
+  "client_version_pwa_hint": "Bila muat ulang tidak mengubah apa pun, tutup semua tab NYX — dan bila ini aplikasi terpasang, pasang ulang dari situs NYX."
 }
