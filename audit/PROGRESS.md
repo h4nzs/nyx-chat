@@ -79,13 +79,14 @@ angka layout `docs/01` (21 router/77 komponen/5 job). Pengamatan baru **D7**:
 tree) untuk #19–#24 & #26: pengecualian main-thread crypto, ML-DSA-65 di §4.1 &
 §4.3, koreksi §4.4 (`pqSignature` tidak diverifikasi; autentikasi = tanda tangan
 transkrip), envelope grup v3 85 B / v4 2037 B + `sigV`/`senderKeyId`/`signingKeyV2`, fail-open `ENC1:` di
-§4.8, dan katalog **50 op** yang akurat. `docs/01` (#25) belum disentuh.
+§4.8, dan katalog **50 op** yang akurat. `docs/01` (#25) menyusul di batch kerapian (lihat §Perbaikan Batch 9).
 
 **Bersih-bersih referensi op (2026-10-26):** `docs/16`, `docs/21`, `docs/26`,
 `docs/29` tidak lagi menyebut `pq_box_seal`/`crypto_box_seal` yang sudah dihapus;
 sekarang memakai `pq_box_seal_v2` (X-Wing, parameter kunci klasik diabaikan) dan
 menyebut envelope grup v4 2037 B di tempat yang relevan (`notes` drift #27).
-Sisa referensi historis di `docs/03`, `docs/05`, `docs/31`, `docs/35` belum diubah.
+Sisa referensi historis di `docs/03`, `docs/05`, `docs/31`, `docs/35` **ditutup
+2026-10-27** (lihat §Sisa implementasi di bawah).
 
 ## Perbaikan Batch 1 — gate CI dibuka (2026-10-26)
 
@@ -108,7 +109,7 @@ Catatan: `cargo fmt --check` di `server/transport-sidecar` **masih** gagal
 (impor di `src/fuzz.rs` dan `src/bin/fuzz-framing.rs` belum di-rustfmt). Itu
 tidak dimasukkan ke CI pada batch ini supaya job baru tidak merah sejak awal;
 menjalankan `rustfmt` menyeluruh akan mencampur diff format besar dengan
-perbaikan audit.
+perbaikan audit. **Ditutup 2026-10-27** — lihat §Sisa implementasi.
 
 ## Perbaikan Batch 2–9 (2026-10-26, working tree, belum commit)
 
@@ -209,3 +210,79 @@ di-pin ke SHA (komentar tag di sampingnya), `permissions: contents: read` di
 `ci.yml` dan `deploy.yml`, dan gate `scripts/check-actions-pins.mjs` menolak
 `@master`/`@main`/`@latest`.
 
+
+## Sisa implementasi (2026-10-27, working tree)
+
+Dua hal yang masih tercatat "belum" di batch 1–9 dikerjakan, ditambah sinkronisasi
+angka dokumen yang ikut terlihat saat mengerjakannya. Batas sesi ini: **tidak**
+menyentuh keputusan maintainer (lihat daftar di akhir).
+
+### 1. `cargo fmt --check` hijau + jadi gate CI
+
+`server/transport-sidecar` di-rustfmt-kan sekali (4 berkas, +296/−99; 57 hunk — impor
+`fuzz.rs`/`bin/fuzz-framing.rs`, pembungkusan argumen `main.rs`/`protocol.rs`). Job CI
+`sidecar` kini menjalankan `cargo fmt --all -- --check` **sebelum** clippy, persis seperti
+job `pir-sidecar` (`toolchain.components: rustfmt, clippy`); tanpa gate itu satu-satunya
+crate Rust tanpa fmt otomatis akan kembali kacau. Gate baru dicatat di `docs/11` §11.1
+dan `docs/25` (daftar job `ci.yml`).
+
+Verifikasi: `cargo fmt --all -- --check` bersih, `cargo clippy --all-targets -- -D warnings`
+bersih, `cargo test` → lib **19** + `cert_tests` **6** lulus (0 gagal).
+
+### 2. Referensi op sealing usang di dokumen sisa (drift #28–#31)
+
+- `docs/03` §3.2: baris "Message vault" (memakai `ENC1:` masterSeed, bukan envelope
+  ber-kunci identitas — sama kelasnya dengan drift #20) dan baris "Push payloads"
+  (`crypto_box_seal` → `pq_box_seal_v2`/`sealForDevice`, perangkat tanpa kunci PQ tidak
+  dapat payload).
+- `docs/05` diagram alur: label `crypto_box_seal(pushPayload, devicePk)` → `sealForDevice`
+  → `pq_box_seal_v2`.
+- `docs/31` §tabel jalur kunci: kunci `migration:*` diseal `pq_box_seal_v2` (X-Wing),
+  QR v1 tanpa `pqPubKey` ditolak.
+- `docs/35` §35.2.2 (tiga baris inventaris) + §35.6 (dua bullet "Langkah 5/9") yang masih
+  menjanjikan fallback `crypto_box_seal` untuk QR/perangkat lama diberi anotasi
+  **dihapus di cutover PQ-only 2026-10-23** dengan lokasi kode yang menegakkannya.
+  §35.2 tetap dibiarkan sebagai baseline historis (memang dinyatakan begitu).
+
+Tidak diubah (diperiksa, bukan drift): `marketing/src/locales/*/api-docs.json` memakai
+nama fungsi **libsodium** `crypto_box_seal_open` pada troubleshooting integrator Engine,
+dan entri lama di `CHANGELOG.md`.
+
+### 3. Angka test `docs/11` §11.1 disinkronkan (drift #31)
+
+Diukur di mesin ini, bukan dari ingatan:
+
+| Runner | Angka nyata 2026-10-27 | Tertulis sebelumnya |
+|---|---|---|
+| server (`node:test` via `tsx`) | **86 berkas / 677 tes — 675 pass, 0 fail, 2 skip**, exit 0 | 48 berkas / 380 tes |
+| web (vitest) | **125 berkas / 1018 tes** | 72 berkas / 615 tes |
+| sidecar `cargo test` | **2 target / 25 tes** (19 lib + 6 sertifikat) | 18 tes |
+| total | **211 berkas** (86 + 125) | 120 berkas |
+
+Semua **86** berkas `server/tests/*.test.ts` terdaftar di skrip `test`
+`server/package.json` (0 yatim, dicek dengan membandingkan `readdirSync` ke isi skrip).
+
+### Catatan verifikasi (jujur)
+
+- `pnpm --filter nyx-web run test` penuh menghasilkan **1 gagal / 1017 lulus** dari 1018:
+  `src/lib/__tests__/pqBench.test.ts` → `expected 108.376 to be less than 100`
+  (`PQ_BENCH_BUDGET.mlDsaSignP95Ms`). Ini **benchmark wall-clock** di dalam suite unit,
+  jadi sensitif beban mesin — dijalankan ulang sendirian berkas itu **lulus** (sign
+  p95 40,19 ms; keempat ukuran output ML-DSA-65/X-Wing juga persis). Tidak ada berkas web
+  yang disentuh di sesi ini, jadi ini flake beban, bukan regresi; ambang `PQ_BENCH_BUDGET`
+  **tidak** diubah (itu akan melemahkan assertion).
+- Perubahan sesi ini hanya menyentuh dokumen, `.github/workflows/ci.yml`, dan format Rust —
+  tidak ada kode runtime yang berubah, sehingga gate perilaku (drill alert, PQ-only,
+  overrides, actions-pins, e2e) tidak terpengaruh; yang relevan dan dijalankan ulang:
+  `cargo fmt/clippy/test`.
+
+### Masih menunggu keputusan maintainer (tidak diputuskan di sini)
+
+1. **F-04 hard cut token grup** — produksi di-reset (kehilangan riwayat) atau backfill?
+   Menentukan apakah `docs/37` §37.4 P0 perlu langkah reset eksplisit.
+2. **Privacy Pass** — perbaiki dan hidupkan (`PP_SYNC_REQUIRED=1`) atau matikan dan hapus
+   kode + exception PQ-nya?
+3. **Metrik klaster** — eksporter terpisah/agregasi, atau cukup satu worker + `NODE_APP_INSTANCE`?
+4. **D1/D7** — `MIN_CLIENT_VERSION` dijadikan fail-closed untuk mutasi? Seal at-rest
+   tetap fail-open ke plaintext (didokumentasikan di `docs/04` §4.8) atau berubah jadi
+   melempar/melewati penulisan?

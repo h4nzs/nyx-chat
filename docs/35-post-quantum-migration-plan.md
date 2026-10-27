@@ -113,9 +113,9 @@ Akar sesi SPQR berasal dari X3DH; karena itu X3DH v2 adalah prasyarat.
 | `web/src/workers/crypto.worker.ts` | 965, 976, 1336, 2212, 2244, 2327 | verifikasi/sign Ed25519 |
 | `web/src/store/auth.ts` | 84-85, 540, 562, 948, 963 | prekey signature + X25519 keygen |
 | `web/src/utils/crypto.ts` | 213, 269 | group metadata Ed25519 (jalur v1; v4 ML-DSA saat gerbang aktif) |
-| `web/src/pages/MigrationSendPage.tsx` | 140 | `crypto_box_seal` hanya untuk QR lama; `sealForDevice` (hybrid v1 / X-Wing v2) |
-| `web/src/pages/MigrationReceivePage.tsx` | 103 | `crypto_box_seal_open` untuk QR lama; `openSealedForDevice` mendeteksi magic v2 |
-| `web/src/store/message.ts` | 1015, 1136 | `crypto_box_seal` untuk device tanpa `pqPublicKey`; `sealForDevice` saat v2 aktif |
+| `web/src/pages/MigrationSendPage.tsx` | 140 | ~~`crypto_box_seal` hanya untuk QR lama~~ → **dihapus di cutover PQ-only 2026-10-23**: hanya `sealForDevice` (X-Wing v2), QR v1 ditolak (`MigrationSendPage.tsx:140-146`) |
+| `web/src/pages/MigrationReceivePage.tsx` | 103 | ~~`crypto_box_seal_open` untuk QR lama~~ → **dihapus**: `openSealedForDevice` menolak apa pun tanpa magic v2 |
+| `web/src/store/message.ts` | 1015, 1136 | ~~`crypto_box_seal` untuk device tanpa `pqPublicKey`~~ → **dihapus**: device tanpa kunci PQ tidak mendapat push payload (`message.ts:1155-1165`) |
 | `server/src/routes/auth.ts` | 939 | verifikasi recovery Ed25519 (v1); ML-DSA-65 (`PQ_V2_DOMAINS.RECOVERY`) bila `signatureV2` |
 | `server/src/lib/groupCredentials.ts` | seluruh suite | RSA-PSS blind signature |
 | `server/kt-query` + `vendor/signal/libsignal-keytrans` | tree head/VRF | Ed25519 + ECVRF-Edwards25519 |
@@ -633,6 +633,8 @@ Status (2026-10-20; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **seluruh langkah 
     (fallback `user.pqPublicKey`) dan memakai `sealForDevice` saat gerbang v2 aktif; jalur
     `crypto_box_seal` hanya tersisa sebagai fallback perangkat tanpa kunci PQ. SW memang tidak
     mendekripsi payload, jadi tidak ada perubahan sisi baca.
+    **Dihapus di cutover PQ-only 2026-10-23** (`store/message.ts:1161`): perangkat tanpa kunci
+    PQ kini **tidak** menerima push payload sama sekali — tidak ada lagi jalur v1 di sini.
 - Langkah 7 (sebagian — tanda tangan pesan grup v4) selesai:
   - Worker op `group_ratchet_encrypt` menerima `signingV2PrivateKey` opsional dan menandatangani
     `dataToSign = u32(n) BE ‖ nonce(24) ‖ ct` dengan ML-DSA-65 (`PQ_V2_DOMAINS.GROUP`), mengembalikan
@@ -699,7 +701,8 @@ Status (2026-10-20; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **seluruh langkah 
     perubahan lanjutan.
   - **Push payload v2**: `store/message.ts` menambah `pqPublicKey` pada tipe device partisipan,
     mendekode kunci PQ, dan menyegel payload via `sealForDevice` hanya bila gerbang aktif dan
-    kunci PQ tersedia; selain itu tetap `crypto_box_seal` (perilaku v1 identik). SW tidak
+    kunci PQ tersedia; selain itu tetap `crypto_box_seal` (perilaku v1 identik) — **paruh kedua
+    ini dihapus di cutover PQ-only 2026-10-23**: payload hanya diseal v2, tanpa fallback. SW tidak
     mendekripsi payload, jadi tidak ada jalur baca yang perlu diubah.
   - Verifikasi: `npx tsc -b --noEmit` (web) dan `npx tsc --noEmit` (server) bersih;
     `deviceLinking` server 11 lulus (termasuk round-trip `signingKeyV2`);

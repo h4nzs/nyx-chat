@@ -60,7 +60,7 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 
 | Workflow | Purpose |
 |---|---|
-| `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit (web+server) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → drill pemulihan log KT (`kt-recovery`) → `pnpm audit --prod` → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata) |
+| `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit (web+server) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → drill pemulihan log KT (`kt-recovery`) → `pnpm audit --prod` → job Rust `pir-sidecar`/`sidecar` (`cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test`) → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata) |
 | `deploy.yml` | On push to `main`: guard → build web + marketing + server + Rust sidecar + `nyx-kt-query` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd `nyx-kt-query`/v2 dan `nyx-ohttp-relay` dari `ops/systemd/`, lalu restart+verifikasi **bila unitnya sudah `enabled`** (gagal ⇒ deploy merah; relay butuh `server/dist/ohttp/relay.js`) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
 | `codeql.yml` | Static security analysis |
 | `gemini-dispatch.yml` | Route issues/PRs to the Gemini agent |

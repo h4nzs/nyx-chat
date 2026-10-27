@@ -19,7 +19,7 @@ sequenceDiagram
     CW-->>MS: { state, header, ciphertext, mk } (8KB padded)
     MS->>MS: store mk (encrypted, key = temp_<id>)
     loop each recipient device
-        MS->>CW: crypto_box_seal(pushPayload, devicePk)  [parallel]
+        MS->>CW: sealForDevice → pq_box_seal_v2(pushPayload, devicePk)  [parallel]
     end
     MS->>TW: SEND_STREAM { op: CHAT_MESSAGE, payload }
     TW->>TW: enqueueSend (FIFO promise chain — no artificial delay)

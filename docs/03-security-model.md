@@ -32,10 +32,10 @@ flowchart LR
 | Layer | Mechanism | Key file |
 |---|---|---|
 | Key storage at rest | `ENC1:` masterSeed-encrypted envelope (ratchet states, chain keys, skipped keys, story keys) | `web/src/lib/keychainDb.ts`, `shadowVaultDb.ts` |
-| Message vault | XChaCha envelope derived from identity private key | `web/src/lib/shadowVaultDb.ts` |
+| Message vault (structural fields) | `ENC1:` masterSeed-encrypted envelope (`sealLocal*`); XChaCha20-Poly1305 under a **different key path** — not the canonical `xchacha_seal` envelope | `web/src/lib/shadowVaultDb.ts`, `localAtRest.ts`, `keychainDb.ts` |
 | Profile | `encryptProfile` worker op (same canonical envelope) | `crypto.worker.ts` |
 | Attachments | libsodium secretstream (header + chunks), key inside the E2EE message | `crypto.worker.ts` |
-| Push payloads | `crypto_box_seal` per recipient device | `web/src/store/message.ts` |
+| Push payloads | `pq_box_seal_v2` (X-Wing, magic `NYS2`) per recipient device via `sealForDevice`; a device without a PQ key gets **no** payload | `web/src/store/message.ts`, `web/src/lib/pqBoxSeal.ts` |
 
 ## 3.3 Authentication & sessions
 

@@ -4,10 +4,12 @@ Semua baris di bawah diverifikasi dengan membaca kode/berkas, bukan dari ingatan
 Prioritas: **P1** membuat operator/kontributor salah langkah; **P2** menyesatkan
 tapi tidak berbahaya; **P3** kosmetik.
 
-> **Tindak lanjut 2026-10-26:** #19–#24, #26, dan #27 sudah diperbaiki (working
-> tree, belum commit) — #19–#24/#26 di `docs/04`, #27 di `docs/16`, `docs/21`,
-> `docs/26`, `docs/29`. #25 (angka layout `docs/01`) belum diperbaiki. Baris di
-> bawah tetap menggambarkan keadaan HEAD `25b1699` yang diaudit.
+> **Tindak lanjut 2026-10-26:** #19–#24, #26, dan #27 sudah diperbaiki —
+> #19–#24/#26 di `docs/04`, #27 di `docs/16`, `docs/21`, `docs/26`, `docs/29`;
+> #25 (angka layout `docs/01`) menyusul di batch kerapian (#1–#18 dan #28–#31
+> juga sudah diperbaiki). Baris 1–27 tetap menggambarkan keadaan HEAD
+> `25b1699` yang diaudit; baris 28–31 ditambahkan 2026-10-27 dari sisa
+> referensi op/laporan yang belum disinkronkan.
 
 | # | Pri | Dokumen | Klaim | Kenyataan (bukti) |
 |---|---|---|---|---|
@@ -38,6 +40,21 @@ tapi tidak berbahaya; **P3** kosmetik.
 | 25 | P3 | `docs/01:8-20` | `components/ ~90 file`, `routes/ 17 modul`, `jobs/ messageSweeper + systemSweeper` | aktual: **77** berkas komponen, **21** router di-mount (`app.ts:275,430-498`), **5** job (`cleanup`, `ktSnapshot`, `messageSweeper`, `pirSnapshot`, `systemSweeper`). |
 | 26 | P3 | `docs/04:116-121` | nilai keychain "wrapped" `ENC1:`; hanya legacy yang plaintext | `encryptValueAtRest` **menulis plaintext** bila masterSeed tidak tersedia atau enkripsi gagal (`keychainDb.ts:33-47`, hanya `console.warn`). Perilaku fail-open ini tidak didokumentasikan (D7). |
 | 27 | P3 | `docs/16:54,87,176`, `docs/21:50`, `docs/26:92,105,133,508`, `docs/29:218` | sealing per-device memakai `pq_box_seal`; `docs/21` juga mendaftar `worker_crypto_box_seal(_open)` dan `worker_pq_box_seal(_open)` | op klasik sudah dihapus; yang ada `pq_box_seal_v2` (X-Wing, magic `NYS2`, parameter kunci klasik diabaikan — `pqBoxSeal.ts:5-30`). Sudah diperbarui 2026-10-26. |
+| 28 | P2 | `docs/03:35` | "Message vault: XChaCha envelope derived from identity private key" | sama seperti #20: vault struktural memakai jalur at-rest `ENC1:`/`encrypt_session_key`-nya `masterSeed` (`shadowVaultDb.ts:14-16` → `localAtRest.ts` → `keychainDb.ts:33-47`), bukan envelope kanonik ber-kunci identitas. Sudah diperbaiki 2026-10-27. |
+| 29 | P2 | `docs/03:38`, `docs/05:22`, `docs/31:306` | push payload & kunci migrasi diseal `crypto_box_seal` | op itu sudah tidak ada: `store/message.ts:1155-1165` dan `MigrationSendPage.tsx:140-146` memakai `sealForDevice` → `pq_box_seal_v2` (X-Wing, magic `NYS2`); perangkat/QR tanpa kunci PQ ditolak, tidak ada fallback. Sudah diperbaiki 2026-10-27. |
+| 30 | P2 | `docs/35:116-118`, `:634`, `:702` | "`crypto_box_seal` hanya untuk QR lama / device tanpa `pqPublicKey`" (fallback v1 masih ada) | cutover PQ-only 2026-10-23 (dinyatakan di header dokumen yang sama) menghapus fallback itu; teks §35.2.2/§35.6 bertentangan dengan headernya sendiri. Sudah diberi anotasi cutover 2026-10-27. |
+| 31 | P3 | `docs/11:7-11` | server "48 files / 380 tests", web "72 files / 615 tests", sidecar "18 tests", total "120 files" | angka nyata per 2026-10-27 ada di tabel yang sama setelah diperbarui (lihat `audit/PROGRESS.md` §Sisa implementasi) — server 86 berkas / 677 test (675 pass + 2 skip), web 125 berkas / 1018 test, sidecar 2 target/25 test. Sudah diperbaiki 2026-10-27. |
+
+### Diperiksa tapi **bukan** drift
+
+- `marketing/src/locales/*/api-docs.json:41` menyebut `crypto_box_seal_open` — itu
+  nama fungsi **libsodium** di troubleshooting integrator Engine/Iframe, bukan op
+  worker NYX (`docs/21` katalog worker sudah bersih). Tidak diubah.
+- `CHANGELOG.md` menyebut `crypto_box_seal`/`x3dh_initiator` — entri rilis lama,
+  memang rekam jejak historis. Tidak diubah.
+- `docs/35` §35.2 "Inventaris classical-only" dan §35.2.1 tabel peta kripto
+  menyatakan dirinya sebagai baseline sebelum Fase 1; baris yang tidak lagi benar
+  hanya diberi anotasi cutover, tidak ditulis ulang.
 
 ## Drift yang **tidak** saya temukan (klaim yang ternyata benar)
 

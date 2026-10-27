@@ -303,7 +303,7 @@ kunci — itu keputusan pemanggil:
 
 | Jalur | Kunci | Butuh phrase di perangkat lama? |
 |---|---|---|
-| `migration:*` (transfer langsung) | acak 32 byte, diseal `crypto_box_seal` ke kunci publik penerima (QR) | tidak |
+| `migration:*` (transfer langsung) | acak 32 byte, diseal `pq_box_seal_v2` (X-Wing, magic `NYS2`) ke kunci publik penerima (QR); QR v1 tanpa `pqPubKey` ditolak | tidak |
 | berkas `.nyxbak` | `deriveBackupKey(recoveryPhrase, salt)` | ya (di perangkat pengganti saat restore) |
 
 **Wiring UI.** `MigrationSendPage` membangun arsip pada tahap prefetch (socket
