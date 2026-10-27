@@ -441,3 +441,54 @@ Berkas: `server/src/realtime/gateway.ts`,
   `burnerRooms`, `gatewayMultiTab`, `transportLatency`, `roomMembership`,
   `metrics`, `envExample`, `deployWorkflow`, `lintGate`) lulus.
 - `npx oxlint` pada semua berkas yang diubah: 0 warning/0 error.
+
+## Lanjutan 2026-10-27 — batas D2/D3/D4 + layar 426 di klien
+
+Dua tindak lanjut dari daftar saran (bukan temuan baru).
+
+### 1. D2/D3/D4 ditulis eksplisit di dokumen yang tepat
+
+- **D2 (Opaque Mailbox, tanpa cek keanggotaan)** → `docs/03` §3.7.1: siapa pun
+  yang terautentikasi dan tahu ID percakapan bisa membaca baris *pending*
+  (ciphertext + timestamp/ukuran + routing hint klien). Yang tetap dijaga
+  ditulis apa adanya (E2EE, padding 8 KB, jendela 14 hari, CUID tidak
+  dapat dienumerasi, receipt berupa tag), dan yang **tidak** diklaim
+  ("hanya anggota bisa fetch") dinyatakan terang-terangan. `docs/12` baris
+  `GET /api/messages/:conversationId` ikut diberi catatan.
+- **D3 (tag mailbox terlihat server)** → `docs/37` §37.3.2 + `docs/03` §3.7.1:
+  `tag = HMAC(memberToken, "nyx-mailbox-v1")` memungkinkan server mencocokkan
+  satu item dengan token yang sedang dipull — tidak bisa dibalik ke akun (token
+  mentah tidak disimpan, hanya SHA-256-nya) dan tidak membentuk graf
+  requester→fulfiller (tidak ada kolom pengirim). Sisa korelasi per-token
+  dicatat.
+- **D4 (credential presentation fail-closed)** → `docs/16` §16.5.1 + `docs/12`:
+  route tetap ter-mount untuk membekukan wire format, tetapi build ini tanpa
+  issuer/verifier (`CREDENTIAL_SUITE_ALLOWLIST` kosong = tolak semua), jadi 403
+  adalah keadaan yang benar — bukan langkah deployment yang terlewat. Klien
+  tidak boleh menggantungkan fitur grup padanya. `audit/02-findings.md` diberi
+  penanda "DITULIS" untuk ketiganya.
+
+### 2. 426 dirender sebagai layar penuh, bukan toast
+
+- `web/src/store/clientVersionGate.ts` (baru): state `rejection`
+  (`too-old` | `version-required`) + `dismissed`; `too-old` tidak pernah
+  diturunkan tingkat dan tidak bisa ditutup, `version-required` boleh ditutup
+  dan pengulangan jenis yang sama tidak membuka layar lagi.
+- `web/src/pages/ClientVersionRequiredPage.tsx` (baru, import statis): overlay
+  `role="alertdialog"` yang menyebut build yang dipakai + minimum dari server,
+  dengan tombol muat ulang; teks menjelaskan beda "semua request ditolak" vs
+  "hanya perubahan yang ditolak". Dipasang di `App.tsx` sebelum `ServerDownPage`
+  (jika keduanya aktif, layar server-down yang menang).
+- `web/src/lib/api.ts`: 426 tidak lagi memunculkan toast; body-nya diteruskan ke
+  store. Jalur `apiUpload` (XHR) ikut dipetakan — sebelumnya 426 di upload
+  tidak terlihat sama sekali.
+- i18n: 10 kunci baru di namespace `errors`, keempat bahasa (`en`, `es`, `id`,
+  `pt-BR`); `client_too_old` lama tetap ada (dipakai body lain/kompatibilitas).
+- `docs/10` §10.14 + `docs/21` (§21.1 `App.tsx`, §21.2 store) diperbarui.
+
+Test: `web/src/lib/__tests__/clientVersion.test.ts` (14) — 426 `CLIENT_TOO_OLD`
+dan `CLIENT_VERSION_REQUIRED` mengisi store, kode lain tidak, presedensi
+`too-old`, dismiss hanya untuk `version-required`, kunci i18n di 4 bahasa; plus
+`web/src/pages/__tests__/clientVersionRequiredPage.test.tsx` (5) — layar penuh,
+versi build/minimum tampil, tombol muat ulang, dismiss hanya di mode mutasi.
+`npx tsc -b --noEmit` (web) bersih, oxlint 0 error.
