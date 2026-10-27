@@ -182,18 +182,35 @@ export async function ppVerifyToken (conversationId: string, token: unknown): Pr
 export type PpRedeemResult = 'ok' | 'spent' | 'invalid'
 
 /**
+ * Bagian klien Redis yang dipakai redemption: **hanya** `SET` dengan opsi.
+ *
+ * Sengaja bukan `Pick<RedisClientType,'set'>`: tanda tangan node-redis punya
+ * banyak overload, sehingga pemanggil (dan fake Redis di test) harus memakai
+ * cast. Bentuk di bawah adalah satu-satunya overload yang benar — objek
+ * `{ EX, NX }` — dan itulah yang dipaksakan ke pemanggil.
+ */
+export interface PpRedeemRedis {
+  set (key: string, value: string, options: { EX: number; NX: true }): Promise<string | null>
+}
+
+/**
  * Redemption sekali pakai. Kunci double-spend = SHA-256(token) di Redis dengan
  * TTL = umur token — tidak menyimpan token mentah dan tidak menyebut percakapan
  * di key (agar tidak menjadi graf).
+ *
+ * [audit F-01] Sebelum ini argumen dikirim posisional (`'EX', ttl, 'NX'`),
+ * bentuk yang **diabaikan** node-redis 6: SET berjalan tanpa NX dan tanpa TTL,
+ * jadi token bisa di-replay selamanya dan key `pp:spent:*` tumbuh tanpa batas.
+ * Opsi harus berupa objek `{ EX, NX: true }`.
  */
 export async function ppRedeemToken (
-  redis: { set (key: string, value: string, mode: 'EX', ttl: number, nx: 'NX'): Promise<'OK' | null> },
+  redis: PpRedeemRedis,
   conversationId: string,
   token: string
 ): Promise<PpRedeemResult> {
   if (!await ppVerifyToken(conversationId, token)) return 'invalid'
 
   const spentKey = `pp:spent:${createHash('sha256').update(token).digest('hex')}`
-  const stored = await redis.set(spentKey, '1', 'EX', PP_TOKEN_TTL_SEC, 'NX')
+  const stored = await redis.set(spentKey, '1', { EX: PP_TOKEN_TTL_SEC, NX: true })
   return stored === 'OK' ? 'ok' : 'spent'
 }

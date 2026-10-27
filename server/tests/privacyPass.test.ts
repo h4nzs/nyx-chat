@@ -64,21 +64,39 @@ test('privacy pass: token yang diubah / bentuk rusak ditolak', async () => {
   assert.equal(decodePpToken(undefined), null);
 });
 
-test('privacy pass: redeem sekali pakai (double-spend ditolak)', async () => {
-  clearPpKeyCacheForTests();
-  const token = await issueToken('conv-alpha');
-  const spent = new Set<string>();
+/**
+ * Fake Redis yang **hanya** mengenal `SET key value { EX, NX }`.
+ *
+ * [audit F-01] Bentuk posisional (`'EX', ttl, 'NX'`) harus gagal di sini:
+ * itulah bentuk yang diabaikan node-redis 6 dan membuat token bisa di-replay
+ * tanpa TTL. Fake menolak argumen yang bukan objek opsi.
+ */
+function fakeRedis () {
+  const spent = new Map<string, number>();
   const redis = {
-    set: async (key: string) => {
+    async set (key: string, value: string, options?: { EX?: number; NX?: boolean }): Promise<'OK' | null> {
+      assert.equal(value, '1');
+      assert.ok(options && typeof options === 'object', 'SET wajib memakai objek opsi, bukan argumen posisional');
+      assert.equal(options.NX, true, 'NX wajib: tanpa itu token bisa di-replay');
+      assert.ok(typeof options.EX === 'number' && options.EX > 0, 'EX wajib: tanpa itu key pp:spent tumbuh tanpa batas');
       if (spent.has(key)) return null;
-      spent.add(key);
-      return 'OK' as const;
+      spent.set(key, options.EX);
+      return 'OK';
     },
   };
+  return { redis, spent };
+}
+
+test('privacy pass: redeem sekali pakai (double-spend ditolak, TTL diset)', async () => {
+  clearPpKeyCacheForTests();
+  const token = await issueToken('conv-alpha');
+  const { redis, spent } = fakeRedis();
 
   assert.equal(await ppRedeemToken(redis, 'conv-alpha', token), 'ok');
   assert.equal(await ppRedeemToken(redis, 'conv-alpha', token), 'spent');
   assert.equal(await ppRedeemToken(redis, 'conv-beta', token), 'invalid', 'binding gagal sebelum menyentuh Redis');
+  assert.equal(spent.size, 1, 'hanya token yang lolos binding yang menyentuh Redis');
+  assert.deepEqual([...spent.values()], [24 * 60 * 60], 'TTL = umur token');
 });
 
 test('privacy pass: blindSign menolak pesan ter-blind dengan panjang salah', async () => {
