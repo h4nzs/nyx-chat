@@ -84,6 +84,23 @@ locks the exact status codes, the message strings (`BLIND_AUTH_REQUIRED: …`,
 answering **403 (not 404)** for a missing conversation — do not "fix" it without a
 client contract change.
 
+**D4 — credential presentation is a closed door, not a feature (explicit).**
+`POST /:id/credential/present` is still mounted (body binary `NYXC…`, ≤8 KB) so
+the wire format is frozen before any client ships it, but this build has **no
+issuer and no verifier**: `CREDENTIAL_SUITE_ALLOWLIST` is empty by default and
+empty means *reject everything*, and `verifyCredentialPresentation` answers
+`no_verifier` for every suite. A well-formed presentation therefore always ends
+as **403 `CREDENTIAL_REJECTED`**; only a malformed body gets 400. Consequences
+that must not be "fixed" by guessing:
+
+- no client sends this request, and no client may gate group messaging,
+  key rotation, or membership on it — treating the route as a live capability
+  would lock every group behind a check that can never pass;
+- the 403 is fail-closed by design, not a missing deployment step: there is
+  nothing to enable in `.env` for this build;
+- re-opening it requires a PQ blind-signature suite that passes review
+  (`docs/37` §37.9.3) **and** a non-empty allowlist — both, not either.
+
 **Distribution:** the token is sealed pairwise (`pq_box_seal_v2`) to each member and relayed via `group:fulfilled_key` with the `adminToken: true` flag (realtime + offline sync branch in `message.ts` — processed as a capability, never as a chain key). Done at group creation, on MEMBER→ADMIN promotion, re-sealed to all other admins on every `rotateGroupKey`, and transferred to the successor admin when the owner leaves.
 - **UI gating:** rotate-key button (`amIAdmin`), "Delete Group" menu/swipe entry (`canDeleteGroup`), and the solo-leave dialog variant all check admin status locally; the server-side guard is the source of truth.
 - **Trade-off:** the server cannot distinguish between admins and a stolen token stays valid until the next rotation — mitigated by re-sealing on every membership change.

@@ -98,13 +98,13 @@ ada handler yang menulis/membaca `userId` (`docs/37` §37.3).
 | GET | `/pp/issuer` | `{suite, keyId, publicJwk}` — kunci verifikasi Privacy Pass |
 | POST | `/pp/issue` | `{groupToken, memberToken, blinded[]}` → `{signatures, suite, keyId}`; issuer menandatangani pesan ter-blind (tidak melihat isinya) |
 | POST | `/pp/redeem` | `{conversationId, tokens[]}` → `{accepted, spent, invalid}`; 403 bila tidak ada yang diterima |
-| POST | `/:id/credential/present` | Body biner (`application/octet-stream`); verifier fail-closed — build ini tanpa issuer, jadi selalu 403 |
+| POST | `/:id/credential/present` | Body biner `NYXC…` ≤8 KB; verifier fail-closed — build ini tanpa issuer/verifier (`CREDENTIAL_SUITE_ALLOWLIST` kosong = tolak semua), jadi selalu **403 `CREDENTIAL_REJECTED`** (400 hanya untuk body cacat). Bukan kapabilitas hidup; tidak ada klien yang memakainya (`docs/16` §16.5.1 D4) |
 
 ## messages — `/api/messages`
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/:conversationId?limit=250` | Pending store-and-forward messages (last 14 days) |
+| GET | `/:conversationId?limit=250` | Pending store-and-forward messages (last 14 days). Auth (`requireAuth`) but **no membership check** — knowing the ID is enough; Opaque Mailbox trade-off, see `docs/03` §3.7.1 (D2) |
 | POST | `/` | Send (blind relay): `{conversationId, content, sessionId?, tempId?, expiresIn?, isViewOnce?, targetRecipients? (≤500; ≤2 untuk GUEST)}`. Conversation tak dikenal → **404** (dulu 500) |
 | DELETE | `/:id` | Blind delete — header `X-Delete-Token` must match `deleteSecret` (constant-time); `?r2Key=` cleans the R2 blob |
 

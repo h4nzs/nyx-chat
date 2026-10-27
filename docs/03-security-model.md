@@ -69,8 +69,50 @@ Every device row stores `fingerprint` (browser signals, SHA-256) and `installati
 |---|---|
 | Biometric unlock stores the recovery phrase in localStorage under a WebAuthn-PRF-derived key | Convenience vs blast radius — accepted by maintainer |
 | `'wasm-unsafe-eval'` and `'unsafe-inline'` remain in CSP | Required for libsodium WASM and inline scripts; `'unsafe-eval'` was removed |
-| REST `GET /api/messages/:conversationId` has no membership check | Opaque Mailbox design — the server doesn't know participants; ciphertext-only risk accepted |
+| REST `GET /api/messages/:conversationId` has no membership check | Opaque Mailbox design — the server doesn't know participants; ciphertext-only risk accepted (§3.7.1 D2) |
+| Mailbox `tag` is visible to the server | Needed so a fulfiller can find its own envelope; server can match a presented token to an item, but not to an account (§3.7.1 D3) |
 | Sidecar caches JWT/device checks at session start | Per-message device validation happens in Node (redisBridge) instead |
+
+### 3.7.1 Explicit limits of the Opaque Mailbox (D2, D3)
+
+These are the two places where "the server cannot see the social graph" is
+deliberately weaker than the headline claim. They are **accepted trade-offs,
+not bugs** — treat any change here as a protocol decision, not a refactor.
+
+**D2 — reading pending messages requires authentication, not membership.**
+`GET /api/messages/:conversationId` (`server/src/routes/messages.ts:30,46`) runs
+`requireAuth` but has **no participant check**: the server holds no membership
+list it could consult without rebuilding the graph it is trying not to hold.
+Any authenticated caller who knows (or guesses) a conversation CUID can read that
+conversation's **pending** rows: ciphertext, timestamps, sizes, and whatever
+routing hints the client itself supplied.
+
+What still limits the exposure, and why the risk is accepted:
+
+- content is unreadable without end-device keys (E2EE), and every payload is
+  padded to 8 KB so size does not track message length;
+- only the store-and-forward window is readable (14 days, enforced on the
+  query and by the cleanup job — there is no unbounded history endpoint);
+- conversation IDs are CUIDs and no endpoint enumerates them, so "guessing"
+  requires the ID to leak from elsewhere;
+- receipts/status rows store conversation-scoped tags, not user IDs, so the
+  response does not reveal who is in the conversation.
+
+What is explicitly **not** claimed: "only members can fetch a conversation's
+messages". Enforcing that needs a membership proof at fetch time (e.g. a
+delivery/membership token, `docs/16` §16.5, `docs/37` §37.3) — a product
+decision, not a bug fix.
+
+**D3 — a mailbox `tag` links one item to one token, not to a person.**
+`GroupMailboxItem.tag = base64url(HMAC-SHA256(memberToken, "nyx-mailbox-v1"))`
+(`server/src/utils/groupMailbox.ts`). When a client pulls, the server can
+compute that HMAC from the presented token and see which items are addressed to
+it — for that pull. It cannot reverse a tag into a user (raw member tokens are
+never stored; only their SHA-256 sits in `UserHiddenConversation.tokenHash`), and
+it cannot build a requester→fulfiller graph because mailbox rows carry no sender
+column. Residual: one token used repeatedly lets the server group the items that
+single token read; there is no account link, and post/pull run `anonymous: true`
+(no cookie, CSRF, or installation ID). Details: `docs/37` §37.3.2.
 
 ## 3.8 Crypto code rules (frozen)
 

@@ -476,16 +476,27 @@ pertahanan berlapis, ketersediaan, dan drift yang membuat kontrol tampak ada.
   (trade-off `docs/03` §3.7, Opaque Mailbox) masih seperti yang didokumentasikan.
   Tidak saya laporkan sebagai bug; yang berubah: token grup sekarang tersimpan
   sebagai hash, sehingga dump DB tidak bisa dipakai membaca mailbox.
+  **[DITULIS 2026-10-27]** `docs/03` §3.7.1 (D2) menyatakan batasnya eksplisit:
+  siapa pun yang terautentikasi dan tahu ID bisa membaca baris *pending*;
+  yang tetap dijaga (E2EE, padding 8 KB, jendela 14 hari, CUID tak bisa
+  di-enumerasi, receipt berupa tag) dan yang **tidak** diklaim ditulis apa adanya.
 - **D3 — Tag mailbox `HMAC(memberToken)` terlihat server.** Server memegang
   hash token + tag; saat pull ia bisa menghitung tag untuk token yang
   dipresentasikan. Ini menghapus klaim "server tidak bisa mengaitkan item ke
   penerima" pada **satu** item yang sedang dipull, tetapi tidak membentuk graf
   requester→fulfiller. Dokumen `docs/37` §37.3.2 sudah menyatakan batas ini
   secara implisit; layak ditulis eksplisit.
+  **[DITULIS 2026-10-27]** `docs/37` §37.3.2 (D3) + `docs/03` §3.7.1: tag
+  menghubungkan satu item ke satu token pada saat pull; tidak bisa dibalik ke
+  akun dan tidak membentuk graf. Sisa korelasi per-token dicatat, bukan disembunyikan.
 - **D4 — `CREDENTIAL_SUITE_ALLOWLIST` kosong = fail-closed** dan tidak ada
   issuer di build ini. Positif (tidak ada klaim fitur hidup), tetapi berarti
   `POST /:id/credential/present` selalu 403 — pastikan tidak ada klien yang
   menganggapnya jalur hidup.
+  **[DITULIS 2026-10-27]** `docs/16` §16.5.1 (D4) + `docs/12`: route tetap
+  ter-mount untuk membekukan wire format, tetapi build ini tanpa issuer/verifier;
+  403 adalah fail-closed, bukan langkah deployment yang terlewat, dan klien tidak
+  boleh menggantungkan fitur grup padanya.
 - **D5 — Duplikasi konstruksi frame KICK** di dua cabang `main.rs:385-405` dan
   `:446-466`, padahal `AGENTS.md` meminta logika framing di `protocol.rs`.
   Bukan bug, tetapi persis kelas duplikasi yang fuzz target dibuat untuk dicegah.

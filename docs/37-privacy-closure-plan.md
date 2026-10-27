@@ -116,6 +116,20 @@ model GroupMailboxItem {
 - Pesan chat tetap lewat jalur normal (bukan mailbox): yang dihilangkan adalah
   **graf distribusi kunci**, sesuai klaim `docs/26` §26.4.
 
+**Batas yang eksplisit (D3).** `tag = base64url(HMAC-SHA256(memberToken,
+"nyx-mailbox-v1"))` (`server/src/utils/groupMailbox.ts`). Untuk **satu item yang
+sedang dipull**, server bisa menghitung tag dari token yang dipresentasikan dan
+melihat item mana yang ditujukan ke token itu — sifat ini yang membuat fulfiller
+tahu envelope mana miliknya tanpa server menyimpan alamat. Yang **tidak** bisa
+dilakukan: membalik tag menjadi identitas (token mentah tidak pernah disimpan;
+yang ada hanya SHA-256-nya di `UserHiddenConversation.tokenHash`), dan membentuk
+graf requester→fulfiller (baris mailbox tidak punya kolom pengirim). Sisa
+korelasi yang diterima: satu token yang dipakai berulang membuat server bisa
+mengelompokkan item yang dibaca token itu dalam satu grup — **tanpa** tautan ke
+akun, karena post/pull memakai `anonymous: true` (tanpa cookie, installation ID,
+atau CSRF). Ini batas yang disepakati, bukan klaim yang dilanggar; perubahan
+di sini adalah keputusan protokol (`docs/03` §3.7.1).
+
 ### 37.3.3 Anonymous sync
 
 `POST /api/groups/sync` (tanpa cookie, tanpa CSRF, tanpa `requireAuth`):
