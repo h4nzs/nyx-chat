@@ -67,9 +67,18 @@ export interface SyncResolution {
   unknown: number
   /** Conversation yang epoch/tokennya basi, untuk log/metrik agregat. */
   stale: number
+  /** True = klien mengirim lebih dari `MAX_SYNC_TOKENS`; sisanya TIDAK diproses. */
+  truncated: boolean
 }
 
-export const MAX_SYNC_TOKENS = 500
+/**
+ * [audit F-10] Batas dokumen `docs/37` §37.3.3 (≤200 item). Dulu 500: satu
+ * request anonim tanpa sesi bisa memaksa 500 lookup hash + metadata grup, dan
+ * responsnya bisa melewati 256 KB yang dijanjikan dokumen. Endpoint yang sama
+ * juga bisa dipanggil lewat OHTTP dengan body 64 KB, jadi batas ini yang
+ * menjaga biaya per request tetap terukur.
+ */
+export const MAX_SYNC_TOKENS = 200
 
 /**
  * Petakan token mentah ke percakapan yang masih sah.
@@ -87,7 +96,12 @@ export async function resolveSyncMemberships (
   now: Date = new Date()
 ): Promise<SyncResolution> {
   const submitted = tokens.slice(0, MAX_SYNC_TOKENS)
-  if (submitted.length === 0) return { memberships: [], conversations: [], unknown: 0, stale: 0 }
+  // Pemotongan dilaporkan, bukan disembunyikan: klien yang mengirim 500 token
+  // hanya mendapat jawaban untuk 200 pertama dan harus tahu itu.
+  const truncated = tokens.length > submitted.length
+  if (submitted.length === 0) {
+    return { memberships: [], conversations: [], unknown: 0, stale: 0, truncated }
+  }
 
   // `index` harus menunjuk array token ASLI yang dikirim klien (dipakai untuk
   // refresh), bukan array hasil dedup — token duplikat sebelum token lain bisa
@@ -158,5 +172,6 @@ export async function resolveSyncMemberships (
     conversations: conversations.filter((conversation) => readableConversationIds.has(conversation.id)),
     unknown: hashToIndexes.size - knownHashes.size,
     stale,
+    truncated,
   }
 }

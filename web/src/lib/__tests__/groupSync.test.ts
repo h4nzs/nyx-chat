@@ -121,4 +121,50 @@ describe('syncGroupMemberships', () => {
     expect(init?.credentials).toBe('omit');
     expect(JSON.parse(init?.body as string)).toEqual({ token: 'TOK-1' });
   });
+
+  it('memecah >200 token jadi batch dan menggeser indeks membership', async () => {
+    const tokens = Array.from({ length: 201 }, (_, i) => `TOK-${i}`);
+    const bodies: string[][] = [];
+    fetchMock.mockImplementation(async (_url, init) => {
+      const body = JSON.parse(init?.body as string) as { tokens: string[] };
+      bodies.push(body.tokens);
+      return jsonResponse({
+        conversations: [{ id: `conv-${body.tokens[0]}` }],
+        memberships: body.tokens.map((_, index) => ({
+          index,
+          status: 'ok',
+          conversationId: `conv-${body.tokens[index]}`,
+          epoch: 0,
+          expiresAt: '2026-11-01T00:00:00Z',
+        })),
+      });
+    });
+
+    const result = await syncGroupMemberships(tokens);
+
+    expect(bodies.map((batch) => batch.length)).toEqual([200, 1]);
+    expect(result.conversations).toHaveLength(2);
+    expect(result.memberships[200]?.index).toBe(200);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('mengembalikan batch yang berhasil bila batch berikutnya gagal', async () => {
+    const tokens = Array.from({ length: 201 }, (_, i) => `TOK-${i}`);
+    fetchMock
+      .mockImplementationOnce(async (_url, init) => {
+        const body = JSON.parse(init?.body as string) as { tokens: string[] };
+        return jsonResponse({
+          conversations: [{ id: 'conv-first' }],
+          memberships: [{ index: 0, status: 'ok', conversationId: 'conv-first', epoch: 0, expiresAt: '2026-11-01T00:00:00Z' }],
+          tokens: body.tokens.length,
+        });
+      })
+      .mockRejectedValueOnce(new Error('PP_PROOF_REQUIRED'));
+
+    const result = await syncGroupMemberships(tokens);
+
+    expect(result.conversations.map((conversation) => conversation.id)).toEqual(['conv-first']);
+    expect(result.memberships).toHaveLength(1);
+    expect(result.truncated).toBe(true);
+  });
 });

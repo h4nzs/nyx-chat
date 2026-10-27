@@ -188,6 +188,17 @@ test('sync: batas token per request', async () => {
     conversation: { findMany: async () => [] },
   };
 
-  await resolveSyncMemberships(db, tokens, now);
+  const result = await resolveSyncMemberships(db, tokens, now);
   assert.ok(queried <= MAX_SYNC_TOKENS, `hash di-cap ${MAX_SYNC_TOKENS}, dapat ${queried}`);
+  assert.equal(MAX_SYNC_TOKENS, 200, 'batas = dokumen docs/37 §37.3.3');
+  assert.equal(result.truncated, true, 'pemotongan dilaporkan ke klien');
+});
+
+test('sync: di bawah batas tidak ditandai terpotong', async () => {
+  const db: SyncDb = {
+    userHiddenConversation: { findMany: async () => [] },
+    conversation: { findMany: async () => [] },
+  };
+  const result = await resolveSyncMemberships(db, [TOKEN_A], now);
+  assert.equal(result.truncated, false);
 });

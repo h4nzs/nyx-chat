@@ -160,8 +160,7 @@ router.post('/sync', zodValidate({ body: syncBodySchema }), async (req, res, nex
         // mengunci discovery dengan `PP_SYNC_REQUIRED=1`.
         conversationIds: resolution.memberships.map((membership) => membership.conversationId),
         required: requiredProof,
-        redeem: (conversationId, proof) =>
-          ppRedeemToken(redisClient as unknown as Parameters<typeof ppRedeemToken>[0], conversationId, proof),
+        redeem: (conversationId, proof) => ppRedeemToken(redisClient, conversationId, proof),
       })
       incCounter(PRIVACY_PASS, {
         route: 'sync',
@@ -186,6 +185,9 @@ router.post('/sync', zodValidate({ body: syncBodySchema }), async (req, res, nex
         expiresAt: membership.expiresAt.toISOString(),
       })),
       unknown: resolution.unknown,
+      // [audit F-10] Klien harus tahu bila tokennya dipotong `MAX_SYNC_TOKENS`,
+      // bukan menganggap semua grup yang dikirim sudah disinkronkan.
+      truncated: resolution.truncated,
     })
   } catch (error) {
     next(error)
@@ -293,11 +295,7 @@ router.post('/pp/redeem', zodValidate({ body: ppRedeemBodySchema }), async (req,
     let invalid = 0
 
     for (const token of tokens) {
-      const result = await ppRedeemToken(
-        redisClient as unknown as Parameters<typeof ppRedeemToken>[0],
-        conversationId,
-        token
-      )
+      const result = await ppRedeemToken(redisClient, conversationId, token)
       if (result === 'ok') accepted += 1
       else if (result === 'spent') spent += 1
       else invalid += 1

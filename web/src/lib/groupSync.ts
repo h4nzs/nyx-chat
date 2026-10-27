@@ -35,6 +35,28 @@ export interface GroupSyncResponse {
   memberships: GroupSyncMembership[];
   /** Jumlah token yang tidak dikenali server (bukan daftar token). */
   unknown?: number;
+  /** Server hanya memproses 200 token pertama (`MAX_SYNC_TOKENS`). */
+  truncated?: boolean;
+}
+
+/**
+ * [audit F-10] Batas server per request (`server/src/utils/groupSync.ts`).
+ * Klien memecah token menjadi batch sebesar ini; jangan kirim semuanya lalu
+ * berharap server memproses sisanya.
+ */
+export const MAX_SYNC_TOKENS = 200;
+
+/**
+ * Batch pertama yang dicoba pada sync berikutnya. Bila satu batch gagal (mis.
+ * bukti Privacy Pass habis), batch itu didahulukan agar grup di luar 200
+ * pertama tidak kelaparan selamanya.
+ */
+let nextBatchCursor = 0;
+
+function warnIfTruncated (response: GroupSyncResponse): void {
+  if (response.truncated) {
+    console.warn('[GroupSync] Sebagian token belum tersinkron; batch yang gagal didahulukan pada sync berikutnya.');
+  }
 }
 
 export interface GroupSyncOptions {
@@ -89,11 +111,10 @@ async function refreshDueMemberships (tokens: string[], memberships: GroupSyncMe
   }));
 }
 
-export async function syncGroupMemberships (
+async function syncBatch (
   tokens: string[],
-  options: GroupSyncOptions = {},
+  conversationId?: string,
 ): Promise<GroupSyncResponse> {
-  const { conversationId } = options;
   const proof = conversationId
     ? await takePrivacyPassProof(conversationId).catch((error) => {
         console.warn('[PP] Bukti Privacy Pass tidak tersedia:', error);
@@ -115,6 +136,7 @@ export async function syncGroupMemberships (
       if (result.status >= 200 && result.status < 300) {
         if (conversationId) await consumePrivacyPassProof(conversationId, proof);
         const parsed = parseSyncBody(result.body);
+        warnIfTruncated(parsed);
         await refreshDueMemberships(tokens, parsed.memberships ?? []);
         return parsed;
       }
@@ -132,7 +154,52 @@ export async function syncGroupMemberships (
   }
 
   const response = await anonymousPost<GroupSyncResponse>('/api/groups/sync', body);
+  warnIfTruncated(response);
   if (conversationId) await consumePrivacyPassProof(conversationId, proof);
   await refreshDueMemberships(tokens, response.memberships ?? []);
   return response;
+}
+
+export async function syncGroupMemberships (
+  tokens: string[],
+  options: GroupSyncOptions = {},
+): Promise<GroupSyncResponse> {
+  if (tokens.length <= MAX_SYNC_TOKENS) return syncBatch(tokens, options.conversationId);
+
+  const totalBatches = Math.ceil(tokens.length / MAX_SYNC_TOKENS);
+  const merged: GroupSyncResponse = { conversations: [], memberships: [], unknown: 0, truncated: false };
+  const seenConversations = new Set<string>();
+  let processed = 0;
+  let lastError: unknown = null;
+
+  for (let step = 0; step < totalBatches; step += 1) {
+    const batchIndex = (nextBatchCursor + step) % totalBatches;
+    const offset = batchIndex * MAX_SYNC_TOKENS;
+    const batch = tokens.slice(offset, offset + MAX_SYNC_TOKENS);
+    try {
+      const response = await syncBatch(batch, options.conversationId);
+      for (const conversation of response.conversations ?? []) {
+        if (seenConversations.has(conversation.id)) continue;
+        seenConversations.add(conversation.id);
+        merged.conversations.push(conversation);
+      }
+      for (const membership of response.memberships ?? []) {
+        merged.memberships.push({ ...membership, index: membership.index + offset });
+      }
+      merged.unknown = (merged.unknown ?? 0) + (response.unknown ?? 0);
+      processed += 1;
+    } catch (error) {
+      nextBatchCursor = batchIndex;
+      merged.truncated = true;
+      lastError = error;
+      console.warn(`[GroupSync] Batch ${batchIndex + 1}/${totalBatches} gagal:`, error);
+      break;
+    }
+  }
+
+  if (processed === totalBatches) nextBatchCursor = 0;
+  else if (processed === 0) throw lastError ?? new Error('Group sync gagal');
+  else warnIfTruncated(merged);
+  merged.memberships.sort((a, b) => a.index - b.index);
+  return merged;
 }
