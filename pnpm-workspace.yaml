@@ -4,13 +4,60 @@ packages:
   - marketing
   - packages/*
 
-# [SECURITY] Dependabot #229/#230/#233: mysql2 & deepmerge-ts dibawa oleh
-# Prisma CLI (dev-only toolchain; runtime NYX pakai Postgres via `postgres`).
-# Pin ke versi yang sudah menambal decompression-bomb DoS (mysql2),
-# auth-downgrade (mysql2), dan stack exhaustion (deepmerge-ts).
+# [SECURITY] Pin dependensi transitif HANYA lewat `overrides:`.
+#
+# [audit F-08] Sebelum ini 31 pin keamanan hidup di `resolutions` (`package.json`
+# root) — **pnpm 11 mengabaikan kunci itu**, jadi tidak ada satu pun yang benar-
+# benar berlaku: rasa aman tanpa efek. `resolutions` sudah dihapus; jangan
+# dihidupkan lagi (`scripts/check-overrides.mjs` menolaknya di CI, job `audit`).
+#
+# Aturan pemakaian:
+#   - kunci `pkg` = semua versi paket itu; `pkg@range` = hanya bila versi yang
+#     terpasang cocok range (dipakai saat dua major perlu pin berbeda);
+#   - nilai harus versi/range yang benar-benar ada di lockfile — buktinya
+#     `pnpm install` mengubah `pnpm-lock.yaml` (pin yang tidak berlaku = tidak
+#     mengubah apa pun).
 overrides:
+  # --- keamanan produksi (audit F-03, 2026-10-26) ---
+  #   zod        <4.6.6  memory exhaustion pada koleksi berkonstrain (astro, shared)
+  #   body-parser<2.4.0  DoS byte sisa setelah body terkompresi (express)
+  #   undici     <8.12.2 DoS content-encoding berlebihan (link-preview-js, unifont)
+  #   fast-uri   <3.1.9  host confusion / path equivalence (ajv via prisma dev);
+  #                      dijaga <4 karena ajv 8 memakai API major 3
+  #   ip-address <=10.7.3 SSRF/parse bypass (express-rate-limit)
+  zod: '>=4.6.6'
+  body-parser: '>=2.4.0'
+  undici: '>=8.12.2'
+  fast-uri: '>=3.1.9 <4'
+  ip-address: '>=10.7.4'
+
+  # --- pin transitif yang sebelumnya inert di `resolutions` (F-08) ---
+  # Dependabot #229/#230/#233: mysql2 & deepmerge-ts dibawa Prisma CLI
+  # (dev-only toolchain; runtime NYX pakai Postgres via `postgres`).
   mysql2: '>=3.23.1'
   deepmerge-ts: '>=8.0.0'
+  minimatch: '>=10.2.3'
+  serialize-javascript: '>=7.0.3'
+  bn.js: '>=5.2.3'
+  qs: '>=6.14.2'
+  ws: '>=8.20.1'
+  'socket.io-parser': '^4.2.6'
+  picomatch: '>=4.0.4'
+  effect: '>=3.20.0'
+  path-to-regexp: '^8.4.0'
+  defu: '>=6.1.5'
+  lodash: '>=4.18.1'
+  brace-expansion: '^2.0.3'
+  esbuild: '>=0.28.1'
+  '@types/react': '>=19.2.15'
+  '@types/react-dom': '>=19.2.3'
+  # Pin yang SENGAJA tidak dipindahkan dari `resolutions` lama karena paketnya
+  # tidak ada lagi di pohon dependensi (pin semacam itu hanya klaim kosong):
+  # basic-ftp, fast-xml-parser, tar, hono, @hono/node-server,
+  # @opentelemetry/core, flatted, lodash-es, axios, follow-redirects, dan dua
+  # entri `rollup@^2.0.0`/`rollup@^4.0.0` (tidak ada rollup v2 terpasang; entri
+  # itu hanya memunculkan peer warning palsu). Tambahkan kembali sebagai
+  # `overrides:` bila paketnya benar-benar masuk pohon.
 
 allowBuilds:
   '@parcel/watcher': true
@@ -20,7 +67,11 @@ allowBuilds:
   argon2: true
   esbuild: true
   prisma: true
-  puppeteer: set this to true or false
+  # [audit F-08] Nilai placeholder ("set this to true or false") diganti boolean.
+  # Puppeteer hanya dipakai untuk screenshot dokumen di dev; unduhannya selalu
+  # dilewati (`PUPPETEER_SKIP_DOWNLOAD=true` di CI & deploy), jadi build script-nya
+  # tidak dibutuhkan.
+  puppeteer: false
   sharp: true
   unrs-resolver: true
 

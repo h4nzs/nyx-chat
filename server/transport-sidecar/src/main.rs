@@ -25,8 +25,8 @@ use bytes::{BufMut, BytesMut};
 // nyata (`cargo test`, `cargo run --release --bin fuzz-framing`). Kontrak
 // numeriknya tetap sinkron dengan `packages/shared/src/transport.ts`.
 use transport_sidecar::protocol::{
-    classify_inbound, hello_reply_frame, hello_reply_payload, parse_inbound_frame,
-    parse_transport_hello, InboundFrame, InboundHeader, ACK_OPCODE, HANDSHAKE_OPCODE,
+    classify_inbound, hello_reply_frame, hello_reply_payload, kick_frame, parse_inbound_frame,
+    parse_transport_hello, InboundFrame, InboundHeader, ACK_OPCODE, HANDSHAKE_OPCODE, KICK_OPCODE,
     MAX_BIDI_PAYLOAD_BYTES,
 };
 
@@ -104,69 +104,6 @@ struct DownstreamMessage {
 }
 
 type SessionMap = Arc<DashMap<String, Arc<Connection>>>; // Key: "user_id:device_id"
-
-#[cfg(test)]
-mod cert_tests {
-    use super::{local_cert_is_usable, LOCAL_CERT_VALIDITY_DAYS};
-
-    /// Bangun sertifikat self-signed dengan offset validitas relatif ke sekarang.
-    fn cert_with_offsets(not_before: time::Duration, not_after: time::Duration) -> Vec<u8> {
-        let mut params =
-            rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
-                .expect("params");
-        let now = time::OffsetDateTime::now_utc();
-        params.not_before = now + not_before;
-        params.not_after = now + not_after;
-        let key_pair = rcgen::KeyPair::generate().expect("keypair");
-        params.self_signed(&key_pair).expect("cert").der().to_vec()
-    }
-
-    #[test]
-    fn fresh_local_cert_is_reused() {
-        let cert = cert_with_offsets(
-            -time::Duration::days(1),
-            time::Duration::days(LOCAL_CERT_VALIDITY_DAYS),
-        );
-        assert!(local_cert_is_usable(&cert).is_ok());
-    }
-
-    #[test]
-    fn expired_cert_is_rotated() {
-        // Sertifikat warisan dari disk: kedaluwarsa beberapa hari lalu.
-        let cert = cert_with_offsets(-time::Duration::days(30), -time::Duration::days(20));
-        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
-        assert!(err.contains("kedaluwarsa"), "alasan: {err}");
-    }
-
-    #[test]
-    fn cert_near_expiry_is_rotated() {
-        // Masih valid, tetapi sisa < margin rotasi (1 hari).
-        let cert = cert_with_offsets(-time::Duration::days(10), time::Duration::hours(5));
-        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
-        assert!(err.contains("margin rotasi"), "alasan: {err}");
-    }
-
-    #[test]
-    fn cert_with_span_over_webtransport_limit_is_rotated() {
-        // Rentang 30 hari > batas keras Chrome (14 hari).
-        let cert = cert_with_offsets(-time::Duration::days(1), time::Duration::days(29));
-        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
-        assert!(err.contains("batas WebTransport"), "alasan: {err}");
-    }
-
-    #[test]
-    fn not_yet_valid_cert_is_rotated() {
-        let cert = cert_with_offsets(time::Duration::days(2), time::Duration::days(9));
-        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
-        assert!(err.contains("notBefore"), "alasan: {err}");
-    }
-
-    #[test]
-    fn garbage_bytes_are_rotated_not_fatal() {
-        let err = local_cert_is_usable(b"not a certificate").expect_err("harus ditolak");
-        assert!(err.contains("tidak bisa di-parse"), "alasan: {err}");
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -382,23 +319,18 @@ async fn main() -> Result<()> {
                         let op_code = down_msg.op_code;
                         let payload_clone = payload_bytes.clone();
 
-                        if op_code == 0x07 { // KICK
-                            // [PARITY 2026-10-18] Frame KICK dikirim DULU, baru koneksi
-                            // ditutup. Sebelumnya hanya `close("Kicked by server")` yang
-                            // dikirim: klien tidak pernah menerima alasan terstruktur
-                            // (deviceId/reason), jadi alur force_logout — yang di jalur
-                            // WSS membuat perangkat yang di-revoke langsung logout —
-                            // tidak pernah jalan di jalur WT. Penulisan stream
-                            // diselesaikan sebelum close supaya frame tidak ter-reset.
+                        if op_code == KICK_OPCODE {
+                            // [PARITY 2026-10-18 / audit D5] Bentuk frame hidup di
+                            // `protocol::kick_frame` (satu tempat, teruji). Frame dikirim
+                            // DULU, baru koneksi ditutup: klien butuh alasan terstruktur
+                            // (deviceId/reason) supaya force_logout jalan; penulisan
+                            // diselesaikan sebelum close agar frame tidak ter-reset.
                             let conn_kick = conn.clone();
                             let payload_kick = payload_clone.clone();
                             tokio::spawn(async move {
+                                let frame = kick_frame(&payload_kick);
                                 if let Ok(opening) = conn_kick.open_uni().await {
                                     if let Ok(mut stream) = opening.await {
-                                        let mut frame = BytesMut::with_capacity(5 + payload_kick.len());
-                                        frame.put_u8(0x07);
-                                        frame.put_u32(payload_kick.len() as u32);
-                                        frame.put_slice(&payload_kick);
                                         let _ = stream.write_all(&frame).await;
                                         let _ = stream.finish().await;
                                     }
@@ -419,7 +351,7 @@ async fn main() -> Result<()> {
                                 let _ = conn.send_datagram(frame.freeze());
                             } else {
                                 if let Ok(opening) = conn.open_uni().await {
-                                    let _ = tokio::spawn(async move {
+                                    tokio::spawn(async move {
                                         if let Ok(mut stream) = opening.await {
                                             let _ = stream.write_all(&frame).await;
                                             let _ = stream.finish().await;
@@ -443,23 +375,18 @@ async fn main() -> Result<()> {
                         let op_code = down_msg.op_code;
                         let payload_clone = payload_bytes.clone();
                         
-                        if op_code == 0x07 { // KICK
-                            // [PARITY 2026-10-18] Frame KICK dikirim DULU, baru koneksi
-                            // ditutup. Sebelumnya hanya `close("Kicked by server")` yang
-                            // dikirim: klien tidak pernah menerima alasan terstruktur
-                            // (deviceId/reason), jadi alur force_logout — yang di jalur
-                            // WSS membuat perangkat yang di-revoke langsung logout —
-                            // tidak pernah jalan di jalur WT. Penulisan stream
-                            // diselesaikan sebelum close supaya frame tidak ter-reset.
+                        if op_code == KICK_OPCODE {
+                            // [PARITY 2026-10-18 / audit D5] Bentuk frame hidup di
+                            // `protocol::kick_frame` (satu tempat, teruji). Frame dikirim
+                            // DULU, baru koneksi ditutup: klien butuh alasan terstruktur
+                            // (deviceId/reason) supaya force_logout jalan; penulisan
+                            // diselesaikan sebelum close agar frame tidak ter-reset.
                             let conn_kick = conn.clone();
                             let payload_kick = payload_clone.clone();
                             tokio::spawn(async move {
+                                let frame = kick_frame(&payload_kick);
                                 if let Ok(opening) = conn_kick.open_uni().await {
                                     if let Ok(mut stream) = opening.await {
-                                        let mut frame = BytesMut::with_capacity(5 + payload_kick.len());
-                                        frame.put_u8(0x07);
-                                        frame.put_u32(payload_kick.len() as u32);
-                                        frame.put_slice(&payload_kick);
                                         let _ = stream.write_all(&frame).await;
                                         let _ = stream.finish().await;
                                     }
@@ -480,7 +407,7 @@ async fn main() -> Result<()> {
                                 let _ = conn.send_datagram(frame.freeze());
                             } else {
                                 if let Ok(opening) = conn.open_uni().await {
-                                    let _ = tokio::spawn(async move {
+                                    tokio::spawn(async move {
                                         if let Ok(mut stream) = opening.await {
                                             let _ = stream.write_all(&frame).await;
                                             let _ = stream.finish().await;
@@ -674,117 +601,112 @@ async fn handle_connection(
     let p_bi = pub_conn.clone();
     let metrics_bi = metrics.clone();
     tokio::spawn(async move {
-        loop {
-            match c_bi.accept_bi().await {
-                Ok((mut send, mut recv)) => {
-                    let mut p = p_bi.clone();
-                    let uid = user_id_bi.clone();
-                    let did = device_id_bi.clone();
-                    let metrics_stream = metrics_bi.clone();
-                    tokio::spawn(async move {
-                        let mut header = [0u8; 5];
-                        let mut head_read = 0;
-                        while head_read < 5 {
-                            match recv.read(&mut header[head_read..]).await {
-                                Ok(Some(n)) if n > 0 => head_read += n,
-                                _ => return, // Stream closed or error
-                            }
-                        }
-
-                        let op_code = header[0];
-                        let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
-
-                        // [docs/30 WS-G(5)] Keputusan dipakai bersama jalur
-                        // uni/datagram: CHAFF dibuang, > 32 KB ditolak, HELLO
-                        // dikenali — semuanya lewat `protocol::classify_inbound`.
-                        let header_kind = classify_inbound(op_code, length, MAX_BIDI_PAYLOAD_BYTES);
-                        match header_kind {
-                            // CHAFF = padding penyamaran trafik (8 KB per ping).
-                            // Selalu dibuang; hitungannya sendiri berguna: turun ke 0
-                            // di tengah koneksi aktif berarti cover traffic klien mati.
-                            InboundHeader::Chaff => {
-                                metrics_stream.rejected(RejectReason::Chaff);
-                                return;
-                            }
-                            InboundHeader::TooLarge => {
-                                metrics_stream.rejected(RejectReason::TooLarge);
-                                warn!("Payload too large: {} bytes", length);
-                                return;
-                            }
-                            InboundHeader::Hello | InboundHeader::Message => {}
-                        }
-
-                        let mut payload = vec![0u8; length];
-                        let mut read = 0;
-                        while read < length {
-                            match recv.read(&mut payload[read..]).await {
-                                Ok(Some(n)) if n > 0 => read += n,
-                                _ => break,
-                            }
-                        }
-
-                        if read == length {
-                            // Mulai stopwatch ingress: frame utuh sudah diterima.
-                            // Yang diukur adalah pekerjaan sidecar (parse murni →
-                            // publish Redis), bukan waktu tunggu klien — jadi
-                            // timer dimulai SETELAH pembacaan selesai.
-                            let ingress_started = std::time::Instant::now();
-
-                            // [docs/29 §5.6] Negosiasi kapabilitas: transport-local,
-                            // TIDAK diteruskan ke Redis/Node. Balas dengan versi
-                            // server + irisan kapabilitas.
-                            if header_kind == InboundHeader::Hello {
-                                match parse_transport_hello(&payload) {
-                                    Some(hello) => {
-                                        let reply = hello_reply_payload(&hello.caps);
-                                        let _ = send.write_all(&hello_reply_frame(&reply)).await;
-                                        info!(
-                                            "HELLO dari user {} (v{}, {} cap) → dijawab {} cap",
-                                            uid,
-                                            hello.v,
-                                            hello.caps.len(),
-                                            parse_transport_hello(&reply).map(|r| r.caps.len()).unwrap_or(0)
-                                        );
-                                    }
-                                    None => {
-                                        warn!("HELLO tidak sah dari user {} — diabaikan (legacy)", uid);
-                                    }
-                                }
-                                return;
-                            }
-
-                            let b64_payload = data_encoding::BASE64URL_NOPAD.encode(&payload);
-                            let msg = UpstreamMessage {
-                                user_id: uid,
-                                device_id: did,
-                                op_code,
-                                payload: b64_payload,
-                            };
-                            
-                            if let Ok(json) = serde_json::to_string(&msg) {
-                                let channel = format!("nyx:upstream:{}", op_code);
-                                let published: Result<(), _> = p.publish(channel, json).await;
-                                // Dihitung hanya bila Redis BENAR-BENAR menerima: garis
-                                // datar di dashboard karena itu berarti Redis/bridge
-                                // bermasalah, bukan "tidak ada trafik".
-                                if published.is_ok() {
-                                    metrics_stream.relay_published(MetricsPath::Bidi);
-                                    metrics_stream.add_bytes(Direction::In, payload.len() as u64);
-                                    metrics_stream
-                                        .ingress_seconds(ingress_started.elapsed().as_secs_f64());
-                                }
-
-                                // For HANDSHAKE, send back immediate ACK to client
-                                if op_code == HANDSHAKE_OPCODE {
-                                    let ack_frame = [ACK_OPCODE, 0, 0, 0, 0]; // ACK OpCode + 0 length
-                                    let _ = send.write_all(&ack_frame).await;
-                                }
-                            }
-                        }
-                    });
+        while let Ok((mut send, mut recv)) = c_bi.accept_bi().await {
+            let mut p = p_bi.clone();
+            let uid = user_id_bi.clone();
+            let did = device_id_bi.clone();
+            let metrics_stream = metrics_bi.clone();
+            tokio::spawn(async move {
+                let mut header = [0u8; 5];
+                let mut head_read = 0;
+                while head_read < 5 {
+                    match recv.read(&mut header[head_read..]).await {
+                        Ok(Some(n)) if n > 0 => head_read += n,
+                        _ => return, // Stream closed or error
+                    }
                 }
-                Err(_) => break,
-            }
+
+                let op_code = header[0];
+                let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+
+                // [docs/30 WS-G(5)] Keputusan dipakai bersama jalur
+                // uni/datagram: CHAFF dibuang, > 32 KB ditolak, HELLO
+                // dikenali — semuanya lewat `protocol::classify_inbound`.
+                let header_kind = classify_inbound(op_code, length, MAX_BIDI_PAYLOAD_BYTES);
+                match header_kind {
+                    // CHAFF = padding penyamaran trafik (8 KB per ping).
+                    // Selalu dibuang; hitungannya sendiri berguna: turun ke 0
+                    // di tengah koneksi aktif berarti cover traffic klien mati.
+                    InboundHeader::Chaff => {
+                        metrics_stream.rejected(RejectReason::Chaff);
+                        return;
+                    }
+                    InboundHeader::TooLarge => {
+                        metrics_stream.rejected(RejectReason::TooLarge);
+                        warn!("Payload too large: {} bytes", length);
+                        return;
+                    }
+                    InboundHeader::Hello | InboundHeader::Message => {}
+                }
+
+                let mut payload = vec![0u8; length];
+                let mut read = 0;
+                while read < length {
+                    match recv.read(&mut payload[read..]).await {
+                        Ok(Some(n)) if n > 0 => read += n,
+                        _ => break,
+                    }
+                }
+
+                if read == length {
+                    // Mulai stopwatch ingress: frame utuh sudah diterima.
+                    // Yang diukur adalah pekerjaan sidecar (parse murni →
+                    // publish Redis), bukan waktu tunggu klien — jadi
+                    // timer dimulai SETELAH pembacaan selesai.
+                    let ingress_started = std::time::Instant::now();
+
+                    // [docs/29 §5.6] Negosiasi kapabilitas: transport-local,
+                    // TIDAK diteruskan ke Redis/Node. Balas dengan versi
+                    // server + irisan kapabilitas.
+                    if header_kind == InboundHeader::Hello {
+                        match parse_transport_hello(&payload) {
+                            Some(hello) => {
+                                let reply = hello_reply_payload(&hello.caps);
+                                let _ = send.write_all(&hello_reply_frame(&reply)).await;
+                                info!(
+                                    "HELLO dari user {} (v{}, {} cap) → dijawab {} cap",
+                                    uid,
+                                    hello.v,
+                                    hello.caps.len(),
+                                    parse_transport_hello(&reply).map(|r| r.caps.len()).unwrap_or(0)
+                                );
+                            }
+                            None => {
+                                warn!("HELLO tidak sah dari user {} — diabaikan (legacy)", uid);
+                            }
+                        }
+                        return;
+                    }
+
+                    let b64_payload = data_encoding::BASE64URL_NOPAD.encode(&payload);
+                    let msg = UpstreamMessage {
+                        user_id: uid,
+                        device_id: did,
+                        op_code,
+                        payload: b64_payload,
+                    };
+
+                    if let Ok(json) = serde_json::to_string(&msg) {
+                        let channel = format!("nyx:upstream:{}", op_code);
+                        let published: Result<(), _> = p.publish(channel, json).await;
+                        // Dihitung hanya bila Redis BENAR-BENAR menerima: garis
+                        // datar di dashboard karena itu berarti Redis/bridge
+                        // bermasalah, bukan "tidak ada trafik".
+                        if published.is_ok() {
+                            metrics_stream.relay_published(MetricsPath::Bidi);
+                            metrics_stream.add_bytes(Direction::In, payload.len() as u64);
+                            metrics_stream
+                                .ingress_seconds(ingress_started.elapsed().as_secs_f64());
+                        }
+
+                        // For HANDSHAKE, send back immediate ACK to client
+                        if op_code == HANDSHAKE_OPCODE {
+                            let ack_frame = [ACK_OPCODE, 0, 0, 0, 0]; // ACK OpCode + 0 length
+                            let _ = send.write_all(&ack_frame).await;
+                        }
+                    }
+                }
+            });
         }
     });
 
@@ -795,67 +717,62 @@ async fn handle_connection(
     let p2 = pub_conn.clone();
     let metrics_uni = metrics.clone();
     tokio::spawn(async move {
-        loop {
-            match c2.accept_uni().await {
-                Ok(mut stream) => {
-                    let mut p = p2.clone();
-                    let uid = user_id2.clone();
-                    let did = device_id2.clone();
-                    let metrics_stream2 = metrics_uni.clone();
-                    tokio::spawn(async move {
-                        let mut buffer = Vec::new();
-                        let mut chunk = [0u8; 4096];
-                        while let Ok(Some(n)) = stream.read(&mut chunk).await {
-                            buffer.extend_from_slice(&chunk[..n]);
-                        }
-                        // Stopwatch ingress dimulai setelah stream selesai dibaca
-                        // (lihat jalur bidi: waktu tunggu klien bukan bagian dari
-                        // latensi yang diukur).
-                        let ingress_started = std::time::Instant::now();
-                        
-                        // [docs/30 WS-G(5)] Parser murni untuk buffer utuh: CHAFF,
-                        // HELLO, dan frame terpotong TIDAK pernah diteruskan ke
-                        // `nyx:upstream:*` (opcode transport-local bocor = regresi).
-                        match parse_inbound_frame(&buffer, usize::MAX) {
-                            InboundFrame::Forward { op_code, payload } => {
-                                let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
-
-                                let msg = UpstreamMessage {
-                                    user_id: uid,
-                                    device_id: did,
-                                    op_code,
-                                    payload: b64_payload,
-                                };
-
-                                if let Ok(json) = serde_json::to_string(&msg) {
-                                    let channel = format!("nyx:upstream:{}", op_code);
-                                    let published: Result<(), _> = p.publish(channel, json).await;
-                                    if published.is_ok() {
-                                        metrics_stream2.relay_published(MetricsPath::Uni);
-                                        metrics_stream2.add_bytes(Direction::In, payload.len() as u64);
-                                        metrics_stream2
-                                            .ingress_seconds(ingress_started.elapsed().as_secs_f64());
-                                    }
-                                }
-                            }
-                            // [docs/29 §5.6] HELLO hanya sah di stream BIDI (butuh
-                            // balasan irisan kapabilitas).
-                            InboundFrame::Hello(_) => {
-                                metrics_stream2.rejected(RejectReason::HelloWrongPath);
-                                warn!("HELLO di stream uni dari user {} — diabaikan (harus bidi)", uid);
-                            }
-                            other => metrics_stream2.rejected(match other {
-                                InboundFrame::Chaff => RejectReason::Chaff,
-                                InboundFrame::TooLarge => RejectReason::TooLarge,
-                                // `Incomplete`/`Truncated`: frame terpotong — bukan
-                                // sesuatu yang "ditunggu", jadi terhitung sebagai rusak.
-                                _ => RejectReason::Malformed,
-                            }),
-                        }
-                    });
+        while let Ok(mut stream) = c2.accept_uni().await {
+            let mut p = p2.clone();
+            let uid = user_id2.clone();
+            let did = device_id2.clone();
+            let metrics_stream2 = metrics_uni.clone();
+            tokio::spawn(async move {
+                let mut buffer = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while let Ok(Some(n)) = stream.read(&mut chunk).await {
+                    buffer.extend_from_slice(&chunk[..n]);
                 }
-                Err(_) => break,
-            }
+                // Stopwatch ingress dimulai setelah stream selesai dibaca
+                // (lihat jalur bidi: waktu tunggu klien bukan bagian dari
+                // latensi yang diukur).
+                let ingress_started = std::time::Instant::now();
+
+                // [docs/30 WS-G(5)] Parser murni untuk buffer utuh: CHAFF,
+                // HELLO, dan frame terpotong TIDAK pernah diteruskan ke
+                // `nyx:upstream:*` (opcode transport-local bocor = regresi).
+                match parse_inbound_frame(&buffer, usize::MAX) {
+                    InboundFrame::Forward { op_code, payload } => {
+                        let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
+
+                        let msg = UpstreamMessage {
+                            user_id: uid,
+                            device_id: did,
+                            op_code,
+                            payload: b64_payload,
+                        };
+
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            let channel = format!("nyx:upstream:{}", op_code);
+                            let published: Result<(), _> = p.publish(channel, json).await;
+                            if published.is_ok() {
+                                metrics_stream2.relay_published(MetricsPath::Uni);
+                                metrics_stream2.add_bytes(Direction::In, payload.len() as u64);
+                                metrics_stream2
+                                    .ingress_seconds(ingress_started.elapsed().as_secs_f64());
+                            }
+                        }
+                    }
+                    // [docs/29 §5.6] HELLO hanya sah di stream BIDI (butuh
+                    // balasan irisan kapabilitas).
+                    InboundFrame::Hello(_) => {
+                        metrics_stream2.rejected(RejectReason::HelloWrongPath);
+                        warn!("HELLO di stream uni dari user {} — diabaikan (harus bidi)", uid);
+                    }
+                    other => metrics_stream2.rejected(match other {
+                        InboundFrame::Chaff => RejectReason::Chaff,
+                        InboundFrame::TooLarge => RejectReason::TooLarge,
+                        // `Incomplete`/`Truncated`: frame terpotong — bukan
+                        // sesuatu yang "ditunggu", jadi terhitung sebagai rusak.
+                        _ => RejectReason::Malformed,
+                    }),
+                }
+            });
         }
     });
 
@@ -865,48 +782,43 @@ async fn handle_connection(
     let mut p3 = pub_conn.clone();
     let metrics_dgram = metrics.clone();
     tokio::spawn(async move {
-        loop {
-            match c3.receive_datagram().await {
-                Ok(datagram) => {
-                    // Datagram tiba utuh: receipt-nya sendiri sudah awal stopwatch.
-                    let ingress_started = std::time::Instant::now();
-                    // [docs/30 WS-G(5)] Parser murni yang sama dengan jalur uni.
-                    match parse_inbound_frame(&datagram, usize::MAX) {
-                        InboundFrame::Forward { op_code, payload } => {
-                            let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
+        while let Ok(datagram) = c3.receive_datagram().await {
+            // Datagram tiba utuh: receipt-nya sendiri sudah awal stopwatch.
+            let ingress_started = std::time::Instant::now();
+            // [docs/30 WS-G(5)] Parser murni yang sama dengan jalur uni.
+            match parse_inbound_frame(&datagram, usize::MAX) {
+                InboundFrame::Forward { op_code, payload } => {
+                    let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
 
-                            let msg = UpstreamMessage {
-                                user_id: user_id3.clone(),
-                                device_id: device_id3.clone(),
-                                op_code,
-                                payload: b64_payload,
-                            };
+                    let msg = UpstreamMessage {
+                        user_id: user_id3.clone(),
+                        device_id: device_id3.clone(),
+                        op_code,
+                        payload: b64_payload,
+                    };
 
-                            if let Ok(json) = serde_json::to_string(&msg) {
-                                let channel = format!("nyx:upstream:{}", op_code);
-                                let published: Result<(), _> = p3.publish(channel, json).await;
-                                if published.is_ok() {
-                                    metrics_dgram.relay_published(MetricsPath::Datagram);
-                                    metrics_dgram.add_bytes(Direction::In, payload.len() as u64);
-                                    metrics_dgram
-                                        .ingress_seconds(ingress_started.elapsed().as_secs_f64());
-                                }
-                            }
+                    if let Ok(json) = serde_json::to_string(&msg) {
+                        let channel = format!("nyx:upstream:{}", op_code);
+                        let published: Result<(), _> = p3.publish(channel, json).await;
+                        if published.is_ok() {
+                            metrics_dgram.relay_published(MetricsPath::Datagram);
+                            metrics_dgram.add_bytes(Direction::In, payload.len() as u64);
+                            metrics_dgram
+                                .ingress_seconds(ingress_started.elapsed().as_secs_f64());
                         }
-                        // [docs/29 §5.6] HELLO tidak pernah valid di datagram
-                        // (tidak ada balasan di jalur ini) — jangan diteruskan.
-                        InboundFrame::Hello(_) => {
-                            metrics_dgram.rejected(RejectReason::HelloWrongPath);
-                            warn!("HELLO di datagram dari user {} — diabaikan (harus bidi)", user_id3);
-                        }
-                        other => metrics_dgram.rejected(match other {
-                            InboundFrame::Chaff => RejectReason::Chaff,
-                            InboundFrame::TooLarge => RejectReason::TooLarge,
-                            _ => RejectReason::Malformed,
-                        }),
                     }
                 }
-                Err(_) => break,
+                // [docs/29 §5.6] HELLO tidak pernah valid di datagram
+                // (tidak ada balasan di jalur ini) — jangan diteruskan.
+                InboundFrame::Hello(_) => {
+                    metrics_dgram.rejected(RejectReason::HelloWrongPath);
+                    warn!("HELLO di datagram dari user {} — diabaikan (harus bidi)", user_id3);
+                }
+                other => metrics_dgram.rejected(match other {
+                    InboundFrame::Chaff => RejectReason::Chaff,
+                    InboundFrame::TooLarge => RejectReason::TooLarge,
+                    _ => RejectReason::Malformed,
+                }),
             }
         }
     });
@@ -989,5 +901,68 @@ async fn serve_metrics(addr: std::net::SocketAddr, metrics: Arc<TransportMetrics
             let _ = stream.write_all(response.as_bytes()).await;
             let _ = stream.shutdown().await;
         });
+    }
+}
+
+#[cfg(test)]
+mod cert_tests {
+    use super::{local_cert_is_usable, LOCAL_CERT_VALIDITY_DAYS};
+
+    /// Bangun sertifikat self-signed dengan offset validitas relatif ke sekarang.
+    fn cert_with_offsets(not_before: time::Duration, not_after: time::Duration) -> Vec<u8> {
+        let mut params =
+            rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("params");
+        let now = time::OffsetDateTime::now_utc();
+        params.not_before = now + not_before;
+        params.not_after = now + not_after;
+        let key_pair = rcgen::KeyPair::generate().expect("keypair");
+        params.self_signed(&key_pair).expect("cert").der().to_vec()
+    }
+
+    #[test]
+    fn fresh_local_cert_is_reused() {
+        let cert = cert_with_offsets(
+            -time::Duration::days(1),
+            time::Duration::days(LOCAL_CERT_VALIDITY_DAYS),
+        );
+        assert!(local_cert_is_usable(&cert).is_ok());
+    }
+
+    #[test]
+    fn expired_cert_is_rotated() {
+        // Sertifikat warisan dari disk: kedaluwarsa beberapa hari lalu.
+        let cert = cert_with_offsets(-time::Duration::days(30), -time::Duration::days(20));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("kedaluwarsa"), "alasan: {err}");
+    }
+
+    #[test]
+    fn cert_near_expiry_is_rotated() {
+        // Masih valid, tetapi sisa < margin rotasi (1 hari).
+        let cert = cert_with_offsets(-time::Duration::days(10), time::Duration::hours(5));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("margin rotasi"), "alasan: {err}");
+    }
+
+    #[test]
+    fn cert_with_span_over_webtransport_limit_is_rotated() {
+        // Rentang 30 hari > batas keras Chrome (14 hari).
+        let cert = cert_with_offsets(-time::Duration::days(1), time::Duration::days(29));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("batas WebTransport"), "alasan: {err}");
+    }
+
+    #[test]
+    fn not_yet_valid_cert_is_rotated() {
+        let cert = cert_with_offsets(time::Duration::days(2), time::Duration::days(9));
+        let err = local_cert_is_usable(&cert).expect_err("harus ditolak");
+        assert!(err.contains("notBefore"), "alasan: {err}");
+    }
+
+    #[test]
+    fn garbage_bytes_are_rotated_not_fatal() {
+        let err = local_cert_is_usable(b"not a certificate").expect_err("harus ditolak");
+        assert!(err.contains("tidak bisa di-parse"), "alasan: {err}");
     }
 }

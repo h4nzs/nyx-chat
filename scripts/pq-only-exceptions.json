@@ -1,4 +1,14 @@
 {
+  "server/src/utils/privacyPass.ts": {
+    "tier": "tier-b",
+    "rationale": "Privacy Pass (RFC 9577/9578, suite RSABSSA-SHA384-PSS-Deterministic) adalah bukti anti-abuse untuk sync anonim, bukan kriptografi pesan/kunci: sinyal yang dilindungi adalah 'pernah diizinkan memakai grup', dan tokennya tidak membawa isi, identitas, atau kunci apa pun. Tidak ada pengganti pasca-kuantum yang bisa dipasang sekarang — BRaccoon/blind UOV ditutup tanpa implementasi (`docs/37` §37.9), dan menulis blind signature lattice sendiri dilarang aturan repo. Karena itu ia masuk Tier B (primitif platform/anti-abuse classical), bukan Tier A, dan bukan jalur baca v1 mana pun.",
+    "removalGate": "Ganti hanya setelah keenam gate `docs/37` §37.9.5 terpenuhi (implementasi referensi sebagai dependensi, signature+proof ≤8 KiB atau envelope versi baru, issuance ≤64 KB, proving WASM terukur, audit eksternal di `docs/36`, dual-verify + kill switch). Sampai itu, `RSABSSA` di berkas ini adalah satu-satunya blind signature yang boleh ada; jangan menambah nama suite classical lain tanpa gate yang sama."
+  },
+  "web/src/lib/privacyPass.ts": {
+    "tier": "tier-b",
+    "rationale": "Sisi klien dari Privacy Pass yang sama: blind/unblind + verifikasi token anti-abuse untuk sync anonim (`docs/37` §37.3.3). Token tidak melindungi isi pesan maupun kunci, dan unlinkability-nya bergantung pada OHTTP, jadi ini Tier B classical — bukan Tier A dan bukan fallback v1.",
+    "removalGate": "Sama dengan sisi server: hapus `RSABSSA` di sini hanya bersama migrasi suite PQ yang lolos `docs/37` §37.9.5 (BRaccoon/blind UOV). Format token klien (`base64url(nonce||signature)`) harus naik versi bersamaan, bukan ditukar diam-diam."
+  },
   "web/src/store/auth.ts": {
     "tier": "hybrid-v2-identity",
     "rationale": "Identitas X25519 (crypto_scalarmult_base) diikat ke transkrip tanda tangan X3DH v2 (`docs/35` §35.6.2 responderIdentityKey) dan masih diturunkan saat bundle dibuat. Dua `crypto_sign_detached` adalah tanda tangan signed-prekey v1 yang kolomnya belum nullable di bundle/DB; server tidak lagi memverifikasinya.",

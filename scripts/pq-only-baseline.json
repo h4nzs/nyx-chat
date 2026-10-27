@@ -1,4 +1,10 @@
 {
+  "server/src/utils/privacyPass.ts": {
+    "RSABSSA": 4
+  },
+  "web/src/lib/privacyPass.ts": {
+    "RSABSSA": 3
+  },
   "web/src/store/auth.ts": {
     "crypto_scalarmult_base": 4,
     "crypto_sign_detached": 2

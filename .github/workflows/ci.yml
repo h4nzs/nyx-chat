@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+# [audit F-15] Permission minimum: CI hanya membaca repo (checkout) + cache.
+# Tanpa blok ini setiap job mendapat default repo (bisa tulis) — token GITHUB
+# yang lebih luas dari yang dibutuhkan, dan semua action pihak ketiga mewarisi
+# izin itu.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build (shared + web + server + marketing)
@@ -70,7 +77,7 @@ jobs:
       # Toolchain dipin `packages/*/rust-toolchain.toml` (1.95.0); tindakan ini
       # menyiapkan rustup + target wasm32 agar `rustup target add` di build.sh
       # tidak mengunduh dua kali.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
         with:
           toolchain: '1.95.0'
           targets: wasm32-unknown-unknown
@@ -114,7 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
         with:
           toolchain: '1.95.0'
           components: rustfmt, clippy
@@ -128,13 +135,35 @@ jobs:
         working-directory: server/pir-sidecar
         run: cargo test --locked
 
+  sidecar:
+    # [audit F-12 2026-10-26] Clippy akhirnya dijalankan di CI. Sebelum ini
+    # tidak ada job yang memeriksanya (hanya `cargo test` di `e2e-chrome`), dan
+    # `cargo clippy --all-targets -- -D warnings` ternyata merah: 3 lint di
+    # `fuzz.rs`/`protocol.rs` plus `while_let_loop`/`items_after_test_module` di
+    # `main.rs`. Kode protokol murni (`protocol.rs`, `fuzz.rs`) adalah yang
+    # dijalankan fuzz 1 jam, jadi regresi di sana harus terlihat per-PR.
+    name: Transport sidecar (Rust — clippy + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
+        with:
+          toolchain: '1.95.0'
+          components: clippy
+      - name: Clippy (deny warnings)
+        working-directory: server/transport-sidecar
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test (protokol murni + fuzz deterministik)
+        working-directory: server/transport-sidecar
+        run: cargo test
+
   lint:
     # [2026-10-11, diperbarui 2026-10-14] Lint BLOCKING lewat oxlint (Rust; tidak
     # terikat versi TS). Rule level error = kelas bug/keamanan (no-eval,
     # no-new-func, no-async-promise-executor, no-unsafe-negation, dll) dan harus 0.
     # Kategori `correctness` **sudah `error`** (gate M7 `docs/30` §30.15 terpenuhi:
     # `correctness` bersih, 0 error). Sisa temuan adalah `no-unused-vars` yang
-    # sengaja tetap `warn` (194) dan dibersihkan bertahap; jangan naikkan rule itu
+    # sengaja tetap `warn` (193) dan dibersihkan bertahap; jangan naikkan rule itu
     # ke error sebelum angkanya 0, atau CI jadi merah terus dan diabaikan.
     name: Lint (oxlint — rule error blocking)
     runs-on: ubuntu-latest
@@ -261,6 +290,13 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Audit production dependencies
         run: pnpm audit --prod
+      # [audit F-08] Pin transitif harus di `overrides:` (bukan `resolutions`
+      # yang diabaikan pnpm) dan benar-benar muncul di lockfile.
+      - name: Overrides pnpm berlaku
+        run: node scripts/check-overrides.mjs
+      # [audit F-15] Tolak action yang di-pin ke ref bergerak (`@master`/`@main`).
+      - name: Pin action (tidak ada ref bergerak)
+        run: node scripts/check-actions-pins.mjs
 
   e2e:
     name: E2E (Playwright, Chromium)

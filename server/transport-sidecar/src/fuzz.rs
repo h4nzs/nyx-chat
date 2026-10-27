@@ -214,11 +214,9 @@ pub struct FuzzStats {
 impl FuzzStats {
     /// Iterasi per detik (0 bila terlalu cepat/`ms == 0`).
     pub fn per_second(&self) -> u64 {
-        if self.ms == 0 {
-            0
-        } else {
-            (self.iterations as u128 * 1000 / self.ms) as u64
-        }
+        (self.iterations as u128 * 1000)
+            .checked_div(self.ms)
+            .unwrap_or(0) as u64
     }
 }
 
@@ -245,7 +243,7 @@ pub fn run_campaign(
         }
         fuzz_iteration(seed, i)?;
         i += 1;
-        if progress_every > 0 && i % progress_every == 0 {
+        if progress_every > 0 && i.is_multiple_of(progress_every) {
             println!("[fuzz-framing] {i} iterasi, {:.1}s", started.elapsed().as_secs_f64());
         }
     }

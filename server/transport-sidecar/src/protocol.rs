@@ -31,6 +31,12 @@ pub const CHAFF_OPCODE: u8 = 0x00;
 pub const HANDSHAKE_OPCODE: u8 = 0x0A;
 /// Opcode ACK.
 pub const ACK_OPCODE: u8 = 0x06;
+/// Opcode KICK (force-logout perangkat) — sinkron dengan klien TS.
+///
+/// [audit D5] Frame-nya dulu dibangun dua kali inline (target per-device dan
+/// broadcast) di jalur downstream; bentuk frame adalah kontrak wire, jadi ia
+/// harus ada di modul protokol bersama `hello_reply_frame`, bukan disalin.
+pub const KICK_OPCODE: u8 = 0x07;
 /// Versi protokol transport yang dipahami sidecar ini.
 pub const TRANSPORT_PROTOCOL_VERSION: u32 = 1;
 /// Kapabilitas yang diiklankan sidecar.
@@ -97,6 +103,19 @@ pub fn negotiate_capabilities(client: &[String], server: &[&str]) -> Vec<String>
 pub fn hello_reply_frame(payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(FRAME_HEADER_BYTES + payload.len());
     frame.push(HELLO_OPCODE);
+    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(payload);
+    frame
+}
+
+/// Frame KICK `[0x07][len:u32 BE][payload]`.
+///
+/// Ditulis ke stream uni SEBELUM `close()`, supaya klien menerima alasan
+/// terstruktur (deviceId/reason) — kalau hanya `close`, alur force_logout tidak
+/// pernah jalan di jalur WebTransport.
+pub fn kick_frame(payload: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(FRAME_HEADER_BYTES + payload.len());
+    frame.push(KICK_OPCODE);
     frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     frame.extend_from_slice(payload);
     frame
@@ -198,10 +217,7 @@ pub fn reference_forward(buf: &[u8], max_payload: usize) -> Option<(u8, Vec<u8>)
     if op_code == HELLO_OPCODE {
         return None;
     }
-    let end = match FRAME_HEADER_BYTES.checked_add(length) {
-        Some(end) => end,
-        None => return None,
-    };
+    let end = FRAME_HEADER_BYTES.checked_add(length)?;
     if buf.len() < end {
         return None;
     }
@@ -318,6 +334,23 @@ mod tests {
         let parsed = parse_transport_hello(&frame_out[5..]).unwrap();
         assert_eq!(parsed.v, TRANSPORT_PROTOCOL_VERSION);
         assert_eq!(parsed.caps, vec!["hello-v1".to_string()]);
+    }
+
+    #[test]
+    fn kick_frame_shape_is_wire_contract() {
+        // Pembaca di klien (`transportClient`) mengharapkan opcode 0x07 lalu
+        // panjang u32 BE; frame yang salah bentuk berarti force_logout diam.
+        let payload = br#"{"reason":"revoked"}"#;
+        let frame = kick_frame(payload);
+        assert_eq!(frame[0], KICK_OPCODE);
+        let len = u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]) as usize;
+        assert_eq!(len, payload.len());
+        assert_eq!(&frame[FRAME_HEADER_BYTES..], payload.as_slice());
+        assert_eq!(FRAME_HEADER_BYTES + payload.len(), frame.len());
+        // Frame KICK tidak boleh diteruskan sebagai frame masuk (parser inbound
+        // menganggapnya pesan biasa milik kanal upstream) — yang dijaga di sini
+        // hanya bentuknya, bukan klasifikasi arah.
+        assert_eq!(kick_frame(&[]).len(), FRAME_HEADER_BYTES);
     }
 
     #[test]
