@@ -142,14 +142,21 @@ jobs:
     # `fuzz.rs`/`protocol.rs` plus `while_let_loop`/`items_after_test_module` di
     # `main.rs`. Kode protokol murni (`protocol.rs`, `fuzz.rs`) adalah yang
     # dijalankan fuzz 1 jam, jadi regresi di sana harus terlihat per-PR.
-    name: Transport sidecar (Rust — clippy + test)
+    # [audit F-12 2026-10-27] `cargo fmt --check` juga dijadikan gate di sini,
+    # persis seperti job `pir-sidecar`, setelah crate ini di-rustfmt-kan sekali
+    # (57 hunk lama). Tanpa gate, satu-satunya crate Rust yang tidak diformat
+    # otomatis kembali kacau dan diff review jadi bising.
+    name: Transport sidecar (Rust — fmt + clippy + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
         with:
           toolchain: '1.95.0'
-          components: clippy
+          components: rustfmt, clippy
+      - name: Format
+        working-directory: server/transport-sidecar
+        run: cargo fmt --all -- --check
       - name: Clippy (deny warnings)
         working-directory: server/transport-sidecar
         run: cargo clippy --all-targets -- -D warnings

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use bytes::{BufMut, BytesMut};
 use dashmap::DashMap;
 use dotenvy::dotenv;
 use futures_util::StreamExt;
@@ -8,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use wtransport::{Connection, Endpoint, Identity, ServerConfig};
-use bytes::{BufMut, BytesMut};
 
 // ============================================================================
 // [docs/29 §5.6 / docs/30 WS-G(5)] Negosiasi kapabilitas transport
@@ -69,7 +69,10 @@ fn local_cert_is_usable(cert_der: &[u8]) -> std::result::Result<(), String> {
         return Err("notBefore di masa depan (clock skew?)".to_string());
     }
     if now > not_after {
-        return Err(format!("sudah kedaluwarsa {} jam lalu", (now - not_after) / 3600));
+        return Err(format!(
+            "sudah kedaluwarsa {} jam lalu",
+            (now - not_after) / 3600
+        ));
     }
     let remaining_hours = (not_after - now) / 3600;
     if remaining_hours < LOCAL_CERT_ROTATE_MARGIN_HOURS {
@@ -116,14 +119,20 @@ async fn main() -> Result<()> {
     // ditandatangani dengan kunci publik di repo → impersonasi anyone.
     let jwt_secret = std::env::var("JWT_SECRET")
         .context("JWT_SECRET wajib diset (sidecar tidak punya nilai cadangan)")?;
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
     let prod_cert_path = std::env::var("PROD_CERT_PATH").unwrap_or_default();
     let prod_key_path = std::env::var("PROD_KEY_PATH").unwrap_or_default();
 
     let identity = if !prod_cert_path.is_empty() && !prod_key_path.is_empty() {
-        info!("[PRODUCTION] Loading CA-signed PEM certificates from {}...", prod_cert_path);
-        Identity::load_pemfiles(&prod_cert_path, &prod_key_path).await.context("Failed to load production PEM certificates")?
+        info!(
+            "[PRODUCTION] Loading CA-signed PEM certificates from {}...",
+            prod_cert_path
+        );
+        Identity::load_pemfiles(&prod_cert_path, &prod_key_path)
+            .await
+            .context("Failed to load production PEM certificates")?
     } else {
         info!("[LOCAL] Loading/Generating persistent self-signed DER certificates...");
         let cert_path = CERT_PATH;
@@ -167,13 +176,16 @@ async fn main() -> Result<()> {
             );
             let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
 
-            let mut params = rcgen::CertificateParams::new(subject_alt_names).context("Failed to create cert params")?;
+            let mut params = rcgen::CertificateParams::new(subject_alt_names)
+                .context("Failed to create cert params")?;
             let now = time::OffsetDateTime::now_utc();
             params.not_before = now - time::Duration::days(1);
             params.not_after = now + time::Duration::days(LOCAL_CERT_VALIDITY_DAYS);
 
             let key_pair = rcgen::KeyPair::generate().context("Failed to generate keypair")?;
-            let cert = params.self_signed(&key_pair).context("Failed to create cert")?;
+            let cert = params
+                .self_signed(&key_pair)
+                .context("Failed to create cert")?;
             let cert_der = cert.der().to_vec();
             let key_der = key_pair.serialize_der();
 
@@ -182,8 +194,10 @@ async fn main() -> Result<()> {
             (cert_der, key_der)
         };
 
-        use wtransport::tls::{CertificateChain, PrivateKey, Certificate};
-        let chain = CertificateChain::single(Certificate::from_der(cert_der).context("Failed to parse cert DER")?);
+        use wtransport::tls::{Certificate, CertificateChain, PrivateKey};
+        let chain = CertificateChain::single(
+            Certificate::from_der(cert_der).context("Failed to parse cert DER")?,
+        );
         let key = PrivateKey::from_der_pkcs8(key_der);
         Identity::new(chain, key)
     };
@@ -218,7 +232,7 @@ async fn main() -> Result<()> {
         .build();
 
     let server = Endpoint::server(config).context("Failed to create server")?;
-    
+
     let sessions: SessionMap = Arc::new(DashMap::new());
 
     // [docs/30 WS-G(6) · docs/10 §10.12] Exporter `/metrics` sidecar.
@@ -228,8 +242,8 @@ async fn main() -> Result<()> {
     // (`web/src/lib/transportMode.ts`) tanpa error di mana pun. Loopback saja
     // (`parse_metrics_addr` menolak alamat non-loopback).
     let metrics = Arc::new(TransportMetrics::new());
-    let metrics_addr_raw = std::env::var("TRANSPORT_METRICS_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:9465".to_string());
+    let metrics_addr_raw =
+        std::env::var("TRANSPORT_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9465".to_string());
     match parse_metrics_addr(&metrics_addr_raw) {
         Ok(Some(addr)) => {
             let metrics_task = metrics.clone();
@@ -237,7 +251,10 @@ async fn main() -> Result<()> {
             tokio::spawn(async move { serve_metrics(addr, metrics_task, sessions_task).await });
             info!("📊 Metrik sidecar: http://{}/metrics (loopback)", addr);
         }
-        Ok(None) => info!("📊 Metrik sidecar dimatikan (TRANSPORT_METRICS_ADDR={:?})", metrics_addr_raw),
+        Ok(None) => info!(
+            "📊 Metrik sidecar dimatikan (TRANSPORT_METRICS_ADDR={:?})",
+            metrics_addr_raw
+        ),
         Err(reason) => {
             // Alamat salah BUKAN alasan mematikan transport: klien tetap dilayani.
             // Tetapi visibilitas hilang, jadi ini error — dan alert
@@ -271,14 +288,17 @@ async fn main() -> Result<()> {
             };
 
             if let Err(e) = pubsub.subscribe("nyx:downstream").await {
-                error!("Failed to subscribe to nyx:downstream: {:?}. Retrying in 3s...", e);
+                error!(
+                    "Failed to subscribe to nyx:downstream: {:?}. Retrying in 3s...",
+                    e
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 continue;
             }
 
             info!("Successfully subscribed to nyx:downstream");
             let mut stream = pubsub.on_message();
-            
+
             while let Some(msg) = stream.next().await {
                 let payload: String = match msg.get_payload() {
                     Ok(p) => p,
@@ -296,16 +316,17 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                let payload_bytes = match data_encoding::BASE64URL_NOPAD.decode(down_msg.payload.as_bytes()) {
-                    Ok(b) => b,
-                    Err(_) => match data_encoding::BASE64.decode(down_msg.payload.as_bytes()) {
+                let payload_bytes =
+                    match data_encoding::BASE64URL_NOPAD.decode(down_msg.payload.as_bytes()) {
                         Ok(b) => b,
-                        Err(_) => {
-                            metrics_downstream.downstream(DownstreamOutcome::Dropped);
-                            continue;
-                        }
-                    }
-                };
+                        Err(_) => match data_encoding::BASE64.decode(down_msg.payload.as_bytes()) {
+                            Ok(b) => b,
+                            Err(_) => {
+                                metrics_downstream.downstream(DownstreamOutcome::Dropped);
+                                continue;
+                            }
+                        },
+                    };
 
                 // `delivered` = jumlah sesi yang cocok untuk pesan ini; 0 berarti
                 // perangkat sudah lepas (bukan kegagalan) dan itu dibedakan di metrik.
@@ -313,7 +334,10 @@ async fn main() -> Result<()> {
 
                 if let Some(target_device) = down_msg.device_id {
                     let prefix = format!("{}:{}:", down_msg.user_id, target_device);
-                    for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
+                    for item in sessions_clone
+                        .iter()
+                        .filter(|i| i.key().starts_with(&prefix))
+                    {
                         delivered += 1;
                         let conn = item.value().clone();
                         let op_code = down_msg.op_code;
@@ -340,7 +364,8 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        metrics_downstream.add_bytes(Direction::Out, (5 + payload_clone.len()) as u64);
+                        metrics_downstream
+                            .add_bytes(Direction::Out, (5 + payload_clone.len()) as u64);
                         tokio::spawn(async move {
                             let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
                             frame.put_u8(op_code);
@@ -369,12 +394,15 @@ async fn main() -> Result<()> {
                 } else {
                     // Broadcast to all devices of this user
                     let prefix = format!("{}:", down_msg.user_id);
-                    for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
+                    for item in sessions_clone
+                        .iter()
+                        .filter(|i| i.key().starts_with(&prefix))
+                    {
                         delivered += 1;
                         let conn = item.value().clone();
                         let op_code = down_msg.op_code;
                         let payload_clone = payload_bytes.clone();
-                        
+
                         if op_code == KICK_OPCODE {
                             // [PARITY 2026-10-18 / audit D5] Bentuk frame hidup di
                             // `protocol::kick_frame` (satu tempat, teruji). Frame dikirim
@@ -396,7 +424,8 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        metrics_downstream.add_bytes(Direction::Out, (5 + payload_clone.len()) as u64);
+                        metrics_downstream
+                            .add_bytes(Direction::Out, (5 + payload_clone.len()) as u64);
                         tokio::spawn(async move {
                             let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
                             frame.put_u8(op_code);
@@ -457,9 +486,14 @@ async fn main() -> Result<()> {
                                     val.validate_exp = true;
                                     val.required_spec_claims.insert("exp".to_string());
 
-                                    match decode::<Claims>(&*value, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
+                                    match decode::<Claims>(
+                                        &*value,
+                                        &DecodingKey::from_secret(jwt_secret.as_bytes()),
+                                        &val,
+                                    ) {
                                         Ok(token_data) => {
-                                            ticket_user_id = token_data.claims.id.or(token_data.claims.sub);
+                                            ticket_user_id =
+                                                token_data.claims.id.or(token_data.claims.sub);
                                             ticket_device_id = token_data.claims.device_id;
                                         }
                                         // Tiket di URL yang tidak sah tidak menggagalkan sesi
@@ -477,7 +511,17 @@ async fn main() -> Result<()> {
                     match req.accept().await {
                         Ok(conn) => {
                             metrics.connection(ConnectionOutcome::Accepted);
-                            if let Err(e) = handle_connection(conn, sessions, pub_conn, jwt_secret, ticket_user_id, ticket_device_id, metrics.clone()).await {
+                            if let Err(e) = handle_connection(
+                                conn,
+                                sessions,
+                                pub_conn,
+                                jwt_secret,
+                                ticket_user_id,
+                                ticket_device_id,
+                                metrics.clone(),
+                            )
+                            .await
+                            {
                                 warn!("Conn error: {:?}", e);
                             }
                         }
@@ -507,22 +551,35 @@ async fn handle_connection(
     ticket_device_id: Option<String>,
     metrics: Arc<TransportMetrics>,
 ) -> Result<()> {
-    let (user_id, device_id, auth_method) = if let (Some(uid), Some(did)) = (ticket_user_id, ticket_device_id) {
+    let (user_id, device_id, auth_method) = if let (Some(uid), Some(did)) =
+        (ticket_user_id, ticket_device_id)
+    {
         info!("User {} authenticated via URL Ticket", uid);
         (uid, did, AuthMethod::Ticket)
     } else {
         // Fallback: First bidirectional stream is for Authentication
         let (mut _auth_send, mut auth_recv) = conn.accept_bi().await.context("auth_accept_bi")?;
-        
+
         let mut auth_header = [0u8; 5];
         let mut read_bytes = 0;
         while read_bytes < 5 {
-            let n = auth_recv.read(&mut auth_header[read_bytes..]).await.context("auth_header")?.unwrap_or(0);
-            if n == 0 { break; }
+            let n = auth_recv
+                .read(&mut auth_header[read_bytes..])
+                .await
+                .context("auth_header")?
+                .unwrap_or(0);
+            if n == 0 {
+                break;
+            }
             read_bytes += n;
         }
-        
-        let auth_length = u32::from_be_bytes([auth_header[1], auth_header[2], auth_header[3], auth_header[4]]) as usize;
+
+        let auth_length = u32::from_be_bytes([
+            auth_header[1],
+            auth_header[2],
+            auth_header[3],
+            auth_header[4],
+        ]) as usize;
         if auth_length > 4096 {
             metrics.auth_failed(AuthFailure::TokenTooLarge);
             return Err(anyhow::anyhow!("Token too large"));
@@ -531,17 +588,27 @@ async fn handle_connection(
         let mut token_bytes = vec![0u8; auth_length];
         read_bytes = 0;
         while read_bytes < auth_length {
-            let n = auth_recv.read(&mut token_bytes[read_bytes..]).await.context("auth_token")?.unwrap_or(0);
-            if n == 0 { break; }
+            let n = auth_recv
+                .read(&mut token_bytes[read_bytes..])
+                .await
+                .context("auth_token")?
+                .unwrap_or(0);
+            if n == 0 {
+                break;
+            }
             read_bytes += n;
         }
-        
+
         let token = String::from_utf8(token_bytes).unwrap_or_default();
         let mut val = Validation::new(jsonwebtoken::Algorithm::HS256);
         val.validate_exp = true;
         val.required_spec_claims.insert("exp".to_string());
 
-        let token_data = match decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
+        let token_data = match decode::<Claims>(
+            &token,
+            &DecodingKey::from_secret(jwt_secret.as_bytes()),
+            &val,
+        ) {
             Ok(data) => data,
             Err(e) => {
                 metrics.auth_failed(AuthFailure::BwhInvalid);
@@ -549,7 +616,7 @@ async fn handle_connection(
                 return Err(anyhow::anyhow!("Unauthorized"));
             }
         };
-        
+
         let uid = match token_data.claims.id.or(token_data.claims.sub) {
             Some(id) => id,
             None => {
@@ -558,19 +625,25 @@ async fn handle_connection(
                 return Err(anyhow::anyhow!("Unauthorized: Missing ID"));
             }
         };
-        let did = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
+        let did = token_data
+            .claims
+            .device_id
+            .unwrap_or_else(|| "unknown".to_string());
         info!("User {} authenticated via BWH-V1 Stream", uid);
         (uid, did, AuthMethod::Bwh)
     };
 
     // Tepat satu hitungan per sesi: jalur tiket dan jalur cadangan saling eksklusif.
     metrics.authenticated(auth_method);
-    info!("User {} (device {}) finalized authentication", user_id, device_id);
+    info!(
+        "User {} (device {}) finalized authentication",
+        user_id, device_id
+    );
 
     // Enforce "One User, One Active Device"
     let user_prefix = format!("{}:", user_id);
     let mut sessions_to_kick = Vec::new();
-    
+
     // Find all active sessions for this user
     for item in sessions.iter() {
         if item.key().starts_with(&user_prefix) {
@@ -590,7 +663,7 @@ async fn handle_connection(
 
     let session_uuid = uuid::Uuid::new_v4().to_string();
     let session_key = format!("{}:{}:{}", user_id, device_id, session_uuid);
-    
+
     let conn = Arc::new(conn);
     sessions.insert(session_key.clone(), conn.clone());
 
@@ -617,7 +690,8 @@ async fn handle_connection(
                 }
 
                 let op_code = header[0];
-                let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+                let length =
+                    u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
 
                 // [docs/30 WS-G(5)] Keputusan dipakai bersama jalur
                 // uni/datagram: CHAFF dibuang, > 32 KB ditolak, HELLO
@@ -668,7 +742,9 @@ async fn handle_connection(
                                     uid,
                                     hello.v,
                                     hello.caps.len(),
-                                    parse_transport_hello(&reply).map(|r| r.caps.len()).unwrap_or(0)
+                                    parse_transport_hello(&reply)
+                                        .map(|r| r.caps.len())
+                                        .unwrap_or(0)
                                 );
                             }
                             None => {
@@ -695,8 +771,7 @@ async fn handle_connection(
                         if published.is_ok() {
                             metrics_stream.relay_published(MetricsPath::Bidi);
                             metrics_stream.add_bytes(Direction::In, payload.len() as u64);
-                            metrics_stream
-                                .ingress_seconds(ingress_started.elapsed().as_secs_f64());
+                            metrics_stream.ingress_seconds(ingress_started.elapsed().as_secs_f64());
                         }
 
                         // For HANDSHAKE, send back immediate ACK to client
@@ -762,7 +837,10 @@ async fn handle_connection(
                     // balasan irisan kapabilitas).
                     InboundFrame::Hello(_) => {
                         metrics_stream2.rejected(RejectReason::HelloWrongPath);
-                        warn!("HELLO di stream uni dari user {} — diabaikan (harus bidi)", uid);
+                        warn!(
+                            "HELLO di stream uni dari user {} — diabaikan (harus bidi)",
+                            uid
+                        );
                     }
                     other => metrics_stream2.rejected(match other {
                         InboundFrame::Chaff => RejectReason::Chaff,
@@ -803,8 +881,7 @@ async fn handle_connection(
                         if published.is_ok() {
                             metrics_dgram.relay_published(MetricsPath::Datagram);
                             metrics_dgram.add_bytes(Direction::In, payload.len() as u64);
-                            metrics_dgram
-                                .ingress_seconds(ingress_started.elapsed().as_secs_f64());
+                            metrics_dgram.ingress_seconds(ingress_started.elapsed().as_secs_f64());
                         }
                     }
                 }
@@ -812,7 +889,10 @@ async fn handle_connection(
                 // (tidak ada balasan di jalur ini) — jangan diteruskan.
                 InboundFrame::Hello(_) => {
                     metrics_dgram.rejected(RejectReason::HelloWrongPath);
-                    warn!("HELLO di datagram dari user {} — diabaikan (harus bidi)", user_id3);
+                    warn!(
+                        "HELLO di datagram dari user {} — diabaikan (harus bidi)",
+                        user_id3
+                    );
                 }
                 other => metrics_dgram.rejected(match other {
                     InboundFrame::Chaff => RejectReason::Chaff,
@@ -851,7 +931,11 @@ async fn handle_connection(
 // mentah klien.
 //
 // Loopback HANYA (dijamin `parse_metrics_addr`); nginx tidak mem-proxy jalur ini.
-async fn serve_metrics(addr: std::net::SocketAddr, metrics: Arc<TransportMetrics>, sessions: SessionMap) {
+async fn serve_metrics(
+    addr: std::net::SocketAddr,
+    metrics: Arc<TransportMetrics>,
+    sessions: SessionMap,
+) {
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
         Err(e) => {
@@ -893,7 +977,8 @@ async fn serve_metrics(addr: std::net::SocketAddr, metrics: Arc<TransportMetrics
                     body
                 )
             } else if request_line.starts_with("GET ") {
-                "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string()
+                "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                    .to_string()
             } else {
                 "HTTP/1.1 405 Method Not Allowed\r\nallow: GET\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string()
             };

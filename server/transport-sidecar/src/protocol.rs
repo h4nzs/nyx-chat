@@ -269,25 +269,57 @@ mod tests {
     fn parse_transport_hello_accepts_valid_payload() {
         let hello = parse_transport_hello(br#"{"v":1,"caps":["hello-v1","kt-lite"]}"#).unwrap();
         assert_eq!(hello.v, 1);
-        assert_eq!(hello.caps, vec!["hello-v1".to_string(), "kt-lite".to_string()]);
+        assert_eq!(
+            hello.caps,
+            vec!["hello-v1".to_string(), "kt-lite".to_string()]
+        );
     }
 
     #[test]
     fn parse_transport_hello_rejects_malformed_payload() {
         assert!(parse_transport_hello(b"").is_none(), "kosong");
         assert!(parse_transport_hello(b"bukan-json").is_none(), "bukan JSON");
-        assert!(parse_transport_hello(br#"[1,2,3]"#).is_none(), "array, bukan object");
-        assert!(parse_transport_hello(br#"{"v":0,"caps":[]}"#).is_none(), "versi 0");
-        assert!(parse_transport_hello(br#"{"v":70000,"caps":[]}"#).is_none(), "versi di luar batas");
-        assert!(parse_transport_hello(br#"{"v":"1","caps":[]}"#).is_none(), "versi bukan angka");
-        assert!(parse_transport_hello(br#"{"v":1,"caps":"hello"}"#).is_none(), "caps bukan array");
-        assert!(parse_transport_hello(br#"{"v":1,"caps":[""]}"#).is_none(), "cap kosong");
+        assert!(
+            parse_transport_hello(br#"[1,2,3]"#).is_none(),
+            "array, bukan object"
+        );
+        assert!(
+            parse_transport_hello(br#"{"v":0,"caps":[]}"#).is_none(),
+            "versi 0"
+        );
+        assert!(
+            parse_transport_hello(br#"{"v":70000,"caps":[]}"#).is_none(),
+            "versi di luar batas"
+        );
+        assert!(
+            parse_transport_hello(br#"{"v":"1","caps":[]}"#).is_none(),
+            "versi bukan angka"
+        );
+        assert!(
+            parse_transport_hello(br#"{"v":1,"caps":"hello"}"#).is_none(),
+            "caps bukan array"
+        );
+        assert!(
+            parse_transport_hello(br#"{"v":1,"caps":[""]}"#).is_none(),
+            "cap kosong"
+        );
         // Cap kepanjangan / kebanyakan = tolak (anti-DoS).
-        let long_cap = format!(r#"{{"v":1,"caps":["{}"]}}"#, "a".repeat(HELLO_MAX_CAP_LENGTH + 1));
-        assert!(parse_transport_hello(long_cap.as_bytes()).is_none(), "cap > batas");
-        let many: Vec<String> = (0..HELLO_MAX_CAPS + 1).map(|i| format!("\"c{i}\"")).collect();
+        let long_cap = format!(
+            r#"{{"v":1,"caps":["{}"]}}"#,
+            "a".repeat(HELLO_MAX_CAP_LENGTH + 1)
+        );
+        assert!(
+            parse_transport_hello(long_cap.as_bytes()).is_none(),
+            "cap > batas"
+        );
+        let many: Vec<String> = (0..HELLO_MAX_CAPS + 1)
+            .map(|i| format!("\"c{i}\""))
+            .collect();
         let many_payload = format!(r#"{{"v":1,"caps":[{}]}}"#, many.join(","));
-        assert!(parse_transport_hello(many_payload.as_bytes()).is_none(), "caps > batas");
+        assert!(
+            parse_transport_hello(many_payload.as_bytes()).is_none(),
+            "caps > batas"
+        );
         // Payload > 4096 byte ditolak lebih dulu (tanpa parse JSON).
         let huge = vec![b' '; 4097];
         assert!(parse_transport_hello(&huge).is_none(), "payload > batas");
@@ -295,10 +327,19 @@ mod tests {
 
     #[test]
     fn negotiate_capabilities_returns_intersection_in_client_order() {
-        let client = vec!["kt-lite".to_string(), "hello-v1".to_string(), "experimental".to_string()];
-        assert_eq!(negotiate_capabilities(&client, &SERVER_CAPABILITIES), vec!["hello-v1".to_string()]);
+        let client = vec![
+            "kt-lite".to_string(),
+            "hello-v1".to_string(),
+            "experimental".to_string(),
+        ];
+        assert_eq!(
+            negotiate_capabilities(&client, &SERVER_CAPABILITIES),
+            vec!["hello-v1".to_string()]
+        );
         // Kapabilitas tak dikenal TIDAK pernah masuk hasil.
-        assert!(negotiate_capabilities(&client, &SERVER_CAPABILITIES).iter().all(|c| c != "experimental"));
+        assert!(negotiate_capabilities(&client, &SERVER_CAPABILITIES)
+            .iter()
+            .all(|c| c != "experimental"));
         // Duplikat tidak menggandakan hasil.
         let dup = vec!["hello-v1".to_string(), "hello-v1".to_string()];
         assert_eq!(negotiate_capabilities(&dup, &SERVER_CAPABILITIES).len(), 1);
@@ -327,8 +368,12 @@ mod tests {
     fn hello_reply_frame_shape_and_opcode() {
         let payload = hello_reply_payload(&["hello-v1".to_string()]);
         let frame_out = hello_reply_frame(&payload);
-        assert_eq!(frame_out[0], HELLO_OPCODE, "balasan memakai opcode HELLO, bukan ACK");
-        let len = u32::from_be_bytes([frame_out[1], frame_out[2], frame_out[3], frame_out[4]]) as usize;
+        assert_eq!(
+            frame_out[0], HELLO_OPCODE,
+            "balasan memakai opcode HELLO, bukan ACK"
+        );
+        let len =
+            u32::from_be_bytes([frame_out[1], frame_out[2], frame_out[3], frame_out[4]]) as usize;
         assert_eq!(len, payload.len());
         assert_eq!(&frame_out[5..], payload.as_slice());
         let parsed = parse_transport_hello(&frame_out[5..]).unwrap();
@@ -356,33 +401,63 @@ mod tests {
     #[test]
     fn classify_orders_chaff_before_size_and_hello() {
         // CHAFF menang walau panjangnya ekstrem (dibuang paling murah).
-        assert_eq!(classify_inbound(CHAFF_OPCODE, usize::MAX, 4096), InboundHeader::Chaff);
+        assert_eq!(
+            classify_inbound(CHAFF_OPCODE, usize::MAX, 4096),
+            InboundHeader::Chaff
+        );
         // Panjang ekstrem & bukan chaff → TooLarge (bukan Hello).
-        assert_eq!(classify_inbound(HELLO_OPCODE, 4097, 4096), InboundHeader::TooLarge);
-        assert_eq!(classify_inbound(HELLO_OPCODE, 4096, 4096), InboundHeader::Hello);
-        assert_eq!(classify_inbound(HANDSHAKE_OPCODE, 0, 4096), InboundHeader::Message);
+        assert_eq!(
+            classify_inbound(HELLO_OPCODE, 4097, 4096),
+            InboundHeader::TooLarge
+        );
+        assert_eq!(
+            classify_inbound(HELLO_OPCODE, 4096, 4096),
+            InboundHeader::Hello
+        );
+        assert_eq!(
+            classify_inbound(HANDSHAKE_OPCODE, 0, 4096),
+            InboundHeader::Message
+        );
         // Tanpa batas (uni/datagram): panjang u32 maksimum pun bukan TooLarge.
-        assert_eq!(classify_inbound(0x11, u32::MAX as usize, usize::MAX), InboundHeader::Message);
+        assert_eq!(
+            classify_inbound(0x11, u32::MAX as usize, usize::MAX),
+            InboundHeader::Message
+        );
     }
 
     #[test]
     fn parse_inbound_frame_covers_every_outcome() {
-        assert_eq!(parse_inbound_frame(&[], usize::MAX), InboundFrame::Incomplete);
-        assert_eq!(parse_inbound_frame(&[0x11, 0, 0], usize::MAX), InboundFrame::Incomplete);
-        assert_eq!(parse_inbound_frame(&[CHAFF_OPCODE, 0, 0, 0, 0], usize::MAX), InboundFrame::Chaff);
+        assert_eq!(
+            parse_inbound_frame(&[], usize::MAX),
+            InboundFrame::Incomplete
+        );
+        assert_eq!(
+            parse_inbound_frame(&[0x11, 0, 0], usize::MAX),
+            InboundFrame::Incomplete
+        );
+        assert_eq!(
+            parse_inbound_frame(&[CHAFF_OPCODE, 0, 0, 0, 0], usize::MAX),
+            InboundFrame::Chaff
+        );
         // CHAFF walau payload belum lengkap → tetap Chaff (dibuang).
         assert_eq!(
             parse_inbound_frame(&[CHAFF_OPCODE, 0, 0, 1, 0], usize::MAX),
             InboundFrame::Chaff
         );
-        assert_eq!(parse_inbound_frame(&frame(0x11, b"abc"), 2), InboundFrame::TooLarge);
+        assert_eq!(
+            parse_inbound_frame(&frame(0x11, b"abc"), 2),
+            InboundFrame::TooLarge
+        );
         assert_eq!(
             parse_inbound_frame(&frame(0x11, b"abc")[..6], usize::MAX),
             InboundFrame::Truncated
         );
         assert_eq!(
             parse_inbound_frame(&frame(HANDSHAKE_OPCODE, b"hi"), usize::MAX),
-            InboundFrame::Forward { op_code: HANDSHAKE_OPCODE, payload: b"hi" }
+            InboundFrame::Forward {
+                op_code: HANDSHAKE_OPCODE,
+                payload: b"hi"
+            }
         );
         assert_eq!(
             parse_inbound_frame(&frame(HELLO_OPCODE, b"{}"), usize::MAX),
@@ -396,7 +471,10 @@ mod tests {
         // Payload kosong tetap frame yang sah.
         assert_eq!(
             parse_inbound_frame(&frame(ACK_OPCODE, b""), usize::MAX),
-            InboundFrame::Forward { op_code: ACK_OPCODE, payload: b"" }
+            InboundFrame::Forward {
+                op_code: ACK_OPCODE,
+                payload: b""
+            }
         );
     }
 
@@ -404,10 +482,21 @@ mod tests {
     fn forward_payload_only_for_message_frames() {
         let buffer = frame(0x11, b"payload");
         let parsed = parse_inbound_frame(&buffer, usize::MAX);
-        assert_eq!(parsed.forward_payload(), Some((0x11, b"payload".as_slice())));
-        assert_eq!(parse_inbound_frame(&buffer[..1], usize::MAX).forward_payload(), None);
-        assert_eq!(parse_inbound_frame(&frame(HELLO_OPCODE, b"{}"), usize::MAX).forward_payload(), None);
-        assert_eq!(parse_inbound_frame(&frame(CHAFF_OPCODE, b"x"), usize::MAX).forward_payload(), None);
+        assert_eq!(
+            parsed.forward_payload(),
+            Some((0x11, b"payload".as_slice()))
+        );
+        assert_eq!(
+            parse_inbound_frame(&buffer[..1], usize::MAX).forward_payload(),
+            None
+        );
+        assert_eq!(
+            parse_inbound_frame(&frame(HELLO_OPCODE, b"{}"), usize::MAX).forward_payload(),
+            None
+        );
+        assert_eq!(
+            parse_inbound_frame(&frame(CHAFF_OPCODE, b"x"), usize::MAX).forward_payload(),
+            None
+        );
     }
-
 }

@@ -27,7 +27,9 @@ fn env_u64(name: &str) -> Option<u64> {
 }
 
 fn env_f64(name: &str) -> Option<f64> {
-    env::var(name).ok().and_then(|raw| raw.trim().parse::<f64>().ok())
+    env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f64>().ok())
 }
 
 fn main() {

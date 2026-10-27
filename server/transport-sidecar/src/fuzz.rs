@@ -25,8 +25,8 @@
 //!      `reference_forward` (implementasi kedua di `protocol::tests`).
 
 use crate::protocol::{
-    parse_inbound_frame, parse_transport_hello, reference_forward, CHAFF_OPCODE, FRAME_HEADER_BYTES,
-    HELLO_OPCODE,
+    parse_inbound_frame, parse_transport_hello, reference_forward, CHAFF_OPCODE,
+    FRAME_HEADER_BYTES, HELLO_OPCODE,
 };
 
 /// xorshift64* — deterministik, tanpa dependensi.
@@ -172,9 +172,13 @@ pub fn fuzz_iteration(seed: u64, iteration: u64) -> Result<(), String> {
 
     // (3) Differential vs implementasi referensi.
     let reference = reference_forward(&input, max_payload);
-    let actual = parsed.forward_payload().map(|(op, payload)| (op, payload.to_vec()));
+    let actual = parsed
+        .forward_payload()
+        .map(|(op, payload)| (op, payload.to_vec()));
     if reference != actual {
-        return Err(repro("differentia: parse_inbound_frame != reference_forward"));
+        return Err(repro(
+            "differentia: parse_inbound_frame != reference_forward",
+        ));
     }
 
     // HELLO: parser harus tahan payload acak (dan hasilnya selalu "hello sah").
@@ -244,11 +248,17 @@ pub fn run_campaign(
         fuzz_iteration(seed, i)?;
         i += 1;
         if progress_every > 0 && i.is_multiple_of(progress_every) {
-            println!("[fuzz-framing] {i} iterasi, {:.1}s", started.elapsed().as_secs_f64());
+            println!(
+                "[fuzz-framing] {i} iterasi, {:.1}s",
+                started.elapsed().as_secs_f64()
+            );
         }
     }
 
-    Ok(FuzzStats { iterations: i, ms: started.elapsed().as_millis() })
+    Ok(FuzzStats {
+        iterations: i,
+        ms: started.elapsed().as_millis(),
+    })
 }
 
 #[cfg(test)]
@@ -259,7 +269,10 @@ mod tests {
     fn campaign_short_run_reports_stats_and_no_findings() {
         let stats = run_campaign(0x5eed, Some(20_000), None, 0).expect("tidak boleh ada temuan");
         assert_eq!(stats.iterations, 20_000);
-        assert!(stats.ms < 60_000, "20k iterasi harus selesai jauh di bawah 1 menit");
+        assert!(
+            stats.ms < 60_000,
+            "20k iterasi harus selesai jauh di bawah 1 menit"
+        );
     }
 
     #[test]
@@ -268,7 +281,11 @@ mod tests {
         for seed in [1u64, 0xdead_beef, 0x7fff_ffff] {
             let first = run_campaign(seed, Some(500), None, 0);
             let second = run_campaign(seed, Some(500), None, 0);
-            assert_eq!(first.is_ok(), second.is_ok(), "seed {seed} harus deterministik");
+            assert_eq!(
+                first.is_ok(),
+                second.is_ok(),
+                "seed {seed} harus deterministik"
+            );
         }
     }
 
@@ -292,6 +309,10 @@ mod tests {
             v
         };
         let parsed = parse_inbound_frame(&input, 4);
-        assert_eq!(parsed.forward_payload(), None, "melebihi batas → tidak diteruskan");
+        assert_eq!(
+            parsed.forward_payload(),
+            None,
+            "melebihi batas → tidak diteruskan"
+        );
     }
 }
