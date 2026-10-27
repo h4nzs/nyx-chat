@@ -146,7 +146,11 @@ async function writeGrant (conversationId: string, grant: StoredGrant | null): P
  * dan member token (bukti keanggotaan); tanpa keduanya tidak ada yang dikirim.
  * Mengembalikan jumlah token yang benar-benar tersimpan.
  */
-export async function issuePrivacyPassTokens (conversationId: string, count = DEFAULT_BATCH): Promise<number> {
+/**
+ * Penerbitan satu putaran (tanpa penanganan rotasi kunci). Dipisah supaya
+ * `issuePrivacyPassTokens` bisa mengulang SEKALI setelah issuer berganti.
+ */
+async function issueOnce (conversationId: string, count: number): Promise<number> {
   const groupToken = getMyGroupToken(conversationId);
   const memberToken = getMyDeliveryToken(conversationId);
   if (!groupToken || !memberToken) return 0;
@@ -215,6 +219,26 @@ export async function issuePrivacyPassTokens (conversationId: string, count = DE
   return tokens.length;
 }
 
+/**
+ * Minta token baru; bila issuer server sudah dirotasi (`keyId` berbeda), muat
+ * ulang kunci publik dan coba SEKALI lagi.
+ *
+ * Tanpa ini, rotasi `PP_ISSUER_PRIVATE_JWK` (prosedur yang didokumentasikan di
+ * `docs/10`) membuat setiap klien yang sudah menyimpan cache issuer gagal terus
+ * dengan `PP_ISSUER_KEY_CHANGED` sampai halaman di-reload.
+ */
+export async function issuePrivacyPassTokens (conversationId: string, count = DEFAULT_BATCH): Promise<number> {
+  try {
+    return await issueOnce(conversationId, count);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PP_ISSUER_KEY_CHANGED') {
+      issuerCache = null;
+      return await issueOnce(conversationId, count);
+    }
+    throw error;
+  }
+}
+
 // --- redemption ---
 
 /**
@@ -223,7 +247,8 @@ export async function issuePrivacyPassTokens (conversationId: string, count = DE
  *
  * Issuance saat stok kosong sengaja dijalankan **di latar**: blind RSA 2048 di
  * perangkat lambat butuh detik, dan sync tidak boleh menunggu itu. Hasilnya
- * dipakai sync berikutnya (TTL 24 jam).
+ * dipakai sync berikutnya (TTL 24 jam). Jalur yang **butuh** bukti sekarang
+ * (server menjawab `PP_PROOF_REQUIRED`) memakai `ensurePrivacyPassProof`.
  */
 export async function takePrivacyPassProof (conversationId: string): Promise<string | undefined> {
   const tokens = freshTokens(await readGrant(conversationId));
@@ -236,6 +261,28 @@ export async function takePrivacyPassProof (conversationId: string): Promise<str
       .finally(() => issuing.delete(conversationId));
   }
   return undefined;
+}
+
+/**
+ * Terbitkan bukti **secara sinkron** — dipakai saat server menolak sync karena
+ * `PP_PROOF_REQUIRED` (mis. `PP_SYNC_REQUIRED=1` baru dinyalakan, stok kosong,
+ * atau perangkat baru login). Tanpa jalur ini, menyalakan gate itu mematikan
+ * discovery grup sampai issuance latar kebetulan selesai.
+ *
+ * Blind RSA 2048 butuh detik, jadi hanya dipanggil sekali per kegagalan sync
+ * (bukan di setiap sync) dan tetap dibatasi `MAX_BATCH`.
+ */
+export async function ensurePrivacyPassProof (conversationId: string): Promise<string | undefined> {
+  const existing = freshTokens(await readGrant(conversationId));
+  if (existing.length > 0) return existing[0];
+
+  try {
+    await issuePrivacyPassTokens(conversationId);
+  } catch (error) {
+    console.warn('[PP] Issuance sinkron gagal:', error);
+    return undefined;
+  }
+  return freshTokens(await readGrant(conversationId))[0];
 }
 
 /**

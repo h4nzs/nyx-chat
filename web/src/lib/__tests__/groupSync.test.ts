@@ -27,6 +27,8 @@ vi.mock('@lib/ohttpClient', () => ({
 
 vi.mock('@lib/privacyPass', () => ({
   takePrivacyPassProof: async () => 'PROOF-1',
+  // [PP aktif] Hanya dipanggil saat server menjawab 403 PP_PROOF_REQUIRED.
+  ensurePrivacyPassProof: async () => 'PROOF-2',
   consumePrivacyPassProof: async (_conversationId: string, proof: string | undefined) => {
     if (proof) consumed.push(proof);
   },
@@ -120,6 +122,34 @@ describe('syncGroupMemberships', () => {
     expect(url).toBe('https://api.test/api/groups/token/refresh');
     expect(init?.credentials).toBe('omit');
     expect(JSON.parse(init?.body as string)).toEqual({ token: 'TOK-1' });
+  });
+
+  it('403 PP_PROOF_REQUIRED → terbitkan bukti baru lalu ulangi SEKALI', async () => {
+    // [PP hidup] `PP_SYNC_REQUIRED=1` + stok bukti kosong: tanpa retry ini,
+    // discovery grup mati sampai issuance latar kebetulan selesai.
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: 'PP_PROOF_REQUIRED' }, 403))
+      .mockResolvedValueOnce(jsonResponse({ conversations: [], memberships: [] }));
+
+    await syncGroupMemberships(['TOK-1'], { conversationId: 'conv-1' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({
+      tokens: ['TOK-1'],
+      proofs: ['PROOF-2'],
+    });
+    expect(consumed).toEqual(['PROOF-2']);
+  });
+
+  it('403 kedua kalinya tetap dilempar (tidak ada loop)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: 'PP_PROOF_REQUIRED' }, 403))
+      .mockResolvedValueOnce(jsonResponse({ error: 'PP_PROOF_REQUIRED' }, 403));
+
+    await expect(syncGroupMemberships(['TOK-1'], { conversationId: 'conv-1' }))
+      .rejects.toThrow('PP_PROOF_REQUIRED');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(consumed).toEqual([]);
   });
 
   it('memecah >200 token jadi batch dan menggeser indeks membership', async () => {

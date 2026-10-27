@@ -106,7 +106,7 @@ The `.well-known` endpoints themselves are documented in `22-backend-reference.m
 | File | Purpose |
 |---|---|
 | `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback: `nyx-api` :9464, sidecar Rust :9465, auditor KT :9466, log KT :9467, log KT v2 :9468, auditor KT v2 :9469, + exporter node/postgres/redis. Blok `alerting:` menunjuk Alertmanager `127.0.0.1:9093` |
-| `ops/prometheus/alerts.yml` | 39 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query`, `nyx-kt-auditor`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
+| `ops/prometheus/alerts.yml` | 40 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query`, `nyx-kt-auditor`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, Privacy Pass ditolak, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
 | `ops/prometheus/tests.yml` | Kasus uji `promtool test rules` — tiap aturan punya kasus MENYALA dan TIDAK MENYALA; dijalankan `scripts/drill-alerts.sh` (job CI `alerts` + versi scrape-nyata di job `e2e`) |
 | `ops/alertmanager/` | `alertmanager.yml` (tanpa rahasia: receiver = relay loopback), `ntfy-relay.mjs` (Alertmanager → ntfy, prioritas dari `severity`, `--self-test`), `ntfy-relay.env.example` (topik + token, 0600 di VPS) |
 | `server/src/utils/transportLatency.ts` | Pembungkus pengukuran ingress jalur WSS (`nyx_wss_ingress_seconds`); dipisah dari `gateway.ts` supaya bagian yang bisa salah (satu observasi per pengerjaan, error tidak dihitung, satuan detik) bisa diuji tanpa soket |

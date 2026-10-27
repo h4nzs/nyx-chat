@@ -136,6 +136,12 @@ model GroupMailboxItem {
   dikirim (termasuk `stale`): bukti adalah anti-abuse, bukan izin baca, jadi
   bukti dari grup yang barisnya sudah stale tetap boleh mengesahkan satu sync
   selama token grup lain masih sah (`PP_SYNC_REQUIRED=1`).
+- **Gate ini dipertahankan** (keputusan maintainer 2026-10-27); cara aman
+  menyalakannya, memverifikasi, merotasi kunci, dan rollback ada di `docs/10`
+  §10.22. Klien menutup cold-start: saat sync dijawab `403 PP_PROOF_REQUIRED`
+  ia menerbitkan satu bukti secara sinkron (`ensurePrivacyPassProof`) lalu
+  mengulang **sekali**, dan memuat ulang issuer bila `keyId` berubah (rotasi
+  kunci tidak lagi membuat klien gagal permanen sampai reload).
 - **Tidak ada** penulisan `userId`/`routingIdentity` di jalur ini; log hanya
   memuat `conversationId`, `epoch`, `result` (metrik event-only).
 - Rate limit per token-hash (Redis bucket) + batas **200 item per request**
@@ -428,6 +434,10 @@ estimasi penulis, bukan hasil pengukuran kami.
   Privacy Pass (blind RSA, RFC 9474) hanya bukti anti-abuse untuk sync anonim —
   **bukan** unforgeability pasca-kuantum, dan unlinkability-nya bergantung pada
   OHTTP yang belum terpisah prosesnya.
+- **Privacy Pass dipakai (bukan dihapus)**: anti-replay `SET {EX,NX}` (F-01),
+  issuer key wajib di produksi, gate `PP_SYNC_REQUIRED=1` opsional dengan alert
+  `NyxPrivacyPassDenied`. Exception PQ-nya tetap di
+  `scripts/pq-only-exceptions.json` (tier B, gate BRaccoon §37.9.5).
 
 ### 37.9.5 Gate untuk membuka kembali (semua wajib)
 

@@ -713,3 +713,24 @@ groups:
         annotations:
           summary: "Guard anti-abuse ({{ $labels.guard }}) OFF di deployment ini"
           description: "Registrasi berjalan tanpa guard/attestation. Ini pilihan sah untuk dev, tapi di produksi berarti tidak ada batas burst per IP/instalasi/ASN. Set ABUSE_REGISTRATION_GUARD=on dan/atau ABUSE_REQUIRE_ATTESTATION=on lalu restart nyx-api; checklist lengkap di docs/10 \u00a710.16."
+
+      # [audit 2026-10-27] `PP_SYNC_REQUIRED=1` adalah gate fail-closed: sync
+      # anonim tanpa bukti sah dijawab 403. Kalau klien tidak bisa menerbitkan
+      # bukti (issuer mati, kunci beda setelah rotasi, atau token tidak pernah
+      # diisi), discovery grup mati sementara API tampak sehat — hanya 403 yang
+      # tidak ada yang melihat. Rasio dipakai (bukan hitungan absolut) supaya
+      # lonjakan sync sah tidak memicu alarm; `clamp_min` menjaga pembagian nol
+      # saat belum ada trafik sama sekali.
+      - alert: NyxPrivacyPassDenied
+        expr: |
+          (
+            sum(rate(nyx_privacy_pass_total{route="sync",result="denied"}[10m]))
+            /
+            clamp_min(sum(rate(nyx_privacy_pass_total{route="sync"}[10m])), 1e-9)
+          ) > 0.2
+        for: 15m
+        labels:
+          severity: high
+        annotations:
+          summary: "Sync anonim ditolak Privacy Pass >20% selama 15 menit"
+          description: "Gate PP_SYNC_REQUIRED menolak sync tanpa bukti sah. Periksa PP_ISSUER_PRIVATE_JWK (harus diset dan stabil antar worker/restart), rotasi kunci terakhir, dan nyx_privacy_pass_total{route=\"issue\"} — klien yang gagal menerbitkan bukti tidak akan pernah lolos. Prosedur di docs/10 \u00a710.22."

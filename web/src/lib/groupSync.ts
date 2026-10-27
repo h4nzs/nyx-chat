@@ -20,7 +20,12 @@ import type { Conversation } from '@nyx/shared';
 import { getApiBaseUrl } from '@lib/api';
 import { CLIENT_VERSION_HEADER, CLIENT_VERSION_VALUE } from '@lib/clientVersion';
 import { ohttpEnabled, ohttpFetch } from '@lib/ohttpClient';
-import { consumePrivacyPassProof, dropPrivacyPassTokens, takePrivacyPassProof } from '@lib/privacyPass';
+import {
+  consumePrivacyPassProof,
+  dropPrivacyPassTokens,
+  ensurePrivacyPassProof,
+  takePrivacyPassProof,
+} from '@lib/privacyPass';
 
 export interface GroupSyncMembership {
   index: number;
@@ -111,17 +116,20 @@ async function refreshDueMemberships (tokens: string[], memberships: GroupSyncMe
   }));
 }
 
-async function syncBatch (
-  tokens: string[],
-  conversationId?: string,
-): Promise<GroupSyncResponse> {
-  const proof = conversationId
-    ? await takePrivacyPassProof(conversationId).catch((error) => {
-        console.warn('[PP] Bukti Privacy Pass tidak tersedia:', error);
-        return undefined;
-      })
-    : undefined;
+/** Server menolak karena tidak ada bukti Privacy Pass yang sah. */
+function isProofRequired (error: unknown): boolean {
+  return error instanceof Error && error.message.includes('PP_PROOF_REQUIRED');
+}
 
+/**
+ * Satu percobaan sync dengan bukti yang sudah dipilih. Bukti hanya dibuang dari
+ * stok lokal kalau server benar-benar menerimanya (2xx).
+ */
+async function syncOnce (
+  tokens: string[],
+  conversationId: string | undefined,
+  proof: string | undefined,
+): Promise<GroupSyncResponse> {
   const body = JSON.stringify({ tokens, ...(proof ? { proofs: [proof] } : {}) });
 
   if (ohttpEnabled()) {
@@ -141,14 +149,18 @@ async function syncBatch (
         return parsed;
       }
       if (result.status === 403 && conversationId) {
-        // Bukti ditolak (mis. issuer berganti setelah restart dev). Buang stok
-        // supaya sync berikutnya meminta token baru, lalu jatuh ke jalur langsung
-        // agar error yang dilihat pemanggil datang dari API, bukan dari amplop.
         const text = new TextDecoder().decode(result.body);
-        if (text.includes('PP_PROOF_REQUIRED')) await dropPrivacyPassTokens(conversationId);
+        if (text.includes('PP_PROOF_REQUIRED')) {
+          // Bukti tidak sah/kedaluwarsa. Buang stok lalu lempar supaya pemanggil
+          // menerbitkan bukti baru dan mengulang SEKALI (jalur langsung tidak
+          // akan menjawab berbeda selama gate `PP_SYNC_REQUIRED=1` menyala).
+          await dropPrivacyPassTokens(conversationId);
+          throw new Error('PP_PROOF_REQUIRED');
+        }
       }
       console.warn(`[OHTTP] Sync dijawab HTTP ${result.status}, memakai jalur langsung`);
     } catch (error) {
+      if (isProofRequired(error)) throw error;
       console.warn('[OHTTP] Sync gagal di dalam amplop, memakai jalur langsung:', error);
     }
   }
@@ -158,6 +170,32 @@ async function syncBatch (
   if (conversationId) await consumePrivacyPassProof(conversationId, proof);
   await refreshDueMemberships(tokens, response.memberships ?? []);
   return response;
+}
+
+async function syncBatch (
+  tokens: string[],
+  conversationId?: string,
+): Promise<GroupSyncResponse> {
+  const proof = conversationId
+    ? await takePrivacyPassProof(conversationId).catch((error) => {
+        console.warn('[PP] Bukti Privacy Pass tidak tersedia:', error);
+        return undefined;
+      })
+    : undefined;
+
+  try {
+    return await syncOnce(tokens, conversationId, proof);
+  } catch (error) {
+    if (!conversationId || !isProofRequired(error)) throw error;
+
+    // [PP aktif] `PP_SYNC_REQUIRED=1`: stok bukti kosong/kedaluwarsa menjawab
+    // 403. Terbitkan satu bukti secara sinkron lalu ulangi SEKALI — tanpa ini
+    // gate itu mematikan discovery untuk klien yang baru login / perangkat baru.
+    await dropPrivacyPassTokens(conversationId);
+    const fresh = await ensurePrivacyPassProof(conversationId);
+    if (!fresh) throw error;
+    return await syncOnce(tokens, conversationId, fresh);
+  }
 }
 
 export async function syncGroupMemberships (

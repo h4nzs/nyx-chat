@@ -517,6 +517,42 @@ tests:
         exp_alerts: []
 
   # ==========================================================================
+  # [audit 2026-10-27] Gate Privacy Pass menolak sync anonim
+  # ==========================================================================
+
+  - name: 'NyxPrivacyPassDenied: menyala saat hampir semua sync ditolak'
+    interval: 30s
+    input_series:
+      # 1 penolakan per scrape (rate 1/30 dtk), tanpa sync yang lolos → rasio 1.
+      - series: 'nyx_privacy_pass_total{route="sync",result="denied"}'
+        values: '0+1x120'
+      - series: 'nyx_privacy_pass_total{route="sync",result="ok"}'
+        values: '0+0x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxPrivacyPassDenied
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxPrivacyPassDenied
+            exp_annotations:
+              summary: 'Sync anonim ditolak Privacy Pass >20% selama 15 menit'
+              description: 'Gate PP_SYNC_REQUIRED menolak sync tanpa bukti sah. Periksa PP_ISSUER_PRIVATE_JWK (harus diset dan stabil antar worker/restart), rotasi kunci terakhir, dan nyx_privacy_pass_total{route="issue"} — klien yang gagal menerbitkan bukti tidak akan pernah lolos. Prosedur di docs/10 §10.22.'
+
+  - name: 'NyxPrivacyPassDenied: tidak menyala saat sebagian besar sync lolos'
+    interval: 30s
+    input_series:
+      # 1 ditolak per 50 sync → rasio 0,02 (di bawah ambang 0,2).
+      - series: 'nyx_privacy_pass_total{route="sync",result="denied"}'
+        values: '0+1x120'
+      - series: 'nyx_privacy_pass_total{route="sync",result="ok"}'
+        values: '0+49x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxPrivacyPassDenied
+        exp_alerts: []
+
+  # ==========================================================================
   # nyx-kt-auditor — auditor pihak ketiga log KT (mode 3)
   #
   # Kasus di sini sengaja memisahkan empat kegagalan yang berbeda artinya:

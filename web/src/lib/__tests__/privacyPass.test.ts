@@ -48,6 +48,7 @@ const {
   PP_SUITE,
   consumePrivacyPassProof,
   dropPrivacyPassTokens,
+  ensurePrivacyPassProof,
   issuePrivacyPassTokens,
   loadPpIssuer,
   ppMessage,
@@ -189,5 +190,52 @@ describe('redemption', () => {
   it('issuance yang gagal tidak melempar ke pemanggil sync', async () => {
     apiMock.mockRejectedValue(new Error('network'));
     expect(await takePrivacyPassProof('conv-1')).toBeUndefined();
+  });
+
+  it('ensurePrivacyPassProof menerbitkan secara sinkron saat stok kosong', async () => {
+    // [PP hidup] Dipakai jalur retry setelah 403 PP_PROOF_REQUIRED.
+    const proof = await ensurePrivacyPassProof('conv-1');
+    expect(proof).toBeTypeOf('string');
+
+    // Panggilan berikutnya memakai stok yang sudah ada (tidak menagih issuer lagi).
+    const callsAfterIssue = apiMock.mock.calls.length;
+    const again = await ensurePrivacyPassProof('conv-1');
+    expect(again).toBe(proof);
+    expect(apiMock.mock.calls.length).toBe(callsAfterIssue);
+  });
+
+  it('issuer yang dirotasi: cache dimuat ulang sekali, bukan gagal permanen', async () => {
+    // Skenario operator: `PP_ISSUER_PRIVATE_JWK` diganti, klien masih memegang
+    // kunci lama di cache. Tanpa penanganan ini setiap issuance gagal
+    // PP_ISSUER_KEY_CHANGED sampai halaman di-reload.
+    const rotated = await RSABSSA.SHA384.generateKey({ modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) });
+    const rotatedJwk = (await crypto.subtle.exportKey('jwk', rotated.publicKey)) as JsonWebKey;
+    let issuerReads = 0;
+
+    apiMock.mockImplementation(async (path: string, options?: { body?: string }) => {
+      if (path === '/api/groups/pp/issuer') {
+        issuerReads += 1;
+        return issuerReads === 1
+          ? { suite: PP_SUITE, keyId: 'old-key', publicJwk }
+          : { suite: PP_SUITE, keyId: 'rotated-key', publicJwk: rotatedJwk };
+      }
+      if (path === '/api/groups/pp/issue') {
+        const body = JSON.parse(options?.body ?? '{}') as { blinded?: string[] };
+        const signatures = await Promise.all(
+          (body.blinded ?? []).map(async (blinded) => base64url(await suite.blindSign(rotated.privateKey, bytes(blinded)))),
+        );
+        // Server menandatangani dengan kunci baru → keyId berbeda dari cache.
+        return { signatures, suite: PP_SUITE, keyId: 'rotated-key' };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+
+    expect(await issuePrivacyPassTokens('conv-1', 1)).toBe(1);
+
+    const stored = kv.get('nyx_pp_tokens') as Record<string, string>;
+    const plain = JSON.parse(String(stored['conv-1']).slice(5)) as { tokens: string[] };
+    const raw = bytes(plain.tokens[0]!);
+    expect(await suite.verify(rotated.publicKey, raw.subarray(32), await ppMessage('conv-1', raw.subarray(0, 32)))).toBe(true);
+    expect(issuerReads).toBe(2);
   });
 }, 40_000);
