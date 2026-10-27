@@ -60,6 +60,11 @@ function makeStore(seed: Record<string, string> = {}): LinkingStore & { data: Ma
       }
       return removed;
     },
+    async getDel(key) {
+      const value = data.get(key) ?? null;
+      data.delete(key);
+      return value;
+    },
   };
 }
 
@@ -111,6 +116,20 @@ test('token QR: read tidak membakar, consume membakar (sekali pakai)', async () 
   assert.deepEqual(consumed, { userId: 'user-1', deviceId: 'device-old' });
   assert.equal(store.data.has(linkTokenKey(TOKEN)), false, 'consume wajib membakar token');
   assert.equal(await consumeLinkToken(store, sealer, TOKEN), null, 'token yang sudah dipakai tidak sah');
+});
+
+test('token QR: dua claim berbarengan — hanya satu yang mendapat token (GETDEL)', async () => {
+  const store = seededTokenStore();
+
+  // Tanpa GETDEL, GET+DEL berbarengan bisa sama-sama lolos. Sekarang hanya satu
+  // pemanggil yang menerima nilai; sisanya null.
+  const results = await Promise.all([
+    consumeLinkToken(store, sealer, TOKEN),
+    consumeLinkToken(store, sealer, TOKEN),
+  ]);
+  const accepted = results.filter((owner) => owner !== null);
+  assert.equal(accepted.length, 1, 'satu token QR = satu claim');
+  assert.equal(store.data.has(linkTokenKey(TOKEN)), false);
 });
 
 test('nilai di Redis ter-seal: userId & nama perangkat tidak terbaca dari store', async () => {

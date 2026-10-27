@@ -11,6 +11,7 @@ import { db } from '@lib/db';
 import { decryptValueAtRest, encryptValueAtRest } from '@lib/keychainDb';
 import {
   acceptPendingPeerIdentity,
+  listKtUnavailablePeers,
   listPendingPeerIdentityChanges,
   type IdentityChangeSource,
 } from '@lib/peerIdentityTrust';
@@ -54,6 +55,12 @@ type VerificationState = {
   verifiedStatus: Record<string, boolean>;
   /** conversationId → perubahan kunci yang belum diterima (hard gate kirim). */
   identityAlerts: Record<string, IdentityAlert>;
+  /**
+   * [audit F-09] conversationId → pemeriksaan log KT peer TERAKHIR gagal
+   * (`unavailable`). Bukan ancaman dan bukan gate kirim: hanya indikator bahwa
+   * kunci peer belum dibuktikan log publik (TOFU apa adanya).
+   */
+  identityKtUnavailable: Record<string, boolean>;
   loadInitialStatus: (conversations: Conversation[]) => Promise<void>;
   setVerified: (conversationId: string, peerPublicKey: string, peerUserId?: string) => void;
   unsetVerified: (conversationId: string) => void;
@@ -133,6 +140,29 @@ async function persistStoredVerifications(map: Record<string, string>): Promise<
   }
 }
 
+/**
+ * [audit F-09] Percakapan 1:1 yang peer-nya punya verdict KT `unavailable`.
+ * Satu pembacaan blob untuk semua peer, bukan satu per percakapan.
+ */
+async function collectKtUnavailable(conversations: Conversation[]): Promise<Record<string, boolean>> {
+  const unavailable: Record<string, boolean> = {};
+  try {
+    const peers = await listKtUnavailablePeers();
+    if (peers.length === 0) return unavailable;
+    const myId = useAuthStore.getState().user?.id;
+    const byPeer = new Set(peers.map(entry => entry.peerId));
+    for (const convo of conversations) {
+      if (convo.isGroup) continue;
+      const peer = convo.participants.find(p => getParticipantUserId(p) !== myId);
+      if (!peer) continue;
+      if (byPeer.has(String(getParticipantUserId(peer)))) unavailable[convo.id] = true;
+    }
+  } catch (e) {
+    console.warn('[Verification] Gagal memuat status log KT:', e);
+  }
+  return unavailable;
+}
+
 /** Alert perubahan kunci untuk percakapan yang ada di daftar (1:1 saja). */
 async function collectIdentityAlerts(conversations: Conversation[]): Promise<Record<string, IdentityAlert>> {
   const alerts: Record<string, IdentityAlert> = {};
@@ -157,6 +187,7 @@ async function collectIdentityAlerts(conversations: Conversation[]): Promise<Rec
 export const useVerificationStore = create<VerificationState>((set) => ({
   verifiedStatus: {},
   identityAlerts: {},
+  identityKtUnavailable: {},
 
   loadInitialStatus: async (conversations) => {
     const initialStatus: Record<string, boolean> = {};
@@ -189,7 +220,8 @@ export const useVerificationStore = create<VerificationState>((set) => ({
     if (migrated) await persistStoredVerifications(stored);
 
     const identityAlerts = await collectIdentityAlerts(conversations);
-    set({ verifiedStatus: initialStatus, identityAlerts });
+    const identityKtUnavailable = await collectKtUnavailable(conversations);
+    set({ verifiedStatus: initialStatus, identityAlerts, identityKtUnavailable });
   },
 
   setVerified: (conversationId, fingerprint, peerUserId) => {
@@ -198,6 +230,11 @@ export const useVerificationStore = create<VerificationState>((set) => ({
       verifiedStatus: { ...state.verifiedStatus, [conversationId]: true },
       identityAlerts: Object.fromEntries(
         Object.entries(state.identityAlerts).filter(([id]) => id !== conversationId)
+      ),
+      // Verifikasi manual safety number menggantikan indikator "belum terbukti
+      // log": user sudah membandingkan kunci lewat kanal lain.
+      identityKtUnavailable: Object.fromEntries(
+        Object.entries(state.identityKtUnavailable).filter(([id]) => id !== conversationId)
       ),
     }));
     void (async () => {

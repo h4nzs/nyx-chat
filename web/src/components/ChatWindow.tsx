@@ -53,6 +53,29 @@ const KeyRotationBanner = () => {
   );
 };
 
+/**
+ * [audit F-09] Indikator "kunci belum dibuktikan log".
+ *
+ * Pemeriksaan Key Transparency bisa gagal (log mati/tak terjangkau, WASM menolak,
+ * atau username peer belum bisa diturunkan). Dulu kegagalan itu = tanpa jejak,
+ * sehingga user mengira kunci sudah dibuktikan padahal belum. Banner ini TIDAK
+ * memblokir kirim — hanya jujur soal statusnya (TOFU apa adanya).
+ */
+const KtUnavailableBanner = () => {
+  const { t } = useTranslation(['chat']);
+  return (
+    <div className="bg-amber-500/10 border-y border-amber-500/20 px-4 py-3 text-amber-600 dark:text-amber-400">
+      <div className="flex items-center gap-3">
+        <FiShield className="flex-shrink-0" size={18} />
+        <div className="font-mono text-xs flex-1">
+          <p className="font-bold uppercase tracking-wider">{t('banners.kt_unavailable')}</p>
+          <p className="opacity-80">{t('banners.kt_unavailable_desc')}</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // [docs/29 §7.2] Hard gate identitas: perubahan kunci peer yang belum diterima
 // user memblokir pengiriman sampai user memverifikasi safety number baru.
 const IdentityChangeBanner = ({
@@ -327,6 +350,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   // [docs/29 §7.2] Perubahan kunci identitas peer yang belum diterima user:
   // banner + hard gate kirim (composer dinonaktifkan; lihat MessageInput).
   const identityAlert = useVerificationStore(s => s.identityAlerts[id]);
+  // [audit F-09] Peer ini pernah gagal diperiksa di log KT (informasi, bukan gate).
+  const ktUnavailable = useVerificationStore(s => s.identityKtUnavailable[id]);
   const gatePeerId = conversation && !conversation.isGroup
     ? conversation.participants?.find(p => getParticipantUserId(p) !== meId)
     : undefined;
@@ -657,6 +682,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               {identityAlert && (
                 <IdentityChangeBanner peerId={gatePeerUserId} source={identityAlert.source} />
               )}
+              {ktUnavailable && !identityAlert && <KtUnavailableBanner />}
               
               <MessageInput
                 onSend={handleSendMessage}

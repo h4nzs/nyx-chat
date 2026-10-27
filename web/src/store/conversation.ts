@@ -439,7 +439,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       });
 
       set({ conversations: sortConversations(mergedConversations, useAuthStore.getState().user?.id) });
-      useVerificationStore.getState().loadInitialStatus(conversations);
+      useVerificationStore.getState().loadInitialStatus(mergedConversations);
 
       // [BUGFIX 2026-10-18] Segarkan profil peer 1:1 dari pengirim pesan terakhir.
       // Server tidak mengirim roster participant (Opaque Mailbox), jadi snapshot

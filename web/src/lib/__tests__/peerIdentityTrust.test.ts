@@ -71,6 +71,7 @@ import {
     hasPendingPeerIdentityChange,
     listPendingPeerIdentityChanges,
     observePeerIdentityKey,
+    onKtVerdictChange,
 } from '../peerIdentityTrust';
 
 const PEER = 'peer-1';
@@ -282,5 +283,37 @@ describe('pin identitas peer vs log Key Transparency', () => {
         const record = await getPeerIdentityTrust(PEER);
         expect(record?.trustedKey).toBe(KEY_A);
         expect(await hasPendingPeerIdentityChange(PEER)).toBe(false);
+    });
+});
+
+describe('notifikasi verdict KT', () => {
+    it('verdict baru dan perubahan verdict memicu listener; verdict sama tidak', async () => {
+        const seen: string[] = [];
+        const unsubscribe = onKtVerdictChange((peerId) => seen.push(peerId));
+        try {
+            const unavailable = vi.fn(async () => ({ status: 'unavailable' }));
+            await observePeerIdentityKey(PEER, KEY_A, { username: 'alice', checkKeyTransparency: unavailable });
+            expect(seen).toEqual([PEER]);
+
+            await observePeerIdentityKey(PEER, KEY_A, { username: 'alice', checkKeyTransparency: unavailable });
+            expect(seen).toEqual([PEER]);
+
+            const confirmed = vi.fn(async () => ({ status: 'confirmed', keyVersion: 1 }));
+            await observePeerIdentityKey(PEER, KEY_A, { username: 'alice', checkKeyTransparency: confirmed });
+            expect(seen).toEqual([PEER, PEER]);
+        } finally {
+            unsubscribe();
+        }
+    });
+
+    it('unsubscribe menghentikan notifikasi', async () => {
+        const seen: string[] = [];
+        const unsubscribe = onKtVerdictChange((peerId) => seen.push(peerId));
+        unsubscribe();
+
+        const confirmed = vi.fn(async () => ({ status: 'confirmed', keyVersion: 1 }));
+        await observePeerIdentityKey(PEER, KEY_A, { username: 'alice', checkKeyTransparency: confirmed });
+
+        expect(seen).toEqual([]);
     });
 });

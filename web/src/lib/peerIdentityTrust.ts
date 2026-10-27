@@ -40,6 +40,30 @@ import { KT_CONFIRMATION_TTL_MS } from './ktBundleProof';
 const KV_KEY = 'nyx_peer_identity_v1';
 const LEGACY_PREFIX = 'ID_PUB_';
 
+/**
+ * [audit F-09] Verdict KT ditulis di modul ini, tetapi banner membaca state
+ * store verifikasi. Tanpa notifikasi, perubahan (unavailable → confirmed atau
+ * sebaliknya) baru terlihat pada sync percakapan berikutnya.
+ */
+type KtVerdictListener = (peerId: string) => void;
+const ktVerdictListeners = new Set<KtVerdictListener>();
+
+/** Daftarkan listener; kembalikan fungsi unsubscribe. */
+export function onKtVerdictChange(listener: KtVerdictListener): () => void {
+  ktVerdictListeners.add(listener);
+  return () => ktVerdictListeners.delete(listener);
+}
+
+function emitKtVerdict(peerId: string): void {
+  for (const listener of ktVerdictListeners) {
+    try {
+      listener(peerId);
+    } catch (error) {
+      console.warn('[PeerIdentityTrust] Listener verdict KT gagal:', error);
+    }
+  }
+}
+
 export interface PeerIdentityTrust {
   /** Kunci identitas yang dipercaya (pin aktif). */
   trustedKey: string;
@@ -231,6 +255,7 @@ export async function observePeerIdentityKey(
         };
         await saveMap(map);
       });
+      emitKtVerdict(peerId);
       return { status: 'changed', trustedKey: identityKey, pendingKey: identityKey, source: 'kt' };
     }
 
@@ -243,9 +268,14 @@ export async function observePeerIdentityKey(
         ...(kt.verdict === 'confirmed'
           ? { ktVerifiedAt: now, ktKeyVersion: kt.keyVersion, ktCheckedAt: now }
           : {}),
+        // [audit F-09] Peer baru yang pemeriksaan log-nya gagal harus membawa
+        // jejaknya, kalau tidak indikator "belum terbukti" hilang justru pada
+        // kontak pertama (kasus yang paling perlu terlihat).
+        ...(kt.verdict === 'unavailable' ? { ktLastVerdict: 'unavailable', ktCheckedAt: now } : {}),
       };
       await saveMap(map);
     });
+    if (kt.verdict === 'confirmed' || kt.verdict === 'unavailable') emitKtVerdict(peerId);
     return { status: 'new' };
   }
 
@@ -339,8 +369,12 @@ async function checkLog(input: {
     };
   } catch (error) {
     // Verifikasi tidak boleh memblokir pengiriman karena bug lokal.
+    // [audit F-09] Dulu hasilnya `null` — sama dengan "tidak diperiksa", jadi
+    // log KT yang mati/tak terjangkau tidak pernah terlihat user. Sekarang
+    // dicatat sebagai `unavailable`: pin tetap TOFU, pengiriman tidak diblokir,
+    // tetapi banner memberi tahu bahwa kunci ini BELUM dibuktikan log.
     console.warn('[PeerIdentityTrust] Pemeriksaan log KT gagal:', error);
-    return { verdict: null };
+    return { verdict: 'unavailable' };
   }
 }
 
@@ -375,6 +409,7 @@ async function rememberVerdict(
     // Verdict non-konfirmasi yang sama berulang tidak menambah apa pun — hindari
     // menulis ulang blob hanya karena satu pesan masuk.
     if (rec.ktLastVerdict === verdict && verdict !== 'confirmed') return;
+    const changed = rec.ktLastVerdict !== verdict;
     rec.ktLastVerdict = verdict;
     rec.ktCheckedAt = now;
     if (verdict === 'confirmed') {
@@ -382,6 +417,7 @@ async function rememberVerdict(
       if (keyVersion !== undefined) rec.ktKeyVersion = keyVersion;
     }
     await saveMap(map);
+    if (changed) emitKtVerdict(peerId);
   });
 }
 
@@ -411,6 +447,18 @@ export async function listPendingPeerIdentityChanges(): Promise<Array<{ peerId: 
       // [docs/34 §34.6 poin 1] Pertentangan dengan log KT lebih kuat daripada TOFU.
       source: rec.ktMismatch ? ('kt' as const) : ('tofu' as const),
     }));
+}
+
+/**
+ * [audit F-09] Peer yang pemeriksaan log TERAKHIR-nya gagal (`unavailable`),
+ * bukan `mismatch`. Dibaca sekali dari satu blob, bukan per peer, karena
+ * pemanggilnya adalah pemuatan daftar percakapan.
+ */
+export async function listKtUnavailablePeers(): Promise<Array<{ peerId: string; checkedAt: number }>> {
+  const map = await loadMap();
+  return Object.entries(map)
+    .filter(([, rec]) => rec.ktLastVerdict === 'unavailable')
+    .map(([peerId, rec]) => ({ peerId, checkedAt: rec.ktCheckedAt ?? 0 }));
 }
 
 /**

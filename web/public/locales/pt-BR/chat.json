@@ -81,7 +81,9 @@
     "identity_kt_mismatch": "Alerta de Segurança: Chave Contraria o Registro Público",
     "identity_kt_mismatch_desc": "A chave enviada por este servidor não é a registrada no registro público de Key Transparency. Isso pode indicar um ataque em andamento. O envio fica pausado até você verificar o número de segurança com o contato por outro canal.",
     "kt_key_rotation": "Key Transparency: uma rotação de chave de contato foi publicada no registro.",
-    "kt_split_view": "Key Transparency: dois clientes viram cabeças de árvore diferentes para o mesmo tamanho de árvore. Isso nunca deveria acontecer — verifique seus contatos antes de confiar nas chaves deles."
+    "kt_split_view": "Key Transparency: dois clientes viram cabeças de árvore diferentes para o mesmo tamanho de árvore. Isso nunca deveria acontecer — verifique seus contatos antes de confiar nas chaves deles.",
+    "kt_unavailable": "Key Transparency indisponível para este contato",
+    "kt_unavailable_desc": "Não foi possível consultar o registro público agora, então a chave deste contato é confiada apenas no primeiro uso. Verifique o número de segurança por outro canal se precisar de prova."
   },
   "status": {
     "signal_lost": "Sinal Perdido",

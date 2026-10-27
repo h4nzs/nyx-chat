@@ -50,6 +50,8 @@ export interface LinkingStore {
   get(key: string): Promise<string | null>;
   setEx(key: string, ttlSeconds: number, value: string): Promise<unknown>;
   del(...keys: string[]): Promise<unknown>;
+  /** [audit F-11] `GETDEL`: baca + hapus dalam satu perintah atomik. */
+  getDel(key: string): Promise<string | null>;
 }
 
 /** Seal/open at-rest dengan kunci server (lihat utils/atRestSecrets). */
@@ -155,16 +157,24 @@ export async function readLinkToken(
   return parseTokenOwner(await sealer.open(sealed));
 }
 
-/** Baca + hapus: token QR tidak boleh dipakai dua kali (race: GET lalu DEL). */
+/**
+ * Baca + hapus: token QR tidak boleh dipakai dua kali.
+ *
+ * [audit F-11] Dulu `GET` lalu `DEL`: dua request claim yang berbarengan bisa
+ * sama-sama membaca token sebelum salah satunya menghapus, sehingga satu QR
+ * menghasilkan dua `link_pending` (dan perangkat lama menerima dua
+ * `auth:linking_request`). `GETDEL` membuat baca-bakar itu satu operasi atomik;
+ * request kedua selalu mendapat `null`.
+ */
 export async function consumeLinkToken(
   store: LinkingStore,
   sealer: LinkingSealer,
   token: string
 ): Promise<LinkTokenOwner | null> {
-  const owner = await readLinkToken(store, sealer, token);
-  if (!owner) return null;
-  await store.del(linkTokenKey(token));
-  return owner;
+  if (!LINK_TOKEN_PATTERN.test(token)) return null;
+  const sealed = await store.getDel(linkTokenKey(token));
+  if (!sealed) return null;
+  return parseTokenOwner(await sealer.open(sealed));
 }
 
 export async function createPendingLink(

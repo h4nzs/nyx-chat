@@ -89,6 +89,8 @@ import { preloadOnIdle } from '@utils/modalPreload';
 import i18n from './i18n';
 import { useCallStore } from './store/callStore';
 import { useConversationStore } from './store/conversation';
+import { useVerificationStore } from './store/verification';
+import { onKtVerdictChange } from './lib/peerIdentityTrust';
 import { useSystemStore } from './store/systemStore';
 import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 import { useShallow } from 'zustand/react/shallow';
@@ -100,6 +102,15 @@ import { initSocketListeners } from './lib/socketListeners';
 // [LINT 2026-10-11] Baris `transportClient;` dihapus: pernyataan kosong tanpa
 // efek (modul sudah di-import di atas, singleton dibuat saat import).
 initSocketListeners();
+
+// Verdict KT bisa berubah saat pesan berjalan (bukan hanya saat sync daftar
+// percakapan). Muat ulang status banner dari roster yang sudah ada.
+onKtVerdictChange(() => {
+  const conversations = useConversationStore.getState().conversations;
+  if (conversations.length > 0) {
+    void useVerificationStore.getState().loadInitialStatus(conversations);
+  }
+});
 
 // --- Components ---
 
