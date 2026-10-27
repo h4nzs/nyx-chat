@@ -302,8 +302,13 @@ describe('paritas jalur WT ↔ WSS (audit 2026-10-18)', () => {
     expect(client).toMatch(/eventName === 'webrtc:secure_signal'/);
     expect(client).toMatch(/routeOpCode\(TransportOpCode\.WEBRTC_SIGNAL, this\.encodeJson\(data\)\)/);
     // Server: gateway mendaftarkan event masuk DAN memetakan opcode keluar.
-    expect(gateway).toMatch(/guardedOn\('webrtc:secure_signal'/);
-    expect(gateway).toMatch(/sock\.emit\('webrtc:secure_signal', json\)/);
+    // [D6 2026-10-27] Registrasi/pemetaan kini data-driven
+    // (`wssInboundTable()` / `wssDownstreamRoute()`), jadi yang dicocokkan
+    // adalah entri tabel dan cabang routing itu — perilakunya sendiri dikunci
+    // `server/tests/gatewayParity.test.ts`. Uji di sini menjaga sisi KONTRAK:
+    // nama event yang sama dipakai klien dan server, bukan noop.
+    expect(gateway).toMatch(/\{ event: 'webrtc:secure_signal', kind: 'webrtc' \}/);
+    expect(gateway).toMatch(/event: 'webrtc:secure_signal', payload: json/);
   });
 
   it('KICK di jalur WT: sidecar mengirim frame DULU, klien memetakannya seperti WSS', () => {
@@ -320,7 +325,9 @@ describe('paritas jalur WT ↔ WSS (audit 2026-10-18)', () => {
     expect(client).toMatch(/this\.emit\('force_logout', disposition\.payload\)/);
     expect(client).toMatch(/this\.emit\('auth:banned', \{ reason: disposition\.reason \}\)/);
     // Gateway WSS memakai event yang sama (kontrak tidak boleh menyimpang).
-    expect(gateway).toMatch(/case TransportOpCode\.KICK:[\s\S]{0,120}sock\.emit\('force_logout', json\)/);
+    // [D6] Cabang KICK ada di `wssDownstreamRoute()`; bentuk hasilnya dikunci
+    // sebagai perilaku di server/tests/gatewayParity.test.ts.
+    expect(gateway).toMatch(/case TransportOpCode\.KICK:[\s\S]{0,40}event: 'force_logout'/);
   });
 
   it('rate limit jalur data tidak dipasang di klien/gateway lokal', () => {
