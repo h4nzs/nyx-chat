@@ -94,3 +94,16 @@ export function pickChainState<T extends ChainStateRef>(
   }
   return null;
 }
+
+
+/**
+ * Apakah chainId yang datang adalah era yang SUDAH diarsipkan? Replay offline
+ * (SYSTEM GROUP_KEY tersimpan) untuk era lama tidak boleh menimpa era aktif
+ * yang lebih baru. `archivedAt` hanya ada pada snapshot arsip.
+ */
+export function isArchivedEraReplay(
+  states: (ChainStateRef & { chainId?: string })[],
+  chainId: string
+): boolean {
+  return states.some(s => s.chainId === chainId && !!s.archivedAt);
+}

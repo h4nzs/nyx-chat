@@ -108,7 +108,9 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       // perlu menunggu pesan berikutnya untuk menerima sender key.
       try {
         const { rotateGroupKey } = await import('@utils/crypto');
-        await rotateGroupKey(conversationId, 'membership_change', true);
+        // Anggota baru belum tahu delivery token barunya (itu ada di metadata
+        // yang belum bisa ia dekripsi), jadi kunci era baru WAJIB lewat realtime.
+        await rotateGroupKey(conversationId, 'membership_change', true, undefined, new Set(selectedUserIds));
       } catch (rotErr) {
         console.warn('[T1] Active rotation after add failed (will retry lazily):', rotErr);
       }

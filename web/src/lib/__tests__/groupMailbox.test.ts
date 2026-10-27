@@ -131,6 +131,21 @@ describe('postGroupKeyEnvelopes', () => {
     });
   });
 
+  it('penerima yang dipaksa lewat realtime tidak dialamatkan/dianggap terkirim', async () => {
+    deliveryTokens.value = { userA: 'token-a', userB: 'token-b' };
+    apiMock.mockResolvedValue({ written: 1 });
+
+    const delivered = await postGroupKeyEnvelopes('conv-1', [
+      { userId: 'userA', key: 'sealed-a' },
+      { userId: 'userB', key: 'sealed-b' },
+    ], new Set(['userB']));
+
+    expect([...delivered]).toEqual(['userA']);
+    const body = JSON.parse(apiMock.mock.calls[0]![1].body as string) as { items: Array<{ tag?: string }> };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]!.tag).toBe(await deriveMailboxTag('token-a'));
+  });
+
   it('tidak mengirim apa pun tanpa peta token / group token', async () => {
     deliveryTokens.value = undefined;
     expect((await postGroupKeyEnvelopes('conv-1', [{ userId: 'userA', key: 'k' }])).size).toBe(0);

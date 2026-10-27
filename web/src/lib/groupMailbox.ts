@@ -148,7 +148,10 @@ export interface KeyEnvelopeInput {
  */
 export async function postGroupKeyEnvelopes (
   conversationId: string,
-  envelopes: readonly KeyEnvelopeInput[]
+  envelopes: readonly KeyEnvelopeInput[],
+  // Penerima yang token barunya belum mungkin diketahui (mis. anggota yang
+  // baru di-re-add): caller mengirimnya lewat jalur realtime, bukan mailbox.
+  skipUserIds?: ReadonlySet<string>
 ): Promise<Set<string>> {
   const delivered = new Set<string>();
   if (envelopes.length === 0) return delivered;
@@ -160,6 +163,7 @@ export async function postGroupKeyEnvelopes (
   const items: MailboxPostItem[] = [];
   for (const envelope of envelopes) {
     if (!envelope.userId || !envelope.key) continue;
+    if (skipUserIds?.has(envelope.userId)) continue;
     const tag = await deriveMailboxTag(tokenMap[envelope.userId]);
     if (!tag) continue;
     const payload = encodeMailboxPayload({

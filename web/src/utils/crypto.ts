@@ -42,7 +42,7 @@ export {
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import { isSameEraDistribution } from '@lib/groupEra';
+import { isSameEraDistribution, isArchivedEraReplay } from '@lib/groupEra';
 // [docs/35 Fase 1.4] Gerbang X3DH v2 (X-Wing murni + tanda tangan ML-DSA):
 // hanya aktif bila fitur dinyalakan DAN bundle peer memuat `signingKeyV2`.
 import { resolvePqV2Enabled } from '@lib/pqCapability';
@@ -108,6 +108,7 @@ import {
   saveGroupSenderState,
   getGroupReceiverState,
   findGroupReceiverState,
+  listGroupReceiverStates,
   saveGroupReceiverState,
   // [AUDIT FIX 2026-10-05] deleteGroupStates TIDAK lagi dipakai — rotasi kini
   // hanya mengganti sender state (receiver states diarsip, bukan dihapus).
@@ -154,7 +155,7 @@ export async function encryptGroupMetadata(
   // [T1 FIX 2026-09-28] Pseudonym eksplisit untuk distribusi kunci yang dipicu
   // di dalam sini (ensureGroupSession) — penting saat createGroup, peta baru
   // dibuat SEBELUM store terisi (lihat ensureGroupSession).
-  opts?: { pseudonym?: string }
+  opts?: { pseudonym?: string; forcePairwiseUserIds?: ReadonlySet<string> }
 ): Promise<string> {
   // [T1 ROTATION] Regenerasi peta pseudonym SEKALI di sini — single choke point
   // untuk SEMUA penulisan metadata (createGroup, edit info/avatar, rotasi
@@ -296,6 +297,16 @@ export async function decryptGroupMetadata(
         // kandidat aman (pola libsignal: state lama tetap dipakai untuk pesan
         // era lama).
         type MetadataCandidate = { id: string; metadataKey?: string; signingKey?: string; signingKeyV2?: string };
+        // Metadata tiba sebelum distribusi kunci (atau kunci era barunya cuma
+        // nyangkut di mailbox yang tokennya belum kita tahu) → minta sekali per
+        // era lewat jalur realtime; fulfillment-nya memakai forcePairwise.
+        const requestMetadataEra = () => {
+            if (typeof wrapper.senderDeviceKey !== 'string' || typeof wrapper.chainId !== 'string') return;
+            const ref = `${conversationId}_meta_${wrapper.chainId}`;
+            if (unknownEraKeyRequested.has(ref)) return;
+            unknownEraKeyRequested.add(ref);
+            requestGroupKeyWithTimeout(conversationId, 0, undefined, wrapper.senderDeviceKey);
+        };
         const candidates: MetadataCandidate[] = [];
         const addCandidate = (s: MetadataCandidate | null | undefined) => {
             if (!s || !s.metadataKey) return;
@@ -315,6 +326,7 @@ export async function decryptGroupMetadata(
         }
         if (candidates.length === 0) {
             console.warn('Group metadata v2: metadataKey era belum tersedia (menunggu distribusi)', wrapper.chainId);
+            requestMetadataEra();
             return null;
         }
 
@@ -370,6 +382,7 @@ export async function decryptGroupMetadata(
         }
 
         console.warn('Group metadata v2: tidak ada state era yang cocok (metadata ditolak)', wrapper.chainId);
+        requestMetadataEra();
         return null;
     }
 
@@ -1002,7 +1015,7 @@ export async function ensureGroupSession(
   // myId bocorkan userId pengirim ke server pada GROUP_KEY pertama. Caller
   // yang pegang peta (createGroup → encryptGroupMetadata) menyuntikkan
   // pseudonym-nya di sini; jalur lain tetap fallback ke store.
-  opts?: { pseudonym?: string }
+  opts?: { pseudonym?: string; forcePairwiseUserIds?: ReadonlySet<string> }
 ): Promise<Record<string, unknown>[] | null> {
   const cacheKey = `${conversationId}:${forceRotate}`;
   const pending = pendingGroupSessionPromises.get(cacheKey);
@@ -1162,7 +1175,10 @@ export async function ensureGroupSession(
           initialCK: senderKeyB64,
           chainId: chainIdB64,
           metadataKey: metadataKeyB64
-      }, targetsForDistribution, { senderIdOverride: opts?.pseudonym });
+      }, targetsForDistribution, {
+          senderIdOverride: opts?.pseudonym,
+          forcePairwiseUserIds: opts?.forcePairwiseUserIds
+      });
 
       // Save self-receiver state so sealed sender group messages from self can
       // be routed by chainId — [REWRITE] id device-keyed (konsisten dengan
@@ -1247,7 +1263,7 @@ export async function sendGroupSenderKeyDistribution(
   senderState: { CK: string; N: number; initialCK?: string; chainId?: string; metadataKey?: string },
   targets: Array<{ userId: string; deviceId?: string; identityKey: string; pqIdentityKey: string }>,
   // [T1] override pseudonym untuk createGroup (peta belum ada di store).
-  opts: { senderIdOverride?: string } = {}
+  opts: { senderIdOverride?: string; forcePairwiseUserIds?: ReadonlySet<string> } = {}
 ): Promise<Array<Record<string, unknown>>> {
   if (!targets.length) return [];
   const sodium = await getSodiumLib();
@@ -1347,18 +1363,19 @@ export async function sendGroupSenderKeyDistribution(
             senderSigningKey: entry.senderSigningKey,
             senderSigningKeyV2: entry.senderSigningKeyV2,
           };
-        })
+        }),
+        opts.forcePairwiseUserIds
       );
     } catch (e) {
       console.warn('[Distribution] Mailbox tidak tersedia, memakai jalur lama:', e);
     }
 
-    const remaining = delivered && delivered.size > 0
-      ? distributionKeys.filter((dk) => {
-          const userId = (dk as { userId?: string }).userId;
-          return !userId || !delivered!.has(userId);
-        })
-      : distributionKeys;
+    const remaining = distributionKeys.filter((dk) => {
+      const userId = (dk as { userId?: string }).userId;
+      if (!userId) return true;
+      if (opts.forcePairwiseUserIds?.has(userId)) return true;
+      return !delivered?.has(userId);
+    });
     if (remaining.length > 0) {
       await sendGroupKeyDistributionPairwise(conversationId, remaining);
     }
@@ -1556,7 +1573,7 @@ export async function handleGroupKeyDistribution(
     // [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA pengirim dari envelope (opsional;
     // ada bila pengirim v2 aktif).
     senderSigningKeyV2?: string
-): Promise<void> {
+): Promise<{ chainId: string; replay: boolean } | undefined> {
   const { privateKey: classicalPrivateKey } = await getMyEncryptionKeyPair();
   const { privateKey: pqPrivateKey } = await useAuthStore.getState().getPqEncryptionKeyPair();
   const sodium = await getSodiumLib();
@@ -1596,7 +1613,7 @@ export async function handleGroupKeyDistribution(
       // [R2 2026-10-15] Penolakan harus TERLIHAT, bukan senyap: pengguna melihat
       // pesan sistem + toast, bukan grup yang diam-diam kehilangan pesan.
       await reportLegacyGroupKeyIgnored(conversationId, senderKeyBytes.length, senderKeyBytes[0] ?? 0);
-      return;
+      return undefined;
   }
   const b64u = (bytes: Uint8Array) => sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING);
   const envelopeChainIdB64 = b64u(envelope.chainId);
@@ -1673,7 +1690,16 @@ export async function handleGroupKeyDistribution(
       if (senderKeyIdB64 && !existingReceiverState.senderKeyId) {
           await saveGroupReceiverState({ ...existingReceiverState, senderKeyId: senderKeyIdB64 });
       }
-      return;
+      return { chainId: envelopeChainIdB64, replay: true };
+  }
+
+  // Replay era yang SUDAH diarsipkan tidak boleh menimpa era aktif lebih baru.
+  const archivedEraReplay = isArchivedEraReplay(
+      await listGroupReceiverStates(conversationId),
+      envelopeChainIdB64
+  );
+  if (archivedEraReplay) {
+      return { chainId: envelopeChainIdB64, replay: true };
   }
 
   // Era BARU: arsipkan snapshot state lama (multi-era ala libsignal
@@ -1718,6 +1744,7 @@ export async function handleGroupKeyDistribution(
   // Each group member must generate their own sender key via ensureGroupSession
   // when they first send a message. Sharing the same CK between sender and receiver
   // causes keyId collision and signing key resolution failure.
+  return { chainId: envelopeChainIdB64, replay: false };
 }
 export async function rotateGroupKey(
   conversationId: string,
@@ -1726,7 +1753,8 @@ export async function rotateGroupKey(
   // AKTIF — peta baru + metadata re-encrypt + distribusi kunci baru SEKARANG,
   // bukan menunggu kirim pesan berikutnya). 'false' = periodic (lazy).
   isActive: boolean = false,
-  newAuthSecret?: string
+  newAuthSecret?: string,
+  forcePairwiseUserIds?: ReadonlySet<string>
 ): Promise<void> {
   // [AUDIT FIX 2026-10-05 — MULTI-ERA ALA LIBSIGNAL] JANGAN hapus receiver
   // states/arsip/skipped keys (dulu deleteGroupStates — hapus SEMUA):
@@ -1786,7 +1814,8 @@ export async function rotateGroupKey(
       );
       const newEncrypted = await encryptGroupMetadata(
         rotatedMeta as Parameters<typeof encryptGroupMetadata>[0],
-        conversationId
+        conversationId,
+        { forcePairwiseUserIds }
       );
       // authSecret dari metadata (blind authorization untuk PUT details).
       if (effectiveAuthSecret) {
@@ -1829,12 +1858,14 @@ export async function rotateGroupKey(
   // cukup RE-DISTRIBUSI kunci era yang sama (initialCK, N=0) ke semua device.
   if (isActive) {
     try {
-      let sent = await redistributeCurrentGroupKey(conversationId);
+      let sent = await redistributeCurrentGroupKey(conversationId, forcePairwiseUserIds);
       if (sent === 0) {
         // Fallback: era belum ada sama sekali (metadata bukan v2/v3) — buat baru.
         // [V2 — RENCANA #4] ensureGroupSession kini MENGIRIM distribusi sendiri
         // (satu jalur) — tidak ada emit ganda.
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
+        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true, {
+          forcePairwiseUserIds
+        });
         sent = distributionKeys?.length ?? 0;
       }
       useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
@@ -1868,7 +1899,10 @@ export async function rotateGroupKey(
  * distribusi era yang sama aman (penerima menyimpan state yang identik).
  * Return jumlah envelope terkirim (0 bila era belum ada).
  */
-export async function redistributeCurrentGroupKey(conversationId: string): Promise<number> {
+export async function redistributeCurrentGroupKey(
+  conversationId: string,
+  forcePairwiseUserIds?: ReadonlySet<string>
+): Promise<number> {
   const senderState = await getGroupSenderState(conversationId);
   if (!senderState) return 0;
 
@@ -1903,7 +1937,9 @@ export async function redistributeCurrentGroupKey(conversationId: string): Promi
       });
     }
   }
-  const sent = await sendGroupSenderKeyDistribution(conversationId, senderState, targets);
+  const sent = await sendGroupSenderKeyDistribution(conversationId, senderState, targets, {
+    forcePairwiseUserIds
+  });
   return sent.length;
 }
 
@@ -3286,7 +3322,11 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
           identityKey: d.identityKey,
           pqIdentityKey: d.pqIdentityKey!
       }));
-  await sendGroupSenderKeyDistribution(conversationId, senderState, targets);
+  // Permintaan langsung = jalur realtime; mailbox bisa menargetkan token baru
+  // yang justru belum diketahui peminta (akar kegagalan anggota hasil re-add).
+  await sendGroupSenderKeyDistribution(conversationId, senderState, targets, {
+    forcePairwiseUserIds: new Set([requesterId])
+  });
 }
 
 export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise<void> {
@@ -3381,7 +3421,8 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
 
     try {
-        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey, drHeader, senderSigningKey, senderSigningKeyV2);
+        const distribution = await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey, drHeader, senderSigningKey, senderSigningKeyV2);
+        const incomingChainId = distribution?.chainId;
         
         // Opaque Mailbox: update metadata FIRST (before re-decrypting messages)
         // so the receiver state CK hasn't been ratcheted by message decryption yet.
@@ -3408,6 +3449,26 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
                     metadataDecrypted = useConversationStore.getState().conversations.find(c => c.id === conversationId)?.decryptedMetadata ? true : false;
                 } else {
                     metadataDecrypted = true;
+                    // A new-era key can arrive after the matching metadata blob was
+                    // discarded by updateConversation's keepBlob anti-regression guard.
+                    // Retry the server blob now that the chain key exists.
+                    if (incomingChainId && !distribution?.replay) {
+                        try {
+                            const localChainId = JSON.parse(conv.encryptedMetadata)?.chainId;
+                            if (localChainId !== incomingChainId) {
+                                const { authFetch } = await import('@lib/api');
+                                const serverConv: any = await authFetch(`/api/conversations/${conversationId}`);
+                                if (serverConv?.encryptedMetadata) {
+                                    await useConversationStore.getState().updateConversation(conversationId, {
+                                        encryptedMetadata: serverConv.encryptedMetadata
+                                    });
+                                    metadataDecrypted = useConversationStore.getState().conversations.find(c => c.id === conversationId)?.decryptedMetadata ? true : false;
+                                }
+                            }
+                        } catch (e) {
+                            console.warn(`[storeReceivedSK] Failed to refresh metadata for conv ${conversationId}`, e);
+                        }
+                    }
                 }
             }
         })();

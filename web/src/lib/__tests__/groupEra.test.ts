@@ -6,7 +6,7 @@
 // libsignal process_sender_key_distribution_message (sender_keys.rs).
 
 import { describe, it, expect } from 'vitest';
-import { isSameEraDistribution, pickChainState } from '../groupEra';
+import { isSameEraDistribution, isArchivedEraReplay, pickChainState } from '../groupEra';
 
 describe('isSameEraDistribution', () => {
   const ERA_A_INITIAL = 'eraA-initial-key';
@@ -79,5 +79,22 @@ describe('pickChainState (routing ala libsignal sender_key_state_for_chain_id)',
 
   it('tanpa chainId → null (keyId legacy sudah dihapus)', () => {
     expect(pickChainState([live, archived], {})).toBeNull();
+  });
+});
+
+describe('isArchivedEraReplay', () => {
+  it('era yang sudah diarsipkan = replay (jangan timpa era aktif)', () => {
+    expect(isArchivedEraReplay([
+      { chainId: 'chainA__', CK: 'a', archivedAt: 123 },
+      { chainId: 'chainB__', CK: 'b' }
+    ], 'chainA__')).toBe(true);
+  });
+
+  it('era aktif (belum diarsipkan) = bukan replay', () => {
+    expect(isArchivedEraReplay([{ chainId: 'chainB__', CK: 'b' }], 'chainB__')).toBe(false);
+  });
+
+  it('chainId tak dikenal = bukan replay', () => {
+    expect(isArchivedEraReplay([{ chainId: 'chainB__', CK: 'b' }], 'chainX__')).toBe(false);
   });
 });
