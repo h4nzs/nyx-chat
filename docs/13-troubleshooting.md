@@ -31,7 +31,13 @@ Amplop OHTTP **tidak membawa cookie**: relay membuang header klien, dan identita
 - Sidecar hidup tetapi params menolak: snapshot kosong/tidak ada. `pnpm --filter nyx-server run pir:snapshot` **menolak 0 user ber-oprfIndex** — pastikan `PIR_OPRF_ENABLED=1` sejak akun didaftarkan, lalu jalankan ulang dan `systemctl --user restart nyx-pir-sidecar`.
 
 ### Pencarian user yang baru mendaftar tidak menemukan apa pun (PIR aktif)
-Index PIR dibangun dari snapshot, bukan dibaca live dari DB. Akun baru masuk paling lambat lewat cron `04:15` (hot-swap `/admin/rebuild`) atau manual: `pnpm --filter nyx-server run pir:snapshot && systemctl --user restart nyx-pir-sidecar`. Klien sengaja **tidak** punya fallback diam-diam ke `/api/users/search` (`web/src/lib/userSearch.ts`).
+Index PIR dibangun dari snapshot, bukan dibaca live dari DB. Akun baru/profil yang berubah menandai `pir:snapshot:gen` dan job interval (`*/3 * * * *`) membangun ulang, jadi normalnya terlihat ≤ 3 menit. Kalau lebih lama:
+
+- cek `redis-cli get pir:snapshot:gen` vs `redis-cli get pir:snapshot:built` — sama berarti tick sudah jalan (atau penanda tak pernah naik karena Redis mati saat registrasi);
+- cek log `[PIR] snapshot diperbarui (perubahan baru)`; `[PIR] status penanda tidak terbaca` berarti Redis tidak terhubung dan tick sengaja dilewati (cron 04:15 tetap jadi jaring);
+- rebuild manual: `pnpm --filter nyx-server run pir:snapshot && systemctl --user restart nyx-pir-sidecar` (lalu samakan `pir:snapshot:built` bila perlu).
+
+Klien sengaja **tidak** punya fallback diam-diam ke `/api/users/search` (`web/src/lib/userSearch.ts`).
 
 ### `/api/users/search/oprf → 503 PIR_OPRF_DISABLED`
 `PIR_OPRF_ENABLED` kosong. Nyalakan di server **dan** `VITE_PIR_OPRF_ENABLED=1` di klien (bangun ulang web), lalu restart API. Seed OPRF default = `HMAC(NYX_AT_REST_PEPPER, "NYX_OPRF_SEED_V1")` — mengganti pepper/`NYX_OPRF_SEED` setelah ada akun membuat `oprfIndex` lama tidak cocok lagi.

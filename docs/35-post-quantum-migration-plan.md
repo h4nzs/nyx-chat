@@ -971,9 +971,12 @@ Pekerjaan:
   dinyalakan 2026-10-25** bersama OPRF/OHTTP (docs/10 §10.19); default repo
   tetap mati. Snapshot awal
   dibangun manual lewat `pnpm --filter nyx-server run pir:snapshot`; job
-  harian `pirSnapshot` (04:15) membangun ulang snapshot dari user ber-
-  `oprfIndex`, menulis atomik ke `PIR_SNAPSHOT_PATH` (absolut, dibaca
-  sidecar), lalu memanggil `/admin/rebuild` — staleness maksimum ~24 jam.
+  `pirSnapshot` membangun ulang snapshot dari user ber-`oprfIndex`, menulis
+  atomik ke `PIR_SNAPSHOT_PATH` (absolut, dibaca sidecar), lalu memanggil
+  `/admin/rebuild`. Ada dua jadwal: rebuild penuh harian (04:15) dan tick 3
+  menit yang hanya jalan bila penanda generasi (`pir/dirty.ts`) naik —
+  registrasi, perubahan profil/verifikasi/onboarding, rotasi kunci, dan
+  perangkat baru menandainya, jadi user baru terlihat ≤ 3 menit, bukan ~24 jam.
   **4c client (landed
   2026-10-23):** Rust→WASM (`packages/pir-wasm`, artefak masuk manifest
   reprodusibel), worker, hint cache, epoch retry, OHTTP POST + binary response;
@@ -1320,10 +1323,12 @@ Residual yang harus ditulis jujur:
    snapshot epoch + hint (`/params`) dan `/query` opaque; proxy Node
    `/api/pir/*` hanya meneruskan byte dengan auth + rate limit. Snapshot
    awal dibangun manual lewat `pnpm --filter nyx-server run pir:snapshot`;
-   job harian `pirSnapshot` (04:15) membangun ulang dari user ber-`oprfIndex`,
-   menulis atomik ke `PIR_SNAPSHOT_PATH` (absolut), lalu memanggil
-   `/admin/rebuild`, sehingga user baru tertinggal maksimum ~24 jam. Job aktif
-   hanya bila `PIR_ENABLED=1` dan `PIR_ADMIN_TOKEN` terisi. Default mati. **4d benchmark harness landed 2026-10-24:**
+   job `pirSnapshot` membangun ulang dari user ber-`oprfIndex`, menulis atomik
+   ke `PIR_SNAPSHOT_PATH` (absolut), lalu memanggil `/admin/rebuild`. Rebuild
+   penuh harian (04:15) ditambah tick 3 menit yang hanya jalan bila penanda
+   generasi naik (registrasi/profil/verifikasi/onboarding/kunci/perangkat),
+   sehingga user baru tertinggal ≤ 3 menit. Job aktif hanya bila
+   `PIR_ENABLED=1` dan `PIR_ADMIN_TOKEN` terisi. Default mati. **4d benchmark harness landed 2026-10-24:**
    `pnpm --filter nyx-server run bench:pir` menjalankan sidecar asli + WASM
    klien. Angka Celeron N2940, record 2 KB, arity 3: N=1000 startup 20,6 s,
    hint 9,39 MB, setup 75,6 ms, query 150 ms/5,5 KB, respond 12,2 ms/5,4 KB,

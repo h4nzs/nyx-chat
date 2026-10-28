@@ -37,6 +37,10 @@ import {
 // [docs/31 §31.6b] Kunci objek backup akun (HMAC tanpa userId) — dihapus saat
 // akun dihapus, lihat langkah 1b di DELETE /me.
 import { deriveBackupObjectKey } from '../utils/backupObject.js';
+// [docs/35 Fase 4d] Snapshot PIR dibangun dari baris User + Device: setiap
+// penulisan yang terlihat di pencarian menandai generasi supaya job interval
+// (3 menit) membangun ulang, bukan menunggu cron harian.
+import { markPirSnapshotDirty } from '../pir/dirty.js';
 // [docs/30 §30.5 WS-A] Rotasi kunci identitas → entri log KT (verifikasi kepemilikan identifier).
 import { identityKeysChanged, publishIdentityKeyChange } from '../utils/ktIdentityLog.js';
 import { evaluateSearchOprf, isSearchOprfEnabled } from '../utils/searchOprf.js';
@@ -244,6 +248,9 @@ router.put('/me',
       })
 
       if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
+        // Nama/avatar tersimpan di record PIR — tanpa penanda, hasil pencarian
+        // menampilkan profil lama hingga sehari.
+        void markPirSnapshotDirty('profile-update')
         await emitEventToUser(userId, 'user:updated', { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile })
 
         // BUGFIX: profile update hanya dikirim ke diri sendiri, sehingga kontak lain
@@ -451,6 +458,10 @@ router.put('/me/keys',
         redisClient.del(identityKey('cache:keys:public', userId))
       ]).catch((e: unknown) => console.warn('[Keys] Failed to invalidate key cache:', e))
 
+      // Kunci publik device ikut tersalin ke record PIR (bundle untuk lawan
+      // bicara), jadi rotasi harus terlihat di snapshot berikutnya.
+      void markPirSnapshotDirty('keys-update')
+
       // [docs/30 §30.5 WS-A] Rotasi kunci identitas WAJIB terlihat di log —
       // fire-and-forget, tidak pernah menggagalkan respons.
       if (
@@ -480,6 +491,7 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     await prisma.user.update({ where: { id: req.user.id }, data: { hasCompletedOnboarding: true } })
+    void markPirSnapshotDirty('onboarding-complete')
     res.status(200).json({ success: true })
   } catch (error) { next(error) }
 })
@@ -535,6 +547,8 @@ router.delete('/me', zodValidate({
 
     // 3. Delete user
     await prisma.user.delete({ where: { id: userId } })
+    // Akun yang dihapus harus hilang dari snapshot pada rebuild berikutnya.
+    void markPirSnapshotDirty('account-delete')
 
     // 4. Clear cookies (opsi konsisten dengan setAuthCookies)
     clearAuthCookies(res)

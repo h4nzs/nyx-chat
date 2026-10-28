@@ -51,7 +51,7 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 | `messageSweeper` | every minute (`noOverlap`) | Deletes expired (or >14d) messages **oldest `expiresAt` first**, page size 500, draining up to 20 pages per run (10k/min) so a burst never builds a backlog; notifies recipients via `message:deleted_batch`; fetches affected `UserHiddenConversation` rows in ONE query |
 | `systemSweeper` | daily 00:00 | Expired session keys, stale devices/OTPKs, Dead-Man's-Switch account deletion |
 | `ktSnapshot` | daily 03:30 | Unggah snapshot KT terverifikasi ke R2 (retensi 30 hari) |
-| `pirSnapshot` | daily 04:15 | Bangun snapshot `oprfIndex` + hot-swap sidecar PIR (`/admin/rebuild`) |
+| `pirSnapshot` | daily 04:15 **dan** every 3 min | Snapshot `oprfIndex` + hot-swap sidecar PIR (`/admin/rebuild`); tick 3 menit hanya rebuild bila penanda generasi (`pir/dirty.ts`) naik, jadi user/profil baru muncul dalam hitungan menit |
 
 ## 7.5 Redis inventory
 

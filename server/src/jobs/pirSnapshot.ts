@@ -10,6 +10,13 @@
  * membangun ulang snapshot dari DB lalu meminta sidecar mengganti index aktif
  * lewat `/admin/rebuild` (hot-swap; index lama tetap melayani sampai selesai).
  *
+ * Dua jadwal, satu kunci job:
+ *   - `PIR_REFRESH_CRON` (04:15) — rebuild penuh harian, jaring pengaman.
+ *   - `PIR_DIRTY_REFRESH_CRON` (tiap 3 menit) — rebuild hanya bila penanda
+ *     generasi (`pir/dirty.ts`) menunjukkan ada penulisan baru (registrasi,
+ *     login yang mengubah kunci/index, profil, verifikasi, onboarding,
+ *     perangkat). Tanpa ini user baru tidak ketemu hingga ~24 jam.
+ *
  * Batas yang disengaja:
  *   - Hanya jalan bila PIR aktif, URL sidecar valid, dan `PIR_ADMIN_TOKEN` ada.
  *   - `PIR_SNAPSHOT_PATH` ditulis atomik agar restart sidecar memuat snapshot
@@ -22,7 +29,14 @@ import cron from 'node-cron';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '../lib/prisma.js';
+import { redisClient } from '../lib/redis.js';
 import { loadPirConfig } from '../pir/config.js';
+import {
+  markPirSnapshotBuilt,
+  pirSnapshotBuiltGeneration,
+  pirSnapshotGeneration,
+  type PirDirtyRedis,
+} from '../pir/dirty.js';
 import { runWithJobLock } from '../utils/jobLock.js';
 import {
   buildPirSnapshot,
@@ -30,8 +44,14 @@ import {
   type PirRecordSource,
 } from '../pir/snapshot.js';
 
-/** Jam refresh harian; staleness user baru dibatasi maksimal ~24 jam. */
+/** Jam refresh harian; jaring pengaman bila penanda generasi hilang. */
 export const PIR_REFRESH_CRON = '15 4 * * *';
+/**
+ * [staleness user baru] Interval rebuild untuk perubahan yang ditandai.
+ * 3 menit: cukup cepat agar pendaftar langsung bisa dicari, cukup jarang agar
+ * rebuild (O(N) + setup ChalametPIR) tidak berjalan terus-menerus saat ramai.
+ */
+export const PIR_DIRTY_REFRESH_CRON = '*/3 * * * *';
 const REFRESH_TIMEOUT_MS = 60 * 60_000;
 
 export interface PirRefreshConfig {
@@ -51,6 +71,7 @@ export interface PirRefreshDeps {
   collect?: () => Promise<PirRecordSource[]>;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  redis?: PirDirtyRedis;
 }
 
 export function loadPirRefreshConfig(env: NodeJS.ProcessEnv = process.env): PirRefreshConfig | null {
@@ -131,6 +152,48 @@ export async function refreshPirSnapshot(
   };
 }
 
+export type PirDirtyOutcome = 'rebuilt' | 'clean' | 'unknown';
+
+/**
+ * Rebuild HANYA bila generasi penanda lebih baru dari yang sudah tercakup.
+ *
+ * Generasi dibaca SEBELUM build: bila ada pendaftaran saat rebuild berjalan,
+ * `gen` sudah lebih besar dari generasi yang dicatat, sehingga tick berikutnya
+ * membangun lagi (tidak ada perubahan yang hilang).
+ */
+export async function refreshPirSnapshotIfDirty(
+  config: PirRefreshConfig,
+  deps: PirRefreshDeps = {},
+): Promise<{ status: PirDirtyOutcome; epoch?: number; entries?: number }> {
+  const redis = deps.redis ?? (redisClient as unknown as PirDirtyRedis);
+  let generation: number;
+  let built: number;
+  try {
+    generation = await pirSnapshotGeneration(redis);
+    if (generation <= 0) return { status: 'clean' };
+    built = await pirSnapshotBuiltGeneration(redis);
+  } catch (error) {
+    // Redis tidak terbaca: jangan rebuild buta tiap tick — cron harian tetap jalan.
+    console.warn(
+      '[PIR] status penanda tidak terbaca, rebuild interval dilewati:',
+      error instanceof Error ? error.message : error,
+    );
+    return { status: 'unknown' };
+  }
+  if (built >= generation) return { status: 'clean' };
+
+  const result = await refreshPirSnapshot(config, deps);
+  try {
+    await markPirSnapshotBuilt(redis, generation);
+  } catch (error) {
+    console.warn(
+      '[PIR] gagal mencatat generasi yang sudah dibangun:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+  return { status: 'rebuilt', epoch: result.epoch, entries: result.entries };
+}
+
 export function startPirSnapshotRefresher(
   env: NodeJS.ProcessEnv = process.env,
   deps: PirRefreshDeps = {},
@@ -147,26 +210,45 @@ export function startPirSnapshotRefresher(
   }
 
   let running = false;
-  // [audit F-07] `running` hanya menjaga proses ini; kunci Redis menjaga N
-  // worker pm2. TTL 2 jam > REFRESH_TIMEOUT_MS (60 menit) supaya kunci tidak
-  // kedaluwarsa di tengah rebuild yang lambat.
-  cron.schedule(PIR_REFRESH_CRON, () => runWithJobLock('pir-snapshot', 7200, async () => {
-    if (running) {
-      console.warn('[PIR] refresh dilewati: putaran sebelumnya masih berjalan');
-      return;
-    }
-    running = true;
-    try {
-      const result = await refreshPirSnapshot(config, deps);
+  /** Satu putaran pada satu waktu; kunci Redis menjaga N worker pm2. */
+  const schedule = (cronExpr: string, run: () => Promise<void>) => {
+    // [audit F-07] `running` hanya menjaga proses ini; kunci Redis menjaga N
+    // worker pm2. TTL 2 jam > REFRESH_TIMEOUT_MS (60 menit) supaya kunci tidak
+    // kedaluwarsa di tengah rebuild yang lambat.
+    cron.schedule(cronExpr, () => runWithJobLock('pir-snapshot', 7200, async () => {
+      if (running) {
+        console.warn('[PIR] refresh dilewati: putaran sebelumnya masih berjalan');
+        return;
+      }
+      running = true;
+      try {
+        await run();
+      } catch (error) {
+        console.error('[PIR] refresh gagal:', error instanceof Error ? error.message : error);
+      } finally {
+        running = false;
+      }
+    }));
+  };
+
+  schedule(PIR_REFRESH_CRON, async () => {
+    const result = await refreshPirSnapshot(config, deps);
+    console.log(
+      `[PIR] snapshot diperbarui: epoch=${result.epoch} entries=${result.entries} persisted=${result.persisted}`,
+    );
+  });
+
+  schedule(PIR_DIRTY_REFRESH_CRON, async () => {
+    const result = await refreshPirSnapshotIfDirty(config, deps);
+    if (result.status === 'rebuilt') {
       console.log(
-        `[PIR] snapshot diperbarui: epoch=${result.epoch} entries=${result.entries} persisted=${result.persisted}`,
+        `[PIR] snapshot diperbarui (perubahan baru): epoch=${result.epoch} entries=${result.entries}`,
       );
-    } catch (error) {
-      console.error('[PIR] refresh gagal:', error instanceof Error ? error.message : error);
-    } finally {
-      running = false;
     }
-  }));
-  console.log(`[PIR] snapshot refresher aktif (${PIR_REFRESH_CRON})`);
+  });
+
+  console.log(
+    `[PIR] snapshot refresher aktif (harian ${PIR_REFRESH_CRON}, perubahan ${PIR_DIRTY_REFRESH_CRON})`,
+  );
   return true;
 }

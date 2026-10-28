@@ -108,7 +108,7 @@ Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/util
 | `systemSweeper.ts` | daily 00:00 | purge expired refresh tokens + session keys, Dead-Man's-Switch account deletion, subscriber downgrade |
 | `cleanup.ts` | daily 00:00 | pembersihan retensi (berkas yatim/R2, baris kedaluwarsa) dengan guard `ADMIN_CLEANUP_*` |
 | `ktSnapshot.ts` | daily 03:30 | unggah snapshot KT terverifikasi terbaru ke R2 (retensi 30 hari, hanya bila `KT_SNAPSHOT_DIR` ada) |
-| `pirSnapshot.ts` | daily 04:15 | bangun snapshot `User.oprfIndex`, tulis atomik ke `PIR_SNAPSHOT_PATH`, hot-swap sidecar lewat `/admin/rebuild` (butuh `PIR_ENABLED` + `PIR_ADMIN_TOKEN`) |
+| `pirSnapshot.ts` | daily 04:15 + every 3 minutes | bangun snapshot `User.oprfIndex`, tulis atomik ke `PIR_SNAPSHOT_PATH`, hot-swap sidecar lewat `/admin/rebuild` (butuh `PIR_ENABLED` + `PIR_ADMIN_TOKEN`); tick 3 menit memakai `refreshPirSnapshotIfDirty` sehingga hanya rebuild bila `pir:snapshot:gen` > `pir:snapshot:built` |
 
 ## 22.7 Redis keys
 

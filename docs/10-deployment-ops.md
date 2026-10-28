@@ -1333,8 +1333,22 @@ loopback, dan router `/api/pir` **tidak dipasang** tanpa `PIR_ENABLED=1` (404).
 | Unit user (selfhost) | `ops/systemd/user/nyx-pir-sidecar.service` | `systemctl --user`, env terpisah |
 | Proxy API | `server/src/routes/pir.ts` | auth + rate limit pencarian, byte opaque |
 | Snapshot | `pnpm --filter nyx-server run pir:snapshot` | tulis atomik dari `User.oprfIndex` |
-| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, hot-swap `/admin/rebuild` |
+| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, hot-swap `/admin/rebuild` (jaring pengaman) |
+| Refresh perubahan | `server/src/jobs/pirSnapshot.ts` + `server/src/pir/dirty.ts` | cron `*/3 * * * *`, rebuild hanya bila penanda generasi naik |
 | Klien | `web/src/lib/pirClient.ts` + worker WASM | wajib `VITE_OHTTP_ENABLED=1` |
+
+**Kesegaran snapshot.** Snapshot adalah artefak build, bukan view DB: user yang
+mendaftar setelah build terakhir tidak terlihat oleh `/api/pir/query` sampai
+rebuild berikutnya — dan klien tidak punya fallback saat miss (`[]`). Karena itu
+setiap penulisan yang bentuknya masuk snapshot menaikkan generasi di Redis
+(`pir:snapshot:gen` via `markPirSnapshotDirty`): registrasi, login yang mengubah
+`oprfIndex`/kunci perangkat, `PUT /api/users/me` (profil), verifikasi (PoW &
+WebAuthn device-bound), `complete-onboarding`, `PUT /api/users/me/keys`, tautan
+perangkat QR, dan `DELETE /api/users/me`. Job interval membaca generasi itu dan
+membangun ulang hanya bila `pir:snapshot:built` masih di belakang — satu rebuild
+per jendela 3 menit, bukan satu per pendaftaran (sidecar hanya punya
+`/admin/rebuild` yang mengganti seluruh index). Penanda **tidak pernah**
+menggagalkan request bila Redis mati; cron 04:15 tetap menutup ketertinggalan.
 
 **Env yang harus cocok (tiga tempat).**
 

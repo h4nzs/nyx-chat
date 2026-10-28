@@ -20,6 +20,10 @@ import { cfAwareClientIp } from '../utils/clientIp.js'
 import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
 import { authLimiter, burnerLimiter } from '../middleware/rateLimiter.js'
+// [docs/35 Fase 4d] Baris user/device yang berubah membuat snapshot PIR basi;
+// tandai generasinya supaya job interval (3 menit) membangun ulang, bukan
+// menunggu cron harian 04:15.
+import { markPirSnapshotDirty } from '../pir/dirty.js'
 import { getSodium } from '../lib/sodium.js'
 import { invalidateActiveDeviceCache } from '../utils/redisResilience.js'
 import {
@@ -518,6 +522,9 @@ async (req, res, next) => {
     if (!device) throw new ApiError(500, 'Registration succeeded but device was not created.')
     const deviceId = device.id
 
+    // User baru harus bisa dicari setelah snapshot berikutnya (≤ 3 menit).
+    void markPirSnapshotDirty('register')
+
     // [docs/30 §30.5 WS-A] Catat kunci publik di log KT (no-op tanpa KT_SERVER_URL).
     // Fire-and-forget: latensi registrasi tidak bergantung pada log; kegagalan
     // terlihat sebagai metrik `nyx_kt_writes_total{result="error"}` + log
@@ -592,6 +599,8 @@ router.post('/login', authLimiter, zodValidate({
       try {
         await prisma.user.update({ where: { id: user.id }, data: { oprfIndex } });
         console.info('[OPRF] oprfIndex disegarkan saat login');
+        // Index berubah = record PIR lama tidak lagi cocok dengan query klien.
+        void markPirSnapshotDirty('login-oprf-index')
       } catch (error) {
         console.warn('[OPRF] gagal menyegarkan oprfIndex saat login:', error);
       }
@@ -668,6 +677,12 @@ router.post('/login', authLimiter, zodValidate({
         signingKey: Buffer.from(signingKey, 'base64url'),
         signingKeyV2: previousIdentity?.signingKeyV2 ?? undefined,
       });
+      // Perangkat baru (belum ada barisnya) atau kunci identitas yang berubah
+      // mengubah record PIR (snapshot memakai device terakhir).
+      if (!previousIdentity || identityChanged) {
+        void markPirSnapshotDirty('login-device')
+      }
+
       if (identityChanged) {
         void publishIdentityKeyChange({
           userId: user.id,
@@ -1234,6 +1249,9 @@ router.post('/link/approve', requireAuth, zodValidate({
       throw new ApiError(409, 'Link request has already been handled.');
     }
 
+    // Perangkat tertaut bisa menjadi device terakhir di record PIR user ini.
+    void markPirSnapshotDirty('device-link')
+
     // [docs/30 §30.5 WS-A] Kunci identitas perangkat baru = perubahan yang harus
     // terlihat di log KT (paritas dengan login yang meregenerasi kunci).
     try {
@@ -1535,6 +1553,8 @@ return current
               where: { id: userId },
               data: { isVerified: true }
           });
+          // `isVerified` ikut disalin ke record PIR (badge terverifikasi).
+          void markPirSnapshotDirty('verify-pow')
           res.json({ success: true, message: 'Account verified via Proof of Work' });
       } else {
           throw new ApiError(400, 'Invalid Proof of Work. Hash does not meet difficulty target.');
@@ -1645,6 +1665,7 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) => 
         where: { id: user.id },
         data: { currentChallenge: null, ...(deviceBound ? { isVerified: true } : {}) }
       })
+      if (deviceBound) void markPirSnapshotDirty('verify-webauthn')
       res.json({ verified: true, isVerified: user.isVerified || deviceBound, deviceBound })
     } else {
       res.status(400).json({ verified: false, error: 'Verification failed' })
