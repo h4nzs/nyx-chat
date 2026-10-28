@@ -1,0 +1,8 @@
+[Unit]
+Description=NYX self-host stack
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+Wants=nyx-api.service nyx-nginx.service nyx-sidecar.service nyx-kt-query-v2.service nyx-kt-auditor-v2.service nyx-ohttp-relay.service nyx-pir-sidecar.service nyx-prometheus.service nyx-grafana.service nyx-alertmanager.service nyx-ntfy-relay.service nyx-node-exporter.service nyx-postgres-exporter.service nyx-redis-exporter.service
+After=network-online.target
+
+[Install]
+WantedBy=default.target

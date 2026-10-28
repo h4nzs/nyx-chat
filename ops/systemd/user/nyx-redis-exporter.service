@@ -1,0 +1,32 @@
+# NYX — redis_exporter (metrik Valkey/Redis lokal) untuk Prometheus.
+#
+# Padanan tingkat-user dari paket Arch `prometheus-redis-exporter`, dengan path
+# di @NYX_HOME@ supaya tidak butuh root. Prometheus sudah men-scrape
+# 127.0.0.1:9121 sebagai job `redis`; tanpa unit ini target itu mati dan
+# `redis_evicted_keys_total` (alerts.yml) serta panel Redis di dashboard
+# nyx-overview.json tidak punya data — kebijakan eviction Valkey yang mulai
+# membuang key adalah hal yang justru harus terlihat.
+#
+# HANYA loopback (exporter maupun Redis-nya).
+[Unit]
+Description=NYX redis_exporter (metrik Valkey loopback :9121)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=valkey.service
+Wants=valkey.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=@NYX_STATE@/redis-exporter/bin/prometheus-redis-exporter \
+  --web.listen-address=127.0.0.1:9121 \
+  --redis.addr=redis://127.0.0.1:6379
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

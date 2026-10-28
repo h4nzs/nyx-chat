@@ -23,18 +23,18 @@
 
 [Unit]
 Description=NYX OHTTP relay (proses terpisah dari API)
-Documentation=file:///home/ken/nyx-selfhost/README.md
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
 After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-WorkingDirectory=/home/ken/nyx-chat/server
+WorkingDirectory=@NYX_REPO@/server
 # Env terpisah: relay tidak boleh mewarisi DATABASE_URL/JWT_SECRET dari
 # server/.env (kalau itu terjadi, ada tanggung jawab yang salah tempat).
-EnvironmentFile=-/home/ken/nyx-selfhost/ohttp/relay.env
+EnvironmentFile=-@NYX_STATE@/ohttp/relay.env
 Environment=NODE_ENV=production
-ExecStart=/usr/bin/node /home/ken/nyx-chat/server/dist/ohttp/relay.js
+ExecStart=/usr/bin/node @NYX_REPO@/server/dist/ohttp/relay.js
 Restart=always
 RestartSec=3
 NoNewPrivileges=yes

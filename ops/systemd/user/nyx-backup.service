@@ -1,0 +1,12 @@
+[Unit]
+Description=NYX encrypted backup (DB, KT v2, secrets, config)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=nyx.target
+ConditionPathExists=@NYX_REPO@/deploy/selfhost/scripts/backup.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash @NYX_REPO@/deploy/selfhost/scripts/backup.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min

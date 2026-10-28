@@ -137,6 +137,6 @@ berapa pun rapi kodenya.
 
 - **Per kuartal**: Drill A + restore klien dari `.nyxvault`, catat hasil di §39.6.
 - **Setiap perubahan skema** (`prisma db push` destruktif): ambil dump manual
-  sebelum deploy; `deploy.yml` memakai `db push ... || true`, jadi kegagalan
-  push tidak menghentikan deploy.
+  sebelum deploy. `deploy.yml` kini `workflow_dispatch` dan `db push` bersifat
+  fail-closed, tetapi dump tetap wajib karena perubahan skema bisa destruktif.
 - **Setiap rotasi rahasia**: perbarui §39.3 dan salinan offsite di hari yang sama.

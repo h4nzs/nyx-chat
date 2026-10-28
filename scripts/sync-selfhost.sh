@@ -11,7 +11,7 @@
 #
 # Dua profil (karena bentuk deployment berbeda, bukan karena config berbeda):
 #
-#   selfhost  nginx/nyx.conf      → path /home/ken/... , upstream 127.0.0.1
+#   selfhost  config di-render ke @NYX_REPO@/@NYX_STATE@, upstream 127.0.0.1
 #             ops/systemd/user/*  → {SELFHOST}/systemd/user/
 #             ops/prometheus/*    → {SELFHOST}/prometheus/conf/
 #             (job `nyx-api` memakai static 127.0.0.1:9464, bukan file_sd pm2)
@@ -74,11 +74,25 @@ esac
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+NYX_REPO="${NYX_REPO:-$ROOT_DIR}"
+NYX_HOME="${NYX_HOME:-$HOME}"
+NYX_STATE="${NYX_STATE:-$SELFHOST_DIR}"
+
+# Semua berkas selfhost memakai placeholder, bukan path mesin. Render di sini
+# supaya repo tetap portabel untuk migrasi ke host/user lain.
+render_placeholders() {
+  sed \
+    -e "s#@NYX_REPO@#${NYX_REPO}#g" \
+    -e "s#@NYX_STATE@#${NYX_STATE}#g" \
+    -e "s#@NYX_HOME@#${NYX_HOME}#g" \
+    "$1"
+}
+
 # Transformasi profil selfhost untuk site config nginx.
 transform_selfhost_nginx() {
   sed \
-    -e 's#root /var/www/nyx-marketing;#root /home/ken/nyx-chat/marketing/dist;#' \
-    -e 's#root /var/www/nyx-web;#root /home/ken/nyx-chat/web/dist;#' \
+    -e 's#root /var/www/nyx-marketing;#root @NYX_REPO@/marketing/dist;#' \
+    -e 's#root /var/www/nyx-web;#root @NYX_REPO@/web/dist;#' \
     -e 's#http://server:4000#http://127.0.0.1:4000#g' \
     -e 's#http://ohttp-relay:4100#http://127.0.0.1:4100#g' \
     "$1"
@@ -116,12 +130,17 @@ transform_selfhost_prometheus() {
 pairs=()   # format: src|dest_rel|transform(0=tidak, 1=nginx, 2=prometheus)
 
 if [[ "$PROFILE" == "selfhost" ]]; then
+  pairs+=("$ROOT_DIR/ops/nginx/nginx.conf.in|nginx/nginx.conf|0")
   pairs+=("$ROOT_DIR/ops/nginx/nyx.conf|nginx/nyx.conf|1")
   pairs+=("$ROOT_DIR/ops/prometheus/prometheus.yml|prometheus/conf/prometheus.yml|2")
   pairs+=("$ROOT_DIR/ops/prometheus/alerts.yml|prometheus/conf/alerts.yml|0")
   pairs+=("$ROOT_DIR/ops/prometheus/tests.yml|prometheus/conf/tests.yml|0")
+  pairs+=("$ROOT_DIR/ops/alertmanager/alertmanager.yml|alertmanager/conf/alertmanager.yml|0")
+  pairs+=("$ROOT_DIR/ops/grafana/custom.ini.in|grafana/conf/custom.ini|0")
+  pairs+=("$ROOT_DIR/ops/grafana/provisioning/datasources/prometheus.yml|grafana/provisioning/datasources/prometheus.yml|0")
+  pairs+=("$ROOT_DIR/ops/grafana/provisioning/dashboards/nyx.yml|grafana/provisioning/dashboards/nyx.yml|0")
   pairs+=("$ROOT_DIR/ops/grafana/dashboards/nyx-overview.json|grafana/dashboards/nyx-overview.json|0")
-  for unit in "$ROOT_DIR"/ops/systemd/user/*.service; do
+  for unit in "$ROOT_DIR"/ops/systemd/user/*.service "$ROOT_DIR"/ops/systemd/user/*.timer "$ROOT_DIR"/ops/systemd/user/nyx.target; do
     [[ -e "$unit" ]] || continue
     pairs+=("$unit|systemd/user/$(basename "$unit")|0")
   done
@@ -143,6 +162,10 @@ prepare_candidate() {
     2) transform_selfhost_prometheus "$src" > "$out" ;;
     *) cp "$src" "$out" ;;
   esac
+  if [[ "$PROFILE" == "selfhost" ]]; then
+    render_placeholders "$out" > "$out.rendered"
+    mv "$out.rendered" "$out"
+  fi
 }
 
 drift=0

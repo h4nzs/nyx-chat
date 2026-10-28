@@ -25,17 +25,17 @@
 
 [Unit]
 Description=NYX PIR sidecar (ChalametPIR, loopback)
-Documentation=file:///home/ken/nyx-selfhost/README.md
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
 After=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-WorkingDirectory=/home/ken/nyx-chat/server
+WorkingDirectory=@NYX_REPO@/server
 # Env terpisah: sidecar tidak butuh DATABASE_URL/Redis/JWT_SECRET, dan tidak
 # boleh mewarisinya dari server/.env.
-EnvironmentFile=-/home/ken/nyx-selfhost/pir/pir.env
-ExecStart=/home/ken/nyx-chat/server/pir-sidecar/target/release/pir-service
+EnvironmentFile=-@NYX_STATE@/pir/pir.env
+ExecStart=@NYX_REPO@/server/pir-sidecar/target/release/pir-service
 Restart=always
 RestartSec=5
 NoNewPrivileges=yes

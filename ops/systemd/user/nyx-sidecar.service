@@ -1,0 +1,20 @@
+[Unit]
+Description=NYX WebTransport sidecar (QUIC/UDP :33333)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@NYX_REPO@/server
+EnvironmentFile=@NYX_REPO@/server/.env
+# TRANSPORT_PORT di .env sudah 33333; eksplisit supaya unit tetap benar bila
+# .env diubah.
+Environment=TRANSPORT_PORT=33333
+# [docs/30 WS-G(6)] Exporter metrik sidecar (loopback saja; "0" mematikannya).
+Environment=TRANSPORT_METRICS_ADDR=127.0.0.1:9465
+ExecStart=@NYX_REPO@/server/transport-sidecar/target/release/transport-sidecar
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,39 @@
+# NYX — Alertmanager (loopback :9093 → relay ntfy).
+#
+# Kenapa perlu: 23 aturan di ops/prometheus/alerts.yml tanpa Alertmanager hanya
+# terlihat di UI /alerts — tidak ada yang diberi tahu. Alertmanager menambahkan
+# grouping, dedup, inhibit, dan silence (amtool) di depan relay ntfy.
+#
+# Config disalin dari repo (JANGAN diedit di sini):
+#   install -m 644 ~/nyx-chat/ops/alertmanager/alertmanager.yml \
+#                  ~/nyx-selfhost/alertmanager/conf/alertmanager.yml
+#   ~/nyx-selfhost/alertmanager/bin/amtool check-config \
+#                  ~/nyx-selfhost/alertmanager/conf/alertmanager.yml
+#   systemctl --user reload nyx-alertmanager   # setelah config berubah (SIGHUP)
+[Unit]
+Description=NYX Alertmanager (loopback :9093 → relay ntfy)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=nyx-prometheus.service nyx-ntfy-relay.service
+Wants=nyx-ntfy-relay.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@NYX_STATE@/alertmanager
+ExecStart=@NYX_STATE@/alertmanager/bin/alertmanager \
+  --config.file=@NYX_STATE@/alertmanager/conf/alertmanager.yml \
+  --storage.path=@NYX_STATE@/alertmanager/data \
+  --web.listen-address=127.0.0.1:9093 \
+  --cluster.listen-address=
+# SIGHUP = reload config tanpa memutus state alert (systemctl --user reload).
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=default.target

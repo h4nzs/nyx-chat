@@ -34,12 +34,13 @@ SELFHOST_DIR=~/nyx-selfhost bash scripts/sync-selfhost.sh --check
 
 Dua profil:
 
-- `selfhost` (default): mengubah `/var/www/nyx-*` → `/home/ken/nyx-chat/*/dist`,
-  `server:4000`/`ohttp-relay:4100` → `127.0.0.1`, dan menyinkronkan
-  `ops/systemd/user/*.service` → `{SELFHOST}/systemd/user/`.
+- `selfhost` (default): mengubah `/var/www/nyx-*` → `@NYX_REPO@/*/dist`,
+  `server:4000`/`ohttp-relay:4100` → `127.0.0.1`, merender placeholder path,
+  lalu menyinkronkan `ops/systemd/user/*`, nginx master, Grafana, Alertmanager,
+  dan dashboard → `{SELFHOST}/`.
 - `docker`: menyalin apa adanya + `docker-compose.yml` + unit sistem.
 
-Rahasia (`.env`, kunci KT, sertifikat) dan nginx master **tidak** disinkronkan.
+Rahasia (`.env`, kunci KT, sertifikat) **tidak** disinkronkan.
 
 ## Setelah mengubah config
 

@@ -1,0 +1,76 @@
+# NYX — Grafana (tampilan metrik loopback; Prometheus di 127.0.0.1:9090).
+#
+# Ini file OVERLAY: `conf/defaults.ini` (bawaan distribusi) tetap utuh, dan nilai
+# di sini menimpanya. JANGAN mengedit defaults.ini — pembaruan Grafana akan
+# menimpanya.
+#
+# Port 3001, bukan 3000: 127.0.0.1:3000 sudah dipakai `nyx-nginx` (web statis +
+# marketing). Sama seperti Prometheus, dashboard ini TIDAK boleh terekspos ke
+# jaringan: ia menampilkan peta infrastruktur (ukuran log KT, irama tanda tangan,
+# pemakaian disk/RAM host). Membukanya ke publik berarti mempublikasikan
+# permukaan serangan + jam internal deployment.
+#
+# Password admin + secret key tidak ada di file ini; keduanya di
+# `grafana.env` (0600, EnvironmentFile unit systemd --user).
+
+[server]
+http_addr = 127.0.0.1
+http_port = 3001
+domain = 127.0.0.1
+root_url = http://127.0.0.1:3001/
+# Grafana di belakang proxy lokal lain (kalau nanti dipasang): set
+# proxy_set_header Host $host + X-Forwarded-* di nginx, lalu nyalakan ini.
+serve_from_sub_path = false
+enable_gzip = true
+
+[paths]
+data = @NYX_STATE@/grafana/data
+logs = @NYX_STATE@/grafana/logs
+plugins = @NYX_STATE@/grafana/plugins
+provisioning = @NYX_STATE@/grafana/provisioning
+
+[database]
+# SQLite bawaan cukup: satu instance, satu admin, tidak ada tabel user.
+type = sqlite3
+path = @NYX_STATE@/grafana/data/grafana.db
+
+[analytics]
+# Tanpa telemetri keluar (docs/30 WS-G: observability tanpa telemetry).
+reporting_enabled = false
+check_for_updates = false
+check_for_plugin_updates = false
+feedback_links_enabled = false
+
+[users]
+allow_sign_up = false
+allow_org_create = false
+auto_assign_org_role = Viewer
+default_theme = dark
+
+[auth]
+disable_login_form = false
+
+[auth.anonymous]
+enabled = false
+
+[security]
+# Loopback + http: cookie_secure=false. Bila nanti dilayani lewat https
+# (nginx), WAJIB ubah ke true.
+cookie_secure = false
+disable_gravatar = true
+
+[snapshots]
+external_enabled = false
+
+[log]
+mode = console
+level = warn
+
+[alerting]
+enabled = false
+
+[unified_alerting]
+# Alerting di Grafana SENGAJA mati: satu sumber kebenaran aturan = Prometheus
+# (ops/prometheus/alerts.yml, diuji `promtool test rules`). Dua mesin aturan
+# berarti dua tempat yang bisa menyimpang.
+enabled = false

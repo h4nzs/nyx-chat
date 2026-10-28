@@ -1,0 +1,32 @@
+# NYX — Relay Alertmanager → ntfy (loopback :9095).
+#
+# Kenapa proses terpisah: Alertmanager tidak punya receiver ntfy (0.34.1:
+# `ntfy_configs` tidak dikenal) dan payload `webhook_configs` bukan bentuk pesan
+# ntfy. Relay ini yang menerjemahkan — lihat ops/alertmanager/ntfy-relay.mjs.
+#
+# Topik ntfy (rahasia kanal) hidup di EnvironmentFile 0600, BUKAN di config
+# Alertmanager, supaya alertmanager.yml tetap bebas rahasia dan bisa di-commit.
+#
+# Kode disalin dari repo (JANGAN diedit di sini):
+#   ~/nyx-chat/ops/alertmanager/ntfy-relay.mjs
+# Uji format tanpa jaringan:
+#   node ~/nyx-chat/ops/alertmanager/ntfy-relay.mjs --self-test
+[Unit]
+Description=NYX relay Alertmanager → ntfy (loopback :9095)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@NYX_REPO@
+EnvironmentFile=@NYX_STATE@/alertmanager/ntfy-relay.env
+ExecStart=/usr/bin/node @NYX_REPO@/ops/alertmanager/ntfy-relay.mjs
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=default.target

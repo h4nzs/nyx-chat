@@ -1,0 +1,41 @@
+# NYX — Grafana (dashboard observability, loopback).
+# Padanan tingkat-user dari pemasangan /etc/grafana di docs/10 §10.12, dengan
+# path di @NYX_HOME@ supaya tidak butuh root.
+#
+# Loopback WAJIB (conf/custom.ini → http_addr=127.0.0.1, port 3001 karena 3000
+# dipakai nyx-nginx). Dashboard ini memetakan infrastruktur (ukuran log KT,
+# irama tanda tangan, pemakaian disk/RAM host) — jangan dibuka ke jaringan.
+#
+# Datasource + dashboard diprovisikan dari berkas, bukan klik-klik di UI:
+#   provisioning/datasources/prometheus.yml   (uid `prometheus`)
+#   provisioning/dashboards/nyx.yml           (folder NYX)
+#   dashboards/nyx-overview.json              (SALINAN ops/grafana/dashboards/)
+#
+# Setelah mengubah config:
+#   systemctl --user restart nyx-grafana
+[Unit]
+Description=NYX Grafana (dashboard observability loopback :3001)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=nyx-prometheus.service
+Wants=nyx-prometheus.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Password admin + secret key cookie sesi (0600, gitignored).
+EnvironmentFile=@NYX_STATE@/grafana/grafana.env
+WorkingDirectory=@NYX_STATE@/grafana
+ExecStart=@NYX_STATE@/grafana/bin/grafana server \
+  --homepath=@NYX_STATE@/grafana \
+  --config=@NYX_STATE@/grafana/conf/custom.ini
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+# Unit user tidak boleh ProtectSystem/ProtectHome (path-nya di dalam /home).
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

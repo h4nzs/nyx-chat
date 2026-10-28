@@ -98,3 +98,18 @@ tools/dr-oracle/nyx-dr-oracle
 
 # [deepwork] state sesi lokal, bukan deliverable
 .slim/deepwork/
+
+# deploy/selfhost — runtime/secret artifacts never committed
+deploy/selfhost/rendered/
+deploy/selfhost/**/data/
+deploy/selfhost/**/bin/
+deploy/selfhost/**/db/
+deploy/selfhost/**/snapshots/
+deploy/selfhost/**/auditor-state/
+deploy/selfhost/**/*.log
+deploy/selfhost/**/*.key
+deploy/selfhost/**/*.der
+deploy/selfhost/**/*.age
+deploy/selfhost/**/*.tar.gz
+deploy/selfhost/**/*.pem
+!deploy/selfhost/attestation/roots.pem

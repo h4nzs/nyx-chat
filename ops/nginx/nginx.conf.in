@@ -1,0 +1,13 @@
+worker_processes 1;
+pid @NYX_STATE@/nginx/nginx.pid;
+error_log @NYX_STATE@/nginx/error.log warn;
+events { worker_connections 1024; }
+http {
+  access_log @NYX_STATE@/nginx/access.log;
+  client_body_temp_path @NYX_STATE@/nginx/tmp/client_body;
+  proxy_temp_path @NYX_STATE@/nginx/tmp/proxy;
+  fastcgi_temp_path @NYX_STATE@/nginx/tmp/fastcgi;
+  uwsgi_temp_path @NYX_STATE@/nginx/tmp/uwsgi;
+  scgi_temp_path @NYX_STATE@/nginx/tmp/scgi;
+  include @NYX_STATE@/nginx/nyx.conf;
+}

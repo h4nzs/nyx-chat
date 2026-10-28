@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily NYX encrypted backup at 03:30
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

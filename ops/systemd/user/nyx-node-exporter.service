@@ -1,0 +1,29 @@
+# NYX — node_exporter (metrik host: RAM, disk, load) untuk Prometheus.
+#
+# Padanan tingkat-user dari paket Arch `prometheus-node-exporter`, dengan path di
+# @NYX_HOME@ supaya tidak butuh root. Prometheus (nyx-prometheus.service) sudah
+# men-scrape 127.0.0.1:9100 sebagai job `node`, dan `ops/prometheus/alerts.yml`
+# memakai node_memory_* / node_filesystem_* — tanpa unit ini target itu mati
+# (`up == 0` palsu) dan alert disk/RAM tidak pernah dievaluasi.
+#
+# HANYA loopback: tidak ada port metrik yang boleh terbuka ke jaringan.
+[Unit]
+Description=NYX node_exporter (metrik host loopback :9100)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=@NYX_STATE@/node-exporter/bin/prometheus-node-exporter \
+  --web.listen-address=127.0.0.1:9100
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+# Unit user tidak boleh ProtectSystem/ProtectHome (path-nya di dalam /home).
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

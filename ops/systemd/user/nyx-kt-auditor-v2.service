@@ -1,0 +1,44 @@
+# NYX — auditor pihak ketiga log Key Transparency v2 (`nyx-kt-auditor-v2`).
+# Padanan tingkat-user dari `ops/systemd/nyx-kt-auditor-v2.service` (repo), dengan
+# path disesuaikan ke @NYX_HOME@ supaya tidak butuh root.
+#
+# Proses TERPISAH dari `nyx-kt-query-v2` dengan sengaja: auditor adalah pihak
+# ketiga. Ia hanya bicara lewat HTTP baca (`127.0.0.1:8089`) dan gRPC auditor
+# (`127.0.0.1:8087`), dan tidak pernah menyentuh LevelDB — kalau ia ikut memegang
+# basis data, "verifikasi independen" hanya klaim.
+#
+# Auditor boleh mati tanpa mematikan log; yang berhenti hanyalah tanda tangan
+# tree head baru (dan klien menolak auditor head yang lebih tua dari 7 hari).
+# Sejak 2026-10-28 ini satu-satunya auditor di mesin ini (auditor v1 pensiun,
+# docs/38); metrik `nyx_kt_auditor_*` tetap memakai nama yang sama dan hidup di
+# :9469.
+[Unit]
+Description=NYX Key Transparency v2 third-party auditor (ML-DSA-65)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=nyx-kt-query-v2.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@NYX_REPO@/server/kt-query
+# Nama auditor HARUS punya entri di `api.auditors` kt/v2/etc/config.yaml — di
+# sana tersimpan kunci publik pasangan kt/v2/etc/auditor.key.
+ExecStart=@NYX_REPO@/server/kt-query/nyx-kt-auditor-v2 \
+  -name nyx-primary-auditor-v2 \
+  -key-file @NYX_STATE@/kt/v2/etc/auditor.key \
+  -state-file @NYX_STATE@/kt/v2/auditor-state.json \
+  -read-url http://127.0.0.1:8089 \
+  -auditor-addr 127.0.0.1:8087 \
+  -metrics-addr 127.0.0.1:9469
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+# Hardening ringan saja: unit user tidak boleh memakai ProtectSystem/ProtectHome
+# (path-nya justru di dalam /home).
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

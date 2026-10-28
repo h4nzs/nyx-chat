@@ -1,0 +1,19 @@
+[Unit]
+Description=NYX API (Express 5 + Prisma + Redis bridge + WebSocket gateway)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+# Unit user TIDAK bisa mengurutkan diri terhadap layanan manager sistem
+# (postgresql/valkey), jadi andalkan pengulangan: API keluar sendiri kalau Redis
+# belum siap (index.ts menunggu connectRedis), lalu dijalankan lagi.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@NYX_REPO@/server
+EnvironmentFile=@NYX_REPO@/server/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

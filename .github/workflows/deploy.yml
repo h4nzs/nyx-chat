@@ -1,9 +1,7 @@
 name: Deploy NYX to VPS (PNPM Monorepo)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 # [audit F-15] Permission minimum. Deploy hanya membaca repo di runner; semua
 # akses VPS lewat SSH milik step sendiri, bukan token GITHUB.

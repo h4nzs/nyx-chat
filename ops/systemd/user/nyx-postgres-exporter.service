@@ -1,0 +1,34 @@
+# NYX — postgres_exporter (metrik Postgres lokal) untuk Prometheus.
+#
+# Padanan tingkat-user dari paket Arch `prometheus-postgres-exporter`, dengan
+# path di @NYX_HOME@ supaya tidak butuh root. Prometheus sudah men-scrape
+# 127.0.0.1:9187 sebagai job `postgres`; tanpa unit ini target itu mati dan
+# panel Grafana/alert yang memakai metrik pg_* tidak punya data.
+#
+# DSN diambil dari DATABASE_URL aplikasi (lihat postgres-exporter.env, 0600) dan
+# memakai `sslmode=disable`: Postgres-nya lokal, sertifikat snakeoil justru
+# mematikan koneksi (catatan yang sama dengan server/src/lib/prisma.ts).
+#
+# HANYA loopback.
+[Unit]
+Description=NYX postgres_exporter (metrik Postgres loopback :9187)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=postgresql.service
+Wants=postgresql.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=@NYX_STATE@/postgres-exporter/postgres-exporter.env
+ExecStart=@NYX_STATE@/postgres-exporter/bin/prometheus-postgres-exporter \
+  --web.listen-address=127.0.0.1:9187
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=default.target

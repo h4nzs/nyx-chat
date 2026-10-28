@@ -1,0 +1,14 @@
+[Unit]
+Description=NYX nginx (marketing + web app statis, loopback :3000)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/nginx -c @NYX_STATE@/nginx/nginx.conf -g 'daemon off;'
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

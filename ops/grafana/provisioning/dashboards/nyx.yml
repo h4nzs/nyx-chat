@@ -1,0 +1,20 @@
+# Provider dashboard: berkas JSON di $G/dashboards dimuat otomatis.
+#
+# Sumber kebenaran tetap repo (ops/grafana/dashboards/nyx-overview.json); berkas
+# di sini adalah SALINAN. Perbarui dengan:
+#   install -m 644 ~/nyx-chat/ops/grafana/dashboards/nyx-overview.json \
+#                  ~/nyx-selfhost/grafana/dashboards/nyx-overview.json
+# Grafana memuat ulang tiap 60 detik (updateIntervalSeconds).
+apiVersion: 1
+
+providers:
+  - name: nyx
+    orgId: 1
+    folder: NYX
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: @NYX_STATE@/grafana/dashboards
+      foldersFromFilesStructure: false
