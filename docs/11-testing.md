@@ -4,11 +4,11 @@
 
 | Package | Runner | Command | Count |
 |---|---|---|---|
-| server | `node:test` via `tsx` (Jest config is dead — ignore it) | `pnpm --filter nyx-server run test` | 86 files / 689 tests (687 pass + 2 skip) |
-| web | Vitest (jsdom) | `pnpm --filter nyx-web run test` | 127 files / 1038 tests |
-| kt-query | `go test` lewat `build.sh test` (vendor, tanpa jaringan) | `server/kt-query/build.sh test` | 31 tests |
+| server | `node:test` via `tsx` (Jest config is dead — ignore it) | `pnpm --filter nyx-server run test` | 86 files / 693 tests (691 pass + 2 skip) |
+| web | Vitest (jsdom) | `pnpm --filter nyx-web run test` | 128 files / 1038 tests |
+| kt-query | `go test` lewat `build.sh test` (vendor, tanpa jaringan) | `server/kt-query/build.sh test` | 147 tests (`go test ./...`, semua lulus) |
 | sidecar | `cargo test` (Rust, murni tanpa soket); CI juga menjalankan `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` (job `sidecar`, sama seperti `pir-sidecar`) | `cd server/transport-sidecar && cargo test` | 2 targets / 25 tests (19 lib + 6 sertifikat) |
-| everything | — | `pnpm -r --if-present run test` | 213 files (server 86 + web 127) |
+| everything | — | `pnpm -r --if-present run test` | 214 files (server 86 + web 128) |
 | DR oracle | Go (implementasi kedua, tanpa libsodium) | `cd tools/dr-oracle && go run . -check` | vektor 9 test web + interop 4 test |
 
 Server tests are listed explicitly in `server/package.json` (`tsx --test tests/…`). They must **not** require Postgres/Redis — Prisma clients are faked (see `tests/sessionKeys.test.ts`).

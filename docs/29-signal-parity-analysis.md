@@ -1,50 +1,67 @@
 # 29 — Analisis Komparatif NYX vs Signal (dan apa yang bisa kita adopsi)
 
-> **Status: ANALISIS / RESEARCH.** Tidak ada perubahan kode dalam dokumen ini.
-> Dibuat 2026-10-10 dengan membaca langsung source NYX + source Signal di
-> `~/signal` (libsignal, Signal-Server, Signal-Desktop, key-transparency-server,
-> ContactDiscoveryService-Icelake, registration-service, SparsePostQuantumRatchet,
-> node-sqlcipher, Signal-FTS5-Extension). Semua klaim di bawah punya rujukan file
-> atau README; yang tidak bisa saya verifikasi ditandai eksplisit.
+> **Status: ANALISIS + STATUS IMPLEMENTASI.** Dibuat 2026-10-10 dengan membaca
+> source NYX + source Signal; **diperbarui 2026-10-28** terhadap HEAD `1664`
+> commit (v3.0.0). Sejak 2026-10-16 source Signal **di-vendor di repo ini**
+> (`vendor/signal/spqr`, `vendor/signal/libsignal-keytrans`,
+> `server/kt-query/vendor/github.com/signalapp/keytransparency`), jadi rujukan
+> "Signal punya X" di bawah bisa dicek tanpa checkout eksternal.
 >
-> **Satu temuan yang perlu tindakan segera** ada di §7 (blind credential issuance
-> tidak memverifikasi keanggotaan) — lihat juga §9 quick win #1.
+> Klaim status di dokumen ini diverifikasi dari kode/berkas, bukan dari ingatan:
+> daftar rujukan ada di akhir setiap bagian yang berubah. Yang tidak bisa
+> diverifikasi ditandai eksplisit.
+>
+> **Banyak item yang dulu "celah" sudah selesai** (KT penuh, SPQR, backup
+> ber-frame, negosiasi kapabilitas, calls). Ringkasan perubahannya ada di §1.1.
 
 ---
 
 ## 1. Ringkasan eksekutif
 
 1. **Kripto inti NYX setara atau di atas Signal pada beberapa sumbu.** PQX3DH
-   (X-Wing/ML-KEM-768) wajib, DR hybrid, sender-key v2 yang meniru
-   `sender_keys.rs` libsignal, plus **token-first group membership**. Blind RSA
-   credential pernah ada (RFC 9474) tetapi dihapus 2026-10-23; catatan historis
-   ada di §4.3/§7.1. NYX tidak perlu merasa kalah di layer protokol.
-2. **Celah terbesar NYX bukan kripto, tapi *kepercayaan pada server* dan
-   *perangkat*.** Tiga hal: (a) **key transparency** — belum ada sama sekali,
-   jadi server tetap bisa menyajikan prekey bundle palsu secara terarah dan
-   korban hanya tahu dari safety number manual; (b) **multi-device** — NYX
-   mengunci 1 perangkat aktif, Signal menjalankan device-list + linked devices +
-   storage service; (c) **backup/restore** — NYX hanya export/import manual,
-   Signal punya format backup terenkripsi yang tervalidasi ketat.
-3. **NYX unggul pada privasi identitas & data-at-rest.** Tanpa PII sama sekali
-   (Signal tetap butuh nomor telepon sebagai akar identitas), blind index
-   Argon2id 64MB client-side (vs hash SHA-256 + enclave SGX di Signal), hardening
-   dump DB yang tidak dimiliki messenger lain (senderId/sessionId/device key
-   ter-seal, bucketing waktu, Redis identityTag, token-only membership), panic
-   password, burner room, dan cover traffic T4 yang **tidak** dikirim Signal.
-4. **Signal unggul pada rekayasa, verifikasi, dan ekosistem.** libsignal = Rust
-   core + binding multi-platform, ada verifikasi formal (SPQR dengan hax/F* dan
-   model ProVerif), ribuan test, capability negotiation (`DeviceCapability`,
-   `ClientRelease`), spam-filter ML, registration fraud analytics, audit
-   eksternal, dan klien native di semua platform. NYX: satu worker TS monolitik,
-   ratusan test web + server, lint lewat **oxlint** sejak 2026-10-15 (ESLint tidak
-   pernah jalan di TS 7.0.2 dan kini dihapus — §7.4), klien web saja.
-5. **Hal paling layak diadopsi, urut ROI:** (1) gate issuance credential +
-   binding konteks; (2) key transparency (mulai dari versi "lite" berbasis
-   gossip); (3) multi-device; (4) backup terenkripsi inkremental; (5) capability
-   negotiation di handshake; (6) SPQR-style PQ ratchet (FS **dan** PCS, bukan
-   cuma FS); (7) static analysis + test vector lintas-implementasi (lint:
-   **oxlint blocking**, §7.4).
+   (X25519 + ML-KEM-768/X-Wing) wajib, DR hybrid, **braid SPQR PQ (FS+PCS)
+   sudah live** sebagai jalur v2, sender-key v2 yang meniru `sender_keys.rs`
+   libsignal, plus **token-first group membership**. Blind RSA credential
+   (RFC 9474) pernah ada tetapi **dihapus 2026-10-23**; catatan historisnya ada
+   di §4.3/§7.1. NYX tidak perlu merasa kalah di layer protokol.
+2. **Celah "kepercayaan pada server" sudah menyusut drastis.** Key transparency
+   **sudah berjalan di jalur produksi**: penulis log + verifier WASM + monitor loop +
+   auditor mode 3 + gossip tree head, dengan log v2 ML-DSA-65 berjalan sebagai
+   **dual-write**. Verifikasi kunci kini **bukan** lagi TOFU murni: verdict KT
+   ikut memblokir pin. Sisa pekerjaan KT bersifat operasional/interop (§5.1).
+3. **Celah besar yang masih tersisa bukan kripto, tapi perangkat & ekosistem.**
+   (a) **multi-device tetap non-goal permanen** (satu perangkat aktif sebagai
+   properti keamanan); (b) **klien hanya web**, jadi reliabilitas push/background
+   di mobile tidak bisa dijamin; (c) **belum ada review kripto eksternal**
+   (`docs/36` adalah paketnya, bukan hasilnya).
+4. **NYX unggul pada privasi identitas & data-at-rest.** Tanpa PII (Signal
+   berakar pada nomor telepon), blind index Argon2id 64 MB client-side, pencarian
+   privat **OPRF + PIR (ChalametPIR) + OHTTP** (default mati di repo, hidup di
+   selfhost), hardening dump DB yang tidak dimiliki messenger lain
+   (senderId/sessionId/device key ter-seal, bucketing waktu, `identityTag` Redis,
+   token-only membership), panic password, burner room, dan cover traffic yang
+   **tidak** dikirim Signal.
+5. **Signal masih unggul pada verifikasi formal, ekosistem, dan skala
+   rekayasa.** libsignal = Rust core multi-platform + verifikasi formal (SPQR
+   dengan hax/F* dan ProVerif), ribuan test, audit eksternal, klien native di
+   semua platform. NYX: kripto di satu worker TS (tidak boleh dipecah), 128
+   berkas tes web, 86 berkas / 693 tes server, 147 tes Go KT, fuzz deterministik,
+   oracle DR lintas implementasi, lint **oxlint** blocking — tapi belum ada
+   formal method dan belum ada audit pihak ketiga.
+
+### 1.1 Apa yang berubah sejak analisis 2026-10-10
+
+| Item | 2026-10-10 | Sekarang (2026-10-28) | Bukti |
+|---|---|---|---|
+| Key transparency | belum ada | log + verifier + monitor + auditor + gossip; v2 dual-write | `docs/32`, `docs/34`, `server/kt-query` |
+| PQ ratchet (PCS) | DR hybrid (FS saja) | braid SPQR v2 **live** berdampingan, dipilih via `ackV` | `docs/33` §33.10, `packages/spqr-wasm` |
+| Backup | satu JSON export | **`NYXB` v1**: ber-frame, AEAD+AAD, BIP39→Argon2id 128 MB, streaming | `docs/31`, `web/src/lib/backupFormat.ts` |
+| Negosiasi kapabilitas | tidak ada | HELLO bidi (WT) + `handshake.auth.capabilities` (WSS) | `packages/shared/src/transport.ts` |
+| Calls | signaling `to: userId`, fallback STUN Google | **relay token** (bukan userId), coturn primari, tanpa STUN pihak ketiga | `realtimeHandlers.ts`, `routes/keys.ts` |
+| Blind RSA credential | ada, tanpa gating | **dihapus** (cutover PQ-only) | `docs/26`, `docs/35` Fase 6 |
+| Verifikasi kunci | TOFU + localStorage | KT verdict + pin di keychain + **gate kirim** | `peerIdentityTrust.ts`, `docs/34` §34.6a |
+| Pencarian | tukar link / hash persis | **OPRF + PIR + OHTTP** (bertahap, default mati) | `docs/35` Fase 4, `server/pir-sidecar` |
+| Lint | ESLint tidak jalan | **oxlint** satu-satunya linter, blocking pada `error` | `AGENTS.md`, `.oxlintrc.json` |
 
 ---
 
@@ -52,19 +69,23 @@
 
 | | **NYX** | **Signal** |
 |---|---|---|
-| Bentuk | Web-only (React 19 + Vite 8), monorepo pnpm | Native Android/iOS/Desktop (Electron) + server Java |
-| Bahasa | TypeScript di semua layer; Rust hanya sidecar WebTransport | Rust (libsignal, SPQR, extensions), Java (server, CDS, registration), TS (Desktop), Go (key transparency) |
-| Server | Express 5 + Prisma 7 + PostgreSQL + Redis, Redis pub/sub, 1 VPS (4c/8GB, pm2) | Java + FoundationDB/DynamoDB/ScyllaDB + Redis, gRPC, fleet besar |
-| Transport | WebTransport/QUIC (sidecar Rust) + REST fallback, opcode biner | WebSocket/gRPC + REST protobuf |
-| Kripto inti | PQX3DH (X25519+ML-KEM-768 X-Wing), DR hybrid, sender key v2, burner PQ-DR, XChaCha20-Poly1305, BLAKE2b, Argon2id, Ed25519 | X3DH/PQXDH, Double Ratchet, Sender Keys, **SPQR** (ML-KEM Braid), AES-GCM (RustCrypto), zkgroup (pairing/BBS) |
-| Identitas | Tanpa PII: `usernameHash` Argon2id 64MB client-side + recovery phrase BIP39 + hardware binding | Nomor telepon (ACI/PNI) + opsional username; PIN + Secure Value Recovery |
-| Storage lokal | IndexedDB (Dexie) — kolom sensitif terenkripsi, struktur plaintext; OPFS hanya blob terenkripsi | SQLCipher (seluruh DB) + FTS5 terenkripsi |
-| Verifikasi kunci | TOFU + warning perubahan kunci + safety number manual | **Key transparency** (log Merkle + monitor/auditor) |
-| Lisensi | AGPL-3.0 | AGPL-3.0(-only) — semuanya, termasuk SPQR & key-transparency-server |
+| Bentuk | Web-only (React 19 + Vite 8), monorepo pnpm (`web`, `server`, `marketing`, `packages/*`) | Native Android/iOS/Desktop (Electron) + server Java |
+| Bahasa | TypeScript di semua app; **Rust** (sidecar WebTransport, sidecar PIR), **Go** (`server/kt-query`), **WASM** (`spqr-wasm`, `keytrans-wasm(-v2)`, `pir-wasm`) | Rust (libsignal, SPQR, extensions), Java (server, CDS, registration), TS (Desktop), Go (key transparency) |
+| Server | Express 5 + Prisma 7 + PostgreSQL + Redis (pub/sub), 1 VPS 4c/8GB; pm2 untuk API/sidecar + systemd untuk KT log/auditor, PIR, OHTTP relay | Java + FoundationDB/DynamoDB/ScyllaDB + Redis, gRPC, fleet besar |
+| Transport | WebTransport/QUIC (sidecar Rust) + **fallback WSS socket.io**, opcode biner, negosiasi kapabilitas di kedua jalur | WebSocket/gRPC + REST protobuf |
+| Kripto inti | PQX3DH (X25519 + ML-KEM-768 X-Wing), DR hybrid, **braid SPQR**, sender key v2, burner PQ-DR, XChaCha20-Poly1305, BLAKE2b, Argon2id, Ed25519 + **ML-DSA-65** | X3DH/PQXDH, Double Ratchet, Sender Keys, **SPQR** (ML-KEM Braid), AES-GCM (RustCrypto), zkgroup (pairing/BBS) |
+| Identitas | Tanpa PII: `usernameHash` Argon2id 64 MB client-side + index OPRF hibrida + `shareId` publik + recovery phrase (BIP39) + attestation WebAuthn | Nomor telepon (ACI/PNI) + opsional username; PIN + Secure Value Recovery |
+| Storage lokal | IndexedDB (Dexie) — **struktur & konten sensitif ter-seal `ENC1:`**, urutan dua lapis; OPFS hanya blob terenkripsi | SQLCipher (seluruh DB) + FTS5 terenkripsi |
+| Verifikasi kunci | **KT** (log Merkle, monitor, auditor, gossip) + pin + safety number manual + gate kirim saat `mismatch` | Key transparency (log Merkle + monitor/auditor), tanpa safety number wajib |
+| Pencarian user | hash identifier (Argon2id) → OPRF → PIR (ChalametPIR) via OHTTP; tanpa social graph | SGX/Icelake PSI atas nomor telepon; username links |
+| Lisensi | AGPL-3.0 | AGPL-3.0(-only) — termasuk SPQR & key-transparency-server |
 
-Skala: NYX 515 file / 1.481 commit / 2 kontributor manusia, v2.7.0, DB dev 39
-pesan–3 percakapan. Signal: repo Signal-Desktop saja sudah v8.31.0-alpha dengan
-ratusan migrasi SQLCipher (`Signal-Desktop/ts/sql/migrations/` sampai seri 990+).
+Skala NYX (terukur 2026-10-28): **1.664 commit**, 2 kontributor manusia (+1 bot),
+v3.0.0, 2.722 berkas terindeks, 128 berkas tes web, 86 berkas / 693 tes server,
+147 test Go, 2 crate Rust dengan test, 14 spec Playwright. Signal: repo
+Signal-Desktop saja sudah v8.31.0-alpha dengan ratusan migrasi SQLCipher
+(`Signal-Desktop/ts/sql/migrations/` sampai seri 990+) — angka itu berasal dari
+pembacaan 2026-10-10 dan tidak diverifikasi ulang.
 
 ---
 
@@ -74,45 +95,48 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 
 | # | Domain | NYX hari ini | Signal | Verdict |
 |---|---|---|---|---|
-| 1 | Registrasi & identitas | tanpa PII, Argon2id blind index, PoW/Turnstile | nomor telepon via registration-service (SMS/voice, fraud analytics) | **NYX+** (privasi) / SIG+ (sybil resistance) |
+| 1 | Registrasi & identitas | tanpa PII, Argon2id blind index, PoW/Turnstile, attestation WebAuthn | nomor telepon via registration-service (SMS/voice, fraud analytics) | **NYX+** (privasi) / SIG+ (sybil resistance) |
 | 2 | Key agreement PQ | PQX3DH X-Wing wajib, tolak downgrade klasik | PQXDH + Kyber, PQ opsional-per-kapabilitas | **≈** (NYX lebih ketat) |
-| 3 | Ratchet 1:1 | DR hybrid (KEMs/KEMr/savedCt) — PQ **FS**; jalur v2 **braid SPQR** (PQ **FS + PCS**) sudah live berdampingan, dipilih lewat deklarasi peer (`docs/33` §33.10) | DR + **SPQR** (ML-KEM Braid) — PQ **FS + PCS**, terverifikasi formal | **≈** (kripto setara; formal verification masih SIG+) |
-| 4 | Grup | sender key v2 (model libsignal) + rotasi era, pseudonym, metadata-key terpisah | Sender Keys + zkgroup GroupSendEndorsement, sedang menuju QR/MLS | **≈** |
-| 5 | Kredensial keanggotaan anonim | **token-first** (group/delivery token); blind RSA dihapus 2026-10-23 (§4.3 historis) | zkgroup (pairing, redemption time, presentation context) | **≈** (NYX lebih sederhana, tanpa unlinkability) |
-| 6 | Key transparency | tidak ada | key-transparency-server (Merkle log, VRF, monitor) + klien `keytrans` | **SIG+** (celah terbesar) |
-| 7 | Verifikasi kunci user | TOFU warning + safety number manual, state di localStorage | otomatis + monitor, manual jadi opsional | **SIG+** |
-| 8 | Contact discovery | tukar link / cari usernameHash persis; tanpa social graph | SGX/Icelake PSI atas nomor telepon; username links | **SIG+** (fitur) / NYX+ (privasi terhadap Intel) |
-| 9 | Multi-device | **1 perangkat aktif** (sidecar), migrasi manual via QR+chunk | device list, linked devices, provisioning, device-transfer, storage service | **SIG+** |
-| 10 | Backup/restore | export/import JSON (opsional terenkripsi), migrasi streaming | format backup protobuf tervalidasi ketat + SVR/PIN + frame/padding/scramble | **SIG+** |
-| 11 | At-rest server (dump) | **sealed senderId/sessionId/device key, bucketing waktu, identityTag Redis, token-only membership, audit script** | sealed sender di transit, tapi kolom DB tetap ter-join ke akun | **NYX+** |
-| 12 | Sealed sender | 1:1 `senderId` tersimpan ter-seal/NULL; server tetap tahu penulis saat write | sealed sender + sender certificate + access-key/rate-limit token | **≈** (tujuan sama, mekanisme beda) |
-| 13 | Storage lokal | Dexie; konten/nama/participant/contact terenkripsi, struktur plaintext | SQLCipher penuh + FTS5 terenkripsi | **SIG+** |
-| 14 | Media/lampiran | R2 presigned + secretstream, deleteAt | CDN + `media` crate (thumbnail/transcode terkendali) | **≈** |
-| 15 | Calls | WebRTC P2P; signaling `to: userId`; TURN Cloudflare + **STUN Google** | RingRTC, call links, blinded signaling, SFU-less multi-party | **SIG+** |
-| 16 | Push | VAPID, body generik, payload per-device ter-seal ≤3KB | push tanpa konten + NSE/notification extension native | ≈ untuk web, **SIG+** untuk mobile |
-| 17 | Anti-spam | PoW (client-mined, server-verified), Turnstile, tier sandbox/VIP, rate limit Lua atomik | spam-filter ML, rate-limit challenge, registration fraud analytics | **≈** (filosofi beda) |
+| 3 | Ratchet 1:1 | DR hybrid + **braid SPQR jalur v2** (FS+PCS), dipilih setelah peer meng-ack (`ackV`) | DR + **SPQR** (ML-KEM Braid) — FS+PCS, terverifikasi formal | **≈** (kripto setara; formal verification & laporan audit masih SIG+) |
+| 4 | Grup | sender key v2 + rotasi era, pseudonym, metadata-key terpisah, envelope v2/v3/v4 (77/85/2037 B) | Sender Keys + zkgroup GroupSendEndorsement, menuju QR/MLS | **≈** |
+| 5 | Kredensial keanggotaan | **token-first** (group/delivery token); blind RSA dihapus 2026-10-23 | zkgroup (pairing, redemption time, presentation context) | **≈** (NYX lebih sederhana, tanpa unlinkability) |
+| 6 | Key transparency | **ada**: penulis log, `kt-query` (pemilik LevelDB), verifier WASM, monitor loop, auditor mode 3, gossip; v2 dual-write | key-transparency-server (Merkle log, VRF, monitor) + klien `keytrans` | **≈** (fitur setara; interop `kt-client` & cutover baca v2 masih SIG+) |
+| 7 | Verifikasi kunci user | KT verdict + pin terenkripsi + gate kirim saat `mismatch`; safety number manual tersedia | otomatis + monitor, manual opsional | **≈** (residual: `unavailable`/`unknown-subject` fail-open yang terlihat) |
+| 8 | Contact discovery | hash identifier → OPRF → PIR di balik OHTTP; tanpa social graph; default mati di repo | SGX/Icelake PSI atas nomor telepon; username links | **≈** (fitur) / NYX+ (privasi terhadap Intel, tanpa PII) |
+| 9 | Multi-device | **1 perangkat aktif** (non-goal permanen, `docs/30` §30.6/§30.18) | device list, linked devices, provisioning, device-transfer, storage service | **SIG+** (dipilih tidak ditutup) |
+| 10 | Backup/restore | **format `NYXB` v1** ber-frame, AEAD+AAD, kunci dari recovery phrase, opsional di R2 + migrasi streaming | format backup protobuf tervalidasi ketat + SVR/PIN + frame/padding/scramble | **≈** |
+| 11 | At-rest server (dump) | sealed senderId/sessionId/device key, bucketing waktu, `identityTag` Redis, token-only membership, audit script | sealed sender di transit, kolom DB tetap ter-join ke akun | **NYX+** |
+| 12 | Sealed sender | 1:1 `senderId` ter-seal/NULL; server tahu penulis saat write | sealed sender + sender certificate + access-key/rate-limit token | **≈** (tujuan sama, mekanisme beda) |
+| 13 | Storage lokal | Dexie; konten + kolom struktur ter-seal, sisa plaintext = primary key & bucket indeks | SQLCipher penuh + FTS5 terenkripsi | **SIG+** (lebih sederhana: satu kunci DB) |
+| 14 | Media/lampiran | R2 presigned + secretstream, deleteAt, batas ukuran per tier | CDN + `media` crate (thumbnail/transcode terkendali) | **≈** |
+| 15 | Calls | WebRTC P2P; signaling lewat **token relay** (bukan userId); coturn primari → Cloudflare → STUN operator → 503 | RingRTC, call links, blinded signaling, SFU-less multi-party | **SIG+** (fitur); mekanisme privasi NYX kini setara arah |
+| 16 | Push | VAPID, body generik, payload per-device ter-seal ≤3 KB | push tanpa konten + NSE/notification extension native | ≈ untuk web, **SIG+** untuk mobile |
+| 17 | Anti-spam | PoW (client-mined, server-verified), Turnstile, attestation WebAuthn, heuristik per-ASN, tier sandbox/VIP, rate limit Lua atomik | spam-filter ML, rate-limit challenge, registration fraud analytics | **≈** (filosofi beda) |
 | 18 | Panic/deniability | panic password + nuke wipe | tidak ada | **NYX+** |
 | 19 | Burner/ephemeral | burner room (guest, PQ-DR, RAM-only) | tidak ada | **NYX+** |
-| 20 | Cover traffic | T4 opt-in (chaff 1KB/3s + dummy message ber-jitter) | tidak ada (Signal menolak trade-off ini) | **NYX+** |
-| 21 | Negosiasi kapabilitas | tidak ada (opcode + version byte per-payload) | `DeviceCapability`, `ClientRelease`, gRPC/protobuf ter-skema | **SIG+** |
-| 22 | Jaminan rekayasa | 602 vitest + 374 node:test + 31 test Go (`server/kt-query`) + 18 cargo test + 24 Playwright; fuzz deterministik parser (web & sidecar framing, `docs/30` WS-G(5)); lint hidup (oxlint); tanpa formal method | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
-| 23 | Operabilitas/self-host | 1 VPS, pm2, deploy SCP — siapa pun bisa jalankan | butuh FDB/Dynamo/Scylla — praktis tidak self-hostable | **NYX+** |
+| 20 | Cover traffic | chaff 1000 B/3 s (visibility-aware) + padding 8 KB + dummy message ber-jitter, opt-in | tidak ada (Signal menolak trade-off ini) | **NYX+** |
+| 21 | Negosiasi kapabilitas | **ada** di kedua relay: `hello-v1`, `spqr-ratchet`, `pq-v2`; klien lama (tanpa daftar) tetap legacy | `DeviceCapability`, `ClientRelease`, gRPC/protobuf ter-skema | **≈** |
+| 22 | Jaminan rekayasa | 128 berkas tes web, 86/693 server, 147 Go, 2 crate Rust, 14 spec Playwright; fuzz deterministik; oracle DR non-libsodium; 40 aturan alert + drill; oxlint blocking; **tanpa** formal method/audit eksternal | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
+| 23 | Operabilitas/self-host | 1 VPS, pm2 + beberapa unit systemd — siapa pun bisa jalankan | butuh FDB/Dynamo/Scylla — praktis tidak self-hostable | **NYX+** |
 | 24 | Ekosistem produk | web + marketing + tenant B2B/subscription | semua platform, stickers, call links, backup, donations | **SIG+** |
+| 25 | Privasi pencarian | OPRF + PIR + OHTTP; snapshot PIR disegarkan lewat penanda generasi (≤3 menit) | ContactDiscovery (SGX), tanpa PIR | **NYX+** (privasi kueri) / SIG+ (laten si & skala) |
 
 ---
 
 ## 4. Di mana NYX sudah bagus (jangan diubah tanpa alasan)
 
 **4.1 Identitas tanpa PII dan blind index memory-hard.**
-`usernameHash` dihitung client-side dengan Argon2id 64MB/3 iter
-(`docs/14-auth-identity.md` §14.1, `web/src/workers/crypto.worker.ts` op
-`hashUsername`). Konsekuensinya: server tidak bisa reverse, dan **dump DB pun
-tidak bisa di-dictionary-attack murah** — berbeda dari Signal yang menaruh hash
-nomor telepon sebagai search key (Signal menutup ini dengan enclave + key
-transparency, bukan dengan biaya memori). Ini aset paling khas NYX; fitur baru
-(termasuk key transparency nanti) harus mempertahankannya.
+`usernameHash` dihitung client-side dengan Argon2id 64 MB/3 iter
+(`docs/14` §14.1, `web/src/workers/crypto.worker.ts` op `hashUsername`).
+Konsekuensinya: server tidak bisa reverse, dan **dump DB pun tidak bisa
+di-dictionary-attack murah** — berbeda dari Signal yang menaruh hash nomor
+telepon sebagai search key (Signal menutup ini dengan enclave + key
+transparency, bukan dengan biaya memori). Sejak 2026-10-23 identitas pencarian
+memakai **index OPRF hibrida** (`User.oprfIndex`) tanpa memutus baris legacy,
+dan sejak 2026-10-25 pencarian privat OPRF→PIR→OHTTP tersedia (default mati).
+Ini aset paling khas NYX; fitur baru harus mempertahankannya.
 
-**4.2 Hardening at-rest yang tidak dimiliki Signal.** `docs/28-db-dump-threat-model.md`
+**4.2 Hardening at-rest yang tidak dimiliki Signal.** `docs/28`
 + `server/src/utils/atRestSecrets.ts`, `senderIdentity.ts`, `redisIdentity.ts`,
 `temporalBucket.ts`, `groupMetadataBlob.ts`, dengan pemeriksa otomatis
 `server/src/utils/dumpAudit.ts` dan `server/scripts/privacy-dump-audit.ts`.
@@ -122,557 +146,390 @@ Pertahankan, dan jadikan rujukan saat menambah fitur baru.
 
 **4.3 Blind RSA membership credential (26.8.1) — historis, dihapus 2026-10-23.**
 > **Dihapus pada cutover PQ-only.** `groupCredentials.ts`, endpoint issuance/
-> commit/revoke, dan persist Dexie tidak ada lagi. Grup memakai token-first;
-> bagian di bawah hanya catatan desain lama dan tidak boleh dijadikan acuan
-> implementasi.
+> commit/revoke, op worker `credential_*`, dan persist Dexie tidak ada lagi.
+> Grup memakai token-first; route `POST /api/groups/:id/credential/present`
+> (`server/src/routes/groups.ts`, di-mount di `/api/groups`) masih ter-mount
+> tetapi **fail-closed**: tanpa issuer/verifier semua presentasi dijawab **403**
+> (`docs/16` §16.5.1), untuk membekukan wire format. Bagian di bawah hanya catatan
+> desain lama dan tidak boleh dijadikan acuan implementasi.
 
-`server/src/lib/groupCredentials.ts` + `web/src/lib/groupCredentials.ts` +
-op worker `credential_blind`/`credential_finalize`. Ini menjawab kebutuhan
-"presentation moment" (docs/26.8.1) tanpa pairing/BBS+: suite
-`RSABSSA-SHA384-PSS-Randomized` (RFC 9474), private key issuer **wajib dari env**
-(`GROUP_ISSUER_KEY_PKCS8`), fail-closed di production, DB hanya menyimpan material
-publik. Revocation = hapus row serial. Dibanding zkgroup Signal: lebih kecil,
-lebih standar, tapi **kurang binding** (lihat §7). Klaim rotasi key yang
-membatalkan credential lama juga tidak ditegakkan oleh `verifyPresentation`.
+Dulu: suite `RSABSSA-SHA384-PSS-Randomized` (RFC 9474), private key issuer dari
+env (`GROUP_ISSUER_KEY_PKCS8`), fail-closed di production, DB hanya menyimpan
+material publik. Dibanding zkgroup Signal: lebih kecil, lebih standar, tapi
+**kurang binding** (lihat §7.1) — dan karena itu dihapus, bukan diperbaiki.
 
-**4.4 Timing/covers & deniability.** Chaff 1000B/3s (`CHAFF = 0x00`, sidecar
-mengabaikan), padding 8KB, cover traffic T4 opt-in (docs/26.10), panic password,
-nuke wipe. Signal secara sadar **tidak** mengirim cover traffic; di dimensi
-"menyembunyikan kapan", NYX lebih jauh.
+**4.4 Timing/covers & deniability.** Chaff 1000 B/3 s (`CHAFF = 0x00`, sidecar
+mengabaikan; tab background berhenti mengirim), padding 8 KB
+(`PADDING_BLOCK_SIZE = 8192` di `crypto.worker.ts`), cover traffic T4 opt-in
+(`docs/26` §26.10), panic password, nuke wipe (wipe lokal selalu didahului
+`POST /api/auth/logout-all`). Signal secara sadar **tidak** mengirim cover
+traffic; di dimensi "menyembunyikan kapan", NYX lebih jauh.
 
-**4.5 Sederhana dan bisa di-self-host.** 1 VPS + pm2 vs fleet FDB/Dynamo/Scylla.
-Ini bukan sekadar hemat biaya: memperkecil permukaan operasional memperkecil
-permukaan kebocoran (dan membuat audit oleh pihak ketiga realistis).
+**4.5 Sederhana dan bisa di-self-host.** 1 VPS + pm2 (+ systemd untuk KT/PIR/OHTTP)
+vs fleet FDB/Dynamo/Scylla. Ini bukan sekadar hemat biaya: memperkecil permukaan
+operasional memperkecil permukaan kebocoran (dan membuat audit oleh pihak ketiga
+realistis).
 
 ---
 
-## 5. Celah NYX vs Signal — detail + cara menutup
+## 5. Celah yang tersisa — dan yang sudah ditutup
 
-### 5.1 Key transparency (celah nomor satu)
+Bagian ini dulu daftar "celah"; sekarang dibagi menjadi **status** dan **sisa
+pekerjaan**. Angka "tingkat keparahan" dipertahankan untuk konteks historis.
 
-**Masalah.** Root of trust pemetaan `username → prekey bundle` adalah server
-(`server/src/routes/keys.ts`). Penyerang dengan akses server (atau backup dump)
-bisa menyajikan bundle palsu **hanya untuk satu target** dan tidak ada yang bisa
-membuktikannya. NYX hanya punya TOFU + warning bubble
-(`web/src/utils/crypto.ts` `identityChanged`, `web/src/utils/verification.ts`,
-state di **localStorage** — mudah dibersihkan, hilang saat wipe, dan tidak
-ditandatangani). Safety number ada (`web/src/utils/safetyNumber.ts`) tapi manual
-dan tidak pernah di-*re-verify*.
+### 5.1 Key transparency — **CELAH UTAMA SUDAH DITUTUP** (residual: interop & cutover)
 
-**Yang dipakai Signal.** `key-transparency-server` (Go): log append-only
-gaya Merkle + prefix tree, VRF, endpoint Search/Monitor + auditor, mengikuti
-`draft-ietf-keytrans-protocol`, dengan klien verifikasi di
-`libsignal/rust/keytrans` (`verify_search`, `verify_monitor`,
-`verify_distinguished`, commitment/prefix proof) dan pemanggilan server di
-`Signal-Server/.../controllers/KeyTransparencyController.java`. **Semuanya
-AGPL-3.0** → secara lisensi bisa diadopsi langsung.
+**Dulu (2026-10-10):** root of trust pemetaan `username → prekey bundle` adalah
+server; bundle palsu terarah tak bisa dibuktikan siapa pun.
 
-**Rencana bertahap (disarankan):**
+**Sekarang.** KT berjalan di jalur produksi, bukan rencana:
 
-- **Tahap A — "KT lite" (1–2 minggu, tanpa server baru).** Log identitas
-  append-only **di perangkat**: setiap kali klien mengamati
-  `(usernameHash → identityKey)` dari bundle atau pesan, catat
-  `(peer, key, timestamp)` ke keychain `ENC1:`. Sertakan *observasi* itu
-  (ditandatangani klien, ikut di payload pesan 1:1/grup — sudah ada slot
-  metadata) sehingga kontak Anda menyimpan observasi independen. Bila ada konflik
-  (dua observasi berbeda untuk peer yang sama), **dua-duanya** munculkan warning
-  keras, bukan hanya sisi yang kebetulan melihat bundle baru. Ini mengubah
-  serangan dari "tidak terdeteksi" menjadi "terdeteksi oleh pihak ketiga yang
-  tidak dikendalikan penyerang" — persis properti yang membuat full KT berguna,
-  dengan biaya nol server.
-- **Tahap B — KT penuh (4–8 minggu).** Reuse `key-transparency-server` + port
-  klien `keytrans` (Rust → WASM via wasm-bindgen) atau implementasi TS dari
-  `verify.rs`. Search key = `usernameHash` (bukan nomor telepon) — dan karena
-  hasilnya Argon2id memory-hard, **log-nya sendiri tidak menciptakan kamus**
-  (ini justru lebih kuat dari pada Signal). Update log dipicu pada
-  register/rotate prekey/recover.
-- **Tahap C.** Monitor/auditor pihak ketiga (siapa pun bisa menjalankan
-  auditor yang sama, seperti Signal) + gossip antar-klien atas tree head.
+| Bagian | Implementasi |
+|---|---|
+| Penulis log | `server/src/utils/keyTransparency.ts` — tulis update saat register/rotasi; nonaktif tanpa `KT_SERVER_URL`; **dual-write** ke log v2 (ML-DSA-65) bila `KT_V2_SERVER_URL` diisi |
+| Penyaji bukti | `server/kt-query` (Go) — **pemilik tunggal** LevelDB (goleveldb `LOCK_EX`), `/search`, `/distinguished`, `/monitor`, `/config`, `/head`; 147 test Go |
+| Proxy API | `/api/keys/kt/*` meneruskan protobuf base64url apa adanya (server tidak mem-parse bukti) |
+| Verifier | `packages/keytrans-wasm` (+ `keytrans-wasm-v2`) dipanggil dari `web/src/lib/keyTransparency.ts`; jangkar `distinguished` di-pin (`ktConfigPin.ts`) |
+| Integrasi pin | `ktBundleProof.ts` → `peerIdentityTrust.ts`: verdict `confirmed`/`mismatch`/`unverifiable`/`unavailable`/`unknown-subject`; hanya `mismatch` (yang butuh bukti terverifikasi) memblokir kirim |
+| Monitor | `runKtMonitorOnce` **fail-closed** (state hanya ditulis setelah `verifyMonitor` sukses) + loop di `App.tsx` |
+| Auditor | `server/kt-query/cmd/nyx-kt-auditor` (mode 3, `TreeSize`/`Audit`/`SetAuditorHead`) + varian v2 |
+| Gossip | `ktGossip.ts`: jangkar `(treeSize, root)` di payload ter-seal (field `ktG`) → `split-view` saat dua klien melihat root berbeda untuk ukuran sama |
+| State klien | tabel Dexie `ktMonitoring`/`ktGossip`, ter-seal `ENC1:`, dibersihkan saat wipe |
 
-**Alternative label: SIGNAL-ONLY.** Jika server server ini dijalankan oleh
-operator tunggal, KT penuh pun bergantung pada auditor independen. Tahap A
-adalah mitigasi minimum yang praktis.
+**Batasan yang jujur (tetap ada).**
+`unavailable` (KT mati/jaringan), `unverifiable` (anchor basi), dan
+`unknown-subject` (username peer belum diketahui) **tidak** memblokir — memblokir
+kirim karena layanan mati akan membuat NYX tak bisa dipakai; setiap verdict
+dicatat di baris pin, dan `ChatWindow` menampilkan banner informasi (audit F-09).
+Username peer datang dari profil E2EE yang dibagikan peer, jadi peer tanpa profil
+tidak bisa di-*search* di log.
+
+**Sisa pekerjaan** (`docs/34` §34.6): interop `cmd/kt-client` upstream, dua
+implementasi auditor berdampingan, auditor di host terpisah dari log, dan
+**cutover baca ke v2** (sekarang: dual-write, baca tetap v1). Kapabilitas
+`KT_LITE` masih dideklarasikan klien tetapi tidak pernah diiklankan relay — sisa
+tahap A yang dibatalkan; jangan dihidupkan kembali tanpa alasan.
 
 ### 5.2 Multi-device — **KEPUTUSAN MAINTAINER: tidak dikerjakan (non-goal permanen)**
 
-> **Update 2026-10-11.** Ini bukan celah yang akan ditutup: NYX memilih satu
-> perangkat aktif per akun sebagai **properti keamanan** (tanpa device list, tanpa
-> fan-out kunci per device, tanpa layanan storage ber-kunci-akun). Rencana
-> implementasinya dibatalkan di `docs/30` §30.6 dan dicatat sebagai non-goal di
-> §30.18; kapabilitas `CLIENT_CAPABILITIES.MULTI_DEVICE` sudah dihapus dari
-> `packages/shared/src/transport.ts`. Jalur pemulihan resmi: recovery phrase dan
-> backup ber-frame (`docs/31`). Analisis di bawah dipertahankan sebagai konteks
-> tentang apa yang Signal lakukan — **bukan** sebagai backlog.
+> **Update 2026-10-11, masih berlaku.** Ini bukan celah yang akan ditutup: NYX
+> memilih satu perangkat aktif per akun sebagai **properti keamanan** (tanpa
+> device list, tanpa fan-out kunci per device, tanpa layanan storage ber-kunci
+> akun). Kapabilitas `MULTI_DEVICE` sudah dihapus dari
+> `packages/shared/src/transport.ts` (dan komentar di sana menjelaskan kenapa).
+> Jalur pemulihan resmi: recovery phrase dan backup ber-frame (`docs/31`).
 
-**Masalah.** Sidecar menegakkan satu sesi WebTransport per user
+**Penegakan saat ini.** Sidecar menegakkan satu sesi WebTransport per user
 (`docs/14` §14.7) dan `redisBridge.isActiveDeviceAllowed` menolak perangkat
-kedua, kecuali mode migrasi (`is_migrating:<userId>`) yang memindahkan vault,
-bukan menambah perangkat.
+kedua, kecuali mode migrasi (`is_migrating:<tag>`) yang **memindahkan** vault,
+bukan menambah perangkat. Analisis di bawah dipertahankan sebagai konteks tentang
+apa yang Signal lakukan — **bukan** backlog.
 
 **Signal.** `DeviceController`, `ProvisioningController`, `device-transfer`
-(libsignal), `DeviceCapability`, `DeviceKEMPreKeyPages` (server storage),
-device list per akun, dan satu `storage service` untuk sinkronisasi
-setelan/kontak antar perangkat.
+(libsignal), `DeviceCapability`, `DeviceKEMPreKeyPages` (server storage), device
+list per akun, dan satu `storage service` untuk sinkronisasi setelan/kontak.
 
-**Yang sudah ada di NYX (modal awal):** amplop **per-device** sudah jadi norma
-(`pq_box_seal_v2` + `targetDeviceId`/`targetDeviceKey` di envelope sender-key v2/v4),
-`SessionKey` per device, `contactStore` sudah terenkripsi dan kuncinya
-deterministik dari identity key (jadi bisa di-restore/di-sync lintas perangkat),
-dan alur QR (`auth:request_linking_qr`, `migration:start|chunk|ack`) sudah ada
+**Modal yang tetap berguna** (dipakai jalur migrasi/linking): amplop **per-device**
+(`pq_box_seal_v2` + `targetDeviceId`/`targetDeviceKey` di envelope sender-key
+v2/v4), `SessionKey` per device, `contactStore` terenkripsi dengan kunci turunan
+identity, dan alur QR (`auth:request_linking_qr`, `migration:start|chunk|ack`)
 untuk pemindahan.
 
-**Langkah:** (1) perluas "1 aktif" → "N linked" dengan device list bertanda
-tangan + fan-out per device (mekanisme sealer sudah ada); (2) keluarga pesan
-`SYNC`/`COPY` untuk riwayat & setelan antar perangkat (mulai dari contactStore +
-admin token + verification state, bukan riwayat pesan); (3) QR "Add device"
-memakai alur linking yang sudah ada; (4) storage service minimal: blob
-terenkripsi per akun (R2) yang hanya bisa dibuka perangkat dengan kunci akun.
-Ini proyek multi-minggu dan mengubah banyak asumsi (`docs/03` §3.3, docs/16),
-jadi harus masuk backlog resmi — bukan tambalan.
+### 5.3 Backup/restore — **SELESAI** (format `NYXB` v1)
 
-### 5.3 Backup/restore
+**Dulu (2026-10-10):** `exportDatabaseToJson`/`importDatabaseFromJson` — satu
+JSON besar, opsional terenkripsi, tanpa validasi.
 
-**NYX:** `exportDatabaseToJson`/`importDatabaseFromJson`
-(`web/src/lib/keychainDb.ts`) — ada envelope terenkripsi opsional + password,
-plus migrasi perangkat streaming. Tidak ada backup otomatis, tidak ada format
-yang tervalidasi, dan export berisi seluruh tabel sekaligus.
+**Sekarang** (`docs/31`, `web/src/lib/backupFormat.ts` dkk.):
 
-**Signal:** `libsignal/rust/message-backup` — validator format backup dengan
-framing berurutan, derivasi kunci (`key.rs`), padding, dan pengacakan field
-(`scramble/`) supaya bentuk backup tidak membocorkan struktur; tujuannya
-eksplisit agar dua implementasi bisa dibandingkan (`serialize(backup) ==
-serialize(export(restoreFrom(backup)))`).
+- **ber-frame**: tiap frame di-pad ke blok tetap (bentuk tidak membocorkan jumlah
+  pesan/kontak), di-AEAD dengan AAD yang mengikat `(type, index, jumlah frame)` →
+  tamper/reorder/truncate gagal keras;
+- **kunci dari recovery phrase** (BIP39) + salt header lewat Argon2id 128 MB —
+  tidak ada kunci backup di server;
+- parser **streaming** (bukan `JSON.parse` seluruh vault), plus
+  `backupPayload`/`backupTransport`/`backupRestore` dan bench;
+- opsional diunggah terenkripsi ke R2 (kunci objek HMAC tanpa userId, dihapus
+  saat akun dihapus).
 
-**Rekomendasi:** format backup ber-frame (bukan satu JSON besar) yang
-sepenuhnya terenkripsi, diturunkan dari recovery phrase (Argon2id) atau kunci
-backup terpisah, opsional tersimpan client-side-encrypted di R2 untuk restore
-lintas perangkat. Prasyarat teknis: **§5.2 harus jalan dulu** (restore lintas
-perangkat tanpa multi-device hanya menghasilkan vault orphan).
+Sisa perbedaan dengan Signal: tidak ada backup otomatis berjadwal dan tidak ada
+SVR/PIN; restore lintas perangkat tetap terbatas oleh pilihan satu-perangkat.
 
-### 5.4 PQ ratchet: FS vs FS+PCS (SPQR)
+### 5.4 PQ ratchet: FS vs FS+PCS (SPQR) — **SELESAI untuk jalur v2**
 
-**NYX:** DR dengan langkah KEM (`KEMs`/`KEMr`/`savedCt` di
-`web/src/workers/crypto.worker.ts`, header membawa `ct` 1120 byte sampai
-peer meng-ack `ackKem`) → PQ **forward secrecy** sudah ada, tapi PCS
-(post-compromise security) untuk komponen PQ tidak dijamin: setelah state
-dicuri, penyerang mengikuti rantai sampai ada DH/KEM baru yang benar-benar
-independen.
+**NYX.** v1 = DR hybrid (`KEMs`/`KEMr`/`savedCt`): PQ **forward secrecy**.
+v2 = braid ML-KEM via **`packages/spqr-wasm`** (crate SPQR Signal di-vendor),
+header `{v:2,b:[frames]}` (`web/src/lib/spqrWire.ts`), orkestrasi
+`spqrSession.ts`, op worker `spqr_ratchet_*`, state braid ter-seal
+`nyx_spqr_state_v1:*`, dan **dikirim hanya setelah peer meng-ack `ackV:2`**
+(bukti in-band di payload ter-seal). Ada rollback test dua-klien dan kill switch
+`VITE_SPQR_FORCE_V1` (berhenti *mengirim/mengiklankan*, tidak pernah berhenti
+membaca). Detail: `docs/33` §33.10.
 
-**(2026-10-14)** Jalur **v2** sudah live berdampingan: message key dari braid
-ML-KEM (`spqr`) di header `{v:2,b:[…]}`, dipakai hanya setelah peer menyatakan
-mampu (`ackV`), state braid ter-seal berdampingan dengan state v1 dan bisa
-di-rollback tanpa kehilangan riwayat (`docs/33` §33.10). Jadi klaim "PCS PQ
-belum ada" pada paragraf di atas kini hanya berlaku untuk sesi v1 (peer lama /
-kill switch) — primitif v1 sendiri tetap beku.
+**Signal.** `SparsePostQuantumRatchet` — ratchet ML-KEM **Braid**
+(`src/v1/{chunked,unchunked}`) + erasure coding Reed–Solomon, chain simetris
+untuk FS, **dan verifikasi formal** (hax/F* panic-free, ProVerif FS/PCS).
 
-**Signal:** `SparsePostQuantumRatchet` — ratchet publik ML-KEM **Braid**
-(`src/v1/{chunked,unchunked}`) + erasure coding Reed–Solomon supaya pesan
-KEM besar tidak rapuh terhadap paket hilang, chain simetris untuk FS, **dan
-verifikasi formal** (hax/F* untuk panic-free + ProVerif untuk FS/PCS), AGPL-3.0.
+**Yang masih berbeda:** NYX memakai kode SPQR yang sama (vendored, tanpa patch)
+tetapi **tidak** membawa bukti formalnya ke dalam CI, dan tidak menguji vector
+erasure-coding lintas implementasi. Format v1 tetap beku; perubahan hanya lewat
+jalur versi paralel seperti di atas.
 
-**Rekomendasi:** jadikan ini proyek kripto berikutnya setelah KT lite, dengan
-caveat penting: **format baru = jalur versi paralel**, bukan perubahan format
-beku (aturan `docs/04` tetap berlaku). Karena SPQR adalah Rust dan lisensinya
-kompatibel, opsi realistis adalah mengompilasinya ke WASM dan memanggilnya dari
-`crypto.worker.ts` dengan API "output message keys" — pola yang sama seperti
-libsodium sekarang. Ini juga kesempatan mengganti bagian ratchet yang paling
-sulit diaudit di worker TS dengan kode yang sudah diverifikasi.
+### 5.5 Storage lokal & pencarian terenkripsi — **SEBAGIAN BESAR SELESAI**
 
-### 5.5 Storage lokal & pencarian terenkripsi
+**NYX.** IndexedDB Dexie; kolom sensitif **dan** kolom struktur ter-seal.
 
-**NYX:** IndexedDB Dexie; kolom sensitif terenkripsi
-(`content`, `senderName`, `participants`, `ContactRow.data`) tapi **struktur
-tetap plaintext**: `id`, `isGroup`, `lastMessageAt`, `seq`, `updatedAt`
-(`web/src/lib/db.ts` `ConversationRecord`/`DecryptedMessageRecord`).
-
-> **[2026-10-12 — WS-F] Sebagian besar sudah ditutup:** `lastMessageAt`
-di-bucket 15 menit (bucket yang sama dengan server), `seq`/`senderId`/
-`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`Conversation.isGroup`/
-`Message.reactions` ter-seal `ENC1:` di tempat, urutan pesan memakai skema dua lapis
-(`orderBucketMs` plaintext + `createdAtSealed`), pencarian lewat indeks
-in-memory saat vault terbuka, dan `ContactRow.updatedAt` /
-`ProfileCacheRecord.updatedAt` di-seal di rel migrasi unlock. OPFS sudah benar
-(hanya blob terenkripsi, `opfsStorage.ts`).
+> **[2026-10-12 — WS-F]** `lastMessageAt` di-bucket 15 menit (bucket sama dengan
+> server), `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/
+> `Conversation.isGroup`/`Message.reactions` ter-seal `ENC1:` di tempat, urutan
+> pesan dua lapis (`orderBucketMs` plaintext + `createdAtSealed`), pencarian lewat
+> indeks in-memory saat vault terbuka, `ContactRow.updatedAt`/
+> `ProfileCacheRecord.updatedAt` di-seal saat migrasi unlock.
 >
-> **[2026-10-16 — status setelah verifikasi gate `docs/30` §30.10] Yang masih
-plaintext (dan memang tidak bisa dihilangkan):** `id` (primary key —
-tidak bisa dienkripsi tanpa mematikan indeks), `orderBucketMs` /
-`Conversation.lastMessageAt` (indeks; granularitasnya **sudah** terpublikasi di
-server `temporalBucket.ts`, docs/28 B3/B4) dan `offlineQueue.timestamp` (kolom
-indeks `orderBy('timestamp')` pada antrean kirim yang sementara). Yang **tidak**
-lagi plaintext sejak verifikasi: `sentAt` dan `pqDrSessionsV2.lastActivity`
-(keduanya ms presisi → kini `ENC1:`); sebelumnya dua kolom itu lolos dari daftar
-"sisa" dan praktis membatalkan gate "jam tidak terbaca".
->
-> Artinya penyerang yang memegang profil browser (atau backup profil, atau
-device tercuri) hanya melihat **pola aktivitas sampai presisi bucket 15 menit**
-(berapa pesan per bucket/percakapan) — bukan jam per pesan. Isi pesan tetap
-tidak terbaca. Ini kontras dengan `docs/28` yang justru berjuang membucket
-`lastMessageAt` **di sisi server** (`temporalBucket.ts`) — jadi aneh kalau sisi
-klien membiarkannya presisi.
+> **[2026-10-16 — verifikasi gate `docs/30` §30.10]** `sentAt` dan
+> `pqDrSessionsV2.lastActivity` sempat lolos plaintext (presisi ms) dan **kini**
+> ter-seal, dengan pemindai baris mentah di `dexieMigration.test.ts` (plus kontrol
+> negatif). Sisa yang disengaja plaintext: `id` (primary key), kolom bucket indeks
+> (`orderBucketMs`, `Conversation.lastMessageAt`), dan `offlineQueue.timestamp`
+> (antrean kirim sementara).
 
-**Signal:** SQLCipher mengenkripsi seluruh DB + FTS5 untuk pencarian (dan
-ekstensi SQLCipher-nya sendiri).
+Artinya penyerang yang memegang profil browser hanya melihat **pola aktivitas
+sampai presisi bucket 15 menit** — bukan jam per pesan. Isi pesan tetap tidak
+terbaca.
 
-**Rekomendasi (murah, cocok jadi quick win):** bucket `lastMessageAt`/`seq`
-atau bungkus field struktural itu dengan `ENC1:`. Pencarian lokal penuh ala FTS5
-tidak realistis di IndexedDB; alternatifnya indeks pencarian terenkripsi di
-memori saat vault dibuka (bukan di disk).
+**Signal:** SQLCipher mengenkripsi seluruh DB + FTS5 untuk pencarian.
 
-### 5.6 Negosiasi kapabilitas & evolusi protokol
+Sisa perbedaan nyata: SQLCipher menyembunyikan **semua** kolom (termasuk primary
+key & jumlah baris) dengan satu kunci; Dexie menyembunyikan nilai tetapi tidak
+bentuk. Pencarian lokal penuh ala FTS5 tidak realistis di IndexedDB; NYX memakai
+indeks in-memory saat vault terbuka — trade-off yang didokumentasikan.
 
-NYX memakai opcode + version byte per-payload (`packages/shared/src/transport.ts`)
-dan tidak mengirim daftar kapabilitas saat AUTH. Signal punya `DeviceCapability`
-dan `ClientRelease` di server, plus skema protobuf/gRPC.
+### 5.6 Negosiasi kapabilitas & evolusi protokol — **SELESAI**
 
-**Kenapa ini penting untuk NYX sekarang:** seluruh roadmap di atas (KT, SPQR,
-multi-device, backup) membutuhkan klien baru + lama hidup berdampingan. Tanpa
-`capabilities[]` di handshake, setiap fitur baru harus mengandalkan "tebak dari
-version byte di payload" — pola yang sudah terbukti rapuh di jalur sender-key
-(docs/16: lima invariant era harus ditambal berulang kali karena routing antar
-versi). Tambahan `protocolVersion` + `capabilities` (server mengabaikan yang tak
-dikenal) adalah perubahan kecil dengan nilai besar.
-
-**Status implementasi (2026-10-16):** negosiasi berjalan di **kedua** transport,
-sebab satu transport saja tidak cukup — klien di jaringan yang memblokir QUIC
-memakai WSS, dan di sanalah kapabilitas dulu tidak pernah ada:
+NYX mengirim daftar kapabilitas di **kedua** transport (satu transport saja tidak
+cukup: klien di jaringan yang memblokir QUIC memakai WSS):
 
 | Transport | Klien → relay | Relay → klien | Kode |
 |---|---|---|---|
 | WebTransport (sidecar) | frame `HELLO` (opcode `0x0B`) di stream **bidi** | frame `HELLO` balasan, irisan kapabilitas | `server/transport-sidecar/src/protocol.rs` |
-| WSS (socket.io) | `handshake.auth.capabilities` (array string pendek) | event `capabilities`, irisan kapabilitas | `server/src/realtime/gateway.ts` + `server/src/utils/transportCapability.ts` |
+| WSS (socket.io) | `handshake.auth.capabilities` | event `capabilities`, irisan kapabilitas | `server/src/realtime/gateway.ts` + `utils/transportCapability.ts` |
 
-Aturan yang sama di kedua jalur: klien **lama** yang tidak mengirim apa pun =
-legacy (daftar kosong), bentuk cacat **tidak** memutus koneksi, irisan dihitung
-klien **dan** server (server tidak boleh mengaktifkan kapabilitas yang belum
-diiklankan klien), dan nama kapabilitas hidup di satu tempat —
-`SERVER_CAPABILITIES` di `packages/shared/src/transport.ts`.
+Aturan: klien **lama** tanpa daftar = legacy (daftar kosong); bentuk cacat tidak
+memutus koneksi; irisan dihitung klien **dan** server; nama kapabilitas hidup di
+satu tempat — `SERVER_CAPABILITIES` di `packages/shared/src/transport.ts`,
+sekarang `hello-v1`, `spqr-ratchet`, `pq-v2`. Menghapus `spqr-ratchet` dari daftar
+itu = kill switch setingkat deployment (`docs/33` §33.7). Rollout terukur lewat
+`nyx_wss_capability_total{capability}`.
 
-Kenapa ini menentukan untuk ratchet v2 (braid SPQR, `docs/33` §33.7): klien hanya
-mengirim v2 bila relay **aktif** mengiklankan `spqr-ratchet`. Sebelum gateway WSS
-ikut menegosiasikan, semua klien di jalur WSS selalu dilihat sebagai legacy — jadi
-jalur v2 praktis tidak pernah terpakai walau kedua peer sudah saling menyatakan
-mampu lewat `ackV` (bukti peer itu in-band dan tetap satu-satunya syarat
-sesungguhnya). Rollout-nya bisa diukur: `nyx_wss_capability_total{capability}`.
+### 5.7 Calls — **SELESAI** (STUN pihak ketiga hilang, signaling token)
 
-### 5.7 Calls
+Signaling **tidak lagi** dirutekan ke `userId`: `handleWebRtcRelay`
+(`server/src/network/realtimeHandlers.ts`) meneruskan lewat **token relay**
+(`relayCallSignal`, `docs/30` §30.9 WS-E(2)); token tak dikenal = drop
+fail-closed + dihitung sebagai blokir keamanan; envelope yang diteruskan memuat
+token pengirim, jadi jalur relay/log/pub-sub tidak pernah melihat pasangan
+userId→userId. Logika yang sama dipakai kedua relay (WT dan WSS).
 
-`docs/27` §27.5 sudah mencatat jujur bahwa media DTLS-SRTP E2E **tetapi**
-signaling `WEBRTC_SIGNAL` dirutekan `to: userId`. Untuk ICE, dua jalur memakai
-**STUN Google** (diverifikasi, koreksi terhadap klaim docs/27 bahwa fallback
-ditambahkan di atas TURN):
+ICE (`GET /api/keys/turn`, `server/src/routes/keys.ts`) urutannya: **coturn
+sendiri** (kredensial HMAC time-limited, username = `identityTag`, bukan userId)
+→ Cloudflare TURN → **STUN operator** (`ICE_STUN_URLS`) → `503
+TURN_NOT_CONFIGURED`. **Tidak ada** `stun.l.google.com` di mana pun; kegagalan
+TURN menjadi error yang terlihat, bukan fallback senyap ke pihak ketiga.
+Gate E2E: `web/e2e/call.spec.ts` membuktikan dua peer `iceTransportPolicy:'relay'`
+terhubung dengan pasangan `relay`↔`relay` terhadap coturn nyata (CI `e2e-chrome`
+memasang coturn).
 
-- `server/src/routes/keys.ts:590,607,610` — `GET /api/keys/turn` mengembalikan
-  `stun:stun.l.google.com:19302` ketika TURN tidak dikonfigurasi, ketika respons
-  Cloudflare tidak memuat `iceServers`, atau ketika terjadi error;
-- `web/src/lib/webrtc.ts:29` — klien jatuh ke STUN Google bila request TURN gagal.
-
-Artinya bukan "selalu bocor", tapi **setiap jalur gagal (TURN down / env
-kosong / error transient) mengirim IP klien ke Google** — dan itu justru terjadi
-pada momen paling sensitif. Signal: RingRTC, call links, blinded signaling,
-multi-party tanpa SFU.
-
-**Langkah murah (minggu ini):** ganti kedua fallback itu ke coturn sendiri
-(atau Cloudflare-only) dan buat kegagalan TURN jadi error yang terlihat, bukan
-fallback senyap ke pihak ketiga. **Langkah menengah:** signaling berbasis
-delivery token T3b (bukan `to: userId`) supaya percobaan call tidak ter-link ke
-akun.
+Sisa perbedaan: RingRTC, call links, blinded signaling, multi-party tanpa SFU.
 
 ### 5.8 Anti-abuse & rekayasa
 
-- **Abuse:** model NYX (PoW client-mined + Turnstile + tier sandbox/VIP) bagus
-  untuk privasi tapi lemah terhadap sybil berbiaya rendah dibanding nomor
-  telepon + fraud analytics Signal (`registration-service`: Bigtable/PubSub,
-  multi-provider SMS/voice, fictitious numbers untuk testing). Karena "tanpa
-  PII" adalah prinsip, jalur realistis: perkuat attestation (WebAuthn sudah ada),
-  tambah heuristik per-ASN/IP (tanpa menyimpan IP), dan kuota bertingkat seperti
-  pola `otpkQuota.ts`.
-- **ESLint mati repo-wide** karena `typescript-eslint` belum mendukung
-  TypeScript 7.0.2 (`web/package.json`, `server/package.json`). Efeknya: **nol
-  static analysis** pada basis kode yang memegang kripto. Perbaikan murah:
-  jalankan ESLint dengan alias `typescript@5` khusus lint (parser bisa
-  diarahkan), atau adopsi linter berbasis Rust (`oxlint`) sebagai gantinya, lalu
-  buat sebagian rule jadi blocking di CI.
-  → **Diselesaikan 2026-10-15 lewat jalur kedua (oxlint); ESLint dihapus
-  sepenuhnya. Lihat §7.4.**
-- **Test berbasis source-text.** `server/tests/groupCredentials.test.ts` (dan
-  pola serupa di `schemaPrivacy.test.ts`) meng-assert regex atas source.
-  Roundtrip kriptonya nyata (bagus), tapi klaim perilaku (endpoint, otorisasi)
-  hanya diuji sebagai string. Test yang mengunci *perilaku* endpoint akan
-  langsung menangkap §7 di bawah.
+- **Abuse.** Model NYX: PoW client-mined + Turnstile + attestation WebAuthn
+  (tier `hardware` → `isVerified`) + tier sandbox/VIP + heuristik **per-ASN**
+  (`server/src/utils/asnLookup.ts`, tabel prefix lokal, ambang 100/jam/ASN dan
+  burst sybil 25/10 menit yang menuntut attestation alih-alih memblokir) +
+  rate limit Lua atomik. Signal: spam-filter ML + fraud analytics
+  berbasis nomor telepon. Filosofinya berbeda; NYX tidak bisa memakai nomor
+  telepon tanpa membuang prinsipnya.
+- **Static analysis.** **oxlint satu-satunya linter** sejak 2026-10-15: ESLint
+  dihapus total (3 config + 20 devDependency), `pnpm run lint` =
+  `oxlint src` per paket, job CI `lint` **blocking** untuk rule `error` dan
+  kategori `correctness`; sisa `no-unused-vars` sengaja `warn` (web 190, server
+  45 saat dokumen ini diperbarui). Detail: §7.4.
+- **Test berbasis source-text.** `groupCredentials.test.ts` sudah hilang bersama
+  fiturnya. Pola "assert regex atas sumber" masih ada di beberapa tempat
+  (`usernameBlindIndex.test.ts`, `deployWorkflow.test.ts`, `lintGate.test.ts`),
+  tetapi yang menyangkut **perilaku** sudah dipindahkan (audit D6:
+  `gatewayParity`/`redisIdentity` menguji tabel registrasi & tulisan Redis nyata,
+  bukan teks). Sisa pemindaian sumber diberi komentar eksplisit.
 
 ---
 
 ## 6. Kelebihan & kekurangan, sisi per sisi
 
 ### NYX lebih baik dari Signal pada
-1. **Tidak ada PII** — Signal tetap berakar pada nomor telepon (username adalah
-   lapisan di atasnya).
-2. **Blind index memory-hard** (Argon2id 64MB) vs hash + enclave (SGX
-   menambah trust ke vendor CPU & supply chain enclosure).
-3. **Hardening at-rest DB** yang terukur & punya audit script otomatis —
-   senderId/sessionId/device key ter-seal, bucketing waktu, Redis bersih dari
-   userId, token-only membership, `ENC1:`.
-4. **Deniability & ephemerality**: panic password, nuke wipe, burner room
-   (PQ-DR, RAM-only) — tidak ada padanannya di Signal.
-5. **Cover traffic T4 + chaff** — Signal menolak trade-off ini.
-6. **Operabilitas**: bisa dijalankan satu orang di satu VPS.
-7. **Group membership token-first** yang sederhana (blind RSA pernah ada,
-   dihapus 2026-10-23; private key issuer klasik tidak lagi dipakai).
-8. **Verifikasi safety number tidak wajib** di Signal karena KT — tapi NYX punya
-   *manual* verification + safety number sendiri; bila KT lite dibangun, NYX
-   bisa menyamai sambil tetap tanpa PII.
+1. **Tidak ada PII** — Signal tetap berakar pada nomor telepon.
+2. **Blind index memory-hard** (Argon2id 64 MB) + pencarian **OPRF→PIR→OHTTP**
+   vs hash + enclave SGX (menambah trust ke vendor CPU & supply chain).
+3. **Hardening at-rest DB** yang terukur & punya audit script otomatis.
+4. **Deniability & ephemerality**: panic password, nuke wipe, burner room.
+5. **Cover traffic + chaff** — Signal menolak trade-off ini.
+6. **Operabilitas**: satu VPS, pm2/systemd, Prometheus/Grafana/Alertmanager lokal.
+7. **Group membership token-first** yang sederhana (tanpa pairing/BBS+).
+8. **Signaling call tidak membawa identitas akun** (token relay) — Signal memakai
+   mekanisme lain (blinded signaling) untuk tujuan serupa.
 
 ### Signal lebih baik dari NYX pada
-1. **Key transparency** (log + monitor + auditor klien) — kemampuan mendeteksi
-   MITM terarah.
-2. **Multi-device** lengkap (linked devices, provisioning, device-transfer,
-   storage service).
-3. **Backup** berformat, tervalidasi, dapat di-restore (dan SVR/PIN).
-4. **SPQR**: PQ FS **dan** PCS, terverifikasi formal (hax/F*, ProVerif).
-5. **libsignal** sebagai library lintas platform yang diaudit & berversi, vs
-   kripto NYX di worker TS monolitik yang tidak boleh dipecah (`docs/04`).
-   Trade-off desain NYX ("jangan dipecah") bagus untuk konsistensi format, tapi
-   mempersulit audit independen.
-6. **Contact discovery** (SGX PSI) + username links.
-7. **Full-DB encryption lokal** (SQLCipher) + FTS5.
-8. **Calls** (RingRTC, call links, blinded signaling, multi-party).
-9. **Rekayasa**: capability negotiation, skema gRPC, ribuan test, spam-filter,
-   fraud analytics, reproducible build, audit eksternal.
-10. **Ekosistem**: klien native semua platform (termasuk background push iOS
-    yang di web tidak bisa dijamin), stickers, backup, donations.
+1. **Verifikasi formal** (SPQR: hax/F*, ProVerif) dan **audit eksternal**;
+   NYX memakai crate SPQR yang sama tetapi tidak membawa bukti formal itu ke CI,
+   dan `docs/36` (review kripto eksternal) belum dijalankan.
+2. **Multi-device** lengkap — dipilih **tidak** ditutup oleh NYX.
+3. **Ekosistem/klien native** (reliabilitas push iOS/Android di web tidak bisa
+   dijamin).
+4. **Skala & format ter-skema** (protobuf/gRPC) vs opcode biner + TS monolitik.
+5. **Contact discovery SGX** dengan latensi & skala yang sudah terbukti (PIR NYX
+   default mati, setup superlinear).
+6. **Full-DB encryption lokal** (SQLCipher) + FTS5.
+7. **Calls**: RingRTC, call links, multi-party tanpa SFU.
+8. **Operasi fleet**: KT multi-auditor independen, storage service, dsb.
 
 ---
 
-## 7. Temuan konkret saat audit lintas-baca (perlu tindakan)
+## 7. Temuan konkret saat audit lintas-baca (status)
 
-### 7.1 `POST /api/conversations/credential-issuance` tidak memverifikasi keanggotaan — **HIGH (historis, dihapus 2026-10-23)**
+### 7.1 `POST /api/conversations/credential-issuance` tidak memverifikasi keanggotaan — **HIGH, historis: dihapus 2026-10-23**
 
-> **Resolved by deletion.** Endpoint, blind RSA, dan seluruh alur credential
-> dihapus pada cutover PQ-only. Temuan ini disimpan sebagai catatan audit; jangan
-> menghidupkan kembali credential tanpa memperbaiki gating keanggotaan dan
-> binding issuance/commit.
+> **Resolved by deletion.** Endpoint, blind RSA, op worker `credential_*`, dan
+> persist Dexie dihapus pada cutover PQ-only. Temuan ini disimpan sebagai catatan
+> audit: **jangan hidupkan kembali credential tanpa** (1) gate keanggotaan
+> (hash group/delivery token), (2) binding `conversationId` di dalam message yang
+> ditandatangani, (3) kaitan serial↔issuance di commit, (4) nonce/purpose/expiry
+> agar bukan bearer bebas, dan (5) test **perilaku** (bukan regex sumber).
 
-`server/src/routes/conversations.ts` (blok issuance, ±baris 66–114): body
-`{ conversationId, blindedMsg }`, dibatasi hanya oleh `req.user` + kuota Redis
-`cred:issue:<userId>:<conversationId>:<hari>` (maks 3/hari). **Tidak ada** cek
-`X-Group-Token`/admin token/delivery token, dan **tidak ada** verifikasi bahwa
-user adalah anggota `conversationId`. Server menandatangani blinded message apa
-pun (≤512 byte) dan mengembalikan `blindSig` + `keyVersion`.
+Konteks historis: body `{ conversationId, blindedMsg }` hanya dibatasi `req.user`
++ kuota Redis `cred:issue:…` (3/hari), tanpa cek token/keanggotaan; commit hanya
+upsert row; `verifyPresentation` memeriksa tanda tangan issuer, serial terdaftar,
+dan `conversationId` row == klaim. Siapa pun yang terautentikasi dan tahu UUID
+percakapan bisa menerbitkan credential untuk grup itu. Eksploitabilitas dibatasi
+kerahasiaan `conversationId` **dan** Opaque Mailbox (`docs/03` §3.7.1) —
+dampaknya kebocoran daftar percakapan + metadata, bukan isi pesan. Route
+presentasi sekarang tetap ter-mount tetapi fail-closed (`docs/16` §16.5.1).
 
-Klien lalu `POST /credential-commit` dengan `(conversationId, keyVersion, serial)`
-— dan commit **tidak memverifikasi apa pun** (`recordIssuedCredential` hanya
-upsert row).
+### 7.2 Verifikasi kunci di localStorage — **MEDIUM, SELESAI**
 
-Akibatnya, presentasi `X-Group-Credentials` (dipakai di `GET /api/conversations`
-sync untuk *discovery* membership) memvalidasi tiga hal saja
-(`verifyPresentation`, `server/src/lib/groupCredentials.ts`): tanda tangan issuer
-valid, serial terdaftar, dan `conversationId` row == yang diklaim. Salah satu
-akun terdaftar yang mengetahui UUID `conversationId` sebuah grup **dapat
-menerbitkan credential untuk grup itu dan menambahkannya ke sync-nya** — tanpa
-token grup, tanpa keanggotaan. Eksploitabilitas dibatasi oleh kerahasiaan
-`conversationId` (UUID tak bisa ditelusuri) **dan** oleh fakta bahwa
-`GET /api/messages/:conversationId` sudah tidak memeriksa keanggotaan (Opaque
-Mailbox, `docs/03` §3.7) — jadi dampak utamanya adalah kebocoran *daftar
-percakapan + metadata* dan hilangnya arti "token-only membership" yang justru
-jadi inti T3b.
+State verifikasi lama disimpan di localStorage tanpa tanda tangan. Sekarang:
+`peerIdentityTrust.ts` menyimpan pin **terenkripsi di keychain** (`ENC1:`),
+membawa `ktVerifiedAt`/`ktKeyVersion`/`ktLastVerdict`, dan perubahan kunci
+menjadi **gate kirim** (`hasPendingPeerIdentityChange`) sampai user
+mengonfirmasi; pin lama tidak ditimpa. Bukti: `peerIdentityTrust.test.ts`
+(14 tes), `docs/34` §34.6a.
 
-**Perbaikan (kecil, 1 sesi):**
-1. Gate issuance dengan bukti keanggotaan: hash `X-Group-Token`/delivery token
-   (pola `credentialTokenMatches` sudah dipakai di route lain).
-2. Verifikasi binding di `verifyPresentation`: prepared message NYX punya format
-   tetap `nyx-grp-cred:v1:<convId>:<hex>` (`web/src/lib/groupCredentials.ts`
-   `randomMessage`) → server bisa **mencocokkan prefiks convId di dalam
-   `preparedMsg`** dengan `conversationId` yang diklaim, tanpa perlu tahu
-   blinding factor. Ini menutup pemakaian silang antar-conversation secara
-   gratis.
-3. Commit: kaitkan serial ke issuance yang sudah ditandatangani (simpan ctx
-   issuance keyed by blind-hash + convId, lalu di commit pastikan ada) supaya
-   klien tidak bisa menyuntikkan serial sembarang.
-4. Jadikan credential **bukan bearer bebas**: sertakan nonce/challenge dari
-   server (atau `purpose` + `expiresAt`) di dalam message yang ditandatangani
-   agar presentasi tidak bisa di-replay pihak lain (Signal menyematkan group
-   identifier + redemption time + presentation context di zkgroup).
-5. Tambah test perilaku (bukan source-regex): issuance tanpa token → 403;
-   presentasi dengan convId tidak cocok → ditolak.
+### 7.3 Metadata struktur lokal masih plaintext — **MEDIUM, SELESAI**
 
-### 7.2 Verifikasi kunci disimpan di localStorage — **MEDIUM**
+Lihat §5.5. Keempat kolom ditutup (`localAtRest.ts`, `localOrderKey.ts`, migrasi
+unlock `migrateAtRestSealing`), lalu `sentAt`/`pqDrSessionsV2.lastActivity`
+menyusul. Sisa plaintext: primary key, kolom bucket indeks, `offlineQueue.timestamp`.
 
-`web/src/utils/verification.ts` menyimpan `verified_conversation_*` di
-localStorage **tanpa tanda tangan dan tanpa proteksi**. Siapa pun yang bisa
-menulis localStorage (skrip injeksi via XSS, atau akses perangkat) bisa
-"memverifikasi" percakapan, dan `nukeProtocol`/wipe akan menghapusnya tanpa
-jejak. Rekomendasi: pindahkan ke keychain `ENC1:` (terikat masterSeed) +
-sertakan `identityKey` yang diverifikasi di dalam state terenkripsi, dan ubah
-perubahan kunci dari "warning bubble" menjadi **hard gate** (blokir kirim sampai
-user konfirmasi), minimal sebagai opsi "pinned identity" per kontak.
+### 7.4 ESLint tidak berjalan sama sekali — **MEDIUM, SELESAI 2026-10-15**
 
-### 7.3 Metadata struktur lokal masih plaintext — **MEDIUM**
+**Status: SELESAI — oxlint menjadi satu-satunya linter.** ESLint tidak pernah bisa
+dijalankan di repo ini (`typescript-eslint` menolak TypeScript 7), jadi jalannya
+bukan "perbaiki ESLint" melainkan menggantinya: `pnpm run lint` menjalankan
+`oxlint src` di tiap paket dengan konfigurasi tunggal `.oxlintrc.json`, job CI
+`lint` **blocking** untuk rule `error` dan kategori `correctness` (0 temuan),
+sisa `no-unused-vars` sengaja `warn`.
 
-Lihat §5.5. Bucket/`ENC1:`-kan `lastMessageAt`, `seq`, `updatedAt`, `isGroup`
-(bucket yang sama dengan `temporalBucket.ts` supaya konsisten sisi klien-server).
+Pada 2026-10-15 sisa ESLint dihapus tuntas: ketiga `eslint.config.js`, 20
+devDependency, dan semua direktif `eslint-disable` lama. Satu direktif
+`no-control-regex` di `server/src/utils/logger.ts` **benar-benar dipakai** dan
+dipindahkan ke sintaks `oxlint-disable-next-line`; 4 direktif lain terbukti mati
+(`--report-unused-disable-directives`).
 
-**Status 2026-10-12 (WS-F): SELESAI.** Keempat kolom ditutup
-(`localAtRest.ts` + skema urutan `localOrderKey.ts` + migrasi unlock
-`migrateAtRestSealing`); sisa plaintext hanya primary key dan bucket indeks yang
-memang harus bisa di-range-scan (§5.5).
+### 7.5 Duplikasi helper E2E antar-spec — **LOW, SELESAI 2026-10-12**
 
-**Status 2026-10-16 (verifikasi gate `docs/30` §30.10):** klaim "sisa plaintext
-hanya primary key dan bucket indeks" di atas ternyata **belum lengkap** —
-`Message.sentAt` dan `pqDrSessionsV2.lastActivity` (dua-duanya ms presisi) masih
-plaintext dan membuat "jam" tetap terbaca dari IndexedDB. Keduanya kini ter-seal
-`ENC1:` (writer + migrasi unlock + pembaca; baris lama tetap terbaca) dan ada
-**pemindai baris mentah** yang menjaganya (`dexieMigration.test.ts`, dengan
-kontrol negatif). Sisa yang disengaja plaintext hanya `id`, kolom bucket indeks,
-dan `offlineQueue.timestamp`.
+Helper diekstrak ke `web/e2e/helpers/registration.ts`: rantai onboarding
+(`registerUser`, `registerUserViaBiometric`), probe WebTransport, dan alur
+"cari peer → buka chat → kirim → peer menerima". Perbaikan alur onboarding kini
+cukup di satu berkas.
 
-### 7.4 ESLint tidak berjalan sama sekali — **MEDIUM (selesai 2026-10-15)**
+### 7.6 Snapshot PIR basi membuat user baru tak ditemukan — **MEDIUM, SELESAI 2026-10-28**
 
-Tidak ada static analysis di repo yang memegang kripto. Lihat §5.8.
-
-**Status 2026-10-15: SELESAI — oxlint menjadi satu-satunya linter.** ESLint tidak
-pernah bisa dijalankan di repo ini (`typescript-eslint` menolak TypeScript 7), jadi
-jalannya bukan "perbaiki ESLint" melainkan menggantinya: `pnpm run lint` menjalankan
-`oxlint src` di tiap paket dengan konfigurasi tunggal `.oxlintrc.json`, job CI `lint`
-**blocking** untuk rule level `error` dan kategori `correctness` (0 temuan), sisa
-`no-unused-vars` sengaja `warn`.
-
-Pada 2026-10-15 sisa ESLint dihapus tuntas supaya tidak ada dua sumber kebenaran:
-ketiga `eslint.config.js` (`web`, `server`, `marketing`), 20 devDependency
-(`eslint`, `@eslint/js`, `typescript-eslint`, plugin react/astro/import/n/promise,
-`globals`, parser-nya) dan semua direktif `eslint-disable` lama. Bukti bahwa ini
-bukan sekadar pembersihan kosmetik: satu direktif `no-control-regex` di
-`server/src/utils/logger.ts` **benar-benar dipakai** (menghapus keduanya membuat
-lint gagal), jadi ia dipindahkan ke sintaks `oxlint-disable-next-line` tepat di atas
-baris kodenya; 4 direktif lain terbukti mati (`--report-unused-disable-directives`)
-dan diganti komentar biasa yang tetap menjelaskan alasannya.
-
-### 7.5 Duplikasi helper E2E antar-spec — **LOW (selesai 2026-10-12)**
-
-`AGENTS.md` dulu menyatakan duplikasi helper per spec sebagai konvensi; itu
-menambah biaya perawatan pada suite yang sudah flaky di paralel (`workers: 1`).
-**Sudah diekstrak** ke `web/e2e/helpers/registration.ts` (WS-G(7)): rantai
-onboarding (`registerUser` + varian `registerUserViaBiometric` untuk spec
-Settings — sebelumnya hanya berbeda satu langkah skip biometric dan sudah
-menyimpang), probe WebTransport (dulu dua nama + satu evaluasi inline), serta
-alur "cari peer → buka chat → kirim → peer menerima". Perbaikan alur onboarding
-ke depan cukup di satu berkas, sehingga regresi flaky tidak perlu disinkronkan
-manual ke enam spec.
+Saat `VITE_PIR_ENABLED=1`, klien **tidak** punya fallback (`userSearch.ts`
+mengembalikan `[]` pada miss), sedangkan snapshot hanya dibangun cron 04:15 —
+jadi pendaftar baru (dan profil/verifikasi/perangkat yang berubah) tidak terlihat
+hingga ~24 jam. Perbaikan: penanda generasi Redis (`server/src/pir/dirty.ts`,
+`pir:snapshot:gen`/`pir:snapshot:built`) di semua jalur tulis
+(register/login/profil/verifikasi/onboarding/kunci/perangkat/hapus akun) + tick
+rebuild 3 menit yang hanya jalan bila generasi naik, berbagi job lock dengan
+rebuild harian. Uji: `pirSnapshotJob.test.ts` (7 tes, termasuk "perubahan saat
+rebuild tidak hilang" dan "Redis mati = lewati, bukan rebuild buta").
 
 ---
 
 ## 8. Roadmap usulan (urut ROI, bukan urut besar)
 
-### Quick wins (≤1 minggu total)
-| # | Item | Target file | Kriteria selesai |
-|---|---|---|---|
-| 1 | Gate + binding credential (§7.1) | `server/src/routes/conversations.ts`, `server/src/lib/groupCredentials.ts`, `web/src/lib/groupCredentials.ts` | Test perilaku: issuance tanpa token → 403; convId mismatch → ditolak; presentasi context-bound |
-| 2 | Pindahkan verification state ke keychain + hard gate perubahan kunci | `web/src/utils/verification.ts`, `web/src/utils/crypto.ts`, `web/src/lib/messagePipeline.ts` | Perubahan identitas → kirim diblokir sampai konfirmasi; state tahan reload & wipe terkelola |
-| 3 | Buang fallback Google STUN — **landed**: `keys.ts` tidak lagi menyebut STUN pihak ketiga; urutan coturn → Cloudflare → `ICE_STUN_URLS` → 503/502 | `server/src/routes/keys.ts`, `web/src/lib/webrtc.ts` | Tidak ada `google.com` di jalur ICE; kegagalan TURN jadi error eksplisit |
-| 4 | Bucket/`ENC1:` metadata lokal | `web/src/lib/db.ts`, `shadowVaultDb.ts`, `keychainDb.ts` | Tidak ada `lastMessageAt` presisi & `seq` plaintext di IndexedDB |
-| 5 | Nyalakan kembali lint (alias TS 5 untuk lint atau oxlint) — **landed 2026-10-15**: oxlint menggantikan ESLint sepenuhnya; config ESLint dihapus | `.oxlintrc.json`, `package.json` (per paket `lint: oxlint src`) | `pnpm run lint` jalan; rule `error` + kategori `correctness` blocking di CI (0 temuan) |
-| 6 | Test vector lintas-implementasi (DR/sender-key/era) | `web/src/lib/__tests__/`, `server/tests/`, `tools/dr-oracle/` | Vektor dari libsignal/SPQR lulus untuk primitif yang identik. **Landed:** KAT primitif (`cryptoKnownAnswer`, `argonKnownAnswer`) **plus** oracle Go non-libsodium dua arah untuk X3DH/KEM/kdfChain/AEAD (`docs/30` WS-G(6)); **residual:** sender-key chain / skipped key / `SessionRecord` tetap internal |
-| 7 | Capability negotiation di handshake | `packages/shared/src/transport.ts`, sidecar `main.rs`, `web/src/lib/transportClient.ts` | Klien lama tanpa `capabilities` tetap jalan |
+### 8.1 Quick wins — status
 
-**Status implementasi (2026-10-11).** Ketujuhnya sudah landed di branch ini,
-masing-masing dengan test yang menguncinya. Item 8–16 (KT penuh, multi-device,
-backup, SPQR, calls, observability, anti-abuse, MLS, klien native) sudah punya
-rencana eksekusi bertahap dengan acceptance gate di
-[`docs/30-post-parity-implementation-plan.md`](30-post-parity-implementation-plan.md)
-— termasuk alasan kenapa "KT lite" (item 8 di tabel di bawah) **tidak**
-dikerjakan dan diganti KT penuh (§30.3, §30.5).
+| # | Item | Status |
+|---|---|---|
+| 1 | Gate + binding credential (§7.1) | **Tidak berlaku** — fitur dihapus 2026-10-23; jangan hidupkan tanpa 5 syarat di §7.1 |
+| 2 | Verification state ke keychain + hard gate | **Selesai** (`peerIdentityTrust.ts`) |
+| 3 | Buang fallback STUN pihak ketiga | **Selesai** (coturn → Cloudflare → `ICE_STUN_URLS` → 503) |
+| 4 | Bucket/`ENC1:` metadata lokal | **Selesai** (termasuk `sentAt`, `lastActivity`) |
+| 5 | Nyalakan lint | **Selesai** (oxlint blocking) |
+| 6 | Test vector lintas-implementasi | **Sebagian** — KAT primitif + oracle DR non-libsodium (`tools/dr-oracle`, job CI `dr-oracle`); **residual**: sender-key chain/skipped key/`SessionRecord` internal |
+| 7 | Capability negotiation | **Selesai** (dua transport) |
 
-| # | Item | Test/bukti pengunci | Catatan penting |
-|---|---|---|---|
-| 1 | Gate + binding credential | `server/tests/credentialIssuance.test.ts` (**dihapus 2026-10-23** bersama credential blind RSA — grup kini token-first, lihat docs/26 banner + docs/35 Fase 6) | issuance butuh bukti keanggotaan + tiket; presentasi context-bound ke conversation |
-| 2 | Verification state ke keychain + hard gate | `web/src/lib/__tests__/peerIdentityTrust.test.ts` | kunci berubah → kirim diblokir sampai konfirmasi; pin lama TIDAK ditimpa dan tersimpan terenkripsi |
-| 3 | Tanpa STUN pihak ketiga | `server/tests/turnIceServers.test.ts` | kegagalan TURN = error eksplisit + kunci `call_no_turn` di 4 bahasa |
-| 4 | Metadata lokal di-bucket / `ENC1:` | `web/src/lib/__tests__/localAtRest.test.ts`, `localOrderKey.test.ts`, `dexieMigration.test.ts` (IndexedDB nyata), `vaultSeqPersistence.test.ts`, `vaultReactionsPersistence.test.ts`, `contactStore.test.ts` | `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/`isGroup`/`Message.reactions`/`ContactRow.updatedAt`/`ProfileCacheRecord.updatedAt` tidak lagi plaintext, `lastMessageAt` dipotong 15 menit (baris lama plaintext tetap terbaca + di-seal saat unlock) |
-| 5 | Lint hidup lagi | `pnpm run lint` (oxlint, CI blocking pada `error`; kategori `correctness` **`error`** sejak 2026-10-14, 0 error) | sisa 194 `no-unused-vars` yang sengaja tetap `warn` dan dibersihkan bertahap |
-| 6 | KAT lintas-implementasi | `server/tests/cryptoKnownAnswer.test.ts` (RFC 7748/8032/7693/8439/9106 + invarian X-Wing), `web/src/lib/__tests__/argonKnownAnswer.test.ts` | `hash-wasm` tidak mengekspos associated data → tag RFC 9106 §5.3 diikat di server; sisi klien mengunci nilai penengah A/B yang sama |
-| 7 | Negosiasi kapabilitas | `web/src/lib/__tests__/transportCapabilities.test.ts`, `cargo test` di sidecar (`protocol::tests`) | HELLO wajib lewat stream **bidi**; di jalur uni/datagram sidecar mengabaikannya supaya opcode 0x0B tidak pernah muncul di `nyx:upstream:*` |
+### 8.2 Yang masih terbuka (2026-10-28)
 
-**Residual setelah audit 2026-10-12, diperbarui 2026-10-14 (lihat `docs/30`
-§30.20 untuk status lengkap):** WS-G(4) test perilaku endpoint ✅ (jalur grup
-lengkap di `utils/groupAccess.ts`), WS-G(5) fuzz parser ✅ (web + framing
-sidecar), WS-G(1) dashboard Grafana ✅, WS-F kolom waktu kontak/profil ✅,
-WS-G(2) drill alert ✅ (**14** aturan; tiap aturan punya kasus menyala **dan**
-tidak-menyala, dijalankan per-PR oleh `scripts/drill-alerts.sh` + job CI
-`alerts`), WS-G(3) load test ✅ terukur (500 VU: send p95 74,4 ms / fetch p95
-68,8 ms, 0% error), WS-H per-hash-ASN ✅ (`utils/asnLookup.ts` — tabel prefix→ASN
-lokal tanpa layanan pihak ketiga, ambang 100/jam/ASN + burst sybil 25/10 menit
-yang menuntut attestation **bukan** memblokir); **WS-A ✅ dan WS-D ✅
-(2026-10-14)**: KT penuh (penulis + verifier + `server/kt-query` + monitor +
-**auditor/mode 3** + **gossip tree head**) dan SPQR terintegrasi ke jalur pesan
-(detail `docs/33`, `docs/34`); **WS-G(6) 🟡 parsial**: primitif X3DH/KEM/KDF/AEAD
-sudah dibuktikan dua arah terhadap oracle non-libsodium (`tools/dr-oracle`, job
-CI `dr-oracle`), tapi sender-key chain/skipped key/`SessionRecord` libsignal
-tidak — itu tetap internal (`spqrRatchet.test.ts` + crate SPQR); **WS-E gate (1)
-✅ (2026-10-15)**: `web/e2e/call.spec.ts` dijalankan Chrome penuh terhadap
-coturn nyata (kredensial `/api/keys/turn` → dua peer `iceTransportPolicy:'relay'`
-terhubung, pasangan terpilih `relay`↔`relay`), dan job CI `e2e-chrome` kini
-memasang + menjalankan coturn sendiri sehingga gate itu bukan klaim.
+| # | Item | Kenapa / target |
+|---|---|---|
+| 1 | **Review kripto eksternal** (`docs/36`) | Satu-satunya cara menutup "tidak ada audit pihak ketiga"; paketnya sudah disusun |
+| 2 | **KT: cutover baca ke v2** + interop `cmd/kt-client` | Log v2 baru dual-write; pembacaan masih v1 (`KT_QUERY_URL`) |
+| 3 | **KT: dua auditor berdampingan + auditor di host terpisah** | Auditor yang tinggal semeja dengan log tidak membuktikan banyak |
+| 4 | **PIR skala**: sharding / epoch inkremental | Setup ChalametPIR superlinear (10k user ≈ 18 menit); NYX hanya menutup staleness, bukan skalanya |
+| 5 | **Ukur false-positive ASN/NAT** | Heuristik per-ASN sudah ada, angka lapangan belum |
+| 6 | **Bawa bukti formal SPQR** (hax/F*/ProVerif) ke CI atau dokumen jaminan | Crate sudah vendored; yang belum adalah jaminannya |
+| 7 | **Klien native** (wrapper push/background iOS/Android) | Tanpa ini, reliabilitas notifikasi selalu kalah |
+| 8 | **MLS saat PQ suite matang** | Sudah tercatat di `docs/26` §26.8.2; bukan pekerjaan 2026 |
 
-Masih terbuka: pengukuran
-false-positive NAT/ASN di lapangan, attestation WebAuthn perangkat keras
-sungguhan, dan kedua gate CI auditor (`cmd/generate-auditing-test-vectors`,
-`cmd/kt-client`) yang binari upstream-nya tidak di-vendor.
+### 8.3 Non-goal (jangan diusulkan lagi)
 
-Residual jujur:
-
-- Jalur WT nyata (E2E `transport.spec.ts`) **sudah** dijalankan (2026-10-15) dengan
-  `--project=chrome` terhadap sidecar WebTransport sungguhan — dan benar begitu:
-  headless Chromium di mesin ini tidak punya WebTransport, jadi selama spec itu
-  hanya auto-skip, dua bug di dalamnya (assertion tombstone yang tidak pernah
-  cocok, locator `getByText` yang juga mengenai preview sidebar sehingga aksi
-  menggantung) tidak pernah terlihat. Sesi QUIC jarak jauh (WAN, handshake
-  lintas jaringan) tetap tidak diuji di sini.
-- `associatedData` Argon2 tidak tersedia di `hash-wasm`. Kalau nanti ada fitur klien
-  yang butuh AD, itu berarti implementasi baru — bukan sekadar menyalakan opsi.
-- Item 2 hanya menutup TOFU lokal; deteksi serangan tetap butuh KT (§5.1).
-
-### Menengah (1–8 minggu)
-8. **KT lite** (§5.1 tahap A) — log identitas lokal + gossip observasi; ini
-   menutup "deteksi serangan" tanpa infra baru.
-9. **Backup terenkripsi ber-frame** (§5.3) + simpan opsional di R2.
-10. **Observability tanpa telemetry + load test k6** (`docs/27` §27.7) supaya
-    perubahan besar di atas punya gerbang objektif.
-11. **Call privacy**: coturn sendiri + signaling berbasis delivery token.
-
-### Proyek besar (persetujuan eksplisit, ada dokumen desain sendiri)
-12. **KT penuh** (§5.1 tahap B) — reuse `key-transparency-server` + klien
-    `keytrans` (AGPL, kompatibel) atau implementasi TS dari `verify.rs`.
-13. **Multi-device** (§5.2) — prasyarat untuk banyak hal lain, termasuk restore.
-14. **SPQR-style PQ ratchet** (§5.4) — jalur versi paralel, target: PQ FS+PCS
-    yang terverifikasi formal; ini pembeda terbesar yang tersisa.
-15. **MLS saat PQ suite matang** (2027+, sudah tercatat di `docs/26.8.2`).
-16. **Klien native** (minimal wrapper push/background untuk iOS/Android) —
-    tanpa ini, "messenger" NYX selalu kalah pada reliabilitas notifikasi.
+Multi-device (`docs/30` §30.6/§30.18), onion routing/mixnet, SFU multi-party,
+ZKGroup penuh/pairing (blind RSA sudah dihapus — tidak ada "versi cukup" yang
+tersisa untuk dihidupkan tanpa desain baru), dan pemecahan `crypto.worker.ts`
+(aturan maintainer: perbaiki di tempat).
 
 ---
 
-## 9. Non-goals (tetap dipertahankan)
+## 9. Non-goals yang tetap dipertahankan
 
-Sesuai `docs/26.3`/`docs/27.8`, dan analisis ini tidak mengubahnya: onion
-routing/mixnet, MLS sebelum PQ suite RFC, SFU multi-party, ZKGroup penuh
-(pairing) — versi blind-RSA sudah cukup dan lebih standar. Yang **berubah**
-adalah status "ZKGroup tidak dibangun": versi RFC 9474 sudah ada di repo, jadi
-yang kurang hanyalah binding + gating (§7.1), bukan kemampuan baru.
+Sesuai `docs/26` §26.3 / `docs/27` §27.8, analisis ini tidak mengubahnya: onion
+routing/mixnet, MLS sebelum PQ suite RFC, SFU multi-party, dan pairing penuh.
+**Koreksi terhadap versi sebelumnya dokumen ini:** klaim "versi blind-RSA sudah
+cukup dan lebih standar" **tidak berlaku lagi** — blind RSA dihapus 2026-10-23
+dan grup memakai token-first. Yang benar sekarang: tidak ada implementasi
+kredensial anonim di repo; menghidupkannya berarti desain baru + gate keamanan
+§7.1.
 
 ---
 
 ## 10. Batasan analisis ini
 
-- **Statis.** Tidak ada E2E/runtime yang dijalankan (Redis/Postgres/sidecar
-  tidak diboot); klaim server di §7 berasal dari membaca route + lib, bukan dari
-  eksploitasi nyata. Klaim exploitability credential bergantung pada kerahasiaan
-  `conversationId` — perlu satu eksperimen lokal untuk memastikan dampak penuh.
-- **Signal dibaca selektif**, bukan seluruh ~1.5GB: README, struktur direktori,
-  daftar modul/crate, dan controller/store tertentu. Klaim "Signal punya X"
-  merujuk keberadaan modul/kode, bukan berarti fitur aktif di semua klien.
-- **Tidak ada review lisensi formal.** Semua repo Signal yang ada di `~/signal`
-  berlisensi AGPL-3.0(-only), sama dengan NYX — jadi adopsi kode *mungkin*
-  legal, tapi tetap butuh keputusan maintainer (atribusi, NOTICE, kompatibilitas
-  "or-later" vs "only").
-- **Tidak ada benchmark kinerja.** Rekomendasi CPU/RAM (mis. KT, SPQR) belum
-  diukur terhadap VPS 4c/8GB.
+- **Diperbarui 2026-10-28 dari kode**, bukan dari eksperimen runtime: angka tes
+  diukur (web: 128 berkas; server: 86 berkas / 693 tes — 691 lulus, 2 skip; Go:
+  147 test; Playwright: 14 spec), tetapi tidak ada uji beban/benchmark baru.
+- **E2E tidak dijalankan di sesi pembaruan ini.** CI menjalankan
+  `e2e`/`e2e-chrome` (termasuk coturn nyata dan sidecar WebTransport), dan
+  `web/e2e/call.spec.ts` sudah terbukti relay↔relay; sesi ini hanya membaca
+  spec + kode.
+- **Klaim "Signal punya X"** merujuk keberadaan modul/kode (sekarang bisa dicek
+  di `vendor/signal/*`), bukan berarti fitur aktif di semua klien. Nomor versi
+  Signal-Desktop di §2 berasal dari pembacaan 2026-10-10 dan tidak diverifikasi
+  ulang.
+- **Tidak ada review lisensi formal.** Repo Signal yang di-vendor AGPL-3.0(-only);
+  adopsi kode *mungkin* legal tetapi tetap butuh keputusan maintainer (atribusi,
+  NOTICE, kompatibilitas "or-later" vs "only"). `scripts/check-vendor.sh`
+  menjaga pin + NOTICE, bukan lisensi.
+- **Tidak ada benchmark kinerja baru.** Rekomendasi berbasis CPU/RAM (KT, SPQR,
+  PIR) belum diukur ulang terhadap VPS 4c/8GB; angka PIR yang ada berasal dari
+  `bench:pir` di Celeron N2940 (`docs/35` §35.11).
