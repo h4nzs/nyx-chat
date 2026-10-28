@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
-import { authFetch, handleApiError } from '@lib/api';
+import { authFetch } from '@lib/api';
+import { apiErrorTranslator, formatApiError } from '@lib/apiErrorText';
 import { toAbsoluteUrl } from '@utils/url';
 import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowLeft } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
@@ -46,7 +47,7 @@ export default function ProfilePage() {
           setProfileUser(userData);
         }
       } catch (e) {
-        toast.error(handleApiError(e));
+        toast.error(formatApiError(e, apiErrorTranslator(t)));
       } finally {
         setIsFetching(false);
       }

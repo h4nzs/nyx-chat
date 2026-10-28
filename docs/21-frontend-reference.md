@@ -67,6 +67,8 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 **Auth / API / transport**
 - `api.ts` — `api`, `authFetch` (CSRF + 401-refresh-retry), `apiUpload`, `getCsrfToken`, `handleApiError`, `setAuthFailureHandler`, `getPreKeyBundle`.
+- `apiErrorText.ts` — **satu-satunya** pemetaan error REST/realtime → teks tampilan: `apiErrorHint` (status + kode mesin + kalimat server), `apiErrorKey`, `formatApiError`, `formatApiErrorOr` (kalimat konteks bila server diam), `formatApiOrLocalError` (error perangkat tetap apa adanya), `formatApiErrorCode`, `apiErrorTranslator` (membaca namespace `errors`). Kode mesin (`RATE_LIMITED`, `TOKEN_STALE`, `MEMBERS_REMAIN`) tidak pernah menjadi teks; kuncinya ada di `public/locales/*/errors.json`.
+- `sandboxLimitNotice.ts` — `reportSandboxLimit(error?)`: batas akun belum terverifikasi (`SANDBOX_LIMIT*`) adalah keadaan, jadi tampil sebagai `SystemBanner` dengan CTA verifikasi (bertahan saat `systemStore.checkStatus` poll), bukan toast sekilas.
 - `transportClient.ts` — `NyxWebTransportClient` (EventEmitter), `connectSocket`, `disconnectSocket`, `emitSessionKeyRequest/Fulfillment`, `emitGroupKeyDistribution/Request/Fulfillment`, `emitMetadataUpdated`, `fireGhostSync`; singleton `transportClient`.
 - `socketListeners.ts` — `initSocketListeners()`: transport events → stores; offline sync.
 - `webrtc.ts` — call signaling + peer connections.

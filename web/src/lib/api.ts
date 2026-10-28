@@ -4,6 +4,27 @@
 import toast from 'react-hot-toast'; // Pastikan sudah diinstall
 import { CLIENT_VERSION_HEADER, CLIENT_VERSION_VALUE } from './clientVersion';
 import { reportClientVersionRejection } from '@store/clientVersionGate';
+import { apiErrorTranslator, formatApiError } from './apiErrorText';
+// Instance i18next yang SAMA dengan yang dikonfigurasi `src/i18n.ts`. Sengaja
+// diambil dari paket, bukan `import i18n from '../i18n'`: modul ini di-import
+// hampir semua tes, dan sebagian tes mem-mock `react-i18next` seluruhnya
+// (tanpa `initReactI18next`), sehingga mengevaluasi `i18n.ts` dari sini membuat
+// suite itu gagal sebelum satu tes pun jalan.
+import i18next from 'i18next';
+
+/**
+ * Teks toast untuk error API dalam bahasa aktif.
+ *
+ * [2026-10-27] Toast 429 di jalur ini dulu memakai `details.error` mentah —
+ * pengguna melihat `RATE_LIMITED: …` (kode mesin, bahasa Inggris). Sekarang
+ * dipetakan lewat `lib/apiErrorText` seperti toast lain.
+ */
+function apiErrorToastText(error: unknown): string {
+  return formatApiError(
+    error,
+    apiErrorTranslator((key, opts) => i18next.t(key, opts as Record<string, unknown> | undefined))
+  );
+}
 
 // PERBAIKAN: Baca dari Environment Variable
 const envUrl = import.meta.env.VITE_API_URL || "";
@@ -236,7 +257,7 @@ export async function api<T = unknown>(
 
       // 3b. Handle Rate Limit (429) dengan Toast
       if (res.status === 429) {
-        toast.error(errorMessage, {
+        toast.error(apiErrorToastText({ status: res.status, details }), {
           id: 'rate-limit-error', // ID biar gak muncul duplikat toast
           duration: 5000,
           icon: '⏳',
@@ -319,25 +340,17 @@ export async function authFetch<T>(
   }
 }
 
+/**
+ * Teks error Inggris untuk konteks tanpa React (log, store non-React).
+ *
+ * [2026-10-27] Dulu fungsi ini mengembalikan `e.message` apa adanya — dan karena
+ * `api()` mengisi `message` dari `details.error`, toast pengguna bisa berisi kode
+ * mesin (`SANDBOX_LIMIT_REACHED`, `TOKEN_STALE`). Sekarang pemetaannya ada di
+ * `lib/apiErrorText.ts`: kode dikenal → kalimat spesifik, kode asing → fallback
+ * status, dan kode mentah tidak pernah menjadi teks tampilan. Komponen yang
+ * punya `t` memakai `formatApiError(e, t)` langsung. */
 export function handleApiError(e: unknown): string {
-  if (e instanceof ApiError) {
-    // Pesan spesifik dari backend lebih diprioritaskan
-    if (e.message) return e.message;
-
-    // Fallback status code
-    switch (e.status) {
-      case 0: return "Network error. Check your connection.";
-      case 400: return "Invalid request.";
-      case 401: return "Session expired. Please login again.";
-      case 403: return "You don't have permission.";
-      case 404: return "Resource not found.";
-      case 429: return "Too many requests. Please wait.";
-      case 500: return "Server internal error.";
-      default: return `Error (${e.status})`;
-    }
-  }
-  if (e instanceof Error) return e.message;
-  return "An unexpected error occurred";
+  return formatApiError(e);
 }
 
 export interface PreKeyBundle {
@@ -427,7 +440,7 @@ export async function apiUpload<T = unknown>({
       }
       // Handle 429 di upload juga
       if (error.status === 429) {
-        toast.error(error.message, { icon: '⏳', style: { background: '#fee2e2', color: '#b91c1c' } });
+        toast.error(apiErrorToastText(error), { icon: '⏳', style: { background: '#fee2e2', color: '#b91c1c' } });
       }
       throw error;
     }

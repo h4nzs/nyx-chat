@@ -49,8 +49,9 @@ audit --prod` 0 vuln, `node scripts/check-pq-only.mjs` lulus (Tier B: 2 untuk
 
 > **Selesai 2026-10-26.** `|| true` dihapus, verifikasi `information_schema`
 > setelah push, deploy berhenti sebelum `pm2` restart. Jalur data dipilih:
-> **tidak ada reset otomatis** (operator + backup terverifikasi), jadi keputusan
-> maintainer soal backfill/reset DB produksi tetap terbuka.
+> **tidak ada reset otomatis** (operator + backup terverifikasi); keputusan
+> maintainer #1 (2026-10-27) menetapkan skema produksi sudah memuat kolomnya,
+> jadi tidak ada backfill/reset tambahan.
 
 **Tidak tergantung Batch 1/2.** Ini yang mencegah rilis merusak produksi.
 
@@ -97,9 +98,10 @@ audit --prod` 0 vuln, `node scripts/check-pq-only.mjs` lulus (Tier B: 2 untuk
 ## Batch 6 — Satu worker untuk job singleton + metrik
 
 > **Selesai 2026-10-26.** Kunci `job:<name>` (`SET NX EX` + Lua
-> compare-and-delete, fail-closed) untuk keempat job; exporter metrik hanya di
-> `NODE_APP_INSTANCE=0`. Agregasi multi-proses (keputusan maintainer #3) tetap
-> terbuka — ini menutup gejalanya, bukan menggantinya.
+> compare-and-delete, fail-closed) untuk keempat job. Metrik per-worker
+> (`METRICS_PORT + NODE_APP_INSTANCE * 10` + `file_sd` dari
+> `scripts/metrics-targets.mjs`) menyusul di commit `13e602d5` — lihat poin #3
+> di bawah.
 
 - **F-07** lock Redis per job (`SET job:<name> <id> NX EX <ttl>`, pola Lua yang
   sudah ada) untuk `messageSweeper`, `systemSweeper`, `ktSnapshot`,
@@ -163,9 +165,11 @@ audit --prod` 0 vuln, `node scripts/check-pq-only.mjs` lulus (Tier B: 2 untuk
    (`ensurePrivacyPassProof` + retry sekali pada 403 `PP_PROOF_REQUIRED`), muat
    ulang issuer saat rotasi kunci, alert `NyxPrivacyPassDenied`, dan runbook
    `docs/10` §10.22 (generate kunci, verifikasi metrik, rotasi, rollback).
-3. **Metrik klaster** — masih terbuka: eksporter terpisah/agregasi penuh, atau
-   cukup satu worker + `NODE_APP_INSTANCE` (kondisi sekarang)? F-07 menutup
-   gejala (target per-worker + job lock), bukan penggantinya.
+3. **Metrik klaster** — **ditutup 2026-10-27 oleh commit `13e602d5`:** tiap worker
+   membuka `METRICS_PORT + NODE_APP_INSTANCE * 10`, deploy menulis `file_sd`
+   lewat `scripts/metrics-targets.mjs`, Prometheus men-scrape semua target
+   (`docs/10` §10.12), dan alert mengagregasi sehingga angka trafik tidak lagi
+   mewakili 1/N proses.
 4. **`NODE_ENV=production`** — **diputuskan 2026-10-27 (sudah diimplementasikan di
    Batch 4 dengan guard pra-restart):** deploy memverifikasi `JWT_SECRET` sebelum
    `pm2 delete`, jadi crash-loop terjadi sebelum proses lama dimatikan.

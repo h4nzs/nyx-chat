@@ -22,6 +22,9 @@ import ImageCropperModal from './ImageCropperModal';
 import type { ConversationId, GroupMemberEntry } from '@nyx/shared';
 import { parseGroupMembers } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] 403/409 grup berbentuk kode mesin (`ADMIN_AUTH_REQUIRED`,
+// `MEMBERS_REMAIN`) — petakan ke kalimat, jangan tampilkan kodenya.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 import { useSettingsStore } from '@store/settings';
 import { estimateDailyCoverBytes } from '@lib/coverTraffic';
 import clsx from 'clsx';
@@ -239,7 +242,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       setAvatarCropTarget(null);
     } catch (error: unknown) {
       console.error('Avatar upload failed');
-      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('modals:group_info.toasts.upload_failed', { error: msg }), { id: toastId });
       setAvatarCropTarget(null);
     }
@@ -258,7 +261,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       if (outcome !== 'rotated') throw new Error(`EPOCH_ROTATION_${outcome}`);
       toast.success(t('modals:group_info.toasts.keys_rotated'), { id: toastId });
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('modals:group_info.toasts.rotate_failed', { error: msg }), { id: toastId });
     }
   };
@@ -350,7 +353,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       toast.success(t('modals:group_info.toasts.left_success'), { id: toastId });
       handleClose();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('modals:group_info.toasts.leave_failed', { error: msg }), { id: toastId });
     }
   };

@@ -2,7 +2,8 @@ import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toAbsoluteUrl } from '@utils/url';
-import { authFetch, handleApiError } from '@lib/api';
+import { authFetch } from '@lib/api';
+import { apiErrorTranslator, formatApiError } from '@lib/apiErrorText';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
 import SafetyNumberModal from './SafetyNumberModal';
@@ -135,7 +136,7 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
         const userData = await authFetch<ProfileUser>(`/api/users/${userId}`);
         setUser(userData);
       } catch (e) {
-        setError(handleApiError(e));
+        setError(formatApiError(e, apiErrorTranslator(t)));
       } finally {
         setLoading(false);
       }

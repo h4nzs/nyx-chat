@@ -5,6 +5,9 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '@store/auth';
 import { FiStar, FiShield, FiZap, FiUsers, FiFile, FiLock } from 'react-icons/fi';
 import { useTranslation, Trans } from 'react-i18next';
+// [2026-10-27] Kegagalan ini 4xx (401/403/429) — tampilkan kalimat yang bisa
+// ditindaklanjuti, bukan kode mesin atau teks Inggris hardcoded.
+import { apiErrorTranslator, formatApiError } from '@lib/apiErrorText';
 
 export default function SubscriptionModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(['modals', 'common']);
@@ -22,8 +25,7 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
       window.location.href = res.invoice_url;
     } catch (error: unknown) {
       setIsLoading(false);
-      const err = error as Error;
-      toast.error(err.message || 'Failed to initiate crypto payment');
+      toast.error(formatApiError(error, apiErrorTranslator(t)));
     }
   };
 

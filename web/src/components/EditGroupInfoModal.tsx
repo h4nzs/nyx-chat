@@ -5,6 +5,8 @@ import { Spinner } from './Spinner';
 import ModalBase from './ui/ModalBase';
 import type { ConversationId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] 403 ADMIN_AUTH_REQUIRED / MEMBERS_REMAIN adalah kode mesin.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 
 interface EditGroupInfoModalProps {
   conversationId: ConversationId;
@@ -66,7 +68,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
       toast.success(t('modals:edit_group.success'));
       onClose();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('modals:edit_group.error', { error: msg }));
     } finally {
       setIsLoading(false);

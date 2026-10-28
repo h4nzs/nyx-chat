@@ -10,6 +10,8 @@ import { useNavigate } from 'react-router-dom';
 import i18n from '../i18n';
 
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] 403/404 admin berbentuk kode mesin — petakan sebelum ditampilkan.
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 interface BannedUser {
   id: string;
@@ -53,7 +55,11 @@ export default function AdminDashboard() {
   const loadMetrics = () => {
     authFetch('/api/admin/system-status')
       .then((res: unknown) => setMetrics(res as { vps: { ramUsage: string; uptime: string; }; db: { totalUsers: string; totalMessages: string; }; storage: { totalSizeMB: string; totalFiles: string; }; }))
-      .catch((_err: unknown) => toast.error(i18n.t('errors:failed_to_load_metrics', 'Failed to load metrics')));
+      // 403 admin / 429 dijelaskan apa adanya; tanpa detail server, kalimat
+      // konteks "gagal memuat metrik" tetap dipakai (bukan "Something went wrong").
+      .catch((err: unknown) =>
+        toast.error(formatApiErrorOr(err, apiErrorTranslator(t), t('errors:failed_to_load_metrics', 'Failed to load metrics')))
+      );
   };
 
   const loadBannedUsers = () => {
@@ -69,7 +75,7 @@ export default function AdminDashboard() {
       setTenants(res);
     } catch (e) {
       console.error(e);
-      toast.error(t('failed_to_load_tenants', 'Failed to load tenants'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('failed_to_load_tenants', 'Failed to load tenants')));
     } finally {
       setIsFetchingTenants(false);
     }
@@ -106,7 +112,7 @@ export default function AdminDashboard() {
           toast.success(i18n.t('common:user_unbanned', `User @${bannedUser.username} unbanned!`, { username: bannedUser.username }));
           loadAllData();
         } catch (e: unknown) {
-          toast.error((e instanceof Error ? e.message : i18n.t('common:errors.unknown', 'Unknown error')) || t('unban_failed'));
+          toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('unban_failed', 'Failed to unban user.')));
         }
       }
     );
@@ -133,7 +139,9 @@ export default function AdminDashboard() {
       fetchTenants();
     } catch (e) {
       console.error(e);
-      toast.error(t('failed_to_create_tenant', 'Failed to create tenant'));
+      // Server memvalidasi nama/domain (400/409) — tampilkan alasannya; kalau
+      // tidak ada, tetap sebut tindakan yang gagal.
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('failed_to_create_tenant', 'Failed to create tenant')));
     }
   };
 
@@ -144,7 +152,7 @@ export default function AdminDashboard() {
       fetchTenants();
     } catch (e) {
       console.error(e);
-      toast.error(t('failed_to_toggle_tenant', 'Failed to update tenant status'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('failed_to_toggle_tenant', 'Failed to update tenant status')));
     }
   };
 

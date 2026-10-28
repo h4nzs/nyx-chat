@@ -9,6 +9,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import type { UserId, ConversationId } from '@nyx/shared';
 import { asUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 export interface SearchUser {
   id: UserId;
@@ -61,8 +62,10 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
         if (currentId === searchIdRef.current) {
           setList(r.map((u: Record<string, unknown>) => ({ ...u, id: asUserId(String(u.id)) })));
         }
-      } catch {
-        toast.error(t('search.failed'));
+      } catch (e: unknown) {
+        // Pencarian dibatasi 429 (`SEARCH_RATE_LIMITED`) — jelaskan, jangan
+        // hanya bilang "pencarian gagal".
+        toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('search.failed')));
       }
     }, 300);
     return () => clearTimeout(tTimer);
@@ -74,7 +77,7 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
       const id = await startConversation(peerId);
       onStarted(id);
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || t('connect.failed_start'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('connect.failed_start')));
     } finally {
       setLoadingId(null);
     }

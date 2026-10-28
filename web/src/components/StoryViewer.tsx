@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import type { UserId } from '@nyx/shared';
 import { getParticipantUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 
 // Default durasi untuk Teks/Gambar
@@ -242,8 +243,9 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
              setProgress(0); // Restart untuk story pengganti di posisi yang sama
           }
       }
-    } catch (e) {
-      toast.error(t('stories.delete_failed'));
+    } catch (e: unknown) {
+      // [2026-10-27] DELETE story bisa ditolak 403/404 berkode; jelaskan sebabnya.
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('stories.delete_failed')));
     }
   };
 

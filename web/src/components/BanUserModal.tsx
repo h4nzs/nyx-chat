@@ -3,6 +3,7 @@ import ModalBase from './ui/ModalBase';
 import { authFetch } from '@lib/api';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 interface Props {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
       setReason('');
       if (!targetUserId) setUserId('');
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || t('modals:ban.failed'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('modals:ban.failed')));
     } finally {
       setLoading(false);
     }

@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import { FiAlertCircle, FiX, FiCheck } from 'react-icons/fi';
 import ModalBase from './ui/ModalBase';
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] Laporan ditolak 400/429 — tampilkan sebabnya, bukan toast generik.
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 interface Props {
   onClose: () => void;
@@ -35,9 +37,9 @@ export default function ReportBugModal({ onClose }: Props) {
 
       toast.success(t('modals:report.success_bug'), { id: toastId });
       onClose();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(error);
-      toast.error(t('modals:report.failed_bug'), { id: toastId });
+      toast.error(formatApiErrorOr(error, apiErrorTranslator(t), t('modals:report.failed_bug')), { id: toastId });
     } finally {
       setIsSubmitting(false);
     }

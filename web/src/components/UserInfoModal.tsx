@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { useModalStore } from '@store/modal';
 import { useNavigate } from 'react-router-dom';
 import { toAbsoluteUrl } from '@utils/url';
-import { authFetch, handleApiError } from '@lib/api';
+import { authFetch } from '@lib/api';
+import { apiErrorTranslator, formatApiError, formatApiErrorOr } from '@lib/apiErrorText';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
 import toast from 'react-hot-toast';
@@ -74,7 +75,7 @@ export default function UserInfoModal() {
         const userData = await authFetch<ProfileUser>(`/api/users/${profileUserId}`);
         setUser(userData);
       } catch (e) {
-        setError(handleApiError(e));
+        setError(formatApiError(e, apiErrorTranslator(t)));
       } finally {
         setLoading(false);
       }
@@ -138,7 +139,9 @@ export default function UserInfoModal() {
       });
       toast.success(t('modals:report.success'));
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : t('common:errors.unknown')) || t('modals:report.failed'));
+      // [2026-10-27] 4xx dari server = kode mesin (`RATE_LIMITED`); pakai
+      // kalimat konteks bila server tidak memberi detail yang bisa dibaca.
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('modals:report.failed')));
     }
   };
 

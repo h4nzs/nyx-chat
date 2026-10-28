@@ -15,6 +15,8 @@ import { getGroupMembers, getMyAdminToken } from '@lib/groupPseudonyms';
 import { useEffect } from 'react';
 import { useProfileStore, hydrateProfileForPlainId } from '@store/profile';
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] Error 4xx dari server berbentuk kode mesin — jangan tampil mentah.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 
 // [FIX UI ANONYMOUS 2026-10-05] Anggota yang gagal di-resolve (tanpa
 // profileKey + remote tak membantu) ditandai sekali per sesi — jangan boros
@@ -79,7 +81,7 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, my
       }
       toast.success(t('modals:participants.toasts.role_changed', { name: profile.name, role: newRole.toLowerCase() }));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('modals:participants.toasts.role_failed', { error: msg }));
     }
   };
@@ -133,7 +135,7 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, my
           }
           toast.success(t('modals:participants.toasts.removed', { name: profile.name }));
         } catch (error: unknown) {
-          const msg = error instanceof Error ? error.message : t('common:errors.unknown');
+          const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
           toast.error(t('modals:participants.toasts.remove_failed', { error: msg }));
         }
       }
@@ -151,8 +153,8 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin, my
         toast.success(t('modals:participants.toasts.blocked', { name: profile.name }));
       }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
-        toast.error(t('modals:participants.toasts.block_failed', { error: msg }));
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
+      toast.error(t('modals:participants.toasts.block_failed', { error: msg }));
     }
   };
 

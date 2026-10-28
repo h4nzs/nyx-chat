@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧾 Error 4xx tidak lagi tampil sebagai kode mesin (2026-10-28)
+
+Server menjawab 4xx dengan **kode mesin** (`RATE_LIMITED`, `TOKEN_STALE`,
+`ADMIN_AUTH_REQUIRED: Invalid or missing X-Admin-Token`, `SANDBOX_LIMIT_REACHED`,
+`MEMBERS_REMAIN: …`). `handleApiError` mengembalikan `e.message` apa adanya dan
+belasan komponen memakai `error.message` langsung, jadi toast pengguna bisa berisi
+kode itu — atau teks Inggris hardcoded yang tidak bisa diterjemahkan — tanpa
+petunjuk apa yang harus dilakukan.
+
+Sekarang semua jalur lewat `web/src/lib/apiErrorText.ts`: kode dikenal → kalimat
+yang bisa ditindaklanjuti (kunci `api_*` di keempat bahasa), kalimat manusia dari
+server dipakai bila ada, sisanya fallback per status (401/403/404/409/413/429),
+dan kode mentah tidak pernah dirender. Pemanggil yang punya kalimat konteks
+(`formatApiErrorOr`) mempertahankannya saat server tidak memberi detail, sedangkan
+error perangkat (crypto/rotasi/penyimpanan) tetap apa adanya agar bisa didiagnosis.
+
+Batas akun belum terverifikasi (`SANDBOX_LIMIT*`) bukan kegagalan sekilas:
+`sandboxLimitNotice.ts` menampilkannya sebagai `SystemBanner` dengan aksi ke
+halaman verifikasi (bertahan melewati poll `systemStore`), dan
+`startConversation` tidak lagi membungkus ulang `ApiError` menjadi `Error` biasa
+sehingga `status`/`details` sampai ke pemanggil.
+
 ## 🚨 Realtime mati setelah login: cookie sesi host-only + `NODE_ENV` VPS (2026-10-25)
 
 Setelah registrasi, dasbor `/chat` tertahan di banner `ESTABLISHING_UPLINK`.

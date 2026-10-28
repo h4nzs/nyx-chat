@@ -18,6 +18,7 @@ import { computeContactTrust, compareByTrustDescThenRecency, type ContactTrustLe
 import { subscribeToContacts, getAllContacts } from '@lib/contactStore';
 import type { ContactRecord } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 
 // [CONTACT TRUST — P4 2026-10-05] Baris kontak untuk picker: dekripsi profil
 // via profileStore (pola yang sama dengan ContactItem CreateStoryModal) +
@@ -209,11 +210,13 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       onClose();
 
     } catch (error: unknown) {
-      if (error instanceof Error) {
-        toast.error(t('modals:group_info.toasts.create_error', { error: error.message }));
-      } else {
-        toast.error(t('common:errors.unknown'));
-      }
+      // [2026-10-27] `error.message` bisa berisi kode mesin 4xx
+      // (`SANDBOX_LIMIT_REACHED: …`) — petakan dulu, jangan tampilkan mentah.
+      toast.error(
+        t('modals:group_info.toasts.create_error', {
+          error: formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown')),
+        })
+      );
     } finally {
       setLoading(false);
     }

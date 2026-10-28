@@ -21,7 +21,7 @@ import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import BackupRestoreModal from '../components/BackupRestoreModal';
 import BackupExportModal from '../components/BackupExportModal';
-import { api, handleApiError } from '@lib/api';
+import { api } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
 import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
 import { executeLocalWipe } from '@lib/nukeProtocol';
@@ -37,27 +37,12 @@ import ImageCropperModal from '../components/ImageCropperModal';
 import SubscriptionModal from '../components/SubscriptionModal';
 import { estimateDailyCoverBytes } from '@lib/coverTraffic';
 import clsx from 'clsx';
+// [2026-10-27] `parseApiError` lokal mengembalikan `error.message` apa adanya —
+// untuk 4xx itu kode mesin (`PP_TOKEN_REJECTED`, `RATE_LIMITED`). Satu pemetaan
+// bersama: kode dikenal → kalimat, tidak dikenal → fallback status.
+import { apiErrorTranslator, formatApiError, formatApiOrLocalError } from '@lib/apiErrorText';
 
 /* --- MICRO-COMPONENTS --- */
-
-const parseApiError = (error: unknown, fallback: string): string => {
-  if (error instanceof Error) return error.message;
-  if (error && typeof error === 'object' && 'details' in error) {
-    try {
-      const details = (error as Record<string, unknown>).details;
-      if (typeof details === 'string') {
-        const parsed = JSON.parse(details);
-        return parsed.error || fallback;
-      }
-      if (typeof details === 'object' && details !== null && 'error' in details) {
-        return (details as { error: string }).error;
-      }
-    } catch (e) {
-      console.warn('[Settings] Failed to parse response:', e);
-    }
-  }
-  return fallback;
-};
 
 const RockerSwitch = ({ checked, onChange, disabled, label, ariaLabel }: { checked: boolean; onChange: () => void; disabled?: boolean; label?: string; ariaLabel?: string }) => (
   <button
@@ -217,7 +202,7 @@ export default function SettingsPage() {
         window.location.replace('/');
     } catch (error: unknown) {
         setIsDeleting(false);
-        const errorMsg = parseApiError(error, t('common:errors.unknown'));
+        const errorMsg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
         toast.error(t('settings:messages.deletion_failed', { error: errorMsg }));
     }
   };
@@ -293,7 +278,7 @@ export default function SettingsPage() {
 
       toast.success(t('settings:messages.identity_updated'));
     } catch (error: unknown) {
-      const errorMsg = parseApiError(error, t('common:errors.unknown'));
+      const errorMsg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('settings:messages.update_failed', { error: errorMsg }));
     } finally {
       setIsLoading(false);
@@ -402,7 +387,7 @@ export default function SettingsPage() {
         // (termasuk 500 dari `/webauthn/register/options`) tampil sebagai
         // "Unknown error", sehingga bug server tak bisa dilaporkan pengguna.
         console.error('[Settings] biometric setup failed:', error);
-        toast.error(handleApiError(error), { id: 'passkey' });
+        toast.error(formatApiError(error, apiErrorTranslator(t)), { id: 'passkey' });
       }
     }
   };
@@ -434,7 +419,8 @@ export default function SettingsPage() {
       
     } catch (error: unknown) {
       console.error(sanitizeErrorLog(error));
-      const errorMsg = error instanceof Error ? error.message : t('common:errors.unknown');
+      // PoW verify bisa menjawab 4xx berkode (`RATE_LIMITED`, `INVALID_PROOF`).
+      const errorMsg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('settings:messages.mining_failed', { error: errorMsg }), { id: toastId });
     } finally {
       setMiningStatus('idle');

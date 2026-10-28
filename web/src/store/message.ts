@@ -5,13 +5,16 @@ import type { UserId, ConversationId, MessageId, MessageSendPayload, SystemMessa
 import { asUserId, asConversationId, asMessageId, getParticipantUserId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 const uuidv4 = () => crypto.randomUUID();
-import { api, authFetch } from "@lib/api"; 
+import { api, authFetch, ApiError } from "@lib/api"; 
 import { transportClient, emitSessionKeyRequest, emitGroupKeyDistribution } from '@lib/transportClient';
 // [docs/35 Fase 3] Jitter/batching kirim pada mode Maximum (client-local).
 import { applyMaximumSendDelay } from '@lib/sendTiming';
 // [BUGFIX 2026-10-18] Receipt pesan-tiba = 'messages:mark_delivered' (bukan READ).
 import { sendDeliveryReceipts } from '@lib/deliveryReceipts';
 import { captureAndLog } from '@utils/feedback';
+// [2026-10-27] Kode error 4xx dari server tidak boleh tampil mentah.
+import { apiErrorTranslator, formatApiErrorCode, formatApiErrorOr } from '@lib/apiErrorText';
+import { reportSandboxLimit } from '@lib/sandboxLimitNotice';
 import { 
   encryptMessage, 
   decryptMessage, 
@@ -1358,10 +1361,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           } else if (!res.ok) {
               if (!isReactionPayload && !shouldBeSilent) {
                   get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
-                  if (res.error?.includes('SANDBOX_LIMIT_REACHED')) {
-                      toast.error(i18n.t('errors:sandbox_limit_reached_verify_your_accoun', 'Sandbox limit reached! Verify your account to unlock unlimited messaging.'));
+                  // [2026-10-27] `res.error` adalah kode mesin (bisa ber-prefix
+                  // ": kalimat"). Dulu string itu ditampilkan mentah — pengguna
+                  // melihat `SANDBOX_LIMIT_REACHED: …` tanpa tahu harus apa.
+                  // Batas sandbox adalah KEADAAN (bertahan sampai verifikasi),
+                  // jadi yang tampil adalah banner dengan CTA; toast hanya umpan
+                  // balik langsung untuk kegagalan lain.
+                  if (reportSandboxLimit(res.error)) {
+                      toast.error(i18n.t('errors:api_unverified_limited', 'Unverified accounts are limited. Verify your account to unlock this.'));
                   } else if (res.error) {
-                      toast.error(res.error);
+                      toast.error(formatApiErrorCode(res.error, apiErrorTranslator((key, opts) => i18n.t(key, opts))) ?? i18n.t('errors:api_unknown'));
                   }
               } else if (isReactionPayload) {
                   const reactionData = parseReaction(data.content);
@@ -1688,7 +1697,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           
           xhr.onload = () => {
               if (xhr.status === 200) resolve();
-              else reject(new Error('Upload failed'));
+              // [2026-10-27] Simpan status HTTP: R2 menolak dengan 413/403, dan
+              // tanpa status itu toast hanya bisa bilang "gagal upload" generik.
+              else reject(new ApiError(xhr.status, 'Upload failed'));
           };
           
           xhr.onerror = () => reject(new Error('Network error'));
@@ -1718,7 +1729,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     } catch (error) {
       removeActivity(uploadId);
       console.error("File upload failed:", error);
-      toast.error(i18n.t('errors:failed_to_upload_file', `Failed to upload ${file.name}.`, { filename: file.name }));
+      // 413/403 punya kalimat sendiri (api_too_large / api_forbidden); tanpa
+      // detail server, pakai kalimat konteks berisi nama berkas.
+      reportSandboxLimit(error);
+      toast.error(
+        formatApiErrorOr(
+          error,
+          apiErrorTranslator((key, opts) => i18n.t(key, opts as Record<string, unknown> | undefined)),
+          i18n.t('errors:failed_to_upload_file', `Failed to upload ${file.name}.`, { filename: file.name })
+        )
+      );
       set(state => ({
         messages: {
           ...state.messages,

@@ -5,6 +5,8 @@ import { Spinner } from '@components/Spinner';
 import { Link } from 'react-router-dom';
 import { FiMonitor, FiSmartphone, FiLogOut, FiChevronLeft, FiServer, FiLink } from 'react-icons/fi';
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] 401/403/429 dari sesi perangkat punya sebab spesifik.
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 // [LINK 2026-10-18] Pairing perangkat baru lewat QR (token + persetujuan).
 import LinkDeviceModal from '@components/LinkDeviceModal';
 
@@ -115,8 +117,10 @@ export default function SessionManagerPage() {
 
         setSessions(processedSessions);
 
-      } catch (error) {
-        toast.error(t('common:errors.network'));
+      } catch (error: unknown) {
+        // 401 (sesi berakhir) / 429 tidak sama dengan gangguan jaringan; kalau
+        // servernya memang tak terjangkau, kalimat jaringan yang dipakai.
+        toast.error(formatApiErrorOr(error, apiErrorTranslator(t), t('common:errors.network')));
       } finally {
         setLoading(false);
       }
@@ -130,8 +134,9 @@ export default function SessionManagerPage() {
       await api(`/api/sessions/${jti}`, { method: 'DELETE' });
       setSessions(prev => prev.filter(s => s.jti !== jti));
       toast.success(t('settings:messages.terminated'), { id: toastId });
-    } catch (error) {
-      toast.error(t('settings:messages.eject_failed'), { id: toastId });
+    } catch (error: unknown) {
+      // 403/404 dari DELETE /api/sessions/:jti dijelaskan apa adanya.
+      toast.error(formatApiErrorOr(error, apiErrorTranslator(t), t('settings:messages.eject_failed')), { id: toastId });
     }
   };
 

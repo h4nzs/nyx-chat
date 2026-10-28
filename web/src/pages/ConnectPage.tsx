@@ -6,6 +6,7 @@ import { useAuthStore } from '@store/auth';
 import { Spinner } from '@components/Spinner';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 export default function ConnectPage() {
   const { t } = useTranslation(['common']);
@@ -99,7 +100,7 @@ export default function ConnectPage() {
                 toast.success(t('connect.connected'), { id: 'connect' });
                 navigate(`/chat/${convId}`);
              } catch (e: unknown) {
-                toast.error((e instanceof Error ? e.message : 'Unknown error') || t('connect.failed_start'), { id: 'connect' });
+                toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('connect.failed_start')), { id: 'connect' });
                 navigate('/chat');
              }
           },

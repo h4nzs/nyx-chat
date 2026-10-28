@@ -3,6 +3,7 @@ import QRCodeRaw from 'react-qr-code';
 import { FiCheck, FiRefreshCw, FiShield, FiSmartphone, FiX } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 import ModalBase from './ui/ModalBase';
 import { transportClient } from '@lib/transportClient';
@@ -112,7 +113,7 @@ export default function LinkDeviceModal({ onClose }: Props) {
       setPending((prev) => prev.filter((entry) => entry.pendingId !== item.pendingId));
       toast.success(t('settings:sessions_page.link_approved', { device: item.deviceName }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('settings:sessions_page.link_action_failed'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('settings:sessions_page.link_action_failed')));
     } finally {
       setBusyId(null);
     }
@@ -125,7 +126,7 @@ export default function LinkDeviceModal({ onClose }: Props) {
       setPending((prev) => prev.filter((entry) => entry.pendingId !== item.pendingId));
       toast.success(t('settings:sessions_page.link_denied', { device: item.deviceName }));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('settings:sessions_page.link_action_failed'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('settings:sessions_page.link_action_failed')));
     } finally {
       setBusyId(null);
     }

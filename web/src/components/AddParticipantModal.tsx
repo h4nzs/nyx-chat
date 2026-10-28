@@ -10,6 +10,8 @@ import useDynamicIslandStore from '@store/dynamicIsland';
 import ModalBase from './ui/ModalBase';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
+// [2026-10-27] 403 `ADMIN_AUTH_REQUIRED` / 409 dari server = kode mesin.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 
 const AddParticipantModal = ({ conversationId, onClose }: {
   conversationId: string;
@@ -117,7 +119,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       toast.success(t('modals:add_participant.success'));
       onClose();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : t('common:errors.unknown', 'Unknown error');
+      const msg = formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown'));
       toast.error(t('modals:add_participant.error', { error: msg }));
     } finally {
       setIsLoading(false);

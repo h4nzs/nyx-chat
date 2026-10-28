@@ -26,6 +26,16 @@ import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto
 import type { UserId, User, SubscriptionTier } from '@nyx/shared';
 import { executeLocalWipe } from "@lib/nukeProtocol";
 import i18n from '../i18n';
+// [2026-10-27] Error 4xx dari server berbentuk kode mesin (`RATE_LIMITED`,
+// `SANDBOX_UPLOAD_RESTRICTION`) — jangan pernah ditampilkan mentah ke toast.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
+
+const apiErrorText = (error: unknown): string =>
+  formatApiOrLocalError(
+    error,
+    apiErrorTranslator((key, opts) => i18n.t(key, opts as Record<string, unknown> | undefined)),
+    i18n.t('errors:api_unknown')
+  );
 import { prefetchAppChunks } from '@lib/prefetch';
 
 // ✅ Helper pendeteksi nama perangkat
@@ -937,7 +947,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         return fileUrl; 
       } catch (e: unknown) {
         console.error(e);
-        toast.error(`Update failed: ${(e instanceof Error ? e.message : 'Unknown error')}`, { id: toastId });
+        toast.error(i18n.t('errors:update_failed', { error: apiErrorText(e) }), { id: toastId });
         throw e;
       }
     },
@@ -1015,9 +1025,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast.success(i18n.t('common:user_blocked', 'User blocked'), { id: toastId });
         set(state => ({ blockedUserIds: [...state.blockedUserIds, userId] }));
       } catch (error: unknown) {
-        const errorDetails = typeof error === 'object' && error !== null && 'details' in error ? (error as Record<string, unknown>).details : undefined;
-        const errorMsg = errorDetails ? JSON.parse(String(errorDetails)).error : (error instanceof Error ? error.message : 'Unknown error');
-        toast.error(`Block failed: ${errorMsg}`, { id: toastId });
+        // Dulu `JSON.parse(String(details))` bisa melempar di dalam catch
+        // (details objek) dan menyembunyikan error aslinya.
+        toast.error(i18n.t('errors:block_failed', { error: apiErrorText(error) }), { id: toastId });
         throw error;
       }
     },
@@ -1029,9 +1039,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast.success(i18n.t('common:user_unblocked_plain', 'User unblocked'), { id: toastId });
         set(state => ({ blockedUserIds: state.blockedUserIds.filter(id => id !== userId) }));
       } catch (error: unknown) {
-        const errorDetails = typeof error === 'object' && error !== null && 'details' in error ? (error as Record<string, unknown>).details : undefined;
-        const errorMsg = errorDetails ? JSON.parse(String(errorDetails)).error : (error instanceof Error ? error.message : 'Unknown error');
-        toast.error(`Unblock failed: ${errorMsg}`, { id: toastId });
+        toast.error(i18n.t('errors:unblock_failed', { error: apiErrorText(error) }), { id: toastId });
         throw error;
       }
     },

@@ -4,7 +4,12 @@
 import type { Participant, UserId, ConversationId, MessageId } from '@nyx/shared';
 import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
-import { api, handleApiError } from "@lib/api";
+import { api } from "@lib/api";
+// [2026-10-27] Error upload = 4xx berkode (`SANDBOX_UPLOAD_RESTRICTION`, `RATE_LIMITED`).
+// Jangan tampilkan kode mentah; batas sandbox juga bukan toast semata.
+import { apiErrorTranslator, formatApiError } from "@lib/apiErrorText";
+import { reportSandboxLimit } from "@lib/sandboxLimitNotice";
+import i18n from "../i18n";
 import { ensureGroupSession } from "@utils/crypto";
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
 import { emitGroupKeyDistribution } from '@lib/transportClient';
@@ -15,7 +20,6 @@ import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
 import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
-import i18n from '../i18n';
 
 export type StagedFile = {
   id: string;
@@ -301,7 +305,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
     } catch (error: unknown) {
       console.error("Upload error:", error);
-      const errorMsg = handleApiError(error);
+      // `SANDBOX_UPLOAD_RESTRICTION` adalah keadaan akun, bukan gangguan upload.
+      reportSandboxLimit(error);
+      const errorMsg = formatApiError(error, apiErrorTranslator((key, opts) => i18n.t(key, opts as Record<string, unknown> | undefined)));
       toast.error(i18n.t('errors:file_upload_failed', 'File upload failed: {{error}}', { error: errorMsg }));
       removeActivity(activityId);
       // FIX 4: Use consistent temp_ prefix
@@ -437,7 +443,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       setTimeout(() => removeActivity(activityId), 1000); 
 
     } catch (error: unknown) {
-      const errorMsg = handleApiError(error);
+      reportSandboxLimit(error);
+      const errorMsg = formatApiError(error, apiErrorTranslator((key, opts) => i18n.t(key, opts as Record<string, unknown> | undefined)));
       toast.error(i18n.t('errors:voice_message_failed', `Voice message failed: ${errorMsg}`, { error: errorMsg }));
       removeActivity(activityId);
       // FIX 7: Use consistent temp_ prefix

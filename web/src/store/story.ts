@@ -11,6 +11,8 @@ import { useAuthStore } from './auth';
 import type { StoryId, UserId, ConversationId } from '@nyx/shared';import { asStoryId, asUserId, asConversationId, getParticipantUserId } from '@nyx/shared';
 import type { Story, Participant } from '@nyx/shared';
 import i18n from '../i18n';
+// [2026-10-27] Posting story bisa ditolak 4xx (`STORY_BLOCKED`, `RATE_LIMITED`).
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 
 type StoryState = {
   stories: Record<string, Story[]>;
@@ -227,7 +229,12 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       toast.success(i18n.t('common:posting_success', 'Story posted!'), { id: toastId });
     } catch (e: unknown) {
       console.error(e);
-      toast.error(i18n.t('common:posting_error', `Failed to post story: ${(e instanceof Error ? e.message : 'Unknown error') || 'Unknown error'}`), { id: toastId });
+      const msg = formatApiOrLocalError(
+        e,
+        apiErrorTranslator((key, opts) => i18n.t(key, opts as Record<string, unknown> | undefined)),
+        i18n.t('errors:api_unknown')
+      );
+      toast.error(i18n.t('common:posting_error', `Failed to post story: ${msg}`), { id: toastId });
     }
   }
 }));

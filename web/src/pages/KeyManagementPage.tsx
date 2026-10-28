@@ -11,6 +11,8 @@ import { api } from '@lib/api';
 import { getRecoveryPhrase, generateNewKeys } from '@lib/crypto-worker-proxy';
 import { getEncryptedKeys, saveEncryptedKeys } from '@lib/keyStorage';
 import { useTranslation, Trans } from 'react-i18next';
+// [2026-10-27] Rotasi kunci bisa ditolak 4xx (`RATE_LIMITED`); jangan tampil mentah.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 
 export default function KeyManagementPage() {
   // Tambahkan 'auth' untuk meminjam pesan error kriptografi
@@ -43,7 +45,7 @@ export default function KeyManagementPage() {
         setShowRecoveryModal(true);
 
       } catch (error: unknown) {
-        toast.error((error instanceof Error ? error.message : t('common:errors.unknown')));
+        toast.error(formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown')));
       } finally {
         setIsProcessing(false);
       }
@@ -119,7 +121,7 @@ export default function KeyManagementPage() {
             }, 1000);
 
           } catch (error: unknown) {
-            toast.error((error instanceof Error ? error.message : t('common:errors.unknown')));
+            toast.error(formatApiOrLocalError(error, apiErrorTranslator(t), t('common:errors.unknown')));
           } finally {
             setIsProcessing(false);
           }

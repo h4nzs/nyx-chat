@@ -4,6 +4,7 @@ import { authFetch } from '@lib/api';
 import toast from 'react-hot-toast';
 import type { UserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 
 interface Props {
   isOpen: boolean;
@@ -31,7 +32,7 @@ export default function ReportUserModal({ isOpen, onClose, reportedUserId, repor
       onClose();
       setReason('');
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || t('modals:report.failed'));
+      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('modals:report.failed')));
     } finally {
       setLoading(false);
     }

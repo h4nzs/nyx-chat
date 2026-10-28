@@ -10,6 +10,8 @@ import toast from "react-hot-toast";
 import { api } from "@lib/api";
 import { attestationErrorKey } from "@lib/registerAttestation";
 import { captureAndLog } from '@utils/feedback';
+// [2026-10-27] Verifikasi WebAuthn bisa ditolak server dengan 4xx berkode.
+import { apiErrorTranslator, formatApiOrLocalError } from '@lib/apiErrorText';
 import { FiShield, FiSkipForward, FiCpu, FiZap } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
 import SEO from '../components/SEO';
@@ -202,7 +204,13 @@ export default function Register() {
       if ((error as Error).name === 'NotAllowedError') {
         toast.error(t('auth:messages.biometric_cancelled'));
       } else {
-        toast.error(`${t('common:errors.error_prefix', 'Error:')} ${(error instanceof Error ? error.message : t('common:errors.unknown', 'Unknown error'))}`);
+        toast.error(
+          `${t('common:errors.error_prefix', 'Error:')} ${formatApiOrLocalError(
+            error,
+            apiErrorTranslator(t),
+            t('common:errors.unknown', 'Unknown error')
+          )}`
+        );
       }
     } finally {
       setIsVerifyingBio(false);

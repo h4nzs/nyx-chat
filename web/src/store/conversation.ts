@@ -25,10 +25,21 @@ import { compareMessagesByOrder } from '@utils/messageOrder';
 // (bukan pesan kontrol) yang boleh mengisi `lastMessage`.
 import { isPreviewableMessage, pickPreviewLastMessage, withPreview } from '@utils/messagePreview';
 import i18n from '../i18n';
+import { apiErrorTranslator, formatApiError, hasApiErrorDetail } from '@lib/apiErrorText';
+import { reportSandboxLimit } from '@lib/sandboxLimitNotice';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
+/**
+ * [2026-10-27] Pesan error dari server adalah **kode mesin** (`TOKEN_STALE`,
+ * `MEMBERS_REMAIN: …`, `ADMIN_AUTH_REQUIRED: …`). Mengembalikan `error.message`
+ * apa adanya menampilkan kode itu ke pengguna. Sekarang: kode dikenal → kalimat
+ * spesifik yang bisa diterjemahkan; kalau server tidak memberi detail, pakai
+ * kalimat konteks pemanggil (lebih berguna daripada "Something went wrong").
+ */
 function getToastErrorMessage(error: unknown, i18nKey: string, fallback: string): string {
-  if (error instanceof Error && error.message) return error.message;
+  if (hasApiErrorDetail(error)) {
+    return formatApiError(error, apiErrorTranslator((key, opts) => i18n.t(key, opts as Record<string, unknown> | undefined)));
+  }
   return i18n.t(i18nKey, fallback);
 }
 
@@ -537,8 +548,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       get().removeConversation(id);
     } catch (error: unknown) {
       console.error("Failed to delete conversation:", error);
-      const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_delete_conversation', "Failed to delete conversation.");
-      toast.error(errorMessage);
+      toast.error(getToastErrorMessage(error, 'errors:failed_to_delete_conversation', "Failed to delete conversation."));
     }
   },
   
@@ -548,11 +558,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       get().removeConversation(id);
     } catch (error: unknown) {
       console.error("Failed to delete group:", error);
-      if (typeof error === 'object' && error !== null && 'status' in error && (error as Record<string, unknown>).status === 403) {
-        toast.error(i18n.t('errors:only_the_group_creator_can_delete_the_gr', 'Only the group creator can delete the group.'));
-      } else {
-        toast.error(getToastErrorMessage(error, 'errors:failed_to_delete_group', "Failed to delete group."));
-      }
+      // 403 di jalur ini bisa berarti `ADMIN_AUTH_REQUIRED` / `BLIND_AUTH_REQUIRED`
+      // (capability/token hilang) atau memang bukan pembuat grup. Memetakan kode
+      // dulu lebih tepat daripada menebak "bukan pembuat grup" untuk semuanya;
+      // kalau server tidak memberi kode, kalimat itu tetap jadi fallback.
+      toast.error(getToastErrorMessage(error, 'errors:only_the_group_creator_can_delete_the_gr', 'Only the group creator can delete the group.'));
     }
   },
   
@@ -585,7 +595,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       return conv.id;
     } catch (error: unknown) {
       console.error("Failed to start conversation:", error);
-      throw new Error(`Failed to establish conversation. ${(error instanceof Error ? error.message : 'Unknown error') || ''}`);
+      // [2026-10-27] Jangan bungkus ulang menjadi `new Error(...)`: itu membuang
+      // `status` + `details` dari ApiError, sehingga pemanggil kehilangan kode
+      // mesin (mis. `SANDBOX_LIMIT`) dan hanya bisa menampilkan teks generik
+      // berbahasa Inggris. Batas sandbox adalah keadaan → banner dengan CTA.
+      reportSandboxLimit(error);
+      throw error;
     }
   },
 
@@ -1464,8 +1479,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       });
     } catch (error: unknown) {
       console.error("Failed to toggle pinned conversation", error);
-      const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_toggle_pinned_conversation', "Failed to toggle pinned conversation.");
-      toast.error(errorMessage);
+      // [2026-10-27] 4xx dari server = kode mesin; pakai kalimat konteks bila
+      // server tidak memberi detail yang bisa dibaca.
+      toast.error(getToastErrorMessage(error, 'errors:failed_to_toggle_pinned_conversation', "Failed to toggle pinned conversation."));
       
       set(state => {
         const updatedConversations = state.conversations.map(conversation => {

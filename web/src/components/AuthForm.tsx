@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Alert from './Alert'
 import { Spinner } from './Spinner';
-import { handleApiError } from '@lib/api';
+import { apiErrorTranslator, formatApiError } from '@lib/apiErrorText';
 import { useTranslation } from 'react-i18next';
 
 interface AuthFormProps {
@@ -52,7 +52,7 @@ export default function AuthForm({ onSubmit, button, isRegister = false, disable
           await onSubmit({ a: emailOrUsername, b: password, d: username, name })
         }
         catch (ex: unknown) {
-          setErr(handleApiError(ex));
+          setErr(formatApiError(ex, apiErrorTranslator(t)));
         } finally {
           setIsLoading(false)
         }
