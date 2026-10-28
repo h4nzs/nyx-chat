@@ -2,8 +2,7 @@
 # [docs/33 §33.10 · docs/34 · NOTICE] Guard artefak WASM yang WAJIB ter-commit.
 #
 # Kenapa ada: `web/src/workers/crypto.worker.ts` meng-import
-# `packages/spqr-wasm/dist/spqr.wasm?url` dan verifier KT memuat
-# `packages/keytrans-wasm/dist/keytrans.wasm`, verifier v2 memuat
+# `packages/spqr-wasm/dist/spqr.wasm?url`, verifier KT v2 memuat
 # `packages/keytrans-wasm-v2/dist/keytrans-v2.wasm`, worker PIR memuat
 # `packages/pir-wasm/dist/pir-client.wasm?url`. Kalau lupa di-commit, build web
 # gagal jauh di dalam Vite dengan "Could not resolve .../spqr.wasm?url". Script
@@ -23,7 +22,7 @@
 #
 # Format daftar: "path:ukuran_minimum_byte" (dipisah whitespace/baris baru).
 # Ambang minimum hanya untuk menangkap file kosong/stub/terpotong — ukuran asli
-# jauh di atasnya (spqr ≈ 507 KiB, keytrans ≈ 293 KiB).
+# jauh di atasnya (spqr ≈ 507 KiB, keytrans-v2 ≈ 273 KiB).
 
 set -euo pipefail
 
@@ -31,7 +30,6 @@ cd "$(dirname "$0")/.."
 
 DEFAULT_ARTIFACTS="
 packages/spqr-wasm/dist/spqr.wasm:100000
-packages/keytrans-wasm/dist/keytrans.wasm:100000
 packages/keytrans-wasm-v2/dist/keytrans-v2.wasm:100000
 packages/pir-wasm/dist/pir-client.wasm:100000
 "

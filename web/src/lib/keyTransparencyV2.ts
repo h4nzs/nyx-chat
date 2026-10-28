@@ -253,7 +253,7 @@ const toMillis = (now: Date | number | undefined): bigint => {
 };
 
 /**
- * Instansiasi modul verifier. `bytes` = isi `packages/keytrans-wasm/dist/keytrans.wasm`.
+ * Instansiasi modul verifier. `bytes` = isi `packages/keytrans-wasm-v2/dist/keytrans-v2.wasm`.
  */
 export function instantiateKeyTransparencyVerifier(
   // `Uint8Array<ArrayBuffer>` karena `WebAssembly.Module` menolak buffer yang

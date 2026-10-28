@@ -94,7 +94,9 @@
     "q3": "How do I backup my cryptographic identity?",
     "a3": "Upon registration, you are given a 24-word recovery phrase. This phrase is the sole backup of your identity keys. Store it securely offline. We cannot recover it for you.",
     "q4": "Is NYX truly quantum-resistant?",
-    "a4": "Yes, we implement a hybrid approach combining classical X25519 and the post-quantum ML-KEM-768 (X-Wing) algorithm inside a dedicated WebAssembly Web Worker."
+    "a4": "Yes, we implement a hybrid approach combining classical X25519 and the post-quantum ML-KEM-768 (X-Wing) algorithm inside a dedicated WebAssembly Web Worker.",
+    "q5": "Is NYX as fast as a regular messenger?",
+    "a5": "No — and it is not meant to be. Post-quantum encryption, Key Transparency verification, and private search (your identifier never leaves the device in the clear) all run on your device, so the first load and the first message after a key change are heavier than a messenger that only checks a password. We treat that as the price of the guarantee you are buying, and we would rather be honest about it than call ourselves lightweight."
   },
   "pipeline": {
     "title": "HOW NYX PROTECTS A MESSAGE",

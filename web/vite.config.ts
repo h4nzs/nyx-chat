@@ -71,7 +71,7 @@ export default defineConfig(({ mode }) => {
         manifest: {
           name: 'Nyx Chat',
           short_name: 'Nyx',
-          description: 'Secure, lightweight messaging app.',
+          description: 'Zero-knowledge, post-quantum encrypted messenger.',
           theme_color: '#1a1a1a', // Sesuaikan tema terang/gelap
           background_color: '#050505',
           display: 'standalone', // Hapus browser UI (Address bar)

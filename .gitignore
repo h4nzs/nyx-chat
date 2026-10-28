@@ -17,10 +17,10 @@ web/dist
 # Salinan cadangan env (dibuat manual saat mengubah kredensial) juga berisi rahasia.
 .env.bak*
 **/.env.bak*
-# Env file unit systemd NYX (template: `ops/systemd/nyx-kt-query.env.example`,
-# `ops/systemd/nyx-kt-auditor.env.example`)
-ops/systemd/nyx-kt-query.env
-ops/systemd/nyx-kt-auditor.env
+# Env file unit systemd NYX (template: `ops/systemd/nyx-kt-query-v2.env.example`,
+# `ops/systemd/nyx-kt-auditor-v2.env.example`)
+ops/systemd/nyx-kt-query-v2.env
+ops/systemd/nyx-kt-auditor-v2.env
 *.log
 **/.env.local
 **/*/.env
@@ -56,21 +56,13 @@ packages/spqr-wasm/target/
 packages/spqr-wasm/Cargo.toml
 # `cargo test` langsung di crate ter-vendor (docs/11 §11.3) meninggalkan target/.
 vendor/signal/spqr/target/
-vendor/signal/libsignal-keytrans/target/
 !packages/spqr-wasm/dist/
 !packages/spqr-wasm/dist/spqr.wasm
 
-# Verifier Key Transparency (docs/34): alasan sama seperti spqr-wasm — sumbernya
-# di-vendor (`vendor/signal/libsignal-keytrans`), artefak WASM tetap di-commit,
-# Cargo.toml di-generate.
-packages/keytrans-wasm/target/
-packages/keytrans-wasm/Cargo.toml
-!packages/keytrans-wasm/dist/
-!packages/keytrans-wasm/dist/keytrans.wasm
-
-# Verifier Key Transparency v2 (docs/35 §35.7 Fase 7): crate fork lokal
-# `packages/keytrans-v2`, jadi artefak WASM tetap di-commit dan diverifikasi
-# manifest seperti v1. Cargo.toml wrapper di-generate `build.sh`.
+# Verifier Key Transparency v2 (docs/35 §35.7 Fase 7; satu-satunya verifier sejak
+# log v1 pensiun, docs/38): crate fork lokal `packages/keytrans-v2`, artefak WASM
+# tetap di-commit dan diverifikasi manifest. Cargo.toml wrapper di-generate
+# `build.sh`.
 packages/keytrans-v2/target/
 packages/keytrans-wasm-v2/target/
 packages/keytrans-wasm-v2/Cargo.toml
@@ -89,18 +81,9 @@ packages/pir-wasm/Cargo.toml
 server/pir-sidecar/target/
 server/pir-snapshot.json
 
-# Layanan baca/tulis Key Transparency NYX (docs/32 §32.8): biner hasil build
-# tidak di-commit (modul upstream-nya sendiri di-vendor di
-# `server/kt-query/vendor/`, lihat NOTICE).
-server/kt-query/nyx-kt-query
-server/kt-query/kt-query
-# `build.sh` juga menghasilkan CLI audit (`nyx-kt-check`) — biner, bukan sumber
-# (sumbernya `cmd/nyx-kt-check/`).
-server/kt-query/nyx-kt-check
-# dan auditor pihak ketiga (`nyx-kt-auditor`) — biner, bukan sumber
-# (sumbernya `cmd/nyx-kt-auditor/`).
-server/kt-query/nyx-kt-auditor
-# fork v2 (docs/35 §35.7) — biner build.sh, sumbernya cmd/nyx-kt-*-v2/
+# Layanan log/tulis Key Transparency NYX v2 (docs/32 §32.8, docs/38): biner hasil
+# build tidak di-commit (modul upstream-nya di-vendor di `server/kt-query/vendor/`,
+# lihat NOTICE).
 server/kt-query/nyx-kt-query-v2
 server/kt-query/nyx-kt-auditor-v2
 server/kt-query/nyx-kt-v2-init

@@ -47,7 +47,7 @@ export function metricsInstance(env: NodeJS.ProcessEnv = process.env): number {
   return instance;
 }
 
-// Stride 10 keeps API workers clear of sidecar (9465) and KT (9466-9469).
+// Stride 10 keeps API workers clear of sidecar (9465) and KT v2 (9468-9469).
 const METRICS_WORKER_STRIDE = 10;
 
 /** Port exporter untuk worker ini; 0 = fitur mati. */

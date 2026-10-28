@@ -63,21 +63,26 @@ const {
   saveKtState,
   startKtMonitorLoop,
 } = await import('../ktMonitoring');
-const { KT_MODE_CONTACT_MONITORING, instantiateKeyTransparencyVerifier } = await import('../keyTransparency');
-type KtConfig = import('../keyTransparency').KtConfig;
+const { KT_MODE_CONTACT_MONITORING, instantiateKeyTransparencyVerifier } = await import('../keyTransparencyV2');
+type KtConfig = import('../keyTransparencyV2').KtConfig;
 
-const WASM_PATH = resolve(process.cwd(), '../packages/keytrans-wasm/dist/keytrans.wasm');
-const FIXTURE_DIR = resolve(process.cwd(), 'src/lib/__tests__/fixtures/kt');
-const CONFIG_PATH = resolve(FIXTURE_DIR, 'config.json');
-const QUERY_V1_PATH = resolve(FIXTURE_DIR, 'query-v1.pb');
-const QUERY_DISTINGUISHED_PATH = resolve(FIXTURE_DIR, 'query-distinguished.pb');
+// Sejak log KT v1 dipensiunkan (`docs/38`), fixture jalur produksi memakai
+// modul v2 (ML-DSA-65). Bukti search ganda di sini dipakai untuk membangun
+// state nyata; kegagalan verifikasi monitor tetap diuji dengan respons sampah.
+const WASM_PATH = resolve(process.cwd(), '../packages/keytrans-wasm-v2/dist/keytrans-v2.wasm');
+const FIXTURE_DIR = resolve(process.cwd(), '../packages/keytrans-wasm-v2/testdata');
+const SEARCH_FIXTURE_PATH = resolve(FIXTURE_DIR, 'search-first.bin');
+const SEARCH_JSON_PATH = resolve(FIXTURE_DIR, 'search-first.bin.json');
 
-const HAS_FIXTURES = existsSync(WASM_PATH) && existsSync(CONFIG_PATH) && existsSync(QUERY_V1_PATH) && existsSync(QUERY_DISTINGUISHED_PATH);
+const HAS_FIXTURES =
+  existsSync(WASM_PATH) && existsSync(SEARCH_FIXTURE_PATH) && existsSync(SEARCH_JSON_PATH);
 
 interface FixtureConfig {
+  mode: number;
   signatureKey: string;
-  vrfKey: string;
+  auditorKeys: string[];
   searchKey: string;
+  verifyNowMs: number;
 }
 
 const hexToBytes = (hex: string): Uint8Array => {
@@ -103,11 +108,11 @@ const VERIFY_NOW = new Date('2026-10-13T12:00:00Z');
 beforeAll(() => {
   if (!HAS_FIXTURES) return;
   verifier = instantiateKeyTransparencyVerifier(new Uint8Array(readFileSync(WASM_PATH)));
-  fixture = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) as FixtureConfig;
+  fixture = JSON.parse(readFileSync(SEARCH_JSON_PATH, 'utf8')) as FixtureConfig;
   config = {
-    mode: KT_MODE_CONTACT_MONITORING,
+    mode: fixture.mode as KtConfig['mode'],
     signatureKey: hexToBytes(fixture.signatureKey),
-    vrfKey: hexToBytes(fixture.vrfKey),
+    auditorKeys: fixture.auditorKeys.map(hexToBytes),
   };
 });
 
@@ -191,29 +196,23 @@ describe('runKtMonitorOnce', () => {
   it.skipIf(!HAS_FIXTURES)(
     'merakit MonitorRequest dari state tersimpan dan fail-closed saat bukti tidak sah',
     async () => {
-      // 1. State nyata: verifikasi bukti search + anchor distinguished (fixture jalur produksi).
-      const [searchHead, searchCondensed] = splitFrames(new Uint8Array(readFileSync(QUERY_V1_PATH)));
+      // 1. State nyata: verifikasi bukti search v2 (fixture jalur produksi).
+      //    Anchor distinguished memakai tree head yang sama — yang diuji di sini
+      //    adalah fail-closed saat bukti monitor ditolak, bukan konsistensi anchor.
+      const [searchHead, searchCondensed] = splitFrames(new Uint8Array(readFileSync(SEARCH_FIXTURE_PATH)));
       const search = verifier.verifySearch({
         config,
         searchKey: hexToBytes(fixture.searchKey),
         condensedResponse: searchCondensed,
         fullTreeHead: searchHead,
-        now: VERIFY_NOW,
-      });
-      const [distHead, distCondensed] = splitFrames(new Uint8Array(readFileSync(QUERY_DISTINGUISHED_PATH)));
-      const distinguished = verifier.verifySearch({
-        config,
-        searchKey: new TextEncoder().encode('distinguished'),
-        condensedResponse: distCondensed,
-        fullTreeHead: distHead,
-        now: VERIFY_NOW,
+        now: fixture.verifyNowMs,
       });
 
       await saveKtState({
         searchKey: hexToBytes(fixture.searchKey),
         treeHead: search.treeHead,
         monitoringData: search.monitoringData,
-        distinguishedTreeHead: distinguished.treeHead,
+        distinguishedTreeHead: search.treeHead,
         keyVersion: 1,
       });
 
@@ -367,9 +366,11 @@ describe('monitorKeyTransparency', () => {
     const outcome = await monitorKeyTransparency({
       verifier,
       fetchConfig: async () => ({
+        abiVersion: 2,
         mode: config.mode,
         signatureKey: fixture.signatureKey,
-        vrfKey: fixture.vrfKey,
+        auditorKeys: fixture.auditorKeys,
+        valueFormat: 'nyx-kt-value-v2',
       }),
       fetchMonitor,
       // [docs/30 §30.5 tahap C] Jangkar gossip disegarkan di akhir langkah monitor;

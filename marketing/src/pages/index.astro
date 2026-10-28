@@ -17,7 +17,10 @@ const langPrefix = lang === 'en' ? '' : `/${lang}`;
 const t = useTranslations(lang);
 
 const APP_URL = "https://app.nyx-app.my.id";
-const APP_VERSION = import.meta.env.npm_package_version || "2.5.4";
+// Versi datang dari `define` di astro.config.mjs. `import.meta.env` hanya
+// mengekspos variabel ber-prefix PUBLIC_, jadi jangan kembali ke
+// `npm_package_version` — nilainya selalu undefined dan badge jatuh ke fallback basi.
+const APP_VERSION = __APP_VERSION__;
 
 const title = "Private & Encrypted Messaging";
 const description = t('landing:hero.description');
@@ -394,7 +397,7 @@ const landingSchema = JSON.stringify({
           <p class="font-sans text-xs font-bold uppercase tracking-[0.3em] text-accent mb-4">{t('landing:faq.title')}</p>
         </div>
         <div class="space-y-4">
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3, 4, 5].map((i) => (
             <div class="card-neumorphic p-0 overflow-hidden">
               <details class="group">
                 <summary class="flex justify-between items-center font-bold cursor-pointer list-none p-6 text-text-primary hover:text-accent transition-colors gap-4">

@@ -78,15 +78,6 @@ async function deriveVaultKey(prfOutput: ArrayBuffer, credentialId: string): Pro
   return sodium.crypto_generichash(32, input, null);
 }
 
-function bufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i] ?? 0);
-  }
-  return btoa(binary);
-}
-
 function base64ToBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -147,11 +138,11 @@ async function decryptData(
 //   - enroll berbeda akun = entry berbeda (tidak saling menimpa);
 //   - credential yang bermasalah bisa dihapus SELEKTIF.
 //
-// Legacy `nyx_bio_vault` (string tunggal) dimigrasikan on-read ke entry pertama
-// yang tersimpan, tanpa memutus unlock yang sudah berjalan.
+// Vault format lama (`nyx_bio_vault`, string tunggal) tidak dibaca lagi
+// (`docs/38`): pengguna dengan vault itu akan ditawari enroll ulang, bukan
+// dibukakan kunci yang formatnya tidak bisa dipertahankan.
 
 const BIO_VAULT_KEY = 'nyx_bio_vault_v2';
-const BIO_VAULT_LEGACY_KEY = 'nyx_bio_vault';
 
 interface BioVaultEntry {
   ciphertext: string;
@@ -191,22 +182,6 @@ function readVaultMap(): BioVaultMap {
     console.warn('[Biometric] Failed to parse bio vault map, ignoring:', e);
   }
 
-  // Migrasi legacy one-shot: angkat entry tunggal lama ke map (dipertahankan
-  // sampai credential-nya dikenali — dipakai sebagai fallback di unlock).
-  if (Object.keys(map).length === 0) {
-    try {
-      const legacyRaw = localStorage.getItem(BIO_VAULT_LEGACY_KEY);
-      if (legacyRaw) {
-        const parsed: unknown = JSON.parse(legacyRaw);
-        if (isPlainObject(parsed) && typeof parsed.ciphertext === 'string' && typeof parsed.iv === 'string') {
-          map['__legacy__'] = { ciphertext: parsed.ciphertext, iv: parsed.iv };
-        }
-      }
-    } catch {
-      // legacy vault korup — abaikan
-    }
-  }
-
   return map;
 }
 
@@ -223,7 +198,7 @@ function writeVaultMap(map: BioVaultMap): void {
 }
 
 /**
- * Apakah ada bio vault terdaftar (map v2 ATAU legacy)?
+ * Apakah ada bio vault terdaftar (map per-credential)?
  * Dipakai UI untuk menampilkan status "biometric aktif".
  */
 export function hasAnyBioVault(): boolean {
@@ -247,7 +222,6 @@ export function removeBioVaultEntry(credentialId: string): void {
 export function clearAllBioVaults(): void {
   try {
     localStorage.removeItem(BIO_VAULT_KEY);
-    localStorage.removeItem(BIO_VAULT_LEGACY_KEY);
   } catch (e) {
     console.error('[Biometric] Failed to clear bio vaults:', e);
   }
@@ -323,7 +297,6 @@ async function storeBioVault(
   // [FIX SILENT-VAULT-OVERWRITE] simpan per-credentialId — enroll akun kedua
   // TIDAK menimpa vault akun pertama.
   const map = readVaultMap();
-  delete map['__legacy__'];
   map[credentialId] = { ciphertext, iv, salt: saltB64 };
   writeVaultMap(map);
 }
@@ -423,7 +396,6 @@ export async function unlockWithBiometric(
   // yang ada di vault). Entry lama tanpa salt tetap memakai salt legacy.
   const evalByCredential: Record<string, { first: ArrayBuffer }> = {};
   for (const [id, entry] of Object.entries(vaultMap)) {
-    if (id === '__legacy__') continue;
     evalByCredential[id] = { first: entry.salt ? base64ToBuffer(entry.salt) : legacySalt.buffer as ArrayBuffer };
   }
   const hasPerCredentialSalt = Object.keys(evalByCredential).length > 0;
@@ -444,8 +416,9 @@ export async function unlockWithBiometric(
   let recoveryPhrase: string | null = null;
 
   const credentialId = asseResp.id;
-  // Entry credential ini dulu; fallback legacy (migrasi) bila belum ada entry v2.
-  const vault = vaultMap[credentialId] || vaultMap['__legacy__'];
+  // Hanya entry credential ini yang boleh membuka vault — tidak ada fallback
+  // ke vault lama/credential lain.
+  const vault = vaultMap[credentialId];
 
   if (vault) {
       try {

@@ -5,14 +5,15 @@
 /**
  * [docs/10 §10.13 · docs/30 WS-A] Unggah snapshot log KT ke R2.
  *
- * Log Key Transparency hanya ada di satu tempat: LevelDB milik `nyx-kt-query`
- * di VPS. `nyx-kt-query` sudah membuat arsip harian yang **diverifikasi**
- * (`server/kt-query/snapshot.go`: penulisan dijeda, salinan dibuka ulang, tree
- * head + root dibandingkan dengan pohon hidup, lalu di-`tar.gz`). Arsip di VPS
- * yang sama bukan backup — satu disk rusak / satu `rm -rf` menghapus keduanya.
- * Modul ini memindahkannya keluar host.
+ * Log Key Transparency hanya ada di satu tempat: LevelDB milik
+ * `nyx-kt-query-v2` di VPS (log v1 + auditor v1 dipensiunkan 2026-10-28,
+ * docs/38). Proses itu sudah membuat arsip harian yang **diverifikasi**
+ * (`server/kt-query/cmd/nyx-kt-query-v2/snapshot.go`: penulisan dijeda, salinan
+ * dibuka ulang, tree head + root dibandingkan dengan pohon hidup, lalu
+ * di-`tar.gz`). Arsip di VPS yang sama bukan backup — satu disk rusak / satu
+ * `rm -rf` menghapus keduanya. Modul ini memindahkannya keluar host.
  *
- * Kenapa unggahan ada di proses server NYX, bukan di `nyx-kt-query`:
+ * Kenapa unggahan ada di proses server NYX, bukan di `nyx-kt-query-v2`:
  *
  *   1. Kredensial R2 hanya hidup di server NYX (`R2_ACCESS_KEY_ID`, dst). Memberi
  *      proses log kredensial bucket penuh berarti satu bug di sana bisa
@@ -32,8 +33,8 @@
  *     membuat server membaca berkas lain di host (`../`).
  *
  * Retensi: objek di bawah prefix yang lebih tua dari `KT_SNAPSHOT_KEEP_DAYS`
- * dihapus. Arsip lokal di VPS sudah dibatasi `NYX_KT_SNAPSHOT_KEEP` (default 7)
- * oleh `nyx-kt-query` — dua batas itu sengaja berbeda: yang di VPS menjaga
+ * dihapus. Arsip lokal di VPS sudah dibatasi `NYX_KT_V2_SNAPSHOT_KEEP` (default 7)
+ * oleh `nyx-kt-query-v2` — dua batas itu sengaja berbeda: yang di VPS menjaga
  * pemulihan cepat, yang di R2 menjaga riwayat panjang.
  */
 
@@ -55,7 +56,7 @@ import {
 export const KT_SNAPSHOT_PREFIX = 'kt-snapshots/';
 /** Umur maksimum arsip di R2 (hari). */
 export const KT_SNAPSHOT_KEEP_DAYS = 30;
-/** Nama berkas arsip yang boleh diunggah (dibuat `server/kt-query/snapshot.go`). */
+/** Nama berkas arsip yang boleh diunggah (dibuat `cmd/nyx-kt-query-v2/snapshot.go`). */
 export const KT_SNAPSHOT_FILE_PATTERN = /^kt-snapshot-\d{8}T\d{6}Z\.tar\.gz$/;
 
 export interface KtSnapshotManifest {

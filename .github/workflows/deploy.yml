@@ -88,17 +88,19 @@ jobs:
           cd server/transport-sidecar
           cargo build --release
 
-      # Binary layanan log Key Transparency (`nyx-kt-query`, Go) — dibangun dari
-      # `vendor/`, jadi tidak ada unduhan saat build (repo upstream Signal privat).
-      # Deploy yang mengirim binary-nya supaya pembaruan layanan KT bukan lagi
-      # langkah manual: unit + catatan pemasangan ada di `ops/systemd/`.
-      - name: 🐹 Setup Go (nyx-kt-query)
+      # Binary layanan log Key Transparency v2 (`nyx-kt-query-v2` + auditor v2 +
+      # bootstrap, Go) — dibangun dari `vendor/`, jadi tidak ada unduhan saat build
+      # (repo upstream Signal privat). Deploy yang mengirim binary-nya supaya
+      # pembaruan layanan KT bukan lagi langkah manual: unit + catatan pemasangan
+      # ada di `ops/systemd/`. Log v1 sudah pensiun (`docs/38`), jadi binari v1
+      # tidak lagi dibangun.
+      - name: 🐹 Setup Go (nyx-kt-query-v2)
         uses: actions/setup-go@v5
         with:
           go-version-file: server/kt-query/go.mod
           cache-dependency-path: server/kt-query/go.sum
 
-      - name: 🐹 Build nyx-kt-query (Go, dari vendor)
+      - name: 🐹 Build nyx-kt-query-v2 (Go, dari vendor)
         run: bash server/kt-query/build.sh
 
       # --- PHASE 5: PACKAGING ---
@@ -130,30 +132,24 @@ jobs:
           mkdir -p deploy_package/server/transport-sidecar/target/release
           cp server/transport-sidecar/target/release/transport-sidecar deploy_package/server/transport-sidecar/target/release/
 
-          # Bawa binary Go layanan log KT (`nyx-kt-query` + pemeriksa `nyx-kt-check`)
-          # dan seluruh `ops/systemd/` (unit + template EnvironmentFile + catatan
-          # pemasangan), supaya VPS tidak perlu menyalin manual dari repo.
+          # Bawa binary Go layanan log KT v2 (`nyx-kt-query-v2`, `nyx-kt-auditor-v2`,
+          # `nyx-kt-v2-init`) dan seluruh `ops/systemd/` (unit + template
+          # EnvironmentFile + catatan pemasangan), supaya VPS tidak perlu menyalin
+          # manual dari repo. Binari v1 tidak lagi dibangun maupun dikirim.
           #
           # Guard: unit systemd dan langkah deploy harus menunjuk path binary yang
           # SAMA. Kalau tidak, deploy akan menyalin binary ke satu tempat sementara
           # unit menjalankan tempat lain — dan kegagalannya hanya terlihat sebagai
-          # "nyx-kt-query gagal start" di VPS, bukan di sini.
-          [ -x server/kt-query/nyx-kt-query ] || { echo "::error::binary nyx-kt-query tidak terbangun (build.sh gagal?)"; exit 1; }
-          [ -x server/kt-query/nyx-kt-auditor ] || { echo "::error::binary nyx-kt-auditor tidak terbangun (build.sh gagal?)"; exit 1; }
+          # "nyx-kt-query-v2 gagal start" di VPS, bukan di sini.
           [ -x server/kt-query/nyx-kt-query-v2 ] || { echo "::error::binary nyx-kt-query-v2 tidak terbangun (build.sh gagal?)"; exit 1; }
           [ -x server/kt-query/nyx-kt-auditor-v2 ] || { echo "::error::binary nyx-kt-auditor-v2 tidak terbangun (build.sh gagal?)"; exit 1; }
           [ -x server/kt-query/nyx-kt-v2-init ] || { echo "::error::binary nyx-kt-v2-init tidak terbangun (build.sh gagal?)"; exit 1; }
-          grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-query ' ops/systemd/nyx-kt-query.service \
-            || { echo "::error::ops/systemd/nyx-kt-query.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-query — samakan unit dengan langkah deploy"; exit 1; }
-          grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-auditor' ops/systemd/nyx-kt-auditor.service \
-            || { echo "::error::ops/systemd/nyx-kt-auditor.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-auditor — samakan unit dengan langkah deploy"; exit 1; }
           grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-query-v2 ' ops/systemd/nyx-kt-query-v2.service \
             || { echo "::error::ops/systemd/nyx-kt-query-v2.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-query-v2 — samakan unit dengan langkah deploy"; exit 1; }
           grep -q 'ExecStart=/root/nyx-app/server/kt-query/nyx-kt-auditor-v2' ops/systemd/nyx-kt-auditor-v2.service \
             || { echo "::error::ops/systemd/nyx-kt-auditor-v2.service tidak menunjuk /root/nyx-app/server/kt-query/nyx-kt-auditor-v2 — samakan unit dengan langkah deploy"; exit 1; }
           mkdir -p deploy_package/server/kt-query
-          cp server/kt-query/nyx-kt-query server/kt-query/nyx-kt-check server/kt-query/nyx-kt-auditor \
-             server/kt-query/nyx-kt-query-v2 server/kt-query/nyx-kt-auditor-v2 \
+          cp server/kt-query/nyx-kt-query-v2 server/kt-query/nyx-kt-auditor-v2 \
              server/kt-query/nyx-kt-v2-init deploy_package/server/kt-query/
           mkdir -p deploy_package/ops
           cp -r ops/systemd deploy_package/ops/
@@ -201,9 +197,6 @@ jobs:
 
             # Simpan binary KT dari deploy sebelumnya untuk rollback cepat — harus
             # SEBELUM zip menimpanya (ops/systemd/README.md).
-            if [ -f "$TARGET_DIR/server/kt-query/nyx-kt-query" ]; then
-                cp -f "$TARGET_DIR/server/kt-query/nyx-kt-query" "$TARGET_DIR/server/kt-query/nyx-kt-query.prev"
-            fi
             if [ -f "$TARGET_DIR/server/kt-query/nyx-kt-query-v2" ]; then
                 cp -f "$TARGET_DIR/server/kt-query/nyx-kt-query-v2" "$TARGET_DIR/server/kt-query/nyx-kt-query-v2.prev"
             fi
@@ -369,81 +362,33 @@ jobs:
               echo "ℹ️  /etc/prometheus tidak ada — target metrics tidak dibuat."
             fi
 
-            # 8. LAYANAN LOG KT (`nyx-kt-query`) — systemd, bukan pm2: ia memegang
-            #    flock LevelDB sehingga harus satu proses dan hidup di luar cluster
-            #    nyx-api (ops/systemd/README.md). Binary + unit datang bersama zip;
-            #    pemasangan pertama (config + kunci log + `systemctl enable`) tetap
-            #    manual karena kunci log tidak boleh lahir dari CI.
-            echo "🔏 Deploying Key Transparency service (nyx-kt-query)..."
+            # 7b. PENSIUNAN KT v1 (docs/38) — unit `nyx-kt-query` dan
+            #     `nyx-kt-auditor` sudah tidak ada di repo. Bila VPS masih
+            #     menjalankannya, hentikan lalu hapus unit-nya: proses v1 tidak
+            #     boleh terus menulis/melayani pohon yang sudah mati. LevelDB v1
+            #     TIDAK dihapus di sini (arsip/rollback operator, docs/39).
             KT_DIR="$TARGET_DIR/server/kt-query"
-            KT_BIN="$KT_DIR/nyx-kt-query"
-            if [ -f "$KT_BIN" ]; then
-                chmod +x "$KT_BIN" "$KT_DIR/nyx-kt-check" "$KT_DIR/nyx-kt-auditor" \
-                         "$KT_DIR/nyx-kt-query-v2" "$KT_DIR/nyx-kt-auditor-v2" "$KT_DIR/nyx-kt-v2-init" 2>/dev/null || true
-            fi
-            if [ -f "$TARGET_DIR/ops/systemd/nyx-kt-query.service" ]; then
-                install -m 644 "$TARGET_DIR/ops/systemd/nyx-kt-query.service" /etc/systemd/system/nyx-kt-query.service
-                systemctl daemon-reload
-            fi
-            if systemctl is-enabled --quiet nyx-kt-query 2>/dev/null; then
-                if [ ! -x "$KT_BIN" ]; then
-                    echo "::error::binary nyx-kt-query tidak ada di $KT_BIN — layanan log KT tidak bisa dijalankan"
-                    exit 1
+            for OLD_UNIT in nyx-kt-query nyx-kt-auditor; do
+                if systemctl is-enabled --quiet "$OLD_UNIT" 2>/dev/null; then
+                    systemctl disable --now "$OLD_UNIT" || true
+                    echo "⏹️  $OLD_UNIT (KT v1) dihentikan — log v1 dipensiunkan"
                 fi
-                systemctl restart nyx-kt-query
-                sleep 2
-                if systemctl is-active --quiet nyx-kt-query; then
-                    echo "✅ nyx-kt-query aktif — log KT hidup"
-                    curl -fsS --max-time 5 http://127.0.0.1:8085/healthz; echo
-                else
-                    systemctl status nyx-kt-query --no-pager -l || true
-                    echo "::error::nyx-kt-query gagal start setelah deploy — log KT berhenti (kunci identitas baru tidak ter-audit)"
-                    exit 1
+                if [ -f "/etc/systemd/system/$OLD_UNIT.service" ]; then
+                    rm -f "/etc/systemd/system/$OLD_UNIT.service"
                 fi
-            else
-                echo "ℹ️  nyx-kt-query.service belum di-enable — pemasangan pertama ada di ops/systemd/README.md"
-            fi
+            done
+            systemctl daemon-reload
 
-            # 9. AUDITOR PIHAK KETIGA (`nyx-kt-auditor`) — juga systemd, dan
-            #    sengaja terpisah dari penulis log: ia hanya bicara lewat gRPC
-            #    loopback. Kalau unit belum `enabled`, deploy tidak menyentuhnya
-            #    (mode 3 belum diaktifkan di config log; lihat ops/systemd/README.md).
-            echo "🧾 Deploying Key Transparency auditor (nyx-kt-auditor)..."
-            AUDITOR_BIN="$KT_DIR/nyx-kt-auditor"
-            if [ -f "$TARGET_DIR/ops/systemd/nyx-kt-auditor.service" ]; then
-                install -m 644 "$TARGET_DIR/ops/systemd/nyx-kt-auditor.service" /etc/systemd/system/nyx-kt-auditor.service
-                systemctl daemon-reload
-            fi
-            if systemctl is-enabled --quiet nyx-kt-auditor 2>/dev/null; then
-                if [ ! -x "$AUDITOR_BIN" ]; then
-                    echo "::error::binary nyx-kt-auditor tidak ada di $AUDITOR_BIN — auditor tidak bisa dijalankan"
-                    exit 1
-                fi
-                # Urutan penting: layanan log hidup dulu, lalu auditor (ia memanggil
-                # TreeSize/Audit/SetAuditorHead ke :8082).
-                systemctl restart nyx-kt-auditor
-                sleep 2
-                if systemctl is-active --quiet nyx-kt-auditor; then
-                    echo "✅ nyx-kt-auditor aktif — tree head diaudit"
-                else
-                    systemctl status nyx-kt-auditor --no-pager -l || true
-                    echo "::error::nyx-kt-auditor gagal start setelah deploy — log berhenti ditandatangani auditor"
-                    exit 1
-                fi
-            else
-                echo "ℹ️  nyx-kt-auditor.service belum di-enable — mode 3 belum diaktifkan (ops/systemd/README.md)"
-            fi
-
-            # 10. LOG KT v2 (`nyx-kt-query-v2`) — service terpisah dengan LevelDB
+            # 8. LOG KT v2 (`nyx-kt-query-v2`) — service terpisah dengan LevelDB
             #     sendiri. Pemasangan pertama (config + kunci ML-DSA + direktori)
             #     dijalankan otomatis di sini bila config belum ada: kunci lahir
             #     di VPS, tidak pernah melewati CI. Config yang sudah ada TIDAK
             #     pernah ditimpa (mengganti signing-key = semua bukti lama mati).
             #
-            #     Yang diaktifkan hanya DUAL-WRITE. `KT_QUERY_URL` sengaja tetap
-            #     menunjuk v1: log v2 baru diisi entri baru/rotasi, jadi
-            #     memindahkan pembacaan sebelum populasi lama terisi akan membuat
-            #     akun lama "not_found" (docs/35 §35.7).
+            #     Sejak 2026-10-28 layanan ini **satu-satunya** log KT: penulisan v1
+            #     dihapus dan `KT_QUERY_URL` menunjuk v2 (docs/38). Pemasangan
+            #     pertama tetap otomatis bila config belum ada; config yang sudah ada
+            #     tidak pernah ditimpa.
             echo "🔏 Deploying Key Transparency service v2 (nyx-kt-query-v2)..."
             KT_V2_BIN="$KT_DIR/nyx-kt-query-v2"
             KT_V2_INIT="$KT_DIR/nyx-kt-v2-init"
@@ -469,13 +414,13 @@ jobs:
             fi
             if [ -f "$KT_V2_UNIT" ] && [ -f /etc/nyx/kt-v2/config.yaml ]; then
                 systemctl enable nyx-kt-query-v2 nyx-kt-auditor-v2
-                # Dual-write: penulis yang sama mengirim entri identik ke v1 + v2.
+                # Penulisan log KT v2: endpoint yang sama dengan `-write-addr` unit.
                 # Hanya ditambahkan sekali; nilai operator tidak ditimpa.
                 if [ -f "$TARGET_DIR/.env" ] && ! grep -q '^KT_V2_SERVER_URL=' "$TARGET_DIR/.env"; then
-                    printf '\n# [docs/35 §35.7] Dual-write Key Transparency v2 (ML-DSA); baca masih v1.\nKT_V2_SERVER_URL=http://127.0.0.1:8088\n' >> "$TARGET_DIR/.env"
+                    printf '\n# [docs/35 §35.7] Log Key Transparency v2 (ML-DSA); satu-satunya log sejak docs/38.\nKT_V2_SERVER_URL=http://127.0.0.1:8088\n' >> "$TARGET_DIR/.env"
                     cp "$TARGET_DIR/.env" "$TARGET_DIR/server/.env"
                     pm2 restart nyx-api --update-env
-                    echo "✅ KT_V2_SERVER_URL ditambahkan — dual-write aktif setelah API restart"
+                    echo "✅ KT_V2_SERVER_URL ditambahkan — penulisan log KT v2 aktif setelah API restart"
                 fi
             fi
             if systemctl is-enabled --quiet nyx-kt-query-v2 2>/dev/null; then

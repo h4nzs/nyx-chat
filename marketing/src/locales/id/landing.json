@@ -94,7 +94,9 @@
     "q3": "Bagaimana cara mencadangkan identitas kriptografi saya?",
     "a3": "Saat mendaftar, Anda diberikan 24 kata frasa pemulihan. Ini adalah satu-satunya cara untuk memulihkan identitas Anda. Simpan dengan aman secara offline. Kami tidak dapat memulihkannya untuk Anda.",
     "q4": "Apakah NYX kebal terhadap komputer kuantum?",
-    "a4": "Ya, kami mengimplementasikan pendekatan hibrida yang menggabungkan X25519 klasik dan algoritma pasca-kuantum ML-KEM-768 (X-Wing) dalam Web Worker WebAssembly khusus."
+    "a4": "Ya, kami mengimplementasikan pendekatan hibrida yang menggabungkan X25519 klasik dan algoritma pasca-kuantum ML-KEM-768 (X-Wing) dalam Web Worker WebAssembly khusus.",
+    "q5": "Apakah NYX secepat messenger biasa?",
+    "a5": "Tidak — dan memang bukan tujuannya. Enkripsi pasca-kuantum, verifikasi Key Transparency, dan pencarian privat (identifier Anda tidak keluar dalam bentuk jelas) berjalan di perangkat Anda, jadi muat pertama dan pesan pertama setelah kunci berubah lebih berat daripada messenger yang hanya memeriksa kata sandi. Kami menganggap itu harga dari jaminan yang Anda dapat, dan lebih baik jujur daripada mengklaim ringan."
   },
   "pipeline": {
     "title": "CARA NYX MELINDUNGI PESAN ANDA",

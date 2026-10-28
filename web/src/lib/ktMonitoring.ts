@@ -5,7 +5,8 @@
 /**
  * [docs/34 §34.6 poin 2] Loop monitor Key Transparency di klien.
  *
- * Verifier (`web/src/lib/keyTransparency.ts`) sudah bisa memverifikasi bukti,
+ * Verifier (`web/src/lib/keyTransparencyV2.ts`, ABI 2 — satu-satunya yang
+ * dipakai sejak `docs/38`) sudah bisa memverifikasi bukti,
  * dan op `monitor_build` (op 6 WASM) sudah bisa merakit `MonitorRequest` dari
  * state yang dimiliki klien. Yang belum ada — dan yang modul ini isi — adalah
  * **tempat menyimpan state itu** dan **satu langkah monitor** yang bisa
@@ -33,7 +34,12 @@
 
 import { db, type KtMonitoringRecord } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
-import type { KeyTransparencyVerifier, KtConfig, KtMonitoringData, KtStoredTreeHead } from './keyTransparency';
+import type {
+  KeyTransparencyVerifier,
+  KtConfig,
+  KtMonitoringData,
+  KtStoredTreeHead,
+} from './keyTransparencyV2';
 
 /** State per search key yang dihidupkan kembali dari penyimpanan. */
 export interface KtStoredState {

@@ -408,35 +408,22 @@ export const GROUP_RELEASE_DELAY_MS = defineHistogram(
   [0, 5, 10, 25, 50, 100, 250, 500, 1000, 2000]
 );
 
-/** [docs/30 §30.5 WS-A] Penulisan entri log Key Transparency, per hasil. Tanpa identitas. */
+/**
+ * [docs/30 §30.5 WS-A] Penulisan entri log Key Transparency, per hasil. Tanpa
+ * identitas. Sejak 2026-10-28 ini **hanya** log v2 (ML-DSA-65): counter terpisah
+ * `nyx_kt_v2_writes_total` dihapus bersama log v1, nama lama dipertahankan agar
+ * alert, dashboard, dan histori seri tidak berubah.
+ */
 export const KT_WRITES = defineCounter(
   'nyx_kt_writes_total',
-  'Penulisan entri log Key Transparency, per hasil',
+  'Penulisan entri log Key Transparency v2, per hasil',
   ['result']
 );
 
-/** Unix timestamp penulisan log KT terakhir yang berhasil (lag = now − nilai ini). */
+/** Unix timestamp penulisan log KT v2 terakhir yang berhasil (lag = now − nilai ini). */
 export const KT_LAST_SUCCESS = defineGauge(
   'nyx_kt_last_success_timestamp_seconds',
   'Unix timestamp penulisan log Key Transparency terakhir yang berhasil'
-);
-
-/**
- * [docs/35 §35.7 Fase 7] Penulisan ke log KT **v2** (ML-DSA, tanpa VRF) saat
- * dual-write transisi. Dipisahkan dari `nyx_kt_writes_total` supaya operator
- * bisa melihat log mana yang tertinggal — nilai yang sama ditulis ke dua pohon
- * yang berbeda, dan satu pohon yang diam tidak boleh tersembunyi di rata-rata.
- */
-export const KT_V2_WRITES = defineCounter(
-  'nyx_kt_v2_writes_total',
-  'Penulisan entri log Key Transparency v2 (ML-DSA), per hasil',
-  ['result']
-);
-
-/** Unix timestamp penulisan log KT v2 terakhir yang berhasil. */
-export const KT_V2_LAST_SUCCESS = defineGauge(
-  'nyx_kt_v2_last_success_timestamp_seconds',
-  'Unix timestamp penulisan log Key Transparency v2 terakhir yang berhasil'
 );
 
 /**

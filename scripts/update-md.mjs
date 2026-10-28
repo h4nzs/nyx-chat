@@ -24,3 +24,12 @@ readme = readme.replace(badgeRegex, `https://img.shields.io/badge/version-${badg
 
 fs.writeFileSync(readmePath, readme);
 console.log(`✅ Badge README.md berhasil di-update ke versi ${newVersion}!`);
+
+// 5. STATUS.md memuat versi yang diperiksa `scripts/check-status.mjs`
+const statusPath = './STATUS.md';
+const status = fs.readFileSync(statusPath, 'utf8');
+if (!/^- app: .*$/m.test(status)) {
+    throw new Error('STATUS.md: baris "- app: <versi>" tidak ditemukan');
+}
+fs.writeFileSync(statusPath, status.replace(/^- app: .*$/m, `- app: ${newVersion}`));
+console.log(`✅ STATUS.md berhasil di-update ke versi ${newVersion}!`);

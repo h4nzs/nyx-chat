@@ -29,31 +29,40 @@
  *     registrasi (ketersediaan), tetapi dihitung di metrik
  *     `nyx_kt_writes_total{result="error"}` dan di-log dengan search key
  *     ter-hash (tidak ada identitas).
- *   - **Nonaktif secara default** — tanpa `KT_SERVER_URL`/`KT_V2_SERVER_URL`,
- *     modul ini no-op.
- *   - **Dual-write transisi (docs/35 §35.7 Fase 7)** — bila `KT_V2_SERVER_URL`
- *     diatur, entri yang SAMA ditulis ke log v1 dan log v2 (dua pohon, dua
- *     proses, port berbeda). Dedupe dan metrik dipisah per log; kegagalan salah
- *     satu log tidak membatalkan yang lain, tetapi hasilnya dilaporkan per log.
+ *   - **Nonaktif secara default** — tanpa `KT_V2_SERVER_URL`, modul ini no-op.
+ *   - **Satu log saja (2026-10-28)** — log v1 (Ed25519/VRF) dipensiunkan:
+ *     `KT_SERVER_URL`, format nilai v1, dan jalur dual-write dihapus. Entri
+ *     ditulis hanya sebagai nilai **v2** (ML-DSA-65) ke `KT_V2_SERVER_URL`.
+ *     `KT_SERVER_URL` yang masih ada di `.env` diabaikan dengan satu peringatan
+ *     saat boot (`index.ts`), bukan ditafsirkan diam-diam.
  *
- * Sisa yang jujur (dicatat di docs/30 §30.20): **verifier klien** (Spike-1
- * KT→WASM: verifikasi VRF/commitment atas search & monitor proof) belum ada —
- * selama itu, log ini belum memberi jaminan terhadap server yang memalsukan
- * bundle, hanya menyediakan jejak yang bisa diaudit belakangan.
+ * Sisa yang jujur (docs/34 §34.6): interop `cmd/kt-client` upstream dan auditor
+ * pihak ketiga kedua belum ada. Verifier klien v2 (`docs/34` §34.6a) sudah
+ * memeriksa bukti search/monitor, jadi log ini bukan sekadar jejak audit.
  */
 
 import http2 from 'node:http2';
 import { createHash } from 'node:crypto';
 import { encodeKtValueV2, ML_DSA_65_PUBLIC_KEY_BYTES } from '@nyx/shared';
 
-import {
-  incCounter,
-  setGauge,
-  KT_WRITES,
-  KT_LAST_SUCCESS,
-  KT_V2_WRITES,
-  KT_V2_LAST_SUCCESS,
-} from './metrics.js';
+import { incCounter, setGauge, KT_WRITES, KT_LAST_SUCCESS } from './metrics.js';
+
+/**
+ * [2026-10-28] Peringatan boot untuk env jalur v1 yang sudah pensiun.
+ *
+ * `KT_SERVER_URL` tidak lagi ditafsirkan: tidak ada penulisan ke pohon v1 dan
+ * nilainya tidak dipakai untuk apa pun. Tetapi env yatim cenderung disalin ke
+ * deployment berikutnya, jadi operator diberi tahu sekali saat boot alih-alih
+ * dibiarkan mengira log v1 masih diisi (`docs/38`).
+ */
+export function ktRetiredEnvWarnings(env: { KT_SERVER_URL?: string }): string[] {
+  const legacy = env.KT_SERVER_URL?.trim();
+  if (!legacy) return [];
+  return [
+    `KT_SERVER_URL=${legacy} diabaikan — log Key Transparency v1 sudah dipensiunkan (docs/38). ` +
+      'Penulisan log hanya ke KT_V2_SERVER_URL; hapus variabel ini dari .env.',
+  ];
+}
 
 /** Prefix tipe search key di server KT (`shared.UsernameHashPrefix`). */
 export const KT_USERNAME_HASH_PREFIX = 0x75;
@@ -61,11 +70,8 @@ export const KT_USERNAME_HASH_PREFIX = 0x75;
 /** Panjang usernameHash NYX (Argon2id 64MB → 32 byte). */
 export const KT_USERNAME_HASH_BYTES = 32;
 
-/** Versi format nilai log NYX. */
-export const KT_VALUE_VERSION = 1;
-
 /**
- * **Label alur** `keyVersion` di dalam nilai log v1 (byte ke-2), bukan penghitung
+ * **Label alur** `keyVersion` di dalam nilai log (byte ke-2), bukan penghitung
  * rotasi (`docs/32` §32.7 poin 2). Tiga nilai yang dipakai NYX:
  *
  *   - `KT_KEY_VERSION_REGISTRATION` — pendaftaran akun (`POST /auth/register`).
@@ -81,15 +87,6 @@ export const KT_VALUE_VERSION = 1;
 export const KT_KEY_VERSION_REGISTRATION = 1;
 export const KT_KEY_VERSION_RECOVERY = 2;
 export const KT_KEY_VERSION_ROTATION = 3;
-
-/** Bentuk kanonik nilai log v1 (byte). */
-export const KT_VALUE_V1_BYTES =
-  1 + // version
-  1 + // keyVersion
-  32 + // identityKey (X25519)
-  1216 + // pqIdentityKey (ML-KEM-768)
-  32 + // signingKey (Ed25519)
-  4; // updatedAtDay (uint32 big-endian)
 
 /** Path gRPC layanan update (test service dari repo KT — lihat docs/32). */
 export const KT_UPDATE_GRPC_PATH = '/kt_test.KeyTransparencyTestService/Update';
@@ -279,7 +276,7 @@ export interface KtTransport {
 
 /**
  * Transport gRPC HTTP/2 (h2c) tanpa dependensi. `endpoint` mis.
- * `http://127.0.0.1:8081`.
+ * `http://127.0.0.1:8088` (test-update log v2).
  */
 export function createGrpcKtTransport(input: { endpoint: string; timeoutMs?: number }): KtTransport {
   const timeoutMs = input.timeoutMs ?? 5000;
@@ -352,7 +349,7 @@ export function createGrpcKtTransport(input: { endpoint: string; timeoutMs?: num
 }
 
 // ============================================================================
-// Entri log (format nilai NYX v1)
+// Entri log (format nilai NYX v2)
 // ============================================================================
 
 export interface KtLogEntryInput {
@@ -362,9 +359,10 @@ export interface KtLogEntryInput {
   pqIdentityKey: Uint8Array;
   signingKey: Uint8Array;
   /**
-   * Verification key ML-DSA-65 (`nyx-pq-v2`). Bila ada, nilai log ditulis dalam
-   * format **v2** sehingga verifier mengikat kunci tanda tangan PQ, bukan hanya
-   * X25519 (celah yang ditutup di Fase KT Scope A).
+   * Verification key ML-DSA-65 (`nyx-pq-v2`). **Wajib**: nilai log hanya
+   * ditulis dalam format v2 sehingga verifier mengikat kunci tanda tangan PQ,
+   * bukan hanya X25519. Tanpa kunci ini entri dilewati
+   * (`KT_V2_SIGNING_KEY_INVALID`, dihitung `result="invalid"`).
    */
   signingKeyV2?: Uint8Array | null;
   keyVersion: number;
@@ -399,53 +397,6 @@ export function ktSearchKey(usernameHash: Uint8Array): Uint8Array {
   return concatBytes(new Uint8Array([KT_USERNAME_HASH_PREFIX]), usernameHash);
 }
 
-/** Nilai log v1 (kanonik, frozen). */
-export function encodeKtValue(entry: {
-  identityKey: Uint8Array;
-  pqIdentityKey: Uint8Array;
-  signingKey: Uint8Array;
-  keyVersion: number;
-  updatedAtDay: number;
-}): Uint8Array {
-  if (entry.identityKey.length !== 32) throw new Error('KT_IDENTITY_KEY_LENGTH_INVALID');
-  if (entry.signingKey.length !== 32) throw new Error('KT_SIGNING_KEY_LENGTH_INVALID');
-  if (entry.pqIdentityKey.length !== 1216) throw new Error('KT_PQ_KEY_LENGTH_INVALID');
-
-  const value = new Uint8Array(KT_VALUE_V1_BYTES);
-  let offset = 0;
-  value[offset++] = KT_VALUE_VERSION;
-  value[offset++] = entry.keyVersion & 0xff;
-  value.set(entry.identityKey, offset);
-  offset += 32;
-  value.set(entry.pqIdentityKey, offset);
-  offset += 1216;
-  value.set(entry.signingKey, offset);
-  offset += 32;
-  new DataView(value.buffer).setUint32(offset, entry.updatedAtDay >>> 0, false);
-  return value;
-}
-
-/** Baca kembali nilai log v1 (round-trip & audit). */
-export function decodeKtValue(value: Uint8Array): {
-  version: number;
-  keyVersion: number;
-  identityKey: Uint8Array;
-  pqIdentityKey: Uint8Array;
-  signingKey: Uint8Array;
-  updatedAtDay: number;
-} {
-  if (value.length !== KT_VALUE_V1_BYTES) throw new Error('KT_VALUE_LENGTH_INVALID');
-  if (value[0] !== KT_VALUE_VERSION) throw new Error('KT_VALUE_VERSION_UNSUPPORTED');
-  return {
-    version: value[0]!,
-    keyVersion: value[1]!,
-    identityKey: value.subarray(2, 34),
-    pqIdentityKey: value.subarray(34, 1250),
-    signingKey: value.subarray(1250, 1282),
-    updatedAtDay: new DataView(value.buffer, value.byteOffset + 1282, 4).getUint32(0, false),
-  };
-}
-
 /** Tag entri untuk dedupe/log: sha256(searchKey) — tanpa identitas. */
 export const ktEntryTag = (searchKey: Uint8Array): string =>
   createHash('sha256').update(searchKey).digest('hex').slice(0, 16);
@@ -465,20 +416,20 @@ export function buildKtLogEntry(input: KtLogEntryInput): KtLogEntry {
   if (!usernameHash) throw new Error('KT_USERNAME_HASH_INVALID');
 
   const searchKey = ktSearchKey(usernameHash);
-  const signingKeyV2 = input.signingKeyV2 ?? null;
-  const value =
-    signingKeyV2 && signingKeyV2.length === ML_DSA_65_PUBLIC_KEY_BYTES
-      ? encodeKtValueV2({ ...input, signingKeyV2 })
-      : encodeKtValue(input);
+  // Tanpa ML-DSA-65 tidak ada nilai log yang sah: format v1 (Ed25519 saja)
+  // sengaja TIDAK lagi ditulis sebagai fallback — pohon v1 sudah mati, jadi
+  // entri tanpa kunci v2 lebih baik dilewati terlihat daripada menulis ke
+  // format yang tidak bisa diverifikasi siapa pun.
+  if (!input.signingKeyV2 || input.signingKeyV2.length !== ML_DSA_65_PUBLIC_KEY_BYTES) {
+    throw new Error('KT_V2_SIGNING_KEY_INVALID');
+  }
+  const value = encodeKtValueV2({ ...input, signingKeyV2: input.signingKeyV2 });
   return { searchKey, value, keyVersion: input.keyVersion, entryTag: ktEntryTag(searchKey) };
 }
 
 // ============================================================================
 // Penulis idempoten
 // ============================================================================
-
-/** Log tujuan. `v1` = Ed25519/VRF, `v2` = ML-DSA/tanpa VRF (docs/35 §35.7). */
-export type KtLogTarget = 'v1' | 'v2';
 
 const recentWrites = new Map<string, number>();
 
@@ -494,52 +445,42 @@ export interface KtTargetResult {
   treeSize?: bigint | null;
 }
 
-export interface KtCommitResult extends KtTargetResult {
-  /** Hasil log v2 saat dual-write aktif. */
-  v2?: KtTargetResult;
-}
+/**
+ * Nama historis untuk hasil satu penulisan. Sejak log v1 dipensiunkan hanya ada
+ * satu log, jadi bentuk bertingkat (`v2`) yang dulu ada sudah dihapus.
+ */
+export type KtCommitResult = KtTargetResult;
 
-interface WriteTarget {
-  name: KtLogTarget;
-  transport: KtTransport;
-}
-
-function configuredTargets(options: {
+export interface KtWriteOptions {
+  /** Hook test: transport injeksi (jangan sentuh jaringan/env nyata). */
   transport?: KtTransport;
-  v2Transport?: KtTransport;
-  targets?: readonly KtLogTarget[];
-}): WriteTarget[] {
-  const allowed = (name: KtLogTarget) => !options.targets || options.targets.includes(name);
-  // Transport eksplisit = mode uji: jangan sentuh env/jaringan nyata.
-  if (options.transport || options.v2Transport) {
-    const targets: WriteTarget[] = [];
-    if (options.transport) targets.push({ name: 'v1', transport: options.transport });
-    if (options.v2Transport) targets.push({ name: 'v2', transport: options.v2Transport });
-    return targets.filter((target) => allowed(target.name));
-  }
-
-  const targets: WriteTarget[] = [];
-  const timeoutMs = Number(process.env.KT_TIMEOUT_MS) || 5000;
-  const v1Endpoint = process.env.KT_SERVER_URL;
-  const v2Endpoint = process.env.KT_V2_SERVER_URL;
-  if (v1Endpoint && allowed('v1')) targets.push({ name: 'v1', transport: createGrpcKtTransport({ endpoint: v1Endpoint, timeoutMs }) });
-  if (v2Endpoint && allowed('v2')) targets.push({ name: 'v2', transport: createGrpcKtTransport({ endpoint: v2Endpoint, timeoutMs }) });
-  return targets;
+  now?: number;
 }
 
-async function writeToTarget(target: WriteTarget, entry: KtLogEntry, now: number): Promise<KtTargetResult> {
-  // Dedupe = (log, search key, versi kunci, nilai). Nilai yang sama tidak ditulis
-  // dua kali; nilai yang BERUBAH selalu ditulis meski versinya sama. Log v1 dan
-  // v2 punya pohon sendiri, jadi dedupe-nya terpisah — entri yang sudah ada di
-  // v1 tetap harus masuk v2 saat dual-write dimulai.
-  const dedupeKey = `${target.name}:${entry.entryTag}:${entry.keyVersion}:${ktValueDigest(entry.value)}`;
+/** Transport nyata hanya dari `KT_V2_SERVER_URL`; transport injeksi = mode uji. */
+function resolveTransport(options: KtWriteOptions): KtTransport | null {
+  if (options.transport) return options.transport;
+  const endpoint = process.env.KT_V2_SERVER_URL;
+  if (!endpoint) return null;
+  const timeoutMs = Number(process.env.KT_TIMEOUT_MS) || 5000;
+  return createGrpcKtTransport({ endpoint, timeoutMs });
+}
+
+async function writeEntry(
+  transport: KtTransport,
+  entry: KtLogEntry,
+  now: number
+): Promise<KtTargetResult> {
+  // Dedupe = (search key, versi kunci, nilai). Nilai yang sama tidak ditulis
+  // dua kali; nilai yang BERUBAH selalu ditulis meski versinya sama.
+  const dedupeKey = `${entry.entryTag}:${entry.keyVersion}:${ktValueDigest(entry.value)}`;
   const last = recentWrites.get(dedupeKey);
   if (last !== undefined && now - last < KT_DEDUPE_TTL_MS) {
     return { ok: true, skipped: 'DUPLICATE' };
   }
 
   try {
-    const responseBytes = await target.transport.update(
+    const responseBytes = await transport.update(
       encodeKtUpdateRequest({
         searchKey: entry.searchKey,
         value: entry.value,
@@ -555,61 +496,31 @@ async function writeToTarget(target: WriteTarget, entry: KtLogEntry, now: number
       }
     }
 
-    incCounter(target.name === 'v2' ? KT_V2_WRITES : KT_WRITES, { result: 'ok' });
-    setGauge(target.name === 'v2' ? KT_V2_LAST_SUCCESS : KT_LAST_SUCCESS, Math.floor(now / 1000));
+    incCounter(KT_WRITES, { result: 'ok' });
+    setGauge(KT_LAST_SUCCESS, Math.floor(now / 1000));
     return { ok: true, treeSize: summary.treeSize };
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'UNKNOWN';
-    incCounter(target.name === 'v2' ? KT_V2_WRITES : KT_WRITES, { result: 'error' });
+    incCounter(KT_WRITES, { result: 'error' });
     console.error(
-      `[KT] Penulisan log ${target.name} gagal (entry ${entry.entryTag}, keyVersion ${entry.keyVersion}): ${reason}`
+      `[KT] Penulisan log gagal (entry ${entry.entryTag}, keyVersion ${entry.keyVersion}): ${reason}`
     );
     return { ok: false, reason };
   }
 }
 
 /**
- * Tulis satu entri ke log (v1, v2, atau keduanya). **Tidak pernah melempar**:
- * kegagalan dicatat sebagai metrik + log (search key ter-hash) supaya registrasi
- * tetap jalan, dan operator melihat lag per log di dashboard.
- *
- * Hasil tingkat atas selalu mewakili log **v1** bila v1 dikonfigurasi (kompatibel
- * dengan pemanggil lama); `v2` berisi hasil log v2 saat dual-write. Bila hanya v2
- * yang dikonfigurasi, hasil tingkat atas mewakili v2.
+ * Tulis satu entri ke log KT v2. **Tidak pernah melempar**: kegagalan dicatat
+ * sebagai metrik + log (search key ter-hash) supaya registrasi tetap jalan, dan
+ * operator melihatnya di dashboard/alert.
  */
 export async function commitKeyTransparencyEntry(
   entry: KtLogEntry,
-  options: {
-    transport?: KtTransport;
-    v2Transport?: KtTransport;
-    targets?: readonly KtLogTarget[];
-    now?: number;
-  } = {}
-): Promise<KtCommitResult> {
-  const targets = configuredTargets(options);
-  if (targets.length === 0) return { ok: false, skipped: 'DISABLED' };
-
-  const now = options.now ?? Date.now();
-  const results = await Promise.all(targets.map((target) => writeToTarget(target, entry, now)));
-
-  const v1Index = targets.findIndex((target) => target.name === 'v1');
-  const v2Index = targets.findIndex((target) => target.name === 'v2');
-  const primary = results[v1Index >= 0 ? v1Index : v2Index]!;
-  const combined: KtCommitResult = { ...primary };
-
-  if (v2Index >= 0) {
-    combined.v2 = results[v2Index]!;
-    const failed = results.find((result) => !result.ok);
-    if (failed && primary.ok) {
-      // Satu log tertinggal bukan sukses penuh: laporkan alasannya di tingkat
-      // atas supaya pemanggil/log tidak menyimpulkan "kedua pohon sinkron".
-      combined.ok = false;
-      combined.reason = failed.reason;
-    }
-    combined.skipped = results.every((result) => result.skipped === 'DUPLICATE') ? 'DUPLICATE' : undefined;
-  }
-
-  return combined;
+  options: KtWriteOptions = {}
+): Promise<KtTargetResult> {
+  const transport = resolveTransport(options);
+  if (!transport) return { ok: false, skipped: 'DISABLED' };
+  return writeEntry(transport, entry, options.now ?? Date.now());
 }
 
 /**
@@ -619,14 +530,9 @@ export async function commitKeyTransparencyEntry(
  */
 export async function publishKeyTransparencyEntry(
   input: KtLogEntryInput,
-  options: {
-    transport?: KtTransport;
-    v2Transport?: KtTransport;
-    targets?: readonly KtLogTarget[];
-    now?: number;
-  } = {}
-): Promise<KtCommitResult> {
-  if (!process.env.KT_SERVER_URL && !process.env.KT_V2_SERVER_URL && !options.transport && !options.v2Transport) {
+  options: KtWriteOptions = {}
+): Promise<KtTargetResult> {
+  if (!process.env.KT_V2_SERVER_URL && !options.transport) {
     return { ok: false, skipped: 'DISABLED' };
   }
 
@@ -645,7 +551,8 @@ export async function publishKeyTransparencyEntry(
     //     terpisah supaya kejadiannya kelihatan, bukan tercampur sebagai "invalid".
     //     Klien sudah diperbaiki (`resolveRecoveryIdentifierInput`); angka ini
     //     adalah jaring pengaman untuk klien/bundel lama.
-    //   - sisanya: input cacat (panjang kunci salah, base64 rusak).
+    //   - sisanya: input cacat (panjang kunci salah, base64 rusak, atau bundle
+    //     tanpa kunci ML-DSA-65 — `KT_V2_SIGNING_KEY_INVALID`).
     const result = reason === 'KT_USERNAME_HASH_LENGTH_INVALID'
       ? 'unsupported_identifier'
       : 'invalid';

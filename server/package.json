@@ -16,7 +16,6 @@
     "dev": "tsx watch src/index.ts",
     "relay": "tsx src/ohttp/relay.ts",
     "seed": "tsx prisma/seed.ts",
-    "kt:fixtures": "tsx scripts/kt-fixtures.ts",
     "ohttp-key:generate": "tsx scripts/ohttp-key.ts",
     "pir:snapshot": "tsx scripts/build-pir-snapshot.ts",
     "privacy:dump-audit": "tsx scripts/privacy-dump-audit.ts",

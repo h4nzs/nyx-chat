@@ -58,7 +58,7 @@ sha256_of() {
 stage_tree() {
   rm -rf "$CANONICAL_ROOT"
   mkdir -p "$CANONICAL_ROOT/packages" "$CANONICAL_ROOT/vendor/signal"
-  for pkg in spqr-wasm keytrans-wasm keytrans-wasm-v2 pir-wasm; do
+  for pkg in spqr-wasm keytrans-wasm-v2 pir-wasm; do
     mkdir -p "$CANONICAL_ROOT/packages/$pkg"
     tar --exclude=./target --exclude=./Cargo.toml --exclude=./dist \
       -cf - -C "$SRC_ROOT/packages/$pkg" . | tar -xf - -C "$CANONICAL_ROOT/packages/$pkg"
@@ -68,7 +68,7 @@ stage_tree() {
   mkdir -p "$CANONICAL_ROOT/packages/keytrans-v2"
   tar --exclude=./target -cf - -C "$SRC_ROOT/packages/keytrans-v2" . \
     | tar -xf - -C "$CANONICAL_ROOT/packages/keytrans-v2"
-  for crate in spqr libsignal-keytrans; do
+  for crate in spqr; do
     mkdir -p "$CANONICAL_ROOT/vendor/signal/$crate"
     tar --exclude=./target -cf - -C "$SRC_ROOT/vendor/signal/$crate" . | tar -xf - -C "$CANONICAL_ROOT/vendor/signal/$crate"
   done
@@ -85,41 +85,34 @@ stage_tree
 echo "== membangun dari sumber ter-vendor (toolchain dari rust-toolchain.toml)…"
 (cd "$CANONICAL_ROOT/packages/spqr-wasm" && ./build.sh >/tmp/nyx-repro-spqr.log 2>&1) \
   || { echo "GUARD GAGAL: build spqr-wasm gagal (lihat /tmp/nyx-repro-spqr.log)" >&2; tail -20 /tmp/nyx-repro-spqr.log >&2; exit 1; }
-(cd "$CANONICAL_ROOT/packages/keytrans-wasm" && ./build.sh >/tmp/nyx-repro-keytrans.log 2>&1) \
-  || { echo "GUARD GAGAL: build keytrans-wasm gagal (lihat /tmp/nyx-repro-keytrans.log)" >&2; tail -20 /tmp/nyx-repro-keytrans.log >&2; exit 1; }
 (cd "$CANONICAL_ROOT/packages/keytrans-wasm-v2" && ./build.sh >/tmp/nyx-repro-keytrans-v2.log 2>&1) \
   || { echo "GUARD GAGAL: build keytrans-wasm-v2 gagal (lihat /tmp/nyx-repro-keytrans-v2.log)" >&2; tail -20 /tmp/nyx-repro-keytrans-v2.log >&2; exit 1; }
 (cd "$CANONICAL_ROOT/packages/pir-wasm" && ./build.sh >/tmp/nyx-repro-pir.log 2>&1) \
   || { echo "GUARD GAGAL: build pir-wasm gagal (lihat /tmp/nyx-repro-pir.log)" >&2; tail -20 /tmp/nyx-repro-pir.log >&2; exit 1; }
 
 SPQR_BUILT="$CANONICAL_ROOT/packages/spqr-wasm/dist/spqr.wasm"
-KT_BUILT="$CANONICAL_ROOT/packages/keytrans-wasm/dist/keytrans.wasm"
 KT_V2_BUILT="$CANONICAL_ROOT/packages/keytrans-wasm-v2/dist/keytrans-v2.wasm"
 PIR_BUILT="$CANONICAL_ROOT/packages/pir-wasm/dist/pir-client.wasm"
 SPQR_DIST="$SRC_ROOT/packages/spqr-wasm/dist/spqr.wasm"
-KT_DIST="$SRC_ROOT/packages/keytrans-wasm/dist/keytrans.wasm"
 KT_V2_DIST="$SRC_ROOT/packages/keytrans-wasm-v2/dist/keytrans-v2.wasm"
 PIR_DIST="$SRC_ROOT/packages/pir-wasm/dist/pir-client.wasm"
 
 echo "== hasil build"
 report "spqr.wasm (root kanonik)" "$SPQR_BUILT"
-report "keytrans.wasm (root kanonik)" "$KT_BUILT"
 report "keytrans-v2.wasm (root kanonik)" "$KT_V2_BUILT"
 report "pir-client.wasm (root kanonik)" "$PIR_BUILT"
 RUSTC_VERSION="$(cd "$CANONICAL_ROOT/packages/spqr-wasm" && rustc --version)"
 
 if [[ "$MODE" == "update" ]]; then
-  mkdir -p "$(dirname "$SPQR_DIST")" "$(dirname "$KT_DIST")" "$(dirname "$KT_V2_DIST")" "$(dirname "$PIR_DIST")"
+  mkdir -p "$(dirname "$SPQR_DIST")" "$(dirname "$KT_V2_DIST")" "$(dirname "$PIR_DIST")"
   cp "$SPQR_BUILT" "$SPQR_DIST"
-  cp "$KT_BUILT" "$KT_DIST"
   cp "$KT_V2_BUILT" "$KT_V2_DIST"
   cp "$PIR_BUILT" "$PIR_DIST"
   CANONICAL_ROOT="$CANONICAL_ROOT" RUSTC_VERSION="$RUSTC_VERSION" \
-    SPQR_SHA="$(sha256_of "$SPQR_BUILT")" KT_SHA="$(sha256_of "$KT_BUILT")" \
+    SPQR_SHA="$(sha256_of "$SPQR_BUILT")" \
     KT_V2_SHA="$(sha256_of "$KT_V2_BUILT")" \
     PIR_SHA="$(sha256_of "$PIR_BUILT")" \
     SPQR_BYTES="$(wc -c < "$SPQR_BUILT" | tr -d '[:space:]')" \
-    KT_BYTES="$(wc -c < "$KT_BUILT" | tr -d '[:space:]')" \
     KT_V2_BYTES="$(wc -c < "$KT_V2_BUILT" | tr -d '[:space:]')" \
     PIR_BYTES="$(wc -c < "$PIR_BUILT" | tr -d '[:space:]')" \
     MANIFEST="$MANIFEST" node -e '
@@ -131,7 +124,6 @@ if [[ "$MODE" == "update" ]]; then
         rustc: process.env.RUSTC_VERSION,
         artifacts: [
           { path: "packages/spqr-wasm/dist/spqr.wasm", bytes: Number(process.env.SPQR_BYTES), sha256: process.env.SPQR_SHA, source: "vendor/signal/spqr@06959b4708f9b7b1e94d0f8cc835f3958c077e94" },
-          { path: "packages/keytrans-wasm/dist/keytrans.wasm", bytes: Number(process.env.KT_BYTES), sha256: process.env.KT_SHA, source: "vendor/signal/libsignal-keytrans@e8cc2dddd578859b4a029c9c94670b24ce2b616a" },
           { path: "packages/keytrans-wasm-v2/dist/keytrans-v2.wasm", bytes: Number(process.env.KT_V2_BYTES), sha256: process.env.KT_V2_SHA, source: "packages/keytrans-v2@nyx-kt-v2-fork (docs/35 §35.7)" },
           { path: "packages/pir-wasm/dist/pir-client.wasm", bytes: Number(process.env.PIR_BYTES), sha256: process.env.PIR_SHA, source: "packages/pir-wasm@nyx (chalametpir-client 0.8.0)" }
         ]
@@ -171,9 +163,9 @@ while IFS=$'\t' read -r rel expected built; do
   else
     echo "ok: $rel — biner yang di-commit = hasil build dari sumber ter-vendor ($expected)"
   fi
-done < <(MANIFEST="$MANIFEST" SPQR_BUILT="$SPQR_BUILT" KT_BUILT="$KT_BUILT" KT_V2_BUILT="$KT_V2_BUILT" PIR_BUILT="$PIR_BUILT" node -e '
+done < <(MANIFEST="$MANIFEST" SPQR_BUILT="$SPQR_BUILT" KT_V2_BUILT="$KT_V2_BUILT" PIR_BUILT="$PIR_BUILT" node -e '
   const m = JSON.parse(require("fs").readFileSync(process.env.MANIFEST, "utf8"));
-  const built = { "packages/spqr-wasm/dist/spqr.wasm": process.env.SPQR_BUILT, "packages/keytrans-wasm/dist/keytrans.wasm": process.env.KT_BUILT, "packages/keytrans-wasm-v2/dist/keytrans-v2.wasm": process.env.KT_V2_BUILT, "packages/pir-wasm/dist/pir-client.wasm": process.env.PIR_BUILT };
+  const built = { "packages/spqr-wasm/dist/spqr.wasm": process.env.SPQR_BUILT, "packages/keytrans-wasm-v2/dist/keytrans-v2.wasm": process.env.KT_V2_BUILT, "packages/pir-wasm/dist/pir-client.wasm": process.env.PIR_BUILT };
   for (const a of m.artifacts) console.log([a.path, a.sha256, built[a.path]].join("\t"));
 ')
 

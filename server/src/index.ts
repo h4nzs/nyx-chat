@@ -41,6 +41,14 @@ async function main() {
     console.warn(`⚠️  [startup] ${warning}`)
   }
 
+  // [2026-10-28] Env jalur KT v1 yang sudah pensiun (docs/38). Diabaikan, tetapi
+  // TIDAK diam-diam: `.env` yang masih memuatnya akan disalin ke deployment
+  // berikutnya dan membuat orang mengira pohon v1 masih diisi.
+  const { ktRetiredEnvWarnings } = await import('./utils/keyTransparency.js')
+  for (const warning of ktRetiredEnvWarnings(process.env)) {
+    console.warn(`⚠️  [startup] ${warning}`)
+  }
+
   // [docs/30 §30.12 WS-H] Bundle root attestation juga bisa basi TANPA error:
   // root kedaluwarsa dan `nextUpdate` MDS yang lewat hanya terlihat saat ada
   // perangkat baru yang ditolak. Gauge-nya yang membuat alert mungkin, log-nya

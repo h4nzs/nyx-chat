@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🗑️ KT v1 dipensiunkan total: penulis, binary, dan drill v1 dihapus (2026-10-28)
+
+Klien sudah lama hanya menerima ABI 2, tetapi server **masih punya jalur tulis v1**
+(`KT_SERVER_URL`, pohon classical) dan masih membangun tiga binary Go v1. Efek
+deployment-nya selama transisi hanya dicapai dengan mengosongkan env — jalur yang
+masih ada berarti suatu hari menyala lagi tanpa alarm yang tepat.
+
+Sekarang `server/src/utils/keyTransparency.ts` hanya punya satu penulis: log
+ML-DSA-65 v2 (`KT_V2_SERVER_URL`). `KT_SERVER_URL` yang masih ada di `.env` tidak
+ditafsirkan — ia memicu satu peringatan boot supaya tidak jadi konfigurasi zombie.
+Metrik tidak diberi sufiks baru: `nyx_kt_writes_total` +
+`nyx_kt_last_success_timestamp_seconds` kini milik log v2 dan `nyx_kt_v2_*`
+dihapus, jadi alert, dashboard Grafana, dan kasus `promtool test rules` memakai
+nama lama tanpa jendela buta dan tanpa `sum()` ganda.
+
+Dihapus bersama jalurnya: `server/kt-query/{main,query,write,audit,snapshot,store,
+metrics,config}.go` + tesnya, `cmd/nyx-kt-auditor`, `cmd/nyx-kt-check`,
+`cmd/nyx-kt-query` (v1), unit `ops/systemd/nyx-kt-query.service` /
+`nyx-kt-auditor.service`, `scripts/kt-restore-drill.sh`, `server/scripts/kt-{drill-
+entries,fixtures,query-fixtures}.ts`, job CI `kt-recovery`, serta verifier klien v1
+(`web/src/lib/keyTransparency.ts` + `packages/keytrans-wasm`, kini hanya
+`keytrans-wasm-v2`) dan fixture protobuf v1 di `web/src/lib/__tests__/fixtures/kt/`.
+
+Yang **hilang dan belum diganti** (dicatat, bukan disembunyikan): drill pemulihan
+otomatis KT. Skrip lamanya bergantung pada penulis v1 dan `nyx-kt-check`; langkah
+pemulihan kini manual dan didokumentasikan di docs/10 §10.13. `deploy.yml`
+mematikan + menghapus unit v1 yang masih `enabled` di VPS, tetapi menghapus
+`/var/lib/nyx/kt` dan kunci v1 adalah tindakan operator (tidak bisa dibatalkan).
+
 ## 🧾 Error 4xx tidak lagi tampil sebagai kode mesin (2026-10-28)
 
 Server menjawab 4xx dengan **kode mesin** (`RATE_LIMITED`, `TOKEN_STALE`,

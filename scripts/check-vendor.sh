@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # [NOTICE · docs/25 · docs/30 §30.2] Guard sumber Signal yang di-vendor.
 #
-# Kenapa ada: `vendor/signal/` (Rust: crate `spqr` + `libsignal-keytrans`) dan
+# Kenapa ada: `vendor/signal/` (Rust: crate `spqr`) dan
 # `server/kt-query/vendor/` (Go: `keytransparency`) adalah satu-satunya cara
 # repo ini bisa dibangun di clone bersih / CI — checkout Signal tidak ada di
 # runner. Kalau isinya lupa di-commit, `packages/*/build.sh` dan `go build`
@@ -9,8 +9,7 @@
 # jadi berbohong soal apa yang didistribusikan.
 #
 # Yang diperiksa:
-#   1. manifest tiap crate ter-vendor ada dan tidak lagi mewarisi
-#      `workspace = true` (libsignal-keytrans dimaterialisasi saat vendoring);
+#   1. manifest crate ter-vendor ada;
 #   2. commit pin di `vendor/README.md` cocok dengan pin di `NOTICE`;
 #   3. `server/kt-query/vendor/modules.txt` ada, `go.mod` TIDAK memuat
 #      `replace` ke checkout lokal, dan setiap paket yang dicatat modules.txt
@@ -58,19 +57,6 @@ if check_file vendor/signal/spqr/Cargo.toml "jalankan scripts/vendor-signal.sh";
   echo "ok: vendor/signal/spqr ($(du -sh vendor/signal/spqr | cut -f1))"
 fi
 
-if check_file vendor/signal/libsignal-keytrans/Cargo.toml "jalankan scripts/vendor-signal.sh"; then
-  grep -q '^name = "libsignal-keytrans"' vendor/signal/libsignal-keytrans/Cargo.toml \
-    || { say_error vendor/signal/libsignal-keytrans/Cargo.toml "bukan manifest 'libsignal-keytrans'."; failed=1; }
-  # Manifest harus sudah dimaterialisasi: crate ini berdiri sendiri di sini.
-  # (Regex sengaja hanya menangkap entri nyata `kunci.workspace = true`; komentar
-  # penjelas di manifest memuat frasa yang sama.)
-  if grep -qE '^[[:space:]]*[A-Za-z0-9_-]+\.workspace[[:space:]]*=[[:space:]]*true' vendor/signal/libsignal-keytrans/Cargo.toml; then
-    say_error vendor/signal/libsignal-keytrans/Cargo.toml "masih memuat 'workspace = true' — jalankan scripts/vendor-signal.sh (materialisasi manifest)."
-    failed=1
-  fi
-  echo "ok: vendor/signal/libsignal-keytrans ($(du -sh vendor/signal/libsignal-keytrans | cut -f1))"
-fi
-
 # --- 2: pin di vendor/README.md cocok dengan NOTICE -------------------------
 if check_file vendor/README.md "jalankan scripts/vendor-signal.sh"; then
   pins="$(grep -E '^Pinned commit: [0-9a-f]{40}' NOTICE | awk '{print $3}')"
@@ -106,7 +92,6 @@ fi
 if [[ -d vendor/signal ]]; then
   tracked vendor/signal/spqr/Cargo.toml
   tracked vendor/signal/spqr/Cargo.lock
-  tracked vendor/signal/libsignal-keytrans/Cargo.toml
   tracked vendor/README.md
 fi
 if [[ -d "$KT_QUERY/vendor" ]]; then

@@ -13,6 +13,9 @@
 #
 #   selfhost  nginx/nyx.conf      → path /home/ken/... , upstream 127.0.0.1
 #             ops/systemd/user/*  → {SELFHOST}/systemd/user/
+#             ops/prometheus/*    → {SELFHOST}/prometheus/conf/
+#             (job `nyx-api` memakai static 127.0.0.1:9464, bukan file_sd pm2)
+#             ops/grafana dashboards → {SELFHOST}/grafana/dashboards/
 #             (tanpa docker-compose — mesin ini tidak memakai Docker)
 #
 #   docker    nginx/nyx.conf      → apa adanya (server:4000, ohttp-relay:4100)
@@ -81,10 +84,43 @@ transform_selfhost_nginx() {
     "$1"
 }
 
-pairs=()   # format: src|dest_rel|transform(bool)
+# Transformasi profil selfhost untuk prometheus.yml: di VPS `nyx-api` di-scrape
+# lewat file_sd yang ditulis `scripts/metrics-targets.mjs` (banyak instance pm2).
+# Di selfhost hanya ada satu proses di 127.0.0.1:9464, jadi blok file_sd diganti
+# static target; tanpa ini target `nyx-api` hilang (warning promtool: file_sd
+# tidak ada) dan semua alert sisi API berhenti punya data.
+transform_selfhost_prometheus() {
+  awk '
+    /^  # Aplikasi NYX \(Express \+ bridge \+ sweeper\)\. Tiap worker pm2 membuka$/ {
+      print "  # Aplikasi NYX (Express + bridge + sweeper). Selfhost: SATU proses di"
+      print "  # 127.0.0.1:9464 (METRICS_PORT default); VPS memakai file_sd yang ditulis"
+      print "  # scripts/metrics-targets.mjs — profil ini menggantinya dengan static target."
+      next
+    }
+    /^  # METRICS_PORT \+ NODE_APP_INSTANCE \* 10 \(default 9464, 9474, \.\.\.\)\. File ini dibuat$/ { next }
+    /^  # deploy dengan `scripts\/metrics-targets\.mjs` setelah pm2 start\.$/ { next }
+    /^  - job_name: nyx-api$/ { api=1; print; next }
+    api && /^    file_sd_configs:$/ {
+      print "    static_configs:"
+      print "      - targets: [\x27127.0.0.1:9464\x27]"
+      skip=1; next
+    }
+    skip {
+      if ($0 ~ /^      /) next
+      skip=0
+    }
+    { print }
+  ' "$1"
+}
+
+pairs=()   # format: src|dest_rel|transform(0=tidak, 1=nginx, 2=prometheus)
 
 if [[ "$PROFILE" == "selfhost" ]]; then
   pairs+=("$ROOT_DIR/ops/nginx/nyx.conf|nginx/nyx.conf|1")
+  pairs+=("$ROOT_DIR/ops/prometheus/prometheus.yml|prometheus/conf/prometheus.yml|2")
+  pairs+=("$ROOT_DIR/ops/prometheus/alerts.yml|prometheus/conf/alerts.yml|0")
+  pairs+=("$ROOT_DIR/ops/prometheus/tests.yml|prometheus/conf/tests.yml|0")
+  pairs+=("$ROOT_DIR/ops/grafana/dashboards/nyx-overview.json|grafana/dashboards/nyx-overview.json|0")
   for unit in "$ROOT_DIR"/ops/systemd/user/*.service; do
     [[ -e "$unit" ]] || continue
     pairs+=("$unit|systemd/user/$(basename "$unit")|0")
@@ -102,11 +138,11 @@ fi
 # yang akan dipasang bila --apply; `--check` membandingkan versi yang sama.
 prepare_candidate() {
   local src="$1" transform="$2" out="$3"
-  if [[ "$transform" == "1" ]]; then
-    transform_selfhost_nginx "$src" > "$out"
-  else
-    cp "$src" "$out"
-  fi
+  case "$transform" in
+    1) transform_selfhost_nginx "$src" > "$out" ;;
+    2) transform_selfhost_prometheus "$src" > "$out" ;;
+    *) cp "$src" "$out" ;;
+  esac
 }
 
 drift=0
@@ -160,6 +196,8 @@ if [[ "$MODE" == "apply" && "$drift" -gt 0 ]]; then
   if [[ "$PROFILE" == "selfhost" ]]; then
     echo "  nginx -t -c $SELFHOST_DIR/nginx/nginx.conf && systemctl --user reload nyx-nginx"
     echo "  systemctl --user daemon-reload   # bila unit berubah"
+    echo "  $SELFHOST_DIR/prometheus/bin/promtool check config $SELFHOST_DIR/prometheus/conf/prometheus.yml"
+    echo "  systemctl --user reload nyx-prometheus   # bila config/aturan berubah"
   else
     echo "  sudo nginx -t && sudo systemctl reload nginx"
     echo "  sudo systemctl daemon-reload"

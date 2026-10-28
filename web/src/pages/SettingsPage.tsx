@@ -975,6 +975,13 @@ export default function SettingsPage() {
                 icon={FiSmartphone} 
                 onClick={() => navigate('/settings/sessions')} 
               />
+              {/* [docs/34 §34.6 · docs/38] Panel bukti: lapisan privasi mana yang
+                  benar-benar berjalan di perangkat ini (bukan daftar fitur). */}
+              <ActionButton
+                label={t('settings:privacy_status.title')}
+                icon={FiShield}
+                onClick={() => navigate('/settings/privacy')}
+              />
               
               {/* VAULT ACTIONS */}
               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">

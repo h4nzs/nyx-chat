@@ -38,7 +38,6 @@ import {
   KT_KEY_VERSION_REGISTRATION,
   KT_KEY_VERSION_ROTATION,
   clearKtDedupeForTests,
-  decodeKtValue,
 } from '../src/utils/keyTransparency.js';
 import {
   backfillKtV2IdentityOnLogin,
@@ -55,20 +54,20 @@ const read = (p: string) => readFileSync(join(here, p), 'utf8');
 /**
  * ⚠️ Test penulisan **live** hanya jalan dengan opt-in eksplisit.
  *
- * Jangan pernah kembali ke `skip: !process.env.KT_SERVER_URL`: `server/.env`
+ * Jangan pernah kembali ke `skip: !process.env.KT_V2_SERVER_URL`: `server/.env`
  * SELALU mengisi variabel itu dan `src/config.ts` memuat dotenv, jadi gate itu
  * membuat `pnpm test` menulis entri sungguhan ke log yang sedang dikonfigurasi.
- * Itu bukan hipotesis — 2026-10-17 dua entri uji ini masuk ke log self-host
- * (`127.0.0.1:8081`, `nyx-kt-query`) saat suite penuh dijalankan, dan log KT
- * bersifat append-only (tidak bisa dihapus).
+ * Itu bukan hipotesis — 2026-10-17 dua entri uji ini masuk ke log self-host saat
+ * suite penuh dijalankan, dan log KT bersifat append-only (tidak bisa dihapus).
  */
 const KT_LIVE_WRITE =
-  process.env.NYX_KT_LIVE_WRITE === '1' && Boolean(process.env.KT_SERVER_URL);
+  process.env.NYX_KT_LIVE_WRITE === '1' && Boolean(process.env.KT_V2_SERVER_URL);
 
 const USERNAME_HASH = new Uint8Array(32).fill(0x5a);
 const USERNAME_HASH_B64 = Buffer.from(USERNAME_HASH).toString('base64url');
 const IDENTITY_KEY = new Uint8Array(32).fill(0x11);
 const SIGNING_KEY = new Uint8Array(32).fill(0x33);
+const SIGNING_KEY_V2 = new Uint8Array(ML_DSA_65_PUBLIC_KEY_BYTES).fill(0x44);
 const PQ_KEY = new Uint8Array(1216).fill(0x22);
 
 /** Transport KT palsu: hitung panggilan + kembalikan respons kosong. */
@@ -171,6 +170,7 @@ test('rotasi: identifier cocok → entri keyVersion rotasi, material publik saja
       identityKey: IDENTITY_KEY,
       pqIdentityKey: PQ_KEY,
       signingKey: SIGNING_KEY,
+      signingKeyV2: SIGNING_KEY_V2,
     },
     {
       transport,
@@ -184,11 +184,13 @@ test('rotasi: identifier cocok → entri keyVersion rotasi, material publik saja
   assert.equal(result.ok, true, `penulisan gagal: ${result.reason ?? 'unknown'}`);
   assert.equal(state.calls, 1);
 
-  const value = decodeKtValue(valueFromRequest(state.values[0]!));
+  const value = parseKtValueBytes(valueFromRequest(state.values[0]!));
+  assert.equal(value.version, 2, 'hanya nilai log v2 yang ditulis');
   assert.equal(value.keyVersion, KT_KEY_VERSION_ROTATION, 'label rotasi, bukan 1/2');
   assert.deepEqual([...value.identityKey], [...IDENTITY_KEY]);
   assert.deepEqual([...value.pqIdentityKey], [...PQ_KEY]);
   assert.deepEqual([...value.signingKey], [...SIGNING_KEY]);
+  assert.deepEqual([...value.signingKeyV2!], [...SIGNING_KEY_V2]);
   assert.ok(value.updatedAtDay > 20_000, 'bucket harian (bukan 0 dan bukan epoch detik)');
   assert.equal(metricCount('ok'), 1);
 });
@@ -225,11 +227,9 @@ test('rotasi: kunci wajib tidak lengkap → invalid (tidak menulis nilai yang sa
   assert.equal(metricCount('invalid'), 1);
 });
 
-test('rotasi: tanpa KT_SERVER_URL/KT_V2_SERVER_URL dan tanpa transport → no-op (bukan error)', async () => {
+test('rotasi: tanpa KT_V2_SERVER_URL dan tanpa transport → no-op (bukan error)', async () => {
   clearKtDedupeForTests();
-  const saved = process.env.KT_SERVER_URL;
   const savedV2 = process.env.KT_V2_SERVER_URL;
-  delete process.env.KT_SERVER_URL;
   delete process.env.KT_V2_SERVER_URL;
   try {
     const result = await publishIdentityKeyChange({
@@ -238,12 +238,41 @@ test('rotasi: tanpa KT_SERVER_URL/KT_V2_SERVER_URL dan tanpa transport → no-op
       identityKey: IDENTITY_KEY,
       pqIdentityKey: PQ_KEY,
       signingKey: SIGNING_KEY,
+      signingKeyV2: SIGNING_KEY_V2,
     });
     assert.deepEqual(result, { ok: false, skipped: 'DISABLED' });
   } finally {
-    if (saved !== undefined) process.env.KT_SERVER_URL = saved;
     if (savedV2 !== undefined) process.env.KT_V2_SERVER_URL = savedV2;
   }
+});
+
+/**
+ * [docs/38] Perangkat tanpa ML-DSA-65 tidak lagi ditulis sebagai nilai v1:
+ * entri dilewati terlihat (`result="invalid"`), bukan masuk ke format yang tidak
+ * bisa diverifikasi siapa pun. Ini juga menjelaskan kenapa akun pra-PQ butuh
+ * rotasi dulu sebelum bisa di-backfill.
+ */
+test('rotasi: tanpa kunci ML-DSA-65 → invalid, bukan nilai v1', async () => {
+  resetMetricsForTests();
+  clearKtDedupeForTests();
+  const { state, transport } = fakeTransport();
+
+  const result = await publishIdentityKeyChange(
+    {
+      userId: 'user-a',
+      usernameHash: USERNAME_HASH_B64,
+      identityKey: IDENTITY_KEY,
+      pqIdentityKey: PQ_KEY,
+      signingKey: SIGNING_KEY,
+      signingKeyV2: null,
+    },
+    { transport, lookupStoredIdentifier: async () => pepperedIdentifier(USERNAME_HASH_B64) }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'KT_V2_SIGNING_KEY_INVALID');
+  assert.equal(state.calls, 0, 'tidak ada penulisan ke log');
+  assert.equal(metricCount('invalid'), 1);
 });
 
 test('identityKeysChanged: upload ulang yang sama bukan rotasi', () => {
@@ -291,6 +320,7 @@ test('live: entri rotasi masuk ke binary KT (opt-in NYX_KT_LIVE_WRITE=1)', { ski
       identityKey: rotated,
       pqIdentityKey: PQ_KEY,
       signingKey: SIGNING_KEY,
+      signingKeyV2: SIGNING_KEY_V2,
     },
     { lookupStoredIdentifier: async () => pepperedIdentifier(usernameHash) }
   );
@@ -315,8 +345,8 @@ test('guard: penulisan live hanya dengan opt-in eksplisit', () => {
     assert.match(source, /skip: !KT_LIVE_WRITE/, `${file}: gate = opt-in eksplisit`);
     assert.doesNotMatch(
       source,
-      /\{ skip: !process\.env\.KT_SERVER_URL \}/,
-      `${file}: jangan gate hanya dari KT_SERVER_URL (server/.env mengisinya)`
+      /\{ skip: !process\.env\.KT_V2_SERVER_URL \}/,
+      `${file}: jangan gate hanya dari KT_V2_SERVER_URL (server/.env mengisinya)`
     );
   }
 });
@@ -355,7 +385,7 @@ test('backfill login: hanya menulis v2 dengan nilai ML-DSA-65 dan label registra
       signingKey: SIGNING_KEY,
       signingKeyV2,
     },
-    { v2Transport: v2.transport, now: 42_000 }
+    { transport: v2.transport, now: 42_000 }
   );
 
   assert.equal(result.ok, true, `backfill v2 gagal: ${result.reason ?? 'unknown'}`);
@@ -378,7 +408,7 @@ test('backfill login: perangkat tanpa ML-DSA-65 dilewati, bukan menulis nilai v1
       signingKey: SIGNING_KEY,
       signingKeyV2: new Uint8Array(32),
     },
-    { v2Transport: v2.transport }
+    { transport: v2.transport }
   );
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'V2_SIGNING_KEY_INVALID');

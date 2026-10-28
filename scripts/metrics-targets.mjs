@@ -40,7 +40,7 @@ if (base !== 0 && base + (workers - 1) * 10 > 65535) {
   process.exit(1);
 }
 
-// Stride 10 keeps API workers clear of sidecar (9465) and KT (9466-9469).
+// Stride 10 keeps API workers clear of sidecar (9465) and KT v2 (9468-9469).
 const groups = base === 0
   ? []
   : [{ targets: Array.from({ length: workers }, (_, index) => `${host}:${base + index * 10}`) }];

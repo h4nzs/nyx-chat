@@ -89,7 +89,7 @@ Registration is additionally guarded by tiered counters per source, installation
 * **State:** Zustand v5
 * **Styling:** Tailwind CSS v4
 * **Real-time:** native **WebTransport** in a dedicated Web Worker, with a Socket.IO WebSocket gateway as the second relay path
-* **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm`) loaded lazily
+* **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm-v2`, `pir-wasm`) loaded lazily
 * **Storage:** IndexedDB via `dexie` ("Unified Shadow Vault"), OPFS for encrypted attachment cache
 * **PWA & i18n:** service worker (precache only), four languages (`en`, `es`, `id`, `pt-BR`)
 
@@ -109,7 +109,7 @@ Registration is additionally guarded by tiered counters per source, installation
 |---|---|
 | `packages/shared` | `@nyx/shared` — types, Zod schemas (jitless), opcodes, capability list |
 | `packages/spqr-wasm` | WASM wrapper for the `spqr` ratchet crate |
-| `packages/keytrans-wasm` | WASM wrapper for `libsignal-keytrans` (client-side KT verifier) |
+| `packages/keytrans-wasm-v2` | WASM wrapper for the ML-DSA-65 KT verifier (`packages/keytrans-v2`) |
 | `tools/dr-oracle` | Go oracle (no libsodium) that cross-checks X3DH/KEM/KDF/AEAD vectors |
 | `marketing/` | Astro static site (independent of `web/`) |
 | `ops/` | Prometheus rules, Alertmanager→ntfy relay, Grafana dashboard, systemd units, attestation roots |
@@ -120,9 +120,9 @@ nyx-chat/
 ├── server/
 │   ├── src/             # Express API, Redis bridge, jobs
 │   ├── transport-sidecar/   # Rust WebTransport sidecar
-│   ├── kt-query/        # Go Key Transparency service + auditor
+│   ├── kt-query/        # Go Key Transparency v2 log + auditor
 │   └── prisma/          # schema
-├── packages/            # shared, spqr-wasm, keytrans-wasm
+├── packages/            # shared, spqr-wasm, keytrans-wasm-v2, pir-wasm
 ├── vendor/signal/       # vendored Signal sources (unmodified)
 ├── tools/  scripts/  ops/  docs/  marketing/
 ```
@@ -203,8 +203,8 @@ NYX is designed for high-security, zero-trust deployments.
 
 **Zero-Inbound Policy:** the production reference architecture disables inbound firewall ports (except SSH). Traffic is routed through **Cloudflare Tunnels** to localhost ports (3000 for the PWA, 4000 for API/Socket).
 
-* **Processes:** `nyx-api` and `nyx-sidecar` under PM2; `nyx-kt-query` (and the KT auditor) under **systemd** — the KT database is single-process, never run it twice or under PM2. Push to `main` triggers `deploy.yml` (build, ship, `prisma db push`, restart).
-* **Observability without telemetry:** six **loopback-only** Prometheus exporters (API `:9464`, sidecar `:9465`, KT auditor v1 `:9466`, KT log v1 `:9467`, KT log v2 `:9468`, KT auditor v2 `:9469`). Metrics are event counts only — identity-shaped label values are rejected — with alert rules, an Alertmanager→ntfy relay, and a Grafana dashboard under `ops/`.
+* **Processes:** `nyx-api` and `nyx-sidecar` under PM2; `nyx-kt-query-v2` (and `nyx-kt-auditor-v2`) under **systemd** — the KT database is single-process, never run it twice or under PM2. Push to `main` triggers `deploy.yml` (build, ship, `prisma db push`, restart).
+* **Observability without telemetry:** four **loopback-only** Prometheus exporters (API `:9464`, sidecar `:9465`, KT log v2 `:9468`, KT auditor v2 `:9469`). Metrics are event counts only — identity-shaped label values are rejected — with alert rules, an Alertmanager→ntfy relay, and a Grafana dashboard under `ops/`.
 * **Version gate:** the server can refuse clients that are too old (`MIN_CLIENT_VERSION` → `426 CLIENT_TOO_OLD`).
 * **Schema changes:** new columns require `prisma db push` to have run **before** new clients roll out.
 
@@ -347,8 +347,7 @@ Parts of NYX are built around **unmodified code from Signal Messenger, LLC** (al
 | Component in this repo | Upstream project | Why it is here |
 |---|---|---|
 | `packages/spqr-wasm/` (crate `spqr` v1.6.0) | SparsePostQuantumRatchet | Post-quantum ratchet (ML-KEM braid) for wire v2 |
-| `packages/keytrans-wasm/` (crate `libsignal-keytrans`) | libsignal | Key Transparency verifier in the browser |
-| `server/kt-query/` | key-transparency-server | KT log service (read/write) beside the API |
+| `server/kt-query/` | key-transparency-server | KT v2 log service (read/write) + auditor beside the API |
 
 Licenses, the exact **pinned commits**, how each artifact is built, byte sizes, and the redistribution obligations are documented in **[`NOTICE`](NOTICE)** — keep that file together with `LICENSE` in any redistribution.
 

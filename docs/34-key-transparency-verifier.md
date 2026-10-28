@@ -1,29 +1,31 @@
 # 34 — Verifier Key Transparency di klien
 
-> **Status: seluruh integrasi klien landed** — verified-search terhadap bukti
-> nyata (2026-10-13), lalu bundle + loop monitor + auditor + gossip (2026-10-14);
-> log v2 ML-DSA-65 baru **dual-write** (2026-10-21). Modul WASM
-> (`packages/keytrans-wasm`, kompilasi `libsignal-keytrans`), pembungkus klien
-> (`web/src/lib/keyTransparency.ts`), pemakai produksinya
+> **Status: klien hanya mengenal log v2 (2026-10-28).** Verified-search terhadap
+> bukti nyata (2026-10-13), bundle + loop monitor + auditor + gossip (2026-10-14),
+> lalu **pensiun KT v1** (`docs/38`): modul verifier v1
+> (`web/src/lib/keyTransparency.ts` + `keytrans.wasm`) dan test-nya dihapus dari
+> klien, `ktBundleProof` selalu memakai verifier ABI 2 (`keyTransparencyV2.ts` +
+> `keytrans-v2.wasm`). Klien memakai
 > (`web/src/lib/ktBundleProof.ts`, `web/src/lib/ktSubject.ts`,
-> `web/src/lib/ktMonitoring.ts`, `web/src/lib/ktGossip.ts`), dan **74 test**
-> verifier di enam berkas — `keyTransparency.test.ts` 18 (bukti nyata dari penulis
-> Go + `server/kt-query`, termasuk rotasi kunci terhadap anchor bukti sebelumnya),
-> `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 11,
-> `ktSubject.test.ts` 8, `ktBundleProof.test.ts` 6. Bundle peer kini
+> `web/src/lib/ktMonitoring.ts`, `web/src/lib/ktGossip.ts`), dan **86 test** di
+> sembilan berkas KT (`ktBundleProofV2`, `keyTransparencyV2`, `ktConfigPin`,
+> `ktMonitoring`, `ktGossip`, `ktSubject`, `ktAvailability`,
+> `ktIdentifierStorage`, `peerIdentityTrust`). Bundle peer
 > **diverifikasi terhadap log sebelum dipin** (§34.6a), loop monitor dijalankan
 > penjadwal (§34.6b), auditor pihak ketiga dilayani `server/kt-query`
-> (`audit.go`), dan tree head di-gossip antar klien (§34.6c). Log v1 tetap
-> frozen; log v2 (ML-DSA-65, port/metrik terpisah) didokumentasikan di
-> `docs/35` §35.7 Fase 7. Banner "KT tidak tersedia" **landed 2026-10-24**
-> (`web/src/lib/ktAvailability.ts`, wired ke loop monitor).
+> (`audit.go`), dan tree head di-gossip antar klien (§34.6c). Banner "KT tidak
+> tersedia" **landed 2026-10-24** (`web/src/lib/ktAvailability.ts`, wired ke loop
+> monitor).
 >
-> **Cutover baca v2 = operasional, bukan flag kode (2026-10-25).** Selfhost
-> sekarang menjalankan `nyx-kt-query-v2` (:8089 baca / :8087 tulis) dan
-> `nyx-kt-auditor-v2` (:8088), dan `KT_QUERY_URL` di `.env` server menunjuk v2 —
-> API hanya meneruskan protobuf mentah, jadi tidak ada `KT_READ_MODE` di kode.
-> Rollback = arahkan `KT_QUERY_URL` kembali ke v1 **dan** reset pin KT klien
-> (`resetKtPin`), karena klien sudah mem-pin konfigurasi v2.
+> **Cutover baca v2 selesai secara kode (2026-10-28).** Selfhost menjalankan
+> `nyx-kt-query-v2` (:8089 baca / :8087 tulis) dan `nyx-kt-auditor-v2` (:8088),
+> dan `KT_QUERY_URL` menunjuk v2. API hanya meneruskan protobuf mentah. Klien
+> **menolak** config non-v2: `abiVersion` kosong/`1` atau `valueFormat` selain
+> `nyx-kt-value-v2` menghasilkan verdict `unavailable` (atau `unverifiable` bila
+> pin ABI 2 sudah ada — potensi downgrade), lihat `ktBundleProof.test` di
+> `ktBundleProofV2.test.ts`. Karena verifier v1 sudah tidak ada, rollback ke log
+> v1 hanya mungkin dengan **men-deploy ulang rilis sebelumnya**; mengarahkan
+> `KT_QUERY_URL` ke v1 sekarang gagal terlihat, bukan diam-diam terverifikasi.
 > Yang **belum**: interop `cmd/kt-client` upstream, dua implementasi auditor
 > (Java referensi vs port Go) berdampingan, dan auditor masih satu host dengan
 > log.
@@ -50,13 +52,13 @@ Semua berjalan **di klien**: server hanya menyampaikan byte.
 
 | Berkas | Isi |
 |---|---|
-| `packages/keytrans-wasm/src/lib.rs` | ABI verifier + framing + re-tag protobuf `UpdateResponse` |
-| `packages/keytrans-wasm/build.sh` | build ke `wasm32-unknown-unknown` (tanpa `wasm-pack`) |
-| `packages/keytrans-wasm/dist/keytrans.wasm` | artefak ter-commit (≈293 KiB / 299.670 byte, **nol import**) |
-| `web/src/lib/keyTransparency.ts` | pembungkus TS: frame, konfigurasi, state update, error |
-| `web/src/lib/__tests__/keyTransparency.test.ts` | 18 test (bukti nyata, MITM, tamper, fuzz, `monitor_build`) |
-| `server/scripts/kt-fixtures.ts` | generator fixture dari kt-server hidup (`pnpm --filter nyx-server run kt:fixtures`) |
-| `web/src/lib/__tests__/fixtures/kt/*` | `config.json`, `search-v1.pb`, `search-v2.pb` (bukti nyata, keyVersion 1 & rotasi) |
+| `packages/keytrans-wasm-v2/src/lib.rs` | ABI verifier v2 (ML-DSA-65) + framing + re-tag protobuf |
+| `packages/keytrans-wasm-v2/build.sh` | build ke `wasm32-unknown-unknown` (tanpa `wasm-pack`) |
+| `packages/keytrans-wasm-v2/dist/keytrans-v2.wasm` | artefak ter-commit, satu-satunya verifier yang dimuat klien |
+| `web/src/lib/keyTransparencyV2.ts` | pembungkus TS ABI 2: frame, konfigurasi, state update, error |
+| `web/src/lib/__tests__/keyTransparencyV2.test.ts` | test ABI 2 (bukti nyata, tamper, fuzz, `monitor_build`) |
+| `packages/keytrans-wasm-v2/testdata/*` | fixture bukti nyata (`search-first`, `search-anchored`, `search-audited`) |
+| `packages/keytrans-wasm/` | **frozen, tidak dipakai klien** (referensi ABI 1; lihat `docs/38`) |
 
 ## 34.3 Interop nyata (bukan mock)
 
@@ -286,17 +288,18 @@ menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
    menimpa banner admin/personal lain, mengabaikan `KT_QUERY_DISABLED`, dan bisa
    di-dismiss per hari lewat mekanisme `SystemBanner` yang sudah ada. 5 test di
    `ktAvailability.test.ts`.
-5. **Rollback** — jalur nyatanya adalah **mengosongkan `KT_QUERY_URL`**: endpoint
-   `/api/keys/kt/*` menjawab 503 dan setiap verdict menjadi `unavailable` (TOFU),
-   tanpa perubahan kode klien. Kapabilitas `KT_LITE` di
+5. **Rollback** — sejak verifier v1 dihapus (`docs/38`), rollback ke log v1
+   **bukan** lagi sekadar mengarahkan `KT_QUERY_URL`: klien akan menolak config
+   ABI 1 (`unavailable`, atau `unverifiable` bila pin ABI 2 sudah ada). Jalur yang
+   masih tersedia: **mengosongkan `KT_QUERY_URL`** (endpoint 503, semua verdict
+   `unavailable` = TOFU) atau men-deploy ulang rilis sebelumnya. Kapabilitas `KT_LITE` di
    `packages/shared/src/transport.ts` **dideklarasikan tetapi tidak pernah
    diiklankan/dibaca** — dulu disebut gerbang rollback di sini, nyatanya bukan.
 6. **Verifikasi E2E jalur KT** — tidak bisa dijalankan di suite E2E NYX (butuh
    layanan `nyx-kt-query` + penulis log hidup; dengan `KT_QUERY_URL` kosong,
    setiap verdict `unavailable` dan pin tetap TOFU). Yang bisa diverifikasi
-   sekarang: unit/properti (**74 test**: `keyTransparency.test.ts` 18,
-   `ktGossip.test.ts` 17, `peerIdentityTrust.test.ts` 14, `ktMonitoring.test.ts` 11,
-   `ktSubject.test.ts` 8, `ktBundleProof.test.ts` 6) + jalur hidup manual
+   sekarang: unit/properti (**86 test** di sembilan berkas KT, termasuk
+   `ktBundleProofV2.test.ts` dan `keyTransparencyV2.test.ts`) + jalur hidup manual
    (`docs/32` §32.8).
 7. **Backfill populasi v2** — akun lama tidak bisa diturunkan `searchKey`-nya
    dari DB. `KT_V2_BACKFILL_ON_LOGIN=1` (opt-in) memakai `usernameHash` yang

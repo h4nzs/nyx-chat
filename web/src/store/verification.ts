@@ -23,8 +23,8 @@ import {
  * ditandatangani, tidak terikat masterSeed, dan bisa ditulis skrip/console mana
  * pun (atau hilang tanpa jejak saat wipe). Sekarang fingerprint safety number
  * hidup di `db.kvStore` sebagai blob **ENC1:** (masterSeed-bound) — sama seperti
- * admin token grup & pin identitas peer. Nilai localStorage lama dimigrasikan
- * sekali (fail-open: bila gagal, user cukup memverifikasi ulang).
+ * admin token grup & pin identitas peer. Status format lama di localStorage
+ * tidak dibaca lagi (`docs/38`): pengguna cukup memverifikasi ulang.
  *
  * Store ini juga memuat `identityAlerts` — daftar perubahan kunci identitas peer
  * yang belum diterima user. UI memakainya untuk memblokir kirim (hard gate
@@ -36,7 +36,6 @@ import {
  */
 
 const KV_KEY = 'nyx_conversation_verification_v1';
-const LEGACY_PREFIX = 'verified_conversation_';
 
 export interface IdentityAlert {
   peerId: string;
@@ -92,7 +91,7 @@ export const computeFingerprint = async (peer: PeerSecurityInfo) => {
   }
 };
 
-/** Baca fingerprint terverifikasi dari kvStore (ENC1), dengan migrasi localStorage sekali. */
+/** Baca fingerprint terverifikasi dari kvStore (ENC1). */
 async function loadStoredVerifications(): Promise<Record<string, string>> {
   try {
     const row = await db.kvStore.get(KV_KEY);
@@ -110,26 +109,7 @@ async function loadStoredVerifications(): Promise<Record<string, string>> {
     console.warn('[Verification] Gagal membaca state terenkripsi:', e);
   }
 
-  // Migrasi sekali dari localStorage (bentuk lama, tanpa tanda tangan).
-  try {
-    const migrated: Record<string, string> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith(LEGACY_PREFIX)) continue;
-      const value = localStorage.getItem(key);
-      if (value) migrated[key.slice(LEGACY_PREFIX.length)] = value;
-    }
-    if (Object.keys(migrated).length > 0) {
-      await persistStoredVerifications(migrated);
-      for (const convId of Object.keys(migrated)) {
-        localStorage.removeItem(`${LEGACY_PREFIX}${convId}`);
-      }
-      console.info(`[Verification] ${Object.keys(migrated).length} status verifikasi dipindahkan ke keychain terenkripsi (docs/29 §7.2).`);
-    }
-    return migrated;
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 async function persistStoredVerifications(map: Record<string, string>): Promise<void> {

@@ -176,5 +176,31 @@
     "terminated": "Sessão encerrada.",
     "eject_failed": "Falha ao ejetar.",
     "keys_rotated": "Chaves Rotacionadas. Reiniciando Sessão..."
+  },
+  "privacy_status": {
+    "title": "Autoverificação de privacidade",
+    "subtitle": "O que está realmente rodando neste dispositivo agora. Cada linha é rotulada pela evidência, não pela intenção.",
+    "loading": "Verificando…",
+    "load_failed": "Não foi possível ler o estado local.",
+    "back": "Configurações",
+    "refresh": "Verificar de novo",
+    "note": "\"Ativo\" significa que há evidência real neste dispositivo (por exemplo, uma prova de Key Transparency que passou na verificação). \"Configurado\" significa que o caminho está habilitado, mas ainda não há um round-trip registrado aqui — preferimos dizer isso a exagerar a garantia.",
+    "state_active": "ativo",
+    "state_configured": "configurado",
+    "state_off": "desligado",
+    "state_unknown": "desconhecido",
+    "layer_e2ee": "Criptografia de mensagens",
+    "layer_e2ee_desc": "As mensagens são seladas no dispositivo; o servidor apenas retransmite texto cifrado.",
+    "layer_ratchet": "Ratchet pós-quântico (SPQR v2)",
+    "layer_ratchet_desc": "Sigilo futuro híbrido; cabeçalhos v2 só são enviados depois que o par prova que consegue lê-los.",
+    "layer_ohttp": "Relay OHTTP para busca",
+    "layer_ohttp_desc": "As buscas são envolvidas por um relay, então a API e o edge não veem seu IP.",
+    "layer_search": "Busca privada (OPRF/PIR)",
+    "layer_search_desc": "Identificadores são buscados por um índice cego; o servidor nunca os recebe em claro.",
+    "layer_kt": "Verificação de Key Transparency",
+    "layer_kt_desc": "As chaves dos contatos são conferidas contra o log público e a prova é verificada neste dispositivo.",
+    "kt_keys": "{{count}} chave(s) de contato verificada(s)",
+    "kt_tree_size": "tamanho da árvore {{size}}",
+    "kt_last_verified": "última verificação {{when}}"
   }
 }

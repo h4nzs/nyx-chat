@@ -176,5 +176,31 @@
     "terminated": "Session terminated.",
     "eject_failed": "Ejection failed.",
     "keys_rotated": "Keys Rotated. Rebooting Session..."
+  },
+  "privacy_status": {
+    "title": "Privacy self-check",
+    "subtitle": "What is actually running on this device right now. Every row is labelled by its evidence, not by intent.",
+    "loading": "Checking…",
+    "load_failed": "Could not read local state.",
+    "back": "Settings",
+    "refresh": "Re-check",
+    "note": "\"Active\" means there is real state on this device (for example a Key Transparency proof that passed verification). \"Configured\" means the path is enabled but no round-trip has been recorded here yet — we would rather say that than overstate the guarantee.",
+    "state_active": "active",
+    "state_configured": "configured",
+    "state_off": "off",
+    "state_unknown": "unknown",
+    "layer_e2ee": "Message encryption",
+    "layer_e2ee_desc": "Messages are sealed on the device; the server only relays ciphertext.",
+    "layer_ratchet": "Post-quantum ratchet (SPQR v2)",
+    "layer_ratchet_desc": "Hybrid forward secrecy; v2 headers are only sent after the peer proves it can read them.",
+    "layer_ohttp": "OHTTP relay for search",
+    "layer_ohttp_desc": "Search requests are wrapped by a relay, so the API and edge do not see your IP.",
+    "layer_search": "Private search (OPRF/PIR)",
+    "layer_search_desc": "Identifiers are searched through a blinded index; the server never receives them in the clear.",
+    "layer_kt": "Key Transparency verification",
+    "layer_kt_desc": "Contact keys are checked against the public log, and the proof is verified on this device.",
+    "kt_keys": "{{count}} contact key(s) verified",
+    "kt_tree_size": "tree size {{size}}",
+    "kt_last_verified": "last verified {{when}}"
   }
 }

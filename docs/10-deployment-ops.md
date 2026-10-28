@@ -8,16 +8,16 @@
 | API | `https://api.nyx-app.my.id` → `localhost:4000` | pm2 `nyx-api` (cluster) |
 | WebTransport | `https://rt.nyx-app.my.id:33333` | pm2 `nyx-sidecar` (Rust, satu fork) |
 | Marketing | `https://nyx-app.my.id` | `/var/www/nyx-marketing` |
-| Key Transparency | `127.0.0.1:8085` (HTTP baca), `127.0.0.1:8081` (gRPC tulis), `127.0.0.1:8082` (gRPC auditor) | binary Go `nyx-kt-query` + LevelDB miliknya — **satu-satunya** pemilik log KT; binary + unit systemd dikirim `deploy.yml` (config + kunci log tetap owner ops, §10.15) |
+| Key Transparency | `127.0.0.1:8089` (HTTP baca), `127.0.0.1:8088` (gRPC tulis), `127.0.0.1:8087` (gRPC auditor) | binary Go `nyx-kt-query-v2` + LevelDB miliknya — **satu-satunya** pemilik log KT sejak v1 pensiun (`docs/38`); binary + unit systemd dikirim `deploy.yml` (config + kunci log tetap owner ops, §10.15) |
 | Relay OHTTP | `127.0.0.1:4100` (proses terpisah) | unit `nyx-ohttp-relay` dikirim `deploy.yml` dan di-restart hanya bila `enabled`; klien memakai `/api/ohttp/relay` di origin API → nginx (§10.18) |
 | Sidecar PIR | `127.0.0.1:9470` (loopback) | binary `server/pir-sidecar`; **tidak** ikut `deploy.yml` (belum ada unit produksi) — jalankan manual bila `PIR_ENABLED=1` (§10.19) |
 | DB | `127.0.0.1:5432/nyx_app` (user `nyx`) | Local PostgreSQL 18 on the VPS (versi prod terkonfirmasi dari dump — `docs/28` §28.7) |
 | Redis | `127.0.0.1:6379` | pub/sub bridge + caches |
-| Storage | Cloudflare R2 | Encrypted blobs + arsip snapshot KT (`kt-snapshots/`) |
+| Storage | Cloudflare R2 | Encrypted blobs + arsip snapshot KT v2 (`kt-snapshots/`) |
 | TURN (WebRTC) | coturn `:3478/udp+tcp`, `:5349/tls` + rentang relay | **primer** untuk kredensial `/api/keys/turn`; Cloudflare TURN hanya cadangan; prosesnya systemd = owner ops (§10.9) |
-| Observability | NYX `127.0.0.1:9464`, sidecar `:9465`, auditor KT `:9466`, log KT `:9467`, log KT v2 `:9468`, auditor KT v2 `:9469`; Prometheus (default `:9090`); Alertmanager `:9093` + relay ntfy `:9095`; exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | semuanya loopback; konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
+| Observability | NYX `127.0.0.1:9464`, sidecar `:9465`, log KT v2 `:9468`, auditor KT v2 `:9469`; Prometheus (default `:9090`); Alertmanager `:9093` + relay ntfy `:9095`; exporter node `:9100`, postgres `:9187`, redis `:9121`; Grafana | semuanya loopback; konfigurasinya di-commit di `ops/`; pemasangan manual (§10.12) |
 
-`deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, binary + unit systemd `nyx-kt-query`/v2, dan unit `nyx-ohttp-relay`** (relay di-restart hanya bila unitnya `enabled`). Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `ops/nginx/nyx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
+`deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, binary + unit systemd log/auditor KT v2, dan unit `nyx-ohttp-relay`** (relay di-restart hanya bila unitnya `enabled`). Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `ops/nginx/nyx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
 
 VPS: Debian 13, **4 core / 8GB RAM / 4GB swap** (upgraded 2026-10 from 1 core / 1GB RAM), `vm.swappiness=10`, PostgreSQL re-tuned for the larger box (see §10.11). The principle from docs/26 §26.9 still applies: the upgrade buys margin for privacy features, not bloat.
 
@@ -30,12 +30,11 @@ On PR and push to `main`:
 | Job | Content |
 |---|---|
 | `build` | gate cepat `scripts/check-wasm-artifacts.sh` + `scripts/check-vendor.sh` → Go build/vet/test `server/kt-query` **dari vendor** → frozen-lockfile install → prisma generate → `pnpm run build` |
-| `wasm` | [R1] bangun ULANG `packages/spqr-wasm` + `packages/keytrans-wasm` dari `vendor/signal/*` lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
+| `wasm` | [R1] bangun ULANG `packages/spqr-wasm`, `packages/keytrans-wasm-v2` (fork lokal), dan `packages/pir-wasm` lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
 | `unit` | `pnpm run test` — seluruh test server (`node:test` + `tsx`) dan web (vitest). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
 | `lint` | **BLOCKING** — `pnpm run lint` = `oxlint src` per paket (ESLint dihapus 2026-10-15). Nol temuan untuk rule level `error` + kategori `correctness`; `no-unused-vars` sengaja `warn` |
 | `alerts` | `SKIP_LIVE=1 scripts/drill-alerts.sh` — drill aturan Prometheus 4 lapis (§10.12); aturan yang merujuk metrik tak terdeklarasi ditolak di sini |
 | `dr-oracle` | [WS-G(6)] `tools/dr-oracle` (Go, implementasi kedua tanpa libsodium): vet/test + gate drift vektor ter-commit + test NYX↔oracle & interop dua arah |
-| `kt-recovery` | [§10.13] drill pemulihan log KT end-to-end (`scripts/kt-restore-drill.sh`) + `go vet`/`go test` `kt-query` |
 | `audit` | `pnpm audit --prod` |
 | `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip; setelah suite, `nyx-api` dinyalakan dan drill alert dijalankan terhadap exporter nyata (`METRICS_URL`) |
 | `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; **coturn installed & started** (loopback relay, `allow-loopback-peers` only in CI) with `TURN_URLS`/`TURN_STATIC_AUTH_SECRET` in the job env; runs `--project=chrome` (WebTransport + real TURN relay active) |
@@ -46,10 +45,10 @@ Push to `main` triggers:
 
 - **Guards (gagal cepat, sebelum install):** `scripts/check-wasm-artifacts.sh` (artefak WASM ter-commit + cocok hash manifest `packages/wasm-artifacts.json`) dan `scripts/check-vendor.sh` (sumber Signal ter-vendor cocok pin `NOTICE`) — tanpa keduanya, clone bersih tidak bisa dibangun ulang.
 1. Install (frozen lockfile) → assert secrets (`VITE_TURNSTILE_SITE_KEY` — satu-satunya yang di-assert hari ini) → build shared → web → marketing → server (incl. `prisma generate`) → Rust sidecar (`cargo build --release`) → binary layanan log KT (`bash server/kt-query/build.sh`, dari vendor; §10.15).
-2. Package ke `nyx-deploy.zip`: manifest root + `packages/shared` (+ `dist`) + `web/dist` + `marketing/dist` + `server/{src,dist,package.json,tsconfig.json,prisma}` + binary sidecar + `server/kt-query/{nyx-kt-query,nyx-kt-check}` + `ops/systemd/`. **Tidak** ikut: `ops/nginx/nyx.conf`, `ops/{prometheus,grafana}`, `scripts/`, `docker-compose.yml`.
-3. SCP to VPS (`root@…`) → `pm2 stop nyx-api nyx-sidecar` → binary KT lama disimpan sebagai `nyx-kt-query.prev` (rollback cepat) → unzip ke `/root/nyx-app` (menimpa; `server/{src,dist}`, `web/`, `marketing/` dihapus lebih dulu).
+2. Package ke `nyx-deploy.zip`: manifest root + `packages/shared` (+ `dist`) + `web/dist` + `marketing/dist` + `server/{src,dist,package.json,tsconfig.json,prisma}` + binary sidecar + `server/kt-query/{nyx-kt-query-v2,nyx-kt-auditor-v2,nyx-kt-v2-init}` + `ops/systemd/`. **Tidak** ikut: `ops/nginx/nyx.conf`, `ops/{prometheus,grafana}`, `scripts/`, `docker-compose.yml`.
+3. SCP to VPS (`root@…`) → `pm2 stop nyx-api nyx-sidecar` → binary KT lama disimpan sebagai `nyx-kt-query-v2.prev` (rollback cepat) → unzip ke `/root/nyx-app` (menimpa; `server/{src,dist}`, `web/`, `marketing/` dihapus lebih dulu).
 4. On VPS: `pnpm install --frozen-lockfile` → **copy `/root/nyx-app/.env` → `server/.env`** (prod secrets live only on the VPS) → `prisma generate` → `prisma db push` (consent env, `|| true`) → deploy web/marketing to `/var/www/…` → reload nginx → `pm2 delete` + `pm2 start` `nyx-api` (`-i max`, `--max-old-space-size=1024`) dan `nyx-sidecar` → `pm2 save --force`.
-5. Layanan log KT (§10.15): binary di-`chmod +x`, unit `/etc/systemd/system/nyx-kt-query.service` disegarkan dari `ops/systemd/` + `systemctl daemon-reload`. Kalau unit **`enabled`**: `systemctl restart nyx-kt-query` → tunggu 2 s → `is-active` + `curl 127.0.0.1:8085/healthz`; gagal ⇒ deploy berhenti **merah** (log KT mati = kunci identitas baru tidak ter-audit). Kalau belum `enabled`: hanya pesan informatif — pemasangan pertama ada di `ops/systemd/README.md`.
+5. Layanan log KT v2 (§10.15): unit v1 yang masih `enabled` dimatikan + dihapus (pensiun, `docs/38`), binary di-`chmod +x`, unit `/etc/systemd/system/nyx-kt-query-v2.service` (+ auditor v2) disegarkan dari `ops/systemd/` + `systemctl daemon-reload`. Kalau config belum ada, `nyx-kt-v2-init` menjalankan bootstrap. Kalau unit **`enabled`**: `systemctl restart nyx-kt-query-v2` → tunggu 2 s → `is-active` + `curl 127.0.0.1:8089/healthz`; gagal ⇒ deploy berhenti **merah** (log KT mati = kunci identitas baru tidak ter-audit). Kalau belum `enabled`: hanya pesan informatif — pemasangan pertama ada di `ops/systemd/README.md`.
 6. Relay OHTTP (§10.18): unit `/etc/systemd/system/nyx-ohttp-relay.service` disegarkan dari `ops/systemd/`. Kalau unit **`enabled`**: pastikan `server/dist/ohttp/relay.js` ada, `systemctl restart nyx-ohttp-relay`, lalu `is-active` + `curl 127.0.0.1:4100/healthz`; gagal ⇒ deploy merah. Kalau belum `enabled`: pesan informatif (relay masih dilayani API bila `OHTTP_RELAY_EXTERNAL` tidak diset). Sidecar PIR **tidak** ikut deploy (belum ada unit sistem/pm2).
 
 > ⚠ Any change to `.env` on the VPS will be **overwritten from `/root/nyx-app/.env`** on the next deploy. Edit the root file, not `server/.env`.
@@ -68,8 +67,8 @@ pg_isready && redis-cli ping
 free -m                                 # RAM pressure watch
 ls /root/backups/                       # nightly pg_dumps
 curl -s 127.0.0.1:9464/metrics | head    # exporter metrik NYX (loopback, §10.12)
-curl -s 127.0.0.1:8085/healthz           # layanan KT: {treeSize,timestamp} (§10.15)
-ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10.13)
+curl -s 127.0.0.1:8089/healthz           # layanan KT v2: {treeSize,timestamp} (§10.15)
+ls /var/lib/nyx/kt-v2-snapshots/         # arsip snapshot KT terverifikasi (§10.13)
 ```
 
 ## 10.5 Post-deploy checklist
@@ -86,12 +85,12 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
    tanpa keputusan eksplisit.
 7. [R1] Pastikan job CI `wasm` hijau: biner WASM yang di-deploy terbukti berasal
    dari `vendor/signal/*` (`scripts/wasm-repro-build.sh --verify`).
-8. [§10.15] Layanan KT hidup: `systemctl is-active nyx-kt-query` → `active`, lalu
-   `curl -s http://127.0.0.1:8085/healthz` → `{treeSize,timestamp}`, dan
-   `/api/keys/kt/*` menjawab bukti (bukan 503 `KT_QUERY_DISABLED`). Health check
-   penuh `nyx-kt-query -check` membuka LevelDB, jadi **hentikan service dulu**
-   (`systemctl stop`, lalu `start`) — beda tree head dengan `latest.json` terakhir
-   berarti basis data dan arsip tidak sinkron.
+8. [§10.15] Layanan KT v2 hidup: `systemctl is-active nyx-kt-query-v2` → `active`,
+   lalu `curl -s http://127.0.0.1:8089/healthz` → `{treeSize,timestamp}`, dan
+   `/api/keys/kt/*` menjawab bukti (bukan 503 `KT_QUERY_DISABLED`). `GET /config`
+   harus `abiVersion: 2`. Health check penuh `nyx-kt-query-v2 -check` membuka
+   LevelDB, jadi **hentikan service dulu** (`systemctl stop`, lalu `start`) — beda
+   tree head dengan `latest.json` terakhir berarti basis data dan arsip tidak sinkron.
 9. [§10.12] `curl -s http://127.0.0.1:9464/metrics` hidup, dan
    `nyx_metrics_rejected_total` tetap **0**.
 
@@ -139,9 +138,9 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 | `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. `docs/30` §30.9 |
 | `ICE_STUN_URLS` | STUN milik operator (opsional, dipisah koma). Kosong = **tidak ada** STUN pihak ketiga; kegagalan TURN jadi 503/502 yang terlihat (`docs/29` §5.7) |
 | `CF_ACCOUNT_ID` / `CF_TURN_KEY_ID` / `CF_TURN_API_TOKEN` | Cloudflare TURN (WebRTC) — **cadangan** sejak WS-E(1) |
-| `KT_SERVER_URL` / `KT_TIMEOUT_MS` | gRPC test-update log KT; samakan dengan `-write-addr` `nyx-kt-query` (`http://127.0.0.1:8081`). Kosong = penulisan log nonaktif (`docs/32` §32.8) |
-| `KT_QUERY_URL` / `KT_QUERY_TIMEOUT_MS` | Layanan baca KT (`http://127.0.0.1:8085`). Kosong = `/api/keys/kt/*` menjawab 503 `KT_QUERY_DISABLED` dan klien jatuh ke TOFU (metrik `result="disabled"`) |
-| `KT_SNAPSHOT_DIR` | Direktori arsip milik `nyx-kt-query`; diisi = unggahan harian 03:30 ke R2 + retensi 30 hari (§10.13) |
+| `KT_V2_SERVER_URL` / `KT_TIMEOUT_MS` | gRPC test-update log KT v2; samakan dengan `-write-addr` `nyx-kt-query-v2` (`http://127.0.0.1:8088`). Kosong = penulisan log nonaktif (`docs/32` §32.8). `KT_SERVER_URL` (v1) tidak dibaca lagi — hanya memicu peringatan boot |
+| `KT_QUERY_URL` / `KT_QUERY_TIMEOUT_MS` | Layanan baca KT v2 (`http://127.0.0.1:8089`). Kosong = `/api/keys/kt/*` menjawab 503 `KT_QUERY_DISABLED` dan klien jatuh ke TOFU (metrik `result="disabled"`). Menunjuk layanan v1 = semua verdict `unavailable` (klien hanya menerima `abiVersion: 2`) |
+| `KT_SNAPSHOT_DIR` | Direktori arsip milik `nyx-kt-query-v2` (default `/var/lib/nyx/kt-v2-snapshots`); diisi = unggahan harian 03:30 ke R2 + retensi 30 hari (§10.13) |
 | `MIN_CLIENT_VERSION` | [R2] Versi klien minimum (mis. `3.0.0`). Klien dengan versi lebih kecil ditolak `426 CLIENT_TOO_OLD` + pesan "perbarui aplikasi" — bukan kehilangan kunci grup secara senyap. Kosong = gerbang mati; klien **tanpa** header versi selalu lolos kecuali `CLIENT_VERSION_REQUIRE_MUTATIONS=1` (§10.14) |
 | `CLIENT_VERSION_REQUIRE_MUTATIONS` | [D1] `1` = **mutasi** (non-GET/HEAD/OPTIONS) tanpa header versi yang bisa dibaca ditolak `426 CLIENT_VERSION_REQUIRED`; baca tetap fail-open. Kosong = perilaku lama (fail-open). Nyatakan hanya saat cutover — lihat §10.14 |
 | `METRICS_HOST` / `METRICS_PORT` | Exporter metrik loopback (default `127.0.0.1:9464`; `0` = mati) — §10.12 |
@@ -159,23 +158,19 @@ ls /var/lib/nyx/kt-snapshots/            # arsip snapshot KT terverifikasi (§10
 
 `JWT_SECRET` (harus sama dengan API — token AUTH diverifikasi di sidecar), `REDIS_URL`, `TRANSPORT_PORT` (default `33333`, **UDP**), opsional `PROD_CERT_PATH` / `PROD_KEY_PATH` (sertifikat CA di produksi; tanpa keduanya sidecar membuat self-signed dan mencetak hash-nya), `TRANSPORT_METRICS_ADDR` (default `127.0.0.1:9465`; **wajib loopback** — alamat non-loopback ditolak saat start; `0` = exporter mati).
 
-### `nyx-kt-query` (env proses log KT, §10.15)
+### `nyx-kt-query-v2` (env proses log KT, §10.15) — satu-satunya log sejak 2026-10-28
 
-`KT_CONFIG_FILE` (config YAML berisi kunci log + `db.file`), `NYX_KT_QUERY_ADDR` (default `127.0.0.1:8085`), `NYX_KT_WRITE_ADDR` (`127.0.0.1:8081`), `NYX_KT_AUDITOR_ADDR` (`127.0.0.1:8082`), `NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL` (`24h`), `NYX_KT_SNAPSHOT_KEEP` (`7`), `NYX_KT_METRICS_ADDR` (default `127.0.0.1:9467`; wajib loopback, `0` = mati). Semua alamat = loopback; tidak ada port KT yang boleh publik.
-
-### `nyx-kt-query-v2` (env proses log KT v2, transisi docs/35 §35.7)
-
-Paralel dan **terpisah** dari v1: database, config, snapshot, dan port sendiri
-(`NYX_KT_V2_QUERY_ADDR` default `127.0.0.1:8089`, `NYX_KT_V2_WRITE_ADDR`
-`:8088`, `NYX_KT_V2_AUDITOR_ADDR` `:8087`, `NYX_KT_V2_SNAPSHOT_DIR`,
-`NYX_KT_V2_METRICS_ADDR` default `127.0.0.1:9468`). Unit + contoh env:
-`ops/systemd/nyx-kt-query-v2.*`; auditor ML-DSA: `nyx-kt-auditor-v2.*`
-(`NYX_KT_V2_AUDITOR_*`, metrics `:9469`). Server menulis ke keduanya bila
-`KT_V2_SERVER_URL` diisi; pembacaan pindah dengan mengarahkan `KT_QUERY_URL` ke
-`:8089`. Saat `/etc/nyx/kt-v2/config.yaml` belum ada, `deploy.yml` menjalankan
+`KT_V2_CONFIG_FILE` (config YAML berisi kunci ML-DSA + `db.file`),
+`NYX_KT_V2_QUERY_ADDR` (default `127.0.0.1:8089`), `NYX_KT_V2_WRITE_ADDR`
+(`:8088`), `NYX_KT_V2_AUDITOR_ADDR` (`:8087`), `NYX_KT_V2_SNAPSHOT_DIR`,
+`NYX_KT_V2_SNAPSHOT_INTERVAL` (`24h`), `NYX_KT_V2_SNAPSHOT_KEEP` (`7`),
+`NYX_KT_V2_METRICS_ADDR` (default `127.0.0.1:9468`; wajib loopback, `0` = mati).
+Unit + contoh env: `ops/systemd/nyx-kt-query-v2.*`; auditor ML-DSA:
+`nyx-kt-auditor-v2.*` (`NYX_KT_V2_AUDITOR_*`, metrics `:9469`). Saat
+`/etc/nyx/kt-v2/config.yaml` belum ada, `deploy.yml` menjalankan
 `nyx-kt-v2-init` lalu meng-`enable` kedua unit (bootstrap otomatis); setelah
-`enabled`, setiap deploy me-restart + health-check. Cutover baca dan backfill
-tetap manual — lihat §10.15.
+`enabled`, setiap deploy me-restart + health-check. Semua alamat = loopback;
+tidak ada port KT yang boleh publik.
 
 ### Web (`web/.env` → build-time `VITE_*`, disuntik `deploy.yml` dari secrets)
 
@@ -196,7 +191,7 @@ tetap manual — lihat §10.15.
 - `.env` files are gitignored; `.env.example` (root) and `server/.env.example` are the templates — setiap var di §10.6 punya komentarnya di sana.
 - GitHub Actions secrets: `VPS_HOST/PORT/USER/PASSWORD`, `VITE_API_URL`, `VITE_TRANSPORT_URL`, `VITE_TURNSTILE_SITE_KEY` (di-assert saat deploy), `VITE_APP_SECRET`, `VITE_VAPID_PUBLIC_KEY`, `INDEXNOW_API_KEY`, `CI_DATABASE_URL` (optional). `VITE_TRANSPORT_CERT_HASH` **bukan** secret deploy — ia di-parse dari banner sidecar hanya di job `e2e-chrome` dan untuk dev lokal.
 - Do not commit: DB passwords (VPS: `/root/.nyx_db_pass`), VAPID private keys, R2 secret keys, sidecar private keys (`*.der`).
-- Kunci yang **wajib** ada hanya di `.env` produksi (bukan di DB, bukan di backup): `NYX_AT_REST_PEPPER` dan config YAML `nyx-kt-query` (kunci `signing-key`/`vrf-key`/`prefix-key`/`opening-key` log KT). Bocornya pepper = identifier at-rest bisa dibalik; bocornya kunci log KT = log bisa ditulis oleh pihak lain.
+- Kunci yang **wajib** ada hanya di `.env` produksi (bukan di DB, bukan di backup): `NYX_AT_REST_PEPPER` dan config YAML `nyx-kt-v2` (kunci ML-DSA `signing-key`/`prefix-key`/`opening-key` log KT). Bocornya pepper = identifier at-rest bisa dibalik; bocornya kunci log KT = log bisa ditulis oleh pihak lain.
 
 ## 10.8 Rollback
 
@@ -295,7 +290,7 @@ IP (`103.169.207.156`). The mitigation is to make that knowledge worthless:
    ufw enable && ufw status verbose
    ```
    cloudflared egress (:7844 outbound) is unaffected. Port Prometheus/exporter dan
-   `nyx-kt-query` **tidak** pernah dibuka: semuanya loopback (§10.12, §10.15).
+   `nyx-kt-query-v2` **tidak** pernah dibuka: semuanya loopback (§10.12, §10.15).
 3. ~~Front `rt.` with Tunnel/Spectrum~~ — not feasible today (no CF WebTransport
    proxying); revisit if Cloudflare ships it or budget allows Spectrum.
 
@@ -451,8 +446,8 @@ akan ditolak lapis kontrak metrik di `scripts/drill-alerts.sh`):
 | `nyx_sweeper_last_run_timestamp_seconds{result}` | Kapan sweeper terakhir selesai (termasuk yang gagal) |
 | `nyx_sweeper_deleted_rows_total{kind}` | Baris dibersihkan (`refresh_token`, `session_key`, `account`, `subscription`, `story`) |
 | `nyx_backup_ops_total{op,result}` | Operasi endpoint backup R2 (presign/unduh/hapus) per hasil — `docs/31` |
-| `nyx_kt_writes_total{result}` | Penulisan entri log KT, per hasil |
-| `nyx_kt_last_success_timestamp_seconds` | Unix timestamp penulisan log KT terakhir yang **berhasil** (lag = selisihnya) |
+| `nyx_kt_writes_total{result}` | Penulisan entri log KT **v2**, per hasil (nama lama dipertahankan; `nyx_kt_v2_writes_total` dihapus 2026-10-28) |
+| `nyx_kt_last_success_timestamp_seconds` | Unix timestamp penulisan log KT v2 terakhir yang **berhasil** (lag = selisihnya) |
 | `nyx_kt_queries_total{result}` | Permintaan bukti lewat `/api/keys/kt/*`; `result="disabled"` = `KT_QUERY_URL` kosong (klien jatuh ke TOFU) |
 | `nyx_kt_snapshot_upload_total{result}` | Unggahan arsip snapshot KT ke R2 (§10.13) |
 | `nyx_kt_snapshot_deleted_total{result}` | Arsip snapshot KT yang dihapus karena retensi |
@@ -467,9 +462,9 @@ akan ditolak lapis kontrak metrik di `scripts/drill-alerts.sh`):
 | `nyx_wss_capability_total{capability}` | Kapabilitas hasil negosiasi jalur WSS (socket.io), per kapabilitas — `none` = klien mengiklankan sesuatu yang tak dikenal gateway (`docs/29` §5.6). Seri datar = tidak ada klien yang mengiklankan apa pun, bukan "semua sudah v2" |
 | `nyx_wss_ingress_seconds` (histogram) | Latensi ingress jalur **WSS**: dari event socket.io diterima sampai handler selesai (validasi + rate limit + perangkat + publish). Pembanding `nyx_transport_ingress_seconds` — lihat "Latensi jalur" di bawah. Rendah tanpa label → tetap dirender (bernilai 0) sejak boot, jadi `rate(..._count[15m])` = **0**, bukan "No data" |
 
-**Metrik auditor log KT** (`server/kt-query/cmd/nyx-kt-auditor/metrics.go`, exporter
-loopback terpisah di `NYX_KT_AUDITOR_METRICS_ADDR`, default `127.0.0.1:9466`) —
-scrape config-nya job `nyx-kt-auditor`. Aturan privasinya sama (deklarasi dulu,
+**Metrik auditor log KT** (`server/kt-query/cmd/nyx-kt-auditor-v2/metrics.go`,
+exporter loopback terpisah di `NYX_KT_V2_AUDITOR_METRICS_ADDR`, default
+`127.0.0.1:9469`) — scrape config-nya job `nyx-kt-auditor-v2`. Aturan privasinya sama (deklarasi dulu,
 label enum, penolakan dihitung):
 
 | Metrik | Arti |
@@ -485,8 +480,9 @@ label enum, penolakan dihitung):
 | `nyx_kt_auditor_uptime_seconds` | Umur proses: pembeda "proses baru (head pertama masih menunggu irama)" dari "proses lama yang tak pernah menandatangani" |
 | `nyx_kt_auditor_metrics_rejected_total{reason}` | Penjaga privasi sisi auditor; harus **selalu 0** |
 
-**Metrik proses LOG KT** (`server/kt-query/metrics.go`, exporter loopback terpisah
-di `NYX_KT_METRICS_ADDR`, default `127.0.0.1:9467`) — job `nyx-kt-query`. Ini
+**Metrik proses LOG KT** (`server/kt-query/cmd/nyx-kt-query-v2/metrics.go`,
+exporter loopback terpisah di `NYX_KT_V2_METRICS_ADDR`, default `127.0.0.1:9468`)
+— job `nyx-kt-query-v2`. Ini
 proses yang **menulis** riwayat, bukan yang mengauditnya: kegagalannya fail-open
 (registrasi tetap sukses tanpa jejak audit), jadi tidak ada satu pun error di
 aplikasi yang menunjuk kemari:
@@ -502,12 +498,9 @@ aplikasi yang menunjuk kemari:
 | `nyx_kt_query_uptime_seconds` | Umur proses (pembeda restart cepat) |
 | `nyx_kt_query_metrics_rejected_total{reason}` | Penjaga privasi sisi log; harus **selalu 0** |
 
-**Metrik proses LOG KT v2** mengekspor nama yang sama (`nyx_kt_query_*`) di
-`NYX_KT_V2_METRICS_ADDR` (`127.0.0.1:9468`, job `nyx-kt-query-v2`); demikian
-pula auditor v2 (`nyx_kt_auditor_*`, `127.0.0.1:9469`, job
-`nyx-kt-auditor-v2`). Nama sengaja tidak diberi sufiks v2 supaya dashboard dan
-aturan alarm yang ada berlaku untuk kedua log; `job` membedakannya. Jangan
-menambahkan aturan `up == 0` sebelum unit v2 di-`enable` (akan menyala palsu).
+Nama metrik `nyx_kt_query_*`/`nyx_kt_auditor_*` sengaja tidak diberi sufiks v2:
+sejak log v1 pensiun hanya ada satu log, dan nama lama menjaga dashboard/alert
+serta histori seri tetap berlaku.
 
 **Metrik sidecar WebTransport** (`server/transport-sidecar/src/metrics.rs`,
 `TRANSPORT_METRICS_ADDR`, default `127.0.0.1:9465`) — job `nyx-sidecar`. "Aplikasi
@@ -549,8 +542,8 @@ dari kenyataan luar** (mis. daftar objek R2, `…_remote_latest_timestamp_second
 — bukan counter, lihat §10.13.
 
 **Pemasangan (ops di VPS).** Prometheus + Grafana + exporter node/postgres/redis
-di host yang sama (`nyx-api` :9464, sidecar :9465, auditor KT :9466, log KT
-:9467, log KT v2 :9468, auditor KT v2 :9469 — semuanya **loopback**). Alertmanager juga di-commit, tetapi **tanpa
+di host yang sama (`nyx-api` :9464, sidecar :9465, log KT v2 :9468, auditor KT
+v2 :9469 — semuanya **loopback**). Alertmanager juga di-commit, tetapi **tanpa
 rahasia**: `ops/alertmanager/alertmanager.yml` hanya menunjuk relay loopback,
 dan topik ntfy hidup di EnvironmentFile 0600 di VPS (§10.12 sub-bagian
 notifikasi).
@@ -592,8 +585,8 @@ curl -s 127.0.0.1:9090/api/v1/targets | grep -o '"health":"[a-z]*"' | sort | uni
 curl -s 127.0.0.1:9090/api/v1/rules   | grep -o '"name":"nyx[^"]*"' | wc -l   # 39 aturan
 # Jumlah target nyx-api = jumlah worker pm2 (-i max); 0 bila METRICS_PORT=0.
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=count(up{job="nyx-api"})'
-curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-auditor"}'
-curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-query"}'
+curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-auditor-v2"}'
+curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-kt-query-v2"}'
 curl -s 127.0.0.1:9090/api/v1/query --data-urlencode 'query=up{job="nyx-sidecar"}'
 # Semua target harus `up` — target yang mati TIDAK menyalakan alarm lain (aturan
 # yang bergantung padanya "diam" karena tidak ada data), jadi `up` diperiksa eksplisit.
@@ -618,7 +611,7 @@ panel dijaga identik dengan `alerts.yml` supaya tidak ada dua kebenaran. Panel
 `nyx_metrics_rejected_total` (harus 0) dan `Redis key ter-evict` sengaja diberi
 warna merah pada nilai > 0: keduanya berarti jaminan privasi/rate-limit sudah
 bocor, bukan sekadar performa. Sejak 2026-10-16 dashboard punya baris **Key
-Transparency (auditor mode 3 + log nyx-kt-query)**: auditor hidup, umur tree head
+Transparency (auditor mode 3 + log nyx-kt-query-v2)**: auditor hidup, umur tree head
 terakhir **dan** umur proses (batang kedua — pembeda "proses baru" dari "tak
 pernah menandatangani"), penjaga label identitas auditor, posisi pohon
 (diverifikasi vs head yang diterima), tulis/baca log KT, putaran audit + head per
@@ -626,7 +619,7 @@ hasil, snapshot KT, dan umur tulis KT sukses terakhir. Sejak 2026-10-17 ada dua
 baris lagi, sejajar dengan aturan alertnya: **Transport WebTransport
 (`nyx-sidecar`)** — sidecar hidup, sesi aktif + handshake per hasil, auth gagal
 per alasan, frame dibuang selain chaff — dan **Log KT: prosesnya sendiri
-(`nyx-kt-query`)** — proses hidup, tulisan per hasil, baca per operasi, umur
+(`nyx-kt-query-v2`)** — proses hidup, tulisan per hasil, baca per operasi, umur
 snapshot lokal, umur anchor `distinguished`, plus panel **ukuran pohon: pandangan
 log vs auditor** (selisih yang melebar = auditor tertinggal, padahal itu satu-
 satunya hal yang membuat log KT punya jaminan auditas).
@@ -665,7 +658,8 @@ Empat lapis: config + kompilasi aturan → **`promtool test rules`** (kasus
 menyala **dan** tidak-menyala per aturan) → kontrak metrik (nama `nyx_*` yang
 dirujuk aturan **atau panel dashboard** harus ada **di salah satu dari empat
 sumber deklarasi**: `server/src/utils/metrics.ts`,
-`server/kt-query/cmd/nyx-kt-auditor/metrics.go`, `server/kt-query/metrics.go`,
+`server/kt-query/cmd/nyx-kt-auditor-v2/metrics.go`,
+`server/kt-query/cmd/nyx-kt-query-v2/metrics.go`,
 `server/transport-sidecar/src/metrics.rs`) → cakupan drill (aturan baru wajib
 punya kasus). Lapis terakhir opsional men-scrape `/metrics` nyata dari keempat
 exporter. Kontrak untuk dashboard ditambahkan bersama panel baris transport/log
@@ -676,7 +670,7 @@ salah tulis tidak akan pernah menyala dan tidak menghasilkan error apa pun** —
 itu yang dicegah lapis ketiga. Ini juga jalan per-PR (job CI `alerts`, dan versi
 scrape-nyata di job `e2e`).
 
-Kelompok `nyx-transport` (6 aturan) dan `nyx-kt-query` (5 aturan) ditambahkan
+Kelompok `nyx-transport` (6 aturan) dan `nyx-kt-query-v2` (5 aturan) ditambahkan
 2026-10-17, saat kedua proses itu akhirnya punya exporter — justru keduanya
 adalah kelas kegagalan **senyap**: sidecar yang mati hanya membuat klien turun ke
 WSS, dan proses log yang mati hanya menghilangkan jejak audit (fail-open).
@@ -725,7 +719,7 @@ muncul sampai seseorang kebetulan membuka dashboard. Penjaganya
 pernah memakai jalur cepat (host ini salah satunya selama WT belum terjangkau dari
 publik) tidak ikut berteriak, karena "selalu nol sejak awal" bukan penurunan.
 
-Kelompok `nyx-kt-auditor` (8 aturan) memisahkan kelas kegagalan yang tindakannya
+Kelompok `nyx-kt-auditor-v2` (8 aturan) memisahkan kelas kegagalan yang tindakannya
 berbeda: proses mati (`…Down`), hidup tapi tak maju (`…RoundStalled`), layanan log
 tak terhubung (`…RoundFailing`), riwayat tidak konsisten (`…ProofInconsistent` —
 insiden keamanan), head ditolak (`…HeadRejected`), dan dua pasangan yang saling
@@ -847,15 +841,15 @@ burst kedaluwarsa > 10k/menit — naikkan batas, jangan mengandalkan run berikut
   `curl -sS -X POST -H "x-admin-key: $ADMIN_CLEANUP_SECRET" https://api.nyx-app.my.id/api/admin/cleanup`
 
 **Snapshot log Key Transparency.** Log KT hanya ada di LevelDB milik
-`nyx-kt-query` (§10.15). Setel `NYX_KT_SNAPSHOT_DIR` di service itu (mis.
-`/var/lib/nyx/kt-snapshots`) untuk menyalakan arsip harian:
+`nyx-kt-query-v2` (§10.15). Setel `NYX_KT_V2_SNAPSHOT_DIR` di service itu (mis.
+`/var/lib/nyx/kt-v2-snapshots`) untuk menyalakan arsip harian:
 
 1. Penulisan dijeda (mutex yang sama dengan penulis log), direktori LevelDB
    disalin, salinan **dibuka ulang** dan tree head + root-nya dibandingkan dengan
    pohon hidup. Beda → arsip dibuang, langkah dilaporkan gagal, `latest.json`
    tidak ditulis. Snapshot yang belum terverifikasi tidak pernah diunggah.
 2. Arsip `kt-snapshot-<waktu>Z.tar.gz` + `latest.json`; arsip lokal dipangkas ke
-   `NYX_KT_SNAPSHOT_KEEP` (default 7).
+   `NYX_KT_V2_SNAPSHOT_KEEP` (default 7).
 3. Proses server NYX (`KT_SNAPSHOT_DIR` di `.env`) mengunggah arsip terbaru ke R2
    tiap 03:30 (`kt-snapshots/<nama arsip>`, kredensial objek hanya di sana),
    idempoten, dan menghapus objek lebih tua dari **30 hari**.
@@ -864,16 +858,21 @@ burst kedaluwarsa > 10k/menit — naikkan batas, jangan mengandalkan run berikut
   dan `nyx_kt_snapshot_deleted_total`.
 - Tanpa `KT_SNAPSHOT_DIR`, job log satu peringatan dan tidak mengunggah apa pun —
   ini kondisi yang harus terlihat, bukan dianggap normal.
-- **Latihan pemulihan.** Sejak 2026-10-14 drill ini **otomatis di CI** (job
-  `kt-recovery`, `scripts/kt-restore-drill.sh`): entri ditulis lewat penulis
-  produksi → snapshot terverifikasi → **basis data hidup dihapus** → pulih hanya
-  dari arsip → tree size **dan** root harus identik dengan pra-bencana, bukti lama
-  tetap lolos verifier upstream (`nyx-kt-check`, memakai `transparency.VerifySearch`
-  yang sama dengan WASM klien), log bisa tumbuh tanpa memutus anchor klien lama,
-  dan kontrol negatif membuktikan pemeriksanya bisa gagal. Yang **tetap manual**
-  (jalankan sebelum mengandalkan arsip R2): unduh arsip terbaru dari R2, ekstrak,
-  arahkan `-db` ke direktori hasil ekstrak dan jalankan `nyx-kt-query -check`;
-  `GET /healthz` harus melaporkan ukuran pohon yang sama dengan `latest.json`.
+- **Latihan pemulihan (manual sejak 2026-10-28).** Drill otomatis di CI (job
+  `kt-recovery` + `scripts/kt-restore-drill.sh`) **dihapus** bersama pensiunnya
+  log v1: keduanya bergantung pada penulis v1 dan pemeriksa `nyx-kt-check`, dan
+  tidak ada di repo lagi. Menggantinya otomatis butuh harness v2 (tulis lewat
+  penulis v2 → snapshot → hapus DB → pulih dari arsip → bandingkan tree size +
+  root dengan pra-bencana, plus bukti lama tetap lolos `keytrans-wasm-v2`), jadi
+  langkah berikut **wajib dijalankan operator** sebelum mengandalkan arsip R2:
+
+  1. Unduh arsip terbaru dari R2 (`kt-snapshots/<file>` di `latest.json`), ekstrak.
+  2. `systemctl stop nyx-kt-query-v2` (LevelDB single-process — `-check` tidak
+     bisa membuka DB yang sedang dipakai).
+  3. `nyx-kt-query-v2 -config <salinan config> -db <direktori hasil ekstrak> -check`
+     → tree head harus sama dengan `treeSize`/`root` di arsip itu.
+  4. `systemctl start nyx-kt-query-v2`, lalu `curl 127.0.0.1:8089/healthz` harus
+     melaporkan angka yang sama.
 
 ## 10.14 Versi klien minimum (`MIN_CLIENT_VERSION`) — added 2026-10-15, R2
 
@@ -938,110 +937,101 @@ naikkan `MIN_CLIENT_VERSION` ke versi rilis sebelumnya → pantau
 `nyx_client_version_rejected_total` (lonjakan = masih ada klien lama); turunkan
 kembali ke kosong bila lonjakannya besar dan pesan-pesannya belum sampai.
 
-## 10.15 Layanan Key Transparency (`nyx-kt-query`) — added 2026-10-15
+## 10.15 Layanan Key Transparency v2 (`nyx-kt-query-v2`) — added 2026-10-15, v1 pensiun 2026-10-28
 
 Log KT tidak ada di Postgres dan tidak di R2: ia hidup di LevelDB yang **dimiliki
-satu proses** — `server/kt-query/` (Go), dijalankan sebagai `nyx-kt-query`. Dua
-alasan bentuknya begitu (query service upstream tidak bisa melayani nilai log NYX;
-LevelDB menolak dibuka dua proses) ada di `server/kt-query/README.md` — baca itu
-sebelum menyentuh service ini.
+satu proses** — `server/kt-query/` (Go), dijalankan sebagai `nyx-kt-query-v2`.
+Dua alasan bentuknya begitu (layanan query upstream tidak bisa melayani nilai log
+NYX; LevelDB menolak dibuka dua proses) ada di `server/kt-query/README.md` —
+baca itu sebelum menyentuh service ini.
 
-**Transisi v2 (docs/35 §35.7).** Binary `nyx-kt-query-v2` dan
-`nyx-kt-auditor-v2` memakai direktori data/konfigurasi sendiri
-(`/var/lib/nyx/kt-v2`, `/var/lib/nyx/kt-v2-snapshots`,
-`/var/lib/nyx/kt-auditor-v2`, config `/etc/nyx/kt-v2/`). `deploy.yml` memasang
-unitnya, dan bila config belum ada ia menjalankan `nyx-kt-v2-init` (kunci lahir
-di VPS), menyalin contoh `EnvironmentFile`, lalu `enable` kedua unit. Pemasangan
-pertama **v1** tetap manual; cutover baca (`KT_QUERY_URL`) dan backfill akun lama
-juga manual (search key tidak dapat diturunkan dari database). Jangan
-menjalankan dua proses pada **satu** direktori LevelDB. Setelah cutover
-(`KT_QUERY_URL` → `:8089`), v1 dipertahankan read-only sampai tidak ada klien
-lama; rollback setelah klien mem-pin ABI 2 bersifat satu arah (anti-downgrade).
+Sejak 2026-10-28 hanya ada **satu** log (`docs/38`): penulis v1, layanan v1,
+auditor v1, `nyx-kt-check`, dan drill v1 dihapus. `deploy.yml` mematikan +
+menghapus unit v1 (`nyx-kt-query`, `nyx-kt-auditor`) yang masih `enabled` di VPS
+sebelum men-deploy v2; LevelDB v1 dibiarkan di disk untuk arsip operator
+(`docs/39`). `KT_SERVER_URL` sisa di `.env` hanya memicu satu peringatan boot dan
+diabaikan.
 
-**Bangun** (dari vendor, tanpa jaringan dan tanpa checkout upstream; artefaknya
-**tidak** ikut `deploy.yml`):
+**Bangun** (dari vendor, tanpa jaringan dan tanpa checkout upstream):
 
 ```bash
-server/kt-query/build.sh          # → server/kt-query/nyx-kt-query + nyx-kt-check
+server/kt-query/build.sh          # → nyx-kt-query-v2 + nyx-kt-auditor-v2 + nyx-kt-v2-init
 server/kt-query/build.sh test     # go vet + go test
 ```
 
-**Jalankan** (semua listener loopback; config YAML berisi kunci log + `db.file`):
+**Jalankan** (semua listener loopback; config YAML berisi kunci ML-DSA + `db.file`):
 
 ```bash
-nyx-kt-query \
-  -config /etc/nyx/kt/test_config.yaml \
-  -read-addr 127.0.0.1:8085 \
-  -write-addr 127.0.0.1:8081 \
-  -auditor-addr 127.0.0.1:8082 \
-  -distinguished 1m \
-  -snapshot-dir /var/lib/nyx/kt-snapshots
+nyx-kt-query-v2 \
+  -config /etc/nyx/kt-v2/config.yaml \
+  -read-addr 127.0.0.1:8089 \
+  -write-addr 127.0.0.1:8088 \
+  -auditor-addr 127.0.0.1:8087 \
+  -snapshot-dir /var/lib/nyx/kt-v2-snapshots
 ```
 
-Flag/env lengkap (`-config`/`KT_CONFIG_FILE`, `-read-addr`/`NYX_KT_QUERY_ADDR`,
-`-write-addr`/`NYX_KT_WRITE_ADDR`, `-auditor-addr`/`NYX_KT_AUDITOR_ADDR`,
-`-snapshot-dir`/`NYX_KT_SNAPSHOT_DIR`, `NYX_KT_SNAPSHOT_INTERVAL`,
-`NYX_KT_SNAPSHOT_KEEP`, `-check`) ada di `server/kt-query/README.md`; sisi server
-NYX memakai `KT_SERVER_URL` (tulis, `:8081`) dan `KT_QUERY_URL` (baca, `:8085`).
+Flag/env lengkap (`-config`/`KT_V2_CONFIG_FILE`, `-read-addr`/`NYX_KT_V2_QUERY_ADDR`,
+`-write-addr`/`NYX_KT_V2_WRITE_ADDR`, `-auditor-addr`/`NYX_KT_V2_AUDITOR_ADDR`,
+`-snapshot-dir`/`NYX_KT_V2_SNAPSHOT_DIR`, `NYX_KT_V2_SNAPSHOT_INTERVAL`,
+`NYX_KT_V2_SNAPSHOT_KEEP`, `-metrics-addr`/`NYX_KT_V2_METRICS_ADDR`, `-check`)
+ada di `server/kt-query/README.md`; sisi server NYX memakai `KT_V2_SERVER_URL`
+(tulis, `:8088`) dan `KT_QUERY_URL` (baca, `:8089`).
 
 Perannya hari ini:
 
 - **Satu-satunya penulis log** — protokolnya tetap
-  `KeyTransparencyTestService.Update`, jadi `server/src/utils/keyTransparency.ts`
-  tidak berubah.
+  `KeyTransparencyTestService.Update`, nilai selalu format v2 (ML-DSA-65).
 - **Penyaji bukti** untuk `/api/keys/kt/*` (proxy loopback dari Express) →
-  verifikasi di klien WASM (`docs/34`).
+  verifikasi di klien WASM (`docs/34`). Config hanya `abiVersion: 2`.
 - **Pembuat arsip snapshot terverifikasi** yang diunggah server NYX ke R2 (§10.13).
-- **Layanan auditor pihak ketiga** di listener terpisah (`:8082`), dan auditor
-  nyatanya `nyx-kt-auditor` (`server/kt-query/cmd/nyx-kt-auditor`, unit
-  `ops/systemd/nyx-kt-auditor.service`). Log berjalan **mode 3** begitu
-  `api.auditors` diisi: klien mewajibkan auditor head yang segar, dan auditor yang
-  berhenti > 7 hari membuat klien menolak head (jadi prosesnya bagian dari
-  ketersediaan verifikasi kunci, bukan hiasan). Pemasangan ada di
-  `ops/systemd/README.md`.
+- **Layanan auditor pihak ketiga** di listener terpisah (`:8087`), dan auditor
+  nyatanya `nyx-kt-auditor-v2` (unit `ops/systemd/nyx-kt-auditor-v2.service`).
+  Log berjalan **mode 3** begitu `api.auditors` diisi: klien mewajibkan auditor
+  head yang segar, dan auditor yang berhenti > 7 hari membuat klien menolak head
+  (jadi prosesnya bagian dari ketersediaan verifikasi kunci, bukan hiasan).
+  Pemasangan ada di `ops/systemd/README.md`.
 
-**Deploy: otomatis, dengan satu langkah sekali-saja.** Unit-nya ada di repo
-(`ops/systemd/nyx-kt-query.service` + template `nyx-kt-query.env.example` +
-`ops/systemd/README.md`), jadi sejak 2026-10-15:
+**Deploy: otomatis, termasuk bootstrap pertama.** Unit-nya ada di repo
+(`ops/systemd/nyx-kt-query-v2.service` + template
+`nyx-kt-query-v2.env.example` + `ops/systemd/README.md`):
 
 | Bagian | Siapa yang mengerjakan |
 |---|---|
-| Build binary dari vendor (`nyx-kt-query` + `nyx-kt-check` + `nyx-kt-auditor`) | `deploy.yml` (CI) |
+| Build binary dari vendor (`nyx-kt-query-v2`, `nyx-kt-auditor-v2`, `nyx-kt-v2-init`) | `deploy.yml` (CI) |
 | Salin binary + `ops/systemd/` ke VPS, segarkan unit, `daemon-reload` | `deploy.yml` |
-| Restart + verifikasi (`is-active`, `/healthz`) bila unit `enabled`; gagal ⇒ deploy merah | `deploy.yml` |
-| Restart `nyx-kt-auditor` setelah `nyx-kt-query` hidup (bila unit auditor `enabled`) | `deploy.yml` |
-| Simpan binary sebelumnya sebagai `nyx-kt-query.prev` | `deploy.yml` |
-| Pemasangan pertama: direktori, kunci log + config YAML, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
-| Pemasangan pertama auditor (mode 3): kunci auditor, entri `api.auditors`, `EnvironmentFile`, `systemctl enable --now` | **owner ops, sekali** — `ops/systemd/README.md` |
+| Matikan + hapus unit v1 yang masih `enabled` (pensiun, `docs/38`) | `deploy.yml` |
 | Bootstrap v2: `nyx-kt-v2-init` (config + kunci ML-DSA di VPS), salin env contoh, `enable` kedua unit, isi `KT_V2_SERVER_URL`, `pm2 restart --update-env` | `deploy.yml` (bila `/etc/nyx/kt-v2/config.yaml` belum ada) |
-| Cutover baca v2 (`KT_QUERY_URL` → `:8089`, `KT_SNAPSHOT_DIR` → `kt-v2-snapshots`), lalu v1 read-only | **owner ops, manual** — akun lama belum punya entri v2 |
-| Isi `KT_SERVER_URL` / `KT_QUERY_URL` / `KT_SNAPSHOT_DIR` di `/root/nyx-app/.env`, lalu `pm2 restart nyx-api` | **owner ops, sekali** |
+| Restart + verifikasi (`is-active`, `/healthz`) bila unit `enabled`; gagal ⇒ deploy merah | `deploy.yml` |
+| Restart `nyx-kt-auditor-v2` setelah log hidup (bila unit auditor `enabled`) | `deploy.yml` |
+| Simpan binary sebelumnya sebagai `nyx-kt-query-v2.prev` | `deploy.yml` |
+| Isi `KT_V2_SERVER_URL` / `KT_QUERY_URL` / `KT_SNAPSHOT_DIR` di `/root/nyx-app/.env`, lalu `pm2 restart nyx-api` | **owner ops, sekali** (deploy mengisi `KT_V2_SERVER_URL` sendiri) |
+| Backfill akun lama (`KT_V2_BACKFILL_ON_LOGIN=1`) | **owner ops, manual** — search key tidak dapat diturunkan dari database |
 
 Aturan yang tidak boleh dilanggar:
 
 1. **systemd, bukan pm2, dan hanya satu proses.** Service ini memegang flock
    LevelDB; dua proses (mis. satu di pm2 + satu di systemd) mati dengan
    `resource temporarily unavailable`.
-2. Jangan pernah membuka `:8081`/`:8085`/`:8082` ke publik: hanya `nyx-api`
+2. Jangan pernah membuka `:8088`/`:8089`/`:8087` ke publik: hanya `nyx-api`
    lewat loopback yang boleh menulis/membaca (§10.9 step 2).
-3. Config YAML + kunci log hidup di `/etc/nyx/kt/` (mode `0600`, §10.7) —
+3. Config YAML + kunci log hidup di `/etc/nyx/kt-v2/` (mode `0600`, §10.7) —
    **tidak** di repo dan **tidak** di DB. Jangan regenerate setelah produksi:
    kunci itu identitas log, dan menggantinya membuat semua bukti lama tak bisa
-   diverifikasi klien.
+   diverifikasi klien (`nyx-kt-v2-init -force` menghapusnya — jangan).
 4. `-check` membuka basis data ⇒ hentikan service dulu (§10.5 butir 8).
 5. Kalau `db.file`/`-snapshot-dir` tidak di dalam `ReadWritePaths` unit
-   (`/var/lib/nyx/kt`, `/var/lib/nyx/kt-snapshots`), service mati dengan
+   (`/var/lib/nyx/kt-v2`, `/var/lib/nyx/kt-v2-snapshots`), service mati dengan
    "read-only file system" — tambahkan path-nya di unit, jangan melepas
    hardening-nya.
-6. Sejak 2026-10-17 service ini mengekspos `/metrics` di loopback
-   (`NYX_KT_METRICS_ADDR`, default `127.0.0.1:9467`, job scrape `nyx-kt-query`).
-   Alamat non-loopback ditolak saat start. Sebelum itu, entry di
-   `prometheus.yml` sengaja dikomentari supaya tidak memicu `up == 0` palsu —
-   pola yang sama berlaku untuk exporter baru apa pun: tambahkan job scrape
-   **bersamaan** dengan exporter-nya hidup.
+6. Service ini mengekspos `/metrics` di loopback (`NYX_KT_V2_METRICS_ADDR`,
+   default `127.0.0.1:9468`, job scrape `nyx-kt-query-v2`). Alamat non-loopback
+   ditolak saat start. Tambahkan job scrape **bersamaan** dengan exporter-nya
+   hidup, jangan sebelumnya (`up == 0` palsu).
 7. Pin upstream naik = `scripts/vendor-signal.sh` + `go mod vendor`
    (`server/kt-query/README.md`); vendor-nya ikut di-commit dan dibuktikan bisa
-   dibangun oleh job CI `build` serta dipakai ulang oleh job `kt-recovery`.
+   dibangun oleh job CI `build`.
+8. Rollback ke log v1 **bukan** env flip: klien menolak ABI 1 dan penulis v1
+   sudah dihapus — itu butuh redeploy commit sebelumnya (`docs/38` §38.3).
 
 ## 10.16 Guard anti-abuse registrasi (WS-H) — menyalakan & memantau (added 2026-10-16)
 
@@ -1521,7 +1511,7 @@ mati bersamanya, jadi pasang pemantau di luar VPS:
 Batas yang disengaja: `/api/system/status` tetap menjawab 200 saat Redis mati
 ("jangan block user"), sehingga overlay server-down **tidak** muncul bila hanya
 Redis yang mati — hanya `/health/ready` yang mendeteksinya. WebTransport sidecar
-(UDP :33333) dan `nyx-kt-query` tidak tercakup pemantau HTTP ini.
+(UDP :33333) dan `nyx-kt-query-v2` tidak tercakup pemantau HTTP ini.
 
 ## 10.22 Privacy Pass: menyalakan gate sync anonim — added 2026-10-27
 

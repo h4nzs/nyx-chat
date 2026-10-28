@@ -5,11 +5,11 @@
 /**
  * [docs/34 §34.6 poin 1] Verifikasi prekey bundle terhadap **log Key Transparency**.
  *
- * Sampai sekarang NYX hanya *menulis* log KT dan punya verifier
- * (`web/src/lib/keyTransparency.ts`) yang belum pernah dipanggil jalur produksi.
- * Akibatnya server masih bisa menyajikan bundle kunci palsu yang konsisten dengan
- * dirinya sendiri (TOFU): `peerIdentityTrust` hanya membandingkan kunci baru
- * dengan pin sebelumnya, dan pada kontak pertama ia menerima apa pun.
+ * Sebelum modul ini, NYX hanya *menulis* log KT dan punya verifier yang belum
+ * pernah dipanggil jalur produksi. Akibatnya server masih bisa menyajikan bundle
+ * kunci palsu yang konsisten dengan dirinya sendiri (TOFU): `peerIdentityTrust`
+ * hanya membandingkan kunci baru dengan pin sebelumnya, dan pada kontak pertama
+ * ia menerima apa pun.
  *
  * Modul ini menutup celah itu: sebelum sebuah `identityKey` dipin, bukti log
  * untuk `0x75 || usernameHash(32)` peer diambil lewat `/api/keys/kt/*`,
@@ -27,9 +27,9 @@
  * | `unknown-subject` | username peer belum diketahui → search key tak bisa diturunkan | TOFU, tanpa panggilan jaringan |
  *
  * Kenapa bukan `crypto.worker.ts`: verifikasi berjalan di thread utama lewat
- * impor dinamis (`keyTransparency.ts` + `keytrans.wasm` 295 KiB), jadi bundle
- * di aplikasi yang **tidak** mengaktifkan KT tidak menanggung biaya muatnya
- * sama sekali. Verifikasi hanya terjadi saat bundle peer pertama dibaca
+ * impor dinamis (`keyTransparencyV2.ts` + `keytrans-v2.wasm`), jadi bundle di
+ * aplikasi yang **tidak** mengaktifkan KT tidak menanggung biaya muatnya sama
+ * sekali. Sejak `docs/38` modul v1 tidak lagi diimpor jalur produksi. Verifikasi hanya terjadi saat bundle peer pertama dibaca
  * (dan di-cache), bukan per pesan — anggarannya milidetik dibanding CPU
  * pembangkitan kunci.
  *
@@ -62,20 +62,15 @@ import {
   loadKtConfigPin,
   parseKtConfigPin,
   saveKtConfigPin,
-  type KtConfigAbi,
   type KtConfigPin,
 } from './ktConfigPin';
 import { parseKtValueBytes } from '@nyx/shared';
 import {
   KT_MODE_CONTACT_MONITORING,
   KtVerificationError,
-  type KeyTransparencyVerifier as KeyTransparencyVerifierV1,
-  type KtConfig as KtConfigV1,
+  type KeyTransparencyVerifier,
+  type KtConfig,
   type KtVerifySearchResult,
-} from './keyTransparency';
-import {
-  type KeyTransparencyVerifier as KeyTransparencyVerifierV2,
-  type KtConfig as KtConfigV2,
 } from './keyTransparencyV2';
 
 /** Prefix tipe search key di log KT (`shared.UsernameHashPrefix`, docs/32). */
@@ -121,12 +116,14 @@ export interface KtRemoteConfig {
   abiVersion?: number;
 }
 
-/** Verifier v1 dan v2 punya permukaan identik; ABI dipilih dari config. */
-type KtVerifier = KeyTransparencyVerifierV1 | KeyTransparencyVerifierV2;
+/**
+ * Hanya ada satu verifier sejak log KT v1 dipensiunkan (`docs/38`): ABI 2
+ * (ML-DSA-65, tanpa VRF). Alias ini menjaga permukaan `deps` tetap sama untuk
+ * pemanggil dan test.
+ */
+type KtVerifier = KeyTransparencyVerifier;
 
-type ResolvedKtConfig =
-  | { abi: 1; config: KtConfigV1; pin: KtConfigPin; pinChanged: boolean }
-  | { abi: 2; config: KtConfigV2; pin: KtConfigPin; pinChanged: boolean };
+type ResolvedKtConfig = { config: KtConfig; pin: KtConfigPin; pinChanged: boolean };
 
 export interface KtProof {
   fullTreeHead: Uint8Array;
@@ -292,64 +289,50 @@ export function treeSizeFromFullTreeHead(fullTreeHead: Uint8Array): number {
 // Loader lazy (modul WASM + config)
 // ---------------------------------------------------------------------------
 
-let verifierPromises: Partial<Record<KtConfigAbi, Promise<KtVerifier>>> = {};
+let verifierPromise: Promise<KtVerifier> | undefined;
 let cachedConfig: ResolvedKtConfig | null = null;
 let lastUnavailableAt = 0;
 
 /** Hook test: buang cache config & instance WASM. */
 export function resetKtBundleProofCaches(): void {
-  verifierPromises = {};
+  verifierPromise = undefined;
   cachedConfig = null;
   lastUnavailableAt = 0;
 }
 
 /**
- * Muat verifier sesuai ABI config, sekali per ABI per sesi. Modul WASM diambil
- * lewat URL aset Vite (`?url`) sehingga hanya diunduh saat KT benar-benar dipakai.
+ * Muat verifier v2 sekali per sesi. Modul WASM diambil lewat URL aset Vite
+ * (`?url`) sehingga hanya diunduh saat KT benar-benar dipakai.
  *
- * ABI 1 (v1) dan ABI 2 (v2) memakai file WASM berbeda; frame v1 ditolak modul v2
- * dan sebaliknya, jadi modul tidak boleh dipilih dari tebakan.
+ * Sejak `docs/38`, modul v1 (`packages/keytrans-wasm`) tidak lagi diimpor jalur
+ * produksi: frame ABI 1 ditolak sebelum verifier dimuat.
  */
-async function loadKtVerifier(abi: KtConfigAbi): Promise<KtVerifier> {
-  const existing = verifierPromises[abi];
-  if (existing) {
+async function loadKtVerifier(): Promise<KtVerifier> {
+  if (verifierPromise) {
     try {
-      return await existing;
+      return await verifierPromise;
     } catch (error) {
-      delete verifierPromises[abi];
+      verifierPromise = undefined;
       throw error;
     }
   }
 
-  const promise = (async (): Promise<KtVerifier> => {
-    if (abi === 2) {
-      const [{ instantiateKeyTransparencyVerifier: instantiate }, wasmModule] = await Promise.all([
-        import('./keyTransparencyV2'),
-        import('../../../packages/keytrans-wasm-v2/dist/keytrans-v2.wasm?url'),
-      ]);
-      const url = (wasmModule as { default: string }).default;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier v2 (${response.status})`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return instantiate(bytes as Uint8Array<ArrayBuffer>);
-    }
-
+  verifierPromise = (async (): Promise<KtVerifier> => {
     const [{ instantiateKeyTransparencyVerifier: instantiate }, wasmModule] = await Promise.all([
-      import('./keyTransparency'),
-      import('../../../packages/keytrans-wasm/dist/keytrans.wasm?url'),
+      import('./keyTransparencyV2'),
+      import('../../../packages/keytrans-wasm-v2/dist/keytrans-v2.wasm?url'),
     ]);
     const url = (wasmModule as { default: string }).default;
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier (${response.status})`);
+    if (!response.ok) throw new Error(`kt: gagal mengunduh modul verifier v2 (${response.status})`);
     const bytes = new Uint8Array(await response.arrayBuffer());
     return instantiate(bytes as Uint8Array<ArrayBuffer>);
   })();
 
-  verifierPromises[abi] = promise;
   try {
-    return await promise;
+    return await verifierPromise;
   } catch (error) {
-    delete verifierPromises[abi];
+    verifierPromise = undefined;
     throw error;
   }
 }
@@ -443,11 +426,22 @@ async function defaultFetchAnchor(query: { last?: number; distinguished?: number
  */
 class KtConfigPinMismatchError extends KtVerificationError {}
 
-/** ABI tak dikenal tidak boleh jatuh ke verifier v1 secara diam-diam. */
-function remoteAbi(remote: KtRemoteConfig): KtConfigAbi {
-  if (remote.abiVersion === undefined) return 1;
-  if (remote.abiVersion === 1 || remote.abiVersion === 2) return remote.abiVersion;
-  throw new Error(`kt: ABI log tidak dikenal (${String(remote.abiVersion)})`);
+/**
+ * Klien hanya menerima log ABI 2. `abiVersion` kosong atau `1` berarti
+ * `KT_QUERY_URL` masih menunjuk layanan baca v1 — kondisi itu harus **terlihat**
+ * sebagai verdict, bukan diturunkan diam-diam ke verifier lama (`docs/38`).
+ */
+function assertV2Config(remote: KtRemoteConfig, pinnedToV2: boolean): void {
+  if (remote.abiVersion !== 2) {
+    const reason = `kt: layanan baca bukan log v2 (abiVersion=${String(remote.abiVersion)}) — KT v1 sudah dipensiunkan`;
+    if (pinnedToV2) throw new KtConfigPinMismatchError(reason);
+    throw new Error(reason);
+  }
+  if (remote.valueFormat !== 'nyx-kt-value-v2') {
+    const reason = 'kt: format nilai log tidak cocok dengan ABI 2';
+    if (pinnedToV2) throw new KtConfigPinMismatchError(reason);
+    throw new Error(reason);
+  }
 }
 
 async function resolveConfig(
@@ -463,14 +457,14 @@ async function resolveConfig(
     throw new Error('kt: config log tidak lengkap');
   }
 
-  const abi = remoteAbi(remote);
-  if (abi === 1 && !remote.vrfKey) throw new Error('kt: config log ABI 1 tanpa vrfKey');
-  if (abi === 2 && remote.valueFormat !== 'nyx-kt-value-v2') {
-    throw new Error('kt: format nilai log tidak cocok dengan ABI 2');
-  }
+  // Pin dibaca lebih dulu: config non-v2 saat pin sudah ABI 2 bukan gangguan
+  // layanan biasa, melainkan perubahan skema verifikasi (potensi downgrade) —
+  // dan itu harus berstatus `unverifiable`, bukan `unavailable`.
+  const pin = await loadKtConfigPin();
+  assertV2Config(remote, pin?.abiVersion === 2);
 
   const observed = parseKtConfigPin({
-    abiVersion: abi,
+    abiVersion: 2,
     mode: remote.mode,
     signatureKey: remote.signatureKey,
     vrfKey: remote.vrfKey,
@@ -478,7 +472,6 @@ async function resolveConfig(
   });
   if (!observed) throw new Error('kt: config log tidak valid');
 
-  const pin = await loadKtConfigPin();
   let pinChanged = false;
   if (!pin || !ktConfigPinMatches(pin, observed)) {
     if (pin) {
@@ -500,31 +493,17 @@ async function resolveConfig(
 
   const signatureKey = hexToBytesLocal(observed.signatureKey);
   const auditorKeys = observed.auditorKeys.map(hexToBytesLocal);
-  cachedConfig =
-    abi === 1
-      ? {
-          abi: 1,
-          config: {
-            // Mode divalidasi sebagai integer di atas; tipe `KtMode` adalah
-            // union nilai yang dikenal verifier.
-            mode: observed.mode as KtConfigV1['mode'],
-            signatureKey,
-            vrfKey: hexToBytesLocal(observed.vrfKey!),
-            auditorKeys,
-          },
-          pin: observed,
-          pinChanged,
-        }
-      : {
-          abi: 2,
-          config: {
-            mode: observed.mode as KtConfigV2['mode'],
-            signatureKey,
-            auditorKeys,
-          },
-          pin: observed,
-          pinChanged,
-        };
+  cachedConfig = {
+    config: {
+      // Mode divalidasi sebagai integer di atas; tipe `KtMode` adalah union
+      // nilai yang dikenal verifier.
+      mode: observed.mode as KtConfig['mode'],
+      signatureKey,
+      auditorKeys,
+    },
+    pin: observed,
+    pinChanged,
+  };
   return cachedConfig;
 }
 
@@ -547,22 +526,13 @@ interface SearchVerificationInput {
   now?: number;
 }
 
-/** Panggil `verifySearch` pada verifier yang ABI-nya cocok dengan config. */
+/** Panggil `verifySearch` dengan config log yang sudah ter-pin. */
 function verifySearchWith(
   resolved: ResolvedKtConfig,
   verifier: KtVerifier,
   input: SearchVerificationInput
 ): KtVerifySearchResult {
-  if (resolved.abi === 1) {
-    return (verifier as KeyTransparencyVerifierV1).verifySearch({
-      ...input,
-      config: resolved.config,
-    });
-  }
-  return (verifier as KeyTransparencyVerifierV2).verifySearch({
-    ...input,
-    config: resolved.config,
-  });
+  return verifier.verifySearch({ ...input, config: resolved.config });
 }
 
 const defaultLog = (event: string, detail: Record<string, unknown>) => {
@@ -622,7 +592,7 @@ export async function checkBundleAgainstKeyTransparency(
     const saveState = deps.saveState ?? saveKtState;
     // Config dulu: ABI-nya menentukan modul WASM yang harus dimuat.
     const resolved = await resolveConfig(fetchConfig);
-    const verifier = deps.verifier ?? (await loadKtVerifier(resolved.abi));
+    const verifier = deps.verifier ?? (await loadKtVerifier());
 
     const proof = await fetchProof({ searchKey, last: state?.treeSize });
     const result = verifySearchWith(resolved, verifier, {
@@ -744,10 +714,9 @@ export async function checkBundleAgainstKeyTransparency(
 
     return { status: 'confirmed', keyVersion: parsed.keyVersion };
   } catch (error) {
-    // `KtVerificationError` v1/v2 adalah dua kelas berbeda (modul dimuat dinamis);
-    // nama kelas adalah kontrak yang sama, jadi jangan bergantung pada satu
-    // identitas kelas saja — kalau tidak, penolakan bukti v2 salah dihitung
-    // sebagai `unavailable` + backoff.
+    // Kelas error dari modul WASM bisa berbeda identitas setelah dimuat dinamis;
+    // `name` adalah kontraknya. Tanpa ini, bukti yang ditolak tercatat sebagai
+    // `unavailable` + backoff — kegagalan verifikasi yang menyamar jadi gangguan.
     if (
       error instanceof KtVerificationError ||
       (error instanceof Error && error.name === 'KtVerificationError')
@@ -800,13 +769,10 @@ export interface KtMonitorDeps {
  */
 export async function monitorKeyTransparency(deps: KtMonitorDeps = {}): Promise<KtMonitorOutcome> {
   const resolved = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
-  const verifier = deps.verifier ?? (await loadKtVerifier(resolved.abi));
+  const verifier = deps.verifier ?? (await loadKtVerifier());
   const outcome = await runKtMonitorOnce({
-    // `ktMonitoring` hanya meneruskan keduanya ke verifier; modul WASM yang
-    // dipilih di atas yang menentukan ABI. Cast ini menjaga tipe v1 lama tanpa
-    // menduplikasi loop monitor untuk v2.
-    verifier: verifier as unknown as KeyTransparencyVerifierV1,
-    config: resolved.config as unknown as KtConfigV1,
+    verifier,
+    config: resolved.config,
     fetchMonitor: deps.fetchMonitor ?? defaultFetchMonitor,
     states: deps.states,
     now: deps.now,

@@ -525,7 +525,7 @@ async (req, res, next) => {
     // User baru harus bisa dicari setelah snapshot berikutnya (≤ 3 menit).
     void markPirSnapshotDirty('register')
 
-    // [docs/30 §30.5 WS-A] Catat kunci publik di log KT (no-op tanpa KT_SERVER_URL).
+    // [docs/30 §30.5 WS-A] Catat kunci publik di log KT (no-op tanpa KT_V2_SERVER_URL).
     // Fire-and-forget: latensi registrasi tidak bergantung pada log; kegagalan
     // terlihat sebagai metrik `nyx_kt_writes_total{result="error"}` + log
     // (search key ter-hash, tanpa identitas).

@@ -11,9 +11,10 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r --if-present run test",
     "lint": "pnpm -r --if-present run lint",
+    "check:status": "node scripts/check-status.mjs",
     "bump:patch": "pnpm -r version patch",
     "bump:minor": "pnpm -r version minor",
-    "version": "node scripts/update-md.mjs && git add README.md web/package.json server/package.json marketing/package.json packages/shared/package.json"
+    "version": "node scripts/update-md.mjs && git add README.md STATUS.md web/package.json server/package.json marketing/package.json packages/shared/package.json"
   },
   "packageManager": "pnpm@11.4.0",
   "devDependencies": {

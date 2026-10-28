@@ -15,6 +15,7 @@ const Chat = lazy(() => import('./pages/Chat'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
 const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
+const PrivacyStatusPage = lazy(() => import('./pages/PrivacyStatusPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
@@ -681,6 +682,7 @@ const AppContent = () => {
                 <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
                 <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
                 <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+                <Route path="/settings/privacy" element={<PageWrapper><PrivacyStatusPage /></PageWrapper>} />
                 <Route path="/settings/migrate-send" element={<PageWrapper><MigrationSendPage /></PageWrapper>} />
                 <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 

@@ -176,5 +176,31 @@
     "terminated": "Sesi dihentikan.",
     "eject_failed": "Pengeluaran gagal.",
     "keys_rotated": "Kunci Diputar. Memulai Ulang Sesi..."
+  },
+  "privacy_status": {
+    "title": "Pemeriksaan privasi",
+    "subtitle": "Apa yang benar-benar berjalan di perangkat ini sekarang. Setiap baris diberi label buktinya, bukan niatnya.",
+    "loading": "Memeriksa…",
+    "load_failed": "State lokal tidak bisa dibaca.",
+    "back": "Pengaturan",
+    "refresh": "Periksa ulang",
+    "note": "\"Aktif\" berarti ada bukti nyata di perangkat ini (misalnya bukti Key Transparency yang lolos verifikasi). \"Dikonfigurasi\" berarti jalurnya hidup tetapi belum ada round-trip yang tercatat di sini — kami lebih memilih mengatakan itu daripada melebihkan jaminannya.",
+    "state_active": "aktif",
+    "state_configured": "dikonfigurasi",
+    "state_off": "mati",
+    "state_unknown": "belum diketahui",
+    "layer_e2ee": "Enkripsi pesan",
+    "layer_e2ee_desc": "Pesan disegel di perangkat; server hanya meneruskan ciphertext.",
+    "layer_ratchet": "Ratchet pasca-kuantum (SPQR v2)",
+    "layer_ratchet_desc": "Forward secrecy hibrida; header v2 hanya dikirim setelah peer membuktikan bisa membacanya.",
+    "layer_ohttp": "Relay OHTTP untuk pencarian",
+    "layer_ohttp_desc": "Permintaan pencarian dibungkus relay, jadi API dan edge tidak melihat IP Anda.",
+    "layer_search": "Pencarian privat (OPRF/PIR)",
+    "layer_search_desc": "Identifier dicari lewat index ter-blind; server tidak pernah menerimanya dalam bentuk jelas.",
+    "layer_kt": "Verifikasi Key Transparency",
+    "layer_kt_desc": "Kunci kontak diperiksa terhadap log publik, dan buktinya diverifikasi di perangkat ini.",
+    "kt_keys": "{{count}} kunci kontak terverifikasi",
+    "kt_tree_size": "tree size {{size}}",
+    "kt_last_verified": "terakhir {{when}}"
   }
 }

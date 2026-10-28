@@ -3,7 +3,12 @@
 # This file is part of NYX, licensed under the AGPL-3.0.
 # For commercial licensing, contact admin@nyx-app.my.id.
 #
-# [docs/32 §32.8] Build `nyx-kt-query`.
+# [docs/32 §32.8 · docs/35 §35.7] Build layanan log Key Transparency NYX.
+#
+# Sejak 2026-10-28 hanya **log v2** (ML-DSA-65) yang dibangun: layanan v1
+# (`nyx-kt-query`), auditor v1, dan pemeriksa `nyx-kt-check` dihapus bersama
+# pensiunnya jalur v1 (`docs/38`). Yang tersisa justru yang berjalan di
+# produksi: log v2, auditor v2, dan alat bootstrap sekali pakai.
 #
 # Modul ini bergantung pada `github.com/signalapp/keytransparency`, yang TIDAK
 # bisa diambil dari jaringan (repo privat — `git ls-remote` menjawab "Repository
@@ -27,17 +32,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
-OUT="${NYX_KT_BINARY:-$here/nyx-kt-query}"
-# Pemeriksa KT (docs/34 §34.6b): memakai verifier upstream untuk membuktikan
-# bukti yang disajikan layanan benar-benar bisa diverifikasi dari luar, dan
-# protokol auditor upstream untuk TreeSize/Audit. Dipakai scripts/kt-restore-drill.sh.
-CHECK_OUT="${NYX_KT_CHECK_BINARY:-$here/nyx-kt-check}"
-# Auditor pihak ketiga (docs/30 §30.5 tahap C, mode 3): proses yang memverifikasi
-# aliran update lalu mengirim `SetAuditorHead`. Diport dari implementasi auditor
-# referensi Signal; tanpa proses ini log hanya berjalan `ContactMonitoring`.
-AUDITOR_OUT="${NYX_KT_AUDITOR_BINARY:-$here/nyx-kt-auditor}"
-# Layanan log v2 (ML-DSA + indeks SHA-256, docs/35 §35.7 Fase 7). Proses, basis
-# data, dan port terpisah dari v1 sampai migrasi selesai.
+# Layanan log v2 (ML-DSA + indeks SHA-256, docs/35 §35.7).
 V2_OUT="${NYX_KT_V2_BINARY:-$here/nyx-kt-query-v2}"
 # Auditor v2: proses terpisah dengan kunci/state/port ML-DSA sendiri.
 V2_AUDITOR_OUT="${NYX_KT_V2_AUDITOR_BINARY:-$here/nyx-kt-auditor-v2}"
@@ -78,15 +73,9 @@ if [[ "${1:-build}" == "test" ]]; then
   exit 0
 fi
 
-go build -o "$OUT" .
-go build -o "$CHECK_OUT" ./cmd/nyx-kt-check
-go build -o "$AUDITOR_OUT" ./cmd/nyx-kt-auditor
 go build -o "$V2_OUT" ./cmd/nyx-kt-query-v2
 go build -o "$V2_AUDITOR_OUT" ./cmd/nyx-kt-auditor-v2
 go build -o "$V2_INIT_OUT" ./cmd/nyx-kt-v2-init
-echo "dibangun: $OUT"
-echo "dibangun: $CHECK_OUT"
-echo "dibangun: $AUDITOR_OUT"
 echo "dibangun: $V2_OUT"
 echo "dibangun: $V2_AUDITOR_OUT"
 echo "dibangun: $V2_INIT_OUT"

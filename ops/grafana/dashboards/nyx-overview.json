@@ -1,5 +1,5 @@
 {
-  "__comment": "[docs/27 §27.7 + docs/30 WS-G(1)] Dashboard Grafana NYX (event-only). Semua panel memakai metrik yang sudah dideklarasikan di server/src/utils/metrics.ts, server/kt-query/cmd/nyx-kt-auditor/metrics.go, server/kt-query/metrics.go, server/transport-sidecar/src/metrics.rs, atau exporter host standar (node/postgres/redis) — TIDAK ada label identitas (userId/IP/usernameHash), jadi dashboard ini tidak bisa dipakai membangun profil pengguna. Query sengaja disamakan dengan ops/prometheus/alerts.yml supaya ambang di panel dan ambang alert tidak menyimpang. Pemasangan: dashboard ini diprovisikan dari berkas (docs/10 §10.12) — datasource WAJIB ber-uid 'prometheus'; impor manual (Grafana → Dashboards → Import) hanya jalur cadangan.",
+  "__comment": "[docs/27 §27.7 + docs/30 WS-G(1)] Dashboard Grafana NYX (event-only). Semua panel memakai metrik yang sudah dideklarasikan di server/src/utils/metrics.ts, server/kt-query/cmd/nyx-kt-auditor-v2/metrics.go, server/kt-query/cmd/nyx-kt-query-v2/metrics.go, server/transport-sidecar/src/metrics.rs, atau exporter host standar (node/postgres/redis) — TIDAK ada label identitas (userId/IP/usernameHash), jadi dashboard ini tidak bisa dipakai membangun profil pengguna. Query sengaja disamakan dengan ops/prometheus/alerts.yml supaya ambang di panel dan ambang alert tidak menyimpang. Pemasangan: dashboard ini diprovisikan dari berkas (docs/10 §10.12) — datasource WAJIB ber-uid 'prometheus'; impor manual (Grafana → Dashboards → Import) hanya jalur cadangan.",
   "uid": "nyx-overview",
   "title": "NYX — Privasi, Relay & Kesehatan Host",
   "description": "Observability tanpa telemetry (docs/30 §30.11 WS-G). Baca bersama docs/10 §10.12.",
@@ -141,7 +141,7 @@
       "id": 4,
       "type": "stat",
       "title": "Eksporter metrik hidup (4 proses NYX)",
-      "description": "up{job=~\"nyx-.*\"} untuk keempat exporter loopback: nyx-api :9464, nyx-sidecar :9465, nyx-kt-auditor :9466, nyx-kt-query :9467. Target yang mati TIDAK menyalakan alarm lain (metriknya tidak ada → aturan yang bergantung padanya hanya \"diam\"), jadi setiap exporter punya alarm `…Down` sendiri dan panel ini adalah ringkasannya.",
+      "description": "up{job=~\"nyx-.*\"} untuk keempat exporter loopback: nyx-api :9464, nyx-sidecar :9465, nyx-kt-query-v2 :9468, nyx-kt-auditor-v2 :9469. Target yang mati TIDAK menyalakan alarm lain (metriknya tidak ada → aturan yang bergantung padanya hanya \"diam\"), jadi setiap exporter punya alarm `…Down` sendiri dan panel ini adalah ringkasannya.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -193,7 +193,8 @@
             "uid": "prometheus"
           },
           "expr": "up{job=~\"nyx-.*\"}",
-          "legendFormat": "{{job}}"
+          "legendFormat": "{{job}}",
+          "instant": true
         }
       ]
     },
@@ -759,7 +760,7 @@
     {
       "id": 19,
       "type": "row",
-      "title": "Key Transparency (auditor mode 3 + log nyx-kt-query)",
+      "title": "Key Transparency (auditor mode 3 + log nyx-kt-query-v2)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -773,7 +774,7 @@
       "id": 20,
       "type": "stat",
       "title": "Auditor KT hidup",
-      "description": "up{job=\"nyx-kt-auditor\"} == 0 → alert NyxKtAuditorDown. Tanpa auditor yang menandatangani, log KT hanya berjalan ContactMonitoring — tidak ada error di aplikasi sampai auditor head basi >7 hari dan klien mulai menolak bukti (docs/34 §34.5).",
+      "description": "up{job=\"nyx-kt-auditor-v2\"} == 0 → alert NyxKtAuditorDown. Tanpa auditor yang menandatangani, log KT hanya berjalan ContactMonitoring — tidak ada error di aplikasi sampai auditor head basi >7 hari dan klien mulai menolak bukti (docs/34 §34.5).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -824,8 +825,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "up{job=\"nyx-kt-auditor\"}",
-          "legendFormat": "nyx-kt-auditor"
+          "expr": "up{job=\"nyx-kt-auditor-v2\"}",
+          "legendFormat": "nyx-kt-auditor-v2"
         }
       ]
     },
@@ -1017,7 +1018,7 @@
       "id": 24,
       "type": "timeseries",
       "title": "Tulis/baca log KT dari sisi API (nyx-api)",
-      "description": "Sisi API: nyx_kt_writes_total{result} = penulisan entri ke log KT yang DILAKUKAN server NYX (kegagalan tidak memblokir registrasi, jadi hanya terlihat di sini) → alert NyxKeyTransparencyWriteFailing; nyx_kt_queries_total{result} = pembacaan bukti oleh klien. Metrik PROSES log-nya sendiri ada di baris \"Log KT: prosesnya sendiri (nyx-kt-query)\" — dua hal berbeda: satu mengukur apa yang dikirim server, satu mengukur apa yang diterima/ditulis proses log.",
+      "description": "Sisi API: nyx_kt_writes_total{result} = penulisan entri ke log KT yang DILAKUKAN server NYX (kegagalan tidak memblokir registrasi, jadi hanya terlihat di sini) → alert NyxKeyTransparencyWriteFailing; nyx_kt_queries_total{result} = pembacaan bukti oleh klien. Metrik PROSES log-nya sendiri ada di baris \"Log KT: prosesnya sendiri (nyx-kt-query-v2)\" — dua hal berbeda: satu mengukur apa yang dikirim server, satu mengukur apa yang diterima/ditulis proses log.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1343,21 +1344,23 @@
       },
       "fieldConfig": {
         "defaults": {
-          "mappings": {
-            "type": "value",
-            "options": {
-              "0": {
-                "text": "DOWN",
-                "color": "red",
-                "index": 0
-              },
-              "1": {
-                "text": "UP",
-                "color": "green",
-                "index": 1
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
               }
             }
-          }
+          ]
         },
         "overrides": []
       },
@@ -1555,7 +1558,7 @@
     {
       "id": 34,
       "type": "row",
-      "title": "Log KT: prosesnya sendiri (nyx-kt-query)",
+      "title": "Log KT: prosesnya sendiri (nyx-kt-query-v2)",
       "collapsed": false,
       "datasource": {
         "type": "prometheus",
@@ -1573,7 +1576,7 @@
       "id": 35,
       "type": "stat",
       "title": "Proses log KT hidup",
-      "description": "up{job=\"nyx-kt-query\"} == 0 → alert NyxKtQueryDown. Proses ini FAIL-OPEN: registrasi & rotasi kunci tetap sukses tanpanya — hanya tanpa jejak audit — jadi tidak ada satu pun error di aplikasi yang menunjuk ke sini. Beda dari panel \"Tulis/baca log KT dari sisi API\": panel itu mengukur nyx-api, panel ini proses log-nya.",
+      "description": "up{job=\"nyx-kt-query-v2\"} == 0 → alert NyxKtQueryDown. Proses ini FAIL-OPEN: registrasi & rotasi kunci tetap sukses tanpanya — hanya tanpa jejak audit — jadi tidak ada satu pun error di aplikasi yang menunjuk ke sini. Beda dari panel \"Tulis/baca log KT dari sisi API\": panel itu mengukur nyx-api, panel ini proses log-nya.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1586,21 +1589,23 @@
       },
       "fieldConfig": {
         "defaults": {
-          "mappings": {
-            "type": "value",
-            "options": {
-              "0": {
-                "text": "DOWN",
-                "color": "red",
-                "index": 0
-              },
-              "1": {
-                "text": "UP",
-                "color": "green",
-                "index": 1
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
               }
             }
-          }
+          ]
         },
         "overrides": []
       },
@@ -1622,8 +1627,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "up{job=\"nyx-kt-query\"}",
-          "legendFormat": "nyx-kt-query"
+          "expr": "up{job=\"nyx-kt-query-v2\"}",
+          "legendFormat": "nyx-kt-query-v2"
         }
       ]
     },
@@ -1901,7 +1906,7 @@
             "uid": "prometheus"
           },
           "expr": "max(nyx_kt_query_tree_size)",
-          "legendFormat": "log (nyx-kt-query)"
+          "legendFormat": "log (nyx-kt-query-v2)"
         },
         {
           "refId": "B",

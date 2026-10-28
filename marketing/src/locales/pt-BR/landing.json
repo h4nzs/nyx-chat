@@ -102,7 +102,9 @@
     "q3": "É totalmente gratuito?",
     "a3": "Sim, o NYX é de código aberto e totalmente gratuito. Sem cobranças ocultas, sem anúncios e sem rastreamento de dados.",
     "q4": "Como eu recupero minha conta?",
-    "a4": "Ao se cadastrar, você recebe uma frase de recuperação de 24 palavras. Essa é a ÚNICA maneira de recuperar sua conta, mas lembre-se de que você não poderá acessar seu histórico de mensagens. E nós não guardamos essa frase."
+    "a4": "Ao se cadastrar, você recebe uma frase de recuperação de 24 palavras. Essa é a ÚNICA maneira de recuperar sua conta, mas lembre-se de que você não poderá acessar seu histórico de mensagens. E nós não guardamos essa frase.",
+    "q5": "O NYX é tão rápido quanto um mensageiro comum?",
+    "a5": "Não — e não é essa a proposta. Criptografia pós-quântica, verificação de Key Transparency e busca privada (seu identificador nunca sai do dispositivo em claro) rodam no seu dispositivo, então o primeiro carregamento e a primeira mensagem após uma troca de chave pesam mais que um mensageiro que só confere uma senha. Tratamos isso como o preço da garantia que você recebe, e preferimos ser honestos a nos chamar de leves."
   },
   "pipeline": {
     "title": "COMO O NYX PROTEGE SUA MENSAGEM",

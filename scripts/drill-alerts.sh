@@ -23,8 +23,8 @@
 #
 # Empat sumber deklarasi (semuanya di-repo, bukan hasil runtime):
 #   - `server/src/utils/metrics.ts`                          → metrik nyx-api
-#   - `server/kt-query/cmd/nyx-kt-auditor/metrics.go`        → metrik auditor KT
-#   - `server/kt-query/metrics.go`                           → metrik proses log KT
+#   - `server/kt-query/cmd/nyx-kt-auditor-v2/metrics.go`     → metrik auditor KT
+#   - `server/kt-query/cmd/nyx-kt-query-v2/metrics.go`       → metrik proses log KT
 #   - `server/transport-sidecar/src/metrics.rs`              → metrik sidecar WT
 # Aturan yang merujuk metrik di luar keempatnya TIDAK akan pernah menyala, dan
 # tanpa lapis ini kesalahan itu tidak mengeluarkan error apa pun.
@@ -37,8 +37,8 @@
 # Pemakaian:
 #   scripts/drill-alerts.sh
 #   METRICS_URL=http://127.0.0.1:9464/metrics scripts/drill-alerts.sh
-#   AUDITOR_METRICS_URL=http://127.0.0.1:9466/metrics scripts/drill-alerts.sh
-#   KT_QUERY_METRICS_URL=http://127.0.0.1:9467/metrics scripts/drill-alerts.sh
+#   AUDITOR_METRICS_URL=http://127.0.0.1:9469/metrics scripts/drill-alerts.sh
+#   KT_QUERY_METRICS_URL=http://127.0.0.1:9468/metrics scripts/drill-alerts.sh
 #   SIDECAR_METRICS_URL=http://127.0.0.1:9465/metrics scripts/drill-alerts.sh
 #   SKIP_LIVE=1 scripts/drill-alerts.sh          # lompati lapis live
 #
@@ -54,8 +54,8 @@ ALERTS="$PROM_DIR/alerts.yml"
 TESTS="$PROM_DIR/tests.yml"
 CONFIG="$PROM_DIR/prometheus.yml"
 METRICS_TS="$ROOT/server/src/utils/metrics.ts"
-AUDITOR_METRICS_GO="$ROOT/server/kt-query/cmd/nyx-kt-auditor/metrics.go"
-KT_QUERY_METRICS_GO="$ROOT/server/kt-query/metrics.go"
+AUDITOR_METRICS_GO="$ROOT/server/kt-query/cmd/nyx-kt-auditor-v2/metrics.go"
+KT_QUERY_METRICS_GO="$ROOT/server/kt-query/cmd/nyx-kt-query-v2/metrics.go"
 SIDECAR_METRICS_RS="$ROOT/server/transport-sidecar/src/metrics.rs"
 DASHBOARD="$ROOT/ops/grafana/dashboards/nyx-overview.json"
 
@@ -64,8 +64,8 @@ DASHBOARD="$ROOT/ops/grafana/dashboards/nyx-overview.json"
 PROMTOOL_VERSION="${PROMTOOL_VERSION:-3.15.0}"
 CACHE_DIR="$ROOT/.cache/promtool"
 METRICS_URL="${METRICS_URL:-http://127.0.0.1:9464/metrics}"
-AUDITOR_METRICS_URL="${AUDITOR_METRICS_URL:-http://127.0.0.1:9466/metrics}"
-KT_QUERY_METRICS_URL="${KT_QUERY_METRICS_URL:-http://127.0.0.1:9467/metrics}"
+AUDITOR_METRICS_URL="${AUDITOR_METRICS_URL:-http://127.0.0.1:9469/metrics}"
+KT_QUERY_METRICS_URL="${KT_QUERY_METRICS_URL:-http://127.0.0.1:9468/metrics}"
 SIDECAR_METRICS_URL="${SIDECAR_METRICS_URL:-http://127.0.0.1:9465/metrics}"
 
 fail() { echo "❌ $*" >&2; exit 1; }
@@ -181,8 +181,8 @@ else
   # yang lain (itu justru kasus yang ingin terlihat).
   label_and_urls=(
     "nyx-api:$METRICS_URL"
-    "nyx-kt-auditor:$AUDITOR_METRICS_URL"
-    "nyx-kt-query:$KT_QUERY_METRICS_URL"
+    "nyx-kt-auditor-v2:$AUDITOR_METRICS_URL"
+    "nyx-kt-query-v2:$KT_QUERY_METRICS_URL"
     "nyx-sidecar:$SIDECAR_METRICS_URL"
   )
   for entry in "${label_and_urls[@]}"; do

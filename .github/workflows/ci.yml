@@ -34,7 +34,7 @@ jobs:
         with:
           go-version-file: server/kt-query/go.mod
           cache-dependency-path: server/kt-query/go.sum
-      - name: Build & test kt-query dari vendor (Go)
+      - name: Build & test log KT v2 dari vendor (Go)
         working-directory: server/kt-query
         run: |
           go build ./...
@@ -189,6 +189,12 @@ jobs:
         run: pnpm run lint
       - name: PQ-only guard
         run: node scripts/check-pq-only.mjs
+      # STATUS.md hanya boleh berisi fakta yang bisa dibuktikan dari kode
+      # (versi, kapabilitas relay, rute privasi, saklar privasi). Dokumen naratif
+      # merujuk ke sana; tanpa gate ini tabel status kembali basi seperti
+      # `docs/29` sebelum ditulis ulang.
+      - name: STATUS.md drift guard
+        run: pnpm run check:status
 
   alerts:
     # [docs/30 WS-G(2)] DRILL alert (gate): aturan Prometheus harus terbukti bisa
@@ -244,42 +250,11 @@ jobs:
         working-directory: web
         run: pnpm exec vitest run src/lib/__tests__/x3dhOracleVectors.test.ts src/lib/__tests__/x3dhOracleInterop.test.ts
 
-  kt-recovery:
-    # [docs/10 §10.13 · docs/32 §32.7 · docs/34 §34.6b] DRILL pemulihan log KT:
-    # entri ditulis lewat penulis produksi → snapshot terverifikasi → basis data
-    # hidup DIHAPUS → pulih hanya dari arsip → tree size + root harus identik dan
-    # bukti harus tetap lolos `transparency.VerifySearch` (kode upstream yang sama
-    # dengan WASM klien), lalu log harus bisa tumbuh tanpa memutus anchor klien
-    # pra-bencana. Kontrol negatif di akhir memastikan pemeriksanya bisa gagal.
-    name: KT recovery drill (snapshot → bencana → pulih)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: server/kt-query/go.mod
-          cache-dependency-path: server/kt-query/go.sum
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'pnpm'
-      - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: 'true'
-      - name: Build shared package
-        run: pnpm --filter @nyx/shared run build
-      - name: Prisma generate
-        working-directory: server
-        run: pnpm exec prisma generate
-      - name: Go — vet + test kt-query (termasuk pemeriksa nyx-kt-check)
-        working-directory: server/kt-query
-        run: |
-          go vet ./...
-          go test ./...
-      - name: Drill pemulihan dari arsip snapshot
-        run: bash scripts/kt-restore-drill.sh
+  # [2026-10-28] Job `kt-recovery` dihapus bersama pensiunnya log KT v1: drill
+  # `scripts/kt-restore-drill.sh` bergantung pada penulis v1 + `nyx-kt-check`,
+  # keduanya tidak ada lagi (docs/38). Drill setara untuk v2 BELUM ada — itu
+  # regresi yang dicatat jujur di docs/38 §38.3 dan docs/39, bukan sesuatu yang
+  # boleh dianggap tertutup.
 
   audit:
     name: Dependency Audit

@@ -109,7 +109,7 @@ export async function publishIdentityKeyChange(
   }
 
   // Tanpa endpoint & tanpa transport injeksi = fitur mati (no-op, bukan error).
-  if (!process.env.KT_SERVER_URL && !process.env.KT_V2_SERVER_URL && !deps.transport) {
+  if (!process.env.KT_V2_SERVER_URL && !deps.transport) {
     return { ok: false, skipped: 'DISABLED' };
   }
 
@@ -203,7 +203,7 @@ export interface KtV2BackfillInput {
 }
 
 export interface KtV2BackfillDeps {
-  v2Transport?: KtTransport;
+  transport?: KtTransport;
   now?: number;
 }
 
@@ -214,7 +214,7 @@ export async function backfillKtV2IdentityOnLogin(
   if (input.signingKeyV2.length !== ML_DSA_65_PUBLIC_KEY_BYTES) {
     return { ok: false, reason: 'V2_SIGNING_KEY_INVALID' };
   }
-  if (!process.env.KT_V2_SERVER_URL && !deps.v2Transport) {
+  if (!process.env.KT_V2_SERVER_URL && !deps.transport) {
     return { ok: false, skipped: 'DISABLED' };
   }
   return publishKeyTransparencyEntry(
@@ -227,6 +227,6 @@ export async function backfillKtV2IdentityOnLogin(
       keyVersion: KT_KEY_VERSION_REGISTRATION,
       updatedAtDay: Math.floor(dayBucket().getTime() / 86_400_000),
     },
-    { v2Transport: deps.v2Transport, targets: ['v2'], now: deps.now }
+    { transport: deps.transport, now: deps.now }
   );
 }

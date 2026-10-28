@@ -169,7 +169,7 @@ groups:
           description: "Metadata bundle menunjukkan tanggal nextUpdate FIDO MDS sudah lewat, jadi daftar root yang dianggap sah mungkin tidak lagi lengkap. Jalankan `node scripts/attestation-roots.mjs refresh --out <ABUSE_ATTESTATION_ROOTS_FILE>` (verifikasi JWS MDS ikut dijalankan) sebelum perangkat baru mulai ditolak dengan reason=root_not_trusted."
 
   # ==========================================================================
-  # Auditor pihak ketiga log Key Transparency (mode 3, `nyx-kt-auditor`).
+  # Auditor pihak ketiga log Key Transparency (mode 3, `nyx-kt-auditor-v2`).
   #
   # Kelas kegagalan di grup ini HARUS bisa dibedakan, karena tindakannya
   # berbeda: proses mati (`NyxKtAuditorDown`), proses hidup tapi tidak maju
@@ -185,16 +185,16 @@ groups:
   # MENOLAK bukti (docs/34 §34.5). Alarm di grup ini adalah satu-satunya hal
   # yang berdiri di antara "auditor mati" dan "verifikasi klien gagal".
   # ==========================================================================
-  - name: nyx-kt-auditor
+  - name: nyx-kt-auditor-v2
     rules:
       - alert: NyxKtAuditorDown
-        expr: up{job="nyx-kt-auditor"} == 0
+        expr: up{job="nyx-kt-auditor-v2"} == 0
         for: 10m
         labels:
           severity: critical
         annotations:
           summary: "Auditor log KT tidak bisa di-scrape (proses mati?)"
-          description: "Prometheus gagal scrape auditor selama 10 menit. unit nyx-kt-auditor (systemd) + journalctl -u nyx-kt-auditor; cek juga NYX_KT_AUDITOR_METRICS_ADDR."
+          description: "Prometheus gagal scrape auditor selama 10 menit. Cek unit nyx-kt-auditor-v2 (systemd) + journalctl -u nyx-kt-auditor-v2; cek juga NYX_KT_V2_AUDITOR_METRICS_ADDR."
 
       # Proses hidup tapi tidak ada putaran audit yang SELESAI. `up == 1` tidak
       # menangkap kasus ini: auditor bisa menggantung di gRPC/Audit tanpa timeout,
@@ -207,7 +207,7 @@ groups:
       # diam selamanya.
       - alert: NyxKtAuditorRoundStalled
         expr: |
-          max(up{job="nyx-kt-auditor"}) == 1
+          max(up{job="nyx-kt-auditor-v2"}) == 1
           and (
             time() - max(nyx_kt_auditor_last_round_timestamp_seconds) > 600
             or absent(nyx_kt_auditor_last_round_timestamp_seconds)
@@ -217,7 +217,7 @@ groups:
           severity: high
         annotations:
           summary: "Auditor log KT hidup tetapi tidak ada putaran audit selesai >10 menit"
-          description: "Prosesnya masih bisa di-scrape, jadi ini bukan kematian proses. Lihat journalctl -u nyx-kt-auditor (blokir gRPC tanpa timeout?) dan pastikan NYX_KT_QUERY_URL + NYX_KT_AUDITOR_ADDR menunjuk log yang benar."
+          description: "Prosesnya masih bisa di-scrape, jadi ini bukan kematian proses. Lihat journalctl -u nyx-kt-auditor-v2 (blokir gRPC tanpa timeout?) dan pastikan NYX_KT_V2_QUERY_URL + NYX_KT_V2_AUDITOR_ADDR menunjuk log yang benar."
 
       # Putaran gagal (layanan baca/audit tidak menjawab, koneksi putus). Beda
       # dari Stalled: putarannya BERJALAN, hanya tidak pernah selesai bersih.
@@ -228,7 +228,7 @@ groups:
           severity: high
         annotations:
           summary: "Putaran audit log KT gagal (tidak bisa diverifikasi)"
-          description: "Auditor tidak bisa menyelesaikan putaran: cek nyx-kt-query hidup, KT_SERVER_URL/NYX_KT_QUERY_URL, dan NYX_KT_AUDITOR_ADDR. Selama ini berlangsung, tidak ada bukti baru yang diperiksa."
+          description: "Auditor tidak bisa menyelesaikan putaran: cek nyx-kt-query-v2 hidup, NYX_KT_V2_QUERY_URL, dan NYX_KT_V2_AUDITOR_ADDR. Selama ini berlangsung, tidak ada bukti baru yang diperiksa."
 
       # Peristiwa keamanan, bukan gangguan operasional: auditor melihat riwayat
       # yang tidak konsisten dengan pohon yang sudah ia verifikasi sendiri.
@@ -239,7 +239,7 @@ groups:
           severity: critical
         annotations:
           summary: "Auditor menemukan riwayat log KT TIDAK KONSISTEN (tanda tangan dihentikan)"
-          description: "Bukti dari layanan log tidak cocok dengan pandangan auditor (errInvalidProof). Auditor berhenti menandatangani — perilaku yang benar. Perlakukan sebagai insiden: periksa journalctl -u nyx-kt-auditor (\"TIDAK KONSISTEN\"), state auditor, dan apakah log dipulihkan dari snapshot/backup yang berbeda."
+          description: "Bukti dari layanan log tidak cocok dengan pandangan auditor (errInvalidProof). Auditor berhenti menandatangani — perilaku yang benar. Perlakukan sebagai insiden: periksa journalctl -u nyx-kt-auditor-v2 (\"TIDAK KONSISTEN\"), state auditor, dan apakah log dipulihkan dari snapshot/backup yang berbeda."
 
       # Tree head ditolak layanan log (mode bukan 3, kunci auditor tidak terdaftar,
       # atau layanan log mati). Head yang tidak sampai berarti jaminan auditas
@@ -251,7 +251,7 @@ groups:
           severity: high
         annotations:
           summary: "Tree head auditor ditolak/tidak sampai ke layanan log"
-          description: "SetAuditorHead gagal: pastikan log berjalan mode 3 (api.auditors terisi, /config → mode=3), nama auditor di NYX_KT_AUDITOR_NAME sama dengan yang di config, dan kunci publiknya cocok (nyx-kt-auditor -print-public-key)."
+          description: "SetAuditorHead gagal: pastikan log berjalan mode 3 (api.auditors terisi, /config → mode=3), nama auditor di NYX_KT_V2_AUDITOR_NAME sama dengan yang di config, dan kunci publiknya cocok (nyx-kt-auditor-v2 -print-public-key)."
 
       # Cadangan terakhir, dan satu-satunya alarm yang mengukur hal yang benar-
       # benar dipakai klien: umur tree head terakhir yang DITERIMA log.
@@ -275,7 +275,7 @@ groups:
       # ditangkap `NyxKtAuditorRestarting` di bawah.
       - alert: NyxKtAuditorHeadStale
         expr: |
-          max(up{job="nyx-kt-auditor"}) == 1
+          max(up{job="nyx-kt-auditor-v2"}) == 1
           and nyx_kt_auditor_tree_size > 0
           and (
             time() - max(nyx_kt_auditor_last_head_timestamp_seconds) > 6 * 3600
@@ -289,7 +289,7 @@ groups:
           severity: high
         annotations:
           summary: "Tree head auditor belum diperbarui >6 jam"
-          description: "Ada entri yang bisa ditandatangani (tree_size > 0) tetapi tidak ada tree head yang diterima log selama 6 jam. Cek journalctl -u nyx-kt-auditor (cari \"tree head DIKIRIM\") dan NYX_KT_AUDITOR_SIGNATURE_INTERVAL. Klien menolak auditor head yang lebih tua dari 7 hari (docs/34 §34.5)."
+          description: "Ada entri yang bisa ditandatangani (tree_size > 0) tetapi tidak ada tree head yang diterima log selama 6 jam. Cek journalctl -u nyx-kt-auditor-v2 (cari \"tree head DIKIRIM\") dan NYX_KT_V2_AUDITOR_SIGNATURE_INTERVAL. Klien menolak auditor head yang lebih tua dari 7 hari (docs/34 §34.5)."
 
       # Pasangan wajib dari penjaga umur di atas: proses yang start ulang terus
       # menerus selalu punya umur muda, jadi `…HeadStale` buta terhadapnya —
@@ -311,14 +311,14 @@ groups:
       # dari operasi normal (deploy), bukan loop.
       - alert: NyxKtAuditorRestarting
         expr: |
-          changes(up{job="nyx-kt-auditor"}[1h]) > 2
+          changes(up{job="nyx-kt-auditor-v2"}[1h]) > 2
           or resets(nyx_kt_auditor_uptime_seconds[1h]) > 1
         for: 10m
         labels:
           severity: high
         annotations:
           summary: "Auditor log KT berulang kali restart dalam 1 jam terakhir"
-          description: "Proses auditor start ulang ≥2 kali dalam 1 jam (lihat journalctl -u nyx-kt-auditor -n 200). Auditor yang start ulang terus tidak pernah sampai irama tanda tangan (NYX_KT_AUDITOR_SIGNATURE_INTERVAL), jadi tidak ada tree head baru yang diterima log meski `up` terlihat sehat pada saat scrape — dan alert `…HeadStale` buta terhadapnya karena umur prosesnya selalu muda."
+          description: "Proses auditor start ulang ≥2 kali dalam 1 jam (lihat journalctl -u nyx-kt-auditor-v2 -n 200). Auditor yang start ulang terus tidak pernah sampai irama tanda tangan (NYX_KT_V2_AUDITOR_SIGNATURE_INTERVAL), jadi tidak ada tree head baru yang diterima log meski `up` terlihat sehat pada saat scrape — dan alert `…HeadStale` buta terhadapnya karena umur prosesnya selalu muda."
 
       # Penjaga privasi sisi auditor — cermin NyxMetricsIdentityLeakAttempt.
       - alert: NyxKtAuditorMetricsIdentityLeakAttempt
@@ -328,7 +328,7 @@ groups:
           severity: critical
         annotations:
           summary: "Ada percobaan mencatat metrik auditor dengan label identitas"
-          description: "nyx_kt_auditor_metrics_rejected_total naik (reason={{ $labels.reason }}). Ada kode baru di cmd/nyx-kt-auditor yang mencoba mengirim nama/ID/IP ke metrik; pemanggilnya harus diperbaiki (metrics.go akan selalu menolak nilainya)."
+          description: "nyx_kt_auditor_metrics_rejected_total naik (reason={{ $labels.reason }}). Ada kode baru di cmd/nyx-kt-auditor-v2 yang mencoba mengirim nama/ID/IP ke metrik; pemanggilnya harus diperbaiki (metrics.go akan selalu menolak nilainya)."
 
   # ==========================================================================
   # Transport WebTransport (`nyx-sidecar`, Rust).
@@ -497,24 +497,24 @@ groups:
           description: "Sesi WebTransport pernah ada, lalu habis, sementara jalur WSS terus menerima trafik — dan prosesnya sendiri masih hidup. Keunggulan jalur cepat hilang tanpa satu pun error: klien sudah mundur ke WSS. Turun ke WSS bukan kegagalan (itu desainnya), jadi yang perlu dicari sebabnya: apakah handshake mulai gagal (lihat `nyx_transport_connections_total{result}`), auth menolak (panel auth gagal), atau WT tidak lagi terjangkau dari jaringan klien — dan perlu diingat CSP/`VITE_TRANSPORT_URL` memengaruhi ini."
 
   # ==========================================================================
-  # Proses LOG Key Transparency (`nyx-kt-query`, Go, pemilik LevelDB).
+  # Proses LOG Key Transparency (`nyx-kt-query-v2`, ML-DSA, pemilik LevelDB).
   #
-  # Pembedaan yang wajib dipahami: grup `nyx-kt-auditor` mengukur "apakah riwayat
+  # Pembedaan yang wajib dipahami: grup `nyx-kt-auditor-v2` mengukur "apakah riwayat
   # ini bisa dipercaya", grup ini mengukur "apakah riwayat ini masih DITULIS dan
   # masih DISALIN". Kegagalan di sini juga **fail-open** — registrasi tetap
   # sukses, hanya tanpa jejak audit (docs/32) — jadi tidak ada satu pun error di
   # aplikasi yang menunjuk kemari.
   # ==========================================================================
-  - name: nyx-kt-query
+  - name: nyx-kt-query-v2
     rules:
       - alert: NyxKtQueryDown
-        expr: up{job="nyx-kt-query"} == 0
+        expr: up{job="nyx-kt-query-v2"} == 0
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Proses log Key Transparency (nyx-kt-query) tidak bisa di-scrape"
-          description: "Proses log mati/terputus. Registrasi & rotasi kunci TIDAK gagal (fail-open), tetapi tidak ada jejak audit baru — dan auditor akan mulai gagal membaca. Cek `systemctl --user status nyx-kt-query`, journalctl, leveldb, dan NYX_KT_METRICS_ADDR (default 127.0.0.1:9467)."
+          summary: "Proses log Key Transparency (nyx-kt-query-v2) tidak bisa di-scrape"
+          description: "Proses log mati/terputus. Registrasi & rotasi kunci TIDAK gagal (fail-open), tetapi tidak ada jejak audit baru — dan auditor akan mulai gagal membaca. Cek `systemctl status nyx-kt-query-v2`, journalctl -u nyx-kt-query-v2, leveldb, dan NYX_KT_V2_METRICS_ADDR (default 127.0.0.1:9468)."
 
       - alert: NyxKtQueryWriteFailing
         expr: increase(nyx_kt_query_writes_total{result="error"}[15m]) > 0
@@ -544,7 +544,7 @@ groups:
           severity: high
         annotations:
           summary: "Snapshot lokal log KT tidak dibuat >48 jam"
-          description: "`nyx-kt-query` belum menyelesaikan satu pun putaran snapshot dalam 48 jam (irama normal 24 jam). Cek NYX_KT_SNAPSHOT_DIR / NYX_KT_SNAPSHOT_INTERVAL, ruang disk, dan log proses (`snapshot`). Tanpa arsip lokal, `NyxKtSnapshotNotUploaded` di grup nyx-host juga akan menyusul — tetapi akar masalahnya di sini, bukan di kredensial R2."
+          description: "`nyx-kt-query-v2` belum menyelesaikan satu pun putaran snapshot dalam 48 jam (irama normal 24 jam). Cek NYX_KT_V2_SNAPSHOT_DIR / NYX_KT_V2_SNAPSHOT_INTERVAL, ruang disk, dan log proses (`snapshot`). Tanpa arsip lokal, `NyxKtSnapshotNotUploaded` di grup nyx-host juga akan menyusul — tetapi akar masalahnya di sini, bukan di kredensial R2."
 
       # Anchor `distinguished` = bukti "pohon ini dilihat pada waktu T" yang
       # membuat auditor lama bisa mengikat riwayat. Kalau putarannya berhenti
@@ -557,7 +557,7 @@ groups:
           severity: high
         annotations:
           summary: "Anchor `distinguished` di log KT tidak berputar >30 menit"
-          description: "Timestamp anchor `distinguished` tidak lagi maju (irama normal 1 menit, dari `api.distinguished` di config log). Gauge-nya ditulis ulang setiap putaran yang BERHASIL, jadi seri yang diam berarti loop-nya berhenti atau penulisannya gagal terus — cek journalctl -u nyx-kt-query (cari \"kunci distinguished\") dan `api.distinguished` di config. Catatan cakupan: seri ini tidak ada pada deployment yang sengaja mematikan anchor (`distinguished: 0`), dan aturan ini tidak menyala untuk kasus itu."
+          description: "Timestamp anchor `distinguished` tidak lagi maju (irama normal 1 menit, dari `api.distinguished` di config log). Gauge-nya ditulis ulang setiap putaran yang BERHASIL, jadi seri yang diam berarti loop-nya berhenti atau penulisannya gagal terus — cek journalctl -u nyx-kt-query-v2 (cari \"kunci distinguished\") dan `api.distinguished` di config. Catatan cakupan: seri ini tidak ada pada deployment yang sengaja mematikan anchor (`distinguished: 0`), dan aturan ini tidak menyala untuk kasus itu."
 
       # Penjaga privasi sisi log — cermin NyxMetricsIdentityLeakAttempt.
       - alert: NyxKtQueryMetricsIdentityLeakAttempt
@@ -617,7 +617,7 @@ groups:
           severity: high
         annotations:
           summary: "Penulisan log Key Transparency gagal"
-          description: "Cek proses KT (leveldb) + KT_SERVER_URL. Kegagalan tidak memblokir registrasi, jadi hanya terlihat dari sini (docs/32)."
+          description: "Cek proses KT v2 (leveldb) + KT_V2_SERVER_URL. Kegagalan tidak memblokir registrasi, jadi hanya terlihat dari sini (docs/32)."
 
       # [drill 2026-10-14] DUA cacat ditemukan di sini, keduanya membuat aturan
       # ini MUSTAHIL menyala (dead rule):
@@ -647,7 +647,7 @@ groups:
       # [docs/10 §10.13] Snapshot log KT: tanpa salinan yang segar di luar VPS,
       # log hanya hidup di SATU disk. Yang diukur di sini adalah **umur arsip
       # terbaru yang ada di R2** (`…_remote_latest_timestamp_seconds`), bukan
-      # jumlah unggahan: arsip dibuat harian oleh `nyx-kt-query`, jadi umur di
+      # jumlah unggahan: arsip dibuat harian oleh `nyx-kt-query-v2`, jadi umur di
       # atas 36 jam berarti cron mati, kredensial R2 rusak, atau snapshot lokal
       # berhenti dibuat. `increase(...{result="error"}) > 0` saja tidak cukup
       # (instance yang tidak pernah mencoba juga tidak pernah error), dan
@@ -685,7 +685,7 @@ groups:
           severity: high
         annotations:
           summary: "Arsip snapshot log KT di R2 tidak lebih baru dari 36 jam"
-          description: "Umur arsip terbaru di R2 melewati 36 jam. Cek KT_SNAPSHOT_DIR di server NYX (cron 03:30 + log \"[KtSnapshot]\"), NYX_KT_SNAPSHOT_DIR/NYX_KT_SNAPSHOT_INTERVAL di nyx-kt-query, dan kredensial R2. Log KT tanpa salinan segar di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13)."
+          description: "Umur arsip terbaru di R2 melewati 36 jam. Cek KT_SNAPSHOT_DIR di server NYX (cron 03:30 + log \"[KtSnapshot]\"), NYX_KT_V2_SNAPSHOT_DIR/NYX_KT_V2_SNAPSHOT_INTERVAL di nyx-kt-query-v2, dan kredensial R2. Log KT tanpa salinan segar di luar VPS = tidak ada pemulihan bila disk hilang (docs/10 §10.13)."
 
       - alert: NyxKtSnapshotUploadFailing
         expr: sum by (result) (increase(nyx_kt_snapshot_upload_total{result="error"}[24h])) > 0

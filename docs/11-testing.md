@@ -29,16 +29,19 @@ Dua test menulis entri **sungguhan** ke log KT (`keyTransparency.test.ts` dan
 `ktIdentityLog.test.ts`). Keduanya sengaja **skip** kecuali diminta eksplisit:
 
 ```bash
-cd server && NYX_KT_LIVE_WRITE=1 KT_SERVER_URL=http://127.0.0.1:18081 \
+cd server && NYX_KT_LIVE_WRITE=1 KT_V2_SERVER_URL=http://127.0.0.1:18088 \
   pnpm exec tsx --test tests/ktIdentityLog.test.ts
 ```
 
-Gate-nya **bukan** keberadaan `KT_SERVER_URL`, dan jangan pernah dikembalikan ke
+Gate-nya **bukan** keberadaan `KT_V2_SERVER_URL`, dan jangan pernah dikembalikan ke
 sana: `server/.env` selalu mengisi variabel itu dan `src/config.ts` memuat dotenv,
 jadi gate lama membuat `pnpm test` menulis entri uji ke log yang sedang
 dikonfigurasi. Itu terjadi 2026-10-17 (dua entri orphan masuk log self-host
 `127.0.0.1:8081`; log KT append-only, jadi tidak bisa dihapus). Guard-nya ada di
 `ktIdentityLog.test.ts` (`guard: penulisan live hanya dengan opt-in eksplisit`).
+Sejak log v1 pensiun (`docs/38`) satu-satunya penulis adalah log v2 — pakai port
+tulis v2 (default `8088`; contoh di atas memakai `18088` agar tidak menyentuh log
+yang sedang berjalan).
 
 ## 11.1b Backup benchmark harness (WS-C fase 5)
 

@@ -26,11 +26,11 @@ Before you write any code, understand our architectural boundaries:
 
 ## 🧾 Third-party attribution & committed artifacts (Signal)
 
-Some subsystems are built around **unmodified Signal code** (AGPL-3.0-only) that is pinned to a commit. Since 2026-10-13 the pinned sources are **vendored inside this repo** (`vendor/signal/`, `server/kt-query/vendor/`), so a clean clone builds everything without any external checkout — the three components, their commits, and everything that actually lives in this repo are listed in **[`NOTICE`](NOTICE)**. Read it before touching `packages/spqr-wasm/`, `packages/keytrans-wasm/`, or `server/kt-query/`.
+Some subsystems are built around **unmodified Signal code** (AGPL-3.0-only) that is pinned to a commit. Since 2026-10-13 the pinned sources are **vendored inside this repo** (`vendor/signal/`, `server/kt-query/vendor/`), so a clean clone builds everything without any external checkout — the three components, their commits, and everything that actually lives in this repo are listed in **[`NOTICE`](NOTICE)**. Read it before touching `packages/spqr-wasm/` or `server/kt-query/`. The Key Transparency verifier (`packages/keytrans-v2` + `packages/keytrans-wasm-v2`) is NYX's own ML-DSA-65 fork, not vendored Signal code.
 
 Rules that keep this setup working:
 
-1. **Never delete, truncate, or hand-edit** `packages/spqr-wasm/dist/spqr.wasm` and `packages/keytrans-wasm/dist/keytrans.wasm`. They are committed on purpose and a missing artifact breaks the web build — `crypto.worker.ts` imports `spqr.wasm?url`.
+1. **Never delete, truncate, or hand-edit** `packages/spqr-wasm/dist/spqr.wasm` or any committed WASM artifact (`keytrans-wasm-v2/dist/keytrans-v2.wasm`, `pir-wasm/dist/pir-client.wasm`). They are committed on purpose and a missing artifact breaks the web build.
 2. To regenerate an artifact, run the package's `build.sh` (it builds from `vendor/` by default) and commit the result **together with `packages/wasm-artifacts.json`**. Both builds are path-independent (absolute paths are remapped, toolchain pinned in `rust-toolchain.toml`), so the hash is the same on your machine and in CI.
 3. The guards CI runs: `bash scripts/check-wasm-artifacts.sh` (missing / empty / untracked artifact, or a hash that no longer matches the manifest → red build) and the `wasm` job, which **rebuilds both artifacts from `vendor/` and compares the hashes** — i.e. the committed binary is now provably produced by the pinned sources in this repo.
 4. When an upstream pin moves, update **`NOTICE` (commit hash + artifact size) and the pins in `docs/30` §30.2 in the same PR**.

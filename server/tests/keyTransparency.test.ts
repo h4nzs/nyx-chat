@@ -3,22 +3,25 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/30 §30.5 WS-A / docs/32] Penulis log Key Transparency.
+ * [docs/30 §30.5 WS-A / docs/32] Penulis log Key Transparency (v2 saja).
  *
- * Semua pengujian di sini bebas infra. Yang diuji bukan "apakah library bekerja"
+ * Sejak 2026-10-28 log v1 dipensiunkan (`docs/38`): nilai yang ditulis selalu
+ * format v2 (ML-DSA-65), dan tidak ada jalur dual-write/target v1 lagi. Semua
+ * pengujian di sini bebas infra. Yang diuji bukan "apakah library bekerja"
  * melainkan kontrak NYX sendiri:
  *
  *   1. **Encoding protobuf** untuk `transparency.UpdateRequest` — field dan
  *      nilainya benar (search key, value, flag proof), karena kontrak ini harus
- *      cocok dengan binary Go `key-transparency-server` yang tidak kita ubah.
+ *      cocok dengan binary Go log KT yang tidak kita ubah.
  *   2. **Framing gRPC** — header 5 byte dan pesan yang terpotong tidak dibuang
  *      diam-diam.
- *   3. **Nilai log v1** — kanonik (frozen), round-trip, menolak panjang salah.
+ *   3. **Nilai log v2** — kanonik (versi 2, ML-DSA-65 terikat), menolak kunci
+ *      yang tidak lengkap.
  *   4. **Search key** = `0x75 || usernameHash(32)` dan tidak ada identitas lain
  *      di nilai yang masuk log.
  *   5. **Penulis** — idempoten, tidak pernah melempar, dan fail-visible (gagal
  *      mengembalikan alasan, bukan senyap sukses).
- *   6. **Live (opt-in)**: bila `KT_SERVER_URL` diset ke binary KT yang benar-benar
+ *   6. **Live (opt-in)**: bila `KT_V2_SERVER_URL` diset ke log v2 yang benar-benar
  *      jalan, satu penulisan nyata dilakukan dan ukuran pohon bertambah.
  */
 
@@ -27,21 +30,20 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { KT_VALUE_V2_BYTES, parseKtValueBytes } from '@nyx/shared';
 
 import {
   KT_KEY_VERSION_RECOVERY,
   KT_KEY_VERSION_REGISTRATION,
   KT_USERNAME_HASH_PREFIX,
-  KT_VALUE_V1_BYTES,
   buildKtLogEntry,
   clearKtDedupeForTests,
   commitKeyTransparencyEntry,
-  decodeKtValue,
   decodeProtoFields,
   encodeKtUpdateRequest,
-  encodeKtValue,
   frameGrpcMessage,
   ktEntryTag,
+  ktRetiredEnvWarnings,
   ktSearchKey,
   parseGrpcFrames,
   publishKeyTransparencyEntry,
@@ -56,6 +58,8 @@ const USERNAME_HASH = new Uint8Array(32).fill(0x5a);
 const IDENTITY_KEY = new Uint8Array(32).fill(0x11);
 const PQ_KEY = new Uint8Array(1216).fill(0x22);
 const SIGNING_KEY = new Uint8Array(32).fill(0x33);
+/** Verification key ML-DSA-65 (1952 byte) — wajib ada untuk nilai log v2. */
+const SIGNING_KEY_V2 = new Uint8Array(1952).fill(0x77);
 const USERNAME_HASH_B64 = Buffer.from(USERNAME_HASH).toString('base64url');
 
 // --- helper protobuf untuk membangun respons uji ---------------------------
@@ -91,17 +95,25 @@ function buildUpdateResponse(treeSize: bigint, vrfProofLength: number): Uint8Arr
   return new Uint8Array(parts.flatMap((p) => [...p]));
 }
 
+/** Input entri yang sah (v2) — dipakai banyak test di bawah. */
+function validInput(overrides: Partial<Parameters<typeof buildKtLogEntry>[0]> = {}) {
+  return {
+    usernameHash: USERNAME_HASH_B64,
+    identityKey: IDENTITY_KEY,
+    pqIdentityKey: PQ_KEY,
+    signingKey: SIGNING_KEY,
+    signingKeyV2: SIGNING_KEY_V2,
+    keyVersion: 1,
+    updatedAtDay: 20_100,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 test('encodeKtUpdateRequest: search key, value, dan flag proof masuk field yang benar', () => {
   const searchKey = ktSearchKey(USERNAME_HASH);
-  const value = encodeKtValue({
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 3,
-    updatedAtDay: 20_000,
-  });
+  const value = buildKtLogEntry(validInput({ keyVersion: 3, updatedAtDay: 20_000 })).value;
 
   const encoded = encodeKtUpdateRequest({ searchKey, value, returnUpdateResponse: true });
   const fields = decodeProtoFields(encoded);
@@ -168,46 +180,28 @@ test('summarizeKtUpdateResponse: ukuran pohon & panjang proof terbaca', () => {
   });
 });
 
-test('search key & nilai log v1', () => {
+test('search key & nilai log v2', () => {
   const searchKey = ktSearchKey(USERNAME_HASH);
   assert.equal(searchKey.length, 33);
   assert.equal(searchKey[0], KT_USERNAME_HASH_PREFIX);
   assert.deepEqual(Array.from(searchKey.subarray(1)), Array.from(USERNAME_HASH));
   assert.throws(() => ktSearchKey(new Uint8Array(16)), /KT_USERNAME_HASH_LENGTH_INVALID/);
 
-  const value = encodeKtValue({
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 7,
-    updatedAtDay: 20_145,
-  });
-  assert.equal(value.length, KT_VALUE_V1_BYTES);
+  const value = buildKtLogEntry(validInput({ keyVersion: 7, updatedAtDay: 20_145 })).value;
+  assert.equal(value.length, KT_VALUE_V2_BYTES);
 
-  const decoded = decodeKtValue(value);
-  assert.equal(decoded.version, 1);
+  const decoded = parseKtValueBytes(value);
+  assert.equal(decoded.version, 2);
   assert.equal(decoded.keyVersion, 7);
   assert.equal(decoded.updatedAtDay, 20_145);
   assert.deepEqual(Array.from(decoded.identityKey), Array.from(IDENTITY_KEY));
   assert.deepEqual(Array.from(decoded.pqIdentityKey.subarray(0, 4)), [0x22, 0x22, 0x22, 0x22]);
   assert.equal(decoded.pqIdentityKey.length, 1216);
-
-  assert.throws(
-    () => encodeKtValue({ identityKey: new Uint8Array(31), pqIdentityKey: PQ_KEY, signingKey: SIGNING_KEY, keyVersion: 1, updatedAtDay: 1 }),
-    /KT_IDENTITY_KEY_LENGTH_INVALID/
-  );
-  assert.throws(() => decodeKtValue(new Uint8Array(10)), /KT_VALUE_LENGTH_INVALID/);
+  assert.deepEqual(Array.from(decoded.signingKeyV2!), Array.from(SIGNING_KEY_V2));
 });
 
 test('buildKtLogEntry: entri tidak membocorkan identitas selain search key', () => {
-  const entry = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 2,
-    updatedAtDay: 20_100,
-  });
+  const entry = buildKtLogEntry(validInput({ keyVersion: 2 }));
 
   assert.equal(entry.keyVersion, 2);
   assert.equal(entry.searchKey[0], KT_USERNAME_HASH_PREFIX);
@@ -219,32 +213,38 @@ test('buildKtLogEntry: entri tidak membocorkan identitas selain search key', () 
   assert.ok(!valueHex.includes('5a5a5a5a5a5a5a5a'), 'nilai log tidak boleh memuat usernameHash');
 
   assert.throws(
-    () => buildKtLogEntry({ usernameHash: Buffer.from(new Uint8Array(16)).toString('base64url'), identityKey: IDENTITY_KEY, pqIdentityKey: PQ_KEY, signingKey: SIGNING_KEY, keyVersion: 1, updatedAtDay: 1 }),
+    () => buildKtLogEntry(validInput({ usernameHash: Buffer.from(new Uint8Array(16)).toString('base64url') })),
     /KT_USERNAME_HASH_LENGTH_INVALID/
   );
   assert.throws(
-    () => buildKtLogEntry({ usernameHash: '', identityKey: IDENTITY_KEY, pqIdentityKey: PQ_KEY, signingKey: SIGNING_KEY, keyVersion: 1, updatedAtDay: 1 }),
+    () => buildKtLogEntry(validInput({ usernameHash: '' })),
     /KT_USERNAME_HASH_INVALID/
   );
 });
 
+/**
+ * Tanpa ML-DSA-65 tidak ada nilai log yang sah. Fallback v1 sengaja dihapus:
+ * pohon v1 sudah mati, jadi entri seperti itu harus DILEWATI terlihat
+ * (`result="invalid"`), bukan ditulis ke format yang tak bisa diverifikasi.
+ */
+test('buildKtLogEntry: bundle tanpa kunci ML-DSA-65 ditolak, bukan ditulis sebagai v1', () => {
+  assert.throws(() => buildKtLogEntry(validInput({ signingKeyV2: null })), /KT_V2_SIGNING_KEY_INVALID/);
+  assert.throws(
+    () => buildKtLogEntry(validInput({ signingKeyV2: new Uint8Array(32) })),
+    /KT_V2_SIGNING_KEY_INVALID/
+  );
+});
+
 test('penulis: idempoten, tidak melempar, dan fail-visible', async () => {
-  // Unit test ini harus berperilaku sama dengan/tanpa `KT_SERVER_URL` di
+  // Unit test ini harus berperilaku sama dengan/tanpa `KT_V2_SERVER_URL` di
   // lingkungan; env disimpan & dipulihkan supaya tidak menyentuh test lain.
-  const previousKtUrl = process.env.KT_SERVER_URL;
-  delete process.env.KT_SERVER_URL;
+  const previousKtUrl = process.env.KT_V2_SERVER_URL;
+  delete process.env.KT_V2_SERVER_URL;
   clearKtDedupeForTests();
 
-  const entry = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_100,
-  });
+  const entry = buildKtLogEntry(validInput());
 
-  // Nonaktif (tanpa KT_SERVER_URL & tanpa transport) → no-op, bukan error.
+  // Nonaktif (tanpa KT_V2_SERVER_URL & tanpa transport) → no-op, bukan error.
   assert.deepEqual(await commitKeyTransparencyEntry(entry), { ok: false, skipped: 'DISABLED' });
 
   let calls = 0;
@@ -265,14 +265,9 @@ test('penulis: idempoten, tidak melempar, dan fail-visible', async () => {
 
   // Perubahan kunci (nilai berbeda, versi sama) WAJIB tetap ditulis — inilah
   // yang membuat rotasi kunci terlihat di log.
-  const rotated = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: new Uint8Array(32).fill(0x44),
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_101,
-  });
+  const rotated = buildKtLogEntry(
+    validInput({ identityKey: new Uint8Array(32).fill(0x44), updatedAtDay: 20_101 })
+  );
   const afterRotation = await commitKeyTransparencyEntry(rotated, { transport: okTransport, now: 3_000 });
   assert.equal(afterRotation.ok, true);
   assert.equal(calls, 2, 'nilai yang berubah tidak boleh ikut ter-dedupe');
@@ -295,121 +290,7 @@ test('penulis: idempoten, tidak melempar, dan fail-visible', async () => {
   assert.equal(failing.reason, 'KT_UPDATE_TIMEOUT');
 
   clearKtDedupeForTests();
-  if (previousKtUrl !== undefined) process.env.KT_SERVER_URL = previousKtUrl;
-});
-
-/**
- * [docs/35 §35.7 Fase 7] Dual-write transisi v1 + v2.
- *
- * Entri yang sama harus masuk ke DUA pohon (nilai byte identik), dedupe terpisah
- * per log, dan kegagalan satu log tidak boleh membatalkan log lain — tetapi juga
- * tidak boleh dilaporkan sebagai sukses penuh.
- */
-test('dual-write: entri sama ke log v1 dan v2, dedupe dan kegagalan terpisah', async () => {
-  const entry = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_100,
-  });
-
-  let v1Calls = 0;
-  let v2Calls = 0;
-  let v2Requests: Uint8Array[] = [];
-  const v1 = {
-    async update() {
-      v1Calls++;
-      return buildUpdateResponse(7n, 96);
-    },
-  };
-  const v2 = {
-    async update(request: Uint8Array) {
-      v2Calls++;
-      v2Requests.push(request);
-      return buildUpdateResponse(7n, 0);
-    },
-  };
-
-  clearKtDedupeForTests();
-  const both = await commitKeyTransparencyEntry(entry, { transport: v1, v2Transport: v2, now: 1_000 });
-  assert.equal(both.ok, true);
-  assert.equal(both.treeSize, 7n);
-  assert.equal(both.v2?.ok, true);
-  assert.equal(v1Calls, 1);
-  assert.equal(v2Calls, 1);
-
-  // Nilai protobuf yang dikirim ke kedua log identik (search key + value).
-  const fields = decodeProtoFields(v2Requests[0]!);
-  assert.deepEqual(Array.from(fields.get(1)![0] as Uint8Array), Array.from(entry.searchKey));
-  assert.deepEqual(Array.from(fields.get(2)![0] as Uint8Array), Array.from(entry.value));
-
-  // Dedupe per log: nilai baru ditulis ke v1 saja dulu, lalu dual-write →
-  // v1 dedupe tetapi v2 (yang belum punya nilai itu) tetap ditulis.
-  const rotatedV1Only = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: new Uint8Array(32).fill(0x46),
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_103,
-  });
-  const v1Only = await commitKeyTransparencyEntry(rotatedV1Only, { transport: v1, now: 2_000 });
-  assert.equal(v1Only.ok, true);
-  assert.equal(v1Calls, 2);
-
-  v2Calls = 0;
-  const onlyV2 = await commitKeyTransparencyEntry(rotatedV1Only, {
-    transport: v1,
-    v2Transport: v2,
-    now: 2_100,
-  });
-  assert.equal(v1Calls, 2, 'v1 tidak ditulis ulang (dedupe v1)');
-  assert.equal(v2Calls, 1, 'v2 tetap ditulis walau v1 dedupe');
-  assert.equal(onlyV2.ok, true);
-  assert.notEqual(onlyV2.skipped, 'DUPLICATE');
-
-  // Kedua log duplikat → skipped DUPLICATE di tingkat atas.
-  const duplicate = await commitKeyTransparencyEntry(rotatedV1Only, {
-    transport: v1,
-    v2Transport: v2,
-    now: 2_500,
-  });
-  assert.equal(duplicate.ok, true);
-  assert.equal(duplicate.skipped, 'DUPLICATE');
-
-  // Log v2 gagal: v1 tetap sukses, tetapi hasil gabungan TIDAK boleh `ok`.
-  let v1AfterFailure = 0;
-  const failingV2 = {
-    async update(): Promise<Uint8Array> {
-      throw new Error('KT_V2_UPDATE_TIMEOUT');
-    },
-  };
-  const rotated = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: new Uint8Array(32).fill(0x45),
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_102,
-  });
-  const partial = await commitKeyTransparencyEntry(rotated, {
-    transport: {
-      async update() {
-        v1AfterFailure++;
-        return buildUpdateResponse(8n, 96);
-      },
-    },
-    v2Transport: failingV2,
-    now: 3_000,
-  });
-  assert.equal(v1AfterFailure, 1, 'kegagalan v2 tidak membatalkan penulisan v1');
-  assert.equal(partial.ok, false, 'satu log tertinggal bukan sukses penuh');
-  assert.equal(partial.reason, 'KT_V2_UPDATE_TIMEOUT');
-  assert.equal(partial.v2?.ok, false);
-
-  clearKtDedupeForTests();
+  if (previousKtUrl !== undefined) process.env.KT_V2_SERVER_URL = previousKtUrl;
 });
 
 test('publishKeyTransparencyEntry: bentuk tidak sah tidak ditulis ke log', async () => {
@@ -422,31 +303,14 @@ test('publishKeyTransparencyEntry: bentuk tidak sah tidak ditulis ke log', async
   };
 
   const bad = await publishKeyTransparencyEntry(
-    {
-      usernameHash: Buffer.from(new Uint8Array(16)).toString('base64url'),
-      identityKey: IDENTITY_KEY,
-      pqIdentityKey: PQ_KEY,
-      signingKey: SIGNING_KEY,
-      keyVersion: 1,
-      updatedAtDay: 1,
-    },
+    validInput({ usernameHash: Buffer.from(new Uint8Array(16)).toString('base64url') }),
     { transport }
   );
   assert.equal(bad.ok, false);
   assert.equal(bad.reason, 'KT_USERNAME_HASH_LENGTH_INVALID');
   assert.equal(calls, 0, 'tidak ada penulisan saat entri tidak sah');
 
-  const good = await publishKeyTransparencyEntry(
-    {
-      usernameHash: USERNAME_HASH_B64,
-      identityKey: IDENTITY_KEY,
-      pqIdentityKey: PQ_KEY,
-      signingKey: SIGNING_KEY,
-      keyVersion: 4,
-      updatedAtDay: 20_100,
-    },
-    { transport }
-  );
+  const good = await publishKeyTransparencyEntry(validInput({ keyVersion: 4 }), { transport });
   assert.equal(good.ok, true);
   assert.equal(calls, 1);
 });
@@ -483,6 +347,7 @@ test('jalur pemulihan: bentuk ter-pepper dilewati dengan alasan yang bisa dibeda
     identityKey: IDENTITY_KEY,
     pqIdentityKey: PQ_KEY,
     signingKey: SIGNING_KEY,
+    signingKeyV2: SIGNING_KEY_V2,
     keyVersion: 2,
     updatedAtDay: 20_100,
   };
@@ -506,7 +371,7 @@ test('jalur pemulihan: bentuk ter-pepper dilewati dengan alasan yang bisa dibeda
  * presisi waktu hanya sampai bucket harian.
  *
  * Kenapa guard sumber, bukan test perilaku: dua situs itu hidup di
- * `routes/auth.ts` (1264 baris; butuh Prisma + Redis untuk dijalankan), sehingga
+ * `routes/auth.ts` (1800+ baris; butuh Prisma + Redis untuk dijalankan), sehingga
  * jalur ini tidak bisa diuji perilakunya tanpa infra. Yang paling mudah rusak
  * tanpa ketahuan justru detail kecil ini: pemulihan lupa menulis ke log (padahal
  * penukaran kunci identitas adalah peristiwa yang paling WAJIB terlihat),
@@ -575,11 +440,7 @@ test('wiring: registrasi (keyVersion 1) + pemulihan (keyVersion 2), fire-and-for
  * pemulihan), padahal jalur lain sama-sama mengubah `Device.publicKey`:
  * `POST /keys/prekey-bundle` (`routes/keys.ts`), `PUT /users/me/keys`
  * (`routes/users.ts`), dan re-sync kunci saat `POST /auth/login` (di
- * `routes/auth.ts`). Ketiganya **tidak** menulis ke log — inilah separuh isi
- * residual `docs/32` §32.7 poin 2: setelah rotasi kunci, log masih memuat kunci
- * LAMA, sehingga peer yang memverifikasi bundle melihat verdict `mismatch`
- * (kunci tersaji ≠ kunci log) dan gate kirim `peerIdentityTrust` menyimpannya
- * sebagai konflik kunci (bukan sebagai rotasi biasa).
+ * `routes/auth.ts`). Ketiganya menulis ke log lewat `ktIdentityLog.ts`.
  *
  * Test ini tidak mengubah perilaku: ia mengunci **daftar** jalur penulis kunci
  * identitas supaya (a) jalur baru tidak lolos tanpa dipertimbangkan untuk log,
@@ -601,7 +462,7 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
   // Pola yang dipakai SELURUH jalur tulis kunci identitas saat ini.
   // `(?!d\.publicKey)` menyisihkan serializer bacaan di `utils/mappers.ts`.
   const writePattern = /publicKey: Buffer\.from\((?!d\.publicKey)/;
-  const read = (file: string) => readFileSync(join(srcRoot, file), 'utf8');
+  const readSrc = (file: string) => readFileSync(join(srcRoot, file), 'utf8');
   const writers = sources
     .filter((file) => writePattern.test(readFileSync(file, 'utf8')))
     .map((file) => file.slice(srcRoot.length + 1).replace(/\\/g, '/'))
@@ -615,7 +476,7 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
 
   // Bukan penulisan: pencarian device berdasarkan kunci (`where: { publicKey: ... }`).
   assert.match(
-    read('network/realtimeHandlers.ts'),
+    readSrc('network/realtimeHandlers.ts'),
     /where: \{ publicKey: Buffer\.from\(/,
     'realtimeHandlers hanya mencari device dengan kunci itu, bukan menimpanya'
   );
@@ -623,7 +484,7 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
   // Tertulis ke log: registrasi + pemulihan (guard wiring di atas) dan tiga jalur
   // rotasi (guard `ktIdentityLog.test.ts`).
   for (const logged of ['routes/auth.ts', 'routes/keys.ts', 'routes/users.ts'] as const) {
-    assert.match(read(logged), /publishKeyTransparencyEntry\(|publishIdentityKeyChange\(/, `${logged} menulis log`);
+    assert.match(readSrc(logged), /publishKeyTransparencyEntry\(|publishIdentityKeyChange\(/, `${logged} menulis log`);
   }
 
   // Dikecualikan dengan alasan yang tetap berlaku: device dummy iframe B2B
@@ -631,16 +492,28 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
   // kunci dummy, jadi tidak ada search key yang bisa ditulis. Bila ini berubah
   // (kunci nyata untuk tenant), jalur ini WAJIB ditambahkan ke penulis log.
   assert.doesNotMatch(
-    read('routes/engine.ts'),
+    readSrc('routes/engine.ts'),
     /publishKeyTransparencyEntry\(|publishIdentityKeyChange\(/,
     'engine.ts (tenant/dummy) dikecualikan — lihat docs/32 §32.7 poin 2'
   );
 });
 
 /**
+ * [docs/38] Env jalur v1 yang pensiun: diabaikan, tetapi tidak diam-diam.
+ */
+test('env v1 pensiun: KT_SERVER_URL memicu satu peringatan, kosong tidak', () => {
+  assert.deepEqual(ktRetiredEnvWarnings({}), []);
+  assert.deepEqual(ktRetiredEnvWarnings({ KT_SERVER_URL: '  ' }), []);
+  const warnings = ktRetiredEnvWarnings({ KT_SERVER_URL: 'http://127.0.0.1:8081' });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /KT_SERVER_URL=http:\/\/127\.0\.0\.1:8081 diabaikan/);
+  assert.match(warnings[0]!, /KT_V2_SERVER_URL/);
+});
+
+/**
  * ⚠️ Test penulisan **live** hanya jalan dengan opt-in eksplisit.
  *
- * Jangan kembali ke `skip: !process.env.KT_SERVER_URL`: `server/.env` selalu
+ * Jangan kembali ke `skip: !process.env.KT_V2_SERVER_URL`: `server/.env` selalu
  * mengisi variabel itu dan `src/config.ts` memuat dotenv, sehingga gate itu
  * membuat `pnpm test` menulis entri sungguhan ke log yang sedang dikonfigurasi
  * (log KT append-only → tidak bisa dihapus). Terjadi 2026-10-17 pada jalur
@@ -648,58 +521,17 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
  * Guard-nya ada di `ktIdentityLog.test.ts` (`guard: penulisan live …`).
  */
 const KT_LIVE_WRITE =
-  process.env.NYX_KT_LIVE_WRITE === '1' && Boolean(process.env.KT_SERVER_URL);
+  process.env.NYX_KT_LIVE_WRITE === '1' && Boolean(process.env.KT_V2_SERVER_URL);
 
-test('live: penulisan nyata ke binary KT (opt-in NYX_KT_LIVE_WRITE=1)', { skip: !KT_LIVE_WRITE }, async () => {
+test('live: penulisan nyata ke log KT v2 (opt-in NYX_KT_LIVE_WRITE=1)', { skip: !KT_LIVE_WRITE }, async () => {
   clearKtDedupeForTests();
   const usernameHash = new Uint8Array(32);
   for (let i = 0; i < 32; i++) usernameHash[i] = (i * 7 + Date.now() % 251) & 0xff;
 
-  const result = await publishKeyTransparencyEntry({
-    usernameHash: Buffer.from(usernameHash).toString('base64url'),
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_100,
-  });
+  const result = await publishKeyTransparencyEntry(
+    validInput({ usernameHash: Buffer.from(usernameHash).toString('base64url') })
+  );
 
   assert.equal(result.ok, true, `penulisan KT gagal: ${result.reason ?? 'unknown'}`);
   assert.ok(result.treeSize !== null && result.treeSize >= 1n, 'ukuran pohon harus bertambah setelah update');
-});
-
-
-test('targets: pilih v2 saja tanpa menyentuh v1', async () => {
-  clearKtDedupeForTests();
-  let v1Calls = 0;
-  let v2Calls = 0;
-  const entry = buildKtLogEntry({
-    usernameHash: USERNAME_HASH_B64,
-    identityKey: IDENTITY_KEY,
-    pqIdentityKey: PQ_KEY,
-    signingKey: SIGNING_KEY,
-    keyVersion: 1,
-    updatedAtDay: 20_000,
-  });
-  const result = await commitKeyTransparencyEntry(entry, {
-    transport: {
-      async update() {
-        v1Calls++;
-        return new Uint8Array(0);
-      },
-    },
-    v2Transport: {
-      async update() {
-        v2Calls++;
-        return new Uint8Array(0);
-      },
-    },
-    targets: ['v2'],
-    now: 1_000,
-  });
-  assert.equal(v1Calls, 0);
-  assert.equal(v2Calls, 1);
-  assert.equal(result.ok, true);
-  assert.equal(result.v2?.ok, true);
-  clearKtDedupeForTests();
 });

@@ -203,6 +203,29 @@ withSkip('ktBundleProof v2: verifikasi bundle terhadap log ML-DSA', () => {
     expect(verdict.keyVersion).toBe(2);
   });
 
+  it('config ABI 1 (layanan baca v1) ditolak sebagai unavailable, bukan diverifikasi', async () => {
+    const { deps } = makeDeps({
+      // Bentuk config yang dilayani `nyx-kt-query` v1: Ed25519 + VRF, tanpa
+      // `abiVersion` dan `valueFormat`.
+      fetchConfig: async () => ({ mode: 1, signatureKey: 'e'.repeat(64), vrfKey: 'f'.repeat(64) }),
+    });
+
+    const verdict = await checkBundleAgainstKeyTransparency(
+      {
+        userId: 'peer-alice',
+        username: 'alice',
+        identityKey: logIdentityKey(),
+        now: fixture.json.verifyNowMs,
+      },
+      deps
+    );
+
+    expect(verdict.status).toBe('unavailable');
+    expect(verdict.reason).toContain('sudah dipensiunkan');
+    // Config lama tidak boleh menghasilkan pin apa pun.
+    expect(pinStore.current).toBeUndefined();
+  });
+
   it('pin ABI 1 lama naik ke ABI 2 setelah bukti v2 sah', async () => {
     pinStore.current = LEGACY_PIN;
     const { deps } = makeDeps();

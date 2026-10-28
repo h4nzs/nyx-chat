@@ -7,7 +7,7 @@
  *
  * Klien memakai endpoint ini untuk mengambil bukti KT; verifikasi kriptografinya
  * terjadi **di klien** (WASM `libsignal-keytrans`). Server NYX hanya meneruskan
- * byte dari `nyx-kt-query` dan tidak pernah menyentuh kunci rahasia pengguna.
+ * byte dari `nyx-kt-query-v2` dan tidak pernah menyentuh kunci rahasia pengguna.
  *
  * Bentuk jawaban: base64url dari protobuf mentah — `fullTreeHead` +
  * `condensed` — karena parser protobuf ada di WASM, bukan di JS.

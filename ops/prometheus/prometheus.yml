@@ -54,18 +54,6 @@ scrape_configs:
           - /etc/prometheus/file_sd/nyx-api.json
         refresh_interval: 30s
 
-  # Auditor pihak ketiga log Key Transparency (`nyx-kt-auditor`, Go, mode 3).
-  # Exporter `/metrics` di loopback (NYX_KT_AUDITOR_METRICS_ADDR, default 9466).
-  #
-  # Job ini di-scrape TERPISAH dari nyx-api karena kegagalannya tidak setara:
-  # nyx-api yang mati = aplikasi mati (terlihat di mana-mana), sedangkan auditor
-  # yang mati hanya terlihat di sini — klien baru menolak auditor head yang basi
-  # setelah 7 hari (docs/34 §34.5), dan itu berarti log KT kehilangan jaminan
-  # auditasnya tanpa satu pun error di aplikasi.
-  - job_name: nyx-kt-auditor
-    static_configs:
-      - targets: ['127.0.0.1:9466']
-
   # Sidecar WebTransport (Rust). Exporter `/metrics` di loopback
   # (TRANSPORT_METRICS_ADDR, default 127.0.0.1:9465) — ditambahkan 2026-10-17
   # bersama modul `server/transport-sidecar/src/metrics.rs`.
@@ -90,43 +78,40 @@ scrape_configs:
     static_configs:
       - targets: ['127.0.0.1:9121']
 
-  # Proses **log** KT (`nyx-kt-query`, pemilik LevelDB). Exporter `/metrics` di
-  # loopback (NYX_KT_METRICS_ADDR, default 127.0.0.1:9467) — ditambahkan
-  # 2026-10-17 bersama `server/kt-query/metrics.go`.
+  # Proses **log** KT (`nyx-kt-query-v2`, ML-DSA, pemilik LevelDB). Exporter
+  # `/metrics` di loopback (NYX_KT_V2_METRICS_ADDR, default 127.0.0.1:9468).
   #
-  # Job terpisah dari `nyx-kt-auditor` karena yang diukur berbeda kelas: auditor
-  # mengukur "apakah riwayat ini bisa dipercaya", sedangkan proses log mengukur
-  # "apakah tulisan masuk, apakah snapshot lokal tetap dibuat, apakah anchor
-  # `distinguished` tetap berputar". Kegagalan proses ini juga **fail-open**
+  # Job terpisah dari `nyx-kt-auditor-v2` karena yang diukur berbeda kelas:
+  # auditor mengukur "apakah riwayat ini bisa dipercaya", sedangkan proses log
+  # mengukur "apakah tulisan masuk, apakah snapshot lokal tetap dibuat, apakah
+  # anchor `distinguished` tetap berputar". Kegagalan proses ini juga **fail-open**
   # (registrasi tetap jalan, hanya tanpa jejak audit) sehingga tanpa metrik ia
   # tidak terlihat di mana pun.
-  - job_name: nyx-kt-query
-    static_configs:
-      - targets: ['127.0.0.1:9467']
-
-  # Log KT v2 (`nyx-kt-query-v2`, ML-DSA, LevelDB terpisah). Exporter
-  # (NYX_KT_V2_METRICS_ADDR, default 9468). Nama metrik sengaja SAMA dengan v1
-  # (`nyx_kt_query_*`) supaya dashboard/alert yang sudah ada ikut membaca kedua
-  # proses; `job` yang membedakannya.
   #
-  # Dicek saat cutover: unit ini hanya di-enable pada rollout Fase 7, jadi
-  # menambahkan aturan `up` khusus v2 sebelum itu akan membuat alarm palsu.
-  # Sampai cutover, seri v2 di sini hanya untuk observasi (`/targets`, grafik).
+  # Log KT v1 beserta exporter-nya (9466/9467) dihapus 2026-10-28 (docs/38);
+  # nama metrik `nyx_kt_query_*`/`nyx_kt_auditor_*` sengaja dipertahankan supaya
+  # alert dan dashboard tidak perlu mengganti nama seri.
   - job_name: nyx-kt-query-v2
     static_configs:
       - targets: ['127.0.0.1:9468']
 
-  # Auditor v2 (`nyx-kt-auditor-v2`, ML-DSA). Exporter default 9469; metrik
-  # `nyx_kt_auditor_*` sama dengan v1 dan dibedakan oleh label `job`.
+  # Auditor pihak ketiga log KT (`nyx-kt-auditor-v2`, ML-DSA). Exporter default
+  # 9469.
+  #
+  # Job ini di-scrape TERPISAH dari nyx-api karena kegagalannya tidak setara:
+  # nyx-api yang mati = aplikasi mati (terlihat di mana-mana), sedangkan auditor
+  # yang mati hanya terlihat di sini — klien baru menolak auditor head yang basi
+  # setelah 7 hari (docs/34 §34.5), dan itu berarti log KT kehilangan jaminan
+  # auditasnya tanpa satu pun error di aplikasi.
   - job_name: nyx-kt-auditor-v2
     static_configs:
       - targets: ['127.0.0.1:9469']
 
-# Catatan pembedaan yang mudah tertukar: `nyx-kt-query` = proses log (pemilik
-# LevelDB, membawa 3 listener: baca :8085, tulis gRPC :8081, auditor gRPC :8082),
-# `nyx-kt-auditor` = proses auditor pihak ketiga. Terpisahnya job scrape di atas
-# membuat kegagalan salah satunya tidak menyamar sebagai kegagalan yang lain.
+# Catatan pembedaan yang mudah tertukar: `nyx-kt-query-v2` = proses log (pemilik
+# LevelDB, membawa 3 listener: baca :8089, tulis gRPC :8088, auditor gRPC :8087),
+# `nyx-kt-auditor-v2` = proses auditor pihak ketiga. Terpisahnya job scrape di
+# atas membuat kegagalan salah satunya tidak menyamar sebagai kegagalan yang lain.
 #
-# Semua port metrik (9464 API, 9465 sidecar, 9466 auditor v1, 9467 log KT v1,
-# 9468 log KT v2, 9469 auditor v2) hanya didengar di loopback dan tidak pernah
-# dibuka ke jaringan — nginx juga tidak mem-proxy-nya.
+# Semua port metrik (9464 API, 9465 sidecar, 9468 log KT v2, 9469 auditor v2)
+# hanya didengar di loopback dan tidak pernah dibuka ke jaringan — nginx juga
+# tidak mem-proxy-nya.

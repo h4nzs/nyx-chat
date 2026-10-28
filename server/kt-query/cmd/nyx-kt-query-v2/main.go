@@ -75,7 +75,7 @@ func main() {
 	readAddr := flag.String("read-addr", envOr("NYX_KT_V2_QUERY_ADDR", "127.0.0.1:8089"),
 		"alamat HTTP baca (wajib loopback; proxy ada di server NYX)")
 	writeAddr := flag.String("write-addr", envOr("NYX_KT_V2_WRITE_ADDR", "127.0.0.1:8088"),
-		"alamat gRPC test-update; default sama dengan KT_SERVER_URL penulis agar tidak berubah")
+		"alamat gRPC test-update; default sama dengan KT_V2_SERVER_URL penulis")
 	auditorAddr := flag.String("auditor-addr", envOr("NYX_KT_V2_AUDITOR_ADDR", "127.0.0.1:8087"),
 		"alamat gRPC layanan auditor pihak ketiga (TreeSize/Audit/SetAuditorHead); kosong = nonaktif")
 	dbFile := flag.String("db", "", "override `db.file` dari config")
