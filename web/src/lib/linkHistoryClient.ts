@@ -36,6 +36,12 @@ export interface HistoryStatus {
   digest?: string;
 }
 
+export interface HistoryLimits {
+  /** Kuota satu arsip untuk akun ini (byte) — angka yang sama dipakai presign. */
+  maxBytes: number;
+  verified: boolean;
+}
+
 export interface HistoryDownloadTicket {
   downloadUrl: string;
   sealedKey: string;
@@ -65,6 +71,20 @@ export async function digestArchive(bytes: Uint8Array): Promise<string> {
 export async function getHistoryStatus(): Promise<HistoryStatus> {
   const res = await api<HistoryStatus>(BASE);
   return res?.state === 'ready' ? res : { state: 'none' };
+}
+
+/**
+ * [docs/40 §40.7 langkah 8] Kuota efektif akun (tier, dipotong 25 MB untuk akun
+ * belum terverifikasi). Dibaca SEBELUM mengunggah supaya kelebihan ukuran
+ * dilaporkan sebagai pesan yang bisa ditindaklanjuti, bukan 400 dari presign
+ * setelah puluhan MB terkirim.
+ */
+export async function getHistoryLimits(): Promise<HistoryLimits> {
+  const res = await api<HistoryLimits>(`${BASE}/limits`);
+  return {
+    maxBytes: typeof res?.maxBytes === 'number' && res.maxBytes > 0 ? res.maxBytes : 0,
+    verified: Boolean(res?.verified),
+  };
 }
 
 export async function presignHistoryUpload(

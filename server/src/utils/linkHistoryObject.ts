@@ -57,6 +57,21 @@ export function deriveLinkHistoryObjectKey(secret: string, deviceId: string): st
   return `${LINK_HISTORY_OBJECT_PREFIX}${digest}.${LINK_HISTORY_FILE_EXTENSION}`;
 }
 
+/**
+ * Kuota satu arsip riwayat untuk akun ini (byte).
+ *
+ * Dipakai **dua** tempat dan harus tetap satu sumber: `validateHistorySize`
+ * (penegakan di presign) dan `GET /history/limits` (klien memeriksa sebelum
+ * mengunggah, agar pesannya jelas dan bukan error generik dari presign).
+ */
+export function historySizeLimit(account: {
+  tier: string | null | undefined;
+  verified: boolean;
+}): number {
+  const tierLimit = backupSizeLimit(account.tier);
+  return account.verified ? tierLimit : Math.min(LINK_HISTORY_SANDBOX_MAX_BYTES, tierLimit);
+}
+
 export type HistoryPresignDecision =
   | { ok: true; size: number; urlTtl: number }
   | { ok: false; status: number; error: string };
@@ -79,10 +94,7 @@ export function validateHistorySize(
   if (!Number.isSafeInteger(size) || size < LINK_HISTORY_MIN_BYTES) {
     return { ok: false, status: 400, error: 'Missing or invalid history size' };
   }
-  const tierLimit = backupSizeLimit(account.tier);
-  const limit = account.verified
-    ? tierLimit
-    : Math.min(LINK_HISTORY_SANDBOX_MAX_BYTES, tierLimit);
+  const limit = historySizeLimit(account);
   if (size > limit) {
     const limitMB = Math.floor(limit / (1024 * 1024));
     return {

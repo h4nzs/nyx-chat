@@ -136,6 +136,7 @@
     "link_history_uploading": "Mengunggah arsip riwayat…",
     "link_history_uploaded": "Arsip riwayat siap — perangkat baru akan mengimpornya.",
     "link_history_failed": "Gagal mengirim arsip riwayat. Perangkat tetap tertaut, tanpa riwayat.",
+    "link_history_too_large": "Arsip riwayat {{size}} MB, melebihi kuota paket {{limit}} MB. Tidak ada yang diunggah — hapus sebagian media lalu tautkan perangkat lagi.",
     "history_retry_title": "Pemindahan riwayat belum selesai",
     "history_retry_desc": "Arsip dari perangkat sebelumnya masih tersedia sebentar lagi. Coba lagi akan melanjutkan dari titik terakhir — yang sudah masuk tidak diduplikasi.",
     "history_retry_button": "Ambil riwayat dari perangkat sebelumnya",

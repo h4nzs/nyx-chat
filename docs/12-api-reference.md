@@ -39,6 +39,7 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | GET | `/link/status/:pendingId` | public (authLimiter) | `{state: 'pending'\|'approved'\|'expired', history: 'none'\|'preparing'\|'ready'}` — perangkat baru melakukan polling; `history` hanya berarti saat `approved` |
 | POST | `/link/approve` | requireAuth | `{pendingId, expectHistory?}` → `{ok, deviceId}`. Membuat Device row untuk kunci yang didaftarkan saat claim + entri log KT. Hanya akun pemilik pending. `expectHistory: true` menandai perangkat baru untuk **menunggu** arsip riwayat sebelum `complete` (`docs/40`) |
 | POST | `/link/deny` | requireAuth | `{pendingId}` → `{ok}`; state dihapus |
+| GET | `/link/history/limits` | requireAuth (perangkat lama) | `{maxBytes, verified}` — kuota efektif yang sama dengan penegakan presign; klien memeriksa ukuran arsip sebelum mengunggah |
 | POST | `/link/history/presign` | requireAuth (perangkat lama, ≤30 mnt) | `{deviceId, size}` → `{uploadUrl, size, urlTtl}`. Kuota tier; akun belum terverifikasi dibatasi 25 MB. `404` bila `LINK_HISTORY_ENABLED=off` |
 | POST | `/link/history/ready` | requireAuth (perangkat lama) | `{deviceId, size, digest, sealedKey}` → `{ok}`. `size` wajib sama dengan presign; `sealedKey` = kunci arsip yang diseal ke X-Wing perangkat baru |
 | POST | `/link/history/abort` | requireAuth (perangkat lama) | `{deviceId}` → `{ok}`; bersihkan intent/presign/state + objek R2 |

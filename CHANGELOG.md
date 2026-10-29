@@ -33,6 +33,12 @@ identitas baru ke server dan `loadConversations()` me-merge percakapan hasil
 impor ke sidebar. `consume` yang gagal (putus jaringan tepat setelah impor)
 tidak menggagalkan impor — objek yatim dihapus TTL/lifecycle.
 
+Sebelum mengunggah, perangkat lama membaca kuota efektifnya dari
+`GET /link/history/limits` (angka yang sama dengan penegakan presign; 25 MB
+untuk akun belum terverifikasi) dan membatalkan ekspor bila arsip melebihi
+kuota — dengan kedua angka di pesan, bukan 400 dari presign setelah puluhan MB
+terkirim. `abort` tetap dipanggil supaya perangkat baru tidak menunggu 60 detik.
+
 Impor yang gagal (jaringan, tab ditutup, kuota browser) tidak membuang arsip:
 penanda boolean `nyx_link_history_pending` di `kvStore` (tanpa timestamp: waktu
 presisi per kejadian adalah metadata aktivitas) membuat app start berikutnya

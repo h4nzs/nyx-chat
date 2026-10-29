@@ -136,6 +136,7 @@
     "link_history_uploading": "Subiendo el archivo de historial…",
     "link_history_uploaded": "Archivo de historial listo: el nuevo dispositivo lo importará.",
     "link_history_failed": "No se pudo enviar el archivo de historial. El dispositivo sigue vinculado, sin historial.",
+    "link_history_too_large": "El archivo de historial ocupa {{size}} MB y supera el límite de tu plan ({{limit}} MB). No se subió nada: elimina algunos archivos multimedia y vuelve a vincular el dispositivo.",
     "history_retry_title": "Transferencia de historial incompleta",
     "history_retry_desc": "El archivo de tu dispositivo anterior sigue disponible por poco tiempo. Reintentar continúa donde se detuvo; lo ya importado no se duplica.",
     "history_retry_button": "Importar historial del dispositivo anterior",

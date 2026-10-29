@@ -8,7 +8,12 @@ import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 import ModalBase from './ui/ModalBase';
 import { transportClient } from '@lib/transportClient';
 import { approveDeviceLink, buildDeviceLinkUrl, denyDeviceLink } from '@lib/deviceLinking';
-import { countHistoryRecords, readHistoryTables, sendHistoryArchive } from '@lib/linkHistoryExport';
+import {
+  countHistoryRecords,
+  parseHistoryTooLarge,
+  readHistoryTables,
+  sendHistoryArchive,
+} from '@lib/linkHistoryExport';
 
 const QRCode = (
   (QRCodeRaw as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
@@ -165,7 +170,20 @@ export default function LinkDeviceModal({ onClose }: Props) {
           // Arsip gagal TIDAK membatalkan tautan: perangkat baru sudah disetujui
           // dan akan lanjut tanpa riwayat (intent dibersihkan oleh exporter).
           console.error('[Link] Arsip riwayat gagal dikirim:', e);
-          toast.error(t('settings:sessions_page.link_history_failed'));
+          const tooLarge = parseHistoryTooLarge(e);
+          if (tooLarge) {
+            // [docs/40 §40.7 langkah 8] Kelebihan kuota dilaporkan dengan angka
+            // nyata; tanpa ini pesannya hanya "gagal mengirim arsip".
+            const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+            toast.error(
+              t('settings:sessions_page.link_history_too_large', {
+                size: mb(tooLarge.size),
+                limit: mb(tooLarge.limit),
+              })
+            );
+          } else {
+            toast.error(t('settings:sessions_page.link_history_failed'));
+          }
         } finally {
           setHistoryPhase(null);
         }

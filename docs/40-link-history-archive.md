@@ -2,7 +2,7 @@
 
 > **Status: FASE 0–2 LANDED (2026-10-29).** Yang sudah berjalan di kode: kirim
 > `pqPublicKey` di `auth:linking_request`, gerbang `history` di status/approve,
-> `/abort`, enam endpoint arsip, ekspor **kontak + daftar percakapan + pesan**,
+> `/abort`, `limits`, dan lima endpoint arsip lainnya, ekspor **kontak + daftar percakapan + pesan**,
 > impor bertahap (batch 250, progres UI), `pushContactBundle` setelah impor, dan
 > e2e nyata yang membaca ulang pesan dengan kunci vault identitas baru. File:
 > `server/src/utils/linkHistory.ts`, `server/src/utils/linkHistoryObject.ts`,
@@ -208,6 +208,7 @@ masuk `writeTablesToDexie` — penanda `k` adalah pagar runtime untuk itu.
 
 | Metode | Path | Auth | Body / hasil |
 |---|---|---|---|
+| `GET` | `/api/auth/link/history/limits` | sesi perangkat lama | → `{maxBytes, verified}` (angka yang sama dengan penegakan presign) |
 | `POST` | `/api/auth/link/history/presign` | sesi **perangkat lama** | `{deviceId, size}` → `{uploadUrl, size, urlTtl}` |
 | `POST` | `/api/auth/link/history/ready` | sesi perangkat lama | `{deviceId, size, digest, sealedKey}` → `{ok:true}` |
 | `POST` | `/api/auth/link/history/abort` | sesi perangkat lama | `{deviceId}` → `{ok:true}` (bersihkan intent/presign/state + objek) |
@@ -275,7 +276,7 @@ Pola yang sama dengan `backupObject.ts`: deterministik, tanpa `userId`/
 
 | Env | Default | Catatan |
 |---|---|---|
-| `LINK_HISTORY_ENABLED` | `on` | `off`/`0`/`false` → keenam endpoint tidak dipasang (404), bukan 403 |
+| `LINK_HISTORY_ENABLED` | `on` | `off`/`0`/`false` → semua endpoint `/link/history/*` tidak dipasang (404), bukan 403 |
 
 TTL dan batas ukuran sengaja **konstanta di kode** (satu sumber kebenaran):
 `LINK_HISTORY_TTL_SECONDS` 1800, `LINK_HISTORY_PRESIGN_TTL_SECONDS` dan
@@ -335,9 +336,14 @@ diambil ulang dari server, jadi bukan bagian tahap ini.)
    `liveBackupStore()`**: `readTables`-nya mengembalikan objek domain hasil
    langkah 2–4, bukan baris Dexie — itu inti pembeda arsip ini dari `.nyxbak`.
 7. `sealedKey = await sealForDevice(JSON.stringify({v:1,k,n,d}), pqPublicKey_new)`.
-8. Lapor `{size, digest, records, counts}` ke UI sebelum unggah; batalkan bila
-   `size > kuota` (pesan jelas: "riwayat 640 MB melebihi kuota 500 MB pilih
-   rentang yang lebih kecil / hapus media").
+8. Sebelum presign, baca `GET /link/history/limits` (kuota efektif akun: tier,
+   dipotong 25 MB bila belum terverifikasi). Bila `size > maxBytes`, batalkan
+   **tanpa mengunggah** dan lempar `HistoryArchiveTooLargeError` yang membawa
+   kedua angka; UI menampilkan "arsip {{size}} MB melebihi kuota {{limit}} MB —
+   hapus sebagian media lalu tautkan perangkat lagi" dan exporter memanggil
+   `abort` supaya perangkat baru tidak menunggu 60 detik. Endpoint `limits`
+   dipakai agar klien tidak menyimpan salinan konstanta kuota; bila endpoint itu
+   tidak terjangkau, presign server tetap penegak terakhir.
 
 On-device cost: 10k pesan ≈ puluhan MB JSON sebelum padding; diukur dengan pola
 `web/src/lib/backupBench.ts` (§40.12 gate).
@@ -396,7 +402,7 @@ masuk ke vault; kegagalan → `markHistoryImportPending()` (boolean plaintext di
 | `sealedKey` tidak bisa dibuka (perangkat salah / kunci salah) | `openSealedForDevice` melempar → impor batal, state utuh |
 | Impor gagal di tengah (kuota penyimpanan browser, tab ditutup) | Batch sebelumnya sudah tersimpan; impor ulang melanjutkan (idempoten per id) |
 | `consume` gagal | Impor tetap sukses; objek dihapus TTL/lifecycle |
-| `LINK_HISTORY_ENABLED=off` | Kelima endpoint tidak ada (404). Tautan tetap jalan; perangkat lama menampilkan toast gagal dan perangkat baru lanjut setelah tunggu ≤60 dtk |
+| `LINK_HISTORY_ENABLED=off` | Semua endpoint `/link/history/*` tidak ada (404). Tautan tetap jalan; perangkat lama menampilkan toast gagal dan perangkat baru lanjut setelah tunggu ≤60 dtk |
 | Arsip riwayat dibuka lewat "Restore from .nyxbak" | Ditolak oleh penanda `k` (§40.5), bukan ditulis sebagai baris rusak |
 | `.nyxbak` diumpankan ke impor riwayat | Ditolak: tidak ada penanda `k` |
 
@@ -462,7 +468,7 @@ state itu terikat ke private key yang tidak ikut pindah.
 - `server/src/utils/linkHistory.ts` (state machine murni di atas
   `LinkingStore`/`LinkingSealer`) + `linkHistoryObject.ts` (kunci HMAC, kuota,
   clamp TTL).
-- `server/src/routes/linkHistory.ts` (6 endpoint, termasuk `abort`) dipasang di
+- `server/src/routes/linkHistory.ts` (7 endpoint, termasuk `abort` dan `limits`) dipasang di
   `app.ts` di belakang `LINK_HISTORY_ENABLED`.
 - `web/src/lib/linkHistoryClient.ts` (REST + seal/open + unggah/unduh),
   `linkHistoryExport.ts`/`linkHistoryImport.ts` dengan tabel tahap 1.

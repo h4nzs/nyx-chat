@@ -19,7 +19,11 @@ import {
   readHistoryState,
   recordHistoryPresign,
 } from '../utils/linkHistory.js';
-import { deriveLinkHistoryObjectKey, validateHistorySize } from '../utils/linkHistoryObject.js';
+import {
+  deriveLinkHistoryObjectKey,
+  historySizeLimit,
+  validateHistorySize,
+} from '../utils/linkHistoryObject.js';
 import { deleteR2File, getPresignedDownloadUrl, getPresignedUploadUrl } from '../utils/r2.js';
 
 // [docs/40 §40.6] Arsip riwayat sekali-pakai untuk perangkat hasil link.
@@ -133,6 +137,26 @@ router.post(
     }
   }
 );
+
+// === 1b. LIMITS (perangkat lama, sebelum ekspor) ===
+//
+// [docs/40 §40.7 langkah 8] Klien perlu tahu kuota SEBELUM mengunggah: tanpa
+// ini satu-satunya umpan balik adalah 400 dari presign setelah puluhan MB
+// diekspor dan dikirim, dan pesannya berbunyi seperti kegagalan jaringan.
+// Angka ini persis yang dipakai presign (`historySizeLimit`), bukan salinan
+// konstanta di klien.
+router.get('/limits', requireAuth, generalLimiter, async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Unauthorized');
+    const account = await accountTier(req.user.id);
+    res.json({
+      maxBytes: historySizeLimit({ tier: account.tier, verified: account.isVerified }),
+      verified: account.isVerified,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // === 2. READY (perangkat lama selesai mengunggah) ===
 router.post(

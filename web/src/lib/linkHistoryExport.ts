@@ -28,6 +28,7 @@ import type { Conversation, Message } from '@store/conversation';
 import {
   digestArchive,
   generateArchiveKey,
+  getHistoryLimits,
   markHistoryReady,
   presignHistoryUpload,
   sealArchiveKey,
@@ -37,6 +38,34 @@ import {
 
 /** Penanda jenis arsip di setiap chunk (ikut AEAD). */
 export const HISTORY_MARKER = 'history';
+
+/** Prefix error `HISTORY_TOO_LARGE:<size>:<limit>` (byte). */
+export const HISTORY_TOO_LARGE_PREFIX = 'HISTORY_TOO_LARGE';
+
+/**
+ * Arsip melebihi kuota akun. Dibawa sebagai error bertipe supaya UI bisa
+ * menampilkan ukuran + batas yang nyata (bukan "gagal mengirim arsip").
+ */
+export class HistoryArchiveTooLargeError extends Error {
+  constructor(
+    readonly size: number,
+    readonly limit: number
+  ) {
+    super(`${HISTORY_TOO_LARGE_PREFIX}:${size}:${limit}`);
+    this.name = 'HistoryArchiveTooLargeError';
+  }
+}
+
+/** Baca kembali ukuran/batas dari error, `null` bila bukan kasus kelebihan kuota. */
+export function parseHistoryTooLarge(error: unknown): { size: number; limit: number } | null {
+  const message = error instanceof Error ? error.message : '';
+  if (!message.startsWith(`${HISTORY_TOO_LARGE_PREFIX}:`)) return null;
+  const [, rawSize, rawLimit] = message.split(':');
+  const size = Number(rawSize);
+  const limit = Number(rawLimit);
+  if (!Number.isFinite(size) || !Number.isFinite(limit)) return null;
+  return { size, limit };
+}
 
 /**
  * Tabel yang ikut arsip tahap ini. Nama tabel = nama frame `backupPayload`
@@ -154,6 +183,16 @@ export async function sendHistoryArchive(input: {
     }
 
     const archive = await createHistoryArchive({ key, tables });
+
+    // [docs/40 §40.7 langkah 8] Periksa kuota SEBELUM presign/unggah. Kalau
+    // batasnya tidak bisa dibaca (jaringan), presign server tetap penegak
+    // terakhir — jangan gagalkan transfer hanya karena endpoint limits.
+    const limits = await getHistoryLimits().catch(() => null);
+    if (limits && limits.maxBytes > 0 && archive.size > limits.maxBytes) {
+      // `catch` di bawah memanggil `abort` (intent/presign dibersihkan) supaya
+      // perangkat baru tidak menunggu 60 detik untuk arsip yang tak akan datang.
+      throw new HistoryArchiveTooLargeError(archive.size, limits.maxBytes);
+    }
 
     input.onProgress?.('uploading');
     const presigned = await presignHistoryUpload(input.deviceId, archive.size);

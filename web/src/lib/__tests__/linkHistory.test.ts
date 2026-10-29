@@ -75,11 +75,13 @@ vi.mock('../linkHistoryClient', async () => {
     digestArchive: async (bytes: Uint8Array) =>
       sodium.to_hex(sodium.crypto_generichash(32, bytes)),
     generateArchiveKey: async () => sodium.randombytes_buf(32),
+    // [docs/40 §40.7 langkah 8] Kuota dibaca sebelum unggah; default "cukup".
+    getHistoryLimits: vi.fn(async () => ({ maxBytes: 500 * 1024 * 1024, verified: true })),
     markHistoryReady: vi.fn(),
     presignHistoryUpload: vi.fn(),
     sealArchiveKey: vi.fn(),
-    uploadHistoryArchive: vi.fn(),
-    abortHistoryUpload: vi.fn(),
+    uploadHistoryArchive: vi.fn(async () => {}),
+    abortHistoryUpload: vi.fn(async () => {}),
     getHistoryStatus: vi.fn(),
     requestHistoryDownload: vi.fn(),
     fetchHistoryArchive: vi.fn(),
@@ -102,11 +104,20 @@ import { createFramedBackup, restoreFramedBackup, type BackupStore } from '../ba
 import { getSodium } from '../sodiumInitializer';
 import {
   HISTORY_MARKER,
+  HistoryArchiveTooLargeError,
   countHistoryRecords,
   createHistoryArchive,
+  parseHistoryTooLarge,
   readHistoryTables,
+  sendHistoryArchive,
 } from '../linkHistoryExport';
 import { importHistoryArchive } from '../linkHistoryImport';
+import {
+  abortHistoryUpload,
+  getHistoryLimits,
+  presignHistoryUpload,
+  uploadHistoryArchive,
+} from '../linkHistoryClient';
 
 async function adapters(): Promise<{ crypto: BackupCryptoBackend; codec: BackupValueCodec }> {
   const sodium = await getSodium();
@@ -265,6 +276,31 @@ describe('arsip riwayat: impor', () => {
     await expect(importHistoryArchive({ bytes: foreign.bytes, key })).rejects.toThrow(
       /HISTORY_TABLE_UNKNOWN:kvStore/
     );
+  });
+});
+
+describe('arsip riwayat: kuota', () => {
+  it('membatalkan unggah sebelum presign bila arsip melebihi kuota', async () => {
+    vi.mocked(getHistoryLimits).mockResolvedValueOnce({ maxBytes: 64, verified: false });
+
+    await expect(
+      sendHistoryArchive({ deviceId: 'device-quota', pqPublicKeyB64: 'pk' })
+    ).rejects.toThrow(/^HISTORY_TOO_LARGE:/);
+
+    // Intent dibersihkan supaya perangkat baru tidak menunggu 60 detik, dan
+    // tidak ada byte yang dikirim ke R2.
+    expect(abortHistoryUpload).toHaveBeenCalledWith('device-quota');
+    expect(presignHistoryUpload).not.toHaveBeenCalled();
+    expect(uploadHistoryArchive).not.toHaveBeenCalled();
+  });
+
+  it('parseHistoryTooLarge hanya mengenali error kuota dan mengembalikan angkanya', () => {
+    expect(parseHistoryTooLarge(new HistoryArchiveTooLargeError(640 * 1024 * 1024, 500 * 1024 * 1024))).toEqual({
+      size: 640 * 1024 * 1024,
+      limit: 500 * 1024 * 1024,
+    });
+    expect(parseHistoryTooLarge(new Error('offline'))).toBeNull();
+    expect(parseHistoryTooLarge(null)).toBeNull();
   });
 });
 

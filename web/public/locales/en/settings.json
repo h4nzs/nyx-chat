@@ -136,6 +136,7 @@
     "link_history_uploading": "Uploading the history archive…",
     "link_history_uploaded": "History archive ready — the new device will import it.",
     "link_history_failed": "Could not send the history archive. The device stays linked, without history.",
+    "link_history_too_large": "The history archive is {{size}} MB, over your plan limit of {{limit}} MB. Nothing was uploaded — remove some media and link the device again.",
     "history_retry_title": "History transfer incomplete",
     "history_retry_desc": "The archive from your previous device is still available for a short time. Retrying continues where it stopped — anything already imported is not duplicated.",
     "history_retry_button": "Import history from previous device",

@@ -43,7 +43,9 @@ import {
   LINK_HISTORY_FILE_EXTENSION,
   LINK_HISTORY_MIN_BYTES,
   LINK_HISTORY_OBJECT_PREFIX,
+  LINK_HISTORY_SANDBOX_MAX_BYTES,
   deriveLinkHistoryObjectKey,
+  historySizeLimit,
   validateHistorySize,
 } from '../src/utils/linkHistoryObject.js';
 
@@ -240,6 +242,19 @@ test('validateHistorySize menegakkan minimum, kuota tier, dan menjepit TTL', () 
     validateHistorySize(200 * 1024 * 1024, undefined, { tier: null, verified: true }).ok,
     false
   );
+});
+
+test('historySizeLimit satu sumber dengan penegakan presign', () => {
+  // Angka yang dikirim `GET /history/limits` harus sama dengan yang dipakai
+  // `validateHistorySize`; kalau tidak, klien memeriksa kuota yang salah.
+  assert.equal(historySizeLimit({ tier: 'FREE', verified: true }), 100 * 1024 * 1024);
+  assert.equal(historySizeLimit({ tier: 'SUBSCRIBER', verified: true }), 500 * 1024 * 1024);
+  assert.equal(historySizeLimit({ tier: null, verified: true }), 100 * 1024 * 1024);
+  assert.equal(historySizeLimit({ tier: 'SUBSCRIBER', verified: false }), LINK_HISTORY_SANDBOX_MAX_BYTES);
+
+  const limit = historySizeLimit({ tier: 'FREE', verified: true });
+  assert.equal(validateHistorySize(limit, undefined, { tier: 'FREE', verified: true }).ok, true);
+  assert.equal(validateHistorySize(limit + 1, undefined, { tier: 'FREE', verified: true }).ok, false);
 });
 
 test('akun belum terverifikasi boleh, tetapi dibatasi 25 MB', () => {
