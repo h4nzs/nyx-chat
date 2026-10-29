@@ -8,7 +8,9 @@
 # Sejak 2026-10-28 hanya **log v2** (ML-DSA-65) yang dibangun: layanan v1
 # (`nyx-kt-query`), auditor v1, dan pemeriksa `nyx-kt-check` dihapus bersama
 # pensiunnya jalur v1 (`docs/38`). Yang tersisa justru yang berjalan di
-# produksi: log v2, auditor v2, dan alat bootstrap sekali pakai.
+# produksi: log v2, auditor v2, alat bootstrap sekali pakai, dan verifier
+# eksternal `nyx-kt-v2-check` (pengganti `nyx-kt-check`, dipakai drill pemulihan
+# `scripts/kt-v2-restore-drill.sh` — bukan layanan).
 #
 # Modul ini bergantung pada `github.com/signalapp/keytransparency`, yang TIDAK
 # bisa diambil dari jaringan (repo privat — `git ls-remote` menjawab "Repository
@@ -39,6 +41,9 @@ V2_AUDITOR_OUT="${NYX_KT_V2_AUDITOR_BINARY:-$here/nyx-kt-auditor-v2}"
 # Bootstrap pemasangan pertama v2 (kunci + config). Bukan layanan; hanya alat
 # satu kali yang dipanggil deploy bila config belum ada.
 V2_INIT_OUT="${NYX_KT_V2_INIT_BINARY:-$here/nyx-kt-v2-init}"
+# Verifier eksternal (pengganti `nyx-kt-check` v1). Dipakai drill pemulihan:
+# `scripts/kt-v2-restore-drill.sh` menaruhnya di `$WORK/bin` lewat variabel ini.
+V2_CHECK_OUT="${NYX_KT_V2_CHECK_BINARY:-$here/nyx-kt-v2-check}"
 UPSTREAM="${NYX_KT_UPSTREAM:-}"
 
 if [[ -n "$UPSTREAM" ]]; then
@@ -76,6 +81,8 @@ fi
 go build -o "$V2_OUT" ./cmd/nyx-kt-query-v2
 go build -o "$V2_AUDITOR_OUT" ./cmd/nyx-kt-auditor-v2
 go build -o "$V2_INIT_OUT" ./cmd/nyx-kt-v2-init
+go build -o "$V2_CHECK_OUT" ./cmd/nyx-kt-v2-check
 echo "dibangun: $V2_OUT"
 echo "dibangun: $V2_AUDITOR_OUT"
 echo "dibangun: $V2_INIT_OUT"
+echo "dibangun: $V2_CHECK_OUT"

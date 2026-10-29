@@ -250,11 +250,39 @@ jobs:
         working-directory: web
         run: pnpm exec vitest run src/lib/__tests__/x3dhOracleVectors.test.ts src/lib/__tests__/x3dhOracleInterop.test.ts
 
-  # [2026-10-28] Job `kt-recovery` dihapus bersama pensiunnya log KT v1: drill
-  # `scripts/kt-restore-drill.sh` bergantung pada penulis v1 + `nyx-kt-check`,
-  # keduanya tidak ada lagi (docs/38). Drill setara untuk v2 BELUM ada — itu
-  # regresi yang dicatat jujur di docs/38 §38.3 dan docs/39, bukan sesuatu yang
-  # boleh dianggap tertutup.
+  kt-recovery-v2:
+    # [docs/39 §39.5] Drill pemulihan log KT **v2** (11 langkah): tulis lewat jalur
+    # penulis produksi → snapshot terverifikasi → bencana → pulih HANYA dari
+    # arsip → bukti lolos `transparency.VerifySearch` dengan anchor lama → log
+    # tumbuh tanpa percabangan, plus 4 kontrol negatif dan skenario rollback.
+    #
+    # Menggantikan job `kt-recovery` (v1) yang dihapus 2026-10-28 (docs/38).
+    # Tidak butuh layanan eksternal: workspace di /tmp, port 18087–18089/19468,
+    # kunci acak per jalannya drill, dan binary dibangun ke `$WORK/bin` (tidak
+    # pernah menimpa binary layanan hidup).
+    name: KT v2 recovery drill
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/kt-query/go.mod
+          cache-dependency-path: server/kt-query/go.sum
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      # `@nyx/shared` dikonsumsi dari dist/; writer drill memakainya lewat
+      # `server/src/utils/keyTransparency.ts`.
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Drill pemulihan KT v2
+        run: bash scripts/kt-v2-restore-drill.sh
 
   audit:
     name: Dependency Audit
