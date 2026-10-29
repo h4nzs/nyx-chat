@@ -858,21 +858,17 @@ burst kedaluwarsa > 10k/menit — naikkan batas, jangan mengandalkan run berikut
   dan `nyx_kt_snapshot_deleted_total`.
 - Tanpa `KT_SNAPSHOT_DIR`, job log satu peringatan dan tidak mengunggah apa pun —
   ini kondisi yang harus terlihat, bukan dianggap normal.
-- **Latihan pemulihan (manual sejak 2026-10-28).** Drill otomatis di CI (job
-  `kt-recovery` + `scripts/kt-restore-drill.sh`) **dihapus** bersama pensiunnya
-  log v1: keduanya bergantung pada penulis v1 dan pemeriksa `nyx-kt-check`, dan
-  tidak ada di repo lagi. Menggantinya otomatis butuh harness v2 (tulis lewat
-  penulis v2 → snapshot → hapus DB → pulih dari arsip → bandingkan tree size +
-  root dengan pra-bencana, plus bukti lama tetap lolos `keytrans-wasm-v2`), jadi
-  langkah berikut **wajib dijalankan operator** sebelum mengandalkan arsip R2:
-
-  1. Unduh arsip terbaru dari R2 (`kt-snapshots/<file>` di `latest.json`), ekstrak.
-  2. `systemctl stop nyx-kt-query-v2` (LevelDB single-process — `-check` tidak
-     bisa membuka DB yang sedang dipakai).
-  3. `nyx-kt-query-v2 -config <salinan config> -db <direktori hasil ekstrak> -check`
-     → tree head harus sama dengan `treeSize`/`root` di arsip itu.
-  4. `systemctl start nyx-kt-query-v2`, lalu `curl 127.0.0.1:8089/healthz` harus
-     melaporkan angka yang sama.
+- **Latihan pemulihan: otomatis lagi sejak 2026-10-29.** `bash
+  scripts/kt-v2-restore-drill.sh` (11 langkah, job CI `kt-recovery-v2`) menulis
+  lewat penulis produksi, menunggu snapshot terverifikasi, menghapus DB,
+  memulihkan **hanya** dari arsip, memverifikasi bukti dengan
+  `transparency.VerifySearch`, lalu membuktikan log bisa tumbuh tanpa memutus
+  anchor pra-bencana — ditambah empat kontrol negatif dan skenario rollback.
+  Prosedur manual (bila drill tidak bisa dijalankan) ada di `docs/39` §39.5b:
+  hentikan layanan (LevelDB single-process), pindahkan DB hidup, ekstrak arsip,
+  `-check` **lalu bandingkan treeSize/root** (`-check` exit 0 saja bukan bukti
+  integritas), jalankan layanan, **jalankan auditor**, baru verifikasi klien.
+  Mode `--bundle <file.tar.gz.age>` (bundle backup nyata) disiapkan untuk operator.
 
 ## 10.14 Versi klien minimum (`MIN_CLIENT_VERSION`) — added 2026-10-15, R2
 
@@ -955,9 +951,15 @@ diabaikan.
 **Bangun** (dari vendor, tanpa jaringan dan tanpa checkout upstream):
 
 ```bash
-server/kt-query/build.sh          # → nyx-kt-query-v2 + nyx-kt-auditor-v2 + nyx-kt-v2-init
+server/kt-query/build.sh          # → nyx-kt-query-v2 + nyx-kt-auditor-v2 + nyx-kt-v2-init + nyx-kt-v2-check
 server/kt-query/build.sh test     # go vet + go test
 ```
+
+`nyx-kt-v2-check` adalah verifier eksternal (pengganti `nyx-kt-check` v1):
+`config`/`head`/`verify-search`/`tree-size`/`audit`, dengan berkas **anchor**
+klien. Ia dipakai drill pemulihan (`scripts/kt-v2-restore-drill.sh`, 11 langkah,
+CI job `kt-recovery-v2`) dan bisa dipakai operator untuk memeriksa instance
+yang sedang pulih — prosedur lengkapnya di `docs/39` §39.5.
 
 **Jalankan** (semua listener loopback; config YAML berisi kunci ML-DSA + `db.file`):
 
@@ -1573,3 +1575,86 @@ dibersihkan (key `pp:spent:*` ber-TTL).
 atas blind RSA (`@cloudflare/blindrsa-ts`), **bukan** unforgeability
 pasca-kuantum; unlinkability issuance↔redemption bergantung pada OHTTP dan
 ketiadaan log waktu (metrik hanya enum hasil, tanpa token/keyId).
+
+## 10.23 Tulisan KT yang dilewati (`nyx_kt_writes_total{result="invalid"}`) — added 2026-10-29
+
+`invalid` bukan kegagalan sistem: ia adalah cara server **menolak menulis** entri
+yang tidak bisa diverifikasi siapa pun. Sejak 2026-10-28 satu-satunya sebab yang
+diharapkan adalah **perangkat tanpa `signingKeyV2`** (ML-DSA-65, kolom nullable
+`Device.signingKeyV2`): `buildKtLogEntry` melempar `KT_V2_SIGNING_KEY_INVALID`,
+entri dilewati, dan akun itu **tidak punya entri log yang ter-update** sampai
+perangkatnya merotasi ke kunci PQ (`docs/38` §38.3). Sebab kedua adalah input
+cacat (base64/hash rusak, panjang kunci salah) — bug klien atau percobaan
+menyuntikkan entri cacat.
+
+Yang **tidak** tercampur di sini: identifier ter-pepper (64 hex) dihitung
+`unsupported_identifier`, bukan `invalid` (`server/src/utils/keyTransparency.ts`).
+
+### 10.23.1 Baseline (diukur 2026-10-29, self-host)
+
+| Ukuran | Nilai | Sumber |
+|---|---|---|
+| tulisan `ok` | 37 dalam 90 hari (≈0,4/hari) | Prometheus, `sum by (result) (increase(nyx_kt_writes_total[90d]))` |
+| tulisan `invalid` | **0 sepanjang riwayat log v2** (seri tidak pernah lahir) | idem |
+| perangkat total / tanpa `signingKeyV2` | 4 / **1** (aktif ≤30 hari) | Postgres, `BEGIN READ ONLY` |
+| baris `[KT] Entri log dilewati` di journal | 0 (journal sudah terotasi) | `journalctl --user -u nyx-api` |
+
+Angka itu yang menentukan ambang: **volume sangat rendah**, jadi hitungan mentah
+tidak berarti apa-apa dan satu kejadian bukan sinyal. Seri `invalid` baru ada
+**setelah** kejadian pertama; semua kueri harus menoleransi seri kosong
+(`or vector(0)` / `absent_over_time`).
+
+### 10.23.2 Alarm
+
+| Aturan | Menyala bila | Artinya |
+|---|---|---|
+| `NyxKeyTransparencyInvalidWrites` (warning, `for: 1h`) | ≥3 kejadian dalam 6 jam **dan** >5% dari seluruh tulisan | aliran persisten: perangkat PQ belum bergerak |
+| `NyxKeyTransparencyInvalidSpike` (warning, `for: 0m`) | ≥5 kejadian dalam 15 menit | burst: bug klien / input cacat |
+
+Keduanya punya kasus **menyala dan tidak menyala** di `ops/prometheus/tests.yml`,
+termasuk kasus "seri `invalid` belum pernah ada" (tidak menyala, tanpa error).
+Panel "Pangsa tulisan KT yang dilewati (invalid)" ada di dashboard
+`nyx-overview` (ambang warna sama dengan aturan: 1% kuning, 5% merah).
+
+### 10.23.3 Laporan harian (baca-saja, agregat)
+
+```bash
+bash scripts/kt-invalid-report.sh
+# PROMETHEUS_URL=… NYX_API_JOURNAL_UNIT=nyx-api SKIP_DB=1 SKIP_JOURNAL=1
+```
+
+Ia mencetak tiga hal dan tidak satu pun identitas: (1) tulisan per `result` 24
+jam/7 hari + pangsa `invalid`, (2) hitungan perangkat total / tanpa
+`signingKeyV2` / yang aktif ≤30 dan ≤90 hari (satu transaksi `READ ONLY`), (3)
+`<reason>` dari journal dikelompokkan, tanpa identifier. Kalau journal sudah
+terotasi, bagian 3 kosong — itu keterbatasan yang dilaporkan apa adanya, bukan
+"nol kejadian".
+
+### 10.23.4 Apa yang diamati setelah deploy
+
+| Jendela | Yang dilihat | Sehat | Bermasalah |
+|---|---|---|---|
+| 24 jam | pangsa `invalid` | 0% (belum ada perangkat lama yang menulis) | >5% sejak jam pertama → input cacat, bukan migrasi |
+| 7 hari | tren pangsa | turun/mendatar, perangkat lama aktif ≤ jumlah yang sama | naik atau tetap >5% → rotasi perangkat tidak berjalan |
+| 30 hari | perangkat tanpa `signingKeyV2` | angka menurun | angka tidak bergerak **dan** `invalid` tetap → akun tak terlihat di log |
+
+Tanda bermasalah yang lebih tajam dari angka: `NyxKeyTransparencyInvalidSpike`
+menyala berulang (bug klien), atau `invalid` muncul dengan `<reason>` selain
+`KT_V2_SIGNING_KEY_INVALID` (input cacat/serangan).
+
+### 10.23.5 Opsi keputusan (milik pemilik, bukan operator)
+
+1. **Dorong rotasi perangkat di klien** — paksa pembuatan `signingKeyV2` saat
+   login berikutnya (atau gate ringan: fitur yang butuh KT menolak perangkat
+   lama). Menutup celah, tetapi menambah friksi dan menuntut rilis klien.
+2. **Terima dan dokumentasikan** — akun di perangkat lama memang tidak terlihat
+   di log; `invalid` menjadi metrik yang dipantau, bukan diperbaiki. Nol kerja,
+   tetapi klaim "setiap perubahan kunci ter-audit" tidak berlaku untuk akun itu.
+3. **Pecah label** (`invalid_signing_key` vs `invalid_input`) — membuat alert
+   lebih tepat sasaran, tetapi mengubah kontrak metrik yang sengaja dipertahankan
+   (`metrics.ts`, `docs/38` §38.2 baris 3) dan menuntut perubahan alert + panel +
+   kasus drill sekaligus. Belum dilakukan; butuh persetujuan pemilik.
+
+Apa pun pilihannya, jangan menaikkan `invalid` menjadi `error`: keduanya punya
+penyebab dan tindakan yang berbeda, dan `NyxKeyTransparencyWriteFailing` sudah
+menjaga jalur `error`.

@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧯 Drill pemulihan log KT v2 menggantikan drill v1 (2026-10-29)
+
+Sejak drill v1 dihapus (2026-10-28), tidak ada satu pun uji otomatis yang
+membuktikan arsip snapshot KT bisa **dipulihkan** — snapshot yang terverifikasi
+saat dibuat hanya membuktikan masa lalu, bukan pemulihan. Sekarang
+`scripts/kt-v2-restore-drill.sh` menjalankan 11 langkah dengan kode produksi
+sungguhan: menulis lewat `publishKeyTransparencyEntry`, menunggu snapshot
+terverifikasi, menghapus DB, memulihkan **hanya** dari arsip, memverifikasi bukti
+lewat `transparency.VerifySearch` (fungsi yang sama dengan `verify_search` di
+WASM klien, dengan anchor klien yang disimpan di berkas), lalu membuktikan log
+tumbuh tanpa memutus anchor pra-bencana. Empat kontrol negatif (root palsu, nilai
+palsu, kunci log salah, arsip dirusak satu byte) menjaga agar "lulus" berarti
+sesuatu; skrip yang sengaja dirusak terbukti merah. Berjalan di CI (job
+`kt-recovery-v2`) tanpa layanan eksternal, dan mode `--bundle <file.tar.gz.age>`
+disediakan untuk operator (belum pernah dijalankan).
+
+Alat baru: `server/kt-query/cmd/nyx-kt-v2-check` (pengganti `nyx-kt-check` v1:
+`config`/`head`/`verify-search`/`tree-size`/`audit`) dan
+`server/scripts/kt-v2-drill-entries.ts`. Drill menemukan dua hal yang tidak
+terlihat dari kode: arsip yang dibuat sebelum auditor menandatangani head **tidak
+memuat** auditor head (pemulihan wajib menjalankan auditor sebelum bukti bisa
+diverifikasi), dan `-check` exit 0 bukan bukti integritas karena LevelDB bisa
+memulihkan diri dari salinan sebagian. Detail + opsi kebijakan rollback:
+`docs/39` §39.5d.
+
+## 🔔 Tulisan KT yang dilewati akhirnya terlihat (2026-10-29)
+
+`nyx_kt_writes_total{result="invalid"}` sudah ada sejak pensiunnya log v1, tetapi
+tidak punya alert maupun panel: perangkat tanpa `signingKeyV2` kehilangan entri
+log tanpa satu pun tanda di dashboard. Dua aturan baru memisahkan dua hal yang
+berbeda — aliran persisten (≥3 kejadian/6 jam dan >5% dari seluruh tulisan) =
+utang migrasi, versus burst ≥5 dalam 15 menit = bug klien/input cacat — sehingga
+satu login dari perangkat lama tidak membangunkan siapa pun. Ditambah panel
+pangsa `invalid` di dashboard `nyx-overview`, dan `scripts/kt-invalid-report.sh`
+yang memecah sebabnya hanya dari agregat (Prometheus + hitungan perangkat di
+Postgres `READ ONLY` + `<reason>` dari journal, tanpa identifier). Baseline dan
+opsi keputusan: `docs/10` §10.23.
+
 ## 🗑️ KT v1 dipensiunkan total: penulis, binary, dan drill v1 dihapus (2026-10-28)
 
 Klien sudah lama hanya menerima ABI 2, tetapi server **masih punya jalur tulis v1**

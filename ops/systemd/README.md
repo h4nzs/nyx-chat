@@ -157,8 +157,10 @@ yang salah tempat. Status: `curl -fsS http://127.0.0.1:4100/healthz`.
 ## Yang masih belum otomatis (jujur)
 
 - Latihan pemulihan arsip KT **dari R2** masih langkah manual (§10.13). Drill
-  otomatis yang dulu ada (job CI `kt-recovery`, `scripts/kt-restore-drill.sh`)
-  dihapus bersama log v1; drill setara untuk v2 **belum ada** (`docs/38` §38.3).
+  yang ada sekarang (`scripts/kt-v2-restore-drill.sh`, job CI `kt-recovery-v2`)
+  memakai snapshot **lokal** yang dibuat `nyx-kt-query-v2`; unduhan objek dari R2
+  belum termasuk. Mode `--bundle` (bundle `.age` nyata) disiapkan untuk operator
+  tetapi belum pernah dijalankan (`docs/39` §39.5c).
 - Auditor di mesin/operator lain: protokolnya sama, tetapi pemasangan kedua belum
   dijalankan (`docs/34` §34.6).
 - coturn dan tumpukan observability (`ops/prometheus`, `ops/grafana`) tetap owner ops

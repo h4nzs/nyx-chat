@@ -39,7 +39,7 @@ hanya boleh dibuang kalau isi data itu memang sudah tidak dibutuhkan.
 | 11 | Riwayat skema Dexie v1–v15 | `web/src/lib/db.ts:305-442` | membuka DB yang sama (berisi keychain) | **Pertahankan mutlak** — menghapus rantai upgrade bukan "membuang data lama", tapi berisiko mengunci kunci identitas pengguna sekarang |
 | 12 | Header pesan SPQR **v1**, gate `ackV`, kill switch | `docs/33`, `web/src/lib/spqrWire.ts` | protokol baca + rollback | **Pertahankan** — kill switch berhenti mengirim, tidak pernah berhenti membaca |
 | 13 | `x-delivery-tokens` di CORS | `server/src/app.ts:221` | sisa header yang sudah dihapus | **Selesai** — sudah tidak ada di whitelist; komentarnya menjelaskan kenapa |
-| 14 | Drill pemulihan KT v1 (`scripts/kt-restore-drill.sh` + `nyx-kt-check`) | skrip, `server/scripts/kt-{drill-entries,fixtures,query-fixtures}.ts`, job CI `kt-recovery` — **dihapus** | menguji penulis/pohon v1 | **Segresi yang disengaja, belum ditutup** — drill setara untuk v2 belum ada (lihat §38.3). Jangan dianggap setara dengan drill yang dulu lulus |
+| 14 | Drill pemulihan KT v1 (`scripts/kt-restore-drill.sh` + `nyx-kt-check`) | skrip, `server/scripts/kt-{drill-entries,fixtures,query-fixtures}.ts`, job CI `kt-recovery` — **dihapus** | menguji penulis/pohon v1 | **Selesai 2026-10-29** — penggantinya `scripts/kt-v2-restore-drill.sh` (11 langkah) + `cmd/nyx-kt-v2-check` + job CI `kt-recovery-v2`; drill v2 memakai penulis produksi & `transparency.VerifySearch` (`docs/39` §39.5) |
 | 15 | Vendor `libsignal-keytrans` (crate v1) | `vendor/signal/libsignal-keytrans/`, bagian `scripts/vendor-signal.sh`, guard `check-vendor.sh` — **dihapus** | sumber `packages/keytrans-wasm` | **Selesai** — verifier v2 adalah fork lokal `packages/keytrans-v2`, tidak dikompilasi dari vendor Signal. `NOTICE` §2 kini hanya menyebut libsignal sebagai referensi desain |
 
 ## 38.3 Konsekuensi yang diterima
@@ -56,13 +56,16 @@ hanya boleh dibuang kalau isi data itu memang sudah tidak dibutuhkan.
   Entri baru dilewati `KT_V2_SIGNING_KEY_INVALID` (terlihat di
   `nyx_kt_writes_total{result="invalid"}`), jadi rotasi ke perangkat PQ adalah
   prasyaratnya — bukan kegagalan senyap.
-- **Drill pemulihan KT v1 hilang dan belum ada penggantinya.** Job CI
-  `kt-recovery` dihapus karena bergantung pada penulis v1 + `nyx-kt-check`.
-  Snapshot v2 tetap dibuat **terverifikasi** oleh proses log (penulisan dijeda,
-  salinan dibuka ulang, head+root dibandingkan) dan diunggah `ktSnapshot.ts`,
-  tetapi rantai penuh *tulis → snapshot → bencana → pulih → bukti lolos verifier*
-  tidak lagi diuji otomatis. Itu regresi yang terbuka, dicatat juga di `docs/39`
-  §39.5.
+- **Drill pemulihan KT v1 hilang dan diganti drill v2 (2026-10-29).** Job CI
+  `kt-recovery` v1 dihapus karena bergantung pada penulis v1 + `nyx-kt-check`.
+  Penggantinya `kt-recovery-v2` (`scripts/kt-v2-restore-drill.sh`, 11 langkah)
+  menguji rantai penuh *tulis → snapshot → bencana → pulih → bukti lolos
+  verifier → tumbuh tanpa percabangan*, termasuk empat kontrol negatif dan
+  skenario rollback. Drill itu sudah menemukan dua hal yang tidak terlihat dari
+  kode: (a) arsip yang dibuat sebelum auditor menandatangani head tidak memuat
+  auditor head, jadi pemulihan **wajib** menjalankan auditor sebelum bukti bisa
+  diverifikasi; (b) `-check` exit 0 bukan bukti integritas arsip (LevelDB bisa
+  memulihkan diri dari salinan sebagian). Detail: `docs/39` §39.5d.
 - **Data lokal format lama** (vault biometrik lama, kunci verifikasi lama)
   diabaikan; pengguna yang membukanya kembali akan diminta mengatur ulang
   biometrik/verifikasi, bukan kehilangan identitas.
