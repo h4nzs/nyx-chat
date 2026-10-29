@@ -4,9 +4,10 @@
 > — `scripts/kt-v2-restore-drill.sh` (11 langkah, CI job `kt-recovery-v2`), dan
 > sudah dijalankan penuh di mesin self-host ini (§39.6). Drill v1 tetap dihapus
 > bersama log v1 (`docs/38`); yang baru adalah penggantinya, bukan kebangkitannya.
-> Dua hal **masih** belum pernah dijalankan dan jangan dianggap tertutup: drill
-> pemulihan **Postgres** (§39.4) dan mode `--bundle` pada bundle `.age` nyata
-> (§39.5c — menuntut kunci age yang hanya dipegang operator).
+> Drill pemulihan **Postgres** juga sudah dijalankan 2026-10-29 (§39.4, klaster
+> `initdb` sendiri). Yang **masih** belum pernah: pemulihan dari bundle `.age`
+> nyata — baik Postgres maupun KT (§39.4 akhir, §39.5c) — karena keduanya
+> menuntut `age-identity` yang hanya dipegang operator.
 >
 > Dokumen ini sengaja pendek dan berisi perintah, bukan narasi. Yang tidak bisa
 > diverifikasi (siapa memegang akses apa) ditandai `TODO(operator)`.
@@ -47,46 +48,56 @@ Aturan: tidak ada satu pun item di atas yang boleh hanya ada di host yang
 sama dengan datanya. Minimal: satu salinan terenkripsi (age/GPG) di penyimpanan
 operator, di luar VPS dan di luar akun Cloudflare yang sama.
 
-## 39.4 Drill A — Postgres (belum pernah dijalankan)
+## 39.4 Drill A — Postgres
 
-Prasyarat: dump terbaru, Postgres hidup, ruang disk ≥ 2× ukuran DB.
+**Sudah dijalankan 2026-10-29** (bentuk *throwaway cluster*, tanpa sudo, tanpa
+menyentuh database produksi) — bukti di §39.6. Resep di bawah adalah yang dipakai.
+
+Kenapa klaster sendiri, bukan `createdb` di klaster produksi: di mesin self-host
+role aplikasi (`nyx_user`) tidak punya `CREATEDB` dan `sudo -u postgres` butuh
+kata sandi, sedangkan `initdb`/`pg_ctl` tersedia sebagai user biasa. Efeknya
+lebih baik: nol kemungkinan menyentuh `nyx_app`, dan `pg_restore` berjalan sebagai
+superuser klaster drill sehingga `--no-owner` tidak menabrak role yang tidak ada.
 
 ```bash
-# 0. Identitas dump yang akan diuji
-ls -lh /root/backups/ | tail -3
-LATEST=$(ls -t /root/backups/*.dump /root/backups/*.sql.gz 2>/dev/null | head -1)
-echo "$LATEST"
+DRILL=/tmp/nyx-pg-drill
+rm -rf "$DRILL" && mkdir -p "$DRILL"
+initdb -D "$DRILL/data" -U drill --auth=trust --no-instructions
+pg_ctl -D "$DRILL/data" -l "$DRILL/pg.log" \
+  -o "-p 15432 -k $DRILL -c listen_addresses=127.0.0.1" start
 
-# 1. Database scratch — JANGAN menyentuh nyx_app
-sudo -u postgres createdb nyx_restore_drill
-# bila dump berupa custom-format (-Fc):
-sudo -u postgres pg_restore --no-owner --no-privileges -d nyx_restore_drill "$LATEST"
-# bila dump berupa .sql.gz:
-# zcat "$LATEST" | sudo -u postgres psql -d nyx_restore_drill
+# 1. Dump dengan cara yang SAMA dengan backup harian (`pg_dump -Fc`)
+cd ~/nyx-chat/server && set -a && . ./.env && set +a
+pg_dump "${DATABASE_URL%%\?*}" -Fc -f "$DRILL/prod.dump"
 
-# 2. Verifikasi isi — bukan sekadar "restore exit 0"
-sudo -u postgres psql -d nyx_restore_drill -c "\dt" | wc -l
-sudo -u postgres psql -d nyx_restore_drill -c \
-  "SELECT (SELECT count(*) FROM \"User\") AS users,
-          (SELECT count(*) FROM \"Message\") AS messages,
-          (SELECT max(\"createdAt\") FROM \"Message\") AS last_message;"
+# 2. Restore ke database baru di klaster drill
+createdb -h 127.0.0.1 -p 15432 -U drill nyx_restore_drill
+pg_restore --no-owner --no-privileges -h 127.0.0.1 -p 15432 -U drill \
+  -d nyx_restore_drill "$DRILL/prod.dump"
 
-# 3. Bandingkan dengan produksi (selisih wajar = aktivitas sejak dump)
-sudo -u postgres psql -d nyx_app -c \
-  "SELECT (SELECT count(*) FROM \"User\") AS users,
-          (SELECT count(*) FROM \"Message\") AS messages;"
+# 3. Verifikasi isi — bukan sekadar "restore exit 0"
+DRILL_URL="postgres://drill@127.0.0.1:15432/nyx_restore_drill"
+psql "$DRILL_URL" -c 'SELECT count(*) FROM information_schema.tables WHERE table_schema = $$public$$;'
+psql "$DRILL_URL" -c 'SELECT (SELECT count(*) FROM "User") users, (SELECT count(*) FROM "Device") devices,
+                             (SELECT count(*) FROM "Message") messages, (SELECT max("createdAt") FROM "Message") last_message;'
 
-# 4. Buktikan aplikasi bisa memakainya, bukan hanya psql
-DATABASE_URL="postgres://nyx:<pass>@127.0.0.1:5432/nyx_restore_drill" \
-  pnpm --filter nyx-server exec npx prisma db pull --print >/dev/null && echo "schema OK"
+# 4. Buktikan APLIKASI bisa memakainya, bukan hanya psql: klien Prisma yang
+#    sama dengan yang dipakai server (adapter-pg), dibaca langsung.
+DATABASE_URL="$DRILL_URL" server/node_modules/.bin/tsx -e \
+  "import {prisma} from './server/src/lib/prisma.js'; console.log(await prisma.user.count());"
 
-# 5. Bersihkan
-sudo -u postgres dropdb nyx_restore_drill
+# 5. Bersihkan (klaster berisi data produksi — jangan ditinggal)
+pg_ctl -D "$DRILL/data" -m fast stop && rm -rf "$DRILL"
 ```
 
-Kriteria lulus: jumlah tabel > 0, `User`/`Message` masuk akal terhadap produksi,
-`max(createdAt)` pesan tidak lebih tua dari 24 jam sebelum waktu dump, dan
-Prisma bisa membaca skema hasil restore.
+Kriteria lulus: jumlah tabel sama dengan produksi, `User`/`Device`/`Message`
+sama (selisih hanya aktivitas sejak dump), `max(createdAt)` masuk akal, dan klien
+Prisma aplikasi membaca barisnya — bukan hanya `psql`.
+
+**Yang belum dicakup:** dump yang diuji adalah `pg_dump` **segar**, bukan arsip
+`nyx-backup-*.tar.gz.age` di R2. Membuka arsip itu butuh `age-identity` operator,
+jadi bagian "bundle terenkripsi bisa dibuka dan isinya bisa dipulihkan" tetap
+belum dibuktikan (sama seperti `--bundle` di §39.5c).
 
 ## 39.5 Drill B — Log KT v2
 
@@ -245,7 +256,8 @@ dijalankan** terhadap bundle sungguhan.
 | Uji skrip drill itu sendiri | 2026-10-29 | salinan skrip dengan `-expect-root` dipalsukan: `❌ root=0e2dbf10…, ingin 0000…` → berhenti di langkah 5 (exit 1) | bukti "lulus" tidak berasal dari harness buta |
 | Drill menemukan bug di dirinya sendiri | 2026-10-29 | run ke-4 gagal di langkah 9: `cp: cannot stat …kt-snapshot-…` karena `-snapshot-keep 3` memangkas arsip pra-bencana | diperbaiki `ee1de40b` (arsip disalin keluar direktori snapshot) |
 | KT restore v2 dari bundle `.age` (§39.5c) | **belum pernah** | — | butuh `age-identity` operator |
-| Postgres restore | **belum pernah** | — | §39.4 |
+| **Postgres restore (otomatis-panduan, §39.4)** | 2026-10-29 | klaster `initdb` di `/tmp` (Postgres 18.6, port 15432), `pg_dump -Fc` 393 KB dari DB 12 MB → `pg_restore` 0,44 s tanpa error; **17/17 tabel**, `User` 4/4, `Device` 4/4, `Message` 1/1, `max(createdAt)` identik `2026-10-28T09:15:00Z`, kolom `Device.signingKeyV2` ada, klien Prisma **aplikasi** membaca `users=4 devices=4 signingKeyV2=null:1` | klaster dihapus setelah drill; arsip `.age` belum diuji |
+| Postgres restore **dari bundle `.age`** | **belum pernah** | — | butuh `age-identity` operator (§39.4 akhir) |
 | Restore klien dari `.nyxvault` | **belum pernah** diuji terhadap dump nyata | — | uji setelah Drill A |
 | Rotasi `JWT_SECRET` tanpa kehilangan backup R2 | **belum pernah** | — | §39.3 |
 
@@ -263,7 +275,9 @@ berapa pun rapi kodenya.
   juga lokal (`bash scripts/kt-v2-restore-drill.sh`) bila menyentuh config/kunci,
   snapshot, atau jalur tulis log — CI memakai config yang dibutuhkan drill sendiri,
   bukan config instance Anda.
-- **Per kuartal**: Drill A + restore klien dari `.nyxvault`, catat hasil di §39.6.
+- **Per kuartal**: Drill A (§39.4) + restore klien dari `.nyxvault`, catat hasil
+  di §39.6. Drill A butuh ~2 menit dan tidak menyentuh produksi — tidak ada
+  alasan melewatinya.
 - **Setelah setiap restore nyata** (bencana atau latihan): catat hasilnya di
   §39.6, termasuk kalau langkah 6 (auditor) terlewat — itu yang membuat klien
   melihat `unavailable`, bukan log yang hilang.
