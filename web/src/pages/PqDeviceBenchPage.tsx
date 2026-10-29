@@ -16,12 +16,22 @@
  *   build produksi : `pnpm --filter nyx-web run build:pq-bench`
  * lalu buka `http://<host>:<port>/bench/pq`.
  *
+ * Yang dijalankan satu tombol:
+ * 1. primitif ML-DSA-65 + X-Wing (thread utama),
+ * 2. pipeline worker: seal/open XChaCha20-Poly1305 lewat crypto worker yang
+ *    sama dengan aplikasi, 4 permintaan in-flight (ukuran 256 B dan 8152 B =
+ *    plaintext setelah padding traffic-cover 8 KB),
+ * 3. IndexedDB: put/get `messageKeys` dan update state ratchet 2 KB di
+ *    database terpisah yang dihapus lagi.
+ *
  * Batasan yang ditampilkan apa adanya:
  * - `navigator.getBattery()` hanya ada di Chromium/Android (dan deprecated).
  *   Level baterai dibulatkan 1%, jadi delta hanya proxy kasar konsumsi energi —
  *   bukan pengukuran mWh. Skor utama tetap waktu p95 per operasi.
- * - Yang diukur primitif ML-DSA-65 + X-Wing di thread utama, bukan RTT jaringan
- *   atau biaya IndexedDB.
+ * - Langkah ratchet/`kdfChain`, serialisasi header, dan RTT jaringan TIDAK
+ *   diukur; yang diukur AEAD + round-trip worker + biaya IndexedDB. State
+ *   ratchet di bagian IndexedDB adalah buffer sintetis, bukan sesi nyata.
+ * - Jalankan saat aplikasi idle: worker dipakai bersama dengan jalur pesan.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -32,6 +42,11 @@ import {
   type PqBenchResult,
   type PqTiming,
 } from '@lib/pqBench';
+import type {
+  BenchTiming,
+  IndexedDbBenchResult,
+  PipelineBenchResult,
+} from '@lib/devicePipelineBench';
 
 const ENABLED = import.meta.env.DEV || import.meta.env.VITE_PQ_BENCH === '1';
 
@@ -62,6 +77,12 @@ interface DeviceReport {
   };
   battery: { start: BatterySnapshot | null; end: BatterySnapshot | null };
   bench: PqBenchResult;
+  pipeline: PipelineBenchResult;
+  indexedDb: IndexedDbBenchResult;
+}
+
+function formatBytes(bytes: number): string {
+  return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
 }
 
 async function readBattery(): Promise<BatterySnapshot | null> {
@@ -92,6 +113,17 @@ const ROWS: Array<{
   { label: 'X-Wing decaps', pick: (r) => r.xwing.decaps, budgetKey: 'xwingDecapsP95Ms' },
 ];
 
+function timingRow(key: string, label: string, timing: BenchTiming) {
+  return (
+    <tr key={key} className="border-t border-text-secondary/10">
+      <td className="py-1 text-text-primary">{label}</td>
+      <td className="py-1 text-right text-text-secondary">{timing.meanMs.toFixed(2)} ms</td>
+      <td className="py-1 text-right text-text-secondary">{timing.p50Ms.toFixed(2)} ms</td>
+      <td className="py-1 text-right text-text-secondary">{timing.p95Ms.toFixed(2)} ms</td>
+    </tr>
+  );
+}
+
 export default function PqDeviceBenchPage() {
   const [iterations, setIterations] = useState(5);
   const [report, setReport] = useState<DeviceReport | null>(null);
@@ -113,6 +145,10 @@ export default function PqDeviceBenchPage() {
     const batteryStart = await readBattery();
     try {
       const bench = await runPqBenchmark({ iterations });
+      // Import dinamis: halaman yang nonaktif tidak boleh membuat crypto worker
+      // hanya karena modul ini ikut di-resolve.
+      const { runRealPathBench } = await import('@lib/devicePipelineBench');
+      const { pipeline, indexedDb } = await runRealPathBench({ messages: iterations });
       const batteryEnd = await readBattery();
       setBatteryNow(batteryEnd);
       const nav = navigator as NavigatorWithBattery;
@@ -128,6 +164,8 @@ export default function PqDeviceBenchPage() {
         },
         battery: { start: batteryStart, end: batteryEnd },
         bench,
+        pipeline,
+        indexedDb,
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -162,9 +200,9 @@ export default function PqDeviceBenchPage() {
             PQ device benchmark
           </h1>
           <p className="text-sm text-text-secondary leading-relaxed">
-            Measures ML-DSA-65 and X-Wing directly in this browser. p95 is the score; sizes are
-            checked against the wire format. Keep the screen on and the device unplugged if you
-            want battery context.
+            Measures ML-DSA-65/X-Wing, the crypto-worker seal/open pipeline (4 in flight), and
+            IndexedDB row costs in this browser. p95 is the score; run it while the app is idle.
+            Keep the screen on and the device unplugged if you want battery context.
           </p>
           <p className="text-xs text-text-secondary/80 font-mono">
             Battery: {batteryNow ? `${formatPercent(batteryNow.level)} (${batteryNow.charging ? 'charging' : 'on battery'})` : 'unavailable in this browser'}
@@ -259,6 +297,68 @@ export default function PqDeviceBenchPage() {
               <pre className="text-xs text-text-secondary whitespace-pre-wrap break-words bg-bg-main rounded-lg p-3 border border-text-secondary/10">
                 {formatPqBenchmark(report.bench)}
               </pre>
+
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-text-primary uppercase tracking-wider">
+                  Worker pipeline (seal/open)
+                </h2>
+                <p className="text-xs text-text-secondary font-mono">
+                  {report.pipeline.messages} pesan · {report.pipeline.concurrency} in-flight · total{' '}
+                  {report.pipeline.totalMs.toFixed(0)} ms ·{' '}
+                  {report.pipeline.operationsPerSecond.toFixed(1)} op/s
+                </p>
+                <table className="w-full text-sm font-mono">
+                  <thead>
+                    <tr className="text-left text-text-secondary">
+                      <th className="py-1">Operation</th>
+                      <th className="py-1 text-right">mean</th>
+                      <th className="py-1 text-right">p50</th>
+                      <th className="py-1 text-right">p95</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.pipeline.runs.map((run) => {
+                      const size = formatBytes(run.payloadBytes);
+                      return [
+                        timingRow(`${size}-seal`, `seal ${size}`, run.encrypt),
+                        timingRow(`${size}-open`, `open ${size}`, run.decrypt),
+                      ];
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-sm font-bold text-text-primary uppercase tracking-wider">
+                  IndexedDB
+                </h2>
+                <p className="text-xs text-text-secondary font-mono">
+                  {report.indexedDb.messages} baris · state ratchet sintetis{' '}
+                  {formatBytes(report.indexedDb.stateBytes)} · total{' '}
+                  {report.indexedDb.totalMs.toFixed(0)} ms · bench DB{' '}
+                  {report.indexedDb.deleted === null
+                    ? 'tidak bisa diverifikasi'
+                    : report.indexedDb.deleted
+                      ? 'terhapus'
+                      : 'MASIH ADA'}
+                </p>
+                <table className="w-full text-sm font-mono">
+                  <thead>
+                    <tr className="text-left text-text-secondary">
+                      <th className="py-1">Operation</th>
+                      <th className="py-1 text-right">mean</th>
+                      <th className="py-1 text-right">p50</th>
+                      <th className="py-1 text-right">p95</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {timingRow('idb-put-key', 'put messageKey', report.indexedDb.write)}
+                    {timingRow('idb-get-key', 'get messageKey', report.indexedDb.read)}
+                    {timingRow('idb-put-ratchet', 'put ratchet state', report.indexedDb.ratchetWrite)}
+                    {timingRow('idb-delete-key', 'delete messageKey', report.indexedDb.delete)}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

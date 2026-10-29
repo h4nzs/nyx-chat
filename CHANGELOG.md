@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 📱 `/bench/pq` juga mengukur jalur nyata: pipeline worker + IndexedDB (2026-10-29)
+
+Harness perangkat hanya mengukur primitif ML-DSA-65/X-Wing di thread utama, jadi
+angka p95-nya tidak menjawab pertanyaan yang sebenarnya saat dipakai di HP:
+berapa biaya satu pesan dan satu tulis IndexedDB. Halaman `/bench/pq` sekarang
+juga menjalankan `web/src/lib/devicePipelineBench.ts`: seal/open
+XChaCha20-Poly1305 lewat crypto worker yang sama dengan aplikasi (4 permintaan
+in-flight; payload 256 B dan 8152 B = plaintext setelah padding traffic-cover
+8 KB), lalu put/get/delete `messageKeys` dan update state ratchet 2 KB di
+database terpisah `nyx-device-bench` yang dihapus setelah pengukuran (`deleted`
+dilaporkan jujur, `null` bila browser tidak punya `indexedDB.databases()`).
+Tidak ada data akun yang dibaca; modul diimpor dinamis supaya build yang
+nonaktif tidak membuat crypto worker. Yang tetap TIDAK diukur ditulis di
+halaman: langkah ratchet/`kdfChain`, serialisasi header, dan RTT jaringan.
+
 ## 🔐 Export/import brankas JSON (`.nyxvault`) dihapus (2026-10-29)
 
 Settings punya dua jalur cadangan yang terlihat setara: "Ekspor/Impor Brankas"

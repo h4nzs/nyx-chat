@@ -1135,6 +1135,49 @@ Status (2026-10-22): **selesai di kode, dengan residual non-kode**. Yang sudah l
   Halaman nonaktif pada build default; aktif lewat dev server `--host` atau
   `pnpm --filter nyx-web run build:pq-bench`. Level baterai adalah proxy kasar
   konsumsi energi, bukan pengukuran mWh — angka p95 tetap skor utamanya.
+  **(2026-10-29) Jalur nyata ikut diukur** di halaman yang sama lewat
+  `web/src/lib/devicePipelineBench.ts`: pipeline worker seal/open
+  XChaCha20-Poly1305 lewat crypto worker yang sama dengan aplikasi (4
+  permintaan in-flight; payload 256 B dan 8152 B = plaintext setelah padding
+  traffic-cover 8 KB), lalu put/get/delete `messageKeys` dan update state
+  ratchet 2 KB di database terpisah `nyx-device-bench` yang dihapus setelah run
+  (`deleted` `true`/`false`/`null` bila `indexedDB.databases()` tidak ada).
+  Langkah ratchet/`kdfChain`, serialisasi header, dan RTT jaringan tetap TIDAK
+  diukur; state ratchet IndexedDB adalah buffer sintetis, bukan sesi nyata.
+  **Hasil perangkat nyata (2026-10-29)** — dua perangkat: Oppo A57 (Android 10,
+  Chrome 149, 8 core, `deviceMemory` 4 GB) dan laptop dev (Firefox 152,
+  x86_64, 8 core). 50 iterasi, p95:
+
+  | Operasi | Oppo A57 | Laptop |
+  |---|---|---|
+  | ML-DSA-65 keygen | 14,5 ms | 16 ms |
+  | ML-DSA-65 sign | 65,8 ms | 147 ms |
+  | ML-DSA-65 verify | 11,5 ms | 20 ms |
+  | X-Wing keypair / encaps / decaps | 0,7 / 1,5 / 2,1 ms | 2 / 2 / 3 ms |
+  | seal / open 256 B | 13,2 / 10,2 ms | 52 / 6 ms |
+  | seal / open 8152 B (padding 8 KB) | 15,4 / 4,2 ms | 13 / 16 ms |
+  | IDB put / get `messageKeys` | 10,9 / 3,4 ms | 6 / 5 ms |
+  | IDB put state ratchet 2 KB | 9,3 ms | 7 ms |
+  | throughput pipeline | 604 op/dtk | 468 op/dtk |
+
+  Kedua perangkat memenuhi `PQ_BENCH_BUDGET` desktop. Envelope 8 KB keluar
+  sebagai 10.923 karakter base64url (~10,7 KiB di kabel) — itu yang dihitung
+  budget trafik, bukan 8 KB. Yang paling lambat di ponsel justru lapisan
+  penyimpanan: satu `put` `messageKeys` p95 10,9 ms (24,2 ms pada run 20
+  iterasi, yang masih memuat pembukaan/upgrade database) ditambah state ratchet
+  9,3 ms per langkah — puluhan milidetik per pesan terkirim, karena Dexie
+  berjalan di main thread. Catatan metodologi:
+  run 5 iterasi masih memuat cold-start worker/libsodium (seal 256 B 20,7 ms
+  lebih lambat daripada seal 8 KB 11,0 ms), jadi laporkan angka dari ≥20
+  iterasi; p95 laptop untuk seal 256 B (52 ms vs mean 13,8) berisik karena
+  mesin dev berbeban. Ulangan 50 iterasi di HP yang sama tanpa charger
+  mereproduksi angka ini dalam ±10% (sign p95 73,4 ms, seal/open 8 KB
+  12,6/9,2 ms, put `messageKeys` 10,9 ms, 619 op/dtk), jadi angkanya stabil —
+  tidak ada penurunan performa saat berjalan di baterai. **Baterai tetap bukan
+  pengukuran energi**: run dengan charger (33% → 34%) maupun tanpa charger
+  (35% → 35%, 4,6 dtk) sama-sama tidak bergerak melebihi resolusi 1%, jadi satu
+  run halaman ini tidak bisa dipakai untuk klaim konsumsi daya; perlu beban
+  sustained bermenit-menit atau meter daya eksternal.
 - **Registry exception**: `scripts/pq-only-exceptions.json` menyimpan **2
   berkas `hybrid-v2-identity`** dan **2 berkas `tier-b`** dengan `tier`,
   `rationale`, dan `removalGate`. Guard `scripts/check-pq-only.mjs` menolak
@@ -1240,7 +1283,9 @@ Test yang sudah ada (Fase 0–7):
   menjalankannya di **step terpisah** pada job `e2e`.
 
 Belum ada (fase lanjut):
-- Benchmark perangkat rendah dan baterai (desktop + throttle proxy sudah ada).
+- Benchmark baterai (energi) dan perangkat kelas bawah. Desktop + proxy throttle
+  + satu HP nyata (Oppo A57, 2026-10-29, §35.11) sudah terukur; konsumsi energi
+  dalam mWh dan HP kelas bawah sungguhan masih terbuka.
 - BRaccoon/blind UOV + dual verify/kill switch untuk credential PQ. Fitur
   credential v1 **sudah dihapus**; suite baru harus dibangun dari nol. Spike
   BRaccoon sudah dijalankan dan **ditutup tanpa implementasi** (`docs/37`
@@ -1288,7 +1333,7 @@ yang tidak membutuhkan arsip v1.
 | PIR kompleks | discovery privacy tertunda | 4a OPRF + `oprfIndex` hybrid; **4b ChalametPIR sidecar+proxy + 4c klien/WASM landed, default mati**; 4d harness landed, audit + angka produksi belum; setup superlinear → sharding/epoch inkremental untuk direktori besar; OHTTP/rate limit tetap aktif |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
-| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi, benchmark baterai/perangkat nyata masih terbuka |
+| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi; HP mid-range (Oppo A57) 2026-10-29: keygen p95 14,5 ms, sign 65,8 ms, verify 11,5 ms, pipeline seal/open 8 KB 15,4/4,2 ms — energi/baterai dan HP kelas bawah masih terbuka |
 | v1/v2 state bercampur | arsip v1 lama tidak terbaca | arsipkan sebelum deploy; rollback = build lama; jangan hapus kolom/schema |
 
 Residual yang harus ditulis jujur:
