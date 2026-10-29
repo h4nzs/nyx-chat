@@ -13,7 +13,7 @@
  * Yang diteruskan adalah **byte protobuf apa adanya** dari `nyx-kt-query`
  * (`server/kt-query`, layanan baca NYX). Tidak ada parsing protobuf di sini:
  * framing `u32 BE || payload` dibuka, dua blob dikirim sebagai base64url, dan
- * verifikasi kriptografinya terjadi di klien (WASM `libsignal-keytrans`) —
+ * verifikasi kriptografinya terjadi di klien (WASM `keytrans-v2`) —
  * server NYX tidak boleh, dan tidak bisa, "memverifikasi" bukti untuk klien.
  *
  * Kenapa bukan query service upstream (`kt_query.KeyTransparencyQueryService`):

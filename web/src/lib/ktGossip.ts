@@ -19,7 +19,7 @@
  *
  * Yang **tidak** dilakukan modul ini:
  *  - tidak memverifikasi apa pun sendiri: ia membandingkan angka. Verifikasi
- *    tetap milik WASM `libsignal-keytrans`, dan root yang dipakai di sini berasal
+ *    tetap milik WASM `keytrans-v2`, dan root yang dipakai di sini berasal
  *    dari layanan yang sama yang buktinya diverifikasi (`/api/keys/kt/head`);
  *    kalau root itu berbeda dari bukti, verifikasi bukti yang gagal.
  *  - tidak menambah data yang dikirim ke server: field gossip hidup **di dalam

@@ -27,9 +27,9 @@ NYX: zero-knowledge post-quantum messenger. pnpm monorepo: `web` (React 19 + Vit
 
 ## Vendored Signal sources
 
-- Signal code that NYX compiles is **vendored in this repo**: `vendor/signal/spqr` (crate `spqr`), `vendor/signal/libsignal-keytrans` (crate `libsignal-keytrans`, manifest materialized from `workspace = true` to explicit versions), and `server/kt-query/vendor/github.com/signalapp/keytransparency` (`go mod vendor`). No external checkout is needed to build a fresh clone, and CI does not fetch Signal repos.
+- Signal code that NYX compiles is **vendored in this repo**: `vendor/signal/spqr` (crate `spqr`) and `server/kt-query/vendor/github.com/signalapp/keytransparency` (`go mod vendor`). No external checkout is needed to build a fresh clone, and CI does not fetch Signal repos.
 - Regenerate with `scripts/vendor-signal.sh` (checks the commit pins in `NOTICE` / `docs/30` §30.2) plus `go mod vendor` in `server/kt-query`; `bash scripts/check-vendor.sh` guards freshness, pin agreement with `NOTICE`, absence of `replace`, and git-tracking.
-- Vendored code is copied **unmodified** — never patch it; behavior changes must come from moving the pin. The Rust wrappers default to the vendored paths (`SPQR_CRATE_PATH` / `KEYTRANS_PATH` override).
+- Vendored code is copied **unmodified** — never patch it; behavior changes must come from moving the pin. The Rust wrapper defaults to the vendored path (`SPQR_CRATE_PATH` overrides). **Deliberate exception:** `packages/keytrans-v2` is a *modified fork* of Signal's `libsignal-keytrans` (derived from `e8cc2ddd…`; `NOTICE` §2, `docs/38` #15), not vendor code — keep the upstream copyright headers in its files, record behavioral changes in `NOTICE` §2, and never describe it as "own" or "reference only".
 
 ## Key Transparency service side
 

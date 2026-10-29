@@ -3,8 +3,9 @@
 > **Status: ANALISIS + STATUS IMPLEMENTASI.** Dibuat 2026-10-10 dengan membaca
 > source NYX + source Signal; **diperbarui 2026-10-28** terhadap HEAD `1664`
 > commit (v3.0.0). Sejak 2026-10-16 source Signal **di-vendor di repo ini**
-> (`vendor/signal/spqr`, `vendor/signal/libsignal-keytrans`,
-> `server/kt-query/vendor/github.com/signalapp/keytransparency`), jadi rujukan
+> (`vendor/signal/spqr`,
+> `server/kt-query/vendor/github.com/signalapp/keytransparency`; verifier KT v2
+> adalah fork lokal `packages/keytrans-v2`, `NOTICE` §2), jadi rujukan
 > "Signal punya X" di bawah bisa dicek tanpa checkout eksternal.
 >
 > Klaim status di dokumen ini diverifikasi dari kode/berkas, bukan dari ingatan:

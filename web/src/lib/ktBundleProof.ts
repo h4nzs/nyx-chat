@@ -13,7 +13,7 @@
  *
  * Modul ini menutup celah itu: sebelum sebuah `identityKey` dipin, bukti log
  * untuk `0x75 || usernameHash(32)` peer diambil lewat `/api/keys/kt/*`,
- * **diverifikasi di klien** (WASM `libsignal-keytrans`), lalu kunci di dalam
+ * **diverifikasi di klien** (WASM `keytrans-v2`), lalu kunci di dalam
  * nilai log dibandingkan dengan kunci yang disajikan bundle.
  *
  * Hasilnya sebuah *verdict* (tidak melempar):
@@ -304,8 +304,8 @@ export function resetKtBundleProofCaches(): void {
  * Muat verifier v2 sekali per sesi. Modul WASM diambil lewat URL aset Vite
  * (`?url`) sehingga hanya diunduh saat KT benar-benar dipakai.
  *
- * Sejak `docs/38`, modul v1 (`packages/keytrans-wasm`) tidak lagi diimpor jalur
- * produksi: frame ABI 1 ditolak sebelum verifier dimuat.
+ * Sejak `docs/38`, modul v1 (`packages/keytrans-wasm`) sudah dihapus dari repo:
+ * frame ABI 1 ditolak sebelum verifier dimuat.
  */
 async function loadKtVerifier(): Promise<KtVerifier> {
   if (verifierPromise) {

@@ -6,7 +6,7 @@
  * [docs/30 §30.5 WS-A / docs/32 §32.8 / docs/34] Proxy `/api/keys/kt/*`.
  *
  * Klien memakai endpoint ini untuk mengambil bukti KT; verifikasi kriptografinya
- * terjadi **di klien** (WASM `libsignal-keytrans`). Server NYX hanya meneruskan
+ * terjadi **di klien** (WASM `keytrans-v2`). Server NYX hanya meneruskan
  * byte dari `nyx-kt-query-v2` dan tidak pernah menyentuh kunci rahasia pengguna.
  *
  * Bentuk jawaban: base64url dari protobuf mentah — `fullTreeHead` +

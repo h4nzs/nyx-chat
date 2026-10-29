@@ -81,7 +81,7 @@ jobs:
         with:
           toolchain: '1.95.0'
           targets: wasm32-unknown-unknown
-      # protoc adalah build-dependency `spqr` & `libsignal-keytrans` (prost-build).
+      # protoc adalah build-dependency `spqr` & `keytrans-v2` (prost-build).
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Rebuild dari vendor + verifikasi hash manifest

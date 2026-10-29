@@ -41,12 +41,25 @@ Tests run against the pinned checkout itself (documented in `docs/33` §33.6):
 `cargo +nightly test --release --lib` → 57 passed, 0 failed.
 
 --------------------------------------------------------------------------------
-2. Signal libsignal (implementation reference only; no code vendored or built)
+2. Signal libsignal `rust/keytrans` (modified fork, compiled and shipped) + design reference
 --------------------------------------------------------------------------------
-Since 2026-10-28 the Key Transparency verifier is NYX's own v2 fork
-(`packages/keytrans-v2`, ML-DSA-65, `docs/35` §35.7); the previous v1 wrapper
-(`packages/keytrans-wasm`) and its vendored `rust/keytrans` crate were removed with
-the v1 retirement (`docs/38`). No libsignal source is compiled or shipped.
+Upstream:      https://github.com/signalapp/libsignal (`rust/keytrans`)
+Derived from:  e8cc2dddd578859b4a029c9c94670b24ce2b616a  (the unmodified copy that was
+               vendored at `vendor/signal/libsignal-keytrans/` until 2026-10-28)
+License:       AGPL-3.0-only; Copyright Signal Messenger, LLC (upstream headers retained)
+
+The Key Transparency verifier shipped to clients is `packages/keytrans-v2`
+(crate `libsignal-keytrans-v2`, compiled to
+`packages/keytrans-wasm-v2/dist/keytrans-v2.wasm`). It is a MODIFIED DERIVATIVE of
+the crate above, not an independent implementation: the tree/proof machinery is
+carried over, and most files (`guide.rs`, `prefix.rs`, `implicit.rs`, the three
+`.proto` files, ...) are byte-identical to the derived-from copy and keep their
+upstream copyright headers. NYX's changes are ML-DSA-65 tree-head authentication and
+a public SHA-256 index in place of an ECVRF (`docs/35` §35.7), mostly in `verify.rs`
+and `lib.rs`, plus the added `index.rs` and `verifying.rs`. The unmodified copy and
+the v1 wrapper (`packages/keytrans-wasm`) were removed with the v1 retirement
+(`docs/38`), so differences from upstream can now only be reviewed against the commit
+above.
 
 Other parts of libsignal were read only as an implementation reference, without
 copying code — e.g. the group sender-key design (`docs/16`). The
