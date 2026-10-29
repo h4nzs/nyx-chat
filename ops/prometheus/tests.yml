@@ -380,6 +380,90 @@ tests:
         alertname: NyxKeyTransparencyStalled
         exp_alerts: []
 
+  # ==========================================================================
+  # [docs/38 §38.3 / docs/10 §10.23] Tulisan yang DILEWATI (`result="invalid"`)
+  # ==========================================================================
+  # Satu perangkat lama yang login sekali tidak boleh membangunkan siapa pun;
+  # aliran persisten harus terlihat. Karena itu yang diuji bukan hanya "ada
+  # invalid", tetapi juga kasus "ada invalid tapi jarang" (tidak menyala) dan
+  # kasus "seri invalid belum pernah ada" (tidak menyala, tanpa error).
+  - name: 'NyxKeyTransparencyInvalidWrites: menyala saat perangkat lama terus menulis'
+    interval: 5m
+    input_series:
+      # 6 jam tulisan yang SEMUANYA invalid: rasio 100%, jauh di atas 5%.
+      - series: 'nyx_kt_writes_total{result="invalid"}'
+        values: '0+1x72'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: NyxKeyTransparencyInvalidWrites
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxKeyTransparencyInvalidWrites
+            exp_annotations:
+              summary: 'Perangkat tanpa kunci PQ terus menulis (dilewati) ke log KT'
+              description: 'Lebih dari 5% tulisan KT dalam 6 jam dilewati sebagai `invalid` (≥3 kejadian). Penyebab tersering: perangkat lama tanpa `signingKeyV2` (ML-DSA-65) — akun itu tidak punya entri log yang ter-update sampai perangkat merotasi kunci (docs/38 §38.3). Kalau angkanya tidak turun dalam 7 hari, lihat opsi keputusan di docs/10 §10.23. `bash scripts/kt-invalid-report.sh` memecah sebabnya (perangkat vs input cacat) tanpa identitas.'
+
+  - name: 'NyxKeyTransparencyInvalidWrites: tidak menyala untuk satu perangkat lama yang login sesekali'
+    interval: 5m
+    input_series:
+      # Satu kejadian invalid di ujung 6 jam (ambang mutlak ≥3 tidak terpenuhi),
+      # sementara tulisan sah terus berjalan. Ini skenario normal, bukan insiden.
+      - series: 'nyx_kt_writes_total{result="invalid"}'
+        values: '0x70 0 1'
+      - series: 'nyx_kt_writes_total{result="ok"}'
+        values: '0+1x72'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: NyxKeyTransparencyInvalidWrites
+        exp_alerts: []
+
+  - name: 'NyxKeyTransparencyInvalidWrites: tidak menyala saat seri invalid belum pernah ada'
+    interval: 5m
+    input_series:
+      - series: 'nyx_kt_writes_total{result="ok"}'
+        values: '0+1x72'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: NyxKeyTransparencyInvalidWrites
+        exp_alerts: []
+
+  - name: 'NyxKeyTransparencyInvalidSpike: menyala saat ada burst invalid'
+    interval: 1m
+    input_series:
+      - series: 'nyx_kt_writes_total{result="invalid"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKeyTransparencyInvalidSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxKeyTransparencyInvalidSpike
+            exp_annotations:
+              summary: 'Lonjakan tulisan KT yang dilewati (`invalid`)'
+              description: '≥5 tulisan KT dilewati dalam 15 menit. Bedakan dari NyxKeyTransparencyInvalidWrites: yang ini burst, jadi tersangka utamanya klien yang mengirim bundle tanpa kunci ML-DSA-65 atau input cacat (bukan perangkat lama yang login sekali). Cek `[KT] Entri log dilewati … invalid: <reason>` di journal nyx-api dan `bash scripts/kt-invalid-report.sh`.'
+
+  - name: 'NyxKeyTransparencyInvalidSpike: tidak menyala untuk satu kejadian tunggal'
+    interval: 1m
+    input_series:
+      - series: 'nyx_kt_writes_total{result="invalid"}'
+        values: '0x20 0 1'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKeyTransparencyInvalidSpike
+        exp_alerts: []
+
+  - name: 'NyxKeyTransparencyInvalidSpike: tidak menyala saat seri invalid belum pernah ada'
+    interval: 1m
+    input_series:
+      - series: 'nyx_kt_writes_total{result="ok"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxKeyTransparencyInvalidSpike
+        exp_alerts: []
+
   # [drill 2026-10-16] Empat kasus di bawah menggantikan versi
   # `increase(nyx_kt_snapshot_upload_total{result="ok"}) == 0`. Yang diuji sekarang
   # adalah UMUR arsip terbaru yang ada di R2, dan dua kasus terakhir adalah

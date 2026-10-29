@@ -619,6 +619,56 @@ groups:
           summary: "Penulisan log Key Transparency gagal"
           description: "Cek proses KT v2 (leveldb) + KT_V2_SERVER_URL. Kegagalan tidak memblokir registrasi, jadi hanya terlihat dari sini (docs/32)."
 
+      # [docs/38 §38.3 / docs/39 §39.5b] `result="invalid"` BUKAN insiden: ia
+      # adalah cara sadar untuk MENOLAK menulis entri yang tidak bisa
+      # diverifikasi. Dua sebab yang tercampur di label ini, dan artinya berbeda:
+      #
+      #   - perangkat lama tanpa `signingKeyV2` (`KT_V2_SIGNING_KEY_INVALID`).
+      #     Akun itu tidak punya entri log yang ter-update — sampai perangkatnya
+      #     merotasi ke kunci PQ. Ini **utang migrasi**, bukan bug.
+      #   - input cacat (base64/hash rusak, panjang kunci salah) — bug klien atau
+      #     percobaan menyuntikkan entri cacat.
+      #
+      # Karena itu alarmnya berbasis RASIO + ambang mutlak, bukan hitungan mentah:
+      # satu login sesekali dari satu perangkat lama tidak boleh membangunkan
+      # siapa pun, tetapi aliran yang persisten (>5% dari seluruh tulisan dan
+      # minimal 3 kejadian dalam 6 jam) berarti perangkat PQ belum bergerak.
+      # Ambang dipilih dari baseline self-host 2026-10-29: 37 tulisan `ok` dalam
+      # 90 hari dan **nol** `invalid` sejak log v2 hidup — jadi 3 kejadian/6 jam
+      # sudah di atas kebisingan normal, dan 5% menjaga agar volume `ok` yang
+      # besar tidak menenggelamkan masalah yang nyata.
+      #
+      # Kenapa `and on()`: kedua sisi `sum()` tanpa label, jadi pencocokan label
+      # default pun akan bekerja — `on()` ditulis eksplisit supaya tidak ada yang
+      # menambahkan `by (result)` di salah satu sisi lalu mematikan aturannya
+      # diam-diam (kelas cacat yang pernah terjadi di NyxKeyTransparencyStalled).
+      - alert: NyxKeyTransparencyInvalidWrites
+        expr: |
+          sum(increase(nyx_kt_writes_total{result="invalid"}[6h])) >= 3
+          and on() (
+            sum(increase(nyx_kt_writes_total{result="invalid"}[6h]))
+            / clamp_min(sum(increase(nyx_kt_writes_total[6h])), 1) > 0.05
+          )
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Perangkat tanpa kunci PQ terus menulis (dilewati) ke log KT"
+          description: "Lebih dari 5% tulisan KT dalam 6 jam dilewati sebagai `invalid` (≥3 kejadian). Penyebab tersering: perangkat lama tanpa `signingKeyV2` (ML-DSA-65) — akun itu tidak punya entri log yang ter-update sampai perangkat merotasi kunci (docs/38 §38.3). Kalau angkanya tidak turun dalam 7 hari, lihat opsi keputusan di docs/10 §10.23. `bash scripts/kt-invalid-report.sh` memecah sebabnya (perangkat vs input cacat) tanpa identitas."
+
+      # Lonjakan mendadak = bug klien atau input cacat yang disuntikkan, bukan
+      # utang migrasi: perangkat lama menulis paling banyak sekali per login.
+      # Ambang 5 dalam 15 menit jauh di atas baseline (0 sepanjang riwayat log v2),
+      # jadi tidak ada ambang yang bisa "capek" — ini hanya menyala pada burst.
+      - alert: NyxKeyTransparencyInvalidSpike
+        expr: sum(increase(nyx_kt_writes_total{result="invalid"}[15m])) >= 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Lonjakan tulisan KT yang dilewati (`invalid`)"
+          description: "≥5 tulisan KT dilewati dalam 15 menit. Bedakan dari NyxKeyTransparencyInvalidWrites: yang ini burst, jadi tersangka utamanya klien yang mengirim bundle tanpa kunci ML-DSA-65 atau input cacat (bukan perangkat lama yang login sekali). Cek `[KT] Entri log dilewati … invalid: <reason>` di journal nyx-api dan `bash scripts/kt-invalid-report.sh`."
+
       # [drill 2026-10-14] DUA cacat ditemukan di sini, keduanya membuat aturan
       # ini MUSTAHIL menyala (dead rule):
       #

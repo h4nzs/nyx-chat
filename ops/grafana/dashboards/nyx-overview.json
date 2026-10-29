@@ -2193,6 +2193,75 @@
           "legendFormat": "p99"
         }
       ]
+    },
+    {
+      "id": 46,
+      "title": "Pangsa tulisan KT yang dilewati (invalid)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 7,
+        "x": 6,
+        "y": 51
+      },
+      "description": "`invalid` = server NYX SENGAJA melewati penulisan entri yang tidak bisa diverifikasi (mis. perangkat tanpa `signingKeyV2`/ML-DSA-65 → dokumen 38 §38.3). Panel ini mengukur PANGSA, bukan hitungan: satu perangkat lama yang login sesekali terlihat sebagai ~0% di bawah ini dan tidak layak alarm, sedangkan aliran >5% berarti perangkat PQ belum bergerak → alert NyxKeyTransparencyInvalidWrites (ambang sama: 5%/6 jam, ≥3 kejadian). Burst singkat ditangkap NyxKeyTransparencyInvalidSpike. Pecah sebabnya per perangkat vs input cacat: `bash scripts/kt-invalid-report.sh` (agregat, tanpa identitas).",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(\n  sum(rate(nyx_kt_writes_total{result=\"invalid\"}[30m]))\n  / clamp_min(sum(rate(nyx_kt_writes_total[30m])), 1e-9)\n) or vector(0)",
+          "legendFormat": "invalid"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      }
     }
   ],
   "annotations": {
