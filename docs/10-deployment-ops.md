@@ -848,6 +848,12 @@ burst kedaluwarsa > 10k/menit — naikkan batas, jangan mengandalkan run berikut
    disalin, salinan **dibuka ulang** dan tree head + root-nya dibandingkan dengan
    pohon hidup. Beda → arsip dibuang, langkah dilaporkan gagal, `latest.json`
    tidak ditulis. Snapshot yang belum terverifikasi tidak pernah diunggah.
+   Manifes juga mencatat **auditor head** yang ikut tersimpan
+   (`auditorName`/`auditorTreeSize`/`auditorTimestamp`). Kosong = auditor belum
+   menandatangani head saat arsip dibuat, sehingga instance hasil pulih butuh
+   auditor berjalan lebih dulu (`docs/39` §39.5d). Proses log menulis peringatan
+   saat itu terjadi; snapshot tetap dibuat (menghentikannya justru menghapus
+   jalur pemulihan tepat saat risikonya naik).
 2. Arsip `kt-snapshot-<waktu>Z.tar.gz` + `latest.json`; arsip lokal dipangkas ke
    `NYX_KT_V2_SNAPSHOT_KEEP` (default 7).
 3. Proses server NYX (`KT_SNAPSHOT_DIR` di `.env`) mengunggah arsip terbaru ke R2
@@ -975,7 +981,10 @@ nyx-kt-query-v2 \
 Flag/env lengkap (`-config`/`KT_V2_CONFIG_FILE`, `-read-addr`/`NYX_KT_V2_QUERY_ADDR`,
 `-write-addr`/`NYX_KT_V2_WRITE_ADDR`, `-auditor-addr`/`NYX_KT_V2_AUDITOR_ADDR`,
 `-snapshot-dir`/`NYX_KT_V2_SNAPSHOT_DIR`, `NYX_KT_V2_SNAPSHOT_INTERVAL`,
-`NYX_KT_V2_SNAPSHOT_KEEP`, `-metrics-addr`/`NYX_KT_V2_METRICS_ADDR`, `-check`)
+`NYX_KT_V2_SNAPSHOT_KEEP`, `-metrics-addr`/`NYX_KT_V2_METRICS_ADDR`, `-check`,
+`-expect-size`/`-expect-root` — pasangan terakhir hanya berlaku bersama `-check`:
+head hasil ekstrak dibandingkan dengan manifes arsip, karena `-check` exit 0
+sendiri tidak membuktikan integritas (`docs/39` §39.5d))
 ada di `server/kt-query/README.md`; sisi server NYX memakai `KT_V2_SERVER_URL`
 (tulis, `:8088`) dan `KT_QUERY_URL` (baca, `:8089`).
 

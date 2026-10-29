@@ -79,11 +79,32 @@ if [[ -d "$STATE_DIR/kt/v2" ]]; then
 fi
 tar -C "$STATE_DIR/kt" -xzf "$STAGE/kt/kt-v2.tgz"
 
-echo "== 5/6  Unit + schema =="
+echo "== 5/6  Unit + schema + KT v2 (log → auditor) =="
 if [[ "$DB_PUSH" -eq 1 ]]; then
   (cd "$REPO_DIR" && pnpm --filter nyx-server exec prisma db push)
 fi
 bash "$SCRIPT_DIR/install-user.sh"
+
+# Mode 3 (ThirdPartyAuditing) menolak menyajikan bukti yang bisa diverifikasi
+# klien sampai ada auditor head yang segar. Arsip yang dibuat saat auditor mati
+# memang TIDAK memuat auditor head — lihat `auditorTreeSize` di `latest.json`
+# arsip itu (drill 2026-10-29, docs/39 §39.5d temuan 1). Jadi setelah LevelDB
+# dipulihkan, tunggu log siap lalu jalankan auditor; tanpa ini klien melihat
+# `unavailable`/`unverifiable` meski datanya utuh.
+kt_ready=0
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 2 http://127.0.0.1:8089/healthz >/dev/null 2>&1; then
+    kt_ready=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$kt_ready" -eq 1 ]]; then
+  echo "   log KT v2 siap (:8089)"
+else
+  echo "   PERINGATAN: log KT v2 (:8089) belum menjawab; auditor mungkin gagal putaran pertama" >&2
+fi
+systemctl --user restart nyx-kt-auditor-v2 2>/dev/null || true
 
 echo "== 6/6  Verifikasi =="
 bash "$SCRIPT_DIR/verify-boot.sh"

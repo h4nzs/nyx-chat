@@ -281,6 +281,26 @@ write_entries() {
     ./node_modules/.bin/tsx scripts/kt-v2-drill-entries.ts)
 }
 
+# wait_snapshot_auditor <dir> <tree-size> → nama arsip yang manifesnya MENCATAT
+# auditor head pada tree size itu. Dipakai untuk membuktikan bahwa arsip yang
+# dibuat setelah auditor menandatangani head bersifat mandiri (tidak butuh auditor
+# berjalan lagi saat dipulihkan) — kebalikan dari arsip pra-auditor.
+wait_snapshot_auditor() {
+  local dir="$1" size="$2"
+  for _ in $(seq 1 80); do
+    if [[ -f "$dir/latest.json" ]]; then
+      local got
+      got="$(jq -r '.auditorTreeSize // 0' "$dir/latest.json")"
+      if [[ "$got" == "$size" ]]; then
+        jq -r '.file' "$dir/latest.json"
+        return 0
+      fi
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 # wait_snapshot <dir> <tree-size> <root> → mencetak nama arsip
 wait_snapshot() {
   local dir="$1" size="$2" root="$3"
@@ -435,7 +455,11 @@ cp -p "$WORK/snap/$ARCHIVE" "$WORK/archive/$ARCHIVE"
 ARCHIVE_PATH="$WORK/archive/$ARCHIVE"
 echo "   arsip: $ARCHIVE ($(stat -c%s "$ARCHIVE_PATH") byte)"
 echo "   head : size=$SIZE_BEFORE root=$ROOT_BEFORE"
-ok "latest.json = pohon hidup (size + root)"
+# Auditor belum menandatangani apa pun di titik ini, jadi manifes HARUS kosong
+# untuk field auditor — kalau tidak, field itu tidak bisa dipercaya.
+[[ "$(jq -r '.auditorTreeSize // 0' "$WORK/snap/latest.json")" == "0" ]] \
+  || fail "manifes mengaku punya auditor head padahal auditor belum berjalan"
+ok "latest.json = pohon hidup (size + root), tanpa auditor head (jujur)"
 
 # ---------------------------------------------------------------------------
 # 3. Bukti pra-bencana lolos verifier + auditor head
@@ -446,6 +470,14 @@ step 2
 # diverifikasi — persis seperti produksi dengan `api.auditors` terisi.
 auditor_once "$WORK/auditor-state.json" || { tail -20 "$WORK/auditor.log" >&2; fail "auditor -once gagal"; }
 ok "auditor menandatangani tree head (mode 3 aktif)"
+
+# Snapshot berikutnya HARUS mencatat head auditor di manifesnya. Inilah arsip
+# "normal" produksi (auditor menandatangani tiap jam, snapshot harian): ia
+# mandiri, sedangkan $ARCHIVE yang dipakai drill sengaja kasus terburuk.
+AUDITED_ARCHIVE="$(wait_snapshot_auditor "$WORK/snap" "$SIZE_BEFORE")" \
+  || { jq . "$WORK/snap/latest.json" 2>/dev/null || true; fail "snapshot setelah auditor tidak mencatat auditorTreeSize=$SIZE_BEFORE"; }
+AUDITED_NAME="$(jq -r '.auditorName' "$WORK/snap/latest.json")"
+ok "snapshot $AUDITED_ARCHIVE mencatat auditor head $AUDITED_NAME (treeSize=$SIZE_BEFORE)"
 
 ANCHOR="$WORK/anchor.json"
 "$CHECK" verify-search -url "$BASE" -hash "$FIRST_HASH" -expect-value "$FIRST_VALUE" \
@@ -474,8 +506,11 @@ ok "proses drill mati, DB hidup dihapus; satu-satunya salinan = $ARCHIVE_PATH"
 step 4
 mkdir -p "$WORK/live"
 tar -xzf "$ARCHIVE_PATH" -C "$WORK/live" || fail "ekstraksi arsip gagal"
+# `-check` dengan harapan head: exit 0 saja tidak cukup (LevelDB memulihkan diri
+# dari salinan sebagian), jadi angkanya yang dibandingkan dengan manifes.
 "$QUERY" -check -config "$CONFIG" -db "$WORK/live" \
-  || fail "-check pada hasil ekstraksi gagal (arsip tidak layak disebut backup)"
+  -expect-size "$SIZE_BEFORE" -expect-root "$ROOT_BEFORE" \
+  || fail "-check: hasil ekstrak tidak cocok dengan manifes (arsip tidak layak disebut backup)"
 start_query "$WORK/live" "$WORK/snap"
 "$CHECK" head -url "$BASE" -expect-size "$SIZE_BEFORE" -expect-root "$ROOT_BEFORE" \
   || fail "tree head hasil pemulihan berbeda dari sebelum bencana"
@@ -573,10 +608,12 @@ fi
 CORRUPT_OUT="$("$QUERY" -check -config "$CONFIG" -db "$WORK/corrupt" 2>&1)" && CORRUPT_RC=0 || CORRUPT_RC=1
 CORRUPT_SIZE="$(echo "$CORRUPT_OUT" | sed -n 's/.*treeSize=\([0-9]*\).*/\1/p' | tail -1)"
 if [[ "$CORRUPT_RC" -eq 0 ]]; then
-  echo "   ℹ️  -check pada sisa ekstraksi exit 0 (treeSize=${CORRUPT_SIZE:-?}) — pemulihan parsial LevelDB; bukti=ukuran pohon"
+  echo "   ℹ️  -check polos pada sisa ekstraksi exit 0 (treeSize=${CORRUPT_SIZE:-?}) — pemulihan parsial LevelDB; inilah sebabnya exit code tidak dipakai sebagai bukti"
 fi
-if [[ "$CORRUPT_RC" -eq 0 && "${CORRUPT_SIZE:-0}" == "$SIZE_AFTER" ]]; then
-  fail "arsip rusak menghasilkan basis data dengan tree head identik ($SIZE_AFTER)"
+# Gerbang yang benar: harapan head. Ini harus MENOLAK sisa ekstraksi tadi.
+if "$QUERY" -check -config "$CONFIG" -db "$WORK/corrupt" \
+     -expect-size "$SIZE_AFTER" -expect-root "$ROOT_AFTER" >/dev/null 2>&1; then
+  fail "arsip rusak lolos -check -expect-size/-expect-root (gerbang verifikasi bocor)"
 fi
 "$CHECK" head -url "$BASE" -expect-size "$SIZE_AFTER" >/dev/null \
   || fail "instance drill tidak lagi sehat setelah kontrol negatif"

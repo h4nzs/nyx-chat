@@ -108,10 +108,10 @@ Yang dibuktikan, berurutan (setiap langkah ❌ menggagalkan skrip):
 | # | Langkah | Bukti yang dicetak |
 |---|---|---|
 | 1 | Tulis entri lewat **jalur penulis produksi** (`server/scripts/kt-v2-drill-entries.ts` → `publishKeyTransparencyEntry` → gRPC `Update`) | `DRILL_ENTRY … treeSize=` |
-| 2 | Snapshot terverifikasi; `latest.json.treeSize` **dan** `root` = pohon hidup | nama arsip + size/root |
+| 2 | Snapshot terverifikasi; `latest.json.treeSize` **dan** `root` = pohon hidup, dan manifes **jujur** soal auditor head (sebelum auditor menandatangani: `auditorTreeSize` kosong) | nama arsip + size/root |
 | 3 | Bukti pra-bencana lolos `transparency.VerifySearch` (Go) + auditor head tersedia (mode 3), `/config` `abiVersion=2`, `TreeSize`/`Audit` menjawab | `OK verify-search treeSize=… anchor=…` |
 | 4 | Bencana: proses drill dimatikan, DB hidup **dihapus**, arsip lain dipangkas | — |
-| 5 | Pulih **hanya** dari `tar.gz` + `config.yaml`; `-check` lulus; head identik | `OK head treeSize=… root=…` |
+| 5 | Pulih **hanya** dari `tar.gz` + `config.yaml`; `-check -expect-size -expect-root` cocok dengan manifes; head identik | `OK head treeSize=… root=…` |
 | 6 | Instance pulih menyajikan bukti yang lolos verifier untuk entri lama | `OK verify-search …` |
 | 7 | Tumbuh 1 entri lalu verifikasi entri lama terhadap anchor `last=<pra-bencana>` (tidak bercabang) | size lama → size baru |
 | 8 | Auditor v2 menyelesaikan satu putaran — **termasuk** auditor yang kehilangan `auditor-state.json` | `OK kt-auditor once …` |
@@ -147,9 +147,11 @@ urutan lain gagal):
 1. `systemctl stop nyx-kt-query-v2 nyx-kt-auditor-v2` (LevelDB `flock`: satu proses).
 2. Pindahkan direktori DB hidup **utuh** ke `<db>.pra-restore-<detik>` (jangan dihapus).
 3. Ekstrak `kt-snapshot-<waktu>Z.tar.gz` terbaru ke direktori kosong baru.
-4. `nyx-kt-query-v2 -check -config <config> -db <hasil-ekstrak>` → bandingkan
-   `treeSize`/`root` dengan `latest.json` arsip itu. **`-check` exit 0 saja bukan
-   bukti** (temuan #2): angkanya yang harus sama.
+4. `nyx-kt-query-v2 -check -config <config> -db <hasil-ekstrak> \
+   -expect-size <treeSize> -expect-root <root>` (angka dari `latest.json`). Ini
+   exit ≠ 0 bila head tidak cocok. **`-check` tanpa harapan head bukan bukti**
+   (temuan #2): exit 0 hanya berarti LevelDB bisa dibuka — dan LevelDB pulih
+   sendiri dari salinan sebagian.
 5. `systemctl start nyx-kt-query-v2`, lalu `curl 127.0.0.1:8089/healthz` harus
    melaporkan angka yang sama.
 6. **Jalankan auditor** (`systemctl start nyx-kt-auditor-v2`, atau
@@ -188,6 +190,12 @@ dijalankan** terhadap bundle sungguhan.
    pemulihan = DB → layanan → **auditor** → verifikasi klien, dan snapshot
    produksi (harian) hampir selalu sudah memuat head auditor (menandatangani tiap
    jam) — tetapi jangan mengandalkannya: jalankan auditor setelah restore.
+
+   Sifat itu sekarang **terlihat sebelum bencana**: manifes `latest.json`
+   mencatat `auditorName`/`auditorTreeSize`/`auditorTimestamp`, dan proses log
+   menulis peringatan saat snapshot dibuat tanpa auditor head (mode 3).
+   `deploy/selfhost/scripts/restore.sh` juga sudah menjalankan auditor setelah
+   log siap, jadi langkah 6 di §39.5b bukan lagi tugas manual yang bisa terlupa.
 2. **`-check` bukan gerbang integritas arsip.** Arsip yang dirusak 1 byte gagal
    diekstrak (`tar` exit ≠ 0), tetapi LevelDB **memulihkan diri** dari sisa
    berkasnya dan `-check` exit 0 dengan `treeSize` lebih kecil. Yang mendeteksi

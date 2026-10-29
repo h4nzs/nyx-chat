@@ -73,6 +73,15 @@ type snapshotManifest struct {
 	TreeSize  uint64 `json:"treeSize"`
 	Root      string `json:"root"`
 	Bytes     int64  `json:"bytes"`
+	// Head auditor yang ikut tersimpan di arsip ini. Kosong berarti salah satu
+	// dari dua hal: tidak ada auditor terkonfigurasi (mode 1), atau auditor
+	// belum menandatangani head saat arsip dibuat. Arsipnya tetap SAH — tetapi
+	// instance hasil pulih tidak bisa menyajikan bukti mode 3 sampai auditor
+	// berjalan lagi (ditemukan drill 2026-10-29, `docs/39` §39.5d temuan 1).
+	// Dicatat di sini supaya sifat itu kelihatan SEBELUM bencana, bukan sesudah.
+	AuditorName      string `json:"auditorName,omitempty"`
+	AuditorTreeSize  uint64 `json:"auditorTreeSize,omitempty"`
+	AuditorTimestamp int64  `json:"auditorTimestamp,omitempty"`
 }
 
 type snapshotter struct {
@@ -89,6 +98,27 @@ type snapshotter struct {
 	nowFn    func() time.Time
 	copyTree func(src, dst string) error
 	logf     func(format string, args ...any)
+}
+
+// newestAuditorHead mengembalikan head auditor terbaru (nama + head). Tie-break
+// nama supaya hasilnya deterministik ketika dua auditor menandatangani pada
+// milidetik yang sama — manifes yang berubah-ubah tanpa alasan menyulitkan
+// perbandingan antar-arsip.
+func newestAuditorHead(tree *transparency.Tree) (string, *db.AuditorTreeHead) {
+	var (
+		bestName string
+		bestHead *db.AuditorTreeHead
+	)
+	for name, head := range tree.AuditorHeads() {
+		if head == nil {
+			continue
+		}
+		if bestHead == nil || head.Timestamp > bestHead.Timestamp ||
+			(head.Timestamp == bestHead.Timestamp && name < bestName) {
+			bestName, bestHead = name, head
+		}
+	}
+	return bestName, bestHead
 }
 
 func newSnapshotter(cfg *transparency.PrivateConfig, store db.TransparencyStore, dbFile string, mu *sync.Mutex, dir string, keep int) *snapshotter {
@@ -136,6 +166,18 @@ func (s *snapshotter) runOnce(ctx context.Context) (snapshotManifest, error) {
 	liveRoot, err := liveTree.GetLogTree().GetRoot(liveHead.TreeSize)
 	if err != nil {
 		return manifest, fmt.Errorf("ambil root hidup: %w", err)
+	}
+
+	// Head auditor yang akan ikut tersimpan. Pilih yang paling baru; kalau ada
+	// beberapa auditor, "paling baru" yang menentukan apakah arsip ini masih
+	// bisa dipakai memverifikasi bukti tanpa menunggu auditor lain.
+	auditorName, auditorHead := newestAuditorHead(liveTree)
+	if s.cfg.Mode == transparency.ThirdPartyAuditing && auditorHead == nil {
+		// Peringatan, BUKAN pembatalan: menghentikan snapshot karena auditor mati
+		// justru menghapus jalur pemulihan tepat saat risiko naik. Yang perlu
+		// terlihat adalah bahwa arsip ini butuh auditor lebih dulu.
+		s.logf("PERINGATAN: snapshot tanpa auditor head — auditor belum menandatangani head; " +
+			"pemulihan dari arsip ini memerlukan auditor berjalan lebih dulu (docs/39 §39.5d)")
 	}
 
 	// 2. Salin direktori basis data sementara penulisan dijeda.
@@ -192,6 +234,11 @@ func (s *snapshotter) runOnce(ctx context.Context) (snapshotManifest, error) {
 		TreeSize:  liveHead.TreeSize,
 		Root:      hex.EncodeToString(liveRoot),
 		Bytes:     archivedBytes,
+	}
+	if auditorHead != nil {
+		manifest.AuditorName = auditorName
+		manifest.AuditorTreeSize = auditorHead.TreeSize
+		manifest.AuditorTimestamp = auditorHead.Timestamp
 	}
 	// 5. Tulis manifest secara atomik (file sementara + rename): pengunggah
 	//    tidak boleh melihat manifest separuh tertulis.
