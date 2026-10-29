@@ -7,8 +7,8 @@
     "desc": "Karena NYX menyimpan kunci dan riwayat Anda secara lokal untuk privasi maksimal, Anda tidak bisa hanya masuk untuk melihat pesan lama. Anda memiliki dua cara aman untuk pindah:",
     "migration_label": "Migrasi Perangkat (Direkomendasikan):",
     "migration_text": "Buka <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Pengaturan &gt; Transfer ke Perangkat Baru</span>. Ini membuat terowongan langsung yang aman ke ponsel baru Anda melalui kode QR.",
-    "backup_label": "Cadangan Vault:",
-    "backup_text": "Buka <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Pengaturan &gt; Ekspor Vault</span>. Simpan file <code>.nyxvault</code> dan impor di layar masuk perangkat baru Anda."
+    "backup_label": "Cadangan terenkripsi:",
+    "backup_text": "Buka <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Pengaturan &gt; Backup Terenkripsi (.nyxbak)</span>. Simpan file <code>.nyxbak</code> — terenkripsi dengan Recovery Phrase Anda — lalu pulihkan di perangkat baru (Pengaturan → Data, atau opsi pemulihan di layar masuk)."
   },
   "burner": {
     "title": "Apa itu Sesi Chat Burner?",

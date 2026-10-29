@@ -7,8 +7,8 @@
     "desc": "Dado que NYX almacena sus claves e historial localmente para máxima privacidad, no puede simplemente iniciar sesión para ver mensajes antiguos. Tiene dos formas seguras de moverse:",
     "migration_label": "Migración de Dispositivo (Recomendado):",
     "migration_text": "Vaya a <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Configuración &gt; Transferir a Nuevo Dispositivo</span>. Esto crea un túnel seguro y directo a su nuevo teléfono mediante un código QR.",
-    "backup_label": "Respaldo de Bóveda:",
-    "backup_text": "Vaya a <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Configuración &gt; Exportar Bóveda</span>. Guarde el archivo <code>.nyxvault</code> e impórtelo en la pantalla de inicio de sesión de su nuevo dispositivo."
+    "backup_label": "Copia cifrada:",
+    "backup_text": "Vaya a <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Configuración &gt; Copia cifrada (.nyxbak)</span>. Guarde el archivo <code>.nyxbak</code> — cifrado con su Frase de Recuperación — y restáurelo en su nuevo dispositivo (Configuración → Datos, o las opciones de recuperación al iniciar sesión)."
   },
   "burner": {
     "title": "¿Qué es una Sesión de Chat Burner?",

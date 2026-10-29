@@ -13,7 +13,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
+  FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
   FiPackage
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
@@ -23,7 +23,7 @@ import BackupRestoreModal from '../components/BackupRestoreModal';
 import BackupExportModal from '../components/BackupExportModal';
 import { api } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
-import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
+import { saveProfileKey } from '@lib/keychainDb';
 import { executeLocalWipe } from '@lib/nukeProtocol';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
@@ -167,7 +167,6 @@ export default function SettingsPage() {
   const [avatarCropTarget, setAvatarCropTarget] = useState<{ url: string, file: File } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const vaultInputRef = useRef<HTMLInputElement>(null);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   // [docs/31 §31.6b] Ekspor arsip ber-frame ber-kunci recovery phrase — jalur
   // manual yang dulu tidak punya pintu masuk UI (hanya ada fungsi transport-nya).
@@ -425,78 +424,6 @@ export default function SettingsPage() {
     } finally {
       setMiningStatus('idle');
     }
-  };
-
-  const handleExportVault = async () => {
-    try {
-      const json = await exportDatabaseToJson();
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nyx_vault_backup_${new Date().toISOString().slice(0, 10)}.nyxvault`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(t('settings:messages.export_success'));
-    } catch (error) {
-      console.error("Export failed:", sanitizeErrorLog(error));
-      toast.error(t('settings:messages.export_failed'));
-    }
-  };
-
-  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const json = String(event.target?.result);
-      try {
-         const parsed = JSON.parse(json);
-         if (parsed.encrypted) {
-             useModalStore.getState().showPasswordPrompt(async (password) => {
-                 if (!password) return;
-                 try {
-                     await importDatabaseFromJson(json, password);
-
-                     // ✅ OPSI A: FORCE NEW IDENTITY FOR THIS HARDWARE
-                     // After importing a vault (which may come from another device),
-                     // we reset the local device ID and identity keys.
-                     localStorage.removeItem('deviceId');
-                     const { db } = await import('@lib/db');
-                     await db.identityKeys.clear();
-
-                     toast.success(t('settings:messages.import_success'));
-                     setTimeout(() => window.location.reload(), 1500);
-                 } catch (error) {
-                     console.error("Import failed:", sanitizeErrorLog(error));
-                     toast.error(t('settings:messages.import_failed'));
-                 }
-                 });
-                 } else {
-                 await importDatabaseFromJson(json);
-
-                 // ✅ OPSI A: FORCE NEW IDENTITY
-                 localStorage.removeItem('deviceId');
-                 const { db } = await import('@lib/db');
-                 await db.identityKeys.clear();
-
-                 toast.success(t('settings:messages.import_success'));
-                 setTimeout(() => window.location.reload(), 1500);
-                 }
-      } catch (error) {
-         console.error("Import parsing failed:", sanitizeErrorLog(error));
-         toast.error(t('settings:messages.import_failed'));
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
-  const triggerImport = () => {
-    vaultInputRef.current?.click();
   };
 
   const handleLogout = async () => {
@@ -986,32 +913,6 @@ export default function SettingsPage() {
               {/* VAULT ACTIONS */}
               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
                  <button 
-                   onClick={handleExportVault}
-                   className="
-                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
-                     bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
-                     shadow-neu-flat-light dark:shadow-neu-flat-dark
-                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                     hover:brightness-110 transition-all
-                   "
-                 >
-                   <FiDownload size={18} />
-                   {t('settings:data.export_vault')}
-                 </button>
-                 <button 
-                   onClick={triggerImport}
-                   className="
-                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
-                     bg-bg-main text-blue-500 font-bold text-xs uppercase tracking-wider
-                     shadow-neu-flat-light dark:shadow-neu-flat-dark
-                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                     hover:brightness-110 transition-all
-                   "
-                 >
-                   <FiUpload size={18} />
-                   {t('settings:data.import_vault')}
-                 </button>
-                 <button 
                    onClick={() => navigate('/settings/migrate-send')}
                    className="
                      col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
@@ -1050,13 +951,6 @@ export default function SettingsPage() {
                    <FiPackage size={18} />
                    {t('settings:data.export_backup')}
                  </button>
-                 <input 
-                    type="file" 
-                    ref={vaultInputRef} 
-                    onChange={handleImportVault} 
-                    accept=".nyxvault,.json" 
-                    className="hidden" 
-                 />
               </div>
             </div>
           </ControlModule>

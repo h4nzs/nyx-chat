@@ -56,8 +56,6 @@
   "data": {
     "keys": "Encryption Keys",
     "sessions": "Active Sessions",
-    "export_vault": "Export Vault",
-    "import_vault": "Import Vault",
     "transfer": "Transfer to New Device (QR)",
     "restore_backup": "Restore from .nyxbak File",
     "export_backup": "Encrypted Backup (.nyxbak)"
@@ -165,10 +163,6 @@
     "mining_verifying": "Verifying proof...",
     "mining_success": "Proof Accepted! Account upgraded to VIP.",
     "mining_failed": "Mining failed: {{error}}",
-    "export_success": "Vault exported successfully! Keep this file safe.",
-    "export_failed": "Failed to export vault.",
-    "import_success": "Vault imported successfully! Reloading...",
-    "import_failed": "Invalid vault file or corrupted data.",
     "emergency_revoking": "Revoking server sessions...",
     "emergency_success": "Sessions revoked. Initiating local wipe...",
     "emergency_failed": "Failed to revoke remote sessions. Check your network connection.",

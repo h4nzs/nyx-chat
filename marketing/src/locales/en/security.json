@@ -90,7 +90,7 @@
     "badge": "09 / LOCAL VAULT",
     "title": "Your history lives on your device.",
     "p1": "Chats, ratchet states, and keys are stored in an IndexedDB <strong>Shadow Vault</strong>, encrypted at rest with the <strong>ENC1:</strong> envelope derived from your master seed.",
-    "p2": "Nothing is synced to the cloud in plaintext — one active device per account, and migration happens through an encrypted <strong>.nyxvault</strong> export.",
+    "p2": "Nothing is synced to the cloud in plaintext — one active device per account, and moving to a new device goes through the recovery-phrase-encrypted <strong>.nyxbak</strong> backup (or a direct QR transfer).",
     "visual_vault": "IndexedDB Vault",
     "visual_cloud": "Cloud DB",
     "visual_encrypted": "ENC1: encrypted at rest"

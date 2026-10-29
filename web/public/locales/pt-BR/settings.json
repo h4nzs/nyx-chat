@@ -56,8 +56,6 @@
   "data": {
     "keys": "Chaves de Criptografia",
     "sessions": "Sessões Ativas",
-    "export_vault": "Exportar Cofre",
-    "import_vault": "Importar Cofre",
     "transfer": "Transferir para Novo Dispositivo (QR)",
     "restore_backup": "Restaurar de Arquivo .nyxbak",
     "export_backup": "Backup Criptografado (.nyxbak)"
@@ -165,10 +163,6 @@
     "mining_verifying": "Verificando prova...",
     "mining_success": "Prova Aceita! Conta atualizada para VIP.",
     "mining_failed": "Falha na mineração de hash: {{error}}",
-    "export_success": "Cofre exportado com sucesso! Guarde este arquivo com segurança.",
-    "export_failed": "Falha ao exportar o cofre.",
-    "import_success": "Cofre importado com sucesso! Recarregando...",
-    "import_failed": "Arquivo de cofre inválido ou dados corrompidos.",
     "emergency_revoking": "Revogando sessões do servidor...",
     "emergency_success": "Sessões revogadas. Iniciando exclusão local...",
     "emergency_failed": "Falha ao revogar sessões remotas.",

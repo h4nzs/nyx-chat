@@ -90,7 +90,7 @@
     "badge": "09 / COFRE LOCAL",
     "title": "Seu histórico vive no seu dispositivo.",
     "p1": "Chats, estados de ratchet e chaves são armazenados em um <strong>Shadow Vault</strong> IndexedDB, criptografados em repouso com o envelope <strong>ENC1:</strong> derivado da sua semente-mestre.",
-    "p2": "Nada é sincronizado para a nuvem em texto puro — um dispositivo ativo por conta, e a migração acontece por meio de uma exportação <strong>.nyxvault</strong> criptografada.",
+    "p2": "Nada é sincronizado para a nuvem em texto puro — um dispositivo ativo por conta, e a troca de dispositivo passa pelo backup <strong>.nyxbak</strong> cifrado com a Frase de Recuperação (ou transferência QR direta).",
     "visual_vault": "Cofre IndexedDB",
     "visual_cloud": "DB na Nuvem",
     "visual_encrypted": "ENC1: criptografado em repouso"

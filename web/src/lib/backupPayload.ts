@@ -73,7 +73,8 @@ export const BACKUP_CHUNK_BYTES = 256 * 1024;
 /**
  * Tabel yang ikut backup, dipetakan ke tipe frame. Urutan array = urutan
  * deterministik pembuatan frame (sebelum scramble). Sumber daftar: `db.ts`
- * (`NyxUnifiedDB` versi 8) + tabel yang sudah dipakai `exportDatabaseToJson`.
+ * (`NyxUnifiedDB` versi 8). Sejak 2026-10-29 daftar ini adalah **satu-satunya**
+ * jalur backup — export JSON lama (`.nyxvault`) sudah dihapus (docs/31 §31.6).
  */
 export const BACKUP_TABLE_FRAME_TYPE: Readonly<Record<string, BackupFrameType>> = {
   // Account — identitas & sesi kripto perangkat.

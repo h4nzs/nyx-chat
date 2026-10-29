@@ -56,8 +56,6 @@
   "data": {
     "keys": "Kunci Enkripsi",
     "sessions": "Sesi Aktif",
-    "export_vault": "Ekspor Brankas",
-    "import_vault": "Impor Brankas",
     "transfer": "Transfer ke Perangkat Baru (QR)",
     "restore_backup": "Pulihkan dari Berkas .nyxbak",
     "export_backup": "Backup Terenkripsi (.nyxbak)"
@@ -165,10 +163,6 @@
     "mining_verifying": "Memverifikasi bukti...",
     "mining_success": "Bukti Diterima! Akun ditingkatkan ke VIP.",
     "mining_failed": "Penambangan hash gagal: {{error}}",
-    "export_success": "Brankas berhasil diekspor! Simpan file ini dengan aman.",
-    "export_failed": "Gagal mengekspor brankas.",
-    "import_success": "Brankas berhasil diimpor! Memuat ulang...",
-    "import_failed": "File brankas tidak valid atau data rusak.",
     "emergency_revoking": "Mencabut sesi server...",
     "emergency_success": "Sesi dicabut. Memulai penghapusan lokal...",
     "emergency_failed": "Gagal mencabut sesi jarak jauh.",

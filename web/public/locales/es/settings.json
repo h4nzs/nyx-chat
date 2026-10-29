@@ -56,8 +56,6 @@
   "data": {
     "keys": "Claves de cifrado",
     "sessions": "Sesiones activas",
-    "export_vault": "Exportar bóveda",
-    "import_vault": "Importar bóveda",
     "transfer": "Transferir a nuevo dispositivo (QR)",
     "restore_backup": "Restaurar desde archivo .nyxbak",
     "export_backup": "Copia cifrada (.nyxbak)"
@@ -165,10 +163,6 @@
     "mining_verifying": "Verificando prueba...",
     "mining_success": "¡Prueba aceptada! Cuenta mejorada a VIP.",
     "mining_failed": "Error en minería de hash: {{error}}",
-    "export_success": "¡Bóveda exportada con éxito! Guarda este archivo de forma segura.",
-    "export_failed": "Error al exportar la bóveda.",
-    "import_success": "¡Bóveda importada con éxito! Recargando...",
-    "import_failed": "Archivo de bóveda inválido o datos corruptos.",
     "emergency_revoking": "Revocando sesiones del servidor...",
     "emergency_success": "Sesiones revocadas. Iniciando borrado local...",
     "emergency_failed": "Error al revocar sesiones remotas.",

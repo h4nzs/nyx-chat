@@ -361,9 +361,32 @@ transaksi); format ukuran.
 4. ~~**Fase 5 — pengukuran:** harness benchmark export/import 10k pesan (waktu +
    puncak memori) sebagai gate `docs/30` §30.7.~~ **SELESAI** — lihat §31.6d.
 
-Jalur `migration:*` ber-frame sudah aktif untuk perangkat pengganti, tetapi
-export JSON lama (`exportDatabaseToJson`) juga masih tersedia di Settings sebagai
-jalur cadangan.
+Jalur `migration:*` ber-frame sudah aktif untuk perangkat pengganti, dan sejak
+**2026-10-29** `.nyxbak` adalah **satu-satunya** jalur backup.
+
+**Yang dihapus (2026-10-29):** export/import JSON lama
+(`exportDatabaseToJson`/`importDatabaseFromJson`, berkas `.nyxvault`) dibuang
+dari `keychainDb.ts`, dari Settings (`Ekspor/Impor Brankas`), dari modal
+recovery di `/login`, dan dari `ChatInfoModal` (teks bantuan). Alasannya bukan
+sekadar duplikasi:
+
+- **Ekspornya plaintext.** Tidak ada satu pun kode yang membuat envelope
+  `{encrypted, salt, data}` yang dibaca `importDatabaseFromJson` (grep
+  `encrypted: true` = 0), jadi tombol "Ekspor Brankas" selalu menulis JSON
+  terbaca. Di dalamnya `sessionKeys.key` dan `groupKeys.key` ditulis mentah
+  (`keychainDb.ts`), bukan `ENC1:` — artinya kunci sesi/grup ikut keluar apa
+  adanya.
+- **Cakupan lebih kecil:** 16 tabel (tanpa `conversations`, `contacts`,
+  `profileCache`, `groupCachedParticipants`) dan `Date` hilang jadi string,
+  sedangkan `.nyxbak` memuat 20 tabel dengan penanda `__type`.
+- **Import-nya tidak menjalankan `normalizeOrderIndex()`**, jadi pesan dari
+  vault pra-v9 bisa tersimpan tapi tak pernah muncul di query berpaginasi, dan
+  ia menghapus `identityKeys` (bukan hanya `deviceId`).
+
+Konsekuensi yang diterima: pengguna yang masih memegang berkas `.nyxvault`
+tidak bisa memulihkannya lagi. Penggantinya sudah ada sebelum penghapusan
+(QR `migration:*`, berkas `.nyxbak`, dan salinan awan R2), dan file itu sendiri
+tidak pernah menjadi satu-satunya cadangan yang aman karena isinya terbuka.
 
 ---
 

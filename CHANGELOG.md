@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔐 Export/import brankas JSON (`.nyxvault`) dihapus (2026-10-29)
+
+Settings punya dua jalur cadangan yang terlihat setara: "Ekspor/Impor Brankas"
+(JSON `.nyxvault`) dan "Backup Terenkripsi (.nyxbak)". Yang pertama ternyata
+berbahaya: `exportDatabaseToJson` menulis **JSON terbaca** berisi seluruh key
+store, termasuk `sessionKeys.key` dan `groupKeys.key` yang disimpan mentah tanpa
+envelope `ENC1:` — mengklik tombol itu sama dengan memindahkan kunci sesi ke
+disk. Envelope `{encrypted, salt, data}` yang dibaca `importDatabaseFromJson`
+tidak pernah dibuat kode mana pun (grep `encrypted: true` = 0 hasil), jadi
+prompt password saat impor hanya berlaku untuk berkas lama. Jalur itu juga lebih
+sempit (16 tabel, tanpa `conversations`/`contacts`/`profileCache`/
+`groupCachedParticipants`), kehilangan `Date` menjadi string, tidak menjalankan
+`normalizeOrderIndex()` (pesan bisa tersimpan tapi tak pernah tampil), dan
+menghapus `identityKeys` — bukan hanya `deviceId`.
+
+Karena itu export **dan** import `.nyxvault` dihapus: dua fungsi di
+`web/src/lib/keychainDb.ts`, tombol di Settings, opsi "Import Vault File" di
+modal pemulihan `/login`, teks bantuan `ChatInfoModal`, serta salinan bantuan
+di situs marketing (4 bahasa). Penggantinya sudah ada dan mencakup 20/20 tabel:
+`.nyxbak` (kunci dari recovery phrase) — dan modal pemulihan di `/login` sekarang
+membuka jalur restore `.nyxbak` itu, sehingga perangkat baru tanpa perangkat lama
+tetap punya pintu masuk berkas. Konsekuensi yang diterima: berkas `.nyxvault`
+yang beredar tidak bisa dipulihkan lagi; formatnya tidak pernah menjadi cadangan
+yang aman.
+
 ## 🧯 Drill pemulihan log KT v2 menggantikan drill v1 (2026-10-29)
 
 Sejak drill v1 dihapus (2026-10-28), tidak ada satu pun uji otomatis yang

@@ -336,8 +336,8 @@
       "content_1": "You have three ways to move your account to a new device:",
       "list_1_label": "Device Migration (Recommended):",
       "list_1_text": "Use the \"Transfer to New Device\" feature in Settings. Scan the QR code on your new device to securely tunnel your entire chat history and keys directly.",
-      "list_2_label": "Vault Backup:",
-      "list_2_text": "Export your \"NYX Vault\" file (.nyxvault) from Settings. You can import this file on any new device to restore your account and history instantly.",
+      "list_2_label": "Encrypted backup:",
+      "list_2_text": "Create an encrypted backup (.nyxbak) from Settings → Data. You can restore it on any new device with your Recovery Phrase to get your history back.",
       "list_3_label": "Emergency Recovery:",
       "list_3_text": "If you lost your device and backups, use the \"Restore\" feature with your 24-word Recovery Phrase. This will reset your password and restore your Identity Keys, but <1>chat history will be lost</1> without a Vault backup."
     },

@@ -336,8 +336,8 @@
       "content_1": "Tienes tres formas de mudar tu cuenta a un nuevo dispositivo:",
       "list_1_label": "Migración de dispositivo (Recomendado):",
       "list_1_text": "Usa la función \"Transferir a nuevo dispositivo\" en Configuración. Escanea el código QR en tu nuevo dispositivo para enviar todo tu historial de chats y claves de forma segura y directa.",
-      "list_2_label": "Copia de seguridad de la Bóveda:",
-      "list_2_text": "Exporta tu archivo \"NYX Vault\" (.nyxvault) desde Configuración. Puedes importar este archivo en cualquier dispositivo nuevo para recuperar tu cuenta y tu historial al instante.",
+      "list_2_label": "Copia cifrada:",
+      "list_2_text": "Crea una copia cifrada (.nyxbak) en Ajustes → Datos. Puedes restaurarla en cualquier dispositivo nuevo con tu Frase de Recuperación para recuperar tu historial.",
       "list_3_label": "Recuperación de emergencia:",
       "list_3_text": "Si pierdes tu dispositivo y tus copias de seguridad, usa la función \"Recuperar\" con tu Frase de Recuperación de 24 palabras. Esto restablecerá tu contraseña y recuperará tu Clave de Identidad, pero <1>el historial de chats se perderá</1> sin una copia de seguridad de la Bóveda."
     },

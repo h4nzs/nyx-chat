@@ -218,11 +218,10 @@ Upgrading from 2.x? 3.0.0 contains breaking changes (legacy data purge, new DB c
 
 Because history isn't synced to the cloud, YOU own your data. For maximum security, **NYX supports only one active device per account at a time** — a deliberate security property, not a limitation to be "fixed".
 
-1. **Vault Export:** export an encrypted `.nyxvault` file containing your keys and metadata.
-2. **Encrypted Backup (`.nyxbak`):** a framed, padded, tamper-evident archive (per-frame AEAD, size-hiding padding, key derived from your recovery phrase) that can be saved manually or, optionally, stored in R2 as an opaque object. It is the restore path for a **replacement device**. Format: [Backup Format](docs/31-backup-format.md).
-3. **Single-Device Policy:** an account may have several device records (so a known or new device can be recognised), but only one device can be logged in and active.
-4. **Secure Migration:** moving to a new device uses your vault and post-quantum protocols; the server acts only as a blind relay.
-5. **Panic & wipe:** a panic password (or account deletion) revokes all sessions server-side first, then wipes IndexedDB, OPFS, caches, cookies, and service workers.
+1. **Encrypted Backup (`.nyxbak`) — the only backup format:** a framed, padded, tamper-evident archive (per-frame AEAD, size-hiding padding, key derived from your recovery phrase) that can be saved manually or, optionally, stored in R2 as an opaque object. It is the restore path for a **replacement device**. The old plaintext JSON "vault" (`.nyxvault`) was removed on 2026-10-29 — it dumped session keys in the clear. Format: [Backup Format](docs/31-backup-format.md).
+2. **Single-Device Policy:** an account may have several device records (so a known or new device can be recognised), but only one device can be logged in and active.
+3. **Secure Migration:** moving to a new device uses your `.nyxbak` backup (file or R2 copy) or a direct QR transfer, plus post-quantum protocols; the server acts only as a blind relay.
+4. **Panic & wipe:** a panic password (or account deletion) revokes all sessions server-side first, then wipes IndexedDB, OPFS, caches, cookies, and service workers.
 
 ---
 

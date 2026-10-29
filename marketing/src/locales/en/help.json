@@ -7,8 +7,8 @@
     "desc": "Since NYX stores your keys and history locally for maximum privacy, you cannot simply log in to see old messages. You have two secure ways to move:",
     "migration_label": "Device Migration (Recommended):",
     "migration_text": "Go to <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Settings &gt; Transfer to New Device</span>. This creates a secure, direct tunnel to your new phone via QR code.",
-    "backup_label": "Vault Backup:",
-    "backup_text": "Go to <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Settings &gt; Export Vault</span>. Save the <code>.nyxvault</code> file and import it on your new device login screen."
+    "backup_label": "Encrypted backup:",
+    "backup_text": "Go to <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Settings &gt; Encrypted Backup (.nyxbak)</span>. Save the <code>.nyxbak</code> file — it is encrypted with your Recovery Phrase — and restore it on your new device (Settings → Data, or the recovery options on the login screen)."
   },
   "burner": {
     "title": "What is a Burner Chat Session?",
