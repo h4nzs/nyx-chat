@@ -107,13 +107,14 @@ pulih? Sampai 2026-10-29 jawabannya tidak pernah diuji — `backupRestore.test.t
 memakai store dan backend kripto palsu, jadi yang terbukti hanya logika pemetaan.
 
 ```bash
-bash scripts/client-restore-drill.sh          # ~10 dtk, tidak menyentuh DB hidup
+bash scripts/client-restore-drill.sh          # ~20 dtk, tidak menyentuh DB hidup
 ```
 
 Yang dijalankan (semua langkah ❌ menggagalkan skrip):
 
 | # | Langkah | Bukti yang dicetak |
 |---|---|---|
+| 0 | **Penjaga cakupan**: daftar tabel drill harus sama dengan `BACKUP_TABLE_ORDER`, dan setiap tabel punya minimal satu baris | `cakupan tabel lengkap: 20/20` |
 | 1 | Perkakas + `server/.env` sumber | `semua perkakas tersedia` |
 | 2 | `pg_dump -Fc` dari database sumber (cara yang sama dengan backup harian) | ukuran + durasi + `users\|conversations\|messages\|devices` |
 | 3 | Klaster `initdb` sendiri (port 15433), **bukan** database hidup | versi Postgres + alamat |
@@ -121,10 +122,18 @@ Yang dijalankan (semua langkah ❌ menggagalkan skrip):
 | 5 | Isi: jumlah tabel + jumlah baris = sumber | `tabel: 17 (sumber 17)` |
 | 6 | Fixture klien diekspor dari hasil restore (id, ciphertext, kunci publik perangkat) | ukuran fixture |
 | 7 | Perangkat lama → arsip → perangkat pengganti (Dexie + IndexedDB nyata, KDF argon2id, XChaCha20-Poly1305) | `header NYXB v1, N frame, M byte` |
-| 8 | Isi per tabel identik byte-per-byte (`Uint8Array`, `Date`, kolom `ENC1:` utuh) + kunci publik sama dengan dump | satu baris `OK` per tabel |
+| 8 | Isi **20 tabel** identik byte-per-byte (`Uint8Array`, `Date`, objek bersarang) + semua nilai `ENC1:` utuh + kunci publik sama dengan dump | satu baris `OK` per tabel |
 | 9 | Silang-cek dengan dump: semua id pesan/percakapan ada, ciphertext sama persis | `semua N id pesan dump ada di klien` |
 | 10 | Ekspor ulang dari perangkat pengganti: urutan + payload frame identik | `ekspor ulang: N frame, urutan + payload identik` |
 | 11 | Kontrol negatif: phrase salah dan arsip dirusak 1 byte **ditolak**, 0 baris tertulis | dua `GAGAL` yang tidak muncul = lulus |
+
+Baris klien **tidak dikarang**: bentuk tiap tabel disalin dari penulisnya di
+kode — `keychainDb.ts` (identitas, state grup, kunci DR terlewat, pending
+header, kunci story), `shadowVaultDb.ts` (`pqDrSessionsV2`, `messageKeys`),
+`offlineQueueDb.ts`, `store/profile.ts` (`profileCache`), `lib/contactStore.ts`.
+Termasuk yang halus: `identityKeys.key` adalah base64 kunci publik (bukan
+`Uint8Array`), `groupSkippedKeys` berkunci string `key`, `pendingHeaders.header`
+objek bersarang, `offlineQueue.tempId` angka.
 
 Workspace di `NYX_CLIENT_DRILL_DIR` (default `/tmp/nyx-client-restore-drill`),
 port `NYX_CLIENT_DRILL_PORT` (default 15433), dihapus oleh `trap` termasuk saat
@@ -134,10 +143,21 @@ gagal — klaster memuat data hasil dump.
 jalankan dengan salinan TS yang sengaja dirusak, dan drill harus merah.
 
 ```bash
+# Salinan sabotase harus tinggal di `web/scripts/`: file TS di /tmp tidak bisa
+# me-resolve impor relatif `../src/lib/...` milik skrip drill.
+d=web/scripts/.drill-blast.ts
 sed 's|content: message.content,|content: (message.content ?? "") + "x",|' \
-  web/scripts/client-restore-drill.ts > /tmp/drill-blast.ts
-NYX_CLIENT_DRILL_TS=/tmp/drill-blast.ts bash scripts/client-restore-drill.sh; echo "exit=$?"
+  web/scripts/client-restore-drill.ts > "$d"
+NYX_CLIENT_DRILL_TS="$PWD/$d" bash scripts/client-restore-drill.sh; echo "exit=$?"
 # → GAGAL ciphertext pesan berbeda dari dump ; exit=1
+rm -f "$d"
+
+# Penjaga cakupan juga harus bisa merah: buang satu tabel dari SCHEMA.
+d=web/scripts/.drill-cakupan.ts
+sed "/  storyKeys: 'storyId',/d" web/scripts/client-restore-drill.ts > "$d"
+NYX_CLIENT_DRILL_TS="$PWD/$d" bash scripts/client-restore-drill.sh; echo "exit=$?"
+# → GAGAL cakupan tabel TIDAK lengkap — drill 19 vs backup 20: kurang storyKeys ; exit=1
+rm -f "$d"
 ```
 
 Catatan dari kontrol itu: perbandingan baris-per-baris **tidak** menangkap
@@ -146,13 +166,14 @@ yang menangkapnya. Karena itu langkah 9 ada, dan jangan dihapus demi kecepatan.
 
 **Yang tidak dibuktikan:** arsipnya **tidak** diekspor dari profil browser
 sungguhan (tidak ada profil pengguna di mesin drill). Baris lokal dibentuk dari
-dump dengan bentuk yang dipakai klien — kolom ter-seal `ENC1:`, `Uint8Array`,
-`Date`, `orderBucketMs` — jadi yang terbukti adalah round-trip + keterkaitan
-dengan dump pada 8 tabel (`identityKeys`, `preKeys`, `sessionKeys`, `contacts`,
-`conversations`, `messages`, `messageKeys`, `kvStore`), bukan klik "Ekspor" di
-UI dan bukan 20 tabel penuh (`ratchetSessions`, `pqDrSessionsV2`, state grup,
-story dsb. belum ikut). Tombol UI tetap perlu dicoba sekali secara manual di
-browser sebelum menghitung pemulihan klien "teruji penuh".
+dump dengan bentuk yang dipakai klien, jadi yang terbukti adalah round-trip
+untuk ke-20 tabel + keterkaitan id/ciphertext dengan dump — bukan klik "Ekspor"
+di UI. Dua hal yang secara struktural tidak bisa dibuktikan drill ini: tabel
+state grup diisi pada satu percakapan yang di dump sebenarnya 1:1 (drill menguji
+pemetaan frame + round-trip, bukan semantik grup), dan kunci privat tiruan di
+drill bukan kunci yang benar-benar bisa mendekripsi ciphertext dari akun nyata.
+Tombol UI tetap perlu dicoba sekali secara manual di browser sebelum menghitung
+pemulihan klien "teruji penuh".
 
 ## 39.4c Temuan drill klien (run 2026-10-29)
 
@@ -175,6 +196,14 @@ browser sebelum menghitung pemulihan klien "teruji penuh".
    menggeser ciphertext di sumber, kedua sisi ikut bergeser dan langkah 8 tetap
    hijau — yang merah hanya silang-cek dengan dump (langkah 9). Karena itu
    langkah itu wajib ada, bukan hiasan.
+5. **Bentuk baris harus disalin dari penulisnya, bukan ditebak.** Versi pertama
+   drill menulis `identityKeys.publicKey` sebagai `Uint8Array`; yang sebenarnya
+   ditulis `keychainDb.ts:749` adalah `{ userId, key: <base64> }`. Drill tetap
+   "lulus" karena arsip hanya memindahkan byte opaque — jadi drill dengan bentuk
+   salah membuktikan round-trip untuk data yang tidak pernah ada di klien. Saat
+   cakupan dinaikkan ke 20 tabel, tiap bentuk diambil dari pemanggil `.put()`
+   yang nyata (`keychainDb.ts`, `shadowVaultDb.ts`, `offlineQueueDb.ts`,
+   `store/profile.ts`, `lib/contactStore.ts`).
 
 ## 39.5 Drill B — Log KT v2
 
@@ -335,8 +364,8 @@ dijalankan** terhadap bundle sungguhan.
 | KT restore v2 dari bundle `.age` (§39.5c) | **belum pernah** | — | butuh `age-identity` operator |
 | **Postgres restore (otomatis-panduan, §39.4)** | 2026-10-29 | klaster `initdb` di `/tmp` (Postgres 18.6, port 15432), `pg_dump -Fc` 393 KB dari DB 12 MB → `pg_restore` 0,44 s tanpa error; **17/17 tabel**, `User` 4/4, `Device` 4/4, `Message` 1/1, `max(createdAt)` identik `2026-10-28T09:15:00Z`, kolom `Device.signingKeyV2` ada, klien Prisma **aplikasi** membaca `users=4 devices=4 signingKeyV2=null:1` | klaster dihapus setelah drill; arsip `.age` belum diuji |
 | Postgres restore **dari bundle `.age`** | **belum pernah** | — | butuh `age-identity` operator (§39.4 akhir) |
-| **Restore klien dari `.nyxbak` (§39.4b)** | 2026-10-29 | `pg_dump` 396 KB dari DB sumber `4\|1\|1\|4` → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore` 442 ms, **17/17 tabel** dan jumlah baris identik; fixture dari hasil restore = 1 percakapan + 1 pesan + 4 perangkat → arsip **8 frame / 118 184 byte**, restore **20 catatan di 8 tabel**, `progress 8/8`; tiap tabel identik byte-per-byte (`Uint8Array`/`Date`/`ENC1:`), kunci publik perangkat byte-identik, semua id pesan/percakapan + ciphertext cocok dengan dump, ekspor ulang **8 frame dengan urutan + payload identik**; kontrol negatif phrase salah & 1 byte rusak **ditolak, 0 baris** | belum dari profil browser sungguhan; 8 dari 20 tabel (§39.4b) |
-| Uji harness drill klien itu sendiri | 2026-10-29 | salinan TS dengan ciphertext digeser 1 karakter → `GAGAL ciphertext pesan berbeda dari dump`, exit 1 | sekaligus temuan #4 di bawah |
+| **Restore klien dari `.nyxbak` (§39.4b)** | 2026-10-29 | `pg_dump` 396 KB dari DB sumber `4\|1\|1\|4` → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore` 442 ms, **17/17 tabel** + jumlah baris identik; fixture dari hasil restore = 1 percakapan + 1 pesan + 4 perangkat → **51 baris di 20/20 tabel** → arsip **20 frame / 51 188 byte** → restore **51 catatan di 20 tabel**, `progress 20/20`; setiap tabel identik byte-per-byte, **45 nilai `ENC1:` utuh**, kunci publik perangkat identik, semua id pesan/percakapan + ciphertext cocok dengan dump, ekspor ulang **20 frame urutan + payload identik**; kontrol negatif phrase salah & 1 byte rusak **ditolak, 0 baris**; total **39 pemeriksaan OK**, exit 0 | belum dari profil browser sungguhan (§39.4b) |
+| Uji harness drill klien itu sendiri | 2026-10-29 | dua sabotase: ciphertext digeser 1 karakter → `GAGAL ciphertext pesan berbeda dari dump`; tabel `storyKeys` dibuang dari `SCHEMA` → `GAGAL cakupan tabel TIDAK lengkap — drill 19 vs backup 20: kurang storyKeys`; keduanya exit 1 | penjaga cakupan ikut terbukti, bukan hanya komentar |
 | Restore klien **dari UI** (tombol Ekspor di profil nyata) | **belum pernah** | — | butuh sesi browser dengan akun nyata |
 | Rotasi `JWT_SECRET` tanpa kehilangan backup R2 | **belum pernah** | — | §39.3 |
 
@@ -355,7 +384,7 @@ berapa pun rapi kodenya.
   snapshot, atau jalur tulis log — CI memakai config yang dibutuhkan drill sendiri,
   bukan config instance Anda.
 - **Per kuartal**: Drill A (§39.4) + Drill klien (§39.4b), catat hasil di §39.6.
-  Drill A butuh ~2 menit, drill klien ~10 detik, dan keduanya tidak menyentuh
+  Drill A butuh ~2 menit, drill klien ~20 detik, dan keduanya tidak menyentuh
   produksi (klaster `initdb` sendiri, dihapus di akhir) — tidak ada alasan
   melewatinya.
 - **Setiap perubahan format `.nyxbak`** (`backupFormat`/`backupPayload`/

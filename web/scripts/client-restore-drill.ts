@@ -46,7 +46,7 @@ import {
   parseBackupArchive,
   readBackupHeader,
 } from '../src/lib/backupFormat';
-import { libsodiumBackupValueCodec } from '../src/lib/backupPayload';
+import { BACKUP_TABLE_ORDER, libsodiumBackupValueCodec } from '../src/lib/backupPayload';
 import {
   createFramedBackup,
   normalizeBackupPhrase,
@@ -88,19 +88,57 @@ interface Fixture {
   messages: FixtureMessage[];
 }
 
-// ── Skema Dexie: hanya tabel yang ikut drill ────────────────────────────────
+// ── Skema Dexie: SELURUH tabel yang ikut backup ─────────────────────────────
 // Nama + keyPath **harus sama** dengan `web/src/lib/db.ts`, kalau tidak backup
 // akan menulis ke tabel yang tidak ada atau mengurutkan dengan kunci salah.
+// Daftar ini sengaja identik dengan `BACKUP_TABLE_ORDER` (20 tabel) dan
+// diperiksa di langkah 0: tabel backup baru tidak bisa lolos drill diam-diam.
 const SCHEMA = {
   identityKeys: 'userId',
   preKeys: 'keyId',
   sessionKeys: 'storageKey, conversationId',
+  ratchetSessions: 'conversationId',
+  pqDrSessionsV2: 'id, conversationId',
   contacts: 'userId',
   conversations: 'id',
+  groupKeys: 'conversationId',
+  groupSenderStates: 'conversationId',
+  groupReceiverStates: 'id',
+  groupSkippedKeys: 'key',
+  groupCachedParticipants: 'conversationId',
   messages: 'id, conversationId, [conversationId+orderBucketMs]',
   messageKeys: 'messageId',
+  skippedKeys: 'headerKey',
+  pendingHeaders: 'conversationId',
+  offlineQueue: 'tempId, timestamp',
+  storyKeys: 'storyId',
   kvStore: 'key',
+  profileCache: 'id',
 } as const;
+
+/** Kunci primer per tabel, untuk dedupe (PK sama = satu baris, seperti Dexie). */
+const PRIMARY_KEY: Record<string, string> = {
+  identityKeys: 'userId',
+  preKeys: 'keyId',
+  sessionKeys: 'storageKey',
+  ratchetSessions: 'conversationId',
+  pqDrSessionsV2: 'id',
+  contacts: 'userId',
+  conversations: 'id',
+  groupKeys: 'conversationId',
+  groupSenderStates: 'conversationId',
+  groupReceiverStates: 'id',
+  groupSkippedKeys: 'key',
+  groupCachedParticipants: 'conversationId',
+  messages: 'id',
+  messageKeys: 'messageId',
+  skippedKeys: 'headerKey',
+  pendingHeaders: 'conversationId',
+  offlineQueue: 'tempId',
+  storyKeys: 'storyId',
+  kvStore: 'key',
+  profileCache: 'id',
+};
 
 const TABLES = Object.keys(SCHEMA) as string[];
 
@@ -147,39 +185,72 @@ const b64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, 'base
 /** Penanda nilai at-rest — drill tidak mendekripsi, hanya membuktikan byte utuh. */
 const sealed = (plain: string): string => `ENC1:${Buffer.from(plain, 'utf8').toString('base64')}`;
 
-/** Baris lokal seperti yang ditulis klien setelah sinkronisasi dari server. */
+/**
+ * Baris lokal seperti yang ditulis klien — bentuknya disalin dari penulis
+ * sebenarnya, bukan dikarang: `keychainDb.ts` (identitas, state grup, kunci
+ * terlewat, pending header, kunci story), `shadowVaultDb.ts` (`pqDrSessionsV2`,
+ * `messageKeys`), `offlineQueueDb.ts`, `store/profile.ts` (`profileCache`),
+ * `lib/contactStore.ts`. Kolom yang di-seal di aplikasi tetap `ENC1:` di sini.
+ */
 function localRowsFromDump(dump: Fixture) {
   const primaryDevice = dump.devices[0];
   const bucket = (iso: string) => Math.floor(new Date(iso).getTime() / (15 * 60_000)) * 15 * 60_000;
+  const conversationIds = dump.conversations.map((conversation) => conversation.id);
+  const primaryConversation = conversationIds[0] ?? 'drill-conversation';
+  const userConvs = (suffix: string) => `${primaryConversation}${suffix}`;
 
   return {
-    identityKeys: dump.devices.map((device) => ({
-      userId: device.userId,
-      publicKey: b64(device.publicKeyB64),
-      pqPublicKey: device.pqPublicKeyB64 ? b64(device.pqPublicKeyB64) : null,
-      signingKey: b64(device.signingKeyB64),
-      signingKeyV2: device.signingKeyV2B64 ? b64(device.signingKeyV2B64) : null,
-      encryptedPrivateKey: device.encryptedPrivateKeyB64
-        ? b64(device.encryptedPrivateKeyB64)
-        : new Uint8Array(0),
-      cryptoVersion: device.cryptoVersion,
-      deviceId: device.id,
-    })),
+    // keychainDb.ts:749 — `{ userId, key }`, `key` = base64 kunci publik.
+    identityKeys: [
+      ...dump.devices.map((device) => ({ userId: device.userId, key: device.publicKeyB64 })),
+      // keychainDb.ts:760 — alias kunci publik murni (`ID_PUB_<userId>`).
+      ...dump.devices.map((device) => ({
+        userId: `ID_PUB_${device.userId}`,
+        key: device.publicKeyB64,
+      })),
+    ],
     preKeys: dump.devices.map((device, index) => ({
-      keyId: `drill-${index}-${device.id}`,
-      publicKey: b64(device.publicKeyB64),
+      keyId: 1000 + index,
+      pqPublicKey: device.pqPublicKeyB64 ?? undefined,
       encryptedPrivateKey: b64(device.signingKeyB64),
     })),
     sessionKeys: dump.conversations.flatMap((conversation) =>
       dump.devices.map((device) => ({
-        storageKey: `${conversation.id}:${device.id}`,
+        storageKey: `${conversation.id}_${device.id}`,
         conversationId: conversation.id,
-        key: sealed(`session:${conversation.id}:${device.id}`),
+        sessionId: `sess-${device.id}`,
+        key: b64(device.signingKeyB64),
       }))
     ),
+    // keychainDb.ts:627 — state ratchet terenkripsi (byte), satu per percakapan.
+    ratchetSessions: dump.conversations.map((conversation) => ({
+      conversationId: conversation.id,
+      state: b64(conversation.id),
+    })),
+    // shadowVaultDb.ts:102 — sesi PQ-DR v2: `state` = JSON ter-seal, `id` =
+    // `<conversationId>_<peerDeviceId>`, `lastActivity` di-seal.
+    pqDrSessionsV2: dump.conversations.flatMap((conversation) =>
+      dump.devices.map((device) => ({
+        id: `${conversation.id}_${device.id}`,
+        conversationId: conversation.id,
+        peerDeviceId: device.id,
+        state: sealed(
+          JSON.stringify({
+            rk: Buffer.from(device.signingKeyB64, 'base64').toString('base64'),
+            ckS: sealed('ck-send'),
+            ckR: sealed('ck-recv'),
+            ns: 3,
+            nr: 2,
+          })
+        ),
+        lastActivity: sealed(String(Date.parse(conversation.createdAt))),
+      }))
+    ),
+    // contactStore.ts:155 — `data` = record terenkripsi, `updatedAt` ter-seal.
     contacts: dump.devices.map((device) => ({
       userId: device.userId,
       data: sealed(JSON.stringify({ userId: device.userId, deviceId: device.id })),
+      updatedAt: sealed(String(Date.parse('2026-10-28T09:15:00Z'))),
     })),
     conversations: dump.conversations.map((conversation) => ({
       id: conversation.id,
@@ -188,7 +259,39 @@ function localRowsFromDump(dump: Fixture) {
       decryptedMetadata: null,
       lastMessageAt: conversation.lastMessageAt ? new Date(conversation.lastMessageAt) : null,
       participants: sealed(JSON.stringify(dump.devices.map((device) => device.userId))),
-      createdAt: new Date(conversation.createdAt),
+    })),
+    // keychainDb.ts:573 — kunci rantai grup (byte mentah).
+    groupKeys: dump.conversations.map((conversation) => ({
+      conversationId: conversation.id,
+      key: b64(conversation.id),
+    })),
+    // keychainDb.ts:241 — state pengirim; `CK`/`initialCK`/`metadataKey` ter-seal.
+    groupSenderStates: dump.conversations.map((conversation) => ({
+      conversationId: conversation.id,
+      state: {
+        CK: sealed('group-ck'),
+        N: 7,
+        initialCK: sealed('group-ck-initial'),
+        chainId: `${conversation.id}:0`,
+        metadataKey: sealed('group-mk'),
+      },
+    })),
+    // keychainDb.ts:316 — state penerima per `(conversationId, senderId)`.
+    groupReceiverStates: dump.conversations.flatMap((conversation) =>
+      dump.devices.map((device) => ({
+        id: `${conversation.id}_${device.userId}`,
+        state: { CK: sealed(`group-rk:${device.id}`), N: 4, chainId: `${conversation.id}:0` },
+      }))
+    ),
+    // keychainDb.ts:405 — kunci pesan grup yang terlewat; PK `key` = string.
+    groupSkippedKeys: dump.devices.slice(0, 3).map((device, index) => ({
+      key: userConvs(`_${index}_${device.id}`),
+      mk: sealed(`group-skipped:${device.id}`),
+    })),
+    // keychainDb.ts:872 — cache partisipan (Opaque Mailbox).
+    groupCachedParticipants: dump.conversations.map((conversation) => ({
+      conversationId: conversation.id,
+      userIds: dump.devices.map((device) => device.userId),
     })),
     messages: dump.messages.map((message) => ({
       id: message.id,
@@ -206,9 +309,45 @@ function localRowsFromDump(dump: Fixture) {
       statuses: sealed('[]'),
       autoDelete: sealed('false'),
     })),
+    // shadowVaultDb.ts — kunci pesan per `messageId`, byte terenkripsi.
     messageKeys: dump.messages.map((message) => ({
       messageId: message.id,
-      key: sealed(`mk:${message.id}`),
+      key: b64(message.id),
+    })),
+    // keychainDb.ts:669 — kunci DR yang terlewat; bentuk headerKey = id_kemPk_n.
+    skippedKeys: dump.devices.slice(0, 2).map((device, index) => ({
+      headerKey: `${primaryConversation}_${device.id}_${index}`,
+      key: b64(device.signingKeyB64),
+    })),
+    // keychainDb.ts:494 — header yang belum bisa diproses (objek, bukan string).
+    pendingHeaders: dump.conversations.map((conversation) => ({
+      conversationId: conversation.id,
+      header: { v: 2, b: [{ i: 0, n: 'drill-nonce', c: 'drill-ct' }] },
+    })),
+    // offlineQueueDb.ts:13 — antrean kirim; `tempId` angka, `data` objek pesan.
+    offlineQueue: [
+      {
+        tempId: 1_700_000_000_001,
+        conversationId: primaryConversation,
+        data: {
+          content: dump.messages[0]?.content ?? null,
+          type: dump.messages[0]?.type ?? 'USER',
+        },
+        timestamp: 1_700_000_000_001,
+        attempt: 0,
+      },
+      {
+        tempId: 1_700_000_000_002,
+        conversationId: primaryConversation,
+        data: { content: sealed('queued-message'), type: 'USER' },
+        timestamp: 1_700_000_000_002,
+        attempt: 2,
+      },
+    ],
+    // keychainDb.ts:857 — kunci story ter-seal (isi cerita ada di kolom pesan).
+    storyKeys: dump.devices.slice(0, 2).map((device, index) => ({
+      storyId: `story-${index}-${device.id}`,
+      key: sealed(`story-key:${device.id}`),
     })),
     kvStore: [
       {
@@ -217,7 +356,17 @@ function localRowsFromDump(dump: Fixture) {
           ? sealed(`identity-bundle:${primaryDevice.id}`)
           : sealed('identity-bundle'),
       },
+      { key: 'nyx_theme', value: 'dark' },
     ],
+    // store/profile.ts:110 — `updatedAt` di-seal, `encryptedHash` = blob profil.
+    profileCache: dump.devices.map((device) => ({
+      id: device.userId,
+      name: `user-${device.userId.slice(0, 8)}`,
+      avatarUrl: null,
+      description: null,
+      encryptedHash: sealed(`profile:${device.id}`),
+      updatedAt: sealed(String(Date.parse('2026-10-28T09:15:00Z'))),
+    })),
   } as Record<string, Record<string, unknown>[]>;
 }
 
@@ -240,6 +389,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Penjaga cakupan: daftar tabel drill HARUS sama dengan daftar tabel backup.
+  // Tanpa ini, tabel baru di `BACKUP_TABLE_ORDER` bisa masuk arsip tanpa satu
+  // pun barisnya pernah diuji round-trip.
+  const backupTables = [...BACKUP_TABLE_ORDER].sort();
+  const drillTables = [...TABLES].sort();
+  check(
+    stable(backupTables) === stable(drillTables),
+    `cakupan tabel lengkap: ${drillTables.length}/${BACKUP_TABLE_ORDER.length} tabel backup`,
+    `cakupan tabel TIDAK lengkap — drill ${drillTables.length} vs backup ${BACKUP_TABLE_ORDER.length}: ` +
+      `kurang ${backupTables.filter((table) => !drillTables.includes(table)).join(',') || '-'}`
+  );
+  const emptyTables = TABLES.filter((table) => (localRowsFromDump(dump)[table] ?? []).length === 0);
+  check(emptyTables.length === 0, 'setiap tabel backup punya minimal satu baris', `tabel tanpa baris: ${emptyTables.join(', ')}`);
+
   await sodium.ready;
   const crypto = libsodiumBackupCrypto(sodium);
   const codec = libsodiumBackupValueCodec(sodium);
@@ -250,7 +413,14 @@ async function main(): Promise<void> {
   const rows = localRowsFromDump(dump);
   const expectedCounts: Record<string, number> = {};
   for (const table of TABLES) {
-    const tableRows = rows[table] ?? [];
+    // Dexie: kunci primer sama = satu baris (bulkPut menimpa). Dedupe di sini
+    // supaya fixture dengan id kembar (mis. dua perangkat milik satu user pada
+    // `contacts`/`profileCache`) tidak membuat hitungan menipu.
+    const keyPath = PRIMARY_KEY[table]!;
+    const tableRows = [
+      ...new Map((rows[table] ?? []).map((row) => [String(row[keyPath]), row])).values(),
+    ];
+    rows[table] = tableRows;
     if (tableRows.length > 0) expectedCounts[table] = tableRows.length;
     await source.table(table).bulkPut(tableRows);
   }
@@ -314,18 +484,30 @@ async function main(): Promise<void> {
     const identical = stable(before) === stable(after);
     check(identical, `${table}: ${after.length} baris identik (byte, Date, ENC1 utuh)`, `${table}: isi berbeda setelah restore`);
   }
-  const sealedIntact =
-    (restored.messages ?? []).every((row) => String((row as Record<string, unknown>).senderId).startsWith('ENC1:')) &&
-    (restored.kvStore ?? []).every((row) => String((row as Record<string, unknown>).value).startsWith('ENC1:'));
-  check(sealedIntact, 'kolom at-rest tetap `ENC1:` (tidak didekripsi ulang oleh backup)', 'kolom at-rest berubah bentuk');
-
-  const restoredBytes = (restored.identityKeys ?? []).map((row) =>
-    Buffer.from((row as Record<string, unknown>).publicKey as Uint8Array).toString('base64')
-  );
-  const dumpBytes = dump.devices.map((device) => device.publicKeyB64);
+  // Semua nilai ter-seal (`ENC1:`) yang ada di sumber harus muncul **utuh** di
+  // hasil restore — backup tidak boleh mendekripsi, menyegel ulang, atau
+  // memotong envelope. Diperiksa di seluruh tabel, bukan hanya `messages`.
+  const sealedValues = (tables: Record<string, unknown[]>): string[] =>
+    Object.values(tables).flatMap((list) =>
+      list.flatMap((row) => JSON.stringify(canon(row)).match(/ENC1:[A-Za-z0-9+/=_-]+/g) ?? [])
+    );
+  const sealedBefore = sealedValues(rows);
+  const sealedAfter = new Set(sealedValues(restored));
   check(
-    dumpBytes.every((key) => restoredBytes.includes(key)),
-    `kunci publik perangkat dari dump byte-identik (${dumpBytes.length})`,
+    sealedBefore.length > 0 && sealedBefore.every((value) => sealedAfter.has(value)),
+    `${sealedBefore.length} nilai \`ENC1:\` utuh di seluruh tabel (tidak didekripsi/disegel ulang)`,
+    `ada nilai \`ENC1:\` yang berubah atau hilang (${sealedBefore.filter((value) => !sealedAfter.has(value)).length})`
+  );
+
+  // `identityKeys.key` sebenarnya base64 kunci publik (keychainDb.ts:749) —
+  // di sini dibandingkan langsung dengan kolom `Device.publicKey` dari dump.
+  const restoredKeys = (restored.identityKeys ?? []).map(
+    (row) => (row as Record<string, unknown>).key as string
+  );
+  const dumpKeys = dump.devices.map((device) => device.publicKeyB64);
+  check(
+    dumpKeys.every((key) => restoredKeys.includes(key)),
+    `kunci publik perangkat dari dump identik (${dumpKeys.length} baris \`key\`)`,
     'kunci publik perangkat tidak identik dengan dump'
   );
 
