@@ -427,7 +427,13 @@ read -r SIZE_BEFORE ROOT_BEFORE <<<"$(head_fields)"
 ARCHIVE="$(wait_snapshot "$WORK/snap" "$SIZE_BEFORE" "$ROOT_BEFORE")" \
   || { jq . "$WORK/snap/latest.json" 2>/dev/null || true; fail "snapshot treeSize=$SIZE_BEFORE tidak muncul"; }
 [[ -f "$WORK/snap/$ARCHIVE" ]] || fail "arsip $ARCHIVE disebut latest.json tapi tidak ada"
-echo "   arsip: $ARCHIVE ($(stat -c%s "$WORK/snap/$ARCHIVE") byte)"
+# Salinan diambil KELUAR direktori snapshot: proses log memangkas arsip lama
+# (`-snapshot-keep 3`) setiap putaran, jadi arsip "pra-bencana" bisa hilang di
+# tengah drill kalau dibaca langsung dari $WORK/snap (pernah terjadi di run 4).
+mkdir -p "$WORK/archive"
+cp -p "$WORK/snap/$ARCHIVE" "$WORK/archive/$ARCHIVE"
+ARCHIVE_PATH="$WORK/archive/$ARCHIVE"
+echo "   arsip: $ARCHIVE ($(stat -c%s "$ARCHIVE_PATH") byte)"
 echo "   head : size=$SIZE_BEFORE root=$ROOT_BEFORE"
 ok "latest.json = pohon hidup (size + root)"
 
@@ -456,18 +462,18 @@ ok "VerifySearch lulus, abiVersion=2, TreeSize+Audit menjawab"
 step 3
 stop_query
 stop_auditor
-rm -rf "$WORK/live"
+rm -rf "$WORK/live" "$WORK/snap"
 [[ ! -e "$WORK/live" ]] || fail "basis data hidup masih ada"
-# Sisa arsip lama tidak boleh menyelamatkan drill: hanya $ARCHIVE yang tersisa.
-find "$WORK/snap" -name 'kt-snapshot-*' ! -name "$ARCHIVE" -delete
-ok "proses drill mati, DB hidup dihapus; satu-satunya salinan = $ARCHIVE"
+# Direktori snapshot ikut dihapus: tidak boleh ada arsip lain yang bisa
+# "menyelamatkan" drill, dan tidak boleh ada arsip yang lebih baru dari ini.
+ok "proses drill mati, DB hidup dihapus; satu-satunya salinan = $ARCHIVE_PATH"
 
 # ---------------------------------------------------------------------------
 # 5. Pulih hanya dari arsip + config
 # ---------------------------------------------------------------------------
 step 4
 mkdir -p "$WORK/live"
-tar -xzf "$WORK/snap/$ARCHIVE" -C "$WORK/live" || fail "ekstraksi arsip gagal"
+tar -xzf "$ARCHIVE_PATH" -C "$WORK/live" || fail "ekstraksi arsip gagal"
 "$QUERY" -check -config "$CONFIG" -db "$WORK/live" \
   || fail "-check pada hasil ekstraksi gagal (arsip tidak layak disebut backup)"
 start_query "$WORK/live" "$WORK/snap"
@@ -549,7 +555,7 @@ WRONG_OUT="$("$CHECK" verify-search -url "$BASE" -hash "$FIRST_HASH" -expect-val
 echo "   kunci salah ditolak: $(echo "$WRONG_OUT" | head -1)"
 # (d) arsip dirusak satu byte
 CORRUPT="$WORK/corrupt.tar.gz"
-cp "$WORK/snap/$ARCHIVE" "$CORRUPT"
+cp "$ARCHIVE_PATH" "$CORRUPT"
 OFFSET=$(( $(stat -c%s "$CORRUPT") / 2 ))
 ORIG_BYTE="$(dd if="$CORRUPT" bs=1 skip="$OFFSET" count=1 2>/dev/null | od -An -tu1 | tr -d ' \n')"
 FLIP_BYTE=$(( (ORIG_BYTE + 128) % 256 ))
@@ -592,6 +598,11 @@ RB_HASH="$(echo "$RB_A" | sed -n 's/^DRILL_FIRST_HASH=//p' | tail -1)"
 read -r RB_SIZE_N RB_ROOT_N <<<"$(head_fields)"
 RB_ARCHIVE="$(wait_snapshot "$WORK/rb/snap" "$RB_SIZE_N" "$RB_ROOT_N")" \
   || fail "rollback: snapshot pada size=$RB_SIZE_N tidak muncul"
+# Sama seperti langkah 2: arsip "lama" disalin keluar karena snapshotter akan
+# memangkasnya saat kita menulis entri berikutnya.
+mkdir -p "$WORK/rb/archive"
+cp -p "$WORK/rb/snap/$RB_ARCHIVE" "$WORK/rb/archive/$RB_ARCHIVE"
+RB_ARCHIVE_PATH="$WORK/rb/archive/$RB_ARCHIVE"
 echo "   snapshot lama: $RB_ARCHIVE (size=$RB_SIZE_N)"
 
 write_entries 2 3 3 >/dev/null || fail "rollback: penulisan batch kedua gagal"
@@ -604,9 +615,9 @@ auditor_once "$WORK/rb/auditor-state.json" || fail "rollback: auditor -once (pra
 echo "   klien + auditor sudah melihat size=$RB_SIZE_NM"
 
 stop_query
-rm -rf "$WORK/rb/live"
+rm -rf "$WORK/rb/live" "$WORK/rb/snap"
 mkdir -p "$WORK/rb/live"
-tar -xzf "$WORK/rb/snap/$RB_ARCHIVE" -C "$WORK/rb/live" || fail "rollback: ekstraksi arsip lama gagal"
+tar -xzf "$RB_ARCHIVE_PATH" -C "$WORK/rb/live" || fail "rollback: ekstraksi arsip lama gagal"
 start_query "$WORK/rb/live" "$WORK/rb/snap"
 read -r RB_RESTORED RB_ROOT_RESTORED <<<"$(head_fields)"
 [[ "$RB_RESTORED" == "$RB_SIZE_N" ]] || fail "rollback: instance pulih bukan pada size=$RB_SIZE_N"
