@@ -5,9 +5,10 @@
 > sudah dijalankan penuh di mesin self-host ini (§39.6). Drill v1 tetap dihapus
 > bersama log v1 (`docs/38`); yang baru adalah penggantinya, bukan kebangkitannya.
 > Drill pemulihan **Postgres** juga sudah dijalankan 2026-10-29 (§39.4, klaster
-> `initdb` sendiri). Yang **masih** belum pernah: pemulihan dari bundle `.age`
-> nyata — baik Postgres maupun KT (§39.4 akhir, §39.5c) — karena keduanya
-> menuntut `age-identity` yang hanya dipegang operator.
+> `initdb` sendiri), dan sejak 2026-10-29 **pemulihan klien** (`.nyxbak`) diuji
+> di atas dump yang benar-benar direstore (§39.4b). Yang **masih** belum pernah:
+> pemulihan dari bundle `.age` nyata — baik Postgres maupun KT (§39.4 akhir,
+> §39.5c) — karena keduanya menuntut `age-identity` yang hanya dipegang operator.
 >
 > Dokumen ini sengaja pendek dan berisi perintah, bukan narasi. Yang tidak bisa
 > diverifikasi (siapa memegang akses apa) ditandai `TODO(operator)`.
@@ -98,6 +99,82 @@ Prisma aplikasi membaca barisnya — bukan hanya `psql`.
 `nyx-backup-*.tar.gz.age` di R2. Membuka arsip itu butuh `age-identity` operator,
 jadi bagian "bundle terenkripsi bisa dibuka dan isinya bisa dipulihkan" tetap
 belum dibuktikan (sama seperti `--bundle` di §39.5c).
+
+## 39.4b Drill klien — `.nyxbak` di atas dump nyata
+
+Langkah terakhir urutan §39.1: setelah DB pulih, apakah **klien** juga bisa
+pulih? Sampai 2026-10-29 jawabannya tidak pernah diuji — `backupRestore.test.ts`
+memakai store dan backend kripto palsu, jadi yang terbukti hanya logika pemetaan.
+
+```bash
+bash scripts/client-restore-drill.sh          # ~10 dtk, tidak menyentuh DB hidup
+```
+
+Yang dijalankan (semua langkah ❌ menggagalkan skrip):
+
+| # | Langkah | Bukti yang dicetak |
+|---|---|---|
+| 1 | Perkakas + `server/.env` sumber | `semua perkakas tersedia` |
+| 2 | `pg_dump -Fc` dari database sumber (cara yang sama dengan backup harian) | ukuran + durasi + `users\|conversations\|messages\|devices` |
+| 3 | Klaster `initdb` sendiri (port 15433), **bukan** database hidup | versi Postgres + alamat |
+| 4 | `pg_restore --no-owner --no-privileges` ke DB baru | durasi, exit 0 |
+| 5 | Isi: jumlah tabel + jumlah baris = sumber | `tabel: 17 (sumber 17)` |
+| 6 | Fixture klien diekspor dari hasil restore (id, ciphertext, kunci publik perangkat) | ukuran fixture |
+| 7 | Perangkat lama → arsip → perangkat pengganti (Dexie + IndexedDB nyata, KDF argon2id, XChaCha20-Poly1305) | `header NYXB v1, N frame, M byte` |
+| 8 | Isi per tabel identik byte-per-byte (`Uint8Array`, `Date`, kolom `ENC1:` utuh) + kunci publik sama dengan dump | satu baris `OK` per tabel |
+| 9 | Silang-cek dengan dump: semua id pesan/percakapan ada, ciphertext sama persis | `semua N id pesan dump ada di klien` |
+| 10 | Ekspor ulang dari perangkat pengganti: urutan + payload frame identik | `ekspor ulang: N frame, urutan + payload identik` |
+| 11 | Kontrol negatif: phrase salah dan arsip dirusak 1 byte **ditolak**, 0 baris tertulis | dua `GAGAL` yang tidak muncul = lulus |
+
+Workspace di `NYX_CLIENT_DRILL_DIR` (default `/tmp/nyx-client-restore-drill`),
+port `NYX_CLIENT_DRILL_PORT` (default 15433), dihapus oleh `trap` termasuk saat
+gagal — klaster memuat data hasil dump.
+
+**Membuktikan harness-nya tidak buta** (wajib dilakukan saat mengubah skrip):
+jalankan dengan salinan TS yang sengaja dirusak, dan drill harus merah.
+
+```bash
+sed 's|content: message.content,|content: (message.content ?? "") + "x",|' \
+  web/scripts/client-restore-drill.ts > /tmp/drill-blast.ts
+NYX_CLIENT_DRILL_TS=/tmp/drill-blast.ts bash scripts/client-restore-drill.sh; echo "exit=$?"
+# → GAGAL ciphertext pesan berbeda dari dump ; exit=1
+```
+
+Catatan dari kontrol itu: perbandingan baris-per-baris **tidak** menangkap
+pergeseran sistematis (kedua sisi ikut bergeser), hanya silang-cek dengan dump
+yang menangkapnya. Karena itu langkah 9 ada, dan jangan dihapus demi kecepatan.
+
+**Yang tidak dibuktikan:** arsipnya **tidak** diekspor dari profil browser
+sungguhan (tidak ada profil pengguna di mesin drill). Baris lokal dibentuk dari
+dump dengan bentuk yang dipakai klien — kolom ter-seal `ENC1:`, `Uint8Array`,
+`Date`, `orderBucketMs` — jadi yang terbukti adalah round-trip + keterkaitan
+dengan dump pada 8 tabel (`identityKeys`, `preKeys`, `sessionKeys`, `contacts`,
+`conversations`, `messages`, `messageKeys`, `kvStore`), bukan klik "Ekspor" di
+UI dan bukan 20 tabel penuh (`ratchetSessions`, `pqDrSessionsV2`, state grup,
+story dsb. belum ikut). Tombol UI tetap perlu dicoba sekali secara manual di
+browser sebelum menghitung pemulihan klien "teruji penuh".
+
+## 39.4c Temuan drill klien (run 2026-10-29)
+
+1. **`server/.env` tidak boleh di-`source` mentah di skrip drill.** Berkas itu
+   mendefinisikan `PORT=4000` (API yang sedang hidup); variabel drill bernama
+   `PORT` tertimpa dan klaster Postgres mencoba mengikat port API →
+   `could not create listen socket for "127.0.0.1"`. Sekarang skrip memakai
+   `DRILL_PORT` dan membaca `DATABASE_URL` di **subshell** (`63` variabel `.env`
+   tidak bocor ke proses drill). Pola yang sama berlaku untuk skrip drill lain.
+2. **`createFramedBackup` default-nya mengekspor SELURUH 20 tabel.** Store yang
+   tidak punya semuanya (drill, alat CLI) mati dengan
+   `InvalidTableError: Table ratchetSessions does not exist`. Bukan bug produksi
+   (Dexie aplikasi punya 20 tabel), tetapi jebakan API: pemanggil non-aplikasi
+   **wajib** mengoper `tables`.
+3. **"Ekspor ulang byte-identik" bukan properti yang sah.** Tiap frame memakai
+   nonce acak, jadi dua ekspor dari data yang sama tidak pernah sama byte-nya.
+   Determinisme yang benar diuji pada **urutan frame + payload** (langkah 10).
+   Jangan "perbaiki" test dengan menuntut kesamaan byte.
+4. **Perbandingan baris-per-baris tidak cukup.** Saat harness dirusak dengan
+   menggeser ciphertext di sumber, kedua sisi ikut bergeser dan langkah 8 tetap
+   hijau — yang merah hanya silang-cek dengan dump (langkah 9). Karena itu
+   langkah itu wajib ada, bukan hiasan.
 
 ## 39.5 Drill B — Log KT v2
 
@@ -258,7 +335,9 @@ dijalankan** terhadap bundle sungguhan.
 | KT restore v2 dari bundle `.age` (§39.5c) | **belum pernah** | — | butuh `age-identity` operator |
 | **Postgres restore (otomatis-panduan, §39.4)** | 2026-10-29 | klaster `initdb` di `/tmp` (Postgres 18.6, port 15432), `pg_dump -Fc` 393 KB dari DB 12 MB → `pg_restore` 0,44 s tanpa error; **17/17 tabel**, `User` 4/4, `Device` 4/4, `Message` 1/1, `max(createdAt)` identik `2026-10-28T09:15:00Z`, kolom `Device.signingKeyV2` ada, klien Prisma **aplikasi** membaca `users=4 devices=4 signingKeyV2=null:1` | klaster dihapus setelah drill; arsip `.age` belum diuji |
 | Postgres restore **dari bundle `.age`** | **belum pernah** | — | butuh `age-identity` operator (§39.4 akhir) |
-| Restore klien dari `.nyxvault` | **belum pernah** diuji terhadap dump nyata | — | uji setelah Drill A |
+| **Restore klien dari `.nyxbak` (§39.4b)** | 2026-10-29 | `pg_dump` 396 KB dari DB sumber `4\|1\|1\|4` → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore` 442 ms, **17/17 tabel** dan jumlah baris identik; fixture dari hasil restore = 1 percakapan + 1 pesan + 4 perangkat → arsip **8 frame / 118 184 byte**, restore **20 catatan di 8 tabel**, `progress 8/8`; tiap tabel identik byte-per-byte (`Uint8Array`/`Date`/`ENC1:`), kunci publik perangkat byte-identik, semua id pesan/percakapan + ciphertext cocok dengan dump, ekspor ulang **8 frame dengan urutan + payload identik**; kontrol negatif phrase salah & 1 byte rusak **ditolak, 0 baris** | belum dari profil browser sungguhan; 8 dari 20 tabel (§39.4b) |
+| Uji harness drill klien itu sendiri | 2026-10-29 | salinan TS dengan ciphertext digeser 1 karakter → `GAGAL ciphertext pesan berbeda dari dump`, exit 1 | sekaligus temuan #4 di bawah |
+| Restore klien **dari UI** (tombol Ekspor di profil nyata) | **belum pernah** | — | butuh sesi browser dengan akun nyata |
 | Rotasi `JWT_SECRET` tanpa kehilangan backup R2 | **belum pernah** | — | §39.3 |
 
 ## 39.7 Jika maintainer hilang
@@ -275,9 +354,13 @@ berapa pun rapi kodenya.
   juga lokal (`bash scripts/kt-v2-restore-drill.sh`) bila menyentuh config/kunci,
   snapshot, atau jalur tulis log — CI memakai config yang dibutuhkan drill sendiri,
   bukan config instance Anda.
-- **Per kuartal**: Drill A (§39.4) + restore klien dari `.nyxvault`, catat hasil
-  di §39.6. Drill A butuh ~2 menit dan tidak menyentuh produksi — tidak ada
-  alasan melewatinya.
+- **Per kuartal**: Drill A (§39.4) + Drill klien (§39.4b), catat hasil di §39.6.
+  Drill A butuh ~2 menit, drill klien ~10 detik, dan keduanya tidak menyentuh
+  produksi (klaster `initdb` sendiri, dihapus di akhir) — tidak ada alasan
+  melewatinya.
+- **Setiap perubahan format `.nyxbak`** (`backupFormat`/`backupPayload`/
+  `backupRestore`): jalankan §39.4b sebelum merge. Arsip lama harus tetap
+  terbuka — format ini satu-satunya jalan pulih klien tanpa perangkat lama.
 - **Setelah setiap restore nyata** (bencana atau latihan): catat hasilnya di
   §39.6, termasuk kalau langkah 6 (auditor) terlewat — itu yang membuat klien
   melihat `unavailable`, bukan log yang hilang.
