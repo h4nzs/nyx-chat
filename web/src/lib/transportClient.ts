@@ -144,11 +144,6 @@ type TransportEvents = {
   'burner:receive': [payload: { roomId?: string, ciphertext: string }];
   'burner:terminated': [payload: { roomId: string }];
 
-  // Migration
-  'migration:start': [payload: { roomId: string; totalChunks: number; sealedKey: string; }];
-  'migration:chunk': [payload: { chunkIndex: number; chunk: string; }];
-  'migration:ack': [payload: { roomId: string, success: boolean }];
-
   // Allow arbitrary events for backward compatibility
   [event: string]: unknown[];
 };
@@ -768,7 +763,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
    *   'force_logout'    -> force_logout  (passthrough json.data)
    *   <json.event>      -> passthrough   (message:updated, conversation:*,
    *                                       user:updated, session:*, group:*,
-   *                                       burner:*, migration:*, dll.)
+   *                                       burner:*, dll.)
    */
   private handleIncomingWss(eventName: string, data: unknown): void {
     if (eventName === 'message:new') {

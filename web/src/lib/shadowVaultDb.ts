@@ -682,6 +682,18 @@ class NyxShadowVaultProxy {
   private async parseRecordsToMessages(records: DecryptedMessageRecord[]): Promise<Message[]> {
      const messages: Message[] = [];
       for (const r of records) {
+        messages.push(await this.decodeMessageRecord(r));
+      }
+      return messages;
+  }
+
+  /**
+   * Satu baris vault → `Message` terdekripsi. Diekstrak dari
+   * `parseRecordsToMessages` ([docs/40 §40.7]) supaya arsip riwayat perangkat
+   * hasil link memakai **pembaca yang sama** dengan tampilan chat — tidak ada
+   * peta kolom kedua yang bisa menyimpang dari penyegelan di `upsertMessages`.
+   */
+  async decodeMessageRecord(r: DecryptedMessageRecord): Promise<Message> {
         // FIX 2: Hapus Zod parsing yang ketat di sini, karena record dari DB lokal sudah kita anggap valid bentuknya.
         // Zod parsing bisa memblokir pesan yang valid jika schema shared-nya sangat ketat.
         
@@ -823,9 +835,49 @@ class NyxShadowVaultProxy {
           isBlindAttachment: decryptedFileMeta?.isBlindAttachment
         };
 
-        messages.push(msg);
+        return msg;
+  }
+
+  /**
+   * [docs/40 §40.7] Proyeksi pesan untuk arsip riwayat perangkat hasil link:
+   * semua baris pesan yang isinya masih bisa ditampilkan, sudah didekripsi.
+   *
+   * Yang dibuang (pilihan sadar, bukan lupa):
+   *   - baris kedaluwarsa (`expiresAt` lewat) — isinya sudah tidak boleh dibaca
+   *     bahkan di perangkat ini,
+   *   - `waiting_for_key` / bubble gagal — tidak ada isi untuk dipindahkan,
+   *   - view-once — memindahkannya menghidupkan konten yang sudah "terbakar",
+   *   - `statuses` (centang baca) — impor tidak boleh mengirim receipt palsu.
+   *
+   * `seq` dan `createdAt` **dipertahankan**: nomor urut server masih valid untuk
+   * akun yang sama, dan tanpanya "muat pesan lama" di perangkat baru kehilangan
+   * kursor.
+   */
+  async getMessagesForExport(): Promise<Message[]> {
+    try {
+      const rows = await db.messages.toArray();
+      const now = Date.now();
+      const messages: Message[] = [];
+      for (const row of rows) {
+        const expiresAt = await readExpiresAt(row.expiresAt);
+        if (expiresAt !== null && expiresAt <= now) continue;
+        try {
+          const msg = await this.decodeMessageRecord(row);
+          if (msg.error) continue;
+          if (msg.content === 'waiting_for_key') continue;
+          if (msg.isViewOnce) continue;
+          messages.push({ ...msg, statuses: undefined });
+        } catch (e) {
+          // Satu baris rusak tidak boleh menggagalkan seluruh arsip — pesan lain
+          // tetap bisa dipindahkan (dan baris itu memang tidak terbaca di sini).
+          console.warn('[ShadowVault] Baris pesan dilewati saat ekspor riwayat:', e);
+        }
       }
       return messages;
+    } catch (e) {
+      console.error('Failed to read messages for history export', e);
+      return [];
+    }
   }
 
   async getMessage(id: string): Promise<Message | null> {

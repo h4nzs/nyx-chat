@@ -59,7 +59,6 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 |---|---|---|
 | `nyx:upstream:<op>` / `nyx:downstream` | pub/sub with the Rust sidecar | — |
 | `active_device:<userId>` | Single-active-device enforcement | 30d |
-| `is_migrating:<userId>` | Migration mode (allow 2 devices) | transient |
 | `revoked_jti:<jti>` | Refresh-token blacklist | until token expiry |
 | `ban_status:<userId>` | Ban cache (`BANNED`/`OK`) | 15m |
 | `cache:keys:bundle:<userId>` / `cache:keys:public:<userId>` | Prekey cache | 1h (invalidated on key rotation) |

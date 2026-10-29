@@ -87,6 +87,12 @@ export const env = {
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
   chatSecret: process.env.CHAT_SECRET || '',
   backupKeySecret: backupKeySecretRaw || process.env.JWT_SECRET || 'dev-backup-secret',
+  // [docs/40] Arsip riwayat untuk perangkat hasil link. Kill switch operator:
+  // `off`/`0`/`false` → router tidak dipasang sama sekali (404), sehingga klien
+  // tidak menampilkan opsi "sertakan riwayat" dan tidak ada jalur R2 baru.
+  linkHistoryEnabled: !['off', '0', 'false'].includes(
+    (process.env.LINK_HISTORY_ENABLED || 'on').trim().toLowerCase()
+  ),
   r2AccountId: process.env.R2_ACCOUNT_ID || "",
   r2AccessKeyId: process.env.R2_ACCESS_KEY_ID || "",
   r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",

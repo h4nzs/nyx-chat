@@ -222,9 +222,9 @@ tahap A yang dibatalkan; jangan dihidupkan kembali tanpa alasan.
 
 **Penegakan saat ini.** Sidecar menegakkan satu sesi WebTransport per user
 (`docs/14` §14.7) dan `redisBridge.isActiveDeviceAllowed` menolak perangkat
-kedua, kecuali mode migrasi (`is_migrating:<tag>`) yang **memindahkan** vault,
-bukan menambah perangkat. Analisis di bawah dipertahankan sebagai konteks tentang
-apa yang Signal lakukan — **bukan** backlog.
+kedua **tanpa pengecualian**: mode migrasi (`is_migrating:<tag>`, dulu
+memindahkan vault lewat QR) dihapus 2026-10-29. Analisis di bawah dipertahankan
+sebagai konteks tentang apa yang Signal lakukan — **bukan** backlog.
 
 **Signal.** `DeviceController`, `ProvisioningController`, `device-transfer`
 (libsignal), `DeviceCapability`, `DeviceKEMPreKeyPages` (server storage), device

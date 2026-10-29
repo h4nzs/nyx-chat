@@ -45,7 +45,7 @@ export type OutgoingMapping =
  *  KEY_SYNC      (0x02) -> derived dari payload.event
  *                         (session:request_key, session:fulfill_response,
  *                          group:request_key, group:fulfilled_key,
- *                          messages:distribute_keys, burner:*, migration:*, ...)
+ *                          messages:distribute_keys, burner:*, ...)
  *  WEBRTC_SIGNAL (0x03) -> 'webrtc:secure_signal'  (fixed; { to: relayToken,
  *  WEBRTC_ICE    (0x04) ->  type, payload })
  *  PRESENCE      (0x05) -> 'presence:update'        (fixed; payload.event adalah

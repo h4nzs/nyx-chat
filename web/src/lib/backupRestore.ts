@@ -21,13 +21,13 @@
  * `liveBackupStore()` yang memuat `./db` secara **dinamis**, sehingga mengimpor
  * modul ini tidak pernah meng-instansiasi Dexie di lingkungan test.
  *
- * Catatan kunci: arsip ber-frame **tidak** menentukan asal kunci. Dua jalur
- * sah (lihat `docs/31` §31.6c):
- *   - **Transfer langsung (`migration:*`)** — kunci acak 32 byte yang di-seal
- *     ke kunci publik penerima (QR); tidak perlu recovery phrase di perangkat
- *     lama.
- *   - **Berkas manual** — kunci dari recovery phrase lewat `openFramedBackupWithPhrase`.
- * Di kedua jalur bentuk byte arsip identik.
+ * Catatan kunci: arsip ber-frame **tidak** menentukan asal kunci, tetapi
+ * pemanggil produksi hanya punya satu jalur (lihat `docs/31` §31.6c):
+ *   - **Berkas manual** — kunci dari recovery phrase lewat
+ *     `openFramedBackupWithPhrase`.
+ * Jalur QR `migration:*` (kunci acak di-seal ke kunci publik penerima) dihapus
+ * 2026-10-29 bersama halaman transfer perangkat; API kunci-di-luar di sini tetap
+ * generik karena test dan harness bench memakainya.
  */
 
 import {
@@ -110,6 +110,12 @@ export interface CreateBackupOptions {
   chunkBytes?: number;
   tables?: readonly string[];
   onProgress?: BackupProgress;
+  /**
+   * Penanda jenis arsip di setiap chunk (`k`). Dipakai arsip riwayat perangkat
+   * (`'history'`, docs/40): payload-nya objek domain, jadi jalur restore
+   * `.nyxbak` menolaknya alih-alih menulis baris yang tidak bisa dibaca.
+   */
+  marker?: string;
 }
 
 /**
@@ -131,6 +137,7 @@ export async function createFramedBackup(opts: CreateBackupOptions): Promise<Cre
     chunkBytes: opts.chunkBytes,
     key: opts.key,
     scramble: opts.scramble ?? true,
+    ...(opts.marker ? { marker: opts.marker } : {}),
   });
 
   const archive = buildBackupArchive({
@@ -190,6 +197,14 @@ export async function restoreFramedBackup(opts: RestoreBackupOptions): Promise<R
 
   for (let i = 0; i < frames.length; i++) {
     const chunk = readBackupChunk(frames[i]!, opts.codec);
+    // [docs/40] Arsip riwayat perangkat memakai kontainer yang sama tetapi
+    // payload-nya objek domain, bukan baris Dexie. Menulisnya lewat jalur ini
+    // akan membuat baris yang tak bisa dibaca aplikasi — jadi ditolak keras.
+    if (chunk.k) {
+      throw new BackupFormatError(
+        'Arsip ini arsip riwayat perangkat (bukan backup .nyxbak) — buka lewat alur tautan perangkat'
+      );
+    }
     if (!recordsByTable[chunk.table]) recordsByTable[chunk.table] = [];
     recordsByTable[chunk.table]!.push(...chunk.records);
     records += chunk.records.length;

@@ -372,9 +372,11 @@ export default function Login() {
                 <FiLock size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
              </button>
 
-             {/* Option 2: QR Transfer */}
+             {/* Option 2: Link this device — identitas baru, tanpa riwayat.
+                 Satu-satunya jalur "perangkat baru tanpa frasa"; riwayat tetap
+                 lewat berkas `.nyxbak` (opsi 3). */}
              <button
-                onClick={() => navigate("/migrate-receive")}
+                onClick={() => navigate("/link")}
                 className="w-full flex items-center justify-between p-4 rounded-xl bg-bg-main border border-text-secondary/10 shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent transition-all group"
              >
                 <div className="flex items-center gap-4">
@@ -382,8 +384,8 @@ export default function Login() {
                         <FiSmartphone size={20} />
                     </div>
                     <div className="text-left">
-                        <p className="font-bold text-sm">{t('auth:buttons.transfer_qr')}</p>
-                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.device_to_device')}</p>
+                        <p className="font-bold text-sm">{t('auth:link.entry_title')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:link.entry_desc')}</p>
                     </div>
                 </div>
                 <FiCpu size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />

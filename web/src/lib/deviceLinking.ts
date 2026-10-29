@@ -92,18 +92,40 @@ export async function claimDeviceLink(input: DeviceLinkClaimInput): Promise<Devi
   });
 }
 
-export async function getDeviceLinkStatus(pendingId: string): Promise<DeviceLinkState> {
-  const res = await api<{ state?: DeviceLinkState }>(
+/**
+ * [docs/40 §40.4] Kesiapan arsip riwayat. Perangkat baru WAJIB menunggu
+ * `history !== 'preparing'` sebelum `complete`: login-nya mencabut sesi
+ * perangkat lama, dan unggahan yang masih berjalan akan terpotong.
+ */
+export type DeviceLinkHistoryStatus = 'none' | 'preparing' | 'ready';
+
+export interface DeviceLinkStatus {
+  state: DeviceLinkState;
+  history: DeviceLinkHistoryStatus;
+}
+
+export async function getDeviceLinkStatus(pendingId: string): Promise<DeviceLinkStatus> {
+  const res = await api<{ state?: DeviceLinkState; history?: DeviceLinkHistoryStatus }>(
     `/api/auth/link/status/${encodeURIComponent(pendingId)}`
   );
   const state = res?.state;
-  return state === 'approved' || state === 'expired' ? state : 'pending';
+  const history = res?.history;
+  return {
+    state: state === 'approved' || state === 'expired' ? state : 'pending',
+    history: history === 'preparing' || history === 'ready' ? history : 'none',
+  };
 }
 
-export async function approveDeviceLink(pendingId: string): Promise<{ deviceId: string }> {
+export async function approveDeviceLink(
+  pendingId: string,
+  options: { expectHistory?: boolean } = {}
+): Promise<{ deviceId: string }> {
   return api<{ deviceId: string }>('/api/auth/link/approve', {
     method: 'POST',
-    body: JSON.stringify({ pendingId }),
+    body: JSON.stringify({
+      pendingId,
+      ...(options.expectHistory ? { expectHistory: true } : {}),
+    }),
   });
 }
 

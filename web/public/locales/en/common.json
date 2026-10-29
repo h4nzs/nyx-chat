@@ -124,33 +124,6 @@
     "error_processing": "Error processing connection link.",
     "decrypting_profile": "DECRYPTING PROFILE..."
   },
-  "migration": {
-    "receiving_data": "Connection established. Receiving data...",
-    "decrypting_vault": "Data received. Decrypting vault...",
-    "complete": "Migration Complete! Welcome back.",
-    "decryption_failed": "Decryption failed. Data might be corrupted.",
-    "receive_title": "Migrate Device",
-    "receive_desc": "Scan this QR from your old device",
-    "read_vault_failed": "Failed to read local vault.",
-    "camera_denied": "Camera access denied or unavailable.",
-    "encrypting_vault": "Encrypting vault data...",
-    "tunneling": "Tunneling data to new device...",
-    "waiting_receiver": "Waiting for receiver to process...",
-    "transfer_complete": "Transfer Complete!",
-    "receiver_failed": "Receiver failed to decrypt or timed out",
-    "failed_generic": "Migration failed. Invalid QR, Network error, or Timeout.",
-    "send_title": "Transfer Vault",
-    "send_desc": "Send data to your new device",
-    "preparing": "PREPARING VAULT...",
-    "archive_summary": "{{frames}} frames · {{size}}",
-    "restoring_data": "Restoring database...",
-    "restore_summary": "Restored {{records}} records · {{size}}",
-    "restore_failed": "Restore failed: data may be corrupted or the key is wrong.",
-    "status_tunneling": "TUNNELING...",
-    "identity_regen_notice": "After the transfer is complete, this device will generate a new unique identity to ensure maximum security.",
-    "syncing_hardware": "Syncing Hardware...",
-    "important_note": "Important"
-  },
   "not_found": {
     "title": "Page Not Found",
     "desc": "The encrypted path you are trying to access does not exist or has been wiped from the system.",
@@ -235,6 +208,7 @@
   "contact_trust_stranger": "Stranger",
   "device_revoked_successfully": "Device revoked successfully",
   "history_sync_payload_broadcasted_success": "History sync broadcast successfully.",
+  "link_history_restored": "History from your previous device was restored ({{count}} items).",
   "preparing_history_sync_for_your_linked_d": "Preparing history sync for your linked devices...",
   "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device..."
 }

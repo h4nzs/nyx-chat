@@ -3,10 +3,11 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [AUDIT 2026-10-24] Index keanggotaan room burner/migration.
+ * [AUDIT 2026-10-24] Index keanggotaan room burner.
  *
- * Dulu `handleDisconnect` mencari room user dengan dua `SCAN` seluruh keyspace
- * (`burner:room:*`, `migration:room:*`) — biayanya tumbuh linear terhadap jumlah
+ * Dulu `handleDisconnect` mencari room user dengan `SCAN` seluruh keyspace
+ * (`burner:room:*`; dulu juga `migration:room:*` sebelum alur transfer QR
+ * dihapus 2026-10-29) — biayanya tumbuh linear terhadap jumlah
  * room, dan biaya itu muncul tepat saat banyak koneksi putus bersamaan (jam
  * sibuk / deploy). Sekarang tiap join mencatat room-nya di set milik user
  * (`room:member:<tag>`), jadi pembersihan cukup membaca set itu.
@@ -18,7 +19,7 @@
  * `SREM` no-op.
  */
 
-export type RoomKind = 'burner' | 'migration';
+export type RoomKind = 'burner';
 
 const ROOM_INDEX_TTL_SECONDS = 24 * 60 * 60;
 
@@ -76,7 +77,7 @@ export async function leaveAllRooms (
     const separator = entry.indexOf(':');
     if (separator <= 0) continue;
     const kind = entry.slice(0, separator);
-    if (kind !== 'burner' && kind !== 'migration') continue;
+    if (kind !== 'burner') continue;
     const roomId = entry.slice(separator + 1);
     if (!roomId) continue;
     removed += await client.sRem(roomKey(kind, roomId), args.sealedMember);

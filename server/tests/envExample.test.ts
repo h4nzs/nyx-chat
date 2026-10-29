@@ -32,6 +32,8 @@ const REQUIRED = [
   'PP_SYNC_REQUIRED',
   // Credential (fail-closed allowlist; suite kosong di build ini)
   'CREDENTIAL_SUITE_ALLOWLIST',
+  // Arsip riwayat perangkat hasil link (docs/40) — kill switch operator.
+  'LINK_HISTORY_ENABLED',
   // KT + PIR
   'KT_QUERY_URL',
   'KT_SNAPSHOT_DIR',

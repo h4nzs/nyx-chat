@@ -2,6 +2,115 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔗 Arsip riwayat untuk perangkat hasil link — kontak, percakapan, dan pesan (2026-10-29)
+
+Link perangkat (`/link`) membuat **identitas baru**, jadi menyalin baris Dexie
+apa adanya menghasilkan riwayat kosong: `content`, `senderName`, `fileMeta`
+disegel kunci vault = turunan identity private key yang **lama**. Sekarang
+perangkat lama mengekspor riwayat sebagai **objek domain terdekripsi**, menyegel
+kunci arsip acak 32 byte ke X-Wing public key perangkat baru (`pq_box_seal_v2`,
+envelope `NYS2`), lalu mengunggahnya ke R2; server hanya menyimpan pointer
+(`size`, `digest`, `sealedKey`) dan tidak pernah melihat isi maupun kuncinya.
+
+Kontainer tetap `NYXB` v1 (tanpa perubahan format/versi/AAD), tetapi setiap
+chunk membawa penanda `k:"history"` **di dalam plaintext AEAD** — jadi arsip ini
+ditolak oleh "Restore from .nyxbak" dan sebaliknya. Kunci objek
+`link-history/<HMAC(deviceId)>.nyxhist`; state di Redis (`link_history:<deviceId>`)
+ber-TTL 30 menit dan dihapus setelah impor (`consume`), dengan lifecycle rule
+sebagai jaring.
+
+Ekspor memakai pembaca yang sudah ada (`getAllContacts`,
+`shadowVault.getAllConversations`, dan `decodeMessageRecord` yang diekstrak dari
+`parseRecordsToMessages`); impor memakai penulis yang sudah ada
+(`saveContactRecord`, `saveConversation`, `upsertMessages` dalam batch 250)
+sehingga data disegel ulang dengan identitas baru. Yang tidak ikut (sengaja):
+pesan kedaluwarsa, view-once, `waiting_for_key`, centang baca, dan seluruh state
+kripto (ratchet/sender-key/prekey) yang terikat identitas lama. `seq`
+dipertahankan supaya "muat pesan lama" di perangkat baru tetap punya kursor.
+
+Melengkapi temuan §40.2: setelah impor, `pushContactBundle()` menulis blob kontak
+identitas baru ke server dan `loadConversations()` me-merge percakapan hasil
+impor ke sidebar. `consume` yang gagal (putus jaringan tepat setelah impor)
+tidak menggagalkan impor — objek yatim dihapus TTL/lifecycle.
+
+Impor yang gagal (jaringan, tab ditutup, kuota browser) tidak membuang arsip:
+penanda boolean `nyx_link_history_pending` di `kvStore` (tanpa timestamp: waktu
+presisi per kejadian adalah metadata aktivitas) membuat app start berikutnya
+mencoba **sekali** lagi (`autoRetryLinkedHistory`, hanya setelah vault terbuka dan
+dijaga single-flight agar file 10 MB tidak diunduh dua kali), dan Settings →
+Active Sessions menampilkan tombol "Ambil riwayat dari perangkat sebelumnya"
+selama arsipnya masih ada. Penanda dibersihkan pada sukses maupun saat server
+menjawab `{state:'none'}` (TTL habis) — tidak menggantung selamanya.
+
+Tes: `web/src/lib/__tests__/linkHistoryMessages.test.ts` (proyeksi pesan) +
+kasus batch/progres di `linkHistory.test.ts`, 13 kasus server di
+`server/tests/linkHistory.test.ts`, dan `web/e2e/deviceLinking.spec.ts` yang
+menyemai tiga pesan di perangkat lama lalu membacanya kembali dengan kunci vault
+identitas baru setelah link (dijalankan nyata, lulus). Desain lengkap:
+`docs/40`.
+
+## 🔗 Blob kontak server ditulis ulang setelah link — perangkat baru tidak lagi gagal memulihkan kontak (2026-10-29)
+
+`users.encryptedContactBundle` disegel kunci vault = BLAKE2b-256(identity
+private key) (`shadowVaultDb.getVaultKey`), bukan `masterSeed`. Link perangkat
+membuat **identitas baru**, jadi blob yang diunggah identitas lama tidak bisa
+dibuka lagi oleh perangkat hasil link: setiap `loadConversations` mencetak
+"Bundle korup/tak dikenal", restore kontak berhenti sebagai kegagalan senyap,
+dan ciphertext mati itu tetap tersimpan di server selamanya.
+
+Perbaikan dua bagian. **(1)** `pushContactBundle({ force })` boleh menulis
+daftar kontak **kosong** — perangkat hasil link memang belum punya kontak, dan
+daftar kosong itulah isi yang benar untuk identitas baru; push rutin tetap
+melewati daftar kosong supaya seeding tidak mem-PUT blob kosong berulang.
+`replaceContactBundleWithLocal()` (nama yang menyatakan sebabnya) dipanggil
+`LinkDevicePage.finishLink` setelah `login()` dan **sebelum** navigasi ke
+`/chat`, jadi `loadConversations` di halaman berikutnya sudah membaca blob yang
+bisa dibuka. **(2)** `restoreContactsFromBundle` sengaja **tidak** menimpa blob
+saat dekripsi gagal: `decryptVaultText` mengembalikan `null` baik untuk "kunci
+identitas lain" maupun "vault terkunci / worker gagal", dan menulis daftar
+lokal yang belum terbaca bisa menghapus salinan server yang masih baik. Ia
+hanya memperingatkan dengan sebab yang benar; penggantinya tetap deterministik
+(link atau upsert kontak berikutnya).
+
+Yang belum kembali adalah **isi** kontak lama — itu tugas arsip riwayat
+(`docs/40`), yang mendarat di entri di atas.
+
+Tes: 4 kasus baru di `web/src/lib/__tests__/contactStore.test.ts` (push kosong
+tanpa `force` tidak mengirim; `replace` menulis bundle kosong yang valid;
+`replace` batal bila vault tidak bisa menyegel; blob identitas lain → restore
+gagal-open tanpa PUT) dan `web/e2e/deviceLinking.spec.ts` menyemai blob
+identitas lama sebelum link lalu memastikan `version` berubah (123 → hash
+klien) dan byte lama hilang — dijalankan nyata, lulus.
+
+## 🔗 Transfer vault via QR dihapus — link device jadi satu-satunya jalur perangkat baru (2026-10-29)
+
+Dua fitur di Settings terlihat setara padahal berbeda: **Transfer to New Device
+(QR)** memindahkan seluruh vault (20 tabel) ke perangkat baru, sedangkan **Link a
+Device** hanya membuat identitas perangkat baru tanpa riwayat. Transfer dihapus
+karena tiga hal yang tidak bisa dibela: (1) `MigrationReceivePage` mewajibkan
+perangkat baru **sudah login** — jadi ia bukan jalur untuk perangkat yang belum
+bisa masuk; (2) nol e2e/unit test untuk alurnya, dan setelah impor halaman itu
+menghapus `deviceId` tanpa pernah membuat ulang Device row, sehingga L1 relay
+menolak perangkat tersebut; (3) `migration:prepare` menyalakan `is_migrating`
+ber-TTL 15 menit yang mematikan cek satu-device untuk seluruh akun — jendela dua
+device yang mahal bila app pengirim crash sebelum `migration:cancel`.
+
+Yang dihapus: `MigrationSendPage`/`MigrationReceivePage`, rute
+`/settings/migrate-send` + `/migrate-receive`, tombol Settings, handler
+`migration:prepare|cancel|join|start|chunk|ack` beserta allowlist gateway WSS,
+kind room `migration`, dan gate `is_migrating` di `issueTokens` +
+`isActiveDeviceAllowed`/L1. Sisa Redis lama (`migration:room:*`,
+`is_migrating:*`, `migration_owner:*`) kedaluwarsa sendiri; tidak ada migrasi
+data.
+
+Pengganti: **(a)** modal recovery di `/login` kini menawarkan **Link a Device**
+(`/link`), dan halaman itu menerima tempelan URL/token saat tidak dipindai dari
+QR — sebelumnya entri ini hanya bisa dicapai dengan memindai; **(b)** riwayat
+tetap pindah lewat `.nyxbak` (berkas atau salinan R2) dengan recovery phrase,
+yang sudah mencakup 20/20 tabel. Tes server yang mengunci perilaku `migration:*`
+disesuaikan (`redisIdentity`, `roomMembership`, `gatewayParity`); suite web tidak
+pernah punya tes untuk alur ini.
+
 ## 📱 `/bench/pq` juga mengukur jalur nyata: pipeline worker + IndexedDB (2026-10-29)
 
 Harness perangkat hanya mengukur primitif ML-DSA-65/X-Wing di thread utama, jadi

@@ -36,9 +36,15 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | GET | `/webauthn/register/options` / POST `/webauthn/register/verify` | requireAuth | Passkey registration |
 | GET | `/webauthn/login/options` / POST `/webauthn/login/verify` | public | Passkey login (returns `encryptedPrivateKey` when the device is recognized) |
 | POST | `/link/claim` | public (authLimiter) | Perangkat baru memindai QR: `{token, publicKey, pqPublicKey?, signingKey, encryptedPrivateKey, deviceName?}` + header fingerprint/installation **perangkat baru** → `{pendingId}`. Token sekali pakai; perangkat lama menerima `auth:linking_request` |
-| GET | `/link/status/:pendingId` | public (authLimiter) | `{state: 'pending'\|'approved'\|'expired'}` — perangkat baru melakukan polling |
-| POST | `/link/approve` | requireAuth | `{pendingId}` → `{ok, deviceId}`. Membuat Device row untuk kunci yang didaftarkan saat claim + entri log KT. Hanya akun pemilik pending |
+| GET | `/link/status/:pendingId` | public (authLimiter) | `{state: 'pending'\|'approved'\|'expired', history: 'none'\|'preparing'\|'ready'}` — perangkat baru melakukan polling; `history` hanya berarti saat `approved` |
+| POST | `/link/approve` | requireAuth | `{pendingId, expectHistory?}` → `{ok, deviceId}`. Membuat Device row untuk kunci yang didaftarkan saat claim + entri log KT. Hanya akun pemilik pending. `expectHistory: true` menandai perangkat baru untuk **menunggu** arsip riwayat sebelum `complete` (`docs/40`) |
 | POST | `/link/deny` | requireAuth | `{pendingId}` → `{ok}`; state dihapus |
+| POST | `/link/history/presign` | requireAuth (perangkat lama, ≤30 mnt) | `{deviceId, size}` → `{uploadUrl, size, urlTtl}`. Kuota tier; akun belum terverifikasi dibatasi 25 MB. `404` bila `LINK_HISTORY_ENABLED=off` |
+| POST | `/link/history/ready` | requireAuth (perangkat lama) | `{deviceId, size, digest, sealedKey}` → `{ok}`. `size` wajib sama dengan presign; `sealedKey` = kunci arsip yang diseal ke X-Wing perangkat baru |
+| POST | `/link/history/abort` | requireAuth (perangkat lama) | `{deviceId}` → `{ok}`; bersihkan intent/presign/state + objek R2 |
+| GET | `/link/history` | requireAuth | Perangkat baru: `{state:'none'}` atau `{state:'ready', size, digest}` |
+| POST | `/link/history/download` | requireAuth | Perangkat baru: `{downloadUrl, sealedKey, size, digest, urlTtl}`; tidak membakar state (impor bisa dicoba ulang) |
+| POST | `/link/history/consume` | requireAuth | `{digest}` → `{deleted, existed}`; menghapus objek R2 + state (sekali pakai). Idempoten |
 | POST | `/link/complete` | public (authLimiter) | `{pendingId, password}` → `{deviceId, usernameHash}`. Password diverifikasi **sebelum** state dibakar (salah ketik tidak menghabiskan QR). **Tidak** menerbitkan token: klien melanjutkan `POST /login` (password + kunci lokal) supaya hanya ada satu jalur sesi |
 | GET | `/pow/challenge` | requireAuth | PoW challenge for trust verification |
 | POST | `/pow/verify` | requireAuth | Submit PoW solution → verified tier |

@@ -18,8 +18,6 @@ const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
 const PrivacyStatusPage = lazy(() => import('./pages/PrivacyStatusPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
-const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 // [LINK 2026-10-18] Halaman perangkat baru yang memindai QR dari perangkat lama.
 const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
@@ -303,8 +301,10 @@ const AppContent = () => {
 
   // --- Lifecycle & Effects ---
 
+  // [LINK] `/link` = perangkat baru sebelum punya sesi. Rute ini tidak perlu
+  // socket: alurnya REST (`/api/auth/link/*`) lalu login biasa di akhir.
   const isDeviceFlow = useCallback((pathname: string) => {
-      return pathname.startsWith('/link-device') || pathname.startsWith('/migrate-receive');
+      return pathname.startsWith('/link');
   }, []);
 
   // 1. Bootstrap Auth
@@ -499,6 +499,32 @@ const AppContent = () => {
       stop?.();
     };
   }, [user, hasRestoredKeys]);
+
+  // 2e. [docs/40 §40.8] Satu percobaan ulang impor riwayat hasil link.
+  //
+  // Impor bisa gagal setelah arsip terunggah (jaringan putus, tab ditutup,
+  // kuota browser). Arsipnya hidup sampai TTL 30 menit, impor bersifat merge
+  // (idempoten per id), dan penandanya hanya ada bila kegagalan itu terjadi —
+  // jadi percobaan di app start berikutnya aman dan tanpa biaya bila bersih.
+  useEffect(() => {
+    if (!user || !hasRestoredKeys) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { autoRetryLinkedHistory } = await import('@lib/linkHistoryRetry');
+        if (cancelled) return;
+        const outcome = await autoRetryLinkedHistory();
+        if (cancelled || !outcome) return;
+        if (outcome.status === 'imported' && outcome.records > 0) {
+          toast.success(i18n.t('common:link_history_restored', { count: outcome.records }));
+        }
+      } catch (error) {
+        console.warn('[Link] Percobaan otomatis impor riwayat gagal:', error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, hasRestoredKeys]);
+
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
@@ -668,7 +694,6 @@ const AppContent = () => {
               <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
               {/* [LINK 2026-10-18] Publik: perangkat baru belum punya sesi. */}
               <Route path="/link" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
-              <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
               {/* [docs/35 residual] Benchmark perangkat: publik supaya HP bisa
                   membuka tanpa sesi; nonaktif pada build default. */}
               <Route path="/bench/pq" element={<PageWrapper><PqDeviceBenchPage /></PageWrapper>} />
@@ -683,7 +708,6 @@ const AppContent = () => {
                 <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
                 <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
                 <Route path="/settings/privacy" element={<PageWrapper><PrivacyStatusPage /></PageWrapper>} />
-                <Route path="/settings/migrate-send" element={<PageWrapper><MigrationSendPage /></PageWrapper>} />
                 <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
                 <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />

@@ -56,7 +56,6 @@
   "data": {
     "keys": "Kunci Enkripsi",
     "sessions": "Sesi Aktif",
-    "transfer": "Transfer ke Perangkat Baru (QR)",
     "restore_backup": "Pulihkan dari Berkas .nyxbak",
     "export_backup": "Backup Terenkripsi (.nyxbak)"
   },
@@ -130,6 +129,20 @@
     "link_offline": "Belum terhubung ke server. Coba lagi sebentar.",
     "link_qr_failed": "Gagal membuat kode tautan. Coba lagi.",
     "link_action_failed": "Tindakan itu gagal diselesaikan.",
+    "link_include_history": "Sertakan kontak & daftar chat ({{count}})",
+    "link_history_hint": "Kontak, daftar percakapan, dan pesan ikut pindah. Media sekali-lihat dan centang baca tidak dipindahkan.",
+    "link_history_empty": "Belum ada yang bisa dipindah — tidak ada kontak atau percakapan.",
+    "link_history_exporting": "Menyiapkan arsip riwayat…",
+    "link_history_uploading": "Mengunggah arsip riwayat…",
+    "link_history_uploaded": "Arsip riwayat siap — perangkat baru akan mengimpornya.",
+    "link_history_failed": "Gagal mengirim arsip riwayat. Perangkat tetap tertaut, tanpa riwayat.",
+    "history_retry_title": "Pemindahan riwayat belum selesai",
+    "history_retry_desc": "Arsip dari perangkat sebelumnya masih tersedia sebentar lagi. Coba lagi akan melanjutkan dari titik terakhir — yang sudah masuk tidak diduplikasi.",
+    "history_retry_button": "Ambil riwayat dari perangkat sebelumnya",
+    "history_retry_running": "Mengimpor… {{messages}} pesan",
+    "history_retry_done": "{{count}} item dipulihkan dari perangkat sebelumnya.",
+    "history_retry_expired": "Arsip itu sudah tidak tersedia. Tidak ada yang diimpor.",
+    "history_retry_failed": "Riwayat masih gagal diimpor. Arsipnya tetap tersedia sebentar lagi.",
     "link_single_device_note": "Hanya satu perangkat aktif per akun: setelah selesai, perangkat baru ini akan mengeluarkan perangkat lama."
   },
   "keys_page": {

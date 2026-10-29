@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
 import { FiCheck, FiLink, FiShield, FiSmartphone, FiX } from 'react-icons/fi';
 
 import { registerAndGenerateKeys } from '@lib/crypto-worker-proxy';
 import { saveEncryptedKeys } from '@lib/keyStorage';
+import { replaceContactBundleWithLocal } from '@lib/contactStore';
 import {
   LINK_TOKEN_QUERY_PARAM,
   claimDeviceLink,
@@ -12,6 +14,8 @@ import {
   getDeviceLinkStatus,
   parseDeviceLinkToken,
 } from '@lib/deviceLinking';
+import { receiveLinkedHistory, type HistoryImportProgress } from '@lib/linkHistoryImport';
+import { clearHistoryImportPending, markHistoryImportPending } from '@lib/linkHistoryRetry';
 import { useAuthStore, getDeviceName } from '@store/auth';
 
 /**
@@ -34,18 +38,35 @@ const POLL_INTERVAL_MS = 2000;
 const WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 const MIN_PASSWORD_LENGTH = 8;
 
-type Phase = 'form' | 'claiming' | 'waiting' | 'finishing';
+/**
+ * [docs/40 §40.4] Batas tunggu arsip riwayat sebelum `complete`. Perangkat lama
+ * mengunggah SETELAH approve, dan login perangkat ini mencabut sesinya — jadi
+ * menunggu terlalu lama menahan tautan, menunggu terlalu singkat memotong
+ * unggahan. 60 detik = ekspor+unggah tipikal untuk riwayat puluhan MB.
+ */
+const HISTORY_WAIT_MS = 60_000;
+
+type Phase = 'form' | 'claiming' | 'waiting' | 'finishing' | 'importing';
 
 export default function LinkDevicePage() {
   const { t } = useTranslation(['auth', 'common']);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const token = parseDeviceLinkToken(searchParams.get(LINK_TOKEN_QUERY_PARAM));
+  // Token dari scan QR (`/link?t=…`). Bila halaman dibuka dari entri "Link a
+  // Device" di /login, belum ada token — pengguna menempel tautan manual dari
+  // perangkat lama (modal menampilkan URL-nya), bukan mengetik token mentah.
+  const tokenFromLink = parseDeviceLinkToken(searchParams.get(LINK_TOKEN_QUERY_PARAM));
 
   const [phase, setPhase] = useState<Phase>('form');
+  const [manualLink, setManualLink] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  // [docs/40 §40.8] Progres impor pesan: arsip riwayat bisa berisi puluhan ribu
+  // baris, jadi tombol menampilkan jumlah pesan yang sudah masuk ke vault.
+  const [importProgress, setImportProgress] = useState<HistoryImportProgress | null>(null);
+
+  const token = tokenFromLink ?? parseDeviceLinkToken(manualLink);
 
   const generatedKeys = useRef<{ encryptedPrivateKeys: string } | null>(null);
   const mounted = useRef(true);
@@ -74,19 +95,62 @@ export default function LinkDevicePage() {
     // semuanya sudah ada di store. Routing setelah ini mengikuti hasRestoredKeys
     // (jangan navigate("/chat") tanpa syarat).
     await useAuthStore.getState().login(usernameHash, password);
+
+    // [LINK 2026-10-29] Identitas berganti, jadi blob kontak di server (disegel
+    // kunci vault identitas LAMA) tidak bisa dibuka perangkat ini. Tulis ulang
+    // dari identitas baru SEBELUM navigasi: kalau tidak, loadConversations di
+    // /chat membaca blob mati itu, gagal, dan server menyimpannya selamanya.
+    // Push ini tidak pernah melempar (best-effort) dan tidak menahan navigasi
+    // lama: satu PUT kecil dengan daftar kontak lokal (biasanya kosong).
+    await replaceContactBundleWithLocal();
+
+    // [docs/40 §40.8] Impor arsip riwayat bila perangkat lama mengirimkannya.
+    // Kegagalan di sini TIDAK menggagalkan tautan: arsip tetap di server sampai
+    // TTL, dan baris yang sudah masuk tetap tersimpan (impor bersifat merge).
+    setPhase('importing');
+    try {
+      const imported = await receiveLinkedHistory({
+        onProgress: (progress) => {
+          if (mounted.current) setImportProgress(progress);
+        },
+      });
+      // Sukses (atau server menyatakan tidak ada arsip) → penanda percobaan
+      // ulang tidak boleh tertinggal dari kegagalan sebelumnya.
+      await clearHistoryImportPending();
+      if (imported && imported.records > 0) {
+        toast.success(t('auth:link.import_done', { count: imported.records }));
+      }
+    } catch (e) {
+      console.error('[Link] Impor riwayat gagal:', e);
+      // [docs/40 §40.8] Arsip masih hidup sampai TTL 30 menit: tandai supaya
+      // app start berikutnya mencoba sekali lagi dan Settings menawarkan
+      // percobaan manual. Baris yang sudah masuk tidak hilang (impor merge).
+      await markHistoryImportPending();
+      toast.error(t('auth:link.import_failed'));
+    }
   }, [password, t]);
 
   const waitForApproval = useCallback(async (pendingId: string) => {
     const deadline = Date.now() + WAIT_TIMEOUT_MS;
     while (mounted.current) {
-      const state = await getDeviceLinkStatus(pendingId);
+      const status = await getDeviceLinkStatus(pendingId);
       if (!mounted.current) return;
-      if (state === 'approved') {
+      if (status.state === 'approved') {
+        // [docs/40 §40.4] Perangkat lama mengunggah arsip SETELAH approve;
+        // `complete` + login di sini mencabut sesinya. Tunggu sampai arsip
+        // siap (atau perangkat lama menyatakan tidak ada) sebelum lanjut.
+        let history = status.history;
+        const historyDeadline = Date.now() + HISTORY_WAIT_MS;
+        while (history === 'preparing' && mounted.current && Date.now() < historyDeadline) {
+          if (mounted.current) setPhase('waiting');
+          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+          history = (await getDeviceLinkStatus(pendingId)).history;
+        }
         await finishLink(pendingId);
         if (mounted.current) navigate('/', { replace: true });
         return;
       }
-      if (state === 'expired') throw new Error(t('auth:link.error_expired'));
+      if (status.state === 'expired') throw new Error(t('auth:link.error_expired'));
       if (Date.now() > deadline) throw new Error(t('auth:link.error_timeout'));
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     }
@@ -135,7 +199,8 @@ export default function LinkDevicePage() {
     }
   };
 
-  const busy = phase === 'claiming' || phase === 'waiting' || phase === 'finishing';
+  const busy =
+    phase === 'claiming' || phase === 'waiting' || phase === 'finishing' || phase === 'importing';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
@@ -152,9 +217,24 @@ export default function LinkDevicePage() {
           </div>
         </div>
 
-        {!token && (
-          <div className="mb-5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
-            {t('auth:link.error_missing_token')}
+        {!tokenFromLink && (
+          <div className="mb-5">
+            <label className="block text-xs font-bold uppercase tracking-widest text-text-secondary mb-1" htmlFor="link-manual">
+              {t('auth:link.manual_label')}
+            </label>
+            <input
+              id="link-manual"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://…/link?t=…"
+              value={manualLink}
+              onChange={(e) => setManualLink(e.target.value)}
+              disabled={busy}
+              className="w-full rounded-xl bg-bg-main border border-text-secondary/10 px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent disabled:opacity-50"
+            />
+            <p className="mt-1 text-[11px] text-text-secondary/80">{t('auth:link.manual_hint')}</p>
           </div>
         )}
 
@@ -206,9 +286,13 @@ export default function LinkDevicePage() {
               ? t('auth:link.waiting_approval')
               : phase === 'finishing'
                 ? t('auth:link.finishing')
-                : phase === 'claiming'
-                  ? t('auth:link.claiming')
-                  : t('auth:link.submit')}
+                : phase === 'importing'
+                  ? importProgress && importProgress.messages > 0
+                    ? t('auth:link.import_progress', { messages: importProgress.messages })
+                    : t('auth:link.importing_history')
+                  : phase === 'claiming'
+                    ? t('auth:link.claiming')
+                    : t('auth:link.submit')}
           </button>
         </form>
 

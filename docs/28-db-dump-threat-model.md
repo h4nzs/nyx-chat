@@ -330,12 +330,13 @@ hanya graph "device X punya sesi di conversation C" — layak dicatat, bukan pri
 **STATUS: SELESAI (Tier 0.7 + 1.5).** Dua perubahan terpisah:
 1. **Redis tidak lagi memuat userId asli** (`server/src/utils/redisIdentity.ts`):
    `identityTag(userId) = HMAC(pepper, "redis:v1:"+userId)` untuk keanggotaan SET
-   (`online_users`) & sufiks key (`active_device:*`, `is_migrating:*`,
-   `cache:keys:*`, `rate_limit:*`); `sealIdentity(userId)` = `sealAtRest`
+   (`online_users`) & sufiks key (`active_device:*`, `cache:keys:*`,
+   `rate_limit:*`); `sealIdentity(userId)` = `sealAtRest`
    (deterministik, bisa dipulihkan) untuk member SET yang dipakai sebagai target
-   kirim (`burner:room:*`, `migration:room:*`, `migration_owner:*`) dan nilai
-   `linking_token:*`. Pembaca memakai bentuk ter-seal saja (toleransi plaintext
-   dihapus 2026-10).
+   kirim (`burner:room:*`) dan nilai `linking_token:*`. Pembaca memakai bentuk
+   ter-seal saja (toleransi plaintext dihapus 2026-10). `is_migrating:*`,
+   `migration_owner:*`, dan `migration:room:*` ikut hilang bersama alur transfer
+   QR perangkat (2026-10-29).
 2. **Presence jadi lazy/opt-in** (`server/src/utils/presenceSubscriptions.ts`):
    tidak ada lagi snapshot `type:'bulk'` otomatis maupun fan-out join/leave ke
    semua peer online. Klien meminta `presence:subscribe` untuk kontak yang SEDANG

@@ -179,6 +179,34 @@ export async function deleteContact(userId: string): Promise<void> {
     notifyContactsChanged();
 }
 
+/**
+ * [docs/40] Tulis record kontak APA ADANYA — dipakai impor arsip riwayat.
+ *
+ * Berbeda dari `upsertContact` (merge + `lastSeenAt = sekarang`), di sini
+ * stempel waktu dari arsip dipertahankan: riwayat yang diimpor tidak boleh
+ * mengaku sebagai aktivitas hari ini. `updatedAt` ikut memakai `lastSeenAt`
+ * supaya pembaca lama (`decryptRow`) mendapat fallback yang konsisten.
+ *
+ * Fail-closed seperti penulisan lain: bila segel at-rest tidak tersedia,
+ * baris dilewati (tidak ada plaintext yang ditulis).
+ */
+export async function saveContactRecord(record: ContactRecord): Promise<void> {
+    if (!isPersistableUserId(record.userId)) return;
+    const now = nowMs();
+    try {
+        await db.contacts.put({
+            userId: asUserId(record.userId),
+            data: await encryptRecord(record),
+            updatedAt: (await sealLocalNumber(record.lastSeenAt || now)) ?? 0,
+        });
+    } catch (e) {
+        console.warn('[ContactStore] Kontak hasil impor tidak disimpan (at-rest seal tidak tersedia):', e);
+        return;
+    }
+    void scheduleContactBundlePush();
+    notifyContactsChanged();
+}
+
 /** Semua kontak terdekripsi (terbaru lastSeenAt dulu). */
 export async function getAllContacts(): Promise<ContactRecord[]> {
     const rows = await db.contacts.toArray();
@@ -310,12 +338,22 @@ export function scheduleContactBundlePush(): void {
     }, 10_000);
 }
 
-export async function pushContactBundle(): Promise<void> {
+export interface ContactBundlePushOptions {
+    /**
+     * Izinkan menulis daftar kontak KOSONG. Default `false`: push rutin tidak
+     * perlu mem-PUT blob kosong berulang (setiap upsert/seed memicu push).
+     * Dipakai `replaceContactBundleWithLocal()` — di sana daftar kosong adalah
+     * isi yang benar, bukan "tidak ada yang berubah".
+     */
+    force?: boolean;
+}
+
+export async function pushContactBundle(options: ContactBundlePushOptions = {}): Promise<void> {
     if (pushInFlight) return pushInFlight;
     pushInFlight = (async () => {
         try {
             const contacts = await getAllContacts();
-            if (contacts.length === 0) return;
+            if (contacts.length === 0 && !options.force) return;
             const bundleJson = serializeContactBundle(contacts);
             let version = await computeBundleVersion(bundleJson);
             // Belt & suspenders: versi harus aman untuk Zod (safe int) DAN
@@ -339,6 +377,25 @@ export async function pushContactBundle(): Promise<void> {
         }
     })();
     return pushInFlight;
+}
+
+/**
+ * [LINK 2026-10-29] Tulis ulang blob kontak server dari identitas SEKARANG.
+ *
+ * `users.encryptedContactBundle` disegel kunci vault = turunan identity private
+ * key (`shadowVaultDb.getVaultKey`). Link perangkat membuat identitas baru,
+ * sehingga blob yang diunggah identitas lama **tidak bisa dibuka lagi** — bukan
+ * korup, hanya milik kunci lain. Tanpa penulisan ulang, setiap
+ * `restoreContactsFromBundle()` di perangkat hasil link gagal ("Bundle korup/tak
+ * dikenal") dan blob mati itu tetap tersimpan di server selamanya.
+ *
+ * Daftar kosong tetap ditulis (`force`): perangkat hasil link memang belum punya
+ * kontak, dan daftar kosong itulah keadaan yang benar untuk identitas baru.
+ * Bila vault belum terbuka, `encryptVaultText` melempar dan push dibatalkan —
+ * blob lama TIDAK pernah ditimpa dengan tebakan (fail-closed, pola audit D7).
+ */
+export async function replaceContactBundleWithLocal(): Promise<void> {
+    await pushContactBundle({ force: true });
 }
 
 /**
@@ -384,7 +441,21 @@ export async function restoreContactsFromBundle(): Promise<number> {
         if (!res?.encryptedBundle) return 0;
 
         const bundleJson = await decryptVaultText(res.encryptedBundle);
-        if (!bundleJson) return 0;
+        if (!bundleJson) {
+            // [LINK 2026-10-29] Blob ada tetapi tidak bisa dibuka kunci ini.
+            // Penyebab paling sering: blob disegel identitas SEBELUM link
+            // (kunci vault = turunan identity private key). Sengaja TIDAK ditimpa
+            // dari sini: `decryptVaultText` juga mengembalikan null saat vault
+            // terkunci / pekerja kripto gagal, dan perangkat baru yang sah bisa
+            // menghapus salinan server yang masih baik. Penggantinya
+            // deterministik: alur link memanggil `replaceContactBundleWithLocal()`,
+            // dan push kontak berikutnya (upsert pertama) menimpanya.
+            console.warn(
+                '[ContactStore] Bundle server tidak bisa dibuka identitas ini (kemungkinan disegel identitas sebelum link)' +
+                ' — kontak lokal dipertahankan; blob diganti saat push berikutnya'
+            );
+            return 0;
+        }
         const bundle = parseContactBundle(bundleJson);
         if (!bundle) {
             console.warn('[ContactStore] Bundle korup/tak dikenal — kontak lokal dipertahankan');

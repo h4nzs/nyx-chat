@@ -5,11 +5,11 @@
 /**
  * [docs/30 WS-C fase 3 / docs/31 §31.6b] Membuat berkas backup `.nyxbak`.
  *
- * Sampai komponen ini ada, `startBackupFileDownload` tidak punya pemanggil:
- * berkas `.nyxbak` hanya lahir dari alur QR (`MigrationSendPage`, kunci acak
- * yang di-seal ke penerima) sehingga `BackupRestoreModal` — yang membuka arsip
- * dengan kunci turunan recovery phrase — tidak pernah punya sumber berkas. Modul
- * transport fase 3-nya lengkap tetapi tidak terjangkau dari UI.
+ * Komponen ini adalah **satu-satunya** sumber berkas `.nyxbak` sejak alur QR
+ * transfer perangkat dihapus (2026-10-29). Sebelumnya arsip lahir dari
+ * `MigrationSendPage` dengan kunci acak yang di-seal ke penerima, sehingga
+ * `BackupRestoreModal` — yang membuka arsip dengan kunci turunan recovery
+ * phrase — tidak punya sumber berkas sama sekali.
  *
  * Alur di sini menutup lingkaran itu, dan itu sebabnya urutannya penting:
  *   1. Ambil recovery phrase (auto-unlock key, atau prompt password).

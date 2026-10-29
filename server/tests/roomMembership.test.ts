@@ -79,7 +79,7 @@ test('join mencatat member ter-seal + index per-user berbasis TAG', async () => 
 test('leave mengeluarkan user dari setiap room yang tercatat, lalu hapus index', async () => {
   const { client, calls } = fakeClient([
     'burner:room-a',
-    'migration:room-b',
+    'burner:room-b',
     'garbage',
     'burner:',
   ]);
@@ -87,7 +87,7 @@ test('leave mengeluarkan user dari setiap room yang tercatat, lalu hapus index',
   const removed = await leaveAllRooms(client, { sealedMember: 'SEALED', memberTag: 'tag-u1' });
 
   const sRemKeys = calls.filter((c) => c.op === 'sRem').map((c) => c.key);
-  assert.deepEqual(sRemKeys, ['burner:room:room-a', 'migration:room:room-b']);
+  assert.deepEqual(sRemKeys, ['burner:room:room-a', 'burner:room:room-b']);
   assert.equal(removed, 2);
   assert.equal(calls.at(-1)?.key, 'room:member:tag-u1');
   assert.equal(calls.at(-1)?.op, 'del');
@@ -104,6 +104,5 @@ test('tanpa index: tidak ada operasi tulis dan hasilnya 0', async () => {
 
 test('key room dan index memakai bentuk yang sama dengan handler', () => {
   assert.equal(roomKey('burner', 'x'), 'burner:room:x');
-  assert.equal(roomKey('migration', 'y'), 'migration:room:y');
   assert.equal(roomIndexKey('tag'), 'room:member:tag');
 });

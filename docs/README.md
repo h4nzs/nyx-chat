@@ -63,6 +63,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 | [37-privacy-closure-plan.md](37-privacy-closure-plan.md) | Rencana penutupan sisa privasi (PIR/OPRF/OHTTP, metadata, residual) | Menutup celah privasi yang masih terbuka |
 | [38-legacy-retirement.md](38-legacy-retirement.md) | Inventaris jalur versi lama + keputusan hapus/pertahankan (KT v1, migrasi data lokal, envelope grup, Dexie, kill switch) | Sebelum menghapus "legacy" apa pun |
 | [39-disaster-recovery-runbook.md](39-disaster-recovery-runbook.md) | Runbook DR: inventaris rahasia, drill Postgres (belum dijalankan), drill KT otomatis, salinan offsite kunci log, status drill | Saat menyiapkan/menguji pemulihan |
+| [40-link-history-archive.md](40-link-history-archive.md) | **Landed (§40.1–§40.12):** arsip riwayat sekali-pakai untuk perangkat hasil `/link` — kontak + daftar percakapan + pesan, kunci acak diseal ke X-Wing perangkat baru, objek R2 sekali unduh, `NYXB` v1 tanpa perubahan format, ekspor lewat pembaca/impor lewat penulis | Mengerjakan riwayat untuk perangkat pengganti |
 | [25-repo-infra-agents.md](25-repo-infra-agents.md) | Root repo files, CI/agent workflows, Docker Compose, agent-skills content, ambient type declarations |
 
 ## Quick facts

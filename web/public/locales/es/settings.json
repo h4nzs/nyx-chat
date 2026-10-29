@@ -56,7 +56,6 @@
   "data": {
     "keys": "Claves de cifrado",
     "sessions": "Sesiones activas",
-    "transfer": "Transferir a nuevo dispositivo (QR)",
     "restore_backup": "Restaurar desde archivo .nyxbak",
     "export_backup": "Copia cifrada (.nyxbak)"
   },
@@ -130,6 +129,20 @@
     "link_offline": "Sin conexión al servidor. Inténtalo en un momento.",
     "link_qr_failed": "No se pudo crear el código. Inténtalo de nuevo.",
     "link_action_failed": "No se pudo completar la acción.",
+    "link_include_history": "Incluir contactos y chats ({{count}})",
+    "link_history_hint": "Los contactos, la lista de conversaciones y los mensajes pasan al nuevo dispositivo. El contenido de una sola vista y los acuses de lectura no se transfieren.",
+    "link_history_empty": "Aún no hay nada que transferir: sin contactos ni chats.",
+    "link_history_exporting": "Creando el archivo de historial…",
+    "link_history_uploading": "Subiendo el archivo de historial…",
+    "link_history_uploaded": "Archivo de historial listo: el nuevo dispositivo lo importará.",
+    "link_history_failed": "No se pudo enviar el archivo de historial. El dispositivo sigue vinculado, sin historial.",
+    "history_retry_title": "Transferencia de historial incompleta",
+    "history_retry_desc": "El archivo de tu dispositivo anterior sigue disponible por poco tiempo. Reintentar continúa donde se detuvo; lo ya importado no se duplica.",
+    "history_retry_button": "Importar historial del dispositivo anterior",
+    "history_retry_running": "Importando… {{messages}} mensajes",
+    "history_retry_done": "{{count}} elementos restaurados desde el dispositivo anterior.",
+    "history_retry_expired": "Ese archivo ya no está disponible. No se importó nada.",
+    "history_retry_failed": "Todavía no se pudo importar el historial. El archivo sigue disponible por poco tiempo.",
     "link_single_device_note": "Solo un dispositivo queda activo por cuenta: el nuevo dispositivo cerrará este al terminar."
   },
   "keys_page": {

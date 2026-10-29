@@ -22,6 +22,9 @@ import { runCleanup } from "./jobs/cleanup.js";
 import { ADMIN_CLEANUP, incCounter } from "./utils/metrics.js";
 
 import authRouter from "./routes/auth.js";
+// [docs/40] Arsip riwayat perangkat hasil link — dimount SEBELUM `/api/auth`
+// supaya `/api/auth/link/history/*` tidak jatuh ke router auth yang umum.
+import linkHistoryRouter from "./routes/linkHistory.js";
 import usersRouter from "./routes/users.js";
 import conversationsRouter from "./routes/conversations.js";
 // [docs/37 §37.3.3] Sync/token grup anonim — sengaja TANPA cookie/JWT.
@@ -490,6 +493,12 @@ app.use("/api", (req, res, next) => {
 });
 
 // === ROUTES ===
+// [docs/40] Kill switch: tanpa LINK_HISTORY_ENABLED, kelima endpoint arsip
+// riwayat tidak ada (404) — bukan 403 — sehingga klien memperlakukan fitur
+// sebagai tidak tersedia (`history: none`).
+if (env.linkHistoryEnabled) {
+  app.use("/api/auth/link/history", linkHistoryRouter);
+}
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/conversations", conversationsRouter);

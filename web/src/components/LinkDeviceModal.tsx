@@ -8,6 +8,7 @@ import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 import ModalBase from './ui/ModalBase';
 import { transportClient } from '@lib/transportClient';
 import { approveDeviceLink, buildDeviceLinkUrl, denyDeviceLink } from '@lib/deviceLinking';
+import { countHistoryRecords, readHistoryTables, sendHistoryArchive } from '@lib/linkHistoryExport';
 
 const QRCode = (
   (QRCodeRaw as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
@@ -33,6 +34,12 @@ interface Props {
 interface PendingLink {
   pendingId: string;
   deviceName: string;
+  /**
+   * [docs/40] X-Wing public key perangkat baru (dari `auth:linking_request`).
+   * Arsip riwayat diseal ke kunci ini — tanpa field ini arsip tidak bisa
+   * dialamatkan dan opsi riwayat harus disembunyikan, bukan gagal diam-diam.
+   */
+  pqPublicKey?: string;
 }
 
 const QR_REQUEST_TIMEOUT_MS = 8000;
@@ -42,6 +49,12 @@ export default function LinkDeviceModal({ onClose }: Props) {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingLink[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // [docs/40] Opsi "sertakan riwayat": hanya ditawarkan bila memang ada yang
+  // bisa dipindah. `readHistoryTables` memakai pembaca yang mendekripsi, jadi
+  // jumlahnya nyata (bukan tebakan dari baris Dexie).
+  const [includeHistory, setIncludeHistory] = useState(true);
+  const [historyCount, setHistoryCount] = useState<number | null>(null);
+  const [historyPhase, setHistoryPhase] = useState<'exporting' | 'uploading' | null>(null);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearRequestTimer = () => {
@@ -50,6 +63,20 @@ export default function LinkDeviceModal({ onClose }: Props) {
       requestTimer.current = null;
     }
   };
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const tables = await readHistoryTables();
+        if (alive) setHistoryCount(countHistoryRecords(tables));
+      } catch (e) {
+        console.warn('[Link] Gagal menghitung riwayat yang bisa dipindah:', e);
+        if (alive) setHistoryCount(0);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const requestQr = useCallback(() => {
     setLinkingToken(null);
@@ -82,15 +109,18 @@ export default function LinkDeviceModal({ onClose }: Props) {
     };
 
     const onLinkRequest = (raw: unknown) => {
-      const data = (raw ?? {}) as { pendingId?: unknown; deviceName?: unknown };
+      const data = (raw ?? {}) as { pendingId?: unknown; deviceName?: unknown; pqPublicKey?: unknown };
       if (typeof data.pendingId !== 'string' || !data.pendingId) return;
       const pendingId = data.pendingId;
       const deviceName = typeof data.deviceName === 'string' && data.deviceName
         ? data.deviceName
         : t('settings:sessions_page.link_unknown_device');
+      const pqPublicKey = typeof data.pqPublicKey === 'string' && data.pqPublicKey
+        ? data.pqPublicKey
+        : undefined;
       setPending((prev) => [
         ...prev.filter((item) => item.pendingId !== pendingId),
-        { pendingId, deviceName },
+        { pendingId, deviceName, ...(pqPublicKey ? { pqPublicKey } : {}) },
       ]);
       toast(t('settings:sessions_page.link_incoming', { device: deviceName }), { icon: '🔗' });
     };
@@ -107,10 +137,40 @@ export default function LinkDeviceModal({ onClose }: Props) {
   }, [requestQr, t]);
 
   const handleApprove = async (item: PendingLink) => {
+    // [docs/40 §40.4] `expectHistory` memberi tahu perangkat baru untuk menunggu
+    // arsip sebelum `complete` — kalau tidak, login-nya mencabut sesi perangkat
+    // ini di tengah unggahan. Hanya diklaim bila arsipnya memang mungkin dibuat.
+    const wantsHistory =
+      includeHistory &&
+      (historyCount ?? 0) > 0 &&
+      typeof item.pqPublicKey === 'string' &&
+      item.pqPublicKey.length > 0;
+
     setBusyId(item.pendingId);
     try {
-      await approveDeviceLink(item.pendingId);
+      const { deviceId } = await approveDeviceLink(item.pendingId, { expectHistory: wantsHistory });
       setPending((prev) => prev.filter((entry) => entry.pendingId !== item.pendingId));
+
+      if (wantsHistory) {
+        try {
+          const result = await sendHistoryArchive({
+            deviceId,
+            pqPublicKeyB64: item.pqPublicKey!,
+            onProgress: (label) => setHistoryPhase(label === 'ready' ? null : label),
+          });
+          if (result.records > 0) {
+            toast.success(t('settings:sessions_page.link_history_uploaded'));
+          }
+        } catch (e) {
+          // Arsip gagal TIDAK membatalkan tautan: perangkat baru sudah disetujui
+          // dan akan lanjut tanpa riwayat (intent dibersihkan oleh exporter).
+          console.error('[Link] Arsip riwayat gagal dikirim:', e);
+          toast.error(t('settings:sessions_page.link_history_failed'));
+        } finally {
+          setHistoryPhase(null);
+        }
+      }
+
       toast.success(t('settings:sessions_page.link_approved', { device: item.deviceName }));
     } catch (e) {
       toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('settings:sessions_page.link_action_failed')));
@@ -182,6 +242,33 @@ export default function LinkDeviceModal({ onClose }: Props) {
             <code className="block break-all text-xs text-text-primary select-all">{linkUrl}</code>
           </div>
         )}
+
+        <div className="rounded-xl bg-bg-main border border-text-secondary/10 p-3 space-y-1">
+          <label className="flex items-start gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              className="mt-1 accent-accent"
+              checked={includeHistory}
+              disabled={!historyCount || historyPhase !== null}
+              onChange={(e) => setIncludeHistory(e.target.checked)}
+            />
+            <span>
+              {t('settings:sessions_page.link_include_history', { count: historyCount ?? 0 })}
+              <span className="block text-[11px] leading-relaxed text-text-secondary/80 mt-1">
+                {!historyCount
+                  ? t('settings:sessions_page.link_history_empty')
+                  : t('settings:sessions_page.link_history_hint')}
+              </span>
+            </span>
+          </label>
+          {historyPhase && (
+            <p className="text-[11px] text-accent">
+              {historyPhase === 'exporting'
+                ? t('settings:sessions_page.link_history_exporting')
+                : t('settings:sessions_page.link_history_uploading')}
+            </p>
+          )}
+        </div>
 
         <div className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary flex items-center gap-2">

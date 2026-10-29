@@ -85,7 +85,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 ## 21.4 Pages (`pages/`, 20)
 
-`Login`, `Register`, `Restore`, `Chat`, `SettingsPage`, `KeyManagementPage`, `SessionManagerPage`, `ProfilePage`, `AdminDashboard`, `BurnerChat` (`/drop`), `ConnectPage`, `EmbedChatPage`, `MigrationReceivePage`, `MigrationSendPage`, `MaintenancePage`, `NotFoundPage`, `LinkDevicePage` (QR perangkat baru), `UsernameLinkPage`, `ServerDownPage`, `PqDeviceBenchPage`. (See the page table in `06-frontend.md` §6.8 and feature docs.)
+`Login`, `Register`, `Restore`, `Chat`, `SettingsPage`, `KeyManagementPage`, `SessionManagerPage`, `ProfilePage`, `AdminDashboard`, `BurnerChat` (`/drop`), `ConnectPage`, `EmbedChatPage`, `MaintenancePage`, `NotFoundPage`, `LinkDevicePage` (QR perangkat baru, `/link`; juga bisa dibuka dari modal recovery di `/login`), `UsernameLinkPage`, `ServerDownPage`, `PqDeviceBenchPage`. (See the page table in `06-frontend.md` §6.8 and feature docs.)
 
 ## 21.5 Components (`components/`, 67 + 5 `ui/`)
 

@@ -56,7 +56,6 @@
   "data": {
     "keys": "Encryption Keys",
     "sessions": "Active Sessions",
-    "transfer": "Transfer to New Device (QR)",
     "restore_backup": "Restore from .nyxbak File",
     "export_backup": "Encrypted Backup (.nyxbak)"
   },
@@ -130,6 +129,20 @@
     "link_offline": "Not connected to the server. Try again in a moment.",
     "link_qr_failed": "Could not create a link code. Try again.",
     "link_action_failed": "Could not complete that action.",
+    "link_include_history": "Include contacts and chats ({{count}})",
+    "link_history_hint": "Contacts, the conversation list and messages move to the new device. View-once media and read receipts are not transferred.",
+    "link_history_empty": "Nothing to transfer yet — no contacts or chats.",
+    "link_history_exporting": "Building the history archive…",
+    "link_history_uploading": "Uploading the history archive…",
+    "link_history_uploaded": "History archive ready — the new device will import it.",
+    "link_history_failed": "Could not send the history archive. The device stays linked, without history.",
+    "history_retry_title": "History transfer incomplete",
+    "history_retry_desc": "The archive from your previous device is still available for a short time. Retrying continues where it stopped — anything already imported is not duplicated.",
+    "history_retry_button": "Import history from previous device",
+    "history_retry_running": "Importing… {{messages}} messages",
+    "history_retry_done": "{{count}} items restored from the previous device.",
+    "history_retry_expired": "That archive is no longer available. Nothing was imported.",
+    "history_retry_failed": "The history still could not be imported. The archive stays available for a short time.",
     "link_single_device_note": "Only one device stays active per account: the new device signs this one out once it finishes."
   },
   "keys_page": {

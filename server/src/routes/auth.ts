@@ -44,12 +44,15 @@ import {
   consumeLinkToken,
   createPendingLink,
   denyPendingLink,
+  getApprovedDeviceId,
   getLinkState,
   readPendingLink,
   takeApprovedLink,
   type LinkingSealer,
   type LinkingStore,
 } from '../utils/deviceLinking.js'
+// [docs/40] Arsip riwayat: intent → preparing → ready (state ter-seal di Redis).
+import { hasHistoryIntent, markHistoryIntent, readHistoryState } from '../utils/linkHistory.js'
 // [docs/28 Tier 1.5 / D14] key Redis memakai tag, bukan userId asli (Redis = artefak setara dump).
 // [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
@@ -176,19 +179,15 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   // Sama untuk deviceId kosong (recovery flow: login tanpa kunci lokal) — refresh token
   // tidak dipersist karena tidak ada device yang valid (FK RefreshToken_deviceId_fkey).
   if (user.role !== 'GUEST' && deviceId) {
-    // Check if user is in Migration Mode
-    const isMigrating = await redisClient.exists(identityKey('is_migrating', user.id));
-
-    if (!isMigrating) {
-        // Enforce "One User, One Active Device": Revoke all existing sessions for this user
-        await prisma.refreshToken.deleteMany({
-            where: {
-                device: { userId: user.id }
-            }
-        });
-    } else {
-        console.log(`[Migration] Bypassing session revocation for user ${user.id} due to active migration flag.`);
-    }
+    // Enforce "One User, One Active Device": Revoke all existing sessions for this user.
+    // [2026-10-29] Dulu ada bypass 15 menit (`is_migrating`) untuk transfer vault
+    // lewat QR; alur itu dihapus, jadi tidak boleh ada lagi jalur yang membuat
+    // dua device sah bersamaan.
+    await prisma.refreshToken.deleteMany({
+        where: {
+            device: { userId: user.id }
+        }
+    });
 
     // Generate familyId for token rotation tracking (reuse detection)
     const tokenFamilyId = familyId || crypto.randomUUID();
@@ -1186,6 +1185,11 @@ router.post('/link/claim', authLimiter, zodValidate({
           pendingId,
           deviceName: deviceName || 'Perangkat baru',
           publicKey,
+          // [docs/40] Kunci X-Wing perangkat baru WAJIB sampai ke perangkat lama:
+          // arsip riwayat diseal ke kunci ini (`pq_box_seal_v2`). Tanpa field
+          // ini, perangkat lama tidak punya tujuan untuk kunci arsip dan fitur
+          // riwayat tidak mungkin jalan. Kunci publik, bukan rahasia.
+          ...(pqPublicKey ? { pqPublicKey } : {}),
           signingKey,
           ...(signingKeyV2 ? { signingKeyV2 } : {}),
         },
@@ -1198,20 +1202,42 @@ router.post('/link/claim', authLimiter, zodValidate({
   } catch (e) { next(e) }
 });
 
+// [docs/40 §40.4] Status juga membawa kesiapan arsip riwayat. Perangkat baru
+// WAJIB menunggu `history !== 'preparing'` sebelum `complete`: login-nya
+// mencabut sesi perangkat lama, dan unggahan yang masih berjalan akan terpotong
+// di tengah jalan.
 router.get('/link/status/:pendingId', authLimiter, async (req, res, next) => {
   try {
     const pendingId = req.params.pendingId;
     if (typeof pendingId !== 'string' || pendingId.length < 8) throw new ApiError(400, 'pendingId is required.');
-    res.json({ state: await getLinkState(linkStore, pendingId) });
+    const state = await getLinkState(linkStore, pendingId);
+    if (state !== 'approved') return res.json({ state, history: 'none' });
+
+    const deviceId = await getApprovedDeviceId(linkStore, pendingId);
+    let history: 'none' | 'preparing' | 'ready' = 'none';
+    if (deviceId) {
+      if (await readHistoryState(linkStore, linkSealer, deviceId)) {
+        history = 'ready';
+      } else if (await hasHistoryIntent(linkStore, deviceId)) {
+        // Perangkat lama sudah berkomitmen mengunggah tetapi belum `ready`.
+        history = 'preparing';
+      }
+    }
+    res.json({ state, history });
   } catch (e) { next(e) }
 });
 
 router.post('/link/approve', requireAuth, zodValidate({
-  body: z.object({ pendingId: z.string().min(8) })
+  body: z.object({
+    pendingId: z.string().min(8),
+    // [docs/40] Perangkat lama berkomitmen mengirim arsip riwayat sesudah
+    // approve. Tanpa flag ini perangkat baru langsung `complete` (perilaku lama).
+    expectHistory: z.boolean().optional(),
+  })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Unauthorized');
-    const { pendingId } = req.body;
+    const { pendingId, expectHistory } = req.body as { pendingId: string; expectHistory?: boolean };
 
     const pending = await readPendingLink(linkStore, linkSealer, pendingId);
     if (!pending) throw new ApiError(404, 'Link request not found or expired.');
@@ -1247,6 +1273,13 @@ router.post('/link/approve', requireAuth, zodValidate({
       // Race: approve lain menang lebih dulu → jangan tinggalkan device yatim.
       await prisma.device.delete({ where: { id: device.id } }).catch(() => {});
       throw new ApiError(409, 'Link request has already been handled.');
+    }
+
+    if (expectHistory) {
+      // [docs/40 §40.4] Sinyal ke perangkat baru: `status.history` menjadi
+      // `preparing` sampai `ready`. Perangkat baru menunggu (maks 60 dtk) supaya
+      // unggahan tidak terpotong oleh login yang mencabut sesi perangkat ini.
+      await markHistoryIntent(linkStore, device.id);
     }
 
     // Perangkat tertaut bisa menjadi device terakhir di record PIR user ini.

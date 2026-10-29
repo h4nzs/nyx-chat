@@ -113,8 +113,7 @@ Akar sesi SPQR berasal dari X3DH; karena itu X3DH v2 adalah prasyarat.
 | `web/src/workers/crypto.worker.ts` | 965, 976, 1336, 2212, 2244, 2327 | verifikasi/sign Ed25519 |
 | `web/src/store/auth.ts` | 84-85, 540, 562, 948, 963 | prekey signature + X25519 keygen |
 | `web/src/utils/crypto.ts` | 213, 269 | group metadata Ed25519 (jalur v1; v4 ML-DSA saat gerbang aktif) |
-| `web/src/pages/MigrationSendPage.tsx` | 140 | ~~`crypto_box_seal` hanya untuk QR lama~~ → **dihapus di cutover PQ-only 2026-10-23**: hanya `sealForDevice` (X-Wing v2), QR v1 ditolak (`MigrationSendPage.tsx:140-146`) |
-| `web/src/pages/MigrationReceivePage.tsx` | 103 | ~~`crypto_box_seal_open` untuk QR lama~~ → **dihapus**: `openSealedForDevice` menolak apa pun tanpa magic v2 |
+| ~~`web/src/pages/MigrationSendPage.tsx`, `web/src/pages/MigrationReceivePage.tsx`~~ | — | **Dihapus 2026-10-29** bersama seluruh alur QR transfer perangkat (lihat CHANGELOG). Tidak ada lagi call site seal/open di jalur migrasi vault; sisa jalur klien adalah `sealForDevice`/`openSealedForDevice` yang sudah X-Wing v2 |
 | `web/src/store/message.ts` | 1015, 1136 | ~~`crypto_box_seal` untuk device tanpa `pqPublicKey`~~ → **dihapus**: device tanpa kunci PQ tidak mendapat push payload (`message.ts:1155-1165`) |
 | `server/src/routes/auth.ts` | 939 | verifikasi recovery Ed25519 (v1); ML-DSA-65 (`PQ_V2_DOMAINS.RECOVERY`) bila `signatureV2` |
 | `server/src/lib/groupCredentials.ts` | seluruh suite | RSA-PSS blind signature |
@@ -584,7 +583,6 @@ Berkas utama:
 - `web/src/lib/keychainDb.ts`
 - `web/src/lib/groupCredentials.ts` (nanti)
 - `web/src/lib/peerIdentityTrust.ts`
-- `web/src/pages/MigrationSendPage.tsx`, `MigrationReceivePage.tsx`
 - `web/src/store/message.ts`
 - `server/src/routes/auth.ts`, `keys.ts`
 - `server/src/utils/keyTransparency.ts`
@@ -626,9 +624,10 @@ Status (2026-10-20; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **seluruh langkah 
     yang beredar tetap bisa dibuka). Semua call site lama `worker_pq_box_seal`/`worker_pq_box_seal_open`
     dialihkan: ratchet session-key, distribusi sender key grup, pembukaan distribusi, admin token
     (seal+open), fulfillment key, dan self round-trip.
-  - Migrasi vault (`MigrationSend/ReceivePage`) ikut pindah: QR penerima kini membawa
-    `pqPubKey` (X-Wing) bersama `pubKey`; pengirim menyegel lewat `sealForDevice` (v1 klasik
-    untuk QR lama tanpa `pqPubKey`), penerima membuka lewat `openSealedForDevice` (deteksi magic).
+  - Migrasi vault lewat QR (`MigrationSend/ReceivePage`) dulu ikut pindah — QR penerima
+    membawa `pqPubKey` (X-Wing), pengirim menyegel lewat `sealForDevice`, penerima membuka
+    lewat `openSealedForDevice`. **Alur itu dihapus 2026-10-29**; tidak ada call site
+    seal/open tersisa di jalur migrasi vault.
   - Push payload menyusul di langkah 9: kini `store/message.ts` membaca `pqPublicKey` per device
     (fallback `user.pqPublicKey`) dan memakai `sealForDevice` saat gerbang v2 aktif; jalur
     `crypto_box_seal` hanya tersisa sebagai fallback perangkat tanpa kunci PQ. SW memang tidak

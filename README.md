@@ -220,7 +220,7 @@ Because history isn't synced to the cloud, YOU own your data. For maximum securi
 
 1. **Encrypted Backup (`.nyxbak`) — the only backup format:** a framed, padded, tamper-evident archive (per-frame AEAD, size-hiding padding, key derived from your recovery phrase) that can be saved manually or, optionally, stored in R2 as an opaque object. It is the restore path for a **replacement device**. The old plaintext JSON "vault" (`.nyxvault`) was removed on 2026-10-29 — it dumped session keys in the clear. Format: [Backup Format](docs/31-backup-format.md).
 2. **Single-Device Policy:** an account may have several device records (so a known or new device can be recognised), but only one device can be logged in and active.
-3. **Secure Migration:** moving to a new device uses your `.nyxbak` backup (file or R2 copy) or a direct QR transfer, plus post-quantum protocols; the server acts only as a blind relay.
+3. **Secure Migration:** moving to a new device uses your `.nyxbak` backup (file or R2 copy) plus post-quantum protocols. Linking a new device starts a fresh identity, but its history (contacts, conversation list and messages) follows through a one-time, device-addressed archive that the old device seals to the new device's post-quantum key — the server only stores an opaque blob. The server acts only as a blind relay.
 4. **Panic & wipe:** a panic password (or account deletion) revokes all sessions server-side first, then wipes IndexedDB, OPFS, caches, cookies, and service workers.
 
 ---

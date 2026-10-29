@@ -56,7 +56,6 @@
   "data": {
     "keys": "Chaves de Criptografia",
     "sessions": "Sessões Ativas",
-    "transfer": "Transferir para Novo Dispositivo (QR)",
     "restore_backup": "Restaurar de Arquivo .nyxbak",
     "export_backup": "Backup Criptografado (.nyxbak)"
   },
@@ -130,6 +129,20 @@
     "link_offline": "Sem conexão com o servidor. Tente novamente em instantes.",
     "link_qr_failed": "Não foi possível criar o código. Tente novamente.",
     "link_action_failed": "Não foi possível concluir essa ação.",
+    "link_include_history": "Incluir contatos e conversas ({{count}})",
+    "link_history_hint": "Contatos, a lista de conversas e as mensagens vão para o novo dispositivo. Mídias de visualização única e confirmações de leitura não são transferidas.",
+    "link_history_empty": "Ainda não há nada para transferir — sem contatos ou conversas.",
+    "link_history_exporting": "Montando o arquivo de histórico…",
+    "link_history_uploading": "Enviando o arquivo de histórico…",
+    "link_history_uploaded": "Arquivo de histórico pronto — o novo dispositivo vai importá-lo.",
+    "link_history_failed": "Não foi possível enviar o arquivo de histórico. O dispositivo continua vinculado, sem histórico.",
+    "history_retry_title": "Transferência de histórico incompleta",
+    "history_retry_desc": "O arquivo do dispositivo anterior ainda fica disponível por pouco tempo. Tentar de novo continua de onde parou — o que já foi importado não é duplicado.",
+    "history_retry_button": "Importar histórico do dispositivo anterior",
+    "history_retry_running": "Importando… {{messages}} mensagens",
+    "history_retry_done": "{{count}} itens restaurados do dispositivo anterior.",
+    "history_retry_expired": "Esse arquivo não está mais disponível. Nada foi importado.",
+    "history_retry_failed": "Ainda não foi possível importar o histórico. O arquivo continua disponível por pouco tempo.",
     "link_single_device_note": "Apenas um dispositivo fica ativo por conta: o novo desconecta este ao concluir."
   },
   "keys_page": {

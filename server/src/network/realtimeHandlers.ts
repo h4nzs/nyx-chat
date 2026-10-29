@@ -48,10 +48,7 @@ import {
   subscribePresence,
 } from '../utils/presenceSubscriptions.js';
 import {
-  identityKey,
-  identityMatches,
   identityTag,
-  openIdentity,
   openIdentityMembers,
   sealIdentity,
 } from '../utils/redisIdentity.js';
@@ -963,60 +960,6 @@ export async function handleKeySync(
         if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, notified: members.length });
         break;
       }
-
-       // --- MIGRATION EVENTS ---
-       case 'migration:prepare': {
-         await ctx.redisClient.set(identityKey('is_migrating', userId), "1", { EX: 900 }); // 15 mins grace period
-         if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true });
-         break;
-       }
-       case 'migration:cancel': {
-         await ctx.redisClient.del(identityKey('is_migrating', userId));
-         break;
-       }
-       case 'migration:join': {
-         if (data) {
-           await joinRoom(ctx.pubClient as unknown as RoomRedisClient, {
-             kind: 'migration',
-             roomId: String(data),
-             sealedMember: await sealIdentity(userId),
-             memberTag: identityTag(userId),
-           });
-         }
-         break;
-       }
-       case 'migration:start': {
-         const { roomId } = data as { roomId: string };
-         // [docs/28 Tier 1.5 / D14] owner & member = nilai ter-seal.
-         await ctx.redisClient.set(`migration_owner:${roomId}`, await sealIdentity(userId), { EX: 3600 });
-         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`migration:room:${roomId}`));
-         for (const memberId of members) {
-            if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'migration:start', data });
-         }
-         break;
-       }
-       case 'migration:chunk': {
-         const { roomId } = data as { roomId: string };
-         const ownerId = await ctx.redisClient.get(`migration_owner:${roomId}`);
-         if (!await identityMatches(ownerId, userId)) return;
-         const members = await openIdentityMembers(await ctx.pubClient.sMembers(`migration:room:${roomId}`));
-         for (const memberId of members) {
-            if (memberId !== userId) await ctx.sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'migration:chunk', data });
-         }
-         break;
-       }
-       case 'migration:ack': {
-         const { roomId } = data as { roomId: string };
-         const ownerId = await ctx.redisClient.get(`migration_owner:${roomId}`);
-
-         // Clear migration grace period flag as it's finished
-         await ctx.redisClient.del(identityKey('is_migrating', userId));
-
-         // [docs/28 Tier 1.5 / D14] nilai tersimpan = ter-seal → dipetakan balik.
-         const ownerUserId = ownerId ? await openIdentity(ownerId) : null;
-         if (ownerUserId) await ctx.sendJsonToUser(ownerUserId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
-         break;
-       }
 
        case 'message:mark_read':
        case 'message:mark_as_read': {

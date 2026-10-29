@@ -13,7 +13,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
+  FiDatabase, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
   FiPackage
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
@@ -912,19 +912,6 @@ export default function SettingsPage() {
               
               {/* VAULT ACTIONS */}
               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
-                 <button 
-                   onClick={() => navigate('/settings/migrate-send')}
-                   className="
-                     col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
-                     bg-bg-main text-accent font-bold text-xs uppercase tracking-wider
-                     shadow-neu-flat-light dark:shadow-neu-flat-dark
-                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                     hover:brightness-110 transition-all
-                   "
-                 >
-                   <FiSend size={18} />
-                   {t('settings:data.transfer')}
-                 </button>
                  <button 
                    onClick={() => setShowRestoreModal(true)}
                    className="

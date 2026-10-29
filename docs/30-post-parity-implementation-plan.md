@@ -114,7 +114,7 @@ pencarian terenkripsi (WS-F), anti-abuse tanpa PII (WS-H), dedup helper E2E
 |---|---|---|---|---|
 | **A** | KT penuh: server log + klien verifikasi + monitor/auditor + gossip | QW7 ✅, QW2 ✅ | 6–9 minggu | WASM compile; operasional log; UX konflik |
 | ~~B~~ | ~~Multi-device~~ — **DIBATALKAN 2026-10-11** (§30.6): single active device adalah pilihan keamanan, bukan keterbatasan | — | — | — |
-| **C** | Backup ber-frame terenkripsi + restore (perangkat PENGGANTI, bukan perangkat tertaut) + R2 opsional | alur `migration:*` yang sudah ada | 2–3 minggu | format jangka panjang; kompatibilitas |
+| **C** | Backup ber-frame terenkripsi + restore (perangkat PENGGANTI, bukan perangkat tertaut) + R2 opsional | arsip `.nyxbak` berphrase (alur `migration:*` dihapus 2026-10-29) | 2–3 minggu | format jangka panjang; kompatibilitas |
 | **D** | SPQR: PQ FS+PCS sebagai jalur versi paralel | QW7 ✅ (capability) | 6–10 minggu | WASM RNG; ukuran chunk; CPU |
 | **E** | Calls: coturn self-host + signaling berbasis delivery token | — | 2–3 minggu | NAT/TLS ops; korelasi signaling |
 | **F** | Storage lokal penuh + pencarian terenkripsi | — | 2 minggu | performa; migrasi data lama |
@@ -841,7 +841,7 @@ Sebuah item dianggap selesai hanya bila **semuanya** benar:
 | WS-C fase 1: format backup ber-frame | ✅ | `web/src/lib/backupFormat.ts` + 13 test kripto sungguhan (roundtrip, tamper, reorder, truncate, padding anti-bocor-ukuran, KDF dipin) + spesifikasi `docs/31-backup-format.md` |
 | WS-C fase 2: pengaitan payload Keychain | ✅ | `web/src/lib/backupPayload.ts` + 12 test kripto (roundtrip via arsip nyata, determinisme urutan, chunking, scramble deterministik, validasi keras) + `docs/31` §31.6a |
 | WS-C fase 3: transport `.nyxbak` + R2 | ✅ | `web/src/lib/backupTransport.ts` + `server/src/routes/backup.ts` (`/api/backup/presign`, `/download-url`, `DELETE`) + `utils/backupObject.ts`; kunci objek HMAC tanpa userId, tanpa tabel DB; 10 test server + 11 test web (`docs/31` §31.6b) |
-| WS-C fase 4: restore perangkat pengganti | ✅ | `web/src/lib/backupRestore.ts` + wiring `MigrationSendPage`/`MigrationReceivePage` lewat `migration:*`; 10 test (progres per frame, kunci salah ditolak sebelum tulis, adapter Dexie, phrase) — `docs/31` §31.6c |
+| WS-C fase 4: restore perangkat pengganti | ✅ | `web/src/lib/backupRestore.ts` + wiring UI `BackupRestoreModal` (`.nyxbak` berphrase); 10 test (progres per frame, kunci salah ditolak sebelum tulis, adapter Dexie, phrase) — `docs/31` §31.6c. Wiring QR `migration:*` dihapus 2026-10-29 |
 | WS-C fase 5: benchmark 10k pesan | ✅ | `web/src/lib/backupBench.ts` + `pnpm --filter nyx-web run bench:backup`; terukur 10k pesan (20.272 catatan, arsip 4.62 MB/79 frame): export 1.3–1.5 s / restore 0.6–0.8 s, puncak heap ~147 MB — `docs/31` §31.6d |
 
 **Keputusan 2026-10-11 (lanjutan):** multi-device **dibatalkan permanen** sebagai
@@ -849,7 +849,7 @@ non-goal keamanan (§30.6, §30.18). Dampak yang sudah dikerjakan: kapabilitas
 `CLIENT_CAPABILITIES.MULTI_DEVICE` dihapus dari `packages/shared/src/transport.ts`
 (test `transportCapabilities` memeriksa nilai runtime, bukan teks), KT
 di-sederhanakan (tanpa daftar device), dan WS-C diarahkan ke **perangkat
-pengganti** lewat alur `migration:*` yang sudah ada.
+pengganti** lewat arsip `.nyxbak` (dulu alur `migration:*`, dihapus 2026-10-29).
 
 Catatan desain untuk WS-F (agar tidak dikerjakan setengah): kolom yang **tidak**
 dipakai untuk pengurutan (`isGroup`, `isPinned`, `isArchived`, `senderId`,

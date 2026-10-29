@@ -6,9 +6,8 @@
  * [docs/28 Tier 0.7 / 1.5 — D14] Redis sebagai artefak setara dump.
  *
  * Redis persisten (AOF) memuat banyak kolom yang dulu berupa **userId asli**:
- * `online_users`, `active_device:*`, `is_migrating:*`, `cache:keys:*`, key
- * rate-limit, nilai `linking_token:*`, dan member `burner:room:*` /
- * `migration:room:*`. Test ini mengunci dua janji:
+ * `online_users`, `active_device:*`, `cache:keys:*`, key rate-limit, nilai
+ * `linking_token:*`, dan member `burner:room:*`. Test ini mengunci dua janji:
  *
  *  (a) helper identitas — tag satu-arah untuk yang hanya dibandingkan, seal
  *      deterministik untuk yang harus dipulihkan (tanpa toleransi plaintext);
@@ -67,7 +66,7 @@ test('identityKey: sufiks key adalah tag, bukan userId', async () => {
     const key = identityKey('active_device', 'user-9');
     assert.equal(key, `active_device:${identityTag('user-9')}`);
     assert.doesNotMatch(key, /user-9/, 'dump Redis tidak bisa memetakan key ke user');
-    assert.notEqual(identityKey('active_device', 'user-9'), identityKey('is_migrating', 'user-9'), 'base beda → key beda');
+    assert.notEqual(identityKey('active_device', 'user-9'), identityKey('rate_limit:chat', 'user-9'), 'base beda → key beda');
   });
 });
 
@@ -189,48 +188,27 @@ function makeRecordingCtx(): { ctx: RealtimeContext; writes: RedisWrite[] } {
   return { ctx, writes };
 }
 
-test('D14 perilaku: join burner/migration menulis member TER-SEAL, index memakai TAG', async () => {
+test('D14 perilaku: join burner menulis member TER-SEAL, index memakai TAG', async () => {
   await withPepper('p-redis', async () => {
     const { ctx, writes } = makeRecordingCtx();
 
     await handleKeySync(ctx, 'user-77', 'dev-1', { event: 'burner:join', msgId: 'b', data: { roomId: 'burner_abc' } });
-    await handleKeySync(ctx, 'user-77', 'dev-1', { event: 'migration:join', msgId: 'm', data: 'room-mig' });
 
     const memberWrites = writes.filter(
-      (w) => w.op === 'sAdd' && (w.key.startsWith('burner:room:') || w.key.startsWith('migration:room:'))
+      (w) => w.op === 'sAdd' && w.key.startsWith('burner:room:')
     );
-    assert.equal(memberWrites.length, 2, 'satu join burner + satu join migration');
+    assert.equal(memberWrites.length, 1, 'satu join burner');
     for (const write of memberWrites) {
       assert.notEqual(write.value, 'user-77', 'member harus ciphertext, bukan userId');
       assert.equal(await openIdentity(write.value ?? null), 'user-77', 'routing masih bisa memetakan member');
     }
 
     const indexWrites = writes.filter((w) => w.op === 'sAdd' && w.key.startsWith('room:member:'));
-    assert.equal(indexWrites.length, 2, 'index per-user dicatat untuk pembersihan disconnect');
+    assert.equal(indexWrites.length, 1, 'index per-user dicatat untuk pembersihan disconnect');
     for (const write of indexWrites) {
       assert.doesNotMatch(write.key, /user-77/, 'index di-key TAG, bukan userId');
       assert.equal(write.key, `room:member:${identityTag('user-77')}`);
     }
-  });
-});
-
-test('D14 perilaku: migration_owner & is_migrating tidak memuat userId asli', async () => {
-  await withPepper('p-redis', async () => {
-    const { ctx, writes } = makeRecordingCtx();
-
-    await handleKeySync(ctx, 'user-88', 'dev-2', { event: 'migration:prepare', msgId: 'p', data: {} });
-    await handleKeySync(ctx, 'user-88', 'dev-2', { event: 'migration:start', msgId: 's', data: { roomId: 'room-1' } });
-
-    const grace = writes.find((w) => w.op === 'set' && w.key.startsWith('is_migrating:'));
-    assert.ok(grace, 'grace period ditulis');
-    assert.doesNotMatch(grace!.key, /user-88/, 'key memakai identityKey (tag)');
-    assert.equal(grace!.key, `is_migrating:${identityTag('user-88')}`);
-
-    const owner = writes.find((w) => w.op === 'set' && w.key === 'migration_owner:room-1');
-    assert.ok(owner, 'owner ditulis');
-    assert.notEqual(owner!.value, 'user-88');
-    assert.equal(await openIdentity(owner!.value ?? null), 'user-88', 'pemilik masih bisa dipulihkan untuk otorisasi chunk');
-    assert.deepEqual(owner!.opts, { EX: 3600 }, 'owner kedaluwarsa (bukan tersimpan selamanya)');
   });
 });
 
@@ -279,13 +257,12 @@ test('D14 statis: key identitas memakai helper, bukan template literal userId', 
   const joined = files.map((f) => read(f)).join('\n');
 
   assert.doesNotMatch(joined, /active_device:\$\{/, 'active_device memakai identityKey');
-  assert.doesNotMatch(joined, /is_migrating:\$\{/, 'is_migrating memakai identityKey');
   assert.doesNotMatch(joined, /cache:keys:[a-z]+:\$\{/, 'cache:keys memakai identityKey');
   assert.doesNotMatch(joined, /rate_limit:[^`'"]*\$\{userId\}/, 'rate_limit memakai identityKey');
 
   for (const f of files) {
     const src = read(f);
-    if (/active_device|is_migrating/.test(src)) {
+    if (/active_device/.test(src)) {
       assert.match(src, /identityKey\(/, `${f}: key identitas via identityKey`);
     }
     assert.doesNotMatch(src, /sAdd\('online_users', userId\)/, `${f}: online_users memakai tag`);
