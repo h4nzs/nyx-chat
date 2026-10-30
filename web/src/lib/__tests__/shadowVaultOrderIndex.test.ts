@@ -22,6 +22,7 @@ type Row = {
   createdAtSealed?: string | null;
   orderBucketMs?: number | null;
   expiresAt?: string | number | null;
+  autoDelete?: boolean | string;
   seq?: number | string;
   // [docs/30 WS-F langkah 3] kolom struktur yang di-seal di tempat: baris baru
   // berbentuk envelope `ENC1:`, baris lama masih boolean/string plaintext.
@@ -321,11 +322,14 @@ describe('[langkah 3] kolom struktur di-seal di tempat', () => {
     expect(page[0]!.repliedToId).toBe('msg_parent');
   });
 
-  it('expiresAt ter-seal tetap menyaring pesan kedaluwarsa (dan tetap dipertahankan saat pesan ditulis ulang)', async () => {
+  it('expiresAt ter-seal menyaring pesan timer yang kedaluwarsa (dan dipertahankan saat ditulis ulang)', async () => {
     const aliveExpiry = new Date(Date.now() + 60 * MIN).toISOString();
     await shadowVault.upsertMessages([
-      liveTombstone('expired', { expiresAt: new Date(Date.now() - MIN).toISOString() }) as never,
-      liveTombstone('alive', { expiresAt: aliveExpiry }) as never,
+      liveTombstone('expired', {
+        autoDelete: true,
+        expiresAt: new Date(Date.now() - MIN).toISOString(),
+      }) as never,
+      liveTombstone('alive', { autoDelete: true, expiresAt: aliveExpiry }) as never,
     ]);
     expect(String(messageRows.get('expired')!.expiresAt).startsWith('ENC1:')).toBe(true);
 
@@ -336,9 +340,34 @@ describe('[langkah 3] kolom struktur di-seal di tempat', () => {
 
     // Tulis ulang tanpa membawa expiresAt → nilai lama TIDAK boleh hilang
     // (envelope tidak boleh diurai dengan `Date.parse`).
-    await shadowVault.upsertMessages([liveTombstone('alive') as never]);
+    await shadowVault.upsertMessages([liveTombstone('alive', { autoDelete: true }) as never]);
     const reread = await shadowVault.getMessagesByConversation('c1', 10);
     expect(reread.find((m) => m.id === 'alive')?.expiresAt).toBeDefined();
+  });
+
+  // [BUGFIX 2026-10-30] Regresi: riwayat percakapan biasa lenyap sehari setelah
+  // dibaca karena deadline retensi server (14 hari, dipersempit ke +24 jam saat
+  // READ) diperlakukan sebagai expiry UI.
+  it('pesan biasa ber-expiresAt lewat (deadline server) TIDAK disaring dan TIDAK dihapus', async () => {
+    const past = new Date(Date.now() - 3 * 24 * 60 * MIN).toISOString();
+    await shadowVault.upsertMessages([
+      liveTombstone('normal-lama', { expiresAt: past }) as never,
+      liveTombstone('normal-baru') as never,
+    ]);
+
+    const page = await shadowVault.getMessagesByConversation('c1', 10);
+    expect(page.map((m) => m.id).sort()).toEqual(['normal-baru', 'normal-lama']);
+
+    // …dan pembersih latar (queueMicrotask) tidak membuang barisnya.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(messageRows.has('normal-lama')).toBe(true);
+  });
+
+  it('upsert pesan biasa tidak menyimpan deadline wire sama sekali', async () => {
+    await shadowVault.upsertMessages([
+      liveTombstone('plain', { expiresAt: new Date(Date.now() + 14 * 24 * 60 * MIN).toISOString() }) as never,
+    ]);
+    expect(messageRows.get('plain')!.expiresAt ?? null).toBeNull();
   });
 
   it('migrateAtRestSealing menyegel kolom struktur baris lama (idempoten)', async () => {
@@ -521,7 +550,10 @@ describe('shadowVault.getMessagesByConversation (indeks bucket)', () => {
     messageRows.set('fresh', await sealedRow('fresh', 'conv_1', B0 + MIN));
     messageRows.set(
       'expired',
-      await sealedRow('expired', 'conv_1', B0 + 2 * MIN, { expiresAt: new Date(Date.now() - MIN).toISOString() })
+      await sealedRow('expired', 'conv_1', B0 + 2 * MIN, {
+        autoDelete: true,
+        expiresAt: new Date(Date.now() - MIN).toISOString(),
+      })
     );
 
     const page = await shadowVault.getMessagesByConversation('conv_1', 10);
@@ -535,5 +567,73 @@ describe('shadowVault.getMessagesByConversation (indeks bucket)', () => {
 
     const page = await shadowVault.getMessagesByConversation('conv_1', 10);
     expect(page[0]!.seq).toBe(42);
+  });
+});
+
+/**
+ * [AUDIT 2026-10-30] Aturan `autoDelete` harus berlaku SAMA di semua jenis
+ * percakapan dan semua jenis isi. Grup memakai TTL server 14 hari (bukan grace
+ * 24 jam 1:1), jadi tanpa aturan ini riwayat grup juga lenyap setelah dua
+ * minggu; lampiran ikut hilang bersama barisnya karena `fileMeta` hidup di
+ * baris yang sama.
+ */
+describe('aturan expiry: grup & lampiran (AUDIT 2026-10-30)', () => {
+  const past = () => new Date(Date.now() - 3 * 24 * 60 * MIN).toISOString();
+  const sealedText = (text: string) => 'VAULT:' + Buffer.from(text, 'utf8').toString('base64');
+
+  it('pesan grup biasa lewat TTL server tetap tampil, pesan timer grup tetap disaring', async () => {
+    messageRows.set(
+      'grp-biasa',
+      await sealedRow('grp-biasa', 'grp_1', B0 + MIN, {
+        content: sealedText('halo grup'),
+        senderId: 'ENC1:' + Buffer.from('pseudonym-1', 'utf8').toString('base64'),
+        expiresAt: past(),
+      })
+    );
+    messageRows.set(
+      'grp-timer',
+      await sealedRow('grp-timer', 'grp_1', B0 + 2 * MIN, {
+        content: sealedText('pesan timer'),
+        autoDelete: true,
+        expiresAt: past(),
+      })
+    );
+
+    const page = await shadowVault.getMessagesByConversation('grp_1', 10);
+    expect(page.map((m) => m.id)).toEqual(['grp-biasa']);
+    expect(page[0]!.content).toBe('halo grup');
+
+    // Pembersih latar tidak boleh menghapus baris pesan grup biasa.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(messageRows.has('grp-biasa')).toBe(true);
+    expect(messageRows.has('grp-timer')).toBe(false);
+  });
+
+  it('lampiran (fileMeta) pada pesan lampau tetap terbaca — galeri/attachment tidak kosong', async () => {
+    messageRows.set(
+      'file-lama',
+      await sealedRow('file-lama', 'conv_file', B0 + MIN, {
+        expiresAt: past(),
+        fileMeta: sealedText(
+          JSON.stringify({
+            fileUrl: 'https://cdn.example/attachment.enc',
+            fileKey: 'k'.repeat(43),
+            fileName: 'dokumen.pdf',
+            fileType: 'application/pdf',
+            fileSize: 1234,
+          })
+        ),
+      })
+    );
+
+    const page = await shadowVault.getMessagesByConversation('conv_file', 10);
+    expect(page.map((m) => m.id)).toEqual(['file-lama']);
+    expect(page[0]!.fileUrl).toBe('https://cdn.example/attachment.enc');
+    expect(page[0]!.fileName).toBe('dokumen.pdf');
+    expect(page[0]!.fileKey).toBe('k'.repeat(43));
+
+    // Arsip riwayat (perangkat hasil link) memakai predikat yang sama.
+    const exported = await shadowVault.getMessagesForExport();
+    expect(exported.map((m) => m.id)).toEqual(['file-lama']);
   });
 });

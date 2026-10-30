@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🩹 Riwayat chat tidak lagi lenyap sehari setelah dibaca (2026-10-30)
+
+Pada 1:1, `expiresAt` di wire **selalu** terisi: server memakainya untuk retensi
+store-and-forward 14 hari, lalu mempersempitnya ke `now + 24 jam` begitu pesan
+dibaca. Pembaca Shadow Vault memperlakukan deadline itu sebagai expiry UI, jadi
+`getMessagesByConversation` menyaring — dan pembersih latarnya `bulkDelete` —
+setiap pesan biasa lebih dari sehari setelah dibaca: pesan biasa (tanpa
+disappearing message) hilang dari UI **dan** dari IndexedDB, permanen.
+
+Jalur kedua yang menghapus bubble: `messageSweeper` menghapus salinan server
+yang kedaluwarsa (termasuk yang deadline-nya baru dipersempit ke +24 jam setelah
+READ) lalu menyiarkan `message:deleted_batch`; handler klien mem-blank baris
+lokal untuk **setiap** id di batch itu, jadi bubble-nya hilang dari UI meski
+salinan lokal utuh.
+
+Sekarang satu-satunya sumber kebenaran "pesan ini menghapus diri" adalah
+penanda `autoDelete` (ikut AEAD, hanya ditulis bila pengirim memilih timer):
+`isExpiredMessageRow` menyaring/menghapus hanya bila `autoDelete` benar dan
+deadline-nya lewat, `upsertMessages` tidak lagi menyimpan deadline wire untuk
+pesan biasa, dan `message:deleted_batch` hanya menandai id yang memang pesan
+timer. Baris lama yang terlanjur menyimpan deadline server
+diabaikan oleh saringan (tidak perlu migrasi). Arsip riwayat perangkat hasil
+link memakai predikat yang sama, jadi pesan biasa yang sudah dibaca >24 jam
+tetap ikut pindah.
+
+Audit jalur lain (grup, story, lampiran): tidak ada jalur keempat. Galeri media
+dan preview daftar chat membaca lewat pembaca vault yang sama (jadi ikut
+terbaiki); `fileRetention` R2 hanya dikirim untuk pesan timer dan view-once
+(lampiran biasa tidak pernah punya delete-at); story memakai `expiresAt`
+sendiri 24 jam sebagai fiturnya dan tidak pernah menghapus isi lokal. Aturan
+lengkapnya kini tercatat sebagai tabel di `docs/15` §15.5.1, dan dua test baru
+mengunci perilaku grup + lampiran.
+
+Data yang sudah terhapus build lama tidak bisa dipulihkan di perangkat itu;
+server memang sudah membuang salinannya setelah READ.
+
 ## 📊 Arsip riwayat link: metrik, alarm, cache partisipan grup, dan angka terukur (2026-10-30)
 
 Operasi arsip riwayat sekarang terukur: `nyx_link_history_ops_total{op,result}`

@@ -54,8 +54,19 @@ vi.mock('../../store/burner', () => ({
   },
 }))
 const updateMessage = vi.fn()
+// [BUGFIX 2026-10-30] `message:deleted_batch` perlu melihat apakah baris yang
+// dihapus server itu pesan timer (`autoDelete`) — state store ikut di-mock.
+type LoadedMessage = { id: string; autoDelete?: boolean; content?: string | null }
+let messageState: Record<string, LoadedMessage[]> = {}
 vi.mock('@store/message', () => ({
-  useMessageStore: { getState: () => ({ loadMessagesForConversation, processOfflineQueue, updateMessage }) },
+  useMessageStore: {
+    getState: () => ({
+      loadMessagesForConversation,
+      processOfflineQueue,
+      updateMessage,
+      messages: messageState,
+    }),
+  },
 }))
 const removeConversation = vi.fn()
 vi.mock('@store/conversation', () => ({
@@ -91,6 +102,7 @@ beforeEach(() => {
   subscriptionHandlers.length = 0
   sessionKeyRequestHandlers.length = 0
   updateMessage.mockReset()
+  messageState = {}
   updateSubscription.mockReset()
   fulfillKeyRequest.mockReset()
   fulfillKeyRequest.mockImplementation(async () => {})
@@ -328,12 +340,35 @@ describe('event server yang sebelumnya tanpa listener (GAP 2026-10-18)', () => {
     expect(updateMessage).toHaveBeenCalledWith('c1', 'm1', { isDeletedLocal: true, content: null })
   })
 
-  it('message:deleted_batch menghapus tiap id (auto-delete sweeper)', async () => {
+  it('message:deleted_batch menghapus pesan timer yang kedaluwarsa (dan mengabaikan id non-string)', async () => {
+    messageState = {
+      c1: [
+        { id: 'm1', autoDelete: true },
+        { id: 'm2', autoDelete: true },
+      ],
+    }
     await initHandlers()
     deletedBatchHandlers[0]!({ conversationId: 'c1', messageIds: ['m1', 'm2', 42 as unknown as string] })
     expect(updateMessage).toHaveBeenCalledTimes(2)
     expect(updateMessage).toHaveBeenNthCalledWith(1, 'c1', 'm1', { isDeletedLocal: true, content: null })
     expect(updateMessage).toHaveBeenNthCalledWith(2, 'c1', 'm2', { isDeletedLocal: true, content: null })
+  })
+
+  // [BUGFIX 2026-10-30] Server memakai `expiresAt` yang sama untuk retensi
+  // store-and-forward (dipersempit ke +24 jam setelah READ). Sweeper menghapusnya
+  // dan menyiarkan batch ini — dulu pesan BIASA ikut di-blank lokal, jadi riwayat
+  // chat lenyap sehari setelah dibaca.
+  it('message:deleted_batch TIDAK mem-blank pesan biasa yang salinan servernya dibuang (retensi/READ grace)', async () => {
+    messageState = {
+      c1: [
+        { id: 'biasa-lama', content: 'halo' },
+        { id: 'timer', autoDelete: true },
+      ],
+    }
+    await initHandlers()
+    deletedBatchHandlers[0]!({ conversationId: 'c1', messageIds: ['biasa-lama', 'timer', 'tidak-dimuat'] })
+    expect(updateMessage).toHaveBeenCalledTimes(1)
+    expect(updateMessage).toHaveBeenCalledWith('c1', 'timer', { isDeletedLocal: true, content: null })
   })
 
   it('message:deleted_batch mengabaikan payload cacat tanpa melempar', async () => {

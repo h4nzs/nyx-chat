@@ -48,6 +48,34 @@ const readExpiresAt = async (raw: string | number | null | undefined): Promise<n
   return null;
 };
 
+/**
+ * [BUGFIX 2026-10-30] Baris pesan kedaluwarsa untuk TUJUAN TAMPILAN hanya bila
+ * ia memang pesan timer (disappearing message, `autoDelete`) dan deadline-nya
+ * lewat.
+ *
+ * Kenapa: pada 1:1, `expiresAt` di wire **bukan** janji "bubble ini menghilang".
+ * Server memakai kolom yang sama untuk retensi store-and-forward (14 hari) dan,
+ * begitu pesan dibaca, mempersempitnya ke `now + READ_DELETE_GRACE_MS` (24 jam)
+ * supaya salinan servernya cepat hilang — penerima sudah punya salinan lokal.
+ * Dulu pembaca vault memperlakukan deadline itu sebagai expiry UI: setelah
+ * pesan dibaca >24 jam, `getMessagesByConversation` menyaringnya DAN
+ * `bulkDelete` menghapus barisnya, sehingga riwayat percakapan biasa lenyap
+ * sehari setelah dibaca. Penanda `autoDelete` (ikut AEAD, hanya ditulis saat
+ * pengirim memilih timer) adalah satu-satunya sumber kebenaran untuk "pesan ini
+ * menghapus diri".
+ *
+ * Baris lama yang terlanjur menyimpan deadline server tidak perlu dimigrasi:
+ * tanpa `autoDelete` mereka kini diabaikan oleh saringan ini.
+ */
+const isExpiredMessageRow = async (
+  row: { expiresAt?: string | number | null; autoDelete?: boolean | string | null },
+  now: number
+): Promise<boolean> => {
+  if ((await openLocalFlag(row.autoDelete)) !== true) return false;
+  const expiresAt = await readExpiresAt(row.expiresAt);
+  return expiresAt !== null && expiresAt <= now;
+};
+
 const getVaultKey = async () => {
   const { privateKey } = await getMyEncryptionKeyPair();
   if (!privateKey) {
@@ -537,13 +565,25 @@ class NyxShadowVaultProxy {
         // pengurutan/seleksi di-seal di tempat. `existing?.*` (baris lama) tetap
         // dipakai apa adanya — sudah berbentuk envelope atau plaintext legacy
         // yang tetap terbaca; menulisnya ulang tidak menambah privasi.
-        // `expiresAt`: nilai baru menang; kalau pesan tidak membawa expiry,
-        // pertahankan baris lama APA ADANYA (sudah ter-seal atau ISO legacy) —
-        // mengurai envelope dengan `Date.parse` akan menghapus expiry-nya.
+        // [BUGFIX 2026-10-30] `expiresAt` HANYA disimpan untuk pesan timer
+        // (`autoDelete`): deadline server (retensi 14 hari, dipersempit jadi 24
+        // jam setelah READ) bukan expiry UI — lihat `isExpiredMessageRow`.
+        // Baris lama yang terlanjur menyimpan deadline server dibiarkan apa
+        // adanya: membuangnya butuh tulis ulang setiap baris, dan saringan baca
+        // sudah mengabaikannya.
         let expiresAtRaw: string | number | null = existing?.expiresAt ?? null;
-        if (m.expiresAt) {
-          const ms = Date.parse(m.expiresAt);
-          expiresAtRaw = Number.isFinite(ms) ? (await sealLocalNumber(ms)) ?? ms : null;
+        if (m.autoDelete === true) {
+          // Pesan timer: nilai baru menang, tetapi envelope lama tidak boleh
+          // diurai dengan `Date.parse` (expiry hilang) — bandingkan lewat
+          // pembaca yang sama dengan saringan.
+          const ms = m.expiresAt ? Date.parse(m.expiresAt) : Number.NaN;
+          if (Number.isFinite(ms)) {
+            const current = await readExpiresAt(existing?.expiresAt ?? null);
+            if (current !== ms) expiresAtRaw = (await sealLocalNumber(ms)) ?? ms;
+          }
+        } else if (!existing) {
+          // Pesan biasa: jangan menyimpan deadline server sama sekali.
+          expiresAtRaw = null;
         }
 
         records.push(await ensureOrderFields({
@@ -639,9 +679,10 @@ class NyxShadowVaultProxy {
           .equals([conversationId, bucket])
           .toArray();
         for (const row of batch) {
-          // [docs/30 WS-F langkah 3] `expiresAt` tersimpan ter-seal (ms).
-          const expiresAt = await readExpiresAt(row.expiresAt);
-          if (expiresAt !== null && expiresAt <= now) continue;
+          // [BUGFIX 2026-10-30] Hanya pesan timer yang boleh hilang karena
+          // `expiresAt` — deadline server bukan expiry UI (lihat
+          // `isExpiredMessageRow`).
+          if (await isExpiredMessageRow(row, now)) continue;
           candidates.push(row);
         }
         if (candidates.length >= limit) break;
@@ -660,8 +701,9 @@ class NyxShadowVaultProxy {
           const rows = await db.messages.where('conversationId').equals(conversationId).toArray();
           const expired: string[] = [];
           for (const r of rows) {
-            const expiresAt = await readExpiresAt(r.expiresAt);
-            if (expiresAt !== null && expiresAt <= now) expired.push(r.id);
+            // [BUGFIX 2026-10-30] Hanya pesan timer yang benar-benar dihapus —
+            // pesan biasa tidak boleh dibuang karena deadline server.
+            if (await isExpiredMessageRow(r, now)) expired.push(r.id);
           }
 
           if (expired.length > 0) {
@@ -843,8 +885,10 @@ class NyxShadowVaultProxy {
    * semua baris pesan yang isinya masih bisa ditampilkan, sudah didekripsi.
    *
    * Yang dibuang (pilihan sadar, bukan lupa):
-   *   - baris kedaluwarsa (`expiresAt` lewat) — isinya sudah tidak boleh dibaca
-   *     bahkan di perangkat ini,
+   *   - pesan timer (`autoDelete`) yang deadline-nya lewat — isinya sudah tidak
+   *     boleh dibaca bahkan di perangkat ini (pesan biasa TIDAK dibuang hanya
+   *     karena deadline retensi server sudah lewat, lihat
+   *     `isExpiredMessageRow`),
    *   - `waiting_for_key` / bubble gagal — tidak ada isi untuk dipindahkan,
    *   - view-once — memindahkannya menghidupkan konten yang sudah "terbakar",
    *   - `statuses` (centang baca) — impor tidak boleh mengirim receipt palsu.
@@ -859,8 +903,9 @@ class NyxShadowVaultProxy {
       const now = Date.now();
       const messages: Message[] = [];
       for (const row of rows) {
-        const expiresAt = await readExpiresAt(row.expiresAt);
-        if (expiresAt !== null && expiresAt <= now) continue;
+        // [BUGFIX 2026-10-30] Deadline server bukan expiry: pesan biasa yang
+        // sudah dibaca >24 jam tetap harus ikut arsip riwayat.
+        if (await isExpiredMessageRow(row, now)) continue;
         try {
           const msg = await this.decodeMessageRecord(row);
           if (msg.error) continue;

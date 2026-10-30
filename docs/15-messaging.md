@@ -65,8 +65,29 @@ All three are **E2EE tombstone control messages** carried through the normal mes
 
 - **View-once:** `isViewOnce` flag; when viewed, the server deletes the message (`message:view_once_opened` → `message:viewed` → `prisma.message.delete`). The sender's client handles `message:viewed` and hides its own copy (the row no longer exists server-side).
 - **Silent:** content wrapped as `{ type:'silent', text }` — no notification on the recipient side.
-- **Expiry/auto-delete:** `expiresAt` on the message; `messageSweeper` (cron, every minute) deletes expired messages and notifies recipients via `message:deleted_batch` (each id marked `isDeletedLocal` client-side on arrival).
+- **Expiry/auto-delete:** `expiresAt` on the message; `messageSweeper` (cron, every minute) deletes expired messages and notifies recipients via `message:deleted_batch`. The client only marks an id `isDeletedLocal` when **that message is a timer** (`autoDelete` true) — the event also fires for ordinary messages whose server copy was dropped by the retention TTL / READ grace, and blanking those erased history from the UI (BUGFIX 2026-10-30).
 - **`expiresAt` is not the auto-delete flag.** In 1:1 it is *always* set (14-day store-and-forward TTL, shortened to 24 h after READ), so the sender's actual choice travels inside the ciphertext as `autoDelete: true` (alongside the precise `sentAt`). `captureAutoDelete()` removes it on decrypt (a leftover field breaks the plaintext-collapse and renders raw JSON), and the flag is persisted sealed in the Shadow Vault. `MessageBubble` renders the countdown only when `autoDelete` is set.
+- **The vault obeys the same rule (BUGFIX 2026-10-30).** `ShadowVault.upsertMessages` stores `expiresAt` only for `autoDelete` rows, and `isExpiredMessageRow` (`shadowVaultDb.ts`) treats a row as expired **only** when `autoDelete` is true and its deadline passed. Before this, the reader filtered *and* `bulkDelete`d on the server deadline: `getMessagesByConversation` dropped every 1:1 message >24 h after it was read (and the background purge erased the row), so ordinary conversations lost their history one day after being read. Rows written by older builds that carry a server deadline without `autoDelete` are left untouched — the read filter ignores them, so no migration is needed. `getMessagesForExport` (link-history archive) uses the same predicate.
+
+#### 15.5.1 Which paths may read `expiresAt` as "this is expired" (audit 2026-10-30)
+
+Only a message's own timer counts. Everything else that carries a deadline
+(`expiresAt` = server retention, story lifetime, presigned URL TTL) is a
+**server-side** concern and must never erase local content or hide a bubble.
+
+| Path | Rule |
+|---|---|
+| `shadowVaultDb.isExpiredMessageRow` (page filter, background purge, `getMessagesForExport`) | expired only when `autoDelete` and deadline passed |
+| `socketListeners` `message:deleted_batch` | blanks a local row only when that row is a timer |
+| `MessageBubble` countdown / auto-remove | only when `autoDelete` |
+| `MediaGallery`, `conversation` preview (`pickPreviewLastMessage`) | inherit the vault reader — no own expiry filter |
+| R2 `fileRetention` (uploads presign) | sent only for timer (`expiresIn`) and view-once; plain attachments have no delete-at |
+| `GET /api/stories/user/:id` | stories have their **own** 24 h lifetime (the feature itself), server-filtered; not `Message.expiresAt` |
+| `messageSweeper` (server) | deletes the **server** copy (`expiresAt` or >14 d) — retention, not a signal to delete the recipient's local history |
+
+Groups follow the same rule as 1:1 here: their server TTL is 14 days (no READ
+grace), so before this rule any group message older than two weeks was blanked
+locally as well.
 
 ## 15.6 Voice messages
 

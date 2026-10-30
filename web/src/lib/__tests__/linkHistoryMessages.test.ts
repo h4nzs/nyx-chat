@@ -26,6 +26,7 @@ type Row = {
   senderId?: string;
   senderName?: string;
   seq?: number;
+  autoDelete?: boolean;
   expiresAt?: number | null;
   isViewOnce?: boolean;
   isDeletedLocal?: boolean;
@@ -51,6 +52,17 @@ const rows: Row[] = [
     conversationId: 'conv-1',
     content: 'VAULT:' + Buffer.from('gone', 'utf8').toString('base64'),
     createdAt: new Date(NOW - 120_000).toISOString(),
+    senderId: 'peer-a',
+    // [BUGFIX 2026-10-30] Hanya pesan timer (`autoDelete`) yang dianggap
+    // kedaluwarsa; deadline server pada pesan biasa tidak membuang isinya.
+    autoDelete: true,
+    expiresAt: NOW - 1_000,
+  },
+  {
+    id: 'm-plain-expired-deadline',
+    conversationId: 'conv-1',
+    content: 'VAULT:' + Buffer.from('bukan disappearing', 'utf8').toString('base64'),
+    createdAt: new Date(NOW - 130_000).toISOString(),
     senderId: 'peer-a',
     expiresAt: NOW - 1_000,
   },
@@ -177,11 +189,13 @@ describe('arsip riwayat: proyeksi pesan', () => {
     expect(plain?.statuses).toBeUndefined();
   });
 
-  it('membuang pesan kedaluwarsa, view-once, dan waiting_for_key', async () => {
+  it('membuang pesan timer kedaluwarsa, view-once, dan waiting_for_key', async () => {
     const messages = await shadowVault.getMessagesForExport();
     const ids = messages.map((m) => m.id);
 
-    expect(ids).toEqual(['m-plain', 'm-tombstone']);
+    // `m-plain-expired-deadline` hanya punya deadline retensi server (bukan
+    // timer) → isinya tetap ikut arsip.
+    expect(ids).toEqual(['m-plain', 'm-plain-expired-deadline', 'm-tombstone']);
   });
 
   it('mempertahankan tombstone supaya pesan terhapus tidak hidup lagi', async () => {
