@@ -251,9 +251,11 @@ saat dibuat hanya membuktikan masa lalu, bukan pemulihan. Sekarang
 `scripts/kt-v2-restore-drill.sh` menjalankan 11 langkah dengan kode produksi
 sungguhan: menulis lewat `publishKeyTransparencyEntry`, menunggu snapshot
 terverifikasi, menghapus DB, memulihkan **hanya** dari arsip, memverifikasi bukti
-lewat `transparency.VerifySearch` (fungsi yang sama dengan `verify_search` di
-WASM klien, dengan anchor klien yang disimpan di berkas), lalu membuktikan log
-tumbuh tanpa memutus anchor pra-bencana. Empat kontrol negatif (root palsu, nilai
+lewat `transparency.VerifySearch` (implementasi Go independen; bukti yang sama —
+format proof v2, AAD, root — yang diperiksa verifier Rust→WASM klien, dengan
+anchor klien yang disimpan di berkas. Cross-check langsung terhadap WASM belum
+dijalankan, jadi kesepakatan byte-per-byte kedua implementasi belum dibuktikan),
+lalu membuktikan log tumbuh tanpa memutus anchor pra-bencana. Empat kontrol negatif (root palsu, nilai
 palsu, kunci log salah, arsip dirusak satu byte) menjaga agar "lulus" berarti
 sesuatu; skrip yang sengaja dirusak terbukti merah. Berjalan di CI (job
 `kt-recovery-v2`) tanpa layanan eksternal, dan mode `--bundle <file.tar.gz.age>`

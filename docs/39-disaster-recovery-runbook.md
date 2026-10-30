@@ -354,6 +354,35 @@ dijalankan** terhadap bundle sungguhan.
   skrip bash butuh loader tersendiri. Kesepakatan dua implementasi tetap diuji di
   CI lewat fixture statis (`cmd/kt-v2-fixtures` → test Rust/WASM di job `build`).
 
+### 39.5f Anchor tree size/root di bundle self-host (2026-10-30)
+
+Sebelum ini `backup.sh` hanya mencatat metadata host, dan `restore.sh` menyatakan
+sukses setelah `verify-boot.sh` — padahal LevelDB yang rusak sebagian bisa
+memulihkan diri dengan tree **lebih kecil** dan tetap exit 0 (§39.5d temuan 2).
+Bundle kini membawa anchor log KT v2:
+
+- **`backup.sh`** membaca `GET /head` layanan baca KT v2 (`NYX_KT_V2_READ_URL`,
+default `http://127.0.0.1:8089`) **sebelum** layanan dihentikan, lalu menulis
+  `ktV2TreeSize=<n>` dan `ktV2Root=<hex>` ke `meta.txt`. Kalau head tidak
+  terbaca, backup tetap jalan (Postgres lebih penting) dan bundle menandai diri
+  `ktV2HeadUnavailable=1` plus peringatan di stderr.
+- **`restore.sh`** membaca kedua nilai itu sebelum dry-run, menampilkannya, dan
+  **memperingatkan secara eksplisit** bila bundle lama tidak memuatnya (restore
+  tetap jalan, tetapi klaim "log pulih = log yang dibackup" tidak dibuat).
+  Setelah `verify-boot.sh`, head hasil pulih dibandingkan lewat
+  `nyx-kt-v2-check head -expect-size … -expect-root …`;
+  bila binernya tidak ada, perbandingan curl tetap dilakukan dan kegagalan
+  membaca `/head` dilaporkan sebagai peringatan (bukan lolos diam-diam).
+  Mismatch = `exit 1` + `systemctl --user stop nyx.target`: jangan buka layanan
+  dengan tree yang berbeda dari arsip.
+- Kontraknya dijaga `server/tests/selfhostScripts.test.ts` (meta keys, flag
+  `-expect-size`/`-expect-root`, peringatan bundle lama, `exit 1` pada mismatch,
+  dan `bash -n` kedua skrip).
+
+**Yang belum dibuktikan:** jalur ini belum dijalankan terhadap bundle `.age`
+sungguhan di host sungguhan (butuh `age-identity` + Postgres lokal). Yang lulus
+adalah kontrak statis + sintaks bash, bukan restore end-to-end.
+
 ## 39.6 Status drill
 
 | Drill | Terakhir dijalankan | Bukti | Catatan |
@@ -367,6 +396,7 @@ dijalankan** terhadap bundle sungguhan.
 | **Restore klien dari `.nyxbak` (§39.4b)** | 2026-10-29 | `pg_dump` 396 KB dari DB sumber `4\|1\|1\|4` → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore` 442 ms, **17/17 tabel** + jumlah baris identik; fixture dari hasil restore = 1 percakapan + 1 pesan + 4 perangkat → **51 baris di 20/20 tabel** → arsip **20 frame / 51 188 byte** → restore **51 catatan di 20 tabel**, `progress 20/20`; setiap tabel identik byte-per-byte, **45 nilai `ENC1:` utuh**, kunci publik perangkat identik, semua id pesan/percakapan + ciphertext cocok dengan dump, ekspor ulang **20 frame urutan + payload identik**; kontrol negatif phrase salah & 1 byte rusak **ditolak, 0 baris**; total **39 pemeriksaan OK**, exit 0 | belum dari profil browser sungguhan (§39.4b) |
 | Uji harness drill klien itu sendiri | 2026-10-29 | dua sabotase: ciphertext digeser 1 karakter → `GAGAL ciphertext pesan berbeda dari dump`; tabel `storyKeys` dibuang dari `SCHEMA` → `GAGAL cakupan tabel TIDAK lengkap — drill 19 vs backup 20: kurang storyKeys`; keduanya exit 1 | penjaga cakupan ikut terbukti, bukan hanya komentar |
 | Restore klien **dari UI** (tombol Ekspor di profil nyata) | **belum pernah** | — | butuh sesi browser dengan akun nyata |
+| Anchor KT v2 di bundle self-host (§39.5f) | 2026-10-30 | `server/tests/selfhostScripts.test.ts` 3/3: meta `ktV2TreeSize`/`ktV2Root`, `-expect-size`/`-expect-root` dipakai, peringatan bundle lama, mismatch → `exit 1`, `bash -n` OK | **belum** dijalankan terhadap bundle `.age` sungguhan |
 | Rotasi `JWT_SECRET` tanpa kehilangan backup R2 | **belum pernah** | — | §39.3 |
 
 ## 39.7 Jika maintainer hilang

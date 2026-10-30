@@ -14,8 +14,15 @@
 #
 # Sebelas langkah, semuanya dengan kode yang sesungguhnya: penulis produksi
 # (`server/scripts/kt-v2-drill-entries.ts` → `publishKeyTransparencyEntry`), dan
-# verifier `nyx-kt-v2-check` yang memakai `transparency.VerifySearch` — fungsi
-# yang sama yang dikompilasi menjadi `verify_search` di WASM klien.
+# verifier `nyx-kt-v2-check` yang memakai `transparency.VerifySearch` —
+# implementasi Go yang INDEPENDEN, bukan salinan verifier klien.
+#
+# Bukti yang diverifikasi adalah bukti yang sama yang diperiksa verifier klien
+# (Rust → WASM, `packages/keytrans-wasm-v2`, docs/34 §34.2): format proof v2,
+# AAD, dan root pohon. Cross-check terhadap WASM klien itu sendiri BELUM
+# dijalankan bersama drill ini — dua implementasi (Go dan Rust→WASM) diperiksa
+# terpisah, jadi kesepakatan byte-per-byte di antara keduanya belum dibuktikan
+# oleh skrip ini.
 #
 # Skrip ini TIDAK menyentuh layanan/port/berkas produksi: workspace sendiri di
 # /tmp, port sendiri (18087–18089, 19468–19469), kunci acak per jalannya drill,

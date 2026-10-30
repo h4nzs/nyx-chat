@@ -46,6 +46,28 @@ echo "== 1/5  Postgres =="
 PG_URL="${DATABASE_URL%%\?*}"
 pg_dump "$PG_URL" -Fc -f "$STAGE/db.dump"
 
+# [docs/39 §39.5] Anchor log KT v2 = tree size + root saat backup.
+#
+# Dicatat SEBELUM layanan dihentikan (setelah itu `/head` tidak tersedia).
+# Tanpa anchor, restore hanya bisa membuktikan "log ini sah", bukan "log ini
+# lanjutan dari yang saya backup": LevelDB yang rusak sebagian memulihkan diri
+# dengan tree lebih kecil dan tetap exit 0 (§39.5d temuan 2). Kegagalan membaca
+# head TIDAK menggagalkan backup (Postgres tetap harus terselamatkan) — bundle
+# lalu menandai dirinya tanpa anchor, dan restore memperingatkannya.
+KT_V2_READ_URL="${NYX_KT_V2_READ_URL:-http://127.0.0.1:8089}"
+kt_v2_tree_size=""
+kt_v2_root=""
+if command -v curl >/dev/null 2>&1; then
+  kt_head_json="$(curl -fsS --max-time 3 "${KT_V2_READ_URL%/}/head" 2>/dev/null || true)"
+  if [[ -n "$kt_head_json" ]]; then
+    kt_v2_tree_size="$(printf '%s' "$kt_head_json" | sed -n 's/.*"treeSize"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p')"
+    kt_v2_root="$(printf '%s' "$kt_head_json" | sed -n 's/.*"root"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]\{1,\}\)".*/\1/p')"
+  fi
+fi
+if [[ -z "$kt_v2_tree_size" || -z "$kt_v2_root" ]]; then
+  echo "   PERINGATAN: head log KT v2 tidak terbaca dari $KT_V2_READ_URL; bundle tidak memuat ktV2TreeSize/ktV2Root" >&2
+fi
+
 echo "== 2/5  KT v2 (LevelDB konsisten: service dihentikan sementara) =="
 if systemctl --user is-active --quiet nyx-kt-auditor-v2 2>/dev/null; then
   systemctl --user stop nyx-kt-auditor-v2 nyx-kt-query-v2
@@ -82,6 +104,12 @@ fi
   echo "pnpm=$(pnpm --version 2>/dev/null || echo unknown)"
   echo "postgres=$(psql --version 2>/dev/null | head -1 || echo unknown)"
   echo "host=$(hostname)"
+  if [[ -n "$kt_v2_tree_size" && -n "$kt_v2_root" ]]; then
+    echo "ktV2TreeSize=$kt_v2_tree_size"
+    echo "ktV2Root=$kt_v2_root"
+  else
+    echo "ktV2HeadUnavailable=1"
+  fi
 } > "$STAGE/meta.txt"
 
 echo "== 4/5  Enkripsi =="
