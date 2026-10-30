@@ -72,6 +72,35 @@ export function historySizeLimit(account: {
   return account.verified ? tierLimit : Math.min(LINK_HISTORY_SANDBOX_MAX_BYTES, tierLimit);
 }
 
+/**
+ * [docs/40 §40.6] Hasil `HEAD` objek dibandingkan dengan ukuran yang disetujui
+ * di presign.
+ *
+ * Presigned PUT mengikat ukuran di tanda tangan, tetapi itu hanya menjamin isi
+ * PUT yang *dilakukan dengan URL itu*. Tanpa pemeriksaan ini, `ready` bisa
+ * mendaftarkan pointer untuk objek yang tidak pernah dibuat (atau dibuat dengan
+ * ukuran lain lewat jalur/kredensial lain) — perangkat baru baru tahu setelah
+ * mengunduh, setelah sesi perangkat lama dicabut.
+ *
+ * Fungsi murni supaya keputusan ini bisa diuji tanpa R2.
+ */
+export type HistoryObjectCheck =
+  | { ok: true }
+  | { ok: false; status: number; error: string };
+
+export function checkHistoryObject(
+  head: { contentLength: number } | null,
+  expectedSize: number
+): HistoryObjectCheck {
+  if (!head) {
+    return { ok: false, status: 409, error: 'HISTORY_OBJECT_MISSING' };
+  }
+  if (head.contentLength !== expectedSize) {
+    return { ok: false, status: 409, error: 'HISTORY_OBJECT_SIZE_MISMATCH' };
+  }
+  return { ok: true };
+}
+
 export type HistoryPresignDecision =
   | { ok: true; size: number; urlTtl: number }
   | { ok: false; status: number; error: string };

@@ -20,12 +20,13 @@ import {
   recordHistoryPresign,
 } from '../utils/linkHistory.js';
 import {
+  checkHistoryObject,
   deriveLinkHistoryObjectKey,
   historySizeLimit,
   validateHistorySize,
 } from '../utils/linkHistoryObject.js';
 import { LINK_HISTORY_OPS, incCounter } from '../utils/metrics.js'
-import { deleteR2File, getPresignedDownloadUrl, getPresignedUploadUrl } from '../utils/r2.js';
+import { deleteR2File, getPresignedDownloadUrl, getPresignedUploadUrl, headR2Object } from '../utils/r2.js';
 
 // [docs/40 §40.6] Arsip riwayat sekali-pakai untuk perangkat hasil link.
 //
@@ -113,7 +114,9 @@ router.post(
   uploadLimiter,
   zodValidate({
     body: z.object({
-      deviceId: z.string().min(8),
+      // Panjang dibatasi: nilai ini masuk ke HMAC (kunci objek) dan query DB,
+      // jadi body raksasa tidak boleh jadi jalur kerja gratis. CUID/UUID muat.
+      deviceId: z.string().min(8).max(64),
       size: z.number().int().positive(),
       urlTtl: z.number().int().optional(),
     }),
@@ -187,7 +190,7 @@ router.post(
   generalLimiter,
   zodValidate({
     body: z.object({
-      deviceId: z.string().min(8),
+      deviceId: z.string().min(8).max(64),
       size: z.number().int().positive(),
       digest: z.string().min(1).max(128),
       sealedKey: z.string().min(1).max(4096),
@@ -204,6 +207,15 @@ router.post(
       };
 
       await assertFreshDeviceOfUser(req.user.id, deviceId);
+
+      // [docs/40 §40.6] Objek harus BENAR ADA dan berukuran sama sebelum pointer
+      // didaftarkan. Kalau tidak, perangkat baru baru tahu setelah mencabut
+      // sesi perangkat lama: unduhan gagal, arsip hilang, riwayat hilang.
+      const objectCheck = checkHistoryObject(
+        await headR2Object(deriveLinkHistoryObjectKey(env.backupKeySecret, deviceId)),
+        size
+      );
+      if (!objectCheck.ok) throw new ApiError(objectCheck.status, objectCheck.error);
 
       const ready = await markHistoryReady(linkStore, linkSealer, deviceId, { size, digest, sealedKey });
       if (!ready.ok) {
@@ -228,7 +240,7 @@ router.post(
   '/abort',
   requireAuth,
   generalLimiter,
-  zodValidate({ body: z.object({ deviceId: z.string().min(8) }) }),
+  zodValidate({ body: z.object({ deviceId: z.string().min(8).max(64) }) }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Unauthorized');

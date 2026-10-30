@@ -11,9 +11,12 @@
  * BARU (kunci vault + `masterSeed`) tanpa peta kolom baru.
  *
  * Urutan pertahanan (gagal sebelum menulis apa pun):
- *   1. `size` + `digest` byte yang diunduh,
+ *   1. `size` + `digest` byte yang diunduh (di `receiveLinkedHistory`),
  *   2. AEAD arsip (`parseBackupArchive`): tamper/reorder/truncate/kunci salah,
- *   3. penanda `k: 'history'` + tabel yang dikenal,
+ *   3. penanda `k: 'history'` + tabel yang dikenal untuk **setiap** frame
+ *      (dua tahap: validasi semua dulu, baru tulis) — sebelumnya pesan ditulis
+ *      per 250 selagi frame dibaca, jadi frame terakhir yang cacat bisa
+ *      meninggalkan tulisan parsial,
  *   4. baru menulis.
  *
  * Impor bersifat MERGE (tanpa `clear()`): id pesan/kontak/percakapan dipertahankan,
@@ -140,8 +143,13 @@ export async function importHistoryArchive(opts: {
     writtenMessages += batch.length;
   };
 
-  for (let i = 0; i < frames.length; i++) {
-    const chunk = readBackupChunk(frames[i]!, codec);
+  // [TAHAP 1 — VALIDASI] Semua frame dibaca dan diverifikasi DULU, tanpa satu
+  // pun tulisan. Frame yang rusak/bermarker salah/berisi tabel asing di posisi
+  // mana pun karena itu tidak meninggalkan baris parsial di vault pengguna.
+  // Memori tidak membengkak: `frames` sudah terdekripsi utuh di memori, dan
+  // `readBackupChunk` hanya mem-parse JSON yang sama.
+  const chunks = frames.map((frame) => {
+    const chunk = readBackupChunk(frame, codec);
     if (chunk.k !== HISTORY_MARKER) {
       // Tanpa penanda = `.nyxbak` biasa (baris Dexie). Menulisnya lewat jalur
       // domain akan membuat data yang tidak bisa dibaca aplikasi.
@@ -150,6 +158,12 @@ export async function importHistoryArchive(opts: {
     if (!isHistoryTable(chunk.table)) {
       throw new Error(`HISTORY_TABLE_UNKNOWN:${chunk.table}`);
     }
+    return chunk;
+  });
+
+  // [TAHAP 2 — TULIS] Baru sekarang data mengalir ke penulis domain.
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
 
     if (chunk.table === 'contacts') {
       contacts.push(...(chunk.records as ContactRecord[]));

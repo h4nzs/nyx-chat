@@ -257,6 +257,16 @@ saat ganti HP. Batas ukurannya yang dipotong: **25 MB** sampai akun terverifikas
 klien: presign 4 MB lalu PUT 40 MB), `digest` cocok `^[0-9a-f]{64}$`, dan
 `sealedKey` base64url ≤ 4096 karakter (X-Wing ct + payload kecil).
 
+Sejak 2026-10-30 `ready` juga melakukan **HEAD objek R2** (`headR2Object`) dan
+menolak `409 HISTORY_OBJECT_MISSING` / `409 HISTORY_OBJECT_SIZE_MISMATCH` bila
+objek tidak ada atau ukurannya berbeda dari yang disetujui presign. Presigned
+PUT hanya mengikat ukuran body yang dikirim lewat URL itu; tanpa HEAD, pointer
+`{size, digest, sealedKey}` bisa menunjuk objek yang tidak pernah dibuat, dan
+perangkat baru baru menyadarinya **setelah** login mencabut sesi perangkat lama.
+Keputusan murninya ada di `checkHistoryObject()` supaya bisa diuji tanpa R2.
+Semua `deviceId` di presign/ready/abort kini dibatasi `min(8).max(64)` di zod
+(CUID/UUID muat; nilai ini masuk HMAC nama objek dan query DB).
+
 ### Kunci objek
 
 `linkHistoryObjectKey(secret, deviceId)` =
@@ -563,6 +573,9 @@ terunggah → perangkat baru membacanya dengan kunci vault identitas baru →
   mengosongkan `statuses` (tidak ada receipt palsu saat impor).
 - Impor menulis pesan per batch 250 lewat `upsertMessages` dan melaporkan
   `{frame, totalFrames, messages}` ke UI (`auth:link.import_progress`, 4 bahasa).
+  Sejak 2026-10-30 **semua** frame divalidasi (penanda `k` + nama tabel) sebelum
+  tulisan pertama, sehingga frame terakhir yang cacat tidak meninggalkan baris
+  parsial; dikunci `linkHistory.test.ts` (batch 1 + frame akhir bermarker salah).
 - `pushContactBundle()` setelah impor + `loadConversations()` supaya percakapan
   hasil impor langsung muncul di sidebar.
 - Gate: `web/src/lib/__tests__/linkHistoryMessages.test.ts` (proyeksi pesan) +

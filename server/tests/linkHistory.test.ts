@@ -44,6 +44,7 @@ import {
   LINK_HISTORY_MIN_BYTES,
   LINK_HISTORY_OBJECT_PREFIX,
   LINK_HISTORY_SANDBOX_MAX_BYTES,
+  checkHistoryObject,
   deriveLinkHistoryObjectKey,
   historySizeLimit,
   validateHistorySize,
@@ -222,6 +223,25 @@ test('kunci objek deterministik, tanpa deviceId, domain terpisah dari backup', (
 test('kunci objek menolak deviceId/rahasia kosong', () => {
   assert.throws(() => deriveLinkHistoryObjectKey('secret', ''));
   assert.throws(() => deriveLinkHistoryObjectKey('', DEVICE));
+});
+
+// [docs/40 §40.6] `ready` memeriksa objek R2 dengan HEAD sebelum mendaftarkan
+// pointer. Tanpa ini, pointer bisa menunjuk objek yang tidak ada / berukuran
+// lain, dan perangkat baru baru tahu setelah sesi perangkat lama dicabut.
+test('checkHistoryObject menolak objek hilang atau berukuran lain', () => {
+  assert.deepEqual(checkHistoryObject(null, 1024), {
+    ok: false,
+    status: 409,
+    error: 'HISTORY_OBJECT_MISSING',
+  });
+  assert.deepEqual(checkHistoryObject({ contentLength: 512 }, 1024), {
+    ok: false,
+    status: 409,
+    error: 'HISTORY_OBJECT_SIZE_MISMATCH',
+  });
+  // Objek kosong bukan "tidak ada" — ukuran 0 tetap harus cocok.
+  assert.deepEqual(checkHistoryObject({ contentLength: 0 }, 0), { ok: true });
+  assert.deepEqual(checkHistoryObject({ contentLength: 1024 }, 1024), { ok: true });
 });
 
 test('validateHistorySize menegakkan minimum, kuota tier, dan menjepit TTL', () => {

@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommandInput } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommandInput } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
@@ -104,6 +104,33 @@ export const listR2Objects = async (prefix: string): Promise<Array<{ key: string
   } while (continuationToken)
 
   return out
+}
+
+/**
+ * [docs/40 §40.6] HEAD objek — keberadaan + ukuran tanpa mengunduh isinya.
+ *
+ * Dipakai `POST /link/history/ready`: presigned PUT hanya mengikat ukuran di
+ * tanda tangan, jadi tanpa pemeriksaan ini klien (atau perantara) bisa
+ * mendaftarkan pointer `{size, digest, sealedKey}` untuk objek yang tidak pernah
+ * ada / berukuran lain, dan perangkat baru baru tahu setelah mengunduh.
+ *
+ * `null` = objek tidak ada (404/NotFound). Error lain (kredensial, jaringan)
+ * dilempar: menganggapnya "tidak ada" akan menyalahkan klien atas kegagalan
+ * infrastruktur.
+ */
+export const headR2Object = async (key: string): Promise<{ contentLength: number } | null> => {
+  try {
+    const head = await s3Client.send(new HeadObjectCommand({
+      Bucket: env.r2BucketName,
+      Key: key
+    }))
+    return { contentLength: typeof head.ContentLength === 'number' ? head.ContentLength : 0 }
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+    const name = (error as { name?: string }).name
+    if (status === 404 || name === 'NotFound' || name === 'NoSuchKey') return null
+    throw error
+  }
 }
 
 // Hapus file

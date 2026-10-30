@@ -100,11 +100,13 @@ vi.mock('../linkHistoryClient', async () => {
 });
 
 import {
+  buildBackupArchive,
   libsodiumBackupCrypto,
   parseBackupArchive,
   type BackupCryptoBackend,
 } from '../backupFormat';
 import {
+  buildBackupFrames,
   libsodiumBackupValueCodec,
   readBackupChunk,
   type BackupValueCodec,
@@ -284,6 +286,60 @@ describe('arsip riwayat: impor', () => {
     await expect(importHistoryArchive({ bytes: plain.bytes, key })).rejects.toThrow(
       'HISTORY_MARKER_MISSING'
     );
+  });
+
+  // [docs/40 §40.8] Impor memvalidasi SEMUA frame sebelum menulis apa pun.
+  // Kasus nyata: frame pesan valid di depan, frame terakhir bermarker salah —
+  // versi lama sudah menulis pesan per batch sebelum sampai ke frame itu.
+  it('tidak menulis apa pun bila frame terakhir bermarker salah', async () => {
+    const { crypto, codec } = await adapters();
+    const sodium = await getSodium();
+    const key = sodium.randombytes_buf(32);
+
+    const messageFrames = buildBackupFrames({
+      recordsByTable: {
+        messages: [
+          {
+            id: 'm1',
+            conversationId: 'conv-a',
+            content: 'halo',
+            senderId: 'peer-a',
+            createdAt: new Date(1_700_000_000_000).toISOString(),
+          },
+        ],
+      },
+      codec,
+      marker: HISTORY_MARKER,
+      key,
+    });
+    const wrongMarkerFrames = buildBackupFrames({
+      recordsByTable: { contacts: [{ userId: 'peer-x' }] },
+      codec,
+      marker: 'backup',
+      key,
+    });
+    const { bytes } = buildBackupArchive({
+      frames: [...messageFrames, ...wrongMarkerFrames],
+      key,
+      crypto,
+    });
+
+    const writeMessages = vi.fn(async () => {});
+    const writeContacts = vi.fn(async () => {});
+    await expect(
+      importHistoryArchive({
+        bytes,
+        key,
+        crypto,
+        codec,
+        writers: { messages: writeMessages, contacts: writeContacts },
+        // batch 1 = frame pesan akan langsung ditulis kalau validasi tidak di depan.
+        batchSize: 1,
+      })
+    ).rejects.toThrow(/HISTORY_MARKER_MISSING/);
+
+    expect(writeMessages).not.toHaveBeenCalled();
+    expect(writeContacts).not.toHaveBeenCalled();
   });
 
   it('menolak tabel di luar proyeksi riwayat walau penandanya benar', async () => {
