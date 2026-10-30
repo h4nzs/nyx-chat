@@ -13,7 +13,7 @@
  * Database & transport di-stub; kripto arsip NYATA (libsodium + AEAD + frame)
  * supaya yang diuji adalah byte sungguhan, bukan tiruan.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type { ContactRecord, Conversation } from '@nyx/shared';
 
 vi.mock('../contactStore', () => ({
@@ -121,6 +121,7 @@ import {
   sendHistoryArchive,
 } from '../linkHistoryExport';
 import { importHistoryArchive } from '../linkHistoryImport';
+import { deriveLinkSas, LinkSasMismatchError } from '../deviceLinkSas';
 import {
   abortHistoryUpload,
   getHistoryLimits,
@@ -305,12 +306,29 @@ describe('arsip riwayat: impor', () => {
   });
 });
 
+/** Kunci X-Wing uji deterministik (base64url tanpa padding). */
+const TEST_PQ_KEY = Buffer.from(new Uint8Array(1216).fill(7)).toString('base64')
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/, '');
+
 describe('arsip riwayat: kuota', () => {
+  // Call-count dari kasus di atas tidak boleh bocor ke asersi "tidak dipanggil".
+  beforeEach(() => {
+    vi.mocked(abortHistoryUpload).mockClear();
+    vi.mocked(presignHistoryUpload).mockClear();
+    vi.mocked(uploadHistoryArchive).mockClear();
+  });
+
   it('membatalkan unggah sebelum presign bila arsip melebihi kuota', async () => {
     vi.mocked(getHistoryLimits).mockResolvedValueOnce({ maxBytes: 64, verified: false });
 
     await expect(
-      sendHistoryArchive({ deviceId: 'device-quota', pqPublicKeyB64: 'pk' })
+      sendHistoryArchive({
+        deviceId: 'device-quota',
+        pqPublicKeyB64: TEST_PQ_KEY,
+        confirmedSas: await deriveLinkSas(TEST_PQ_KEY),
+      })
     ).rejects.toThrow(/^HISTORY_TOO_LARGE:/);
 
     // Intent dibersihkan supaya perangkat baru tidak menunggu 60 detik, dan
@@ -318,6 +336,34 @@ describe('arsip riwayat: kuota', () => {
     expect(abortHistoryUpload).toHaveBeenCalledWith('device-quota');
     expect(presignHistoryUpload).not.toHaveBeenCalled();
     expect(uploadHistoryArchive).not.toHaveBeenCalled();
+  });
+
+  // [SEC 2026-10-30] Autentikasi kunci perangkat baru: kode SAS yang
+  // dikonfirmasi pengguna harus sama dengan kunci yang akan dipakai menyegel
+  // `K`. Server yang menukar kunci = kode berbeda = tidak ada presign/ready.
+  it('menolak menyegel ke kunci yang berbeda dari kode yang dikonfirmasi', async () => {
+    const genuineKey = TEST_PQ_KEY;
+    const swappedKey = Buffer.from(new Uint8Array(1216).fill(9)).toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const confirmedSas = await deriveLinkSas(genuineKey);
+
+    await expect(
+      sendHistoryArchive({ deviceId: 'device-swap', pqPublicKeyB64: swappedKey, confirmedSas })
+    ).rejects.toBeInstanceOf(LinkSasMismatchError);
+
+    expect(presignHistoryUpload).not.toHaveBeenCalled();
+    expect(uploadHistoryArchive).not.toHaveBeenCalled();
+    // Tidak ada intent yang perlu dibatalkan: gagal sebelum menyentuh server.
+    expect(abortHistoryUpload).not.toHaveBeenCalled();
+  });
+
+  it('menolak unggah tanpa kode konfirmasi (fail-closed)', async () => {
+    await expect(
+      sendHistoryArchive({ deviceId: 'device-nos-sas', pqPublicKeyB64: TEST_PQ_KEY, confirmedSas: '' })
+    ).rejects.toBeInstanceOf(LinkSasMismatchError);
+    expect(presignHistoryUpload).not.toHaveBeenCalled();
   });
 
   it('parseHistoryTooLarge hanya mengenali error kuota dan mengembalikan angkanya', () => {

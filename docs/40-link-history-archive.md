@@ -463,11 +463,48 @@ domain publik — aturan yang sama dengan `backups/`, `docs/10`).
   menjadi salinan kedua riwayat (dump perangkat baru = riwayat lama).
 - Server bisa **menghilangkan** arsip (DoS) atau menolak `download`. Integritas
   isi dijamin AEAD, jadi substitusi menghasilkan kegagalan, bukan data palsu.
-- Tidak ada bukti kriptografis "arsip ini dibuat perangkat lama": kedua
-  perangkat mempercayai server sebagai perantara kunci selama link (poin yang
-  sama dengan `auth:linking_request` hari ini). Hardening opsional (tanda tangan
-  ML-DSA perangkat lama atas `digest`, diverifikasi terhadap `Device.signingKeyV2`
-  milik perangkat lama yang masih ada di DB) sengaja **tidak** dikerjakan di v1.
+### 40.10.1 Keaslian kunci penerima: SAS (2026-10-30)
+
+Sebelum ini perangkat lama menyegel `K` ke `pqPublicKey` yang **diterimanya lewat
+server** (`auth:linking_request`). QR hanya membawa token yang dibuat perangkat
+lama, jadi server yang jahat/terkompromi bisa menukar kunci itu dengan miliknya,
+menyegel `K` ke kunci palsu, lalu membaca seluruh arsip. Impor di perangkat baru
+gagal membuka `sealedKey` (kunci privatnya tidak cocok), tetapi kerahasiaan data
+sudah hilang — dan tidak ada tanda apa pun di perangkat lama.
+
+**Model kepercayaan sekarang:**
+
+- Kedua perangkat menurunkan **kode 6 digit** dari `pqPublicKey` perangkat baru
+  (`web/src/lib/deviceLinkSas.ts`): perangkat baru dari kuncinya sendiri,
+  perangkat lama dari kunci yang dikirim server. Pengguna wajib mencocokkan
+  kedua kode; perangkat lama **mengunci tombol persetujuan** sampai kotak
+  konfirmasi dicentang, dan `sendHistoryArchive` menghitung ulang kode dari kunci
+  yang akan dipakai menyegel `K` — beda kode = berhenti sebelum `presign`
+  (fail-closed, tidak ada unggahan, tidak ada `ready`).
+- Server yang menukar kunci menghasilkan dua kode berbeda; peluang menebak kunci
+  pengganti dengan kode yang sama adalah 1/10^6 **per percobaan**, dan setiap
+  percobaan terlihat sebagai kode tidak cocok. Tidak ada kode/rahasia yang
+  dikirim ke server.
+- QR tidak bisa membawa hash kunci perangkat baru: QR ditampilkan perangkat
+  lama, sedangkan kunci perangkat baru baru dibuat setelah token dipindai, dan
+  yang memindai adalah perangkat baru. Membalik arah (perangkat baru menampilkan
+  QR, perangkat lama memindai) menuntut kamera di desktop — bukan pilihan yang
+  realistis, jadi dipilih perbandingan kode (pola SSP Bluetooth / safety number).
+
+**Residual yang tersisa (jujur):**
+
+- SAS mengikat **kunci penerima arsip**, bukan seluruh sesi. `/login` masih
+  mengirim password ke server untuk memverifikasi akun, jadi server yang jahat
+  tetap bisa mencoba membaca bundel kunci terenkripsi lewat password itu. SAS
+  menutup pencurian arsip, bukan menggantikan asumsi server-jujur-tapi-penasaran
+  pada jalur password.
+- Tidak ada bukti kriptografis "arsip ini dibuat perangkat lama": tanda tangan
+  ML-DSA atas `digest` (diverifikasi terhadap `Device.signingKeyV2` perangkat
+  lama) tetap **tidak** dikerjakan, karena celah nyata ada di keaslian penerima,
+  bukan pembuat. Bila nanti dibutuhkan, ia berdiri di atas SAS ini.
+- Perbandingan kode bergantung pada manusia: pengguna yang mencentang tanpa
+  membandingkan mematikan seluruh proteksi ini. Itulah sebabnya teks UI menulis
+  akibatnya secara eksplisit (tolak bila berbeda).
 - Server tetap bisa menahan `sealedKey`; tanpa `K` blob tidak berguna.
 
 ---

@@ -15,6 +15,7 @@ import {
   parseDeviceLinkToken,
 } from '@lib/deviceLinking';
 import { receiveLinkedHistory, type HistoryImportProgress } from '@lib/linkHistoryImport';
+import { deriveLinkSas, formatLinkSas } from '@lib/deviceLinkSas';
 import { clearHistoryImportPending, markHistoryImportPending } from '@lib/linkHistoryRetry';
 import { useAuthStore, getDeviceName } from '@store/auth';
 
@@ -65,6 +66,12 @@ export default function LinkDevicePage() {
   // [docs/40 §40.8] Progres impor pesan: arsip riwayat bisa berisi puluhan ribu
   // baris, jadi tombol menampilkan jumlah pesan yang sudah masuk ke vault.
   const [importProgress, setImportProgress] = useState<HistoryImportProgress | null>(null);
+  /**
+   * [SEC 2026-10-30] Kode verifikasi dari kunci X-Wing perangkat INI. Ditampilkan
+   * selama menunggu persetujuan supaya pengguna bisa membandingkannya dengan
+   * kode di perangkat lama. Kode yang berbeda = server menukar kunci → tolak.
+   */
+  const [sasCode, setSasCode] = useState<string | null>(null);
 
   const token = tokenFromLink ?? parseDeviceLinkToken(manualLink);
 
@@ -179,6 +186,16 @@ export default function LinkDevicePage() {
       // password akun (primitif yang sama dengan register — tidak ada format baru).
       const keys = await registerAndGenerateKeys(password);
       generatedKeys.current = { encryptedPrivateKeys: keys.encryptedPrivateKeys };
+
+      // Kode diturunkan dari kunci PUBLIK yang baru dibuat (sebelum dikirim ke
+      // server). Kunci yang sama harus tampil di perangkat lama; kalau berbeda,
+      // jangan pernah menyetujui tautan itu.
+      setSasCode(
+        await deriveLinkSas(keys.pqEncryptionPublicKeyB64).catch((e) => {
+          console.error('[Link] Gagal menurunkan kode verifikasi:', e);
+          return null;
+        })
+      );
 
       const { pendingId } = await claimDeviceLink({
         token,
@@ -295,6 +312,23 @@ export default function LinkDevicePage() {
                     : t('auth:link.submit')}
           </button>
         </form>
+
+        {sasCode && busy && (
+          <div className="mt-5 rounded-xl bg-bg-main border border-text-secondary/10 p-3">
+            <p className="text-[10px] uppercase tracking-widest text-text-secondary">
+              {t('auth:link.sas_label')}
+            </p>
+            <p
+              data-testid="new-device-sas"
+              className="mt-1 font-mono text-2xl tracking-[0.2em] text-text-primary select-all"
+            >
+              {formatLinkSas(sasCode)}
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-text-secondary/80">
+              {t('auth:link.sas_hint')}
+            </p>
+          </div>
+        )}
 
         {phase === 'waiting' && (
           <div className="mt-5 flex items-start gap-2 rounded-xl bg-bg-main border border-text-secondary/10 p-3 text-xs text-text-secondary">

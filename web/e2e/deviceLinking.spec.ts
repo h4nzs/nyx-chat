@@ -122,9 +122,22 @@ test.describe('Tautan perangkat (QR)', () => {
     await newDevice.locator('#link-password-confirm').fill(PASSWORD);
     await newDevice.getByRole('button', { name: /^Link device$/i }).click();
 
-    // Perangkat lama menerima `auth:linking_request` → tombol approve muncul.
+    // [SEC 2026-10-30] Kode verifikasi harus SAMA di dua layar; berbeda berarti
+    // server menukar kunci perangkat baru dan tautan wajib ditolak.
+    const newDeviceSas = newDevice.getByTestId('new-device-sas');
+    await expect(newDeviceSas).toBeVisible({ timeout: 60000 });
+    const newDeviceCode = (await newDeviceSas.innerText()).trim();
+
+    // Perangkat lama menerima `auth:linking_request` → kode + tombol approve muncul.
+    const oldDeviceSas = page.getByTestId('link-sas-code');
+    await expect(oldDeviceSas).toBeVisible({ timeout: 90000 });
+    expect((await oldDeviceSas.innerText()).trim()).toBe(newDeviceCode);
+
+    // Approve terkunci sampai pengguna mengonfirmasi kode di perangkat ini.
     const approveButton = page.getByRole('button', { name: /Approve device/i }).first();
-    await expect(approveButton).toBeVisible({ timeout: 90000 });
+    await expect(approveButton).toBeDisabled();
+    await page.getByTestId('link-sas-confirm').check();
+    await expect(approveButton).toBeEnabled();
     await approveButton.click();
 
     // Perangkat baru menyelesaikan tautan lalu login (polling status 2 dtk).

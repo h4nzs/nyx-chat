@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔐 Kunci perangkat baru diautentikasi sebelum arsip riwayat diseal (2026-10-30)
+
+Arsip riwayat diseal ke X-Wing public key perangkat baru yang diterima
+perangkat lama **lewat server** (`auth:linking_request`), sedangkan QR hanya
+membawa token milik perangkat lama. Server yang jahat/terkompromi karena itu
+bisa menukar kunci itu dengan miliknya, menerima kunci arsip `K` yang diseal ke
+kunci palsu, lalu membaca seluruh riwayat — tanpa tanda apa pun di perangkat
+lama (impor di perangkat baru memang akan gagal, tetapi data sudah bocor).
+
+Pasangan perangkat sekarang menampilkan **kode verifikasi 6 digit** yang
+diturunkan dari `pqPublicKey` perangkat baru (`web/src/lib/deviceLinkSas.ts`):
+perangkat baru menghitungnya dari kunci yang baru ia buat, perangkat lama dari
+kunci yang dikirim server. Pengguna wajib mencocokkan keduanya; tombol setuju
+di perangkat lama **terkunci** sampai kode dikonfirmasi, dan
+`sendHistoryArchive` menghitung ulang kode dari kunci yang akan dipakai menyegel
+`K` — beda kode berarti berhenti sebelum `presign`/`ready` (tidak ada unggahan,
+tidak ada `abort` yang perlu dikirim). Server yang menukar kunci menghasilkan
+dua kode berbeda; peluang kode kebetulan cocok 1/10^6 per percobaan.
+
+QR tidak bisa membawa hash kunci perangkat baru (QR ditampilkan perangkat lama,
+kunci perangkat baru dibuat setelah token dipindai), jadi dipilih perbandingan
+kode — pola SSP/safety number. Residual yang didokumentasikan di `docs/40`
+§40.10.1: SAS mengikat kunci penerima arsip, bukan jalur password `/login`.
+
 ## 🩹 Riwayat chat tidak lagi lenyap sehari setelah dibaca (2026-10-30)
 
 Pada 1:1, `expiresAt` di wire **selalu** terisi: server memakainya untuk retensi

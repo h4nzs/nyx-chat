@@ -36,6 +36,7 @@ import {
   uploadHistoryArchive,
   abortHistoryUpload,
 } from './linkHistoryClient';
+import { deriveLinkSas, LinkSasMismatchError } from './deviceLinkSas';
 
 /** Penanda jenis arsip di setiap chunk (ikut AEAD). */
 export const HISTORY_MARKER = 'history';
@@ -190,8 +191,23 @@ export async function sendHistoryArchive(input: {
   deviceId: string;
   /** X-Wing public key perangkat baru (base64url) dari `auth:linking_request`. */
   pqPublicKeyB64: string;
+  /**
+   * [SEC 2026-10-30] Kode SAS yang DIKONFIRMASI pengguna di perangkat ini untuk
+   * kunci di atas (lihat `deviceLinkSas.ts`). Wajib: tanpa konfirmasi, kunci
+   * arsip tidak boleh diseal ke kunci yang datang dari server. Bila kunci
+   * berubah antara konfirmasi dan unggah (mis. event lain menimpa state), kode
+   * hasil hitung ulang berbeda → gagal SEBELUM presign/ready.
+   */
+  confirmedSas: string;
   onProgress?: (label: 'exporting' | 'uploading' | 'ready') => void;
 }): Promise<SendHistoryResult> {
+  // Fail-closed paling awal: tidak ada ekspor, tidak ada presign, tidak ada
+  // `ready` bila kode tidak dikonfirmasi / tidak cocok dengan kunci ini.
+  const expectedSas = await deriveLinkSas(input.pqPublicKeyB64);
+  if (!input.confirmedSas || input.confirmedSas !== expectedSas) {
+    throw new LinkSasMismatchError();
+  }
+
   const key = await generateArchiveKey();
 
   try {
