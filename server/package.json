@@ -75,7 +75,7 @@
     "@types/qs": "^6.15.1",
     "@types/ua-parser-js": "^0.7.39",
     "@types/web-push": "^3.6.4",
-    "prisma": "^7.10.0",
+    "prisma": "^7.10.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
