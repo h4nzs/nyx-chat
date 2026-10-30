@@ -32,7 +32,7 @@
     "@cloudflare/blindrsa-ts": "0.4.6",
     "@noble/post-quantum": "0.7.1",
     "@nyx/shared": "workspace:*",
-    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.0",
     "@simplewebauthn/server": "^13.3.3",
     "argon2": "^0.45.1",
