@@ -396,6 +396,18 @@ tidak bisa memulihkannya lagi. Penggantinya sudah ada sebelum penghapusan
 (berkas `.nyxbak` dan salinan awan R2), dan file itu sendiri
 tidak pernah menjadi satu-satunya cadangan yang aman karena isinya terbuka.
 
+**Audit `7544c18` (2026-10-30):** tidak ada simbol `exportDatabaseToJson` /
+`importDatabaseFromJson` yang tersisa (grep = 0 di luar komentar penjelasan),
+`web tsc` bersih, dan jalur login/restore tetap utuh — modal recovery `/login`
+membuka `BackupRestoreModal` (`.nyxbak` + recovery phrase), Settings memakai
+jalur yang sama, dan suite `backupFormat`/`backupPayload`/`backupRestore`/
+`backupTransport`/`keychainDbPersistence` lulus. **Tidak ada migrasi** untuk
+berkas `.nyxvault` lama, dan itu memang disengaja: isinya JSON terbuka (kunci
+sesi/grup mentah), jadi berkas tersebut sebaiknya **dihapus**, bukan diimpor.
+Tidak ada UI yang mengimpor atau mendeteksinya; pengguna yang mencoba membuka
+berkas itu di modal restore akan ditolak sebagai arsip tak dikenal (bukan
+setengah-tertulis).
+
 ---
 
 ## 31.6d Fase 5 — benchmark 10k pesan (selesai)
