@@ -26,11 +26,16 @@ import { libsodiumBackupValueCodec, readBackupChunk, type BackupValueCodec } fro
 import { parseBackupArchive, type BackupCryptoBackend } from './backupFormat';
 import { getSodium } from './sodiumInitializer';
 import { pushContactBundle, saveContactRecord } from './contactStore';
+import { saveCachedGroupParticipants } from './keychainDb';
 import { shadowVault } from './shadowVaultDb';
 import type { ContactRecord, Conversation } from '@nyx/shared';
 import type { Message } from '@store/conversation';
 
-import { HISTORY_MARKER, HISTORY_TABLES } from './linkHistoryExport';
+import {
+  HISTORY_MARKER,
+  HISTORY_TABLES,
+  type CachedGroupParticipantsRecord,
+} from './linkHistoryExport';
 import {
   consumeHistoryArchive,
   digestArchive,
@@ -61,6 +66,7 @@ export interface HistoryImportWriters {
   contacts?: (records: ContactRecord[]) => Promise<void>;
   conversations?: (records: Conversation[]) => Promise<void>;
   messages?: (records: Message[]) => Promise<void>;
+  groupCachedParticipants?: (records: CachedGroupParticipantsRecord[]) => Promise<void>;
 }
 
 /**
@@ -99,6 +105,7 @@ export async function importHistoryArchive(opts: {
 
   const contacts: ContactRecord[] = [];
   const conversations: Conversation[] = [];
+  const cachedParticipants: CachedGroupParticipantsRecord[] = [];
   const tables: Record<string, number> = {};
   const batchSize = Math.max(1, opts.batchSize ?? MESSAGE_BATCH_SIZE);
 
@@ -108,6 +115,13 @@ export async function importHistoryArchive(opts: {
   const writeConversations = opts.writers?.conversations ?? (async (rows) => {
     for (const row of rows) await shadowVault.saveConversation(row);
   });
+  const writeCachedParticipants =
+    opts.writers?.groupCachedParticipants ?? (async (rows) => {
+      // Bukan rahasia (id saja), jadi ditulis langsung tanpa penyegelan ulang.
+      for (const row of rows) {
+        await saveCachedGroupParticipants(row.conversationId, row.userIds);
+      }
+    });
   const writeMessages = opts.writers?.messages ?? (async (rows) => {
     // [docs/40 §40.8] Penulis yang SAMA dengan jalur pesan biasa: menyegel ulang
     // `content` dengan kunci vault identitas BARU, mengisi `orderBucketMs`, dan
@@ -141,6 +155,8 @@ export async function importHistoryArchive(opts: {
       contacts.push(...(chunk.records as ContactRecord[]));
     } else if (chunk.table === 'conversations') {
       conversations.push(...(chunk.records as Conversation[]));
+    } else if (chunk.table === 'groupCachedParticipants') {
+      cachedParticipants.push(...(chunk.records as CachedGroupParticipantsRecord[]));
     } else if (chunk.table === 'messages') {
       // Pesan ditulis bertahap, bukan dikumpulkan sampai akhir: riwayat puluhan
       // ribu pesan tidak boleh menahan semuanya di memori sebelum frame pertama
@@ -160,12 +176,14 @@ export async function importHistoryArchive(opts: {
   // dan tanpa baris percakapan pesan tidak akan pernah tampil di daftar chat.
   if (contacts.length > 0) await writeContacts(contacts);
   if (conversations.length > 0) await writeConversations(conversations);
+  if (cachedParticipants.length > 0) await writeCachedParticipants(cachedParticipants);
   await flushMessages();
   // Batch terakhir baru ditulis di sini, jadi progres terakhir dilaporkan ulang
   // supaya UI tidak berhenti di angka sebelum batch penutup.
   opts.onProgress?.({ frame: frames.length, totalFrames: frames.length, messages: writtenMessages });
 
-  const records = contacts.length + conversations.length + writtenMessages;
+  const records =
+    contacts.length + conversations.length + cachedParticipants.length + writtenMessages;
   return { records, tables, messages: writtenMessages };
 }
 

@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 📊 Arsip riwayat link: metrik, alarm, cache partisipan grup, dan angka terukur (2026-10-30)
+
+Operasi arsip riwayat sekarang terukur: `nyx_link_history_ops_total{op,result}`
+(`presign|ready|abort|download|consume` × `ok|denied|missing|error`, tanpa label
+identitas). `denied` = penolakan kebijakan 4xx, `missing` = TTL habis / sudah
+dikonsumsi, `error` = kegagalan infrastruktur. Alarm
+`NyxLinkHistoryConsumeFailing` menyala bila `consume` gagal (arsip sudah diimpor
+tetapi objeknya tertinggal di R2 — klien hanya mencetak `console.warn`), lengkap
+dengan kasus drill menyala **dan** tidak menyala.
+
+Arsip juga membawa `groupCachedParticipants` (id anggota grup, bukan rahasia):
+tanpa itu grup hasil impor tampil tanpa daftar anggota sampai server mengirim
+ulang cache-nya.
+
+Benchmark 10k pesan (fixture identik dengan `backupBench`, harness
+`linkHistoryBench`): arsip **3,46 MB / 17 frame**, ekspor 932 ms, impor 240 ms,
+puncak heap 106 MB. Penyegelan ulang + tulis IndexedDB tidak termasuk (penulis
+di-inject), jadi angka itu batas bawah.
+
+Paginasi `seq` setelah impor dikunci `olderPageCursor` + test yang memaginasi
+arsip nyata: halaman berikutnya menyambung tanpa duplikat dan tanpa lompatan.
+
+Suite E2E kini **memaksa** `VITE_API_URL=/api`: bila `web/.env` berisi URL API
+absolut (mis. produksi), seluruh suite sebelumnya menulis ke sana — registrasi
+akun uji dan pesan sungguhan — sementara spec mengira sedang menguji stack lokal.
+
 ## 🔗 Arsip riwayat untuk perangkat hasil link — kontak, percakapan, dan pesan (2026-10-29)
 
 Link perangkat (`/link`) membuat **identitas baru**, jadi menyalin baris Dexie

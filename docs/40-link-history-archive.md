@@ -10,8 +10,13 @@
 > Termasuk percobaan ulang: kegagalan impor ditandai di `kvStore`
 > (`nyx_link_history_pending`, boolean tanpa timestamp), satu percobaan otomatis saat app start, dan
 > tombol "Ambil riwayat dari perangkat sebelumnya" di Settings → Active Sessions
-> (`web/src/lib/linkHistoryRetry.ts`). Belum dikerjakan: `groupCachedParticipants`
-> di arsip dan benchmark 10k pesan.
+> (`web/src/lib/linkHistoryRetry.ts`).
+>
+> **Fase 3 sebagian LANDED (2026-10-30):** metrik `nyx_link_history_ops_total`
+> beserta alarm `NyxLinkHistoryConsumeFailing` + drill, `groupCachedParticipants`
+> ikut arsip, benchmark 10k pesan **terukur** (§40.7), dan test paginasi `seq`
+> setelah impor (§40.13 poin 2). **Belum:** e2e pesan grup setelah link (§40.13
+> poin 1) — belum terverifikasi, bukan diklaim bekerja.
 >
 > Tidak ada format beku yang berubah: arsip memakai kontainer `NYXB` v1 apa
 > adanya dengan **kunci acak** (bukan turunan recovery phrase), dan tidak ada
@@ -288,29 +293,43 @@ berpengaruh.
 `BACKUP_KEY_SECRET` dipakai ulang sebagai rahasia HMAC (sudah jadi pola; rotasi
 membuat arsip lama tak bisa ditemukan — sama seperti backup).
 
-### Metrik
+### Metrik — LANDED 2026-10-30
 
-`nyx_link_history_ops_total{op,result}` — rencana `op ∈ presign|ready|download|consume`,
-`result ∈ ok|denied|missing|error`, tanpa label identitas (aturan WS-G).
-**Belum dipasang**: metrik ini belum dideklarasikan di
-`server/src/utils/metrics.ts` dan endpoint belum menaikkannya — jangan
-menambahkan alert yang merujuknya sebelum itu (kontrak
-`scripts/drill-alerts.sh` akan menolak metrik yang tidak dideklarasikan).
+`nyx_link_history_ops_total{op,result}` (`server/src/utils/metrics.ts` →
+`LINK_HISTORY_OPS`), tanpa label identitas (aturan WS-G; `deviceId` bentuk UUID
+sehingga penjaga metrik menolaknya):
 
-Alert opsional (bukan gate): `rate(nyx_link_history_ops_total{op="consume",result="error"}[15m]) > 0`
-— konsumen gagal berarti pengguna kehilangan riwayat; drill `ops/prometheus/tests.yml`
-butuh satu kasus firing **dan** satu non-firing bila rule ditambahkan.
+- `op ∈ presign|ready|abort|download|consume`,
+- `result ∈ ok|denied|missing|error`.
+
+`denied` = penolakan kebijakan yang disengaja (4xx: perangkat bukan milik akun,
+jendela link tutup, urutan protokol/ukuran salah, `NO_HISTORY`), `missing` =
+kondisi yang hilang karena TTL terpakai / sudah dikonsumsi (bukan kesalahan
+klien: `GET /` → `none`, `download` → 404, `consume` idempoten), `error` =
+kegagalan infrastruktur (R2/Redis/DB) — hanya yang terakhir yang layak jadi
+alarm. `GET /limits` dan `GET /` (status) sengaja tidak dihitung: keduanya murah
+dan dipanggil berulang saat klien memantau.
+
+Alarm `NyxLinkHistoryConsumeFailing`: `sum by (result)
+(increase(nyx_link_history_ops_total{op="consume",result="error"}[1h])) > 0`
+selama 10 menit (severity high) — konsumen gagal berarti arsip sudah diimpor
+tetapi objeknya tertinggal di R2, dan klien hanya menulis `console.warn`
+sehingga tanpa alarm ini tidak terlihat dari mana pun. Drill-nya ada di
+`ops/prometheus/tests.yml` (satu firing + satu non-firing yang membuktikan
+konsumsi sah `ok`/`missing` tidak memicunya); `scripts/drill-alerts.sh` lulus
+43 aturan.
 
 ---
 
 ## 40.7 Ekspor di perangkat lama
 
 Modul baru `web/src/lib/linkHistoryExport.ts`, memakai **pembaca yang sudah
-ada** — bukan query mentah ke Dexie:
-
-1. `HISTORY_TABLES = ['contacts','conversations','messages']`.
-   (`groupCachedParticipants` belum ikut — cache nama anggota grup bisa
-diambil ulang dari server, jadi bukan bagian tahap ini.)
+ada** — bukan query mentah ke Dexie:1. `HISTORY_TABLES = ['contacts','conversations','messages','groupCachedParticipants']`.
+   `groupCachedParticipants` (2026-10-30) ikut karena isinya hanya **id**
+   anggota grup — bukan rahasia, dan tanpanya grup hasil impor tampil tanpa
+   daftar anggota sampai server mengirim ulang cache-nya. Ia ditulis apa adanya
+   (tanpa penyegelan ulang), berbeda dari `profileCache` yang tetap dibuang
+   (blob profilnya disegel kunci lama).
 2. **Kontak**: `getAllContacts()` (sudah mendekripsi `data`), bentuk = record kontak biasa.
 3. **Percakapan**: `shadowVault.getAllConversations()` → objek `Conversation`
    dengan `participants`/`decryptedMetadata` sudah didekripsi. `unreadCount`
@@ -345,8 +364,26 @@ diambil ulang dari server, jadi bukan bagian tahap ini.)
    dipakai agar klien tidak menyimpan salinan konstanta kuota; bila endpoint itu
    tidak terjangkau, presign server tetap penegak terakhir.
 
-On-device cost: 10k pesan ≈ puluhan MB JSON sebelum padding; diukur dengan pola
-`web/src/lib/backupBench.ts` (§40.12 gate).
+### Biaya on-device (diukur 2026-10-30)
+
+`web/src/lib/linkHistoryBench.ts` (`pnpm --filter nyx-web run bench:linkhistory`,
+pola yang sama dengan `backupBench`) pada fixture 10.000 pesan (isi 160 B,
+10% dengan `fileMeta`) + 20 percakapan + 200 kontak + 7 cache partisipan grup:
+
+| Fase | Waktu | Puncak heap | Puncak RSS |
+|---|---|---|---|
+| ekspor (tabel → frame AEAD + digest) | 932 ms | 106 MB | 268 MB |
+| impor (parse + verifikasi + tulis) | 240 ms | 106 MB | 282 MB |
+
+Arsip final **3,46 MB / 17 frame**. Batas gate di kode
+(`LINK_HISTORY_BENCH_BUDGET`): 30 s per fase, 256 MB arsip — sengaja longgar,
+angkanya yang dilaporkan.
+
+Batasannya jujur: penulis impor di-inject sebagai no-op, jadi **penyegelan ulang
+(crypto worker) dan tulis IndexedDB nyata tidak termasuk**; angka ini batas
+bawah untuk serialisasi + arsip. Angka 3,46 MB juga menunjukkan padding 1 KB
+per frame menyembunyikan panjang per pesan tetapi **bukan** volume total —
+ukuran arsip tetap membocorkan kasar banyaknya riwayat (§40.10).
 
 ## 40.8 Impor di perangkat baru
 
@@ -506,15 +543,22 @@ terunggah → perangkat baru membacanya dengan kunci vault identitas baru →
   per app start).
 - Belum: benchmark 10k pesan.
 
-### Fase 3 — operasional & bukti — **BELUM**
-- `metrics.ts` (`LINK_HISTORY_OPS`) + kenaikan di endpoint **belum ada**.
+### Fase 3 — operasional & bukti — **SEBAGIAN LANDED (2026-10-30)**
+- `metrics.ts` (`LINK_HISTORY_OPS`) + kenaikan di 5 op + alarm
+  `NyxLinkHistoryConsumeFailing` + drill `tests.yml` — **LANDED** (§40.6).
 - `LINK_HISTORY_ENABLED` sudah ada di `.env.example` dan dijaga
   `server/tests/envExample.test.ts` (bagian Fase 1).
-- Benchmark 10k pesan (pola `backupBench`) — angka waktu + puncak memori
-  dicatat di dokumen ini setelah diukur, bukan diasumsikan.
-- `docs/10` (env + lifecycle rule), `docs/12` (5 endpoint). `docs/14` §14.10 dan
-  `docs/31` §31.6 sudah menunjuk ke dokumen ini sebagai desain; perbarui
-  kalimatnya menjadi "landed" setelah kode ada (jangan klaim selesai lebih awal).
+- Benchmark 10k pesan (pola `backupBench`) — **LANDED**: harness
+  `web/src/lib/linkHistoryBench.ts` + runner `linkHistoryBench.test.ts`
+  (`bench:linkhistory`), angka dicatat di §40.7.
+- Paginasi `seq` setelah impor — **LANDED**: `olderPageCursor`
+  (`web/src/utils/messageOrder.ts`) dipakai `loadPreviousMessages`,
+  dikunci `web/src/lib/__tests__/linkHistoryPagination.test.ts`.
+- **BELUM:** e2e pesan grup setelah link (§40.13 poin 1). Bukan karena kode
+  dinyatakan benar, tetapi karena belum ada run yang sah: E2E di mesin ini
+  harus dijalankan terhadap API lokal (`docs/11` §11.2 — `VITE_API_URL` absolut
+  di `web/.env` dulu mengarahkan suite ke API produksi; sekarang dipaksa
+  relatif oleh `playwright.config.ts`).
 
 ### Gate kualitas (sama dengan aturan repo)
 - `npx tsc --noEmit` server & web, `pnpm -r --if-present run test`, `pnpm run lint`
@@ -526,13 +570,26 @@ terunggah → perangkat baru membacanya dengan kunci vault identitas baru →
 
 ## 40.13 Pertanyaan terbuka (butuh keputusan sebelum Fase 2)
 
-1. **Pesan grup setelah link.** Distribusi sender-key ditujukan ke `deviceKey`;
-   setelah link kuncinya baru. Perlu E2E dua klien: kirim ke grup setelah link —
-   kalau distribusi tidak otomatis menyasar kunci baru, itu bug tersendiri
-   (di luar arsip) dan harus dicatat.
-2. **`seq` impor.** Nomor urut server tetap valid untuk akun yang sama, tetapi
-   `fetch-older` perangkat baru mulai dari `seq` tertua hasil impor. Perlu satu
-   test bahwa halaman berikutnya tidak menduplikasi atau melompati pesan.
+1. **Pesan grup setelah link — BELUM TERVERIFIKASI (masih terbuka).**
+   Distribusi sender-key ditujukan ke `deviceKey`; setelah link kuncinya baru.
+   E2E dua klien (kirim ke grup setelah link, peer lama harus membaca) belum
+   pernah berjalan terhadap stack lokal yang benar, jadi tidak ada klaim
+   "bekerja" di dokumen ini. Yang diketahui dari pembacaan kode: perangkat hasil
+   link bisa mengirim ke grup hanya bila ia punya **metadata grup ter-dekripsi**
+   (pseudonymMap + peta token) — dan satu-satunya sumbernya adalah arsip ini
+   (`conversations.decryptedMetadata` ikut diekspor dan ditulis ulang oleh
+   `saveConversation`). Kalau impor riwayat gagal/dilewati, klien menolak
+   mengirim dengan `Pseudonym pengirim grup tidak tersedia … metadata grup
+   v2/v3 belum ter-dekripsi`; itu perilaku yang benar, tetapi UX-nya perlu
+   dilihat. Saat menjalankan e2e-nya: pastikan API lokal (§11.2), bukan API
+   produksi.
+2. **`seq` impor — TERJAWAB.** Nomor urut server tetap valid untuk akun yang
+   sama. `olderPageCursor` (`web/src/utils/messageOrder.ts`) memilih `seq` pesan
+   **tertua** yang dimiliki (fallback `createdAt` hanya untuk baris legacy) dan
+   `loadPreviousMessages` mengirimnya sebagai `?before=<seq>`; test
+   `web/src/lib/__tests__/linkHistoryPagination.test.ts` mengimpor arsip nyata
+   lalu memaginasi 60 pesan lebih lama: tidak ada duplikat, tidak ada lompatan,
+   berhenti saat `nextCursor` null.
 3. **Kontak.** Apakah `pushContactBundle()` setelah impor cukup, atau bundle di
    server perlu ditandai "milik identitas X" agar perangkat lain tahu kapan
    harus mengabaikannya? (Rekomendasi: cukup push; penanda baru jika muncul

@@ -44,6 +44,14 @@ export default defineConfig({
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
+      // [E2E ISOLASI] `web/.env` lokal boleh berisi `VITE_API_URL` ABSOLUT yang
+      // menunjuk API produksi. Tanpa paksaan ini seluruh suite menulis ke sana
+      // (registrasi akun uji, pesan, unggahan) sementara spec-nya mengira sedang
+      // menguji stack lokal — dan endpoint baru selalu 404 di sana. Env proses
+      // menang atas berkas `.env` di Vite, jadi API dipaksa relatif: request
+      // lewat proxy dev server, yaitu stack lokal (`NYX_E2E_API_PROXY_TARGET`
+      // bila diset, default 4000).
+      env: { VITE_API_URL: '/api' },
     }
   ],
 });

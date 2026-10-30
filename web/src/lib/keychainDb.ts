@@ -883,6 +883,17 @@ export async function getCachedGroupParticipants(conversationId: string): Promis
 }
 
 /**
+ * [docs/40 §40.7] Semua baris cache partisipan grup — dipakai arsip riwayat
+ * perangkat hasil link. Isinya hanya id (bukan rahasia): tanpa cache ini, grup
+ * hasil impor tampil tanpa nama anggota sampai server mengirim ulang daftarnya.
+ */
+export async function listCachedGroupParticipants(): Promise<
+  Array<{ conversationId: string; userIds: string[] }>
+> {
+  return db.groupCachedParticipants.toArray();
+}
+
+/**
  * [REWRITE 2026-10-02] Semua receiver state (aktif + arsip era lama) untuk satu
  * percakapan, sudah didekripsi at-rest — bahan `pickChainState` (pola libsignal
  * SenderKeyRecord.states).

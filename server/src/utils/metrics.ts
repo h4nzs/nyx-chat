@@ -392,6 +392,23 @@ export const BACKUP_OPS = defineCounter(
 );
 
 /**
+ * [docs/40 §40.6] Operasi arsip riwayat perangkat hasil link, per op dan hasil.
+ *
+ * `result="error"` pada `op="consume"` adalah yang paling penting: konsumen
+ * gagal berarti riwayat pengguna tidak pernah terhapus dari R2 dan bisa terunduh
+ * ulang — kegagalan yang tidak terlihat dari mana pun kecuali dari sini (klien
+ * hanya menulis `console.warn`, dan impor tetap dilaporkan sukses).
+ *
+ * Tanpa label identitas (aturan WS-G): `op`/`result` adalah enum pendek tetap,
+ * dan `deviceId` sengaja tidak pernah ikut (ia bentuk UUID → ditolak penjaga).
+ */
+export const LINK_HISTORY_OPS = defineCounter(
+  'nyx_link_history_ops_total',
+  'Operasi arsip riwayat perangkat hasil link, per op dan hasil',
+  ['op', 'result']
+);
+
+/**
  * [docs/37 §37.4 P8] Jitter rilis pesan grup (`GROUP_RELEASE_JITTER_MS`).
  *
  * Satu-satunya cara membuktikan fitur ini benar-benar bekerja (dan tidak

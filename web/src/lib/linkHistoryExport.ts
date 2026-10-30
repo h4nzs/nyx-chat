@@ -21,6 +21,7 @@ import { libsodiumBackupValueCodec } from './backupPayload';
 import { createFramedBackup, type BackupStore, type CreateBackupReport } from './backupRestore';
 import { getSodium } from './sodiumInitializer';
 import { getAllContacts } from './contactStore';
+import { listCachedGroupParticipants } from './keychainDb';
 import { shadowVault } from './shadowVaultDb';
 import type { ContactRecord } from '@nyx/shared';
 import type { Conversation, Message } from '@store/conversation';
@@ -72,12 +73,24 @@ export function parseHistoryTooLarge(error: unknown): { size: number; limit: num
  * (dipakai untuk tipe frame + urutan deterministik), tetapi isinya objek domain,
  * bukan baris Dexie.
  */
-export const HISTORY_TABLES = ['contacts', 'conversations', 'messages'] as const;
+export const HISTORY_TABLES = [
+  'contacts',
+  'conversations',
+  'messages',
+  'groupCachedParticipants',
+] as const;
+
+/** Cache id partisipan grup (bukan rahasia; nama diambil ulang dari server). */
+export interface CachedGroupParticipantsRecord {
+  conversationId: string;
+  userIds: string[];
+}
 
 export interface HistoryTables {
   contacts: ContactRecord[];
   conversations: Conversation[];
   messages: Message[];
+  groupCachedParticipants: CachedGroupParticipantsRecord[];
 }
 
 export interface HistoryArchiveReport extends CreateBackupReport {
@@ -86,20 +99,28 @@ export interface HistoryArchiveReport extends CreateBackupReport {
 
 /** Baca riwayat yang bisa dipindah lewat pembaca yang sudah mendekripsi. */
 export async function readHistoryTables(): Promise<HistoryTables> {
-  const [contacts, conversations, messages] = await Promise.all([
+  const [contacts, conversations, messages, groupCachedParticipants] = await Promise.all([
     getAllContacts(),
     shadowVault.getAllConversations(),
     // [docs/40 §40.7] Pesan dibaca lewat `decodeMessageRecord` yang sama dengan
     // tampilan chat — bukan salinan baris Dexie (yang tersegel kunci identitas
     // LAMA dan akan tampil kosong di perangkat baru).
     shadowVault.getMessagesForExport(),
+    // Bukan rahasia (id saja) dan tanpa ini grup hasil impor tampil tanpa daftar
+    // anggota sampai server mengirim ulang cache-nya.
+    listCachedGroupParticipants(),
   ]);
-  return { contacts, conversations, messages };
+  return { contacts, conversations, messages, groupCachedParticipants };
 }
 
 /** Jumlah catatan yang akan ikut (untuk menampilkan/menyembunyikan opsi UI). */
 export function countHistoryRecords(tables: HistoryTables): number {
-  return tables.contacts.length + tables.conversations.length + tables.messages.length;
+  return (
+    tables.contacts.length +
+    tables.conversations.length +
+    tables.messages.length +
+    tables.groupCachedParticipants.length
+  );
 }
 
 function historyStore(tables: HistoryTables): BackupStore {
@@ -108,6 +129,7 @@ function historyStore(tables: HistoryTables): BackupStore {
       contacts: tables.contacts,
       conversations: tables.conversations,
       messages: tables.messages,
+      groupCachedParticipants: tables.groupCachedParticipants,
     }),
     // Arsip ini tidak pernah ditulis lewat `BackupStore` (impor memakai penulis
     // domain di `linkHistoryImport.ts`), jadi jalur tulis sengaja tidak ada.

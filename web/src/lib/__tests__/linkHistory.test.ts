@@ -46,6 +46,15 @@ const HISTORY_MESSAGES = Array.from({ length: 5 }, (_, i) => ({
   seq: 100 + i,
 }));
 
+// [docs/40 §40.7] Cache partisipan grup ikut (id saja, bukan rahasia): tanpa
+// ini grup hasil impor tampil tanpa anggota sampai server mengirim ulang.
+vi.mock('../keychainDb', () => ({
+  listCachedGroupParticipants: async () => [
+    { conversationId: 'conv-g', userIds: ['peer-a', 'peer-b'] },
+  ],
+  saveCachedGroupParticipants: vi.fn(async () => {}),
+}));
+
 vi.mock('../shadowVaultDb', () => ({
   shadowVault: {
     getAllConversations: async () => [
@@ -147,7 +156,9 @@ describe('arsip riwayat: ekspor', () => {
     expect(tables.conversations[0]!.id).toBe('conv-a');
     expect(tables.messages).toHaveLength(5);
     expect(tables.messages[0]!.seq).toBe(100);
-    expect(countHistoryRecords(tables)).toBe(7);
+    expect(tables.groupCachedParticipants).toHaveLength(1);
+    expect(tables.groupCachedParticipants[0]!.conversationId).toBe('conv-g');
+    expect(countHistoryRecords(tables)).toBe(8);
   });
 
   it('setiap chunk membawa penanda history dan tabel yang diharapkan', async () => {
@@ -157,7 +168,7 @@ describe('arsip riwayat: ekspor', () => {
     const tables = await readHistoryTables();
 
     const report = await createHistoryArchive({ key, tables });
-    expect(report.records).toBe(7);
+    expect(report.records).toBe(8);
     expect(report.size).toBeGreaterThan(0);
     expect(report.digest).toMatch(/^[0-9a-f]{64}$/);
 
@@ -170,6 +181,7 @@ describe('arsip riwayat: ekspor', () => {
     expect([...new Set(chunks.map((c) => c.table))].sort()).toEqual([
       'contacts',
       'conversations',
+      'groupCachedParticipants',
       'messages',
     ]);
   });
@@ -186,7 +198,8 @@ describe('arsip riwayat: impor', () => {
       contacts: ContactRecord[];
       conversations: Conversation[];
       messages: { id: string; seq?: number }[];
-    } = { contacts: [], conversations: [], messages: [] };
+      groupCachedParticipants: { conversationId: string; userIds: string[] }[];
+    } = { contacts: [], conversations: [], messages: [], groupCachedParticipants: [] };
     const report = await importHistoryArchive({
       bytes: archive.bytes,
       key,
@@ -200,14 +213,26 @@ describe('arsip riwayat: impor', () => {
         messages: async (rows) => {
           written.messages.push(...rows);
         },
+        groupCachedParticipants: async (rows) => {
+          written.groupCachedParticipants.push(...rows);
+        },
       },
     });
 
-    expect(report.records).toBe(7);
+    expect(report.records).toBe(8);
     expect(report.messages).toBe(5);
-    expect(report.tables).toEqual({ contacts: 1, conversations: 1, messages: 5 });
+    expect(report.tables).toEqual({
+      contacts: 1,
+      conversations: 1,
+      messages: 5,
+      groupCachedParticipants: 1,
+    });
     expect(written.contacts[0]!.userId).toBe('peer-a');
     expect(written.conversations[0]!.id).toBe('conv-a');
+    expect(written.groupCachedParticipants[0]).toEqual({
+      conversationId: 'conv-g',
+      userIds: ['peer-a', 'peer-b'],
+    });
     // `seq` ikut supaya kursor paginasi server tetap presisi.
     expect(written.messages.map((m) => m.seq)).toEqual([100, 101, 102, 103, 104]);
   });
@@ -227,6 +252,7 @@ describe('arsip riwayat: impor', () => {
       writers: {
         contacts: async () => {},
         conversations: async () => {},
+        groupCachedParticipants: async () => {},
         messages: async (rows) => {
           batches.push(rows.length);
         },

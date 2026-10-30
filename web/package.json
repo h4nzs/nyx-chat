@@ -19,6 +19,7 @@
     "lint": "oxlint src",
     "test": "vitest run",
     "bench:backup": "NYX_BENCH=1 vitest run src/lib/__tests__/backupBench.test.ts",
+    "bench:linkhistory": "NYX_BENCH=1 vitest run src/lib/__tests__/linkHistoryBench.test.ts",
     "bench:spqr": "NYX_BENCH=1 vitest run src/lib/__tests__/spqrBench.test.ts",
     "bench:search": "NYX_BENCH=1 vitest run src/lib/__tests__/searchBench.test.ts",
     "bench:pq": "NYX_BENCH=1 vitest run src/lib/__tests__/pqBench.test.ts",

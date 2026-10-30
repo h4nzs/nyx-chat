@@ -165,8 +165,13 @@ export const BACKUP_BENCH_BUDGET = {
   archiveBytes: 256 * 1024 * 1024,
 } as const;
 
-/** Ambil sampel `process.memoryUsage()` berkala agar puncak selama fase awet. */
-function startMemorySample(intervalMs = 10): { stop(): MemorySample } {
+/**
+ * Ambil sampel `process.memoryUsage()` berkala agar puncak selama fase awet.
+ * Diekspor karena harness benchmark lain (arsip riwayat, `linkHistoryBench.ts`)
+ * memakai sampler yang sama — dua salinan akan menghasilkan angka yang tidak
+ * sebanding.
+ */
+export function startMemorySample(intervalMs = 10): { stop(): MemorySample } {
   const memUsage = (globalThis as {
     process?: { memoryUsage?: () => { heapUsed: number; rss: number } };
   }).process?.memoryUsage;

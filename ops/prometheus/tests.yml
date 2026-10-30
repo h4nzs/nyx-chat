@@ -1668,3 +1668,39 @@ tests:
       - eval_time: 90m
         alertname: NyxAttestationRootBundleStale
         exp_alerts: []
+
+  # ==========================================================================
+  # [docs/40 §40.6] Arsip riwayat perangkat hasil link
+  # ==========================================================================
+
+  - name: 'NyxLinkHistoryConsumeFailing: menyala saat consume error'
+    interval: 30s
+    input_series:
+      - series: 'nyx_link_history_ops_total{op="consume",result="error"}'
+        values: '0+1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxLinkHistoryConsumeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: error
+              alertname: NyxLinkHistoryConsumeFailing
+            exp_annotations:
+              summary: 'Konsumsi arsip riwayat perangkat hasil link gagal'
+              description: "Endpoint POST /api/auth/link/history/consume mengembalikan error (bukan penolakan 4xx). Objek arsip sudah diimpor tetapi belum dihapus dari R2; periksa kredensial/bucket R2 dan Redis (state ter-seal) lewat log nyx-api. Arsip yatim dihapus lifecycle rule link-history/, tetapi pengguna yang gagal di sini tidak mendapat konfirmasi 'sekali pakai'."
+
+  # Konsumsi yang sah tetap menaikkan counter berlabel `ok`/`missing`. Aturan
+  # harus DIAM: tanpa kasus ini, ekspresi yang salah (mis. lupa filter `result`)
+  # akan menyala pada setiap link yang berhasil.
+  - name: 'NyxLinkHistoryConsumeFailing: tidak menyala saat konsumsi sukses'
+    interval: 30s
+    input_series:
+      - series: 'nyx_link_history_ops_total{op="consume",result="ok"}'
+        values: '0+2x120'
+      - series: 'nyx_link_history_ops_total{op="download",result="error"}'
+        values: '0+1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NyxLinkHistoryConsumeFailing
+        exp_alerts: []

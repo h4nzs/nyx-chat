@@ -24,6 +24,7 @@ import {
   historySizeLimit,
   validateHistorySize,
 } from '../utils/linkHistoryObject.js';
+import { LINK_HISTORY_OPS, incCounter } from '../utils/metrics.js'
 import { deleteR2File, getPresignedDownloadUrl, getPresignedUploadUrl } from '../utils/r2.js';
 
 // [docs/40 §40.6] Arsip riwayat sekali-pakai untuk perangkat hasil link.
@@ -59,6 +60,25 @@ const linkSealer: LinkingSealer = { seal: sealAtRest, open: openAtRest };
 
 /** Jendela saat perangkat baru masih dianggap "hasil link" untuk unggahan. */
 export const LINK_HISTORY_UPLOAD_WINDOW_MS = 30 * 60 * 1000;
+
+type HistoryOp = 'presign' | 'ready' | 'abort' | 'download' | 'consume';
+
+/**
+ * [docs/40 §40.6] Satu titik pencatatan hasil operasi arsip riwayat.
+ *
+ * `denied` = penolakan kebijakan yang disengaja (401/403/404/409 — perangkat
+ * bukan milik akun, jendela link tutup, kuota, urutan protokol salah), `error` =
+ * kegagalan yang tidak direncanakan (R2/Redis/DB). Membedakannya penting: deret
+ * `denied` yang naik berarti klien/UX salah urutan, sedangkan `error` berarti
+ * infrastruktur — hanya yang kedua yang layak jadi alarm.
+ */
+function countHistory(op: HistoryOp, result: 'ok' | 'denied' | 'missing' | 'error'): void {
+  incCounter(LINK_HISTORY_OPS, { op, result });
+}
+
+function countHistoryFailure(op: HistoryOp, error: unknown): void {
+  countHistory(op, error instanceof ApiError && error.status < 500 ? 'denied' : 'error');
+}
 
 /**
  * Perangkat tujuan harus milik user ini DAN baru dibuat. `createdAt` dipotong
@@ -131,8 +151,10 @@ router.post(
       // `ready` hanya sah untuk ukuran yang disetujui di sini.
       await recordHistoryPresign(linkStore, linkSealer, deviceId, decision.size);
 
+      countHistory('presign', 'ok');
       res.json({ uploadUrl, size: decision.size, urlTtl: decision.urlTtl });
     } catch (error) {
+      countHistoryFailure('presign', error);
       next(error);
     }
   }
@@ -190,8 +212,10 @@ router.post(
         throw new ApiError(409, `HISTORY_${ready.reason.toUpperCase()}`);
       }
 
+      countHistory('ready', 'ok');
       res.json({ ok: true, size: ready.state.size });
     } catch (error) {
+      countHistoryFailure('ready', error);
       next(error);
     }
   }
@@ -216,8 +240,10 @@ router.post(
       await deleteR2File(key).catch(() => {});
       await burnHistory(linkStore, linkSealer, deviceId);
 
+      countHistory('abort', 'ok');
       res.json({ ok: true });
     } catch (error) {
+      countHistoryFailure('abort', error);
       next(error);
     }
   }
@@ -243,12 +269,18 @@ router.post('/download', requireAuth, generalLimiter, async (req, res, next) => 
   try {
     if (!req.deviceId) throw new ApiError(401, 'Unauthorized');
     const state = await readHistoryState(linkStore, linkSealer, req.deviceId);
-    if (!state) throw new ApiError(404, 'NO_HISTORY');
+    if (!state) {
+      // `missing` dibedakan dari `denied`: TTL habis / sudah dikonsumsi bukan
+      // kesalahan klien, dan deret `denied` yang naik harus berarti klien salah.
+      countHistory('download', 'missing');
+      throw new ApiError(404, 'NO_HISTORY');
+    }
 
     const key = deriveLinkHistoryObjectKey(env.backupKeySecret, req.deviceId);
     const urlTtl = 300;
     const downloadUrl = await getPresignedDownloadUrl(key, urlTtl);
 
+    countHistory('download', 'ok');
     res.json({
       downloadUrl,
       sealedKey: state.sealedKey,
@@ -257,6 +289,10 @@ router.post('/download', requireAuth, generalLimiter, async (req, res, next) => 
       urlTtl,
     });
   } catch (error) {
+    // `missing` sudah dicatat di atas; jangan hitung dua kali.
+    if (!(error instanceof ApiError && error.message === 'NO_HISTORY')) {
+      countHistoryFailure('download', error);
+    }
     next(error);
   }
 });
@@ -274,7 +310,10 @@ router.post(
 
       const state = await readHistoryState(linkStore, linkSealer, req.deviceId);
       // Idempoten: konsumsi kedua (retry setelah jaringan putus) = sukses.
-      if (!state) return res.json({ deleted: true, existed: false });
+      if (!state) {
+        countHistory('consume', 'missing');
+        return res.json({ deleted: true, existed: false });
+      }
       if (state.digest !== digest) {
         // Digest berbeda = yang diimpor bukan yang ditunjuk state. Jangan bakar.
         throw new ApiError(409, 'HISTORY_DIGEST_MISMATCH');
@@ -286,8 +325,10 @@ router.post(
       await deleteR2File(key);
       await burnHistory(linkStore, linkSealer, req.deviceId);
 
+      countHistory('consume', 'ok');
       res.json({ deleted: true, existed: true });
     } catch (error) {
+      countHistoryFailure('consume', error);
       next(error);
     }
   }

@@ -784,3 +784,22 @@ groups:
         annotations:
           summary: "Sync anonim ditolak Privacy Pass >20% selama 15 menit"
           description: "Gate PP_SYNC_REQUIRED menolak sync tanpa bukti sah. Periksa PP_ISSUER_PRIVATE_JWK (harus diset dan stabil antar worker/restart), rotasi kunci terakhir, dan nyx_privacy_pass_total{route=\"issue\"} — klien yang gagal menerbitkan bukti tidak akan pernah lolos. Prosedur di docs/10 \u00a710.22."
+
+      # [docs/40 §40.6] Konsumen arsip riwayat gagal = pengguna kehilangan
+      # riwayat yang sudah dijanjikan perangkat lama, DAN objek terenkripsi tetap
+      # tinggal di R2 sampai TTL 30 menit / lifecycle rule 24 jam. Klien hanya
+      # menulis `console.warn` pada kegagalan `consume` (impor tetap dianggap
+      # sukses), jadi tanpa alarm ini kegagalannya tidak terlihat dari mana pun.
+      #
+      # Ambang `> 0` dalam 1 jam, bukan rasio: satu kegagalan konsumsi sudah
+      # berarti satu arsip riwayat tertinggal, dan volume normalnya sangat kecil
+      # (sekali pakai per link). `sum by (result)` menjaga bentuk label tetap
+      # terlihat di notifikasi.
+      - alert: NyxLinkHistoryConsumeFailing
+        expr: sum by (result) (increase(nyx_link_history_ops_total{op="consume",result="error"}[1h])) > 0
+        for: 10m
+        labels:
+          severity: high
+        annotations:
+          summary: "Konsumsi arsip riwayat perangkat hasil link gagal"
+          description: "Endpoint POST /api/auth/link/history/consume mengembalikan error (bukan penolakan 4xx). Objek arsip sudah diimpor tetapi belum dihapus dari R2; periksa kredensial/bucket R2 dan Redis (state ter-seal) lewat log nyx-api. Arsip yatim dihapus lifecycle rule link-history/, tetapi pengguna yang gagal di sini tidak mendapat konfirmasi 'sekali pakai'."
