@@ -205,6 +205,30 @@ pemulihan klien "teruji penuh".
    yang nyata (`keychainDb.ts`, `shadowVaultDb.ts`, `offlineQueueDb.ts`,
    `store/profile.ts`, `lib/contactStore.ts`).
 
+## 39.4d Run ulang 2026-10-30 — drill menolak database kosong
+
+Drill yang sama dijalankan lagi di mesin dev. Yang perlu dicatat justru
+hasil pertamanya: DB dev kosong (`0|0|0|0`), jadi setelah `pg_restore` fixture-nya
+kosong dan drill berhenti dengan **`GAGAL fixture kosong — tidak ada yang bisa
+dibuktikan`** (exit 1). Ini penjaga yang bekerja: "lulus" dengan nol baris akan
+menjadi bukti palsu.
+
+Untuk benar-benar menguji pipeline, DB sumber diisi sementara (1 user, 1
+device `cryptoVersion 2`, 2 percakapan, 60 pesan `ENC1:`), lalu drill diulang:
+
+- `pg_dump` 172 KB → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore`
+  410 ms, **17/17 tabel**, jumlah baris identik dengan sumber;
+- fixture dari hasil restore = 2 percakapan + 60 pesan + 1 perangkat →
+  **20/20 tabel** identik byte-per-byte, **387 nilai `ENC1:` utuh**, kunci publik
+  perangkat identik, seluruh id pesan/percakapan + ciphertext cocok dengan dump;
+- ekspor ulang **20 frame, urutan + payload identik (54 260 byte)**;
+- kontrol negatif tetap merah: phrase salah dan 1 byte rusak **ditolak, 0 baris**;
+- exit 0. Baris seed dihapus setelahnya, DB dev kembali `0|0|0|0`.
+
+Catatan operator: menjalankan drill pada DB kosong **selalu** berakhir merah —
+itu disengaja, bukan regresi. Untuk drill yang bermakna, arahkan
+`DATABASE_URL` di `server/.env` ke salinan dump (atau isi fixture seperti di atas).
+
 ## 39.5 Drill B — Log KT v2
 
 ### 39.5a Drill otomatis (11 langkah)
@@ -394,6 +418,7 @@ adalah kontrak statis + sintaks bash, bukan restore end-to-end.
 | **Postgres restore (otomatis-panduan, §39.4)** | 2026-10-29 | klaster `initdb` di `/tmp` (Postgres 18.6, port 15432), `pg_dump -Fc` 393 KB dari DB 12 MB → `pg_restore` 0,44 s tanpa error; **17/17 tabel**, `User` 4/4, `Device` 4/4, `Message` 1/1, `max(createdAt)` identik `2026-10-28T09:15:00Z`, kolom `Device.signingKeyV2` ada, klien Prisma **aplikasi** membaca `users=4 devices=4 signingKeyV2=null:1` | klaster dihapus setelah drill; arsip `.age` belum diuji |
 | Postgres restore **dari bundle `.age`** | **belum pernah** | — | butuh `age-identity` operator (§39.4 akhir) |
 | **Restore klien dari `.nyxbak` (§39.4b)** | 2026-10-29 | `pg_dump` 396 KB dari DB sumber `4\|1\|1\|4` → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore` 442 ms, **17/17 tabel** + jumlah baris identik; fixture dari hasil restore = 1 percakapan + 1 pesan + 4 perangkat → **51 baris di 20/20 tabel** → arsip **20 frame / 51 188 byte** → restore **51 catatan di 20 tabel**, `progress 20/20`; setiap tabel identik byte-per-byte, **45 nilai `ENC1:` utuh**, kunci publik perangkat identik, semua id pesan/percakapan + ciphertext cocok dengan dump, ekspor ulang **20 frame urutan + payload identik**; kontrol negatif phrase salah & 1 byte rusak **ditolak, 0 baris**; total **39 pemeriksaan OK**, exit 0 | belum dari profil browser sungguhan (§39.4b) |
+| **Restore klien + Postgres, run ulang (§39.4d)** | 2026-10-30 | DB dev kosong → drill **merah** `fixture kosong`; setelah seed 1 user/1 device/2 percakapan/60 pesan: `pg_dump` 172 KB → `pg_restore` 410 ms 17/17 tabel → fixture 20/20 tabel identik, **387 nilai `ENC1:` utuh**, ekspor ulang 20 frame/54 260 byte identik, kontrol negatif tetap ditolak, exit 0 | seed dihapus setelah run; DB kembali kosong |
 | Uji harness drill klien itu sendiri | 2026-10-29 | dua sabotase: ciphertext digeser 1 karakter → `GAGAL ciphertext pesan berbeda dari dump`; tabel `storyKeys` dibuang dari `SCHEMA` → `GAGAL cakupan tabel TIDAK lengkap — drill 19 vs backup 20: kurang storyKeys`; keduanya exit 1 | penjaga cakupan ikut terbukti, bukan hanya komentar |
 | Restore klien **dari UI** (tombol Ekspor di profil nyata) | **belum pernah** | — | butuh sesi browser dengan akun nyata |
 | Anchor KT v2 di bundle self-host (§39.5f) | 2026-10-30 | `server/tests/selfhostScripts.test.ts` 3/3: meta `ktV2TreeSize`/`ktV2Root`, `-expect-size`/`-expect-root` dipakai, peringatan bundle lama, mismatch → `exit 1`, `bash -n` OK | **belum** dijalankan terhadap bundle `.age` sungguhan |

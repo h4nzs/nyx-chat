@@ -387,7 +387,9 @@ pola yang sama dengan `backupBench`) pada fixture 10.000 pesan (isi 160 B,
 
 Arsip final **3,46 MB / 17 frame**. Batas gate di kode
 (`LINK_HISTORY_BENCH_BUDGET`): 30 s per fase, 256 MB arsip — sengaja longgar,
-angkanya yang dilaporkan.
+angkanya yang dilaporkan. Run ulang di sesi yang sama (setelah hardening link)
+memberi ekspor **960 ms** / impor **249 ms** dengan arsip tetap 3,46 MB / 17
+frame — variasi antar-run ±5%, gate tidak berubah.
 
 Batasannya jujur: penulis impor di-inject sebagai no-op, jadi **penyegelan ulang
 (crypto worker) dan tulis IndexedDB nyata tidak termasuk**; angka ini batas
@@ -516,6 +518,50 @@ sudah hilang — dan tidak ada tanda apa pun di perangkat lama.
   membandingkan mematikan seluruh proteksi ini. Itulah sebabnya teks UI menulis
   akibatnya secara eksplisit (tolak bila berbeda).
 - Server tetap bisa menahan `sealedKey`; tanpa `K` blob tidak berguna.
+
+### 40.10.2 Tinjauan adversarial jalur relay & Redis (2026-10-30)
+
+Pertanyaan yang diuji: bila relay realtime (`realtimeHandlers.ts` →
+`socket.io`/sidecar → `redisBridge.ts` pub/sub) atau isi Redis dibaca penyerang,
+apakah arsip riwayat bisa dibaca, dipalsukan, atau diputar ulang?
+
+| Permukaan | Yang lewat | Mengapa tidak membuka arsip |
+|---|---|---|
+| Relay, `auth:request_linking_qr` | token 32 byte acak (hex), TTL 300 s | token hanya untuk perangkat yang menampilkan QR (`emitEventToUser(..., deviceId)` membatasi ke device itu) |
+| Relay, `auth:linking_request` | `pendingId`, nama perangkat, `publicKey`/`pqPublicKey`/`signingKey` | semuanya kunci PUBLIK; tidak ada `K`, tidak ada isi arsip |
+| Redis `linking_token:<token>` | `{userId, deviceId}` | ter-seal `sealAtRest`, dan token kedaluwarsa 5 menit |
+| Redis `link_history*` | pointer ter-seal `{size, digest, sealedKey}` | `sealedKey` = ciphertext X-Wing ke perangkat baru; server bisa membukanya tetapi isinya tetap tidak bisa didekripsi |
+| R2 `link-history/<hmac>.nyxhist` | blob arsip | di-PUT/GET langsung dari klien lewat URL presigned; byte arsip **tidak pernah** melewati relay maupun proses API |
+| HTTP `download` | `sealedKey` + URL GET 300 s | hanya untuk sesi perangkat itu (`req.deviceId`), nama state = `deviceId` sesi, bukan parameter request → tidak ada id yang bisa dienumerasi |
+
+Kesimpulan tinjauan (tidak ada perubahan kode yang diperlukan):
+
+- **Baca:** tidak ada jalur yang membawa `K` ke server. Satu-satunya jalur yang
+  dulu bisa membocorkannya — server menukar `pqPublicKey` — sudah ditutup SAS
+  (§40.10.1), dan `sendHistoryArchive` menghitung ulang kode dari kunci yang
+  benar-benar dipakai menyegel.
+- **Palsukan:** byte arsip diikat AEAD; klien memverifikasi `size` **dan**
+  `digest` sebelum kunci dibuka (`receiveLinkedHistory`), jadi substitusi isi
+  berakhir sebagai kegagalan, bukan data palsu. Server juga tidak bisa
+  mendaftarkan pointer untuk objek yang tidak ada: `ready` melakukan `HEAD`
+  (`checkHistoryObject`) dan object key-nya HMAC, bukan nama yang bisa ditebak.
+- **Enumerasi:** `pendingId` = UUID v4 (122 bit) dan `GET /link/status/:id`
+  publik hanya membuka `pending`/`approved`/`history`, tanpa identitas akun;
+  status arsip sendiri tidak pernah bisa dibaca lewat id perangkat lain.
+- **DoSing/menghilangkan:** server bisa menahan `download`, menghapus objek,
+  atau tidak meneruskan `pqPublicKey` (perangkat lama lalu tidak bisa menurunkan
+  kode → arsip tidak dikirim, dan perangkat baru hanya kehilangan riwayat).
+  Semuanya kehilangan ketersediaan, bukan kerahasiaan — dan semuanya terlihat
+  sebagai kegagalan di klien, bukan impor diam-diam yang berhasil.
+
+**Residual baru yang tercatat di sini (belum ditutup):** server yang jahat dan
+menyimpan salinan `sealedKey` + objek dari tautan **sebelumnya ke perangkat yang
+sama** bisa memutar ulang arsip lama itu (object key deterministik per device,
+`sealedKey` lama juga masih bisa disimpan). Isinya asli — dibuat perangkat lama
+yang sah — jadi yang bisa dicapai hanyalah **rollback riwayat** ke snapshot
+lebih tua, bukan pemalsuan atau pembacaan. Menutupnya butuh nonce per tautan di
+dalam AAD arsip (atau penghitung yang dikomit server) dan itu perubahan format;
+belum dikerjakan.
 
 ---
 
