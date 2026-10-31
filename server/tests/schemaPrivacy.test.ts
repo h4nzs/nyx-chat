@@ -51,8 +51,8 @@ test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConve
   // Receipt: tag opaque turunan server untuk 1:1/grup v1, pseudonym untuk grup v2.
   assert.equal(
     (handlers.match(/conversationScopedTag\(conversationId, userId\)/g) || []).length,
-    2,
-    'kedua jalur receipt (per-pesan + batch) memakai tag opaque'
+    3,
+    'ketiga jalur receipt (per-pesan + batch + view-once) (per-pesan + batch) memakai tag opaque'
   );
   assert.doesNotMatch(handlers, /persistedReaderId\s*=\s*[^;]*:\s*userId\b/, 'tidak ada fallback userId asli');
 

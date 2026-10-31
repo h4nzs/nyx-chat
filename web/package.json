@@ -48,7 +48,7 @@
     "html5-qrcode": "^2.3.8",
     "i18next": "^26.4.2",
     "i18next-browser-languagedetector": "^8.2.1",
-    "i18next-http-backend": "^4.0.2",
+    "i18next-http-backend": "^4.0.3",
     "libsodium-wrappers": "^0.8.4",
     "react": "^19.3.0",
     "react-advanced-cropper": "^0.20.1",

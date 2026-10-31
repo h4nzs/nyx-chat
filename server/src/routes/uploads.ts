@@ -6,7 +6,12 @@ import { nanoid } from 'nanoid'
 import { getPresignedUploadUrl } from '../utils/r2.js' 
 import { uploadLimiter } from '../middleware/rateLimiter.js'
 // [AUDIT 2026-10-24] Batas ukuran ditetapkan server (dan dikunci di presign).
-import { resolveUploadPolicy, validateUploadSize } from '../utils/uploadLimits.js'
+import {
+  clampFileRetentionSeconds,
+  clampUploadUrlTtl,
+  resolveUploadPolicy,
+  validateUploadSize,
+} from '../utils/uploadLimits.js'
 
 const router: Router = Router()
 
@@ -71,13 +76,15 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     }
 
     // urlTtl: How long the UPLOAD LINK works (default 5 mins)
-    const urlTtl = req.body.urlTtl ? parseInt(req.body.urlTtl, 10) : 300;
+    // [AUDIT F-06] di-clamp: klien tidak boleh meminta URL berumur setahun.
+    const urlTtl = clampUploadUrlTtl(req.body.urlTtl);
 
     // fileRetention: How long the FILE lives before expiration (optional, seconds)
     // Used for Disappearing Messages or temporary transfers
+    // [AUDIT F-06] dibatasi maksimum 30 hari.
     let deleteAt: Date | undefined;
-    const fileRetention = req.body.fileRetention ? parseInt(req.body.fileRetention, 10) : 0;
-    
+    const fileRetention = clampFileRetentionSeconds(req.body.fileRetention);
+
     if (fileRetention > 0) {
       deleteAt = new Date();
       deleteAt.setSeconds(deleteAt.getSeconds() + fileRetention);
@@ -139,15 +146,16 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
       return res.status(400).json({ error: 'File extension not found in filename' })
     }
 
+    // [AUDIT F-06] retensi burner juga dibatasi (TTL URL tetap 5 menit).
     let deleteAt: Date | undefined;
-    const fileRetention = req.body.fileRetention ? parseInt(req.body.fileRetention, 10) : 0;
+    const fileRetention = clampFileRetentionSeconds(req.body.fileRetention);
     if (fileRetention > 0) {
       deleteAt = new Date();
       deleteAt.setSeconds(deleteAt.getSeconds() + fileRetention);
     }
 
     const key = `burner/${nanoid()}.${ext}`
-    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', 300, sizeCheck.size, deleteAt)
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', clampUploadUrlTtl(300), sizeCheck.size, deleteAt)
 
     res.json({
       uploadUrl,

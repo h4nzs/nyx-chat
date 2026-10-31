@@ -1038,8 +1038,11 @@ export function emitGroupKeyFulfillment(payload: { requesterId: string; conversa
 // [T2 FIX #10 2026-09-29] senderPseudonym opsional — dipersist server sebagai
 // senderId pesan SYSTEM METADATA_UPDATED. Tanpa ini server menyimpan userId
 // asli (25-char) di baris pesan SYSTEM — terlihat di audit DB lokal.
-export function emitMetadataUpdated(conversationId: string, encryptedMetadata: string, targetRecipients: string[], senderPseudonym?: string): void {
-  transportClient.sendEvent('metadata:updated', { conversationId, encryptedMetadata, targetRecipients, senderPseudonym });
+export function emitMetadataUpdated(conversationId: string, encryptedMetadata: string, targetRecipients: string[], senderPseudonym?: string, adminCapabilityToken?: string): void {
+  // [AUDIT F-02] Admin capability token ikut dikirim: server menolak baris SYSTEM
+  // dari non-anggota, dan pembuat grup belum punya baris keanggotaan saat
+  // distribusi pertama. Token hanya capability (bukan identitas).
+  transportClient.sendEvent('metadata:updated', { conversationId, encryptedMetadata, targetRecipients, senderPseudonym, adminCapabilityToken });
 }
 
 export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {

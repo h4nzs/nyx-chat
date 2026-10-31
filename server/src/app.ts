@@ -105,10 +105,11 @@ app.use(helmet({
         "'self'",
         "'unsafe-inline'", // Diperlukan karena index.html pakai inline script
         "'wasm-unsafe-eval'", // Diperlukan untuk modul crypto WASM
+        // [AUDIT F-10] Wildcard `https://*.cloudflare.com` dibuang: host yang
+        // benar-benar dipakai (Turnstile + Web Analytics) sudah disebut eksplisit.
         "https://challenges.cloudflare.com",
         "https://static.cloudflareinsights.com",
         "https://cloudflareinsights.com",
-        "https://*.cloudflare.com",
         isProd ? "" : "'unsafe-eval'" // Dev mode kadang butuh eval
       ].filter(Boolean),
       styleSrc: [

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TransportOpCode } from '@nyx/shared';
 import { handleChatMessage, handlePresence, handleKeySync, handleAck, handleWebRtcRelay, type RealtimeContext } from '../src/network/realtimeHandlers.js';
-import { conversationScopedTag } from '../src/utils/atRestSecrets.js';
+import { conversationScopedTag, sealAtRest } from '../src/utils/atRestSecrets.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -63,6 +63,9 @@ function makeCtx() {
           if (method === 'delete' || method === 'upsert' || method === 'deleteMany') {
             return async () => ({});
           }
+          // [AUDIT F-05/F-11] collectPresencePeers memakai findMany — default
+          // kosong, bukan objek generik (dulu `.length` undefined → throw).
+          if (method === 'findMany') return async () => [];
           return async () => ({});
         },
       });
@@ -119,6 +122,19 @@ test('handleChatMessage: menyimpan pesan dan mengirim ack ke pengirim saat paylo
 
 test('handlePresence: menyiarkan envelope PRESENCE bertipe typing dengan bentuk benar ke penerima', async () => {
   const { ctx, calls } = makeCtx();
+  // [AUDIT F-05] typing disaring ke peer turunan server (`collectPresencePeers`):
+  // fake ini mengembalikan percakapan subjek lalu baris anggota ter-seal 'p1'.
+  const sealedPeer = await sealAtRest('p1');
+  let peerQuery = 0;
+  const membership = {
+    findMany: async () => (peerQuery++ === 0 ? [{ conversationId: 'c1' }] : [{ userId: sealedPeer }]),
+  };
+  ctx.prisma = new Proxy(ctx.prisma as unknown as Record<string, unknown>, {
+    get(target, prop: string) {
+      if (prop === 'userHiddenConversation') return membership;
+      return (target as Record<string, unknown>)[prop];
+    },
+  }) as RealtimeContext['prisma'];
   await handlePresence(ctx, 'u1', { event: 'typing:start', conversationId: 'c1', targetRecipients: ['p1'] });
 
   const typingCall = calls.sendJsonToUser.find(
@@ -348,6 +364,16 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
     get(target, prop: string) {
       if (prop === 'message') {
         return { create: async (args: { data: Record<string, unknown> }) => { createdMessages.push(args.data); return { id: 'm-sys' }; } };
+      }
+      // [AUDIT F-02] gate tulis SYSTEM: pengirim adalah anggota grup ini.
+      if (prop === 'conversation') {
+        return {
+          findUnique: async () => ({ id: 'c1', isGroup: true, adminSecretHash: null }),
+          update: async () => ({ messageSeq: 1 }),
+        };
+      }
+      if (prop === 'userHiddenConversation') {
+        return { findFirst: async () => ({ id: 'membership-row' }) };
       }
       return target[prop];
     },
@@ -690,8 +716,8 @@ test('D2 guard: kedua jalur receipt memakai tag opaque, tidak ada fallback userI
   const src = readSrc('../src/network/realtimeHandlers.ts');
   assert.equal(
     (src.match(/conversationScopedTag\(conversationId, userId\)/g) || []).length,
-    2,
-    'jalur per-pesan + batch sama-sama memakai tag opaque per-percakapan'
+    3,
+    'per-pesan + batch + view-once memakai tag opaque per-percakapan'
   );
   assert.doesNotMatch(
     src,

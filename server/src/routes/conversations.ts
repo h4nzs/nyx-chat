@@ -36,6 +36,27 @@ router.use(requireAuth)
 // `tests/groupAccess.test.ts` mengunci urutan gate & kode status, bukan teks.
 const groupDb = prisma as unknown as GroupAccessDb
 
+// [AUDIT F-09] Batas jumlah id pada `GET /sync?ids=`.
+// Tanpa cap, satu request bisa memaksa `IN` berisi puluhan ribu id; bentuk id
+// juga divalidasi supaya nilai sampah tidak ikut ke query. Nilai di atas cap
+// diabaikan (bukan error) — klien yang sah mengirim puluhan id, bukan ribuan.
+export const MAX_SYNC_CONVERSATION_IDS = 200;
+const CONVERSATION_ID_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Parse + validasi + cap daftar id `?ids=a,b,c`. Pure, dipakaiunit test. */
+export function parseSyncConversationIds(raw: unknown): string[] {
+  const value = typeof raw === 'string' ? raw : '';
+  if (!value) return [];
+  const seen = new Set<string>();
+  for (const part of value.split(',')) {
+    const id = part.trim();
+    if (!CONVERSATION_ID_SHAPE.test(id)) continue;
+    seen.add(id);
+    if (seen.size >= MAX_SYNC_CONVERSATION_IDS) break;
+  }
+  return Array.from(seen);
+}
+
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
 // [docs/37 §37.3.3] Discovery token-first sudah PINDAH ke `POST /api/groups/sync`
@@ -47,8 +68,8 @@ router.get('/sync', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     
-    const ids = String(req.query.ids ?? '');
-    const conversationIds: string[] = ids ? ids.split(',') : [];
+    // [AUDIT F-09] cap + validasi bentuk id (lihat `parseSyncConversationIds`).
+    const conversationIds = parseSyncConversationIds(req.query.ids);
 
     // [T3b TOKEN-FIRST] userId join DIHAPUS — membership tidak didiscovery
     // dari identitas akun. Backfill SessionKey (per-device, client-derived)
@@ -83,6 +104,8 @@ router.get('/sync', async (req, res, next) => {
       where: {
         id: { in: allIds }
       },
+      // [AUDIT F-09] `take` eksplisit — jangan biarkan IN besar tanpa batas hasil.
+      take: MAX_SYNC_CONVERSATION_IDS,
       // [docs/28 Tier 2 — B3] `lastMessageAt` kini di-bucket (15 menit) → tie-break
       // deterministik supaya urutan daftar chat tidak flip saat seri bucket.
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }]

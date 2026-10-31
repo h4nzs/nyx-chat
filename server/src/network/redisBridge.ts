@@ -151,12 +151,47 @@ export function clearLocalActiveDeviceCache(): void {
 }
 
 export async function isActiveDeviceAllowed(userId: string, deviceId: string): Promise<boolean> {
+  return isActiveDeviceAllowedWith(
+    (key) => redisClient.get(key),
+    userId,
+    deviceId
+  );
+}
+
+/**
+ * [AUDIT 2026-10-31 — F-04] Inti pengecekan perangkat aktif, dipisah dari klien
+ * Redis supaya jalur gagal-baca bisa diuji tanpa Postgres/Redis.
+ *
+ * Sebelumnya GET yang gagal di-`catch(() => null)` lalu dibaca sebagai "tidak
+ * ada perangkat aktif" → `true` (fail-open), DAN hasil `null` itu disimpan di
+ * cache 60 detik sehingga perangkat yang sudah di-kick tetap lolos setelah
+ * Redis pulih. Ini kontrol keamanan (`docs/03` §3.3), bukan sekadar anti-abuse
+ * seperti rate limit, jadi kegagalan baca = tolak dan JANGAN cache.
+ * "Tidak ada perangkat aktif" (nilai `null` yang benar-benar dibaca) tetap
+ * diloloskan — akun yang belum pernah login tidak punya baris untuk dilanggar.
+ */
+export async function isActiveDeviceAllowedWith(
+  readActiveDevice: (key: string) => Promise<string | null>,
+  userId: string,
+  deviceId: string
+): Promise<boolean> {
   const now = Date.now();
   const cached = activeDeviceCache.get(userId);
   if (cached && cached.expiresAt > now) {
     return cached.deviceId === '' || cached.deviceId === deviceId;
   }
-  const active = await redisClient.get(identityKey('active_device', userId)).catch(() => null);
+
+  let active: string | null;
+  try {
+    active = await readActiveDevice(identityKey('active_device', userId));
+  } catch (e) {
+    console.warn(
+      '[Security] Active-device lookup gagal — menolak perangkat (fail-closed, tanpa cache):',
+      sanitizeForLog(userId)
+    );
+    return false;
+  }
+
   activeDeviceCache.set(userId, { deviceId: active ?? '', expiresAt: now + 60000 });
   return !active || active === deviceId;
 }

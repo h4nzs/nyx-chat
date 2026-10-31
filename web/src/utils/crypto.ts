@@ -1434,6 +1434,10 @@ export async function sendGroupKeyDistributionPairwise(
         // GROUP_KEY pertama (terlihat di audit DB lokal: 1 SYSTEM GROUP_KEY
         // senderId 25-char saat grup dibuat).
         senderPseudonym: (dk as { senderId?: string }).senderId ?? myId,
+        // [AUDIT F-02] Capability admin untuk server: pembuat grup belum punya
+        // baris keanggotaan saat distribusi kunci pertama. Anggota biasa lolos
+        // lewat baris keanggotaan, jadi field ini boleh kosong untuk mereka.
+        adminCapabilityToken: getMyAdminToken(conversationId),
       });
       result.pairwise++;
     } catch (e) {
@@ -1840,7 +1844,9 @@ export async function rotateGroupKey(
           conversationId,
           newEncrypted,
           participantIds.filter(uid => uid !== useAuthStore.getState().user?.id),
-          myPseudoForMeta ?? useAuthStore.getState().user?.id
+          myPseudoForMeta ?? useAuthStore.getState().user?.id,
+          // [AUDIT F-02] capability admin agar server menerima baris SYSTEM.
+          getMyAdminToken(conversationId)
         );
       }
     } catch (e) {
@@ -2311,7 +2317,9 @@ async function doEncryptMessage(
                                conversation.participants
                                    .map(getParticipantUserId)
                                    .filter(uid => uid !== useAuthStore.getState().user?.id),
-                               myPseudoForMeta ?? useAuthStore.getState().user?.id
+                               myPseudoForMeta ?? useAuthStore.getState().user?.id,
+                               // [AUDIT F-02] capability admin untuk gate server.
+                               getMyAdminToken(conversationId)
                            );
                        })
                        .catch(e => console.warn('[T1] Background pseudonym-map rotation failed:', e));
@@ -3081,6 +3089,7 @@ export async function distributeAdminToken(
         targetDeviceId: bundle.deviceId,
         senderDeviceKey: myIdentityKeyB64,
         adminToken: true,
+        adminCapabilityToken: token,
       });
     } catch (e) {
       console.warn(`[RBAC] Failed to seal admin token for device ${bundle.deviceId}:`, e);

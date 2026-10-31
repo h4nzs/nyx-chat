@@ -711,7 +711,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                 // [T2 FIX #10 2026-09-29] Sertakan pseudonym SAYA — pesan SYSTEM
                 // METADATA_UPDATED di server tidak boleh membawa userId asli
                 // sebagai senderId (audit DB: leak 25-char saat createGroup).
-                emitMetadataUpdated(conv.id, encryptedMetadata, notifyTargets, myPseudonym);
+                // [AUDIT F-02] Sertakan capability admin — server menolak baris
+                // SYSTEM dari non-anggota, dan pembuat grup belum punya baris
+                // keanggotaan saat createGroup.
+                emitMetadataUpdated(conv.id, encryptedMetadata, notifyTargets, myPseudonym, adminToken);
             }
         }
         

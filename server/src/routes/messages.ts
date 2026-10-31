@@ -14,9 +14,11 @@ import { deleteR2File } from '../utils/r2.js'
 import { z } from 'zod'
 import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { sanitizeForLog } from '../utils/logger.js'
-import { credentialTokenMatches, sealAtRest } from '../utils/atRestSecrets.js'
+import { credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js'
 // [docs/28 Tier 4] identitas at-rest: senderId/sessionId/device-key ter-seal.
-import { openMessageForClient } from '../utils/senderIdentity.js'
+import { openMessageForClient, senderIdForStorage } from '../utils/senderIdentity.js'
+// [AUDIT F-08] key objek R2 harus valid utuh dan benar-benar milik pemanggil.
+import { isOwnedObjectKey } from '../utils/uploadLimits.js'
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js'
 // [docs/28 Tier 2 — B1] seq atomik per-conversation + parser kursor.
 import { reserveMessageSeq, parseMessageCursor, type SeqPrismaClient } from '../utils/messageSequence.js'
@@ -153,7 +155,10 @@ router.get('/:conversationId', async (req, res, next) => {
     // di-include penuh tiap halaman agar tidak pernah bolong).
     // [docs/28 Tier 2 — B1] Kursor = seq.
     const oldestUserMessage = page.length > 0 ? page[page.length - 1] : null;
-    const nextCursor = hasMore && oldestUserMessage && oldestUserMessage.seq
+    // [AUDIT F-07] `seq` 0 adalah nilai SAH untuk baris legacy — memakai
+    // truthiness membuat backfill berhenti prematur (`nextCursor` null padahal
+    // `hasMore`). Periksa tipenya, bukan "truthy".
+    const nextCursor = hasMore && oldestUserMessage && typeof oldestUserMessage.seq === 'number'
       ? String(oldestUserMessage.seq)
       : null;
 
@@ -174,18 +179,25 @@ router.post('/', zodValidate({
     tempId: z.union([z.string(), z.number()]).optional(),
     expiresIn: z.number().optional().nullable(),
     isViewOnce: z.boolean().optional(),
+    // [AUDIT F-03] Blind-delete token WAJIB ikut jalur REST supaya pesan yang
+    // dikirim lewat sini tetap bisa di-unsend/dihapus (paritas dengan jalur WT,
+    // `realtimeHandlers.ts` menyimpan hash-nya).
+    deleteSecret: z.string().min(32).max(128).optional(),
+    // [AUDIT F-03] Paritas bidang dengan jalur WT: edge balasan (disimpan
+    // ter-seal) dan pseudonym pengirim grup (opaque, tanpa userId).
+    repliedToId: z.string().min(1).max(128).optional(),
+    senderPseudonym: z.string().min(1).max(128).optional(),
     // Cap sama dengan jalur WebTransport: mencegah amplifikasi relay via REST
     targetRecipients: z.array(z.string()).max(500).optional(),
     // [T3b] Delivery tokens (dual-write saat invite relay) — jalur REST fallback
     // [T3b] Key = userId, value = token (Zod 4: argumen pertama z.record = schema KEY).
     targetDeliveryTokens: z.record(z.string().min(1), z.string().regex(/^[A-Za-z0-9_-]{43}$/)).optional()
-    // repliedToId dihapus validasinya karena relasi DB sudah diputus
   }).refine(data => data.content, { message: "Message must contain content" })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const senderId = req.user.id
-    const { conversationId, content, sessionId, tempId, expiresIn, isViewOnce } = req.body
+    const { conversationId, content, sessionId, tempId, expiresIn, isViewOnce, deleteSecret, repliedToId, senderPseudonym } = req.body
 
     // HITUNG TTL (Umur Pesan di Server)
     // Jika tidak ada expiresIn, set otomatis dihancurkan dalam 14 Hari (Store-and-Forward rules).
@@ -229,14 +241,24 @@ router.post('/', zodValidate({
       const created = await tx.message.create({
         data: {
           conversationId,
-          senderId: null,
+          // [AUDIT F-03] Paritas jalur WT: grup memakai pseudonym klien / userId
+          // ter-seal, 1:1 tetap sealed-sender (null).
+          senderId: await senderIdForStorage({
+            isGroup: conversation.isGroup === true,
+            userId: senderId,
+            senderPseudonym,
+          }),
           content,
           // [docs/28 Tier 4] sessionId (relasi device↔percakapan) disimpan TER-SEAL.
           sessionId: sessionId ? await sealAtRest(sessionId) : null,
+          // [docs/28 Tier 2 — 2.2] edge balasan disimpan TER-SEAL.
+          repliedToId: repliedToId ? await sealAtRest(repliedToId) : null,
           seq,
           createdAt: messageAt,
           expiresAt: finalExpiresAt,
-          isViewOnce: isViewOnce === true
+          isViewOnce: isViewOnce === true,
+          // [AUDIT F-03] tanpanya `DELETE /:id` selalu 403 BLIND_AUTH_REQUIRED.
+          deleteSecret: deleteSecret ? hashCredentialToken(deleteSecret) : null
         },
         include: {
           statuses: true
@@ -251,6 +273,8 @@ router.post('/', zodValidate({
     })
 
     const safeMessage = toRawServerMessage(await openMessageForClient(newMessageRaw));
+    // [docs/28 Tier 2 — 2.2] kirim id balasan ASLI, bukan nilai ter-seal.
+    if (repliedToId) safeMessage.repliedToId = repliedToId;
 
     // Inject tempId (Optimistic UI)
     if (tempId !== undefined) {
@@ -338,16 +362,15 @@ router.delete('/:id', async (req, res, next) => {
 
     // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
     if (r2Key) {
-       const safeR2Key = r2Key.replace(/[^a-zA-Z0-9_.\-/]/g, '').substring(0, 255);
-       const parts = safeR2Key.split('/');
-       const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-       if (!filename) return res.status(400).json({ error: 'Invalid file key' });
-
-       // Keamanan sederhana: Pastikan user hanya menghapus file miliknya
-       if (!filename.startsWith(`${userId}-`)) {
-          console.warn('[Security] User', sanitizeForLog(userId), 'attempted to delete unauthorized file:', sanitizeForLog(safeR2Key));
+       // [AUDIT F-08] Validasi bentuk key SECARA UTUH (bukan hanya segmen
+       // terakhir): folder dikenal, prefix `<userId>-`, tanpa `..`/segmen liar.
+       // Sanitizer lama mempertahankan `/` dan `..`, sementara yang dihapus
+       // adalah key penuh.
+       if (!isOwnedObjectKey(userId, r2Key)) {
+          console.warn('[Security] User', sanitizeForLog(userId), 'attempted to delete unauthorized/invalid file:', sanitizeForLog(String(r2Key).slice(0, 120)));
           return res.status(403).json({ error: 'Unauthorized file deletion' });
        } else {
+          const safeR2Key = r2Key;
           console.log('[R2] Deleting blind attachment:', sanitizeForLog(safeR2Key));
           try {
              await deleteR2File(safeR2Key);
