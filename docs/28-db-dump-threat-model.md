@@ -77,6 +77,8 @@ Catatan: `Message.senderId` **bukan** FK (pseudonym untuk grup v2, `NULL` untuk
 | `Conversation` | `isGroup`, `encryptedMetadata`, `authSecret` (SHA-256 token), `groupTokenExpiresAt`, `adminSecretHash`, `lastMessageAt`, `metadata` (JSON tenant) | Hash/timestamp saja; token asli tidak |
 | `Message` | `content` (ciphertext E2EE), `deleteSecret` (plaintext), `senderId` (pseudonym/NULL), `sessionId`, `repliedToId`, `isViewOnce/isViewed`, `createdAt`, `expiresAt` | Ciphertext tidak; secret & metadata ya |
 | `MessageStatus` | `userId` (asli untuk 1:1), `status`, `updatedAt` | Ya — pembaca + waktu baca |
+| `MessageViewOnceOpen` | `openerTag` (**HMAC per percakapan**, bukan userId), `openedAt` (15 mnt) | Tidak — dump hanya melihat "pesan X dibuka oleh tag anonim"; tanpa pepper tag tidak bisa ditautkan ke akun |
+| `MessageViewOnceRecipient` | `recipientTag` (**HMAC per percakapan**, bukan userId), `createdAt` | Tidak bisa ditautkan ke akun tanpa pepper, tetapi **dump melihat jumlah tujuan per pesan** (metadata yang sama sudah dimiliki server saat relay; yang berubah hanya retensinya) |
 | `UserHiddenConversation` | `userId` (ter-seal, routing-only), `tokenHash`, `tokenEpoch`, `expiresAt` | Ya — keanggotaan grup (token asli tidak) |
 | `GroupCredential` (historis; model dihapus 2026-10-23) | `serial` (64-hex), `conversationId`, `keyVersion` | Ya — tanpa identitas |
 | `CredentialIssuerKey` (historis; model dihapus 2026-10-23) | `publicKeyJwk`, **`privateKeyPkcs8` (PLAINTEXT)** | Ya — **akar kepercayaan** |

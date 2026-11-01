@@ -49,7 +49,7 @@ To resist "Harvest Now, Decrypt Later" attacks, NYX operates in a **Mandatory Po
 * **Key Exchange (PQX3DH):** classical X25519 combined with **ML-KEM-768 via the X-Wing construct** for asynchronous key agreement.
 * **1:1 Ratchet:** a hybrid Double Ratchet with PQ forward secrecy from the KEM step. A parallel **ratchet v2 built on Signal's SPQR (ML-KEM Braid)** adds **post-compromise security** on top; it is only used **after the peer proves it can read it**, and the v1 path stays frozen and readable. A kill switch stops sending v2 without ever breaking reading of v2 messages.
 * **Groups:** client-side fan-out **Sender Key** ratchet (XChaCha20-Poly1305). Sender keys are distributed over per-device PQ-sealed channels (`pq_box_seal`), group metadata is kept out of the chain, and group senders appear under **pseudonyms**. The server only routes opaque blobs.
-* **Key Transparency (KT):** public keys are published to a Signal-style KT log. The client verifies **inclusion/consistency proofs in WebAssembly** before pinning a peer's key bundle, runs a **monitor loop** against its own entries, and shares tree heads through **gossip** to detect split-view attacks. An auditor service runs as a separate process (independent *process*, not independent organization — see [docs/34](docs/34-key-transparency-verifier.md)). An ML-DSA-65 log v2 runs alongside as **dual-write**; verification and reads still use v1.
+* **Key Transparency (KT):** public keys are published to a Signal-style KT log. The client verifies **inclusion/consistency proofs in WebAssembly** before pinning a peer's key bundle, runs a **monitor loop** against its own entries, and shares tree heads through **gossip** to detect split-view attacks. An auditor service runs as a separate process (independent *process*, not independent organization — see [docs/34](docs/34-key-transparency-verifier.md)). An ML-DSA-65 log v2 is the **only** log now: the v1 writer, v1 service and ABI-1 verifier were retired on 2026-10-28 (`docs/38`), and the client accepts ABI 2 only.
 * **Hardware-Bound Local Vault:** master seed and recovery phrase are encrypted locally with **WebAuthn PRF (biometric binding)** stretched through Argon2id (128 MB memory cost). Keys at rest use a versioned `ENC1:` envelope.
 * **Traffic cover:** every message is padded to 8 KB, and idle WebTransport connections emit random chaff datagrams.
 
@@ -232,7 +232,7 @@ NYX documents what it does **not** hide. Highlights (full list in [Security Mode
 * Message **timing** is not hidden from a network-level observer; chaffing covers idle periods only.
 * The KT auditor is a separate *process* run by the project, not an independent organization.
 * Biometric unlock keeps the recovery phrase in `localStorage` under a WebAuthn-PRF-derived key (convenience vs blast radius, accepted by the maintainer).
-* The CSP keeps `'wasm-unsafe-eval'` (libsodium/WASM) and `'unsafe-inline'`; `'unsafe-eval'` is removed.
+* The CSP keeps `'wasm-unsafe-eval'` (libsodium/WASM); `'unsafe-inline'` is present only in `style-src` (loader `<style>`), never in `script-src`; `'unsafe-eval'` is removed.
 * Multi-device is **not planned**; MLS and native push clients are deferred.
 
 ---

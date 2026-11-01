@@ -684,6 +684,10 @@ router.get('/search', searchIpLimiter, searchLimiter, async (req, res, next) => 
 // GET user by ID
 router.get('/:id', async (req, res, next) => {
   try {
+    // [AUDIT PASS 2 — N-01] `router.use(requireAuth)` di atas sudah menutup
+    // seluruh router; guard eksplisit ini menjaga rute ini tidak pernah jatuh ke
+    // akses anonim bila kelak dipasang ulang / dipindah.
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
       select: { 

@@ -14,7 +14,7 @@ import { deleteR2File } from '../utils/r2.js'
 import { z } from 'zod'
 import { zodValidate, safeEqualStrings } from '../utils/validate.js'
 import { sanitizeForLog } from '../utils/logger.js'
-import { credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js'
+import { conversationScopedTag, credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js'
 // [docs/28 Tier 4] identitas at-rest: senderId/sessionId/device-key ter-seal.
 import { openMessageForClient, senderIdForStorage } from '../utils/senderIdentity.js'
 // [AUDIT F-08] key objek R2 harus valid utuh dan benar-benar milik pemanggil.
@@ -27,6 +27,9 @@ import { messageTimeBucket } from '../utils/temporalBucket.js'
 // [AUDIT 2026-10-24] Cap penerima khusus guest (paritas dengan jalur realtime).
 import { maxRecipientsFor } from '../utils/guestPolicy.js'
 import { applyGroupReleaseJitter } from '../utils/releaseJitter.js'
+// [PASS-2 residual lanjutan — view-once] paritas jalur WT: catat penerima
+// pesan view-once supaya barisnya bisa dihapus saat semua membuka.
+import { recordViewOnceRecipients, type ViewOnceRecipientDb } from '../utils/viewOnceRecipients.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -139,12 +142,38 @@ router.get('/:conversationId', async (req, res, next) => {
     // FIX 1: Suntikkan null untuk repliedToId agar TS tidak error
     // [docs/28 Tier 2 — 2.2] kolom repliedToId TER-SEAL → buka per-pesan sebelum
     // dikirim (mapper sengaja mengosongkannya agar nilai ter-seal tak bocor).
+    // [AUDIT PASS 2 residual — view-once grup] Pesan view-once yang SUDAH dibuka
+    // oleh pemanggil tidak boleh dikirim lagi isinya. Sebelumnya barisnya dihapus
+    // oleh penerima pertama, sehingga anggota lain kehilangan pesan; sekarang
+    // baris bertahan (lihat realtimeHandlers `message:view_once_opened`) dan
+    // kontennya dikosongkan HANYA untuk yang sudah membuka. Tag pembaca = HMAC
+    // per percakapan, jadi server tidak menyimpan userId di tabel ini.
+    const viewOnceIds = mergedMessages
+      .filter((msg) => msg.isViewOnce === true)
+      .map((msg) => msg.id);
+    const openedViewOnce = new Set<string>();
+    if (viewOnceIds.length > 0) {
+      const openerTag = conversationScopedTag(conversationId, req.user.id);
+      const opens = await prisma.messageViewOnceOpen.findMany({
+        where: { messageId: { in: viewOnceIds }, openerTag },
+        select: { messageId: true },
+      });
+      for (const row of opens) openedViewOnce.add(row.messageId);
+    }
+
     const safeMessages = await Promise.all(mergedMessages.map(async (msg) => {
       // [docs/28 Tier 4] buka senderId/sessionId/device-key ter-seal sebelum relay.
       const opened = await openMessageForClient(msg);
       const mapped = toRawServerMessage(opened);
       const realReply = await resolveRepliedToId(msg.repliedToId);
       if (realReply) mapped.repliedToId = realReply;
+      if (openedViewOnce.has(msg.id)) {
+        mapped.content = null;
+        // `isViewed` tidak ada di tipe `RawServerMessage` (kontrak shared) —
+        // dikirim sebagai field tambahan; klien memakai `content: null` sebagai
+        // sinyal utama bahwa isinya sudah tidak tersedia.
+        (mapped as unknown as { isViewed?: boolean }).isViewed = true;
+      }
       return mapped;
     }));
     
@@ -286,6 +315,19 @@ router.post('/', zodValidate({
     }
 
     res.status(201).json(safeMessage)
+
+    // [PASS-2 residual lanjutan — view-once penerima] Hanya id yang lolos bukti
+    // peserta server yang dicatat (difilter di helper), minus pengirim. Non-fatal:
+    // respons 201 sudah terkirim; tanpa daftar ini pesan hanya bertahan sampai
+    // `expiresAt`, tidak ada data yang rusak.
+    if (isViewOnce === true && Array.isArray(targetRecipients) && targetRecipients.length > 0) {
+      await recordViewOnceRecipients(prisma as unknown as ViewOnceRecipientDb, {
+        conversationId,
+        messageId: newMessageRaw.id,
+        senderId,
+        recipients: targetRecipients,
+      }).catch((e: unknown) => console.warn('[ViewOnce] gagal mencatat penerima:', e))
+    }
 
     // EMIT & PUSH NOTIFICATION (Opaque Mailbox: explicit targetRecipients from client)
     if (Array.isArray(targetRecipients) && targetRecipients.length > 0) {

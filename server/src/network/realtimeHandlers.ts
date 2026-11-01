@@ -53,9 +53,23 @@ import {
   sealIdentity,
 } from '../utils/redisIdentity.js';
 import { conversationScopedTag } from '../utils/atRestSecrets.js';
+// [PASS-2 residual lanjutan — view-once] daftar penerima per pesan + hapus
+// baris begitu SEMUA penerima membuka (bukan menunggu `expiresAt`).
+import {
+  finalizeViewOnceIfAllOpened,
+  recordViewOnceRecipients,
+  type ViewOnceRecipientDb,
+} from '../utils/viewOnceRecipients.js';
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js';
 // [AUDIT 2026-10-31 — F-02/F-11] Otorisasi tulis baris SYSTEM lewat realtime.
 import { authorizeGroupSystemWrite, type GroupRealtimeAuthDb } from '../utils/groupRealtimeAuth.js';
+// [AUDIT PASS 2 — REG-2/N-02] Bukti peserta di-scope PER percakapan (bukan
+// union peer global, yang kosong untuk 1:1 dan untuk pembuat grup).
+import {
+  filterConversationParticipants,
+  isConversationParticipant,
+  type ConversationParticipantDb,
+} from '../utils/conversationParticipants.js';
 import { applyGroupReleaseJitter } from '../utils/releaseJitter.js';
 // [docs/28 Tier 4] identitas pengirim at-rest: pseudonym klien dipakai apa
 // adanya, selain itu userId disimpan TER-SEAL dan dibuka lagi di jalur baca.
@@ -403,6 +417,20 @@ export async function handleChatMessage(
     // Acknowledge the sender
     if (msgId) await sendAck(ctx, userId, deviceId, msgId, { ok: true, msg: safeMessage });
 
+    // [PASS-2 residual lanjutan — view-once penerima] Catat SIAPA yang dituju
+    // pesan ini (tag per percakapan, bukan userId) supaya server bisa menghapus
+    // baris pesan pada pembukaan TERAKHIR, alih-alih menunggu `expiresAt`.
+    // Dijalankan setelah ACK: pengirim tidak menunggu query tambahan. Kegagalan
+    // hanya dicatat — pesan sudah tersimpan dan sudah di-ACK.
+    if (isViewOnce === true && Array.isArray(targetRecipients) && targetRecipients.length > 0) {
+      await recordViewOnceRecipients(ctx.prisma as unknown as ViewOnceRecipientDb, {
+        conversationId,
+        messageId: newMessageRaw.id,
+        senderId: userId,
+        recipients: targetRecipients,
+      }).catch((e: unknown) => console.warn('[ViewOnce] gagal mencatat penerima:', e));
+    }
+
     // [docs/37 §37.4 P8] Jitter rilis grup. Dijalankan SETELAH ACK supaya
     // pengirim tidak menunggu, dan hanya menyentuh waktu relay (isi/padding
     // tidak berubah). Default mati; opt-in lewat GROUP_RELEASE_JITTER_MS.
@@ -527,11 +555,18 @@ export async function handlePresence(
            console.warn('[Security] typing fan-out ditolak (target >', MAX_TYPING_TARGETS, ') oleh', sanitizeForLog(userId));
            return;
          }
-         const peers = new Set(
-           await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId).catch(() => [] as string[])
+         // [PASS-2 REG-2/N-02] Bukti peserta untuk PERCAKAPAN yang disebut
+         // payload, bukan union peer global. Filter lama selalu kosong di 1:1
+         // (tidak ada baris keanggotaan) sehingga indikator typing mati.
+         const allowedTypingTargets = new Set(
+           await filterConversationParticipants(
+             ctx.prisma as unknown as ConversationParticipantDb,
+             conversationId,
+             targetRecipients
+           ).catch(() => [] as string[])
          );
          for (const pId of targetRecipients) {
-             if (typeof pId === 'string' && pId !== userId && peers.has(pId)) {
+             if (typeof pId === 'string' && pId !== userId && allowedTypingTargets.has(pId)) {
                await ctx.sendJsonToUser(pId, TransportOpCode.PRESENCE, typingData);
              }
          }
@@ -599,6 +634,21 @@ export async function handleKeySync(
          if (!requesterId || !conversationId || !encryptedKey) return;
          if (!await ctx.checkRateLimit(userId, 'session_fulfill_response', 60, 60)) return;
 
+         // [AUDIT F-11 sisa] FULFILLER juga harus peserta percakapan yang sama.
+         // Sebelumnya hanya requester yang diperiksa, sehingga user yang tahu
+         // `conversationId` + `requesterId` bisa mengirim amplop kunci ke
+         // percakapan yang bukan miliknya. Klien memverifikasi turunan X3DH,
+         // tetapi server tidak perlu meneruskan amplop dari non-peserta.
+         const fulfillerIsParticipant = await isConversationParticipant(
+           ctx.prisma as unknown as ConversationParticipantDb,
+           conversationId,
+           userId
+         ).catch(() => false);
+         if (!fulfillerIsParticipant) {
+           console.warn('[Security] session:fulfill_response ditolak — fulfiller bukan peserta percakapan:', sanitizeForLog(userId));
+           return;
+         }
+
          // [AUDIT F-11] Hanya relay kunci ke PEER (orang yang benar-benar berbagi
          // percakapan dengan pengirim). Sebelumnya `requesterId` dari payload
          // diteruskan apa adanya: user mana pun bisa menyemprotkan
@@ -606,11 +656,17 @@ export async function handleKeySync(
          // (klien memverifikasi tanda tangan ML-DSA inisiator terhadap bundle
          // peer), tetapi spam/DoS ini tidak perlu dibiarkan.
          if (requesterId !== userId) {
-           const peers = new Set(
-             await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId).catch(() => [] as string[])
-           );
-           if (!peers.has(requesterId)) {
-             console.warn('[Security] session:fulfill_response ditolak — requester bukan peer:', sanitizeForLog(userId));
+           // [PASS-2 REG-2] Bukti peserta di-scope ke `conversationId` payload:
+           // baris keanggotaan, receipt di percakapan itu, atau session key
+           // perangkatnya. Filter peer global sebelumnya kosong di 1:1, jadi
+           // pemulihan kunci sesi 1:1 selalu ditolak dengan hening.
+           const requesterIsParticipant = await isConversationParticipant(
+             ctx.prisma as unknown as ConversationParticipantDb,
+             conversationId,
+             requesterId
+           ).catch(() => false);
+           if (!requesterIsParticipant) {
+             console.warn('[Security] session:fulfill_response ditolak — requester bukan peserta percakapan:', sanitizeForLog(userId));
              return;
            }
          }
@@ -873,8 +929,14 @@ export async function handleKeySync(
        case 'message:view_once_opened': {
          const { messageId, conversationId, targetRecipient, deleteSecret } = data as { messageId: string, conversationId: string, targetRecipient?: string, deleteSecret?: string };
          if (!messageId || !conversationId) return;
-         const msg = await ctx.prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true, senderId: true, deleteSecret: true } });
+         // [PASS-2 residual] `conversation.isGroup` menentukan apakah baris boleh
+         // dihapus: di grup baris harus bertahan untuk penerima lain.
+         const msg = await ctx.prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true, senderId: true, deleteSecret: true, isViewOnce: true, conversation: { select: { isGroup: true } } } });
          if (!msg || msg.conversationId !== conversationId) return;
+         // [PASS-2 REG-1] Event ini HANYA untuk pesan view-once. Tanpa cek ini,
+         // "bukti peserta" di bawah akan mengizinkan peserta mana pun menghapus
+         // pesan biasa di percakapan yang sama.
+         if (msg.isViewOnce !== true) return;
 
          // [AUDIT F-01] Otorisasi SEBELUM menghapus. Dulu `msg.conversationId
          // !== conversationId` dianggap cukup padahal kedua nilai datang dari
@@ -883,41 +945,75 @@ export async function handleKeySync(
          //
          // Bukti yang diterima (pola `message:unsend` di atas):
          //  - pengirim: id pengirim ter-seal == userId, ATAU deleteSecret sah.
-         //  - penerima: `targetRecipient` menunjuk dirinya DAN server punya baris
-         //    receipt untuk pesan ini (tag per-percakapan) — bukti pesan memang
-         //    dikirimi ke dia, bukan sekadar deklarasi klien.
+         //  - penerima: peserta percakapan menurut bukti SERVER (keanggotaan /
+         //    receipt di percakapan ini / session key perangkatnya).
+         //
+         // [PASS-2 REG-1] Dulu syaratnya `targetRecipient` harus sama dengan
+         // userId pengirim event, padahal `web/src/components/Lightbox.tsx`
+         // mengirim `targetRecipient = message.senderId` — id lawan bicara —
+         // sehingga gate tidak pernah lolos: pesan view-once tidak dihapus dan
+         // `message:viewed` tidak terkirim.
          const openedSenderId = await openSenderId(msg.senderId);
          const isSender = openedSenderId === userId
            || (typeof deleteSecret === 'string' && !!msg.deleteSecret && credentialTokenMatches(msg.deleteSecret, deleteSecret));
 
-         let isRecipient = false;
-         if (!isSender && targetRecipient === userId) {
-           const receipt = await ctx.prisma.messageStatus.findUnique({
-             where: { messageId_userId: { messageId, userId: conversationScopedTag(conversationId, userId) } },
-             select: { status: true }
-           }).catch(() => null);
-           isRecipient = receipt !== null;
-         }
+         const participantDb = ctx.prisma as unknown as ConversationParticipantDb;
+         const isRecipient = !isSender
+           && await isConversationParticipant(participantDb, conversationId, userId).catch(() => false);
 
          if (!isSender && !isRecipient) {
            console.warn('[Security] Unauthorized view_once_opened oleh', sanitizeForLog(userId), 'untuk pesan', sanitizeForLog(messageId));
            return;
          }
 
-         // Notifikasi "viewed" hanya ke pengirim hasil bukti (penerima memakai
-         // targetRecipient hanya bila orang itu benar-benar peer-nya, supaya
-         // event ini tidak bisa dipakai menyemprot id sembarang).
-         let notifyTarget: string | null = openedSenderId;
-         if (isRecipient && targetRecipient && targetRecipient !== userId) {
-           const peers = new Set(
-             await collectPresencePeers(ctx.prisma as unknown as PresenceMembershipClient, userId).catch(() => [] as string[])
-           );
-           notifyTarget = peers.has(targetRecipient) ? targetRecipient : openedSenderId;
+         // Notifikasi "viewed" hanya ke pengirim hasil bukti. Pesan 1:1 menyimpan
+         // `senderId: null` (sealed sender), jadi `targetRecipient` dari klien
+         // dipakai sebagai kandidat — tetapi hanya bila orang itu benar-benar
+         // peserta percakapan ini (bukan id sembarang).
+         if (isRecipient) {
+           const notifyCandidate = openedSenderId
+             ?? (typeof targetRecipient === 'string' ? targetRecipient : null);
+           if (notifyCandidate && notifyCandidate !== userId
+               && await isConversationParticipant(participantDb, conversationId, notifyCandidate).catch(() => false)) {
+             await emitEventToUser(ctx, notifyCandidate, 'message:viewed', { messageId, conversationId });
+           }
          }
-         if (isRecipient && notifyTarget && notifyTarget !== userId) {
-           await emitEventToUser(ctx, notifyTarget, 'message:viewed', { messageId, conversationId });
+         // [PASS-2 residual — view-once grup] Catat pembukaan PER PENERIMA.
+         // Tag = HMAC per percakapan (bukan userId), jadi dump tidak menyebut
+         // siapa yang sudah membuka. Diperlukan jalur baca untuk mengosongkan
+         // konten bagi penerima yang sudah membuka tanpa menghapus pesan orang
+         // lain (lihat GET /api/messages/:conversationId).
+         const openerTag = conversationScopedTag(conversationId, userId);
+         await ctx.prisma.messageViewOnceOpen.upsert({
+           where: { messageId_openerTag: { messageId, openerTag } },
+           update: {},
+           create: { messageId, openerTag, openedAt: messageTimeBucket() },
+         }).catch(() => {});
+
+         // 1:1: hanya ada satu penerima → menghapus baris tetap benar (perilaku
+         // lama) dan membuat "buka sekali" bertahan walau klien memuat ulang.
+         // Grup: JANGAN hapus pada pembukaan pertama. Dulu anggota pertama yang
+         // membuka menghapus pesan untuk SEMUA orang, sehingga anggota lain tidak
+         // pernah sempat membaca; isinya tetap dikosongkan khusus bagi yang sudah
+         // membuka (lihat GET /api/messages/:conversationId).
+         //
+         // [PASS-2 residual lanjutan] Daftar penerima pesan ini kini dicatat saat
+         // kirim (`MessageViewOnceRecipient`), jadi "semua sudah membuka" BISA
+         // dihitung: baris dihapus pada pembukaan terakhir, bukan menunggu TTL.
+         // Pesan lama (tanpa daftar penerima) tetap memakai `expiresAt`/unsend.
+         // Penerima yang tidak pernah membuka mendapat mekanisme tunggu sendiri -
+         // tidak ada: daftar itu ikut terhapus bersama pesannya (cascade).
+         if (msg.conversation?.isGroup !== true) {
+           await ctx.prisma.message.delete({ where: { id: messageId } }).catch(() => {});
+         } else {
+           const completed = await finalizeViewOnceIfAllOpened(
+             ctx.prisma as unknown as ViewOnceRecipientDb,
+             { messageId },
+           ).catch(() => false);
+           if (completed) {
+             console.log('[ViewOnce] semua penerima sudah membuka → baris pesan dihapus:', sanitizeForLog(messageId));
+           }
          }
-         await ctx.prisma.message.delete({ where: { id: messageId } }).catch(() => {});
          break;
        }
 

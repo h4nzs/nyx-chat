@@ -30,6 +30,12 @@ interface FakeOptions {
   isGroup?: boolean;
   adminToken?: string;
   members?: string[];
+  /** Epoch grup (default 0). */
+  groupEpoch?: number;
+  /** Epoch token anggota (default 0) — dipakai test kick/rotasi (N-03). */
+  memberEpoch?: number;
+  /** Expiry token anggota (default 7 hari ke depan). */
+  memberExpiresAt?: Date;
 }
 
 /**
@@ -43,12 +49,17 @@ async function makeDb (opts: FakeOptions): Promise<GroupRealtimeAuthDb> {
   }
   const rows = Array.from(sealed.keys()).map((userId) => ({ userId }));
   const adminSecretHash = opts.adminToken ? adminHash(opts.adminToken) : null;
+  const memberRow = {
+    id: 'row',
+    tokenEpoch: opts.memberEpoch ?? 0,
+    expiresAt: opts.memberExpiresAt ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  };
 
   const userHiddenConversation = {
     async findFirst (args: { where: Record<string, unknown> }) {
       const where = args.where as { userId?: { in?: string[] } };
       const candidates = where.userId?.in ?? [];
-      return candidates.some((candidate) => sealed.has(candidate)) ? { id: 'row' } : null;
+      return candidates.some((candidate) => sealed.has(candidate)) ? memberRow : null;
     },
     async findMany (args: { where: Record<string, unknown> }) {
       const where = args.where as { userId?: { in?: string[] } };
@@ -61,7 +72,12 @@ async function makeDb (opts: FakeOptions): Promise<GroupRealtimeAuthDb> {
     conversation: {
       async findUnique () {
         if (opts.missing) return null;
-        return { id: 'c1', isGroup: opts.isGroup ?? true, adminSecretHash };
+        return {
+          id: 'c1',
+          isGroup: opts.isGroup ?? true,
+          adminSecretHash,
+          groupEpoch: opts.groupEpoch ?? 0,
+        };
       },
     },
     userHiddenConversation,
@@ -111,6 +127,27 @@ test('token admin salah tidak memberi akses', async () => {
     userId: 'u-attacker',
     conversationId: 'c1',
     adminCapabilityToken: 'token-palsu',
+  });
+  assert.deepEqual(decision, { ok: false, reason: 'unauthorized' });
+});
+
+test('N-03: baris keanggotaan kedaluwarsa melewati grace → bukan anggota', async () => {
+  const db = await makeDb({
+    members: ['u-old'],
+    memberExpiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+  });
+  const decision = await authorizeGroupSystemWrite(db, {
+    userId: 'u-old',
+    conversationId: 'c1',
+  });
+  assert.deepEqual(decision, { ok: false, reason: 'unauthorized' });
+});
+
+test('N-03: epoch token tidak cocok dengan grup (kick/rotasi) → bukan anggota', async () => {
+  const db = await makeDb({ members: ['u-kicked'], groupEpoch: 2, memberEpoch: 1 });
+  const decision = await authorizeGroupSystemWrite(db, {
+    userId: 'u-kicked',
+    conversationId: 'c1',
   });
   assert.deepEqual(decision, { ok: false, reason: 'unauthorized' });
 });

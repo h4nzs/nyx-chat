@@ -75,6 +75,10 @@ export const API_ERROR_CODE_KEYS: Readonly<Record<string, string>> = {
   SANDBOX_LIMIT_REACHED: 'api_unverified_limited',
   SANDBOX_UPLOAD_RESTRICTION: 'api_unverified_limited',
 
+  // [AUDIT U-01] Klien menolak mutasi sebelum dikirim bila token CSRF tidak
+  // bisa diambil (jaringan/5xx) — bukan 403 yang membingungkan dari server.
+  CSRF_UNAVAILABLE: 'api_csrf_unavailable',
+
   STORY_BLOCKED: 'api_story_blocked',
   PP_PROOF_REQUIRED: 'api_privacy_proof',
   PP_TOKEN_REJECTED: 'api_privacy_proof',
@@ -97,6 +101,7 @@ export const API_ERROR_STATUS_KEYS: Readonly<Record<number, string>> = {
 /** Teks Inggris untuk konteks tanpa `t` (log, store non-React, fallback). */
 export const API_ERROR_FALLBACKS: Readonly<Record<string, string>> = {
   api_rate_limited: 'Too many attempts. Wait a moment and try again.',
+  api_csrf_unavailable: "Couldn't reach the server to prepare this request. Check your connection and try again — nothing was sent.",
   api_group_access_expired: 'Your access to this group has expired. Rejoin from a new invite, or ask an admin to add you again.',
   api_admin_required: 'Only a group admin can do this. Your admin capability may have been rotated — reopen the group and try again.',
   api_blind_auth_required: "This action needs the secret issued when it was created, and this device doesn't have it.",

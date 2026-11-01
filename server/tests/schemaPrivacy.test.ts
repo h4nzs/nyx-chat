@@ -49,11 +49,17 @@ test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConve
   const schema = read('../prisma/schema.prisma');
 
   // Receipt: tag opaque turunan server untuk 1:1/grup v1, pseudonym untuk grup v2.
+  // [PASS-2 residual] Pemakaian ketiga: `MessageViewOnceOpen.openerTag` pada
+  // `message:view_once_opened` — mencatat pembukaan per penerima tanpa userId.
   assert.equal(
     (handlers.match(/conversationScopedTag\(conversationId, userId\)/g) || []).length,
     3,
-    'ketiga jalur receipt (per-pesan + batch + view-once) (per-pesan + batch) memakai tag opaque'
+    'dua jalur receipt + tag pembuka view-once memakai tag opaque'
   );
+  // [PASS-2 REG-1] Jalur view-once memakai bukti peserta dari server; tag
+  // penerima dihitung di utils/conversationParticipants.ts (tidak menyimpan
+  // userId asli), bukan dari `targetRecipient === userId` klien.
+  assert.match(handlers, /isConversationParticipant\(/, 'view-once memakai bukti peserta per percakapan');
   assert.doesNotMatch(handlers, /persistedReaderId\s*=\s*[^;]*:\s*userId\b/, 'tidak ada fallback userId asli');
 
   // Keanggotaan: routing identity ter-seal, bukan userId.

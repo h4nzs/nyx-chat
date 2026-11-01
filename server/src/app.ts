@@ -101,12 +101,16 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
+      // [AUDIT F-10 residual, ditutup] unsafe-inline DIHAPUS dari script-src.
+      // index.html tidak punya <script> inline sama sekali (satu-satunya skrip
+      // adalah modul eksternal `/assets/…` / `/src/main.tsx`), dan registerSW
+      // PWA memakai `registerSW.js` eksternal (`injectRegister: 'script-defer'`).
+      // style-src tetap memakai unsafe-inline untuk blok <style> loader.
       scriptSrc: [
         "'self'",
-        "'unsafe-inline'", // Diperlukan karena index.html pakai inline script
         "'wasm-unsafe-eval'", // Diperlukan untuk modul crypto WASM
-        // [AUDIT F-10] Wildcard `https://*.cloudflare.com` dibuang: host yang
-        // benar-benar dipakai (Turnstile + Web Analytics) sudah disebut eksplisit.
+        // [AUDIT F-10] Wildcard Cloudflare dibuang: host yang benar-benar
+        // dipakai (Turnstile + Web Analytics) sudah disebut eksplisit.
         "https://challenges.cloudflare.com",
         "https://static.cloudflareinsights.com",
         "https://cloudflareinsights.com",

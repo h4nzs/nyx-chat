@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## ⏱️ View-once grup dihapus begitu semua penerima membuka (2026-11-01)
+
+`Message` tidak menyimpan daftar penerima, sehingga "semua sudah membuka" tidak
+bisa dihitung dan baris view-once di grup bertahan sampai `expiresAt` (14 hari)
+walau seluruh anggotanya sudah membukanya. Tabel aditif
+`MessageViewOnceRecipient` (kolom `recipientTag` = `conversationScopedTag`, HMAC
+ber-pepper per percakapan — bukan userId) kini diisi saat kirim, hanya dari id
+yang lolos bukti peserta server dan tanpa pengirim. `message:view_once_opened`
+menghapus baris pesan pada pembukaan **terakhir**, sehingga ciphertext tidak lagi
+menganggur setelah dikonsumsi; 1:1 tidak berubah. Daftar penerima bukan
+pengetahuan baru bagi server (ia sudah memakainya untuk relay) dan tidak bisa
+dibalik jadi akun tanpa pepper, jadi model ancaman dump (`docs/28`) hanya
+bertambah retensi metadata, bukan identitas. Penerima yang tidak pernah membuka
+tidak menambah mekanisme tunggu; batas akhirnya tetap `expiresAt`.
+
 ## 🔐 Kunci perangkat baru diautentikasi sebelum arsip riwayat diseal (2026-10-30)
 
 Arsip riwayat diseal ke X-Wing public key perangkat baru yang diterima

@@ -12,7 +12,6 @@ import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
 import { asMessageId, asConversationId, asUserId } from '@nyx/shared';
 import type { Message, RawServerMessage } from '@nyx/shared';
-import { captureAndLog } from '@utils/feedback';
 import { getSodium } from '@lib/sodiumInitializer';
 import { shadowVault } from '@lib/shadowVaultDb';
 import { isPlainObject, isFileMetadata, isStoryReplyPayload, isSystemMessagePayload } from '@utils/typeGuards';
@@ -347,7 +346,6 @@ export async function decryptMessageObject(
                     contentToDecrypt = payload.ciphertext;
                 } else if (payload.x3dh && payload.ciphertext) {
                     const { initiatorCiphertexts, otpkId, handshakeVersion, initiatorSigningKeyV2 } = payload.x3dh;
-                    const ciphertext = payload.ciphertext;
 
                     // [SECURITY] Fetch peer's PreKeyBundle to verify identity and update keychain
                     let initiatorV2KeyMismatch = false;
@@ -710,9 +708,11 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                           }
                           await db.ratchetSessions.delete(conversationId);
                           
-                          const { getSodiumLib, fetchPreKeyBundle, establishSessionFromPreKeyBundle } = await import('@utils/crypto');
+                          // [AUDIT F-12] `getSodiumLib` dan `useAuthStore` diimpor
+                          // di sini tetapi tidak dipakai — sisa refactor. Dibuang
+                          // supaya sinyal `no-unused-vars` di jalur kripto bersih.
+                          const { fetchPreKeyBundle, establishSessionFromPreKeyBundle } = await import('@utils/crypto');
                           const { getPeerIdentityTrust } = await import('@lib/peerIdentityTrust');
-                          const { useAuthStore } = await import('@store/auth');
                           const { t } = await import('i18next');
                           const { default: toast } = await import('react-hot-toast');
                           const useDynamicIslandStore = (await import('@store/dynamicIsland')).default;
@@ -815,8 +815,8 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                                   });
                                   success = true;
                                   break;
-                              } catch (e) {
-                                  // Fail over gracefully
+                              } catch {
+                                  // Fail over gracefully: distribusi batch berikutnya dicoba.
                               }
                           }
                       } else if (data.encryptedKey || data.key) {

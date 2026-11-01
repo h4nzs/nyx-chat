@@ -37,6 +37,11 @@ Tes invarian kripto yang **sudah ada** dan patut dipertahankan: `cryptoKnownAnsw
 | D-05 | `README.md` §Crypto | "Double Ratchet (hybrid PQ) · SPQR ML-KEM Braid (v2)" | Akurat terhadap kode. Wording "Signal Protocol" (bila ada di deskripsi repo) akan over-state: tidak ada X3DH klasik Signal. | Akurat |
 | D-06 | `docs/04` §4.4 | "`pqSignature` tidak diverifikasi di jalur v2" | Sesuai kode — keputusan terdokumentasi, bukan bug. | Akurat |
 
+**Status 2026-11-01 (residual ditutup):** D-01 (`docs/05` §5.4), D-02
+(`docs/03` §3.3) dan D-04 (README §KT) sudah disinkronkan ke perilaku nyata;
+D-03 hanya perbedaan tingkat umum (bukan drift). Lihat
+`pass-2/40-fixes.md` untuk daftar lengkap beserta tesnya.
+
 ## 6.4 Rekomendasi urutan perbaikan tes
 
 1. Semua tes otorisasi realtime (F-01, F-02, F-05) — murah, dan mengunci perilaku yang sekarang salah.

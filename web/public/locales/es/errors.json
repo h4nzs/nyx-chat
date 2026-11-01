@@ -59,6 +59,7 @@
   "client_version_continue": "Continuar sin enviar",
   "client_version_pwa_hint": "Si al recargar no cambia nada, cierra todas las pestañas de NYX y, si es una aplicación instalada, reinstálala desde el sitio de NYX.",
   "api_rate_limited": "Demasiados intentos. Espera un momento y vuelve a intentarlo.",
+  "api_csrf_unavailable": "No se pudo contactar al servidor para preparar esta solicitud. Revisa tu conexión y vuelve a intentarlo — no se envió nada.",
   "api_group_access_expired": "Tu acceso a este grupo ha caducado. Vuelve a entrar con una invitación nueva o pide a un administrador que te añada otra vez.",
   "api_admin_required": "Solo un administrador del grupo puede hacer esto. Tu capacidad de administrador puede haberse rotado: vuelve a abrir el grupo e inténtalo de nuevo.",
   "api_blind_auth_required": "Esta acción necesita el secreto emitido cuando se creó, y este dispositivo no lo tiene.",

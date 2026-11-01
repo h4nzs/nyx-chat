@@ -368,12 +368,19 @@ test('T2 OFFLINE-KEY: fulfilled_key dipersist sebagai SYSTEM message (penerima o
       // [AUDIT F-02] gate tulis SYSTEM: pengirim adalah anggota grup ini.
       if (prop === 'conversation') {
         return {
-          findUnique: async () => ({ id: 'c1', isGroup: true, adminSecretHash: null }),
+          findUnique: async () => ({ id: 'c1', isGroup: true, adminSecretHash: null, groupEpoch: 0 }),
           update: async () => ({ messageSeq: 1 }),
         };
       }
       if (prop === 'userHiddenConversation') {
-        return { findFirst: async () => ({ id: 'membership-row' }) };
+        // [PASS-2 N-03] Gate `requireFresh`: baris nyata punya epoch + expiry.
+        return {
+          findFirst: async () => ({
+            id: 'membership-row',
+            tokenEpoch: 0,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          }),
+        };
       }
       return target[prop];
     },
@@ -716,14 +723,21 @@ test('D2 guard: kedua jalur receipt memakai tag opaque, tidak ada fallback userI
   const src = readSrc('../src/network/realtimeHandlers.ts');
   assert.equal(
     (src.match(/conversationScopedTag\(conversationId, userId\)/g) || []).length,
+    // [PASS-2 residual] Pemakaian ketiga: `MessageViewOnceOpen.openerTag` —
+    // mencatat pembukaan view-once per penerima tanpa menyimpan userId.
     3,
-    'per-pesan + batch + view-once memakai tag opaque per-percakapan'
+    'per-pesan + batch + pembuka view-once memakai tag opaque per-percakapan'
   );
   assert.doesNotMatch(
     src,
     /persistedReaderId\s*=\s*[^;]*:\s*userId\b/,
     'regresi D2: fallback ke userId asli di MessageStatus'
   );
+  // [PASS-2 REG-1] Jalur view-once tidak lagi menulis receipt sendiri; bukti
+  // penerima diturunkan `isConversationParticipant` (tag opaque dihitung di
+  // utils/conversationParticipants.ts), bukan dari `targetRecipient === userId`.
+  assert.match(src, /isConversationParticipant\(/, 'view-once memakai bukti peserta per percakapan');
+  assert.doesNotMatch(src, /targetRecipient === userId/, 'regresi REG-1: gate view-once lama');
 });
 
 // --- [PARITY 2026-10-18] Rate limit jalur data di HANDLER (berlaku WT + WSS) ---
@@ -787,6 +801,8 @@ test('PARITY: presence:subscribe memakai bucket presence_subscribe (tidak dihitu
   ctx.prisma = new Proxy(ctx.prisma as unknown as Record<string, unknown>, {
     get(target, prop: string) {
       if (prop === 'userHiddenConversation') return { findMany: async () => [] };
+      // [PASS-2 residual] presence juga menurunkan peer dari SessionKey.
+      if (prop === 'sessionKey') return { findMany: async () => [] };
       return (target as Record<string, unknown>)[prop];
     },
   }) as unknown as RealtimeContext['prisma'];

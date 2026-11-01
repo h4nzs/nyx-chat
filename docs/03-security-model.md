@@ -68,7 +68,7 @@ Every device row stores `fingerprint` (browser signals, SHA-256) and `installati
 | Item | Trade-off |
 |---|---|
 | Biometric unlock stores the recovery phrase in localStorage under a WebAuthn-PRF-derived key | Convenience vs blast radius — accepted by maintainer |
-| `'wasm-unsafe-eval'` and `'unsafe-inline'` remain in CSP | Required for libsodium WASM and inline scripts; `'unsafe-eval'` was removed |
+| `'wasm-unsafe-eval'` remains in `script-src`; `'unsafe-inline'` remains only in `style-src` | Required for libsodium WASM and the inline loader `<style>` block. `'unsafe-inline'` was **removed from `script-src`** on 2026-11-01 (audit F-10 residual): the built `index.html` has zero inline `<script>` and the PWA registers through the external `registerSW.js`. `'unsafe-eval'` stays removed. |
 | REST `GET /api/messages/:conversationId` has no membership check | Opaque Mailbox design — the server doesn't know participants; ciphertext-only risk accepted (§3.7.1 D2) |
 | Mailbox `tag` is visible to the server | Needed so a fulfiller can find its own envelope; server can match a presented token to an item, but not to an account (§3.7.1 D3) |
 | Sidecar caches JWT/device checks at session start | Per-message device validation happens in Node (redisBridge) instead |

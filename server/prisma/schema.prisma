@@ -305,6 +305,12 @@ model Message {
   seq                 Int             @default(0)
   createdAt           DateTime        @default(now())
   statuses            MessageStatus[]
+  // [AUDIT PASS 2 residual — view-once grup] Pembukaan per penerima.
+  viewOnceOpens       MessageViewOnceOpen[]
+  // [PASS-2 residual lanjutan — view-once penerima] Daftar TUJUAN pesan ini
+  // (hanya diisi untuk `isViewOnce`), supaya server bisa menghapus baris saat
+  // semua penerima sudah membuka.
+  viewOnceRecipients  MessageViewOnceRecipient[]
   expiresAt           DateTime?
   isViewOnce          Boolean         @default(false)
   isViewed            Boolean         @default(false)
@@ -350,6 +356,54 @@ model MessageStatus {
   @@index([messageId])
   @@index([status])
   @@index([updatedAt])
+}
+
+// [AUDIT PASS 2 residual — view-once di grup] Sebelumnya anggota pertama yang
+// membuka pesan view-once menghapus BARIS pesan untuk semua orang, jadi anggota
+// lain kehilangan pesannya sebelum sempat membaca. Skema tidak menyimpan daftar
+// penerima per pesan, sehingga "sudah dibuka semua orang" tidak bisa dihitung;
+// yang bisa dilakukan dengan benar adalah mencatat pembukaan PER PENERIMA lalu
+// (a) tidak menghapus baris untuk percakapan grup, dan (b) mengosongkan konten
+// di jalur baca bagi penerima yang sudah membuka. Penerima lain tetap bisa
+// mengambil pesan yang sama; pengirim/unsend dan sweeper `expiresAt` tetap
+// menghapusnya.
+model MessageViewOnceOpen {
+  id        String   @id @default(uuid())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String
+  // `conversationScopedTag(conversationId, userId)` — HMAC per percakapan,
+  // bukan userId asli: dump DB tidak bisa menyebut siapa yang sudah membuka.
+  openerTag String
+  openedAt  DateTime
+
+  @@unique([messageId, openerTag])
+  @@index([messageId])
+}
+
+// [PASS-2 residual lanjutan — view-once: daftar penerima per pesan]
+//
+// Sebelumnya skema tidak menyimpan tujuan pesan, jadi "semua penerima sudah
+// membuka" tidak bisa dihitung dan baris view-once grup harus bertahan sampai
+// `expiresAt` (14 hari) walau semua anggotanya sudah membuka. Daftar ini diisi
+// pada saat kirim (hanya bila `isViewOnce`), HANYA dari id yang lolos bukti
+// peserta server (`filterConversationParticipants`), minus pengirim — klien
+// yang menghilangkan anggota tidak bisa memicu penghapusan dini, karena relay
+// memakai daftar yang sama.
+//
+// SIFAT PRIVASI: `recipientTag` = `conversationScopedTag(conversationId, userId)`
+// — HMAC ber-pepper, deterministik per (percakapan, user) tetapi berbeda antar
+// percakapan dan tidak bisa dibalik tanpa pepper. Jadi dump DB tidak memuat
+// "siapa penerima pesan X", dan server tidak mendapat pengetahuan baru: daftar
+// ini sudah ia pegang saat relay, hanya saja dulu dibuang.
+model MessageViewOnceRecipient {
+  id           String   @id @default(uuid())
+  message      Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId    String
+  recipientTag String
+  createdAt    DateTime @default(now())
+
+  @@unique([messageId, recipientTag])
+  @@index([messageId])
 }
 
 model UserHiddenConversation {

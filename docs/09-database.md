@@ -41,6 +41,7 @@ erDiagram
 | `Conversation` | isGroup, encryptedMetadata blob, `authSecret` (blind auth for group ops), `adminSecretHash` (SHA-256 hex of the admin capability token; nullable in schema, but group creation rejects a missing hash and a NULL value is fail-closed — no admin op possible) |
 | `Message` | store-and-forward ciphertext (≤14 days), `deleteSecret`, view-once flags |
 | `MessageStatus` | delivery/read receipts |
+| `MessageViewOnceOpen` | per-recipient view-once opens (`openerTag` = HMAC per conversation, no raw userId) |
 | `UserHiddenConversation` | per-user conversation visibility (Opaque Mailbox discovery) |
 | `Story` | encrypted story blobs with expiry |
 | `User.encryptedContactBundle` | satu blob opaque per user — backup daftar kenalan terenkripsi klien (server tidak bisa membaca); versi = hash isi untuk fetch kondisional |

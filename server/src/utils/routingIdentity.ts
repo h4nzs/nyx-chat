@@ -22,7 +22,7 @@
  */
 
 import { openAtRest, sealAtRest, sealedLookupCandidates } from './atRestSecrets.js'
-import { hashGroupToken, memberTokenExpiry } from './groupTokens.js'
+import { evaluateMemberToken, hashGroupToken, memberTokenExpiry } from './groupTokens.js'
 
 /** Nilai kanonik untuk kolom routing (deterministik, kunci seal aktif). */
 export function routingIdentity(userId: string): Promise<string> {
@@ -81,8 +81,8 @@ export interface MembershipLookup {
   userHiddenConversation: {
     findFirst(args: {
       where: Record<string, unknown>;
-      select: { id?: boolean };
-    }): Promise<{ id?: string } | null>;
+      select: { id?: boolean; tokenEpoch?: boolean; expiresAt?: boolean };
+    }): Promise<{ id?: string; tokenEpoch?: number; expiresAt?: Date } | null>;
   };
 }
 
@@ -187,17 +187,35 @@ export async function filterConversationMembers(
   return wanted.filter((userId) => allowed.has(userId));
 }
 
-/** Cek kepemilikan baris keanggotaan (leave tanpa group token). */
+/**
+ * Cek kepemilikan baris keanggotaan (leave tanpa group token).
+ *
+ * [AUDIT PASS 2 — N-03] `requireFresh` menolak baris yang tokennya sudah mati:
+ * epoch tidak cocok (kick/rotasi) atau kedaluwarsa melewati grace — aturan yang
+ * sama dengan `/api/groups/*` (`evaluateMemberToken`). Dipakai gate tulis baris
+ * SYSTEM supaya anggota lama yang barisnya belum di-GC tidak bisa menyisipkan
+ * envelope kunci ke grup. Pembacaan "apakah baris ada" (leave) tetap memakai
+ * mode lama supaya user dengan token basi masih bisa keluar.
+ */
 export async function findMembership(
   prisma: MembershipLookup,
-  input: { userId: string; conversationId: string }
+  input: { userId: string; conversationId: string },
+  options?: { requireFresh?: boolean; groupEpoch?: number }
 ): Promise<boolean> {
   const candidates = await routingCandidates(input.userId)
   const row = await prisma.userHiddenConversation.findFirst({
     where: { userId: { in: candidates }, conversationId: input.conversationId },
-    select: { id: true },
+    select: options?.requireFresh
+      ? { id: true, tokenEpoch: true, expiresAt: true }
+      : { id: true },
   })
-  return row !== null
+  if (row === null) return false
+  if (!options?.requireFresh) return true
+
+  const tokenEpoch = row.tokenEpoch
+  const expiresAt = row.expiresAt
+  if (typeof tokenEpoch !== 'number' || !expiresAt) return false
+  return evaluateMemberToken({ tokenEpoch, expiresAt }, options.groupEpoch ?? 0) !== 'stale'
 }
 
 /**

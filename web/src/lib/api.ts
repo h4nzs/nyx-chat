@@ -202,9 +202,22 @@ export async function api<T = unknown>(
         headers['Content-Type'] = 'application/json';
     }
     if (!anonymous) {
-      // Coba ambil token, kalau gagal lanjut aja (mungkin endpoint public)
-      const token = await getCsrfToken().catch(() => "");
-      if (token) headers['CSRF-Token'] = token;
+      // [AUDIT U-01] Mutasi TIDAK dikirim tanpa token CSRF. Dulu kegagalan
+      // `GET /api/csrf-token` (offline sesaat / 5xx) ditelan dan request tetap
+      // dikirim tanpa header → server menjawab `403 Invalid CSRF token`, pesan
+      // yang tidak memberi tahu pengguna bahwa masalahnya sementara dan
+      // tindakannya tidak pernah sampai. Sekarang satu percobaan ulang
+      // (single-flight sudah dilepas setelah selesai), lalu berhenti lebih awal
+      // dengan kode yang bisa ditindaklanjuti (`api_csrf_unavailable`).
+      let token = await getCsrfToken().catch(() => "");
+      if (!token) token = await getCsrfToken().catch(() => "");
+      if (!token) {
+        throw Object.assign(
+          new Error('CSRF_UNAVAILABLE: token CSRF tidak bisa diambil; request tidak dikirim'),
+          { status: 0 },
+        );
+      }
+      headers['CSRF-Token'] = token;
     }
   }
 
@@ -239,7 +252,7 @@ export async function api<T = unknown>(
         details = JSON.parse(text);
         if (details.error) errorMessage = details.error;
         if (details.message) errorMessage = details.message;
-      } catch (e) {
+      } catch {
         errorMessage = text || `Request failed with status ${res.status}`;
         details = { raw: text };
       }

@@ -44,8 +44,13 @@ export interface GroupRealtimeAuthDb {
   conversation: {
     findUnique(args: {
       where: { id: string };
-      select: { id?: boolean; isGroup?: boolean; adminSecretHash?: boolean };
-    }): Promise<{ id?: string; isGroup?: boolean; adminSecretHash?: string | null } | null>;
+      select: { id?: boolean; isGroup?: boolean; adminSecretHash?: boolean; groupEpoch?: boolean };
+    }): Promise<{
+      id?: string;
+      isGroup?: boolean;
+      adminSecretHash?: string | null;
+      groupEpoch?: number;
+    } | null>;
   };
   // Dua metode dari dua helper berbeda; dideklarasikan eksplisit karena
   // `extends` dua interface yang sama-sama punya properti ini tidak valid.
@@ -77,17 +82,22 @@ export async function authorizeGroupSystemWrite(
 ): Promise<GroupSystemWriteDecision> {
   const conversation = await db.conversation.findUnique({
     where: { id: input.conversationId },
-    select: { id: true, isGroup: true, adminSecretHash: true },
+    select: { id: true, isGroup: true, adminSecretHash: true, groupEpoch: true },
   });
   if (!conversation) return { ok: false, reason: 'not_found' };
   // Event-event ini hanya bermakna untuk grup; menolak 1:1 menutup penyalahgunaan
   // termudah (percakapan 1:1 tidak menyimpan roster sehingga tidak ada gate lain).
   if (conversation.isGroup !== true) return { ok: false, reason: 'not_group' };
 
-  const isMember = await findMembership(db, {
-    userId: input.userId,
-    conversationId: input.conversationId,
-  });
+  // [AUDIT PASS 2 — N-03] Baris keanggotaan yang tokennya basi (epoch tidak
+  // cocok / kedaluwarsa melewati grace) diperlakukan sebagai bukan anggota:
+  // gate tulis SYSTEM konsisten dengan `/api/groups/*`, dan kick/rotasi tidak
+  // menyisakan jendela tulis selama baris lama belum di-GC.
+  const isMember = await findMembership(
+    db,
+    { userId: input.userId, conversationId: input.conversationId },
+    { requireFresh: true, groupEpoch: conversation.groupEpoch ?? 0 }
+  );
   const token = typeof input.adminCapabilityToken === 'string' ? input.adminCapabilityToken : '';
   const isAdmin = isAdminTokenValid(conversation.adminSecretHash ?? null, token);
 
