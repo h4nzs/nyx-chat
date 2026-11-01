@@ -204,6 +204,12 @@ model SessionKey {
   deviceId             String // Session key E2EE diikat antar perangkat
   device               Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   isInitiator          Boolean      @default(false)
+  // [AUDIT PASS 3 — N3-01] `true` HANYA untuk baris yang ditulis server di
+  // transaksi pembuatan percakapan (`POST /api/conversations` → `initialSession`).
+  // Baris inilah bukti peserta yang sah untuk ratchet client-driven: klien tidak
+  // bisa membuatnya lewat endpoint ratchet (yang hanya boleh menambah perangkat
+  // yang sudah terdaftar), sehingga keanggotaan tidak lagi bisa dicetak sendiri.
+  issuedByServer       Boolean      @default(false)
   encryptedKey         Bytes
   initiatorCiphertexts Bytes?
   createdAt            DateTime     @default(now())

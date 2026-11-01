@@ -24,6 +24,11 @@ import {
   MAX_TYPING_TARGETS,
   type RealtimeContext,
 } from '../src/network/realtimeHandlers.js';
+import { clearAtRestSecretCacheForTests, conversationScopedTag } from '../src/utils/atRestSecrets.js';
+
+// [PASS-3] Tag penerima view-once = HMAC ber-pepper; tes butuh pepper stabil.
+process.env.NYX_AT_REST_PEPPER = 'realtime-authz-pepper-'.padEnd(64, 'z');
+clearAtRestSecretCacheForTests();
 
 interface SentCall {
   target: string;
@@ -70,6 +75,8 @@ function makeViewOnceCtx (opts: {
   isGroup?: boolean;
   /** Jumlah penerima yang tercatat saat kirim (0 = baris lama tanpa daftar). */
   recipientCount?: number;
+  /** Tag penerima yang tercatat saat kirim (untuk cek "pembuka = penerima"). */
+  recipientTags?: string[];
 }) {
   let deletes = 0;
   const opens: Array<{ messageId: string; openerTag: string }> = [];
@@ -110,8 +117,14 @@ function makeViewOnceCtx (opts: {
     },
     // [PASS-2 residual lanjutan] daftar penerima yang dicatat saat kirim.
     messageViewOnceRecipient: {
-      count: async ({ where }: { where: { messageId?: string } }) =>
-        where.messageId === 'm1' ? (opts.recipientCount ?? 0) : 0,
+      count: async ({ where }: { where: { messageId?: string; recipientTag?: string } }) => {
+        if (where.messageId !== 'm1') return 0;
+        // Query bertag = "apakah user ini penerima pesan itu".
+        if (typeof where.recipientTag === 'string') {
+          return (opts.recipientTags ?? []).includes(where.recipientTag) ? 1 : 0;
+        }
+        return opts.recipientCount ?? (opts.recipientTags?.length ?? 0);
+      },
     },
   };
   const built = makeCtx(prisma);
@@ -195,7 +208,11 @@ test('REG-1 residual: view-once di GRUP tidak menghapus pesan anggota lain', asy
 
 test('REG-1 lanjutan: view-once grup TIDAK dihapus selama masih ada penerima yang belum membuka', async () => {
   const { ctx, deletes, opens } = makeViewOnceCtx({
-    senderId: null, receipt: true, isGroup: true, recipientCount: 2,
+    senderId: null,
+    receipt: true,
+    isGroup: true,
+    recipientCount: 2,
+    recipientTags: [conversationScopedTag('c1', 'u-recipient-a'), conversationScopedTag('c1', 'u-recipient-b')],
   });
   await handleKeySync(ctx, 'u-recipient-a', 'd1', {
     event: 'message:view_once_opened',
@@ -209,7 +226,11 @@ test('REG-1 lanjutan: view-once grup TIDAK dihapus selama masih ada penerima yan
 
 test('REG-1 lanjutan: penerima TERAKHIR membuka → baris dihapus tanpa menunggu expiresAt', async () => {
   const { ctx, deletes } = makeViewOnceCtx({
-    senderId: null, receipt: true, isGroup: true, recipientCount: 1,
+    senderId: null,
+    receipt: true,
+    isGroup: true,
+    recipientCount: 1,
+    recipientTags: [conversationScopedTag('c1', 'u-recipient')],
   });
   await handleKeySync(ctx, 'u-recipient', 'd1', {
     event: 'message:view_once_opened',
@@ -218,6 +239,32 @@ test('REG-1 lanjutan: penerima TERAKHIR membuka → baris dihapus tanpa menunggu
   });
 
   assert.equal(deletes(), 1, 'semua penerima yang tercatat sudah membuka');
+});
+
+test('N3-01 lanjutan: keanggotaan palsu tetap tidak bisa menghapus view-once orang lain', async () => {
+  // Bukti peserta dipegang server (receipt), TAPI daftar penerima pesan ini
+  // hanya memuat orang lain → pembuka bukan penerima pesan tersebut.
+  const { ctx, sent, deletes, opens } = makeViewOnceCtx({
+    senderId: null,
+    receipt: true,
+    isGroup: true,
+    recipientCount: 1,
+    recipientTags: [conversationScopedTag('c1', 'u-real-recipient')],
+  });
+
+  await handleKeySync(ctx, 'u-intruder', 'd1', {
+    event: 'message:view_once_opened',
+    msgId: 'evt-not-addressed',
+    data: { messageId: 'm1', conversationId: 'c1', targetRecipient: 'u-sender' },
+  });
+
+  assert.equal(deletes(), 0, 'pembuka bukan penerima pesan → tidak ada penghapusan');
+  assert.equal(opens().length, 0, 'pembukaan tidak dicatat');
+  assert.equal(
+    sent.filter((c) => (c.data as { event?: string }).event === 'message:viewed').length,
+    0,
+    'receipt viewed tidak dikirim'
+  );
 });
 
 test('REG-1: pesan NON view-once tidak bisa dihapus lewat event ini', async () => {

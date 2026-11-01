@@ -196,18 +196,31 @@ return current
         });
 
         if (initialSession) {
+          // [AUDIT PASS 3 — N3-01] Baris ini ditulis SERVER di transaksi
+          // pembuatan, dan kini ditandai `issuedByServer: true`: itulah bukti
+          // peserta yang sah untuk ratchet client-driven (klien tidak bisa
+          // membuat baris bertanda ini lewat endpoint ratchet).
+          //
+          // Dua bug lama sekaligus diperbaiki: kolom yang ditulis bernama
+          // `initiatorCiphertext` (tidak ada di schema → createMany melempar),
+          // dan ciphertext X3DH inisiator diwajibkan padahal distribusi kunci
+          // sesi biasa tidak punya ciphertext tersebut (`relaySessionKeys`
+          // memperlakukannya opsional).
           const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession;
           const keyRecords = [];
           for (const deviceId in initialKeysPerDevice) {
             const encryptedKey = initialKeysPerDevice[deviceId];
-            const initiatorCiphertext = initiatorCiphertextsPerDevice[deviceId];
-            if (typeof encryptedKey !== 'string' || typeof initiatorCiphertext !== 'string') continue;
+            if (typeof encryptedKey !== 'string') continue;
+            const initiatorCiphertext = initiatorCiphertextsPerDevice?.[deviceId];
             keyRecords.push({
               conversationId: convo.id,
               deviceId,
               sessionId,
               encryptedKey: Buffer.from(encryptedKey, 'base64'),
-              initiatorCiphertext: Buffer.from(initiatorCiphertext, 'base64')
+              initiatorCiphertexts: typeof initiatorCiphertext === 'string'
+                ? Buffer.from(initiatorCiphertext, 'base64')
+                : null,
+              issuedByServer: true
             });
           }
           if (keyRecords.length > 0) {

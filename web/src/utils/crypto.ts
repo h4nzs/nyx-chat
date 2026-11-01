@@ -942,63 +942,135 @@ export async function getMyEncryptionKeyPair(): Promise<{ publicKey: Uint8Array;
 
 // --- Session Ratcheting and Key Retrieval ---
 
-export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
-  try {
-    const sodium = await getSodiumLib();
-    const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
-    const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    
-    // 1. Generate local session key and ID
-    const sessionId = sodium.to_hex(sodium.randombytes_buf(16));
-    const sessionKey = sodium.randombytes_buf(32);
-    
-    const conversationStore = useConversationStore.getState();
-    const conversation = conversationStore.conversations.find(c => c.id === conversationId);
-    if (!conversation) throw new Error("Conversation not found for ratcheting");
+/**
+ * [AUDIT PASS 3 — N3-01] Satu kunci sesi baru, disegel ke SEMUA perangkat
+ * peserta yang bundle-nya tersedia. Dipakai dua jalur:
+ *
+ *  - **pembuatan percakapan** (`initialSession` pada `POST /api/conversations`) —
+ *    server menulis baris `SessionKey` dengan `issuedByServer: true`, dan itulah
+ *    bukti peserta yang sah untuk ratchet berikutnya;
+ *  - **ratchet client-driven** (`POST /api/session-keys/:id/ratchet`) — hanya
+ *    boleh untuk perangkat yang sudah terdaftar di percakapan itu (server
+ *    menolak 403 `SESSION_KEY_NOT_ENROLLED` untuk perangkat asing).
+ */
+async function sealSessionKeyForParticipants(userIds: string[]): Promise<{
+  sessionId: string;
+  sessionKey: Uint8Array;
+  keys: Array<{ deviceId: string; encryptedKey: string; encryptedKeyBase64: string; isInitiator: boolean }>;
+}> {
+  const sodium = await getSodiumLib();
+  const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+  const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const myId = useAuthStore.getState().user?.id;
 
-    // 2. Fetch all participant bundles
-    const userIds = conversation.participants.map(p => p.id);
-    const bundlesMap = await fetchPreKeyBundles(userIds);
-    
-    const keysPayload: Record<string, unknown>[] = [];
-    const myId = useAuthStore.getState().user?.id;
+  const sessionId = sodium.to_hex(sodium.randombytes_buf(16));
+  const sessionKey = sodium.randombytes_buf(32);
+  const keys: Array<{ deviceId: string; encryptedKey: string; encryptedKeyBase64: string; isInitiator: boolean }> = [];
 
-    // 3. Encrypt for all devices of all participants
-    for (const uId of userIds) {
-      const bundles = bundlesMap[uId] || [];
-      for (const bundle of bundles) {
-        // Skip current device
-        if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
+  const bundlesMap = await fetchPreKeyBundles(userIds);
+  for (const uId of userIds) {
+    for (const bundle of bundlesMap[uId] || []) {
+      // Lewati perangkat ini sendiri (kunci disimpan lokal, bukan di-relay).
+      if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
 
-        const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
-
-        if (!theirPqPublicKey) {
-          console.warn(`Skipping device ${bundle.deviceId} for user ${uId}: Missing PQ key`);
-          continue;
-        }
-
-        const encryptedKey = await sealForDevice(sessionKey, theirPqPublicKey, theirPublicKey);
-        
-        keysPayload.push({
-          deviceId: bundle.deviceId,
-          encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-          isInitiator: uId === myId
-        });
+      const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const theirPqPublicKey = bundle.pqIdentityKey
+        ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+        : null;
+      if (!theirPqPublicKey) {
+        console.warn(`Skipping device ${bundle.deviceId} for user ${uId}: Missing PQ key`);
+        continue;
       }
-    }
 
-    // 4. Relay to server
-    await authFetch(`/api/session-keys/${conversationId}/ratchet`, {
-      method: 'POST',
-      body: JSON.stringify({ sessionId, keys: keysPayload })
+      const encryptedKey = await sealForDevice(sessionKey, theirPqPublicKey, theirPublicKey);
+      keys.push({
+        deviceId: bundle.deviceId,
+        encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+        // Server jalur pembuatan mendekode dengan `Buffer.from(x, 'base64')`
+        // (standar), jadi sertakan encoding itu juga agar `-`/`_` tidak hilang.
+        encryptedKeyBase64: sodium.to_base64(encryptedKey, sodium.base64_variants.ORIGINAL),
+        isInitiator: uId === myId,
+      });
+    }
+  }
+
+  return { sessionId, sessionKey, keys };
+}
+
+/**
+ * Bangun payload `initialSession` untuk `POST /api/conversations`.
+ *
+ * [AUDIT PASS 3 — N3-01] Percakapan 1:1 tidak punya roster di server, jadi
+ * satu-satunya bukti peserta yang bisa dibuat saat kontak pertama adalah baris
+ * `SessionKey` yang ditulis SERVER pada transaksi pembuatan. Klien mengirim
+ * kunci yang sudah disegel per perangkat di sini; pemanggil menyimpan
+ * `sessionKey` secara lokal (`storeSessionKeySecurely`) setelah percakapan ada.
+ */
+export async function buildInitialSessionForConversation(userIds: string[]): Promise<{
+  sessionId: string;
+  sessionKey: Uint8Array;
+  initialKeysPerDevice: Record<string, string>;
+  initiatorCiphertextsPerDevice: Record<string, string>;
+}> {
+  const sealed = await sealSessionKeyForParticipants(userIds);
+  const initialKeysPerDevice: Record<string, string> = {};
+  for (const key of sealed.keys) {
+    initialKeysPerDevice[key.deviceId] = key.encryptedKeyBase64;
+  }
+  return {
+    sessionId: sealed.sessionId,
+    sessionKey: sealed.sessionKey,
+    initialKeysPerDevice,
+    // Distribusi kunci sesi biasa tidak membawa ciphertext X3DH inisiator;
+    // kolomnya tetap kosong (server menerima objek kosong).
+    initiatorCiphertextsPerDevice: {},
+  };
+}
+
+/**
+ * Rotasi kunci sesi percakapan (client-driven ratchet): segel kunci baru ke
+ * semua perangkat peserta, relay lewat `POST /api/session-keys/:id/ratchet`,
+ * lalu simpan salinan lokal.
+ *
+ * Gerbang server (N3-01): pemanggil harus peserta terbukti — keanggotaan
+ * bertoken, receipt bertag, atau perangkat yang punya baris `SessionKey`
+ * `issuedByServer` dari pembuatan percakapan — dan setiap perangkat tujuan
+ * harus sudah terdaftar di percakapan itu. Percakapan yang dibuat sebelum
+ * pembuatan mengirim `initialSession` baru punya bukti setelah pesan pertama
+ * dibaca (receipt); sampai itu terjadi server menjawab 403.
+ */
+export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) throw new Error("Conversation not found for ratcheting");
+
+  try {
+    const userIds = conversation.participants.map(p => {
+      const withUserId = p as { userId?: string };
+      return withUserId.userId || p.id;
     });
 
-    // 5. Store locally
-    await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
+    const sealed = await sealSessionKeyForParticipants(userIds);
+    if (sealed.keys.length === 0) {
+      throw new Error('Tidak ada perangkat peserta yang bisa menerima kunci sesi baru');
+    }
+
+    await authFetch(`/api/session-keys/${conversationId}/ratchet`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: sealed.sessionId, keys: sealed.keys.map(({ deviceId, encryptedKey, isInitiator }) => ({ deviceId, encryptedKey, isInitiator })) })
+    });
+
+    // Simpan lokal HANYA setelah server menerima: kunci yang gagal di-relay
+    // tidak boleh dipakai (peer tidak akan bisa mendekripsi).
+    await storeSessionKeySecurely(conversationId, sealed.sessionId, sealed.sessionKey);
   } catch (error) {
     console.error('Failed to ratchet session for:', conversationId, error);
-    throw new Error('Could not establish a secure session locally.');
+    // Pertahankan status/kode server (mis. 403 `SESSION_KEY_NOT_PARTICIPANT`)
+    // supaya pemanggil bisa membedakan "belum punya bukti peserta" dari bug lokal.
+    const status = (error as { status?: number }).status;
+    const wrapped = new Error('Could not establish a secure session locally.');
+    (wrapped as Error & { status?: number; cause?: unknown }).status = status;
+    (wrapped as Error & { cause?: unknown }).cause = error;
+    throw wrapped;
   }
 }
 
@@ -3150,7 +3222,16 @@ export async function establishSessionFromPreKeyBundle(
   });
   const identityChanged = observation.status === 'changed';
   if (identityChanged) {
+      // [AUDIT PASS 3 — N3-04] Dulu hanya `console.warn` lalu handshake tetap
+      // jalan: pada kontak PERTAMA server yang jahat bisa menyajikan bundle
+      // pengganti, log KT menandainya `mismatch`, dan pesan tetap dienkripsi ke
+      // kunci itu. Sekarang perubahan kunci yang belum diterima user (TOFU
+      // change ATAU pertentangan log) menghentikan pembentukan sesi; user harus
+      // menerima kunci baru lewat `acceptPendingPeerIdentity` lebih dulu.
+      // Verdict `unavailable` TIDAK memblokir (log mati ≠ serangan) — itu tetap
+      // ditandai banner sesuai audit F-09.
       console.warn(`[Security] Identity key changed for user ${peerUserId}. Pinned: ${observation.trustedKey.substring(0, 10)}... New: ${observation.pendingKey.substring(0, 10)}...`);
+      throw new Error('IDENTITY_CHANGED: kunci identitas peer berubah dan belum diterima user');
   }
   
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -3234,9 +3315,15 @@ export async function deriveSessionKeyAsRecipient(
 
     if (otpkId !== undefined) {
       const masterSeed = await getMasterSeedOrThrow();
+      // [AUDIT PASS 3 — N3-02] Jalur regenerate dulu `return` sebelum
+      // `deleteOneTimePreKey`, jadi OTPK yang SUDAH dikonsumsi server (DELETE …
+      // RETURNING) tetap tersimpan lokal — berbeda dari jalur normal tepat di
+      // bawah. Sekarang OTPK dihapus begitu derivasi regenerate berhasil; kalau
+      // regenerate gagal kita biarkan barisnya (fallback di bawah memang akan
+      // menolak blob ber-OTPK, dan handshake hanya diulang dari pesan baru).
       try {
         const { worker_x3dh_v2_recipient_regenerate } = await getWorkerProxy();
-        return await worker_x3dh_v2_recipient_regenerate({
+        const regenerated = await worker_x3dh_v2_recipient_regenerate({
           keyId: otpkId,
           masterSeed,
           myIdentityKey: myIdentityPublicKey,
@@ -3245,6 +3332,8 @@ export async function deriveSessionKeyAsRecipient(
           theirSigningKeyV2,
           initiatorCiphertexts,
         });
+        await deleteOneTimePreKey(otpkId);
+        return regenerated;
       } catch (e) {
         console.error('[X3DH v2] Gagal regenerate OTPK:', otpkId, e);
       }

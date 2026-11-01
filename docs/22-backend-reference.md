@@ -94,7 +94,7 @@ Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/util
 | `r2.ts` | `s3Client`, `getPresignedUploadUrl`, `deleteR2File(s)` |
 | `secureLinkPreview.ts` | SSRF-safe link preview |
 | `sendPushNotification.ts` | VAPID per-device encrypted push |
-| `sessionKeys.ts` | `relaySessionKeys` (blind relay) |
+| `sessionKeys.ts` | `relaySessionKeys` (blind relay); gerbangnya `sessionKeyRelayGuard.ts` — pemanggil harus peserta terbukti (keanggotaan/receipt, atau perangkatnya punya baris `SessionKey` `issuedByServer` dari pembuatan percakapan), tiap `deviceId` harus perangkat nyata yang **sudah terdaftar** di percakapan itu, dan perangkat orang lain hanya bila pemiliknya peserta terbukti (audit pass 3 N3-01) |
 | `sessionUtils.ts` | `clearAuthCookies`, `revokeFamily` |
 | `lib/prisma.ts` | PrismaClient + `@prisma/adapter-pg`; sslmode only for non-local hosts |
 | `lib/redis.ts` | `redisClient`, `connectRedis` |

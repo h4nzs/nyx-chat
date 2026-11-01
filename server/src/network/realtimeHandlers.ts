@@ -57,6 +57,7 @@ import { conversationScopedTag } from '../utils/atRestSecrets.js';
 // baris begitu SEMUA penerima membuka (bukan menunggu `expiresAt`).
 import {
   finalizeViewOnceIfAllOpened,
+  isAddressedViewOnceRecipient,
   recordViewOnceRecipients,
   type ViewOnceRecipientDb,
 } from '../utils/viewOnceRecipients.js';
@@ -964,6 +965,23 @@ export async function handleKeySync(
          if (!isSender && !isRecipient) {
            console.warn('[Security] Unauthorized view_once_opened oleh', sanitizeForLog(userId), 'untuk pesan', sanitizeForLog(messageId));
            return;
+         }
+
+         // [AUDIT PASS 3 — N3-01 lanjutan] Bila pesan ini punya daftar penerima
+         // (baris baru), pembuka HARUS ada di daftar itu. Daftar ditulis saat
+         // kirim dari bukti peserta server, jadi keanggotaan yang dipalsukan
+         // (mis. baris `SessionKey` karangan sebelum gerbang N3-01 ada) tetap
+         // tidak bisa menghapus view-once orang lain. Pesan lama tanpa daftar →
+         // `null` → kembali ke bukti peserta seperti sebelumnya.
+         if (isRecipient) {
+           const addressed = await isAddressedViewOnceRecipient(
+             ctx.prisma as unknown as ViewOnceRecipientDb,
+             { messageId, conversationId, userId },
+           ).catch(() => null);
+           if (addressed === false) {
+             console.warn('[Security] view_once_opened oleh bukan penerima pesan', sanitizeForLog(messageId));
+             return;
+           }
          }
 
          // Notifikasi "viewed" hanya ke pengirim hasil bukti. Pesan 1:1 menyimpan

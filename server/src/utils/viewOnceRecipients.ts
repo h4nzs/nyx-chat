@@ -97,6 +97,31 @@ export async function recordViewOnceRecipients(
 }
 
 /**
+ * [AUDIT PASS 3 — N3-01 lanjutan] Apakah user ini benar-benar penerima pesan
+ * view-once tersebut menurut daftar yang ditulis saat kirim?
+ *
+ * @returns `true`/`false` bila pesan punya daftar penerima, `null` untuk pesan
+ *          lama (tanpa daftar) — pemanggil kembali ke perilaku lama supaya
+ *          pesan warisan tetap bisa dibuka.
+ */
+export async function isAddressedViewOnceRecipient(
+  db: ViewOnceRecipientDb,
+  opts: { messageId: string; conversationId: string; userId: string }
+): Promise<boolean | null> {
+  const { messageId, conversationId, userId } = opts
+  if (!messageId || !conversationId || !userId) return null
+
+  const [total, mine] = await Promise.all([
+    db.messageViewOnceRecipient.count({ where: { messageId } }),
+    db.messageViewOnceRecipient.count({
+      where: { messageId, recipientTag: conversationScopedTag(conversationId, userId) },
+    }),
+  ])
+  if (total === 0) return null
+  return mine > 0
+}
+
+/**
  * Hapus baris pesan bila SEMUA penerima yang tercatat sudah membuka.
  *
  * @returns `true` kalau baris dihapus. Penerima yang tidak pernah membuka tidak

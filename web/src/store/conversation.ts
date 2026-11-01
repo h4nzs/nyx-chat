@@ -575,14 +575,51 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     }
 
     try {
+      // [AUDIT PASS 3 — N3-01] Percakapan 1:1 tidak punya roster di server, jadi
+      // satu-satunya bukti peserta pada kontak pertama adalah baris `SessionKey`
+      // yang ditulis SERVER dalam transaksi pembuatan (`issuedByServer`). Segel
+      // kunci sesi awal di sini — best-effort: kegagalan sealing (mis. bundle
+      // peer tidak tersedia) tidak boleh menggagalkan pembuatan chat.
+      type InitialSession = {
+        sessionId: string;
+        initialKeysPerDevice: Record<string, string>;
+        initiatorCiphertextsPerDevice: Record<string, string>;
+      };
+      let initialSession: InitialSession | undefined;
+      let localSession: { sessionId: string; sessionKey: Uint8Array } | undefined;
+      try {
+        const { buildInitialSessionForConversation } = await import('@utils/crypto');
+        const built = await buildInitialSessionForConversation([peerId]);
+        if (Object.keys(built.initialKeysPerDevice).length > 0) {
+          initialSession = {
+            sessionId: built.sessionId,
+            initialKeysPerDevice: built.initialKeysPerDevice,
+            initiatorCiphertextsPerDevice: built.initiatorCiphertextsPerDevice,
+          };
+          localSession = { sessionId: built.sessionId, sessionKey: built.sessionKey };
+        }
+      } catch (e) {
+        console.warn('[Session] Kunci sesi awal tidak bisa disiapkan:', e);
+      }
+
       const conv = await authFetch<Conversation>("/api/conversations", {
         method: "POST",
         body: JSON.stringify({
           userIds: [peerId],
           isGroup: false,
-          initialSession: undefined, 
+          initialSession,
         }),
       });
+
+      // Simpan salinan lokal setelah percakapan ada (butuh conv.id).
+      if (localSession) {
+        try {
+          const { storeSessionKeySecurely } = await import('@utils/crypto');
+          await storeSessionKeySecurely(conv.id, localSession.sessionId, localSession.sessionKey);
+        } catch (e) {
+          console.warn('[Session] Gagal menyimpan kunci sesi awal secara lokal:', e);
+        }
+      }
       
       // Opaque Mailbox: server returns empty participants, reconstruct locally
       conv.participants = [

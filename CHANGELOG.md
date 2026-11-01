@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 Tulisan kunci sesi, akuntansi OTPK, dan gerbang identitas peer (2026-11-01, audit pass 3)
+
+Pass 3 menemukan bahwa `POST /api/session-keys/:conversationId/ratchet` hanya
+memeriksa percakapan **ada**, lalu menulis baris `SessionKey` untuk `deviceId`
+apa pun. Karena pass 2 memakai `SessionKey` sebagai bukti keanggotaan, siapa pun
+yang punya akun bisa mencetak "saya peserta" lalu memakai gate itu untuk
+menghapus view-once 1:1 orang lain, mengirim `typing` ke id sembarang, dan
+menyubscribe presence korban. Endpoint kini **fail-closed**
+(`utils/sessionKeyRelayGuard.ts`): payload divalidasi dan dibatasi 500 kunci,
+pemanggil harus peserta terbukti lewat bukti yang tidak ia tulis sendiri
+(keanggotaan bertoken atau receipt bertag — bukan `SessionKey`), dan setiap
+`deviceId` harus perangkat nyata yang **sudah terdaftar** di percakapan itu, dan
+perangkat orang lain hanya boleh bila pemiliknya peserta terbukti. Sebagai
+lapisan kedua, pesan view-once yang punya daftar penerima hanya bisa dibuka oleh
+orang di daftar itu.
+
+Gate itu tidak mematikan fiturnya: `SessionKey.issuedByServer` menandai baris
+yang ditulis server saat percakapan dibuat, dan itulah bukti peserta untuk
+kontak pertama yang tidak punya roster. `startConversation` kembali mengirim
+`initialSession` (kunci sesi awal disegel ke perangkat peer, best-effort), dan
+`ensureAndRatchetSession` hidup lagi memakai penyegel yang sama — menyimpan kunci
+lokal hanya setelah server menerima, serta meneruskan `status` 403 agar
+"belum punya bukti peserta" tidak tertukar dengan bug lokal. Dua bug laten jalur
+pembuatan ikut diperbaiki: kolom `initiatorCiphertext` yang tidak ada di schema,
+dan kewajiban ciphertext X3DH pada distribusi kunci sesi biasa.
+
+Di klien: jalur regenerate OTPK kini benar-benar menghapus prekey lokal setelah
+derivasi (dulu `return` sebelum `deleteOneTimePreKey`), derivasi `keyId` OTPK
+memakai little-endian eksplisit (tidak lagi bergantung endianness host), dan
+pembentukan sesi **berhenti** saat kunci identitas peer berubah atau bertentangan
+dengan log KT — sebelumnya hanya `console.warn` lalu pesan tetap dienkripsi ke
+kunci yang belum diterima user. Verdict `unavailable` (log mati) tetap tidak
+memblokir, sesuai audit F-09.
+
 ## ⏱️ View-once grup dihapus begitu semua penerima membuka (2026-11-01)
 
 `Message` tidak menyimpan daftar penerima, sehingga "semua sudah membuka" tidak

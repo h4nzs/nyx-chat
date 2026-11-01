@@ -3,7 +3,9 @@ import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { ApiError } from '../utils/errors.js'
 import { relaySessionKeys } from '../utils/sessionKeys.js'
-import type { ClientSessionKeyPayload } from '../utils/sessionKeys.js'
+// [AUDIT PASS 3 — N3-01] Tanpa gerbang ini, siapa pun yang terautentikasi bisa
+// menulis baris `SessionKey` (yang dipakai sebagai bukti peserta) untuk dirinya.
+import { authorizeSessionKeyRelay, type SessionKeyRelayGuardDb } from '../utils/sessionKeyRelayGuard.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -48,22 +50,32 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { conversationId } = req.params
-    const { sessionId, keys } = req.body as { sessionId: string, keys: ClientSessionKeyPayload[] }
-
-    if (!sessionId || !keys || !Array.isArray(keys) || keys.length === 0) {
-      throw new ApiError(400, 'sessionId and an array of encrypted keys are required.')
-    }
+    const { sessionId, keys } = req.body as { sessionId: unknown, keys: unknown }
 
     const conversation = await prisma.conversation.findUnique({
-      where: { id: conversationId }
+      where: { id: conversationId },
+      select: { id: true }
     })
 
     if (!conversation) {
       throw new ApiError(404, 'Conversation not found')
     }
 
+    // [AUDIT PASS 3 — N3-01] Bukti peserta diperiksa SEBELUM menulis baris:
+    // baris `SessionKey` adalah bukti keanggotaan di jalur lain, jadi menulisnya
+    // tanpa bukti = mencetak keanggotaan palsu (hapus view-once orang lain,
+    // typing ke id sembarang, presence korban). Bentuk payload juga divalidasi
+    // di sini (cap 500, deviceId base64url, perangkat harus nyata).
+    const decision = await authorizeSessionKeyRelay(
+      prisma as unknown as SessionKeyRelayGuardDb,
+      { conversationId, callerId: req.user.id, sessionId, keys },
+    )
+    if (!decision.ok) {
+      throw new ApiError(decision.status, decision.error)
+    }
+
     // Relay client-encrypted keys to the database
-    await relaySessionKeys(conversationId, sessionId, keys)
+    await relaySessionKeys(conversationId, sessionId as string, decision.keys)
 
     res.status(201).json({
       ok: true,
