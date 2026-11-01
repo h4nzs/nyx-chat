@@ -953,7 +953,10 @@ export async function getMyEncryptionKeyPair(): Promise<{ publicKey: Uint8Array;
  *    boleh untuk perangkat yang sudah terdaftar di percakapan itu (server
  *    menolak 403 `SESSION_KEY_NOT_ENROLLED` untuk perangkat asing).
  */
-async function sealSessionKeyForParticipants(userIds: string[]): Promise<{
+async function sealSessionKeyForParticipants(
+  userIds: string[],
+  options: { includeSelf?: boolean } = {},
+): Promise<{
   sessionId: string;
   sessionKey: Uint8Array;
   keys: Array<{ deviceId: string; encryptedKey: string; encryptedKeyBase64: string; isInitiator: boolean }>;
@@ -970,8 +973,11 @@ async function sealSessionKeyForParticipants(userIds: string[]): Promise<{
   const bundlesMap = await fetchPreKeyBundles(userIds);
   for (const uId of userIds) {
     for (const bundle of bundlesMap[uId] || []) {
-      // Lewati perangkat ini sendiri (kunci disimpan lokal, bukan di-relay).
-      if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
+      // Lewati perangkat ini sendiri untuk ROTASI (kunci disimpan lokal, tidak
+      // perlu baris server). Pembuatan percakapan memakai `includeSelf: true`:
+      // baris `issuedByServer` untuk perangkat pembuat adalah bukti peserta yang
+      // dibutuhkan ratchet berikutnya (audit pass 4 N4-02).
+      if (!options.includeSelf && uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
 
       const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       const theirPqPublicKey = bundle.pqIdentityKey
@@ -1012,7 +1018,13 @@ export async function buildInitialSessionForConversation(userIds: string[]): Pro
   initialKeysPerDevice: Record<string, string>;
   initiatorCiphertextsPerDevice: Record<string, string>;
 }> {
-  const sealed = await sealSessionKeyForParticipants(userIds);
+  // [AUDIT PASS 4 — N4-02] Ikutkan perangkat pembuat sendiri: tanpa baris
+  // `issuedByServer` miliknya, pembuat 1:1 tidak punya bukti peserta apa pun
+  // (1:1 tidak punya baris keanggotaan, dan receipt baru ada setelah peer
+  // membaca pesan) sehingga ratchet-nya sendiri akan ditolak 403.
+  const myId = useAuthStore.getState().user?.id;
+  const participants = Array.from(new Set([...userIds, ...(myId ? [myId] : [])]));
+  const sealed = await sealSessionKeyForParticipants(participants, { includeSelf: true });
   const initialKeysPerDevice: Record<string, string> = {};
   for (const key of sealed.keys) {
     initialKeysPerDevice[key.deviceId] = key.encryptedKeyBase64;

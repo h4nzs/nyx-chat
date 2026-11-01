@@ -38,6 +38,10 @@ import type { ClientSessionKeyPayload } from './sessionKeys.js'
 
 /** Sama dengan cap penerima pesan: satu ratchet tidak boleh mengirim lebih. */
 export const MAX_RELAY_KEYS = 500
+/** Cap yang sama untuk `initialKeysPerDevice` saat pembuatan percakapan (N4-01). */
+export const MAX_INITIAL_SESSION_KEYS = MAX_RELAY_KEYS
+/** base64 STANDAR: jalur pembuatan mendekode dengan `Buffer.from(x, 'base64')`. */
+const BASE64_STANDARD = /^[A-Za-z0-9+/]+={0,2}$/
 const MAX_SESSION_ID = 128
 const MAX_DEVICE_ID = 128
 /** Kunci sesi ter-seal per perangkat; 8 KB jauh di atas ukuran nyata. */
@@ -71,6 +75,20 @@ export interface SessionKeyRelayGuardDb extends ConversationMembershipLookup {
 export type RelayDecision =
   | { ok: true; keys: ClientSessionKeyPayload[] }
   | { ok: false; status: number; error: string }
+
+export interface InitialSessionEntry {
+  deviceId: string
+  encryptedKey: string
+  initiatorCiphertexts: string | null
+}
+
+export type InitialSessionDecision =
+  | { ok: true; entries: InitialSessionEntry[] }
+  | { ok: false; status: number; error: string }
+
+function isBase64Standard(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max && BASE64_STANDARD.test(value)
+}
 
 function isBase64Url(value: unknown, max: number): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= max && BASE64URL.test(value)
@@ -157,6 +175,81 @@ async function provenParticipants(
     if (tags.has(conversationScopedTag(conversationId, userId))) members.add(userId)
   }
   return members
+}
+
+/**
+ * [AUDIT PASS 4 — N4-01] Validasi `initialSession` pada pembuatan percakapan.
+ *
+ * Jalur ini SATU-SATUNYA yang boleh menulis baris `SessionKey.issuedByServer`
+ * (anchor bukti peserta), tetapi pass 3 hanya menutup endpoint ratchet — endpoint
+ * pembuatan menulis `deviceId` apa pun tanpa cek pemilik, tanpa cap, dan tanpa
+ * validasi bentuk. Siapa pun yang punya akun bisa "mendaftarkan" perangkat nyata
+ * milik orang lain ke percakapan yang ia buat (tanpa notifikasi), dan korban lalu
+ * muncul di presence penyerang, bisa dikirimi `typing`, serta menjadi peserta
+ * terbukti untuk penulisan ratchet.
+ *
+ * Aturan yang dipakai = aturan guard ratchet: cap 500, `deviceId` ≤128,
+ * `encryptedKey` base64 ≤8 KB, duplikat digabung, dan **setiap perangkat harus
+ * milik `userIds` atau pemanggil**. Bila tidak ada satu pun perangkat sah → 400
+ * (jangan menulis baris kosong).
+ */
+export async function authorizeInitialSessionKeys(
+  db: SessionKeyRelayGuardDb,
+  input: {
+    allowedUserIds: string[]
+    initialKeysPerDevice: Record<string, unknown>
+    initiatorCiphertextsPerDevice?: Record<string, unknown>
+  }
+): Promise<InitialSessionDecision> {
+  const allowed = new Set(input.allowedUserIds.filter((id) => typeof id === 'string' && id.length > 0))
+  const entriesByDevice = new Map<string, InitialSessionEntry>()
+
+  const deviceIds: string[] = []
+  for (const [deviceId, encryptedKey] of Object.entries(input.initialKeysPerDevice)) {
+    if (typeof deviceId !== 'string' || deviceId.length === 0 || deviceId.length > MAX_DEVICE_ID) {
+      return { ok: false, status: 400, error: 'INVALID_DEVICE_ID: deviceId must be 1-128 chars' }
+    }
+    if (!isBase64Standard(encryptedKey, MAX_KEY_B64)) {
+      return { ok: false, status: 400, error: 'INVALID_ENCRYPTED_KEY: expected base64 up to 8 KB' }
+    }
+    const cipher = input.initiatorCiphertextsPerDevice?.[deviceId]
+    if (cipher !== undefined && cipher !== null && !isBase64Standard(cipher, MAX_KEY_B64)) {
+      return { ok: false, status: 400, error: 'INVALID_INITIATOR_CIPHERTEXT: expected base64 up to 8 KB' }
+    }
+    if (entriesByDevice.size >= MAX_INITIAL_SESSION_KEYS && !entriesByDevice.has(deviceId)) {
+      return { ok: false, status: 400, error: `too many initial keys (max ${MAX_INITIAL_SESSION_KEYS})` }
+    }
+    deviceIds.push(deviceId)
+    entriesByDevice.set(deviceId, {
+      deviceId,
+      encryptedKey,
+      initiatorCiphertexts: typeof cipher === 'string' ? cipher : null,
+    })
+  }
+
+  if (deviceIds.length === 0) {
+    return { ok: false, status: 400, error: 'INITIAL_SESSION_EMPTY: no device keys provided' }
+  }
+
+  const devices = await db.device.findMany({
+    where: { id: { in: deviceIds } },
+    select: { id: true, userId: true },
+  }).catch(() => [] as Array<{ id: string; userId?: string | null }>)
+  const ownerByDevice = new Map(devices.map((device) => [device.id, device.userId ?? null]))
+
+  const entries: InitialSessionEntry[] = []
+  for (const entry of entriesByDevice.values()) {
+    const owner = ownerByDevice.get(entry.deviceId)
+    if (owner === undefined) {
+      return { ok: false, status: 403, error: 'SESSION_KEY_UNKNOWN_DEVICE: device not found' }
+    }
+    if (owner === null || !allowed.has(owner)) {
+      return { ok: false, status: 403, error: 'SESSION_KEY_FOREIGN_DEVICE: device owner is not in this conversation' }
+    }
+    entries.push(entry)
+  }
+
+  return { ok: true, entries }
 }
 
 /**

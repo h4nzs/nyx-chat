@@ -22,7 +22,9 @@ import {
   sealAtRest,
 } from '../src/utils/atRestSecrets.js';
 import {
+  authorizeInitialSessionKeys,
   authorizeSessionKeyRelay,
+  MAX_INITIAL_SESSION_KEYS,
   MAX_RELAY_KEYS,
   type SessionKeyRelayGuardDb,
 } from '../src/utils/sessionKeyRelayGuard.js';
@@ -284,6 +286,85 @@ test('N3-01: payload dibatasi dan divalidasi (cap, base64url, sessionId)', async
 
   const notArray = await authorizeSessionKeyRelay(db, { ...base, keys: 'nope' });
   assert.equal(notArray.ok, false);
+});
+
+// ============================================================================
+// N4-01 — validasi `initialSession` pada pembuatan percakapan
+// ============================================================================
+
+test('N4-01: initialSession menolak perangkat milik orang di luar percakapan', async () => {
+  const { db } = await makeDb({ devices: { 'dev-a1': 'u-a', 'dev-victim': 'u-victim' } });
+
+  const decision = await authorizeInitialSessionKeys(db, {
+    allowedUserIds: ['u-a', 'u-b'],
+    initialKeysPerDevice: { 'dev-a1': KEY, 'dev-victim': KEY },
+  });
+
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.equal(decision.status, 403);
+  assert.match(decision.error, /SESSION_KEY_FOREIGN_DEVICE/);
+});
+
+test('N4-01: initialSession menerima perangkat peserta (pembuat + peer)', async () => {
+  const { db } = await makeDb({ devices: { 'dev-a1': 'u-a', 'dev-b1': 'u-b' } });
+
+  const decision = await authorizeInitialSessionKeys(db, {
+    allowedUserIds: ['u-a', 'u-b'],
+    initialKeysPerDevice: { 'dev-a1': KEY, 'dev-b1': KEY },
+    initiatorCiphertextsPerDevice: { 'dev-a1': KEY },
+  });
+
+  assert.equal(decision.ok, true);
+  if (!decision.ok) return;
+  assert.deepEqual(decision.entries.map((e) => e.deviceId), ['dev-a1', 'dev-b1']);
+  assert.equal(decision.entries[0]!.initiatorCiphertexts, KEY);
+  assert.equal(decision.entries[1]!.initiatorCiphertexts, null);
+});
+
+test('N4-01: initialSession menolak deviceId hantu, base64 salah, dan daftar kosong', async () => {
+  const { db } = await makeDb({ devices: { 'dev-a1': 'u-a' } });
+
+  const ghost = await authorizeInitialSessionKeys(db, {
+    allowedUserIds: ['u-a'],
+    initialKeysPerDevice: { 'dev-ghost': KEY },
+  });
+  assert.equal(ghost.ok, false);
+  if (!ghost.ok) assert.match(ghost.error, /SESSION_KEY_UNKNOWN_DEVICE/);
+
+  const badB64 = await authorizeInitialSessionKeys(db, {
+    allowedUserIds: ['u-a'],
+    initialKeysPerDevice: { 'dev-a1': 'bukan/base64!' },
+  });
+  assert.equal(badB64.ok, false);
+  if (!badB64.ok) assert.equal(badB64.status, 400);
+
+  const empty = await authorizeInitialSessionKeys(db, {
+    allowedUserIds: ['u-a'],
+    initialKeysPerDevice: {},
+  });
+  assert.equal(empty.ok, false);
+  if (!empty.ok) assert.match(empty.error, /INITIAL_SESSION_EMPTY/);
+});
+
+test('N4-01: initialSession dibatasi jumlah perangkatnya', async () => {
+  const devices: Record<string, string> = {};
+  const initialKeysPerDevice: Record<string, string> = {};
+  for (let i = 0; i <= MAX_INITIAL_SESSION_KEYS; i += 1) {
+    devices[`dev-${i}`] = 'u-a';
+    initialKeysPerDevice[`dev-${i}`] = KEY;
+  }
+  const { db } = await makeDb({ devices });
+
+  const decision = await authorizeInitialSessionKeys(db, {
+    allowedUserIds: ['u-a'],
+    initialKeysPerDevice,
+  });
+
+  assert.equal(decision.ok, false);
+  if (decision.ok) return;
+  assert.equal(decision.status, 400);
+  assert.match(decision.error, /too many initial keys/);
 });
 
 test('N3-01: deviceId duplikat dalam satu request digabung (tidak menulis dua kali)', async () => {

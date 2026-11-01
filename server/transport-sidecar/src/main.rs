@@ -26,8 +26,8 @@ use wtransport::{Connection, Endpoint, Identity, ServerConfig};
 // numeriknya tetap sinkron dengan `packages/shared/src/transport.ts`.
 use transport_sidecar::protocol::{
     classify_inbound, hello_reply_frame, hello_reply_payload, kick_frame, parse_inbound_frame,
-    parse_transport_hello, InboundFrame, InboundHeader, ACK_OPCODE, HANDSHAKE_OPCODE, KICK_OPCODE,
-    MAX_BIDI_PAYLOAD_BYTES,
+    parse_transport_hello, InboundFrame, InboundHeader, ACK_OPCODE, FRAME_HEADER_BYTES,
+    HANDSHAKE_OPCODE, KICK_OPCODE, MAX_BIDI_PAYLOAD_BYTES,
 };
 
 // [docs/30 WS-G(6)] Metrik transport. Definisi + rendering hidup di crate lib
@@ -798,10 +798,28 @@ async fn handle_connection(
             let did = device_id2.clone();
             let metrics_stream2 = metrics_uni.clone();
             tokio::spawn(async move {
+                // [AUDIT PASS 4 — N4-03] Batas 32 KB berlaku juga di jalur uni.
+                // Dulu seluruh stream dibaca ke `Vec` tanpa cap (klien
+                // terautentikasi bisa menahan memori sidecar dengan banyak
+                // stream) dan payload >32 KB tetap diteruskan ke
+                // `nyx:upstream:*` — padahal kontraknya batas keras 32 KB.
+                // Sekarang baca berhenti di header + payload maksimum + 1 byte;
+                // kelebihan byte = frame terlalu besar (bukan dipotong diam-diam).
+                let uni_read_limit = FRAME_HEADER_BYTES + MAX_BIDI_PAYLOAD_BYTES + 1;
                 let mut buffer = Vec::new();
                 let mut chunk = [0u8; 4096];
                 while let Ok(Some(n)) = stream.read(&mut chunk).await {
-                    buffer.extend_from_slice(&chunk[..n]);
+                    let remaining = uni_read_limit.saturating_sub(buffer.len());
+                    if remaining == 0 {
+                        break;
+                    }
+                    let take = n.min(remaining);
+                    buffer.extend_from_slice(&chunk[..take]);
+                    // Buffer penuh (atau stream masih mengirim setelah batas):
+                    // berhenti membaca, biarkan parser memutuskan TooLarge.
+                    if take < n || buffer.len() >= uni_read_limit {
+                        break;
+                    }
                 }
                 // Stopwatch ingress dimulai setelah stream selesai dibaca
                 // (lihat jalur bidi: waktu tunggu klien bukan bagian dari
@@ -811,7 +829,9 @@ async fn handle_connection(
                 // [docs/30 WS-G(5)] Parser murni untuk buffer utuh: CHAFF,
                 // HELLO, dan frame terpotong TIDAK pernah diteruskan ke
                 // `nyx:upstream:*` (opcode transport-local bocor = regresi).
-                match parse_inbound_frame(&buffer, usize::MAX) {
+                // [AUDIT PASS 4 — N4-03] Batas payload yang sama dengan jalur
+                // bidi (dulu `usize::MAX` = tanpa batas untuk jalur ini).
+                match parse_inbound_frame(&buffer, MAX_BIDI_PAYLOAD_BYTES) {
                     InboundFrame::Forward { op_code, payload } => {
                         let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
 

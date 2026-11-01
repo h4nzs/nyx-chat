@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧱 Anchor bukti peserta divalidasi, sidecar berhenti membaca tanpa batas (2026-11-01, audit pass 4)
+
+Pass 3 menutup pencetakan keanggotaan lewat endpoint ratchet, lalu memperkenalkan
+anchor baru: baris `SessionKey.issuedByServer` yang hanya ditulis server saat
+percakapan dibuat. Pass 4 menemukan jalur penulis anchor itu —
+`POST /api/conversations` — menerima `deviceId` apa pun: tanpa cek pemilik,
+tanpa cap, tanpa validasi base64. Akibatnya siapa pun bisa mendaftarkan
+perangkat nyata milik orang lain ke percakapan yang ia buat tanpa notifikasi, dan
+korban menjadi "peserta terbukti" (muncul di presence, bisa dikirimi `typing`,
+boleh ditulisi baris ratchet). `authorizeInitialSessionKeys` kini menegakkan
+aturan guard ratchet di jalur itu: cap 500, base64 ≤8 KB, dan pemilik setiap
+perangkat harus peserta percakapan.
+
+`buildInitialSessionForConversation` juga ikut menyegel untuk perangkat pembuat
+(`includeSelf`), sehingga pembuat 1:1 punya bukti peserta sendiri — sebelumnya
+hanya penerima yang punya, dan ratchet milik pembuat akan ditolak 403 oleh gate
+buatannya sendiri. Di sidecar, jalur uni berhenti membaca di batas
+`header + 32 KB + 1` dan mem-parse dengan batas yang sama (dulu membaca seluruh
+stream tanpa cap dan meneruskan payload besar ke `nyx:upstream:*`).
+
 ## 🔒 Tulisan kunci sesi, akuntansi OTPK, dan gerbang identitas peer (2026-11-01, audit pass 3)
 
 Pass 3 menemukan bahwa `POST /api/session-keys/:conversationId/ratchet` hanya

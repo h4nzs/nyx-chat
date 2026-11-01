@@ -27,6 +27,13 @@ import type { Conversation } from '@nyx/shared'
 // hasil parse, dan skema lokal (non-passthrough) di sini dulu membuang
 // `adminSecretHash` sebelum handler membacanya → SETIAP pembuatan grup 400.
 import { createConversationBodySchema } from '../utils/conversationSchemas.js'
+// [AUDIT PASS 4 — N4-01] Jalur pembuatan satu-satunya penulis anchor
+// `issuedByServer`, jadi `initialSession` divalidasi dengan aturan guard ratchet
+// (cap, base64, dan pemilik perangkat harus peserta).
+import {
+  authorizeInitialSessionKeys,
+  type SessionKeyRelayGuardDb,
+} from '../utils/sessionKeyRelayGuard.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -197,35 +204,40 @@ return current
 
         if (initialSession) {
           // [AUDIT PASS 3 — N3-01] Baris ini ditulis SERVER di transaksi
-          // pembuatan, dan kini ditandai `issuedByServer: true`: itulah bukti
-          // peserta yang sah untuk ratchet client-driven (klien tidak bisa
-          // membuat baris bertanda ini lewat endpoint ratchet).
+          // pembuatan, dan ditandai `issuedByServer: true`: itulah bukti peserta
+          // yang sah untuk ratchet client-driven.
           //
-          // Dua bug lama sekaligus diperbaiki: kolom yang ditulis bernama
-          // `initiatorCiphertext` (tidak ada di schema → createMany melempar),
-          // dan ciphertext X3DH inisiator diwajibkan padahal distribusi kunci
-          // sesi biasa tidak punya ciphertext tersebut (`relaySessionKeys`
-          // memperlakukannya opsional).
+          // [AUDIT PASS 4 — N4-01] Karena itu jalur ini TIDAK boleh menerima
+          // `deviceId` mentah dari klien: tanpa validasi, siapa pun bisa
+          // mendaftarkan perangkat nyata milik orang lain ke percakapan yang ia
+          // buat (tanpa notifikasi) dan menjadikannya "peserta terbukti".
+          // Validator-nya sama dengan guard ratchet: cap 500, base64 ≤8 KB,
+          // duplikat digabung, dan pemilik setiap perangkat harus ada di
+          // `allUserIds` (userIds ∪ pembuat).
           const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession;
-          const keyRecords = [];
-          for (const deviceId in initialKeysPerDevice) {
-            const encryptedKey = initialKeysPerDevice[deviceId];
-            if (typeof encryptedKey !== 'string') continue;
-            const initiatorCiphertext = initiatorCiphertextsPerDevice?.[deviceId];
-            keyRecords.push({
+          const authorized = await authorizeInitialSessionKeys(
+            tx as unknown as SessionKeyRelayGuardDb,
+            {
+              allowedUserIds: allUserIds,
+              initialKeysPerDevice,
+              initiatorCiphertextsPerDevice,
+            },
+          )
+          if (!authorized.ok) {
+            throw new ApiError(authorized.status, authorized.error)
+          }
+          await tx.sessionKey.createMany({
+            data: authorized.entries.map((entry) => ({
               conversationId: convo.id,
-              deviceId,
+              deviceId: entry.deviceId,
               sessionId,
-              encryptedKey: Buffer.from(encryptedKey, 'base64'),
-              initiatorCiphertexts: typeof initiatorCiphertext === 'string'
-                ? Buffer.from(initiatorCiphertext, 'base64')
+              encryptedKey: Buffer.from(entry.encryptedKey, 'base64'),
+              initiatorCiphertexts: entry.initiatorCiphertexts
+                ? Buffer.from(entry.initiatorCiphertexts, 'base64')
                 : null,
-              issuedByServer: true
-            });
-          }
-          if (keyRecords.length > 0) {
-            await tx.sessionKey.createMany({ data: keyRecords });
-          }
+              issuedByServer: true,
+            })),
+          });
         }
         return convo;
       });
