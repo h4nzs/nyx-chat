@@ -803,8 +803,15 @@ async fn handle_connection(
                 // terautentikasi bisa menahan memori sidecar dengan banyak
                 // stream) dan payload >32 KB tetap diteruskan ke
                 // `nyx:upstream:*` — padahal kontraknya batas keras 32 KB.
-                // Sekarang baca berhenti di header + payload maksimum + 1 byte;
-                // kelebihan byte = frame terlalu besar (bukan dipotong diam-diam).
+                // Sekarang baca berhenti di header + payload maksimum + 1 byte,
+                // lalu parser dipanggil dengan batas payload yang sama, sehingga
+                // frame ber-`len` > 32 KB menjadi TooLarge.
+                //
+                // [AUDIT PASS 5 — N5-04] Koreksi klaim komentar sebelumnya: parser
+                // hanya membaca FRAME PERTAMA. Frame yang `len`-nya ≤ batas tetapi
+                // diikuti byte tambahan tetap dianggap utuh dan byte sisanya
+                // diabaikan (bukan ditolak) — perilaku lama yang disengaja karena
+                // jalur uni memang satu frame per stream.
                 let uni_read_limit = FRAME_HEADER_BYTES + MAX_BIDI_PAYLOAD_BYTES + 1;
                 let mut buffer = Vec::new();
                 let mut chunk = [0u8; 4096];

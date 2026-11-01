@@ -18,9 +18,17 @@
  * di-seed **sebelum** state ditulis ke scratch, karena `spqr_seed_entropy`
  * membaca dari scratch yang sama.
  *
- * Modul ini **belum dipakai jalur pesan produksi** (lihat `docs/33` §33.7):
- * format wire & state ratchet NYX saat ini beku, dan peralihan ke v2 harus
- * bergerbang kapabilitas + diuji end-to-end dulu.
+ * Modul ini **DIPAKAI jalur pesan produksi** (lihat `docs/33` §33.10): worker
+ * mengimpornya (`crypto.worker.ts`, op `spqr_ratchet_*`) dan setiap pesan v2
+ * lewat sini. Pengirimannya bergerbang tiga lapis: kapabilitas `spqr-ratchet`
+ * yang diiklankan kedua relay, bukti peer bisa membaca v2 (`ackV: 2` di dalam
+ * payload ter-seal), dan kill switch (`VITE_SPQR_FORCE_V1` / override DEV) yang
+ * menghentikan pengiriman tanpa pernah menghentikan pembacaan. Format v1 tetap
+ * beku dan tidak berubah; lihat `spqrNegotiation.ts` untuk keputusan versi.
+ *
+ * [AUDIT PASS 5 — N5-02] Paragraf lama menyatakan modul ini "belum dipakai
+ * jalur pesan produksi"; itu drift berbahaya di berkas kripto — reviewer bisa
+ * menyimpulkan jalur v2 mati dan melewatkannya.
  *
  * **Urutan baca memory itu penting.** Akses pertama ke scratch Rust memicu
  * alokasi malas + `memory.grow`, dan grow **melepas** (`detach`) ArrayBuffer

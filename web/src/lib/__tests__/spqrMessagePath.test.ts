@@ -224,7 +224,17 @@ function openWith(key: Uint8Array, ciphertext: Uint8Array): string {
   return sodium.to_string(plain);
 }
 
+// [AUDIT PASS 5 — N5-03] Artefak WASM yang hilang tidak boleh membuat suite ini
+// hijau tanpa berjalan: `describe.skip` tetap dipakai untuk sisa suite, tetapi
+// ketiadaannya kini menjadi tes yang GAGAL (dulu seluruh tes dilewati diam-diam).
 const withSkip = HAS_WASM ? describe : describe.skip;
+if (!HAS_WASM) {
+  describe('artefak spqr.wasm', () => {
+    it('packages/spqr-wasm/dist/spqr.wasm wajib ada — suite kripto v2 tidak boleh di-skip diam-diam', () => {
+      expect(HAS_WASM).toBe(true);
+    });
+  });
+}
 
 beforeAll(async () => {
   await sodium.ready;

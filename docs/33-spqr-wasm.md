@@ -398,6 +398,25 @@ menghapus state braid.
 
 ## 33.8 Rollback
 
+**[AUDIT PASS 5 — N5-01] Batas yang sekarang eksplisit: state braid tidak punya
+arsip per-era.** Jalur v1 menyelamatkan pesan yang datang dari era sesi lama
+lewat tiga slot `previous_session_states` ("FALLBACK ERA ARSIP"). Jalur v2
+**tidak** punya padanannya: `spqrState` menyimpan satu baris per percakapan
+(`nyx_spqr_state_v1:<conversationId>`) dan baris itu **dihapus** saat sesi baru
+didirikan (`deleteSpqrState`). Konsekuensinya, pesan v2 yang tertunda (offline,
+transport putus) lalu melewati rotasi sesi akan gagal dibuka dengan error
+dekripsi — perilaku yang **disengaja** (bukan bug yang lolos): braid hanya
+menjamin pemulihan pesan hilang/keluar urutan **di dalam satu sesi**, sedangkan
+rotasi sesi berarti akar X3DH baru, jadi frame era lama tidak punya state yang
+cocok.
+
+Untuk operator dan dukungan: jangan menjanjikan "semua pesan v2 selalu bisa
+dibuka"; pesan v1 pada posisi yang sama tetap diselamatkan arsip. Bila suatu saat
+perilaku ini ingin diubah, jalannya adalah menyimpan state braid per
+`sessionId` dan membiarkan pembaca mencoba era yang tersedia (pola arsip v1) —
+itu perubahan protokol/penyimpanan, harus disertai tes dua-era dan E2E
+`spqr.spec.ts`, dan tidak boleh dilakukan sebagai patch diam-diam.
+
 Dua jalur, keduanya **tidak menghapus** state apa pun:
 
 1. **Peer berhenti menyatakan v2** (`ackV` hilang) → pengiriman kembali ke v1.
