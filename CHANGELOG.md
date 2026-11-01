@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔐 Logout perangkat kini memutus socket-nya; id guest Burner dilebarkan (2026-11-01, audit pass 6)
+
+Pass 6 membaca penuh `server/src/routes/auth.ts` — satu-satunya berkas auth yang
+lima pass sebelumnya hanya di-grep — dan tidak menemukan celah Critical/High:
+rotasi refresh + klasifikasi replay, recovery ML-DSA dengan nonce sekali pakai,
+linking QR, WebAuthn UV-wajib, dan identitas PoW semuanya ter-gate benar. Dua
+cacat Low diperbaiki:
+
+- **`POST /api/auth/logout` tidak memutus socket.** Ia mencabut refresh family,
+tetapi tidak mengirim `force_logout`/`KICK` seperti `logout-all` dan
+`DELETE /api/sessions/:jti`, sementara relay tidak memeriksa blacklist JTI per
+frame — perangkat yang "logout" tetap menerima pesan sampai socket-nya sendiri
+putus. Kini kick dikirim **device-scoped**; planner
+(`utils/logoutKick.ts`) mengembalikan `null` bila `deviceId` tidak diketahui,
+sehingga id yang hilang tidak pernah berubah menjadi "logout semua perangkat".
+- **Id guest Burner hanya 32 bit** (`randomUUID().substring(0, 8)`). Id itu `sub`
+JWT sekaligus kunci routing relay, dan guest tidak punya baris User/Device
+(tidak ada uniqueness check) — pada ~10.000 guest peluang tabrakan ~1,2%, dan
+dua guest ber-id sama berbagi kanal relay. Sekarang UUID penuh; isi pesan tetap
+E2EE, jadi yang ditutup adalah kebocoran metadata/alamat.
+
+Dicatat sebagai Info, bukan diperbaiki: `isVerified` dinaikkan oleh PoW tanpa
+memandang tier attestation, jadi ia **bukan** bukti perangkat — komentar di
+`/pow/verify` kini menyatakan itu. Regresi dikunci oleh
+`tests/logoutKick.test.ts` dan `tests/guestIdEntropy.test.ts`.
+
+## 🔭 Jalur ratchet v2 diaudit: dokumen dikoreksi, skip senyap ditutup (2026-11-01, audit pass 5)
+
+Pass 5 membaca jalur braid SPQR yang tiga pass sebelumnya lewati. Kriptonya tidak
+ditemukan cacat: transkrip v2 tetap X3DH yang sama, deklarasi versi hanya dibaca
+dari payload yang lolos AEAD (`ackV`), header v2 tidak pernah dibaca sebagai v1,
+parser header fail-closed, dan kill switch hanya menghentikan kirim/iklan tanpa
+pernah menghentikan baca. Yang diperbaiki adalah hal-hal yang menyesatkan
+reviewer dan CI:
+
+- `spqrRatchet.ts` masih menyatakan modul itu "belum dipakai jalur pesan
+  produksi" padahal worker memakainya di setiap pesan v2 — dokumennya dikoreksi
+  beserta tiga gerbang yang mengelilinginya.
+- Suite kripto v2 dulu memakai `describe.skip` saat `packages/spqr-wasm/dist/spqr.wasm`
+  tidak ada, sehingga CI bisa **hijau tanpa menjalankan satu pun tes handshake
+  v2**. Sekarang ketiadaan artefak menjadi tes yang **gagal** (pola yang sama
+  dengan `transport.spec` sebelum pass 1).
+- Komentar perbaikan batas 32 KB di sidecar tidak lagi menjanjikan penolakan
+  yang tidak ada: parser hanya membaca frame pertama, byte sisa diabaikan.
+
+Satu keputusan yang dicatat, bukan ditambal: jalur **v2 tidak punya arsip era
+sesi** seperti v1 (`previous_session_states`). Pesan v2 yang tertunda melewati
+rotasi sesi karena itu gagal dibuka; pesan v1 pada posisi yang sama tetap
+diselamatkan arsip. Perilaku ini sekarang eksplisit di `docs/33` §33.8 — memori
+braid per-`sessionId` akan menjadi perubahan protokol tersendiri (butuh tes dua
+era + E2E), bukan patch.
+
 ## 🧱 Anchor bukti peserta divalidasi, sidecar berhenti membaca tanpa batas (2026-11-01, audit pass 4)
 
 Pass 3 menutup pencetakan keanggotaan lewat endpoint ratchet, lalu memperkenalkan

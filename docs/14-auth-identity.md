@@ -94,6 +94,8 @@ sequenceDiagram
 - The Rust sidecar enforces **one active WebTransport session per user** (kicking the previous one with `SESSION_REVOKED`).
 - `SessionManagerPage` lists sessions (`GET /api/sessions`) and revokes by JTI (`DELETE /api/sessions/:jti` → family revoke + Redis JTI blacklist + KICK + `force_logout`).
 - `POST /api/auth/logout-all` revokes every session and blacklists all JTIs.
+- **`POST /api/auth/logout` (2026-11-01, audit pass 6 N6-01):** revokes the refresh *family* **and** sends `force_logout` + `KICK` **for that device only** — the kick is planned by `server/src/utils/logoutKick.ts`, which returns `null` when the device id is unknown, so a missing id can never degrade into a global logout. Revoking tokens alone never closed a live relay socket (the relay does not consult the JTI blacklist per frame). It still does not blacklist the family's JTIs in Redis; that remains `logout-all` / `DELETE /api/sessions/:jti` behaviour.
+- **Burner guest ids (audit pass 6 N6-02):** `guest_<uuid>` / `burner_<uuid>` use the **full** UUID. They used to be 8 hex chars (32 bit), and since guests have no `User`/`Device` row there is no database uniqueness check — two guests could share one relay channel at ~10k concurrent guests. E2EE content was never affected; the leak was addressing metadata. Guarded by `server/tests/guestIdEntropy.test.ts`.
 
 ## 14.8 Trust tiers, panic & emergency eject
 

@@ -58,6 +58,8 @@ import { hasHistoryIntent, markHistoryIntent, readHistoryState } from '../utils/
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
 // [docs/30 §30.12 WS-H] Guard burst registrasi (per sumber IP-hash & instalasi).
 import { enforceRegistrationBurst, mayWaiveAttestation } from '../utils/registrationGuard.js'
+// [AUDIT PASS 6 — N6-01] Rencana KICK device-scoped untuk `/logout`.
+import { planDeviceLogoutKick } from '../utils/logoutKick.js'
 // [docs/30 §30.12 WS-H] Attestation yang DITOLAK harus terlihat tanpa membaca log:
 // `root_not_trusted` = bundle root operator ketinggalan, `rejected`/`accepted` =
 // laju penolakan (ops/prometheus/alerts.yml grup `nyx-attestation`).
@@ -786,8 +788,16 @@ router.post('/login', authLimiter, zodValidate({
 // pembuatannya harus dibatasi per IP (lihat `burnerLimiter`).
 router.post('/burner', burnerLimiter, async (req, res, next) => {
   try {
-    const guestId = `guest_${crypto.randomUUID().substring(0, 8)}`;
-    const guestDeviceId = `burner_${crypto.randomUUID().substring(0, 8)}`;
+    // [AUDIT PASS 6 — N6-02] Id guest = `sub` JWT sekaligus kunci routing relay,
+    // dan guest sengaja tidak punya baris User/Device (tidak ada uniqueness check
+    // di DB). Dulu hanya 8 karakter hex (32 bit): pada ~10.000 guest peluang
+    // tabrakan sudah ~1,2% (50% di ~77.000), dan dua guest ber-id sama berbagi
+    // kanal relay (isi tetap E2EE, tetapi metadata/alamat bocor). Pakai UUID
+    // penuh — `burnerLimiter` sudah membatasi pembuatan, jadi panjang bukan biaya.
+    const guestId = `guest_${crypto.randomUUID()}`;
+    // [AUDIT PASS 6 — N6-02] id perangkat guest: UUID penuh, alasan sama dengan
+    // `guestId` di atas (id ini juga dipakai sebagai `device_id` relay).
+    const guestDeviceId = `burner_${crypto.randomUUID()}`;
     
     // Kita berikan token dengan role GUEST
     const tokens = await issueTokens({ id: guestId, role: 'GUEST' }, guestDeviceId, req);
@@ -1451,6 +1461,9 @@ router.post('/logout', async (req, res) => {
   }
   try {
     const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string; sub?: string };
+    // [AUDIT PASS 6 — N6-01] Diisi hanya bila token refresh ada di DB; dipakai
+    // untuk mengarahkan kick ke perangkat ini saja (lihat planner-nya).
+    let loggedOutDeviceId: string | null = null;
     if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
       // Find the token to get its familyId
       const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } });
@@ -1458,6 +1471,7 @@ router.post('/logout', async (req, res) => {
       if (stored) {
         // Revoke ALL tokens in this family + Redis blacklist (paralel)
         await revokeFamily(stored.familyId);
+        loggedOutDeviceId = stored.deviceId;
       } else {
         // Fallback: revoke just this JTI
         await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } });
@@ -1470,6 +1484,27 @@ router.post('/logout', async (req, res) => {
           await redisClient.del(identityKey('active_device', payload.sub));
           await invalidateActiveDeviceCache(payload.sub, redisClient);
         } catch (_re) {}
+      }
+
+      // [AUDIT PASS 6 — N6-01] Revokasi token saja TIDAK memutus socket yang
+      // sedang hidup: relay tidak memeriksa daftar blacklist per frame, jadi
+      // socket yang sudah terbuka terus mengirim & menerima pesan setelah
+      // "logged out". Samakan dengan `DELETE /api/sessions/:jti`, tetapi HANYA
+      // untuk perangkat ini — planner mengembalikan `null` bila `deviceId`
+      // tidak diketahui, sebab kick tanpa `deviceId` = logout semua perangkat.
+      const kick = planDeviceLogoutKick({
+        userId: payload.sub,
+        deviceId: loggedOutDeviceId,
+        reason: 'logout',
+      });
+      if (kick) {
+        try {
+          const { emitEventToUser, sendJsonToUser } = await import('../network/redisBridge.js');
+          await emitEventToUser(kick.userId, 'force_logout', { reason: kick.reason, deviceId: kick.deviceId }, kick.deviceId);
+          await sendJsonToUser(kick.userId, TransportOpCode.KICK, { reason: 'LOGOUT', deviceId: kick.deviceId }, false, kick.deviceId);
+        } catch (err) {
+          console.error('[Auth] Failed to send KICK/force_logout for logout:', err);
+        }
       }
     }
   } catch (_e) {}
@@ -1582,6 +1617,10 @@ return current
 
       if (hash.startsWith(targetPrefix)) {
           await redisClient.del(`pow:challenge:${userId}`);
+          // [AUDIT PASS 6 — N6-03] PoW hanya menaikkan tier kepercayaan; JANGAN
+          // membaca `isVerified` sebagai "perangkat terverifikasi" (register/
+          // WebAuthn memakai arti itu untuk kolom yang sama). Bila keduanya
+          // perlu dibedakan, tambah kolom terpisah.
           await prisma.user.update({
               where: { id: userId },
               data: { isVerified: true }
