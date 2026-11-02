@@ -107,6 +107,17 @@ function searchInputFromQuery(query: Record<string, unknown>): {
 }
 
 // === Bukti untuk satu usernameHash ===
+// POST = jalur utama (hash di body, bisa lewat OHTTP); GET dipertahankan untuk
+// klien lama, tetapi URL lama membocorkan kontak ke log/edge.
+router.post('/search', generalLimiter, requireAuth, async (req, res) => {
+  try {
+    const proof = await fetchKtProof(searchInputFromQuery((req.body ?? {}) as Record<string, unknown>));
+    res.json({ fullTreeHead: encode(proof.fullTreeHead), condensed: encode(proof.condensed) });
+  } catch (error) {
+    sendKtError(res, error);
+  }
+});
+
 router.get('/search', generalLimiter, requireAuth, async (req, res) => {
   try {
     const proof = await fetchKtProof(searchInputFromQuery(req.query as Record<string, unknown>));

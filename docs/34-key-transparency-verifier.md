@@ -164,6 +164,12 @@ Yang menyajikan adalah `server/kt-query`, dan server NYX meneruskannya lewat
 `/api/keys/kt/{search,distinguished,monitor,config}` (byte protobuf base64url
 apa adanya; parser-nya ada di WASM, bukan di JS).
 
+Sejak audit N7-01, klien mengambil bukti lewat **`POST /api/keys/kt/search`**
+dengan body JSON `{hash,last,distinguished}` — hash username dan ukuran pohon
+tidak lagi muncul di URL. Bila OHTTP aktif jalur ini masuk amplop OHTTP dengan
+token ber-scope (allowlist `packages/shared/src/ohttp.ts`); GET `/search` tetap
+ada hanya untuk kompatibilitas klien lama.
+
 Fixture `web/src/lib/__tests__/fixtures/kt/query-*.pb` dihasilkan
 `server/scripts/kt-query-fixtures.ts` melalui jalur itu, dan test ke-13–18
 memverifikasinya dengan WASM sungguhan:
@@ -262,6 +268,13 @@ berhenti saat gagal, pelaporan `changed`, dan tanpa state → tidak memanggil
 jaringan). Loop ini tidak mengubah kunci yang dipercaya: hasilnya state baru +
 notifikasi; keputusan blokir tetap di jalur pin (§34.6a). Setiap langkah juga
 menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
+
+Sejak audit N7-02, primary key `ktMonitoring` bukan search key mentah: nilainya
+HMAC-SHA-256(searchKey, subkey masterSeed), dan search key asli hanya disimpan
+di dalam nilai ter-seal `ENC1:`. Baris lama dimigrasikan malas saat vault
+terbuka; dump IndexedDB tanpa masterSeed tidak lagi bisa dipakai untuk
+menebak kontak yang dimonitor. Logout biasa juga menghapus state monitor dan pin
+config KT (N7-04).
 
 ## 34.6 Sisa pekerjaan
 
@@ -362,3 +375,24 @@ Verifier tidak menambah data yang dikirim ke server: ia hanya memverifikasi byte
 yang sudah ada. Search key tetap `0x75 || usernameHash(32)` (memory-hard), tanpa
 userId/IP di nilai log maupun di permintaan verifikasi (audit `privacy-dump-audit.ts`
 tidak terpengaruh).
+
+**Catatan audit pass 8 (2026-11-02).** Tiga batas yang sebelumnya tidak tertulis:
+
+1. **KDF indeks monitoring.** PK tabel `ktMonitoring` = HMAC(searchKey) dengan
+   subkey `crypto_kdf_derive_from_key(32, 1, 'nyx-kt01', masterSeed)`
+   (`keychainDb.ts`). Bentuk panggilan JS berbeda dari API C: ia **mengembalikan**
+   subkey, bukan menulis ke argumen pertama. Kesalahan bentuk itu pernah membuat
+   seluruh penulisan state KT gagal (N8-01); sekarang dikunci tes yang memakai
+   libsodium asli, bukan mock.
+2. **Pin konfigurasi per akun.** Baris `ktConfig` ber-PK `kt-config:<userId>`.
+   Logout **tidak** menghapusnya (kontinuitas TOFU lintas sesi), dan akun lain di
+   perangkat yang sama tidak pernah membacanya. `clearKtConfigPin()` hanya untuk
+   rotasi kunci yang disengaja/wipe dan menghapus semua baris.
+3. **Fallback OHTTP.** Jalur langsung hanya dipakai untuk gangguan transport atau
+   5xx. 4xx adalah jawaban sah layanan (`404 KT_NOT_FOUND`), dan mengirim ulang
+   lewat cookie berarti hash kontak sampai ke server justru saat kontak belum
+   terdaftar — jadi 4xx **fail-closed** + log `kt.ohttp-degraded`.
+
+Rate limit lintas klien OHTTP: gateway memanggil API lewat loopback, jadi tag
+limiter memakai subjek token OHTTP (per akun) alih-alih `127.0.0.1` bersama
+(audit N8-02, `server/src/utils/clientIp.ts`).

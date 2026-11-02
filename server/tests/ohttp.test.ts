@@ -11,6 +11,7 @@ import {
   OHTTP_KDF_SHA256,
   OHTTP_KEM_P256_SHA256,
   OHTTP_KEY_ID,
+  OHTTP_KT_SEARCH_MAX_BODY_BYTES,
   OHTTP_MAX_MESSAGE_BYTES,
   OHTTP_SYNC_MAX_BODY_BYTES,
   OhttpError,
@@ -159,6 +160,10 @@ test('allowlist: hanya target sempit yang boleh lewat gateway', () => {
   assert.equal(isOhttpTargetAllowed('GET', '/api/groups/sync'), false);
   assert.equal(isOhttpTargetAllowed('POST', '/api/groups/sync/anything'), false);
   assert.equal(isOhttpTargetAllowed('POST', '/api/groups/conv-1/mailbox'), false);
+  // [audit N7-01] Search KT lewat POST berbody, bukan GET ber-query.
+  assert.equal(isOhttpTargetAllowed('POST', '/api/keys/kt/search'), true);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/keys/kt/search'), false);
+  assert.equal(isOhttpTargetAllowed('POST', '/api/keys/kt/search/anything'), false);
 });
 
 test('gateway: body sync di atas 64 KB ditolak 413 terenkripsi', async () => {
@@ -168,6 +173,25 @@ test('gateway: body sync di atas 64 KB ditolak 413 terenkripsi', async () => {
     method: 'POST',
     path: '/api/groups/sync',
     content: new Uint8Array(OHTTP_SYNC_MAX_BODY_BYTES + 1).fill(0x61),
+  });
+  let dispatched = false;
+  const encapsulatedResponse = await handleOhttpGateway(config, client.body, async () => {
+    dispatched = true;
+    return { status: 200, headers: [], content: new Uint8Array() };
+  });
+  const response = await client.openResponse(encapsulatedResponse);
+  assert.equal(dispatched, false);
+  assert.equal(response.status, 413);
+  assert.match(new TextDecoder().decode(response.content), /OHTTP_BODY_TOO_LARGE/);
+});
+
+test('gateway: body search KT di atas 4 KB ditolak 413 terenkripsi', async () => {
+  const config = await makeConfig();
+  const client = await encapsulateOhttpRequest(config.publicConfigs[0]!, {
+    ...sampleRequest,
+    method: 'POST',
+    path: '/api/keys/kt/search',
+    content: new Uint8Array(OHTTP_KT_SEARCH_MAX_BODY_BYTES + 1).fill(0x61),
   });
   let dispatched = false;
   const encapsulatedResponse = await handleOhttpGateway(config, client.body, async () => {

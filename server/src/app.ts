@@ -434,12 +434,16 @@ app.use((req, res, next) => {
   if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
     return next();
   }
-  // [docs/35 Fase 4b] Query PIR lewat OHTTP tidak membawa cookie: relay membuang
-  // header klien dan identitasnya adalah token OHTTP ber-scope DI DALAM amplop
-  // (`requireAuth` menolak token itu di luar allowlist OHTTP). CSRF adalah
-  // proteksi terhadap ambient authority cookie, jadi dilewati HANYA bila tidak
-  // ada cookie sesi sama sekali — kalau ada, jalur cookie tetap wajib CSRF.
-  if (req.path === '/api/pir/query' && !hasSessionCookie(req)) {
+  // [docs/35 Fase 4b] Query PIR & search KT lewat OHTTP tidak membawa cookie:
+  // relay membuang header klien dan identitasnya adalah token OHTTP ber-scope
+  // DI DALAM amplop (`requireAuth` menolak token itu di luar allowlist OHTTP).
+  // CSRF adalah proteksi terhadap ambient authority cookie, jadi dilewati HANYA
+  // bila tidak ada cookie sesi sama sekali — kalau ada, jalur cookie tetap
+  // wajib CSRF.
+  if (
+    (req.path === '/api/pir/query' || req.path === '/api/keys/kt/search') &&
+    !hasSessionCookie(req)
+  ) {
     return next();
   }
   doubleCsrfProtection(req, res, next);

@@ -3,7 +3,7 @@ import { env } from '../config.js'
 import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
 import { Request, Response, NextFunction } from 'express';
-import { clientIpTag } from '../utils/clientIp.js'
+import { clientRateLimitTag } from '../utils/clientIp.js'
 import { searchRateKey } from '../utils/searchRateKey.js'
 import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 
@@ -17,7 +17,11 @@ import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 // pepper** dari alamat itu (`clientIpTag`): `RedisStore` menulis
 // `rl:general:<key>` ke Redis, jadi IP mentah di sini = daftar alamat klien di
 // snapshot Redis (melanggar kriteria audit "tidak ada IP di DB/Redis").
-const secureKeyGenerator = (req: Request): string => clientIpTag(req);
+// [audit N8-02] Trafik OHTTP tiba lewat loopback sehingga IP-nya sama untuk
+// semua klien; `clientRateLimitTag` memakai subjek token OHTTP (per akun) untuk
+// jalur itu dan tetap IP untuk trafik biasa. Tanpa ini, satu klien yang
+// memverifikasi banyak kontak menghabiskan bucket bersama 300/15 menit.
+const secureKeyGenerator = (req: Request): string => clientRateLimitTag(req);
 
 // Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)
 const skipRules = (req: Request) => {

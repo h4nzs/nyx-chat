@@ -868,6 +868,15 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
         // user membuka kunci tanpa login ulang.
         await clearKtIdentifier();
+        // [audit N7-04] State monitoring adalah turunan kontak akun ini, jadi
+        // tidak boleh diwarisi akun berikutnya di perangkat yang sama.
+        // [audit N8-03] Pin config TIDAK dihapus di sini: pin kini ber-PK per
+        // akun (`ktConfigPinRowId`), sehingga isolasi lintas-akun tetap terjaga
+        // sementara akun yang sama mempertahankan kontinuitas TOFU lintas sesi.
+        // Menghapusnya membuat server bisa menukar `signatureKey` di sela
+        // logout→login tanpa terdeteksi.
+        const { clearKtStates } = await import('../lib/ktMonitoring');
+        await clearKtStates().catch(() => {});
         localStorage.removeItem('user');
         
         set({ user: null, accessToken: null, hasRestoredKeys: false });

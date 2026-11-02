@@ -393,19 +393,25 @@ export const OHTTP_DEFAULT_ALLOWLIST: readonly OhttpAllowRule[] = [
   // satunya jalur tulis yang memang tidak membawa identitas, jadi aman lewat
   // gateway. Posting/pull mailbox sengaja BELUM di sini (jalur terpisah).
   { method: 'POST', path: /^\/api\/groups\/sync$/ },
+  // [audit N7-01] Bukti KT untuk satu kontak. Hash username pindah ke body dan
+  // lewat amplop OHTTP supaya server/edge tidak melihat "akun X mencari kontak Y".
+  { method: 'POST', path: /^\/api\/keys\/kt\/search$/ },
 ];
 
 /**
- * Batas body untuk target POST di allowlist (saat ini hanya sync grup).
+ * Batas body untuk target POST di allowlist (sync grup + search KT).
  * Amplop OHTTP sendiri boleh sampai 8 MB; batas ini menjaga satu target
  * "kecil" tidak menjadi jalur upload besar yang menyamar sebagai sync.
  */
 export const OHTTP_SYNC_MAX_BODY_BYTES = 64 * 1024;
+export const OHTTP_KT_SEARCH_MAX_BODY_BYTES = 4 * 1024;
 
 /** Path target yang punya batas body khusus. */
 export function ohttpBodyLimitFor(path: string): number | null {
   const pathname = path.split('?')[0] ?? '';
-  return pathname === '/api/groups/sync' ? OHTTP_SYNC_MAX_BODY_BYTES : null;
+  if (pathname === '/api/groups/sync') return OHTTP_SYNC_MAX_BODY_BYTES;
+  if (pathname === '/api/keys/kt/search') return OHTTP_KT_SEARCH_MAX_BODY_BYTES;
+  return null;
 }
 
 export function isOhttpTargetAllowed(

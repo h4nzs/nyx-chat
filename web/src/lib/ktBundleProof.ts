@@ -46,6 +46,7 @@
  */
 
 import { api } from './api';
+import { ohttpEnabled, ohttpFetch } from './ohttpClient';
 import {
   hexToBytes,
   ktSearchKeyHex,
@@ -349,12 +350,54 @@ async function defaultFetchConfig(): Promise<KtRemoteConfig> {
 }
 
 async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
-  const params = new URLSearchParams({ hash: bytesToBase64Url(query.searchKey.subarray(1)) });
-  if (query.last !== undefined) params.set('last', String(query.last));
-  if (query.distinguished !== undefined) params.set('distinguished', String(query.distinguished));
-  const response = await api<{ fullTreeHead: string; condensed: string }>(
-    `/api/keys/kt/search?${params.toString()}`
-  );
+  // [audit N7-01] Username hash + tree size adalah metadata sosial. Kirim lewat
+  // body (dan OHTTP bila aktif), jangan pernah taruh di URL yang dicatat edge.
+  const body = JSON.stringify({
+    hash: bytesToBase64Url(query.searchKey.subarray(1)),
+    ...(query.last !== undefined ? { last: String(query.last) } : {}),
+    ...(query.distinguished !== undefined ? { distinguished: String(query.distinguished) } : {}),
+  });
+  type ProofResponse = { fullTreeHead: string; condensed: string };
+  let response: ProofResponse | undefined;
+
+  if (ohttpEnabled()) {
+    let result: Awaited<ReturnType<typeof ohttpFetch>> | undefined;
+    try {
+      result = await ohttpFetch('/api/keys/kt/search', {
+        method: 'POST',
+        headers: [['content-type', 'application/json']],
+        body: new TextEncoder().encode(body),
+      });
+    } catch (error) {
+      // [audit N8-04] Kegagalan transport (relay mati, koneksi putus) memang
+      // alasan sah untuk jatuh ke jalur langsung — tetapi harus terlihat, bukan
+      // `console.warn` yang hilang di produksi.
+      defaultLog('kt.ohttp-degraded', {
+        reason: error instanceof Error ? error.message : String(error),
+        action: 'direct-fallback',
+      });
+    }
+
+    if (result) {
+      if (result.status >= 200 && result.status < 300) {
+        response = JSON.parse(new TextDecoder().decode(result.body)) as ProofResponse;
+      } else if (result.status >= 500) {
+        // Kegagalan layanan: request ulang lewat cookie tidak menambah kebocoran
+        // baru dibanding yang sudah terjadi, dan KT tetap harus bisa dipakai.
+        defaultLog('kt.ohttp-degraded', { status: result.status, action: 'direct-fallback' });
+      } else {
+        // 4xx adalah jawaban SAH dari layanan (404 KT_NOT_FOUND, 400 argumen,
+        // 401/403 token/misconfig). Dulu semuanya dikirim ULANG lewat cookie,
+        // sehingga hash kontak sampai ke server justru pada kontak yang belum
+        // terdaftar — persis yang ingin dicegah OHTTP. Fail-closed: jangan
+        // fallback, laporkan degradasi, biarkan pemanggil memberi `unavailable`.
+        defaultLog('kt.ohttp-degraded', { status: result.status, action: 'no-fallback' });
+        throw new Error(`kt: search dijawab HTTP ${result.status} lewat OHTTP`);
+      }
+    }
+  }
+
+  response ??= await api<ProofResponse>('/api/keys/kt/search', { method: 'POST', body });
   return {
     fullTreeHead: base64UrlToBytes(response.fullTreeHead),
     condensed: base64UrlToBytes(response.condensed),

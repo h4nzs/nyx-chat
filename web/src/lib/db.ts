@@ -194,11 +194,18 @@ export interface ConversationRecord {
  * Satu baris per `0x75||usernameHash(32)` yang pernah diverifikasi klien.
  * Semua nilai bukti di-seal `ENC1:` (masterSeed) — IndexedDB tidak boleh
  * menyimpan tree head/monitoring data dalam bentuk terbaca, karena keduanya
- * mengungkap kontak mana yang dimonitor. `searchKeyHex` sengaja plaintext:
- * ia sudah hash 32 byte (tidak reversible), dan ia satu-satunya kunci indeks.
+ * mengungkap kontak mana yang dimonitor.
+ *
+ * [audit N7-02] `searchKeyHex` bukan search key mentah: ia HMAC(masterSeed,
+ * searchKey). Hash nama kontak bisa ditebak (Argon2id parameter publik), jadi
+ * primary key plaintext akan membocorkan daftar kontak. Search key aslinya
+ * disimpan ter-seal di `searchKey`. Nama kolom dipertahankan agar Dexie tidak
+ * perlu mengganti primary key.
  */
 export interface KtMonitoringRecord {
-  searchKeyHex: string; // PK (hex dari search key)
+  searchKeyHex: string; // PK (HMAC hex, bukan search key)
+  /** Search key asli (base64url) ter-seal, `null` untuk baris legacy. */
+  searchKey: string | null;
   /** `StoredTreeHead` (base64url) ter-seal, `null` bila belum ada bukti. */
   treeHead: string | null;
   /** `StoredMonitoringData` (base64url) ter-seal. */

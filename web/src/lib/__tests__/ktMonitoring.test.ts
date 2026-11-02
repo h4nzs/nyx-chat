@@ -22,6 +22,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface Row {
   searchKeyHex: string;
+  searchKey?: string | null;
   treeHead: string | null;
   monitoringData: string | null;
   distinguishedTreeHead: string | null;
@@ -38,6 +39,9 @@ vi.mock('@lib/db', () => ({
       put: async (row: Row) => {
         rows.set(row.searchKeyHex, row);
       },
+      delete: async (key: string) => {
+        rows.delete(key);
+      },
       toArray: async () => [...rows.values()],
       clear: async () => {
         rows.clear();
@@ -48,6 +52,7 @@ vi.mock('@lib/db', () => ({
 
 vi.mock('@lib/keychainDb', () => ({
   AT_REST_PREFIX: 'ENC1:',
+  deriveKtSearchIndexKey: vi.fn(async () => new Uint8Array(32).fill(7)),
   encryptValueAtRest: vi.fn(async (value: string) => 'ENC1:' + Buffer.from(value, 'utf8').toString('base64')),
   decryptValueAtRest: vi.fn(async (stored: string) =>
     stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null
@@ -57,6 +62,7 @@ vi.mock('@lib/keychainDb', () => ({
 const {
   clearKtStates,
   ktSearchKeyHex,
+  ktSearchKeyRowId,
   loadKtStates,
   planKtMonitor,
   runKtMonitorOnce,
@@ -128,20 +134,47 @@ describe('penyimpanan state KT', () => {
 
     await saveKtState({ searchKey, treeHead, monitoringData, keyVersion: 1 });
 
-    const stored = rows.get(ktSearchKeyHex(searchKey))!;
+    const rowId = await ktSearchKeyRowId(searchKey);
+    const stored = rows.get(rowId)!;
     expect(stored).toBeDefined();
     // Nilai bukti TIDAK plaintext — hanya envelope ENC1:
     expect(stored.treeHead!.startsWith('ENC1:')).toBe(true);
     expect(stored.monitoringData!.startsWith('ENC1:')).toBe(true);
     expect(stored.keyVersion!.startsWith('ENC1:')).toBe(true);
     expect(stored.updatedAt.startsWith('ENC1:')).toBe(true);
-    // Search key sendiri sudah hash 32 byte → boleh jadi kunci baris (plaintext).
-    expect(stored.searchKeyHex).toBe('aa'.repeat(33));
+    // [audit N7-02] PK adalah HMAC, bukan search key mentah; search key asli
+    // hanya ada di dalam nilai ter-seal.
+    expect(stored.searchKeyHex).toBe(rowId);
+    expect(stored.searchKeyHex).not.toBe(ktSearchKeyHex(searchKey));
+    expect(stored.searchKey!.startsWith('ENC1:')).toBe(true);
 
     const [loaded] = await loadKtStates();
+    expect(loaded!.searchKey).toEqual(searchKey);
     expect(loaded!.treeHead).toEqual(treeHead);
     expect(loaded!.monitoringData).toEqual(monitoringData);
     expect(loaded!.keyVersion).toBe(1);
+  });
+
+  it('[audit N7-02] baris legacy dipindah ke PK HMAC dan search key disegel', async () => {
+    const searchKey = hexToBytes('dd'.repeat(33));
+    const rawHex = ktSearchKeyHex(searchKey);
+    rows.set(rawHex, {
+      searchKeyHex: rawHex,
+      treeHead: null,
+      monitoringData: null,
+      distinguishedTreeHead: null,
+      keyVersion: null,
+      updatedAt: 'legacy',
+    });
+
+    const [loaded] = await loadKtStates();
+    expect(loaded!.searchKey).toEqual(searchKey);
+
+    const rowId = await ktSearchKeyRowId(searchKey);
+    expect(rows.has(rawHex)).toBe(false);
+    const migrated = rows.get(rowId)!;
+    expect(migrated.searchKeyHex).toBe(rowId);
+    expect(migrated.searchKey!.startsWith('ENC1:')).toBe(true);
   });
 
   it('update parsial tidak menghapus nilai lama', async () => {
@@ -217,7 +250,8 @@ describe('runKtMonitorOnce', () => {
       });
 
       // 2. Bukti tidak sah → verifikasi gagal dan state TIDAK berubah.
-      const before = rows.get(fixture.searchKey)!;
+      const fixtureRowId = await ktSearchKeyRowId(hexToBytes(fixture.searchKey));
+      const before = rows.get(fixtureRowId)!;
       const captured: Uint8Array[] = [];
       await expect(
         runKtMonitorOnce({
@@ -235,7 +269,7 @@ describe('runKtMonitorOnce', () => {
       expect(captured).toHaveLength(1);
       expect(captured[0]!.length).toBeGreaterThan(0);
       // Fail-closed: baris tersimpan identik dengan sebelumnya.
-      expect(rows.get(fixture.searchKey)).toEqual(before);
+      expect(rows.get(fixtureRowId)).toEqual(before);
     }
   );
 });

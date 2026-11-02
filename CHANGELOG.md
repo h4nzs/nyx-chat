@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔑 State KT pulih setelah KDF-nya melempar; OHTTP punya bucket per akun; pin TOFU bertahan lintas sesi (2026-11-02, audit pass 8)
+
+Pass 8 memverifikasi fix pass 7 dengan **menjalankan** panggilan library, bukan
+membaca tipe — dan menemukan bahwa perbaikan keamanan itu justru mematikan
+Key Transparency di klien:
+
+- **N8-01 (High) — `deriveKtSearchIndexKey` selalu melempar.** Ia memanggil
+  `crypto_kdf_derive_from_key` dengan bentuk API C (menulis ke buffer keluaran),
+  padahal binding JS mengembalikan `Uint8Array` dan argumen pertamanya panjang →
+  `TypeError: subkey_len must be an unsigned integer`. Akibatnya `saveKtState`
+  reject sebelum `put`: tidak ada anchor monitoring, tidak ada deteksi rotasi,
+  dan setiap verifikasi kontak menjadi `unavailable`. Tes hijau karena fungsi
+  yang rusak di-mock. Kini memakai bentuk JS yang benar; tes baru memanggil
+  libsodium **asli**.
+- **N8-02 (Medium) — semua trafik OHTTP berbagi satu bucket 300/15 menit.**
+  Gateway meneruskan lewat loopback sehingga `req.ip` = `127.0.0.1` untuk semua
+  pengguna; satu klien yang memverifikasi banyak kontak bisa memblokir pengguna
+  OHTTP lain (termasuk group sync). Limiter umum kini memakai subjek token OHTTP
+  yang sudah bertanda tangan → satu akun satu bucket, sementara trafik non-OHTTP
+  tetap per IP dan tag tetap HMAC pepper (tanpa userId/IP mentah di Redis).
+- **N8-03 (Low) — logout menghapus pin konfigurasi KT.** Perlindungan TOFU turun
+  jadi per-sesi: server bisa menukar `signatureKey` di sela logout→login tanpa
+  terdeteksi. Pin kini ber-PK per akun dan **tidak** dihapus saat logout, jadi
+  isolasi lintas-akun tetap terjaga tanpa kehilangan kontinuitas.
+- **N8-04 (Low) — fallback OHTTP mengirim ulang semua non-2xx.** `404
+  KT_NOT_FOUND` (jawaban sah) diperlakukan sebagai kegagalan, sehingga hash
+  kontak yang belum terdaftar tetap sampai ke server lewat cookie. Fallback kini
+  hanya untuk gangguan transport/5xx; 4xx fail-closed + log struktur
+  `kt.ohttp-degraded`.
+
+N7-01 tetap **PARTIAL**: hash kontak tidak lagi di URL/log, tetapi server masih
+melihat akun→hash di body. Ringkasan: `docs/audit/pass-8/40-fixes.md`.
+
 ## 🔐 Logout perangkat kini memutus socket-nya; id guest Burner dilebarkan (2026-11-01, audit pass 6)
 
 Pass 6 membaca penuh `server/src/routes/auth.ts` — satu-satunya berkas auth yang

@@ -32,7 +32,7 @@
 import { db } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
 
-/** PK baris tunggal di tabel `ktConfig`. */
+/** Prefix PK di tabel `ktConfig`. */
 export const KT_CONFIG_ROW_ID = 'kt-config';
 
 /** ABI frame verifier: 1 = Ed25519 + EC-VRF, 2 = ML-DSA-65 + SHA-256 index. */
@@ -116,10 +116,41 @@ export function ktConfigPinMatches(pin: KtConfigPin, candidate: KtConfigPin): bo
   return pin.auditorKeys.every((key, index) => key === candidate.auditorKeys[index]);
 }
 
-/** Muat pin tersimpan. Baris rusak/tidak ada → `undefined` (belum di-pin). */
+/**
+ * [audit N8-03] PK pin **per akun**, bukan satu baris global.
+ *
+ * Logout tidak lagi menghapus pin (itu menurunkan perlindungan TOFU menjadi
+ * per-sesi: server bisa menukar `signatureKey` di antara logout dan login tanpa
+ * terdeteksi). Dengan baris per akun, akun A mempertahankan kontinuitasnya dan
+ * akun B di perangkat yang sama tidak pernah membaca/mewarisi pin A. Id akun di
+ * PK bukan rahasia baru: perangkat ini memang tahu siapa yang login, dan nilai
+ * pin sendiri tetap ter-seal `ENC1:`.
+ */
+export function ktConfigPinRowId(userId: string): string {
+  return `${KT_CONFIG_ROW_ID}:${userId}`;
+}
+
+/** Id akun yang sedang login; `undefined` bila belum/tidak ada sesi. */
+async function currentKtAccountId(): Promise<string | undefined> {
+  try {
+    const { useAuthStore } = await import('@store/auth');
+    const id = useAuthStore.getState().user?.id;
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Muat pin tersimpan. Baris rusak/tidak ada/akun tidak diketahui → `undefined`.
+ * Tanpa id akun kita sengaja TIDAK membaca baris mana pun: pin milik akun lain
+ * tidak boleh dipakai sebagai jangkar kepercayaan.
+ */
 export async function loadKtConfigPin(): Promise<KtConfigPin | undefined> {
   try {
-    const row = await db.ktConfig.get(KT_CONFIG_ROW_ID);
+    const accountId = await currentKtAccountId();
+    if (!accountId) return undefined;
+    const row = await db.ktConfig.get(ktConfigPinRowId(accountId));
     if (!row) return undefined;
     const plain = await decryptValueAtRest(row.blob);
     if (!plain) return undefined;
@@ -132,18 +163,24 @@ export async function loadKtConfigPin(): Promise<KtConfigPin | undefined> {
 /** Simpan pin (TOFU). Kegagalan tulis ditelan: pin adalah sinyal, bukan blocker. */
 export async function saveKtConfigPin(pin: KtConfigPin): Promise<void> {
   try {
+    const accountId = await currentKtAccountId();
+    if (!accountId) return;
     const blob = await encryptValueAtRest(JSON.stringify(pin));
-    await db.ktConfig.put({ id: KT_CONFIG_ROW_ID, blob });
+    await db.ktConfig.put({ id: ktConfigPinRowId(accountId), blob });
   } catch {
     // IndexedDB ikut terhapus saat wipe; kegagalan menulis bukan alasan
     // menggagalkan jalur kunci.
   }
 }
 
-/** Hapus pin (logout/wipe/rotasi yang disengaja). */
+/**
+ * Hapus SEMUA pin (rotasi kunci yang disengaja / wipe). **Bukan** jalur logout:
+ * `logout` mempertahankan pin akun itu supaya kontinuitas TOFU lintas sesi
+ * terjaga (audit N8-03); isolasi antar-akun datang dari PK per akun.
+ */
 export async function clearKtConfigPin(): Promise<void> {
   try {
-    await db.ktConfig.delete(KT_CONFIG_ROW_ID);
+    await db.ktConfig.clear();
   } catch {
     // Baris ikut terhapus bersama IndexedDB saat wipe.
   }

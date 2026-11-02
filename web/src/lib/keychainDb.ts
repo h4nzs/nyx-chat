@@ -33,6 +33,35 @@ async function getMasterSeedOrUndefined(): Promise<Uint8Array | undefined> {
 }
 
 /**
+ * [audit N7-02] Subkey deterministik untuk indeks pencarian KT.
+ *
+ * `searchKey` adalah hash nama kontak yang bisa ditebak (Argon2id dengan
+ * parameter publik), jadi ia tidak boleh menjadi primary key plaintext di
+ * IndexedDB. Turunkan kunci indeks dari masterSeed supaya dump IDB tanpa vault
+ * tidak bisa dipakai untuk mengenumerasi kontak yang dimonitor.
+ */
+export async function deriveKtSearchIndexKey(): Promise<Uint8Array> {
+  const masterSeed = await getMasterSeedOrUndefined();
+  if (!masterSeed) {
+    throw new AtRestSealUnavailableError(
+      'masterSeed belum tersedia — indeks pencarian KT tidak dapat diturunkan'
+    );
+  }
+  const sodium = await import('@lib/sodiumInitializer').then((m) => m.getSodium());
+  // [audit N8-01] Binding JS libsodium MENGEMBALIKAN subkey; ia tidak menulis ke
+  // argumen pertama seperti API C. Dulu kode memakai bentuk C
+  // (`crypto_kdf_derive_from_key(subkey, 1, ctx, key)`) sehingga SELALU melempar
+  // `TypeError: subkey_len must be an unsigned integer` — akibatnya tidak ada
+  // satu pun baris KT yang bisa ditulis dan verifikasi kontak selalu
+  // `unavailable`. Argumen: (panjang, id, ctx 8 karakter, kunci 32 byte).
+  const subkey = sodium.crypto_kdf_derive_from_key(32, 1, 'nyx-kt01', masterSeed);
+  if (subkey.length !== 32) {
+    throw new AtRestSealUnavailableError('indeks pencarian KT berukuran salah');
+  }
+  return subkey;
+}
+
+/**
  * [audit D7] Dilempar bila sebuah nilai **tidak bisa** disegel: masterSeed belum
  * tersedia (vault terkunci) atau worker enkripsi gagal.
  *
