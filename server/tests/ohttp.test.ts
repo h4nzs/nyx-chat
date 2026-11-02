@@ -34,6 +34,7 @@ import { createServer, type Server } from 'node:http';
 import createOhttpRouter from '../src/routes/ohttp.js';
 import { loadOhttpConfig, type OhttpConfig } from '../src/ohttp/config.js';
 import { handleOhttpGateway } from '../src/ohttp/gateway.js';
+import { OHTTP_CLIENT_TAG_HEADER, OHTTP_INTERNAL_HEADER } from '../src/ohttp/clientTag.js';
 import {
   OHTTP_TOKEN_TTL_SEC,
   isOhttpScopeRequestAllowed,
@@ -507,4 +508,64 @@ test('relay token-off: guard auth, token dicetak server, cookie klien tidak dite
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+// [audit N9-01] Tag klien berasal dari relay (satu-satunya pihak yang melihat
+// alamat klien) dan menentukan bucket rate limit di API. Karena itu tag hanya
+// diteruskan bersama token internal yang sah, dan klaim dengan nama header yang
+// sama dari DALAM amplop selalu dibuang.
+test('gateway: tag klien relay diteruskan, klaim dari dalam amplop dibuang', async () => {
+  const config: OhttpConfig = {
+    ...(await makeConfig()),
+    internalToken: 'internal-secret',
+  };
+  const client = await encapsulateOhttpRequest(config.publicConfigs[0]!, {
+    ...sampleRequest,
+    headers: [
+      [OHTTP_INTERNAL_HEADER, 'internal-palsu'],
+      [OHTTP_CLIENT_TAG_HEADER, 'tag-palsu-dari-amplop'],
+    ],
+  });
+
+  let received: OhttpRequest | null = null;
+  await handleOhttpGateway(
+    config,
+    client.body,
+    async (request) => {
+      received = request;
+      return { status: 200, headers: [], content: new Uint8Array() };
+    },
+    undefined,
+    { clientTag: 'tag-dari-relay' },
+  );
+
+  const headers = (received as OhttpRequest).headers;
+  const matching = (name: string) => headers.filter(([key]) => key.toLowerCase() === name);
+  assert.deepEqual(matching(OHTTP_CLIENT_TAG_HEADER), [
+    [OHTTP_CLIENT_TAG_HEADER, 'tag-dari-relay'],
+  ]);
+  assert.deepEqual(matching(OHTTP_INTERNAL_HEADER), [
+    [OHTTP_INTERNAL_HEADER, 'internal-secret'],
+  ]);
+});
+
+test('gateway: tag klien tidak diteruskan bila relay tidak menandatanganinya', async () => {
+  const config = await makeConfig();
+  const client = await encapsulateOhttpRequest(config.publicConfigs[0]!, {
+    ...sampleRequest,
+    headers: [
+      [OHTTP_CLIENT_TAG_HEADER, 'tag-palsu'],
+      [OHTTP_INTERNAL_HEADER, 'internal-palsu'],
+    ],
+  });
+
+  let received: OhttpRequest | null = null;
+  await handleOhttpGateway(config, client.body, async (request) => {
+    received = request;
+    return { status: 200, headers: [], content: new Uint8Array() };
+  });
+
+  const names = (received as OhttpRequest).headers.map(([key]) => key.toLowerCase());
+  assert.ok(!names.includes(OHTTP_CLIENT_TAG_HEADER));
+  assert.ok(!names.includes(OHTTP_INTERNAL_HEADER));
 });

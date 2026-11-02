@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { ipKeyGenerator } from 'express-rate-limit';
+import { trustedRelayClientTag } from '../ohttp/clientTag.js';
 import { pepperedIdentifier } from './atRestSecrets.js';
 import { verifyJwt } from './jwt.js';
 
@@ -71,7 +72,29 @@ export function ohttpTokenSubjectTag(req: Pick<Request, 'headers'>): string | un
   return pepperedIdentifier(`ohttp-sub:${subject}`);
 }
 
-/** Kunci limiter trafik umum: per akun OHTTP bila ada, selain itu per IP. */
+/**
+ * [audit N9-01] Tag klien OHTTP untuk trafik **tanpa akun**.
+ *
+ * Relay adalah satu-satunya pihak yang masih melihat alamat klien, jadi ia
+ * menghitung `HMAC(secret, alamat)` dan mengirimnya sebagai header internal
+ * (`ohttp/clientTag.ts`). API memakai tag itu setelah di-pepper lagi, sehingga
+ * yang masuk Redis tetap opaque: bukan IP, bukan id akun.
+ *
+ * `undefined` = bukan trafik lewat relay tepercaya (atau header tidak sah) →
+ * pemanggil jatuh ke subjek token/IP seperti sebelumnya. Header tanpa token
+ * internal TIDAK dipercaya; kalau dipercaya, penyerang cukup mengarang tag baru
+ * di setiap request untuk mendapat bucket tanpa batas.
+ */
+export function ohttpRelayClientTag(req: Pick<Request, 'headers'>): string | undefined {
+  const tag = trustedRelayClientTag(req);
+  return tag ? pepperedIdentifier(`ohttp-client:${tag}`) : undefined;
+}
+
+/**
+ * Kunci limiter trafik umum: klien relay OHTTP, lalu akun OHTTP, selain itu IP.
+ * Urutan ini penting: jalur bukti KT sengaja tanpa token, sehingga tanpa tag
+ * relay ia akan berbagi satu bucket `127.0.0.1` untuk semua pengguna.
+ */
 export function clientRateLimitTag(req: Pick<Request, 'headers' | 'ip'>): string {
-  return ohttpTokenSubjectTag(req) ?? clientIpTag(req);
+  return ohttpRelayClientTag(req) ?? ohttpTokenSubjectTag(req) ?? clientIpTag(req);
 }

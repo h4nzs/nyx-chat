@@ -24,6 +24,12 @@
 
 import express, { type Express } from 'express';
 import { rateLimit } from 'express-rate-limit';
+import {
+  OHTTP_CLIENT_TAG_HEADER,
+  OHTTP_INTERNAL_HEADER,
+  ohttpClientAddress,
+  relayClientTag,
+} from './clientTag.js';
 
 const OHTTP_REQUEST_TYPE = 'message/ohttp-req';
 const OHTTP_RESPONSE_TYPE = 'message/ohttp-res';
@@ -44,6 +50,12 @@ export interface OhttpRelayOptions {
   rateLimitPerMinute?: number;
   /** Timeout ke gateway (ms). Gateway yang menggantung = 504, bukan koneksi mati. */
   upstreamTimeoutMs?: number;
+  /**
+   * [audit N9-01] Rahasia proses (harus sama dengan `OHTTP_INTERNAL_TOKEN` di
+   * API). Dipakai sebagai token internal relay **dan** kunci HMAC tag klien.
+   * Kosong = tidak ada tag; limiter API kembali ke identitas loopback bersama.
+   */
+  internalToken?: string;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -110,12 +122,23 @@ export function createOhttpRelayApp(options: OhttpRelayOptions): Express {
 
     // Header dibangun eksplisit — bukan disalin. Header klien apa pun (cookie,
     // authorization, x-forwarded-for, user-agent) tidak pernah sampai ke gateway.
+    const upstreamHeaders: Record<string, string> = { 'content-type': OHTTP_REQUEST_TYPE };
+    if (options.internalToken) {
+      // [audit N9-01] Alamat klien tidak pernah keluar dari proses ini: yang
+      // dikirim hanya HMAC-nya. Token internal menandatangani tag itu, sehingga
+      // gateway/API hanya mempercayainya bila benar-benar berasal dari relay.
+      upstreamHeaders[OHTTP_INTERNAL_HEADER] = options.internalToken;
+      upstreamHeaders[OHTTP_CLIENT_TAG_HEADER] = relayClientTag(
+        options.internalToken,
+        ohttpClientAddress(req),
+      );
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const upstream = await fetch(options.gatewayTarget, {
         method: 'POST',
-        headers: { 'content-type': OHTTP_REQUEST_TYPE },
+        headers: upstreamHeaders,
         body: new Uint8Array(body).buffer,
         signal: controller.signal,
       });

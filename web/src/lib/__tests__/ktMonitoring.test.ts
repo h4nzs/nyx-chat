@@ -392,7 +392,15 @@ describe('startKtMonitorLoop', () => {
  * layanan KT saat belum ada yang dimonitor.
  */
 describe('monitorKeyTransparency', () => {
-  it.skipIf(!HAS_FIXTURES)('tanpa state siap → tidak memanggil jaringan', async () => {
+  // [flake 2026-11-02] Import dinamis `../ktBundleProof` memuat seluruh graf
+  // modul KT (WASM, ktGossip/Dexie, api) — 4,5–5 dtk di mesin lambat atau saat
+  // suite paralel. Itu biaya pemuatan modul, bukan perilaku yang diuji, dan
+  // batas bawaan 5 dtk membuat tes ini gagal acak. Waktu dinaikkan TANPA
+  // melonggarkan satu asersi pun; import tetap dinamis supaya mesin tanpa
+  // fixture tidak membayar pemuatan ini sama sekali.
+  it.skipIf(!HAS_FIXTURES)(
+    'tanpa state siap → tidak memanggil jaringan',
+    async () => {
     const { monitorKeyTransparency, resetKtBundleProofCaches } = await import('../ktBundleProof');
     resetKtBundleProofCaches();
 
@@ -415,5 +423,7 @@ describe('monitorKeyTransparency', () => {
 
     expect(outcome).toEqual({ checked: 0, changed: [] });
     expect(fetchMonitor).not.toHaveBeenCalled();
-  });
+    },
+    20_000
+  );
 });

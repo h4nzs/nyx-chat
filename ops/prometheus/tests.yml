@@ -83,6 +83,49 @@ tests:
         alertname: NyxMetricsIdentityLeakAttempt
         exp_alerts: []
 
+  # [audit N9-01] Tag klien relay: alarm hanya saat tag TIDAK dipakai secara
+  # sistemik (`no-token` = OHTTP_INTERNAL_TOKEN kosong di API/relay, `untagged`
+  # = relay tidak menandatangani, `untrusted` = token beda antar proses).
+  - name: 'NyxOhttpClientTagMissing: menyala saat semua request tanpa token'
+    interval: 30s
+    input_series:
+      - series: 'nyx_ohttp_client_tag_total{status="no-token"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxOhttpClientTagMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxOhttpClientTagMissing
+            exp_annotations:
+              summary: 'Tag klien relay OHTTP tidak dipakai (>50% request gateway)'
+              description: 'Lebih dari separuh request gateway OHTTP berstatus no-token/untagged/untrusted selama 10 menit. Set OHTTP_INTERNAL_TOKEN (>=32 karakter, nilai SAMA) di proses nyx-api dan nyx-ohttp-relay, lalu restart keduanya. Tanpa itu rate limit OHTTP tanpa akun (bukti KT) kembali berbagi satu bucket 127.0.0.1. Metrik: nyx_ohttp_client_tag_total{status}.'
+
+  - name: 'NyxOhttpClientTagMissing: tidak menyala saat tag dipakai'
+    interval: 30s
+    input_series:
+      - series: 'nyx_ohttp_client_tag_total{status="tagged"}'
+        values: '0+1x40'
+      - series: 'nyx_ohttp_client_tag_total{status="untagged"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxOhttpClientTagMissing
+        exp_alerts: []
+
+  - name: 'NyxOhttpClientTagMissing: tidak menyala saat hanya sebagian kecil untagged'
+    interval: 30s
+    input_series:
+      - series: 'nyx_ohttp_client_tag_total{status="tagged"}'
+        values: '0+9x40'
+      - series: 'nyx_ohttp_client_tag_total{status="untagged"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxOhttpClientTagMissing
+        exp_alerts: []
+
   - name: 'NyxSweeperStale: menyala saat run terakhir basi'
     interval: 30s
     input_series:

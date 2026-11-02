@@ -61,7 +61,7 @@ import {
 import { getLocalAnchor, storeAnchor, type KtHeadAnchor } from './ktGossip';
 import {
   ktConfigPinMatches,
-  loadKtConfigPin,
+  resolveKtConfigPin,
   parseKtConfigPin,
   saveKtConfigPin,
   type KtConfigPin,
@@ -530,7 +530,20 @@ async function resolveConfig(
   // Pin dibaca lebih dulu: config non-v2 saat pin sudah ABI 2 bukan gangguan
   // layanan biasa, melainkan perubahan skema verifikasi (potensi downgrade) —
   // dan itu harus berstatus `unverifiable`, bukan `unavailable`.
-  const pin = await loadKtConfigPin();
+  //
+  // [audit N9-02] Fail-closed bila pin TIDAK BISA dibaca (akun belum terhidrasi,
+  // verifikasi setelah logout, atau baris tidak bisa dibuka): menerimanya sebagai
+  // "belum di-pin" berarti satu jendela verifikasi tanpa jangkar, tepat saat
+  // `signatureKey` yang ditukar server tidak akan terdeteksi. Error polos → jalur
+  // pemanggil melaporkan `unavailable` dan mencoba lagi nanti (bukan `mismatch`,
+  // karena tidak ada bukti penyerangan).
+  const pinState = await resolveKtConfigPin();
+  if (pinState.status !== 'pin' && pinState.status !== 'empty') {
+    throw new Error(
+      `kt: pin konfigurasi tidak bisa dibaca (${pinState.status}) — verifikasi ditunda`
+    );
+  }
+  const pin = pinState.status === 'pin' ? pinState.pin : undefined;
   assertV2Config(remote, pin?.abiVersion === 2);
 
   const observed = parseKtConfigPin({

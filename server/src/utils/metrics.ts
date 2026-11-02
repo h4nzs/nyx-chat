@@ -643,6 +643,28 @@ export const OHTTP_OPS = defineCounter(
 );
 
 /**
+ * [audit N9-01] Status tag klien relay pada request gateway OHTTP.
+ *
+ * Kenapa perlu: tanpa tag, jalur OHTTP **tanpa akun** (bukti KT) kembali berbagi
+ * satu bucket `127.0.0.1`, dan kegagalan itu hanya terlihat sebagai `unavailable`
+ * + backoff di klien — persis kondisi yang dulu mematikan verifikasi untuk semua
+ * orang. Relay tidak mencatat apa pun (itu tujuannya), jadi status tag harus
+ * terlihat di metrik: `no-token` = `OHTTP_INTERNAL_TOKEN` kosong di proses API
+ * (atau relay), `untagged` = relay hidup tetapi tidak menandatangani,
+ * `untrusted` = header tag ada tetapi tokennya tidak cocok (salah konfigurasi
+ * atau dikarang lewat gateway langsung).
+ *
+ * Label = enum pendek (`tagged|untagged|untrusted|no-token`). Tidak ada alamat,
+ * nilai tag, atau id akun: tag relay sendiri sudah opaque dan tetap tidak
+ * dicatat.
+ */
+export const OHTTP_CLIENT_TAG = defineCounter(
+  'nyx_ohttp_client_tag_total',
+  'Request gateway OHTTP menurut status tag klien relay',
+  ['status']
+);
+
+/**
  * [docs/35 Fase 8 residual] Jalur legacy v1 yang masih benar-benar dipakai.
  *
  * Denylist baru boleh menjadi literal 0 setelah tidak ada klien/data v1. Audit

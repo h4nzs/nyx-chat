@@ -70,9 +70,24 @@ function main(): void {
     .map((host) => host.trim())
     .filter(Boolean);
 
+  // [audit N9-01] Tag klien per relay. Tanpa ini, semua pengguna OHTTP berbagi
+  // satu bucket limiter di API (`127.0.0.1`) untuk jalur tanpa akun seperti
+  // bukti KT. Nilainya HARUS sama dengan `OHTTP_INTERNAL_TOKEN` di proses API.
+  const internalToken = (process.env.OHTTP_INTERNAL_TOKEN ?? '').trim();
+  if (internalToken && internalToken.length < 32) {
+    throw new Error('OHTTP relay: OHTTP_INTERNAL_TOKEN minimal 32 karakter');
+  }
+  if (!internalToken) {
+    console.warn(
+      '[ohttp-relay] OHTTP_INTERNAL_TOKEN kosong: tag klien tidak dikirim, sehingga ' +
+        'rate limit API untuk trafik OHTTP tanpa akun (bukti KT) menjadi satu bucket bersama.'
+    );
+  }
+
   const app = createOhttpRelayApp({
     gatewayTarget,
     trustedGatewayHosts,
+    internalToken: internalToken || undefined,
     maxBody: process.env.OHTTP_RELAY_MAX_BODY,
     rateLimitPerMinute: process.env.OHTTP_RELAY_RATE_LIMIT
       ? Number(process.env.OHTTP_RELAY_RATE_LIMIT)

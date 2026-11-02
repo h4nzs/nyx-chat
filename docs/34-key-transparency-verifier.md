@@ -409,10 +409,28 @@ karena 401, dan endpoint itu dapat dipanggil siapa pun.
 
 Batas yang tetap ada, dinyatakan jujur: (1) tanpa OHTTP, server masih melihat
 **IP** yang meminta hash tertentu — anonimitas akun, bukan anonimitas jaringan;
-(2) request anonim lewat OHTTP semuanya tiba dari `127.0.0.1`, jadi limiter
-`ktProofLimiter` (240/menit per IP, store `rl:ktproof:` terpisah) berbagi satu
-bucket untuk jalur itu — relay tetap membatasi tiap klien 120/menit, dan bukti
-tidak lagi berbagi bucket dengan group sync/PIR; (3) route lain
-(`/monitor`, `/config`, `/head`, `/distinguished`) tetap terautentikasi karena
-bukan pencarian kontak. Anonimitas **penuh** (server tidak tahu IP) tetap butuh
-OHTTP menyala atau PIR.
+(2) route lain (`/monitor`, `/config`, `/head`, `/distinguished`) tetap
+terautentikasi karena bukan pencarian kontak. Anonimitas **penuh** (server tidak
+tahu IP) tetap butuh OHTTP menyala atau PIR.
+
+**Bucket limiter jalur anonim (N9-01, ditutup).** Semua request anonim lewat
+OHTTP tiba dari `127.0.0.1`, jadi `ktProofLimiter` (240/menit, store
+`rl:ktproof:` terpisah) dulu berbagi **satu** counter untuk seluruh pengguna —
+dua klien wajar sudah cukup menghabiskannya, dan karena kegagalan itu dipetakan
+ke `unavailable` + backoff, verifikasi kontak berhenti untuk semua orang
+(penyerang tidak perlu akun). Sekarang relay — satu-satunya pihak yang melihat
+alamat klien — mengirim `HMAC(secret, alamat)` di header internal, gateway
+membuang klaim header itu dari dalam amplop dan memasang nilai relay, dan API
+memakai tag itu setelah di-pepper lagi (`server/src/utils/clientIp.ts`,
+`server/src/ohttp/clientTag.ts`). Tag tanpa token internal yang sah **tidak**
+dipercaya, jadi ia tidak bisa dikarang lewat gateway langsung. Batas yang
+tersisa: tag adalah identitas per alamat, bukan per akun (beberapa akun di satu
+IP berbagi bucket), dan operasi tanpa `OHTTP_INTERNAL_TOKEN` di kedua proses
+kembali ke bucket bersama — dinyatakan lewat peringatan start relay, bukan
+diam-diam.
+
+**Pin saat akun belum diketahui (N9-02, ditutup).** `resolveKtConfigPin`
+membedakan `pin`, `empty` (TOFU), `unknown-account`, dan `unreadable`. Dua yang
+terakhir **fail-closed**: `resolveConfig` melempar, jalur pemanggil melaporkan
+`unavailable` dan mencoba lagi, bukan menerima config apa adanya. Jendela
+logout/hidrasi tidak lagi mematikan TOFU untuk satu sesi verifikasi.

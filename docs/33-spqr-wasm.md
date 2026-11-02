@@ -420,9 +420,19 @@ ter-seal, `clearSpqrStates` ikut membersihkan arsip) dan
 frame era 1, state era 1 dari arsip menghasilkan message key yang sama dengan
 pengirim, dan dekripsi dari arsip tidak mengubah baris aktif. Batas yang tetap
 ada: rotasi sesi menghapus kunci era lama dari state DR, jadi isi pesan era lama
-yang **baru** diterima setelah arsipnya terbuang (lebih dari tiga rotasi) tetap
-tidak bisa dibuka; arsip memperpanjang jendela, bukan menggantikan pengiriman
+yang **baru** diterima setelah arsipnya terbuang (lebih dari tiga rotasi)tetap tidak bisa dibuka; arsip memperpanjang jendela, bukan menggantikan pengiriman
 ulang.
+
+**[AUDIT PASS 9 — N9-03] Rotasi tanpa kemajuan tidak menggeser arsip.** Sesi
+X3DH baru bisa lahir berulang tanpa satu pun pesan v2 di antaranya (retry
+handshake, kedua sisi mendirikan sesi berdekatan). Dulu setiap rotasi menulis
+ulang state yang nyaris identik ke slot 0 dan menggeser era yang masih
+dibutuhkan, sehingga jendela "tiga era" bisa habis jauh lebih cepat daripada
+yang dijanjikan. Sekarang `rotateSpqrStateForNewSession` membandingkan state
+aktif dengan slot 0 lebih dulu: bila versi dan byte-nya sama (era belum pernah
+maju), arsip **tidak** digeser dan baris aktif tetap dihapus seperti biasa.
+Dikunci dua tes di `spqrState.test.ts` — rotasi yang tidak maju tidak menambah
+slot, dan rotasi setelah state maju tetap menggeser ke `[baru, lama]`.
 
 Dua jalur, keduanya **tidak menghapus** state apa pun:
 

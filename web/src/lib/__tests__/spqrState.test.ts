@@ -253,4 +253,36 @@ describe('arsip era braid (N5-01)', () => {
     expect(await loadArchivedSpqrStates(SESSION)).toEqual([]);
     expect(await loadSpqrState(SESSION)).toBeUndefined();
   });
+
+  // [audit N9-03] Sesi X3DH baru bisa lahir berulang tanpa satu pun pesan v2 di
+  // antaranya. Rotasi seperti itu tidak boleh menggeser arsip: kalau menggeser,
+  // era yang masih dibutuhkan terbuang sebelum tiga slot benar-benar terpakai.
+  it('rotate tanpa kemajuan state tidak menggeser arsip', async () => {
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    // Era baru ditulis dengan state yang SAMA (handshake ulang, belum ada pesan).
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    const archived = await loadArchivedSpqrStates(SESSION);
+    expect(archived).toHaveLength(1);
+    expect(archived[0]?.state).toEqual(stateBytes(1));
+    expect(await loadSpqrState(SESSION)).toBeUndefined();
+  });
+
+  it('rotate setelah state maju tetap menggeser arsip', async () => {
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2' });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    const archived = await loadArchivedSpqrStates(SESSION);
+    expect(archived.map((record) => record.state[0])).toEqual([2, 1]);
+  });
 });

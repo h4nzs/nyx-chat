@@ -142,22 +142,46 @@ async function currentKtAccountId(): Promise<string | undefined> {
 }
 
 /**
- * Muat pin tersimpan. Baris rusak/tidak ada/akun tidak diketahui → `undefined`.
- * Tanpa id akun kita sengaja TIDAK membaca baris mana pun: pin milik akun lain
- * tidak boleh dipakai sebagai jangkar kepercayaan.
+ * [audit N9-02] Hasil pencarian pin — tiga keadaan yang tidak boleh disamakan.
+ *
+ * Sebelumnya semuanya dilaporkan sebagai `undefined`, sehingga `resolveConfig`
+ * memperlakukannya sebagai "belum pernah di-pin" (TOFU): konfigurasi yang
+ * disajikan server diterima tanpa perbandingan. Itu benar untuk `empty`, tetapi
+ * salah untuk `unknown-account` — saat store belum terhidrasi atau verifikasi
+ * berjalan setelah logout, jendela itu mematikan TOFU untuk sesi tersebut.
+ * `unreadable` juga bukan `empty`: baris ada tetapi tidak bisa dibuka (vault
+ * terkunci / rusak) berarti jangkar tidak diketahui, bukan belum ada jangkar.
+ */
+export type KtConfigPinState =
+  | { status: 'pin'; pin: KtConfigPin }
+  | { status: 'empty' }
+  | { status: 'unknown-account' }
+  | { status: 'unreadable' };
+
+export async function resolveKtConfigPin(): Promise<KtConfigPinState> {
+  const accountId = await currentKtAccountId();
+  // Tanpa id akun kita TIDAK membaca baris mana pun: pin milik akun lain tidak
+  // boleh dipakai sebagai jangkar, dan "tidak tahu akun" bukan "belum di-pin".
+  if (!accountId) return { status: 'unknown-account' };
+  try {
+    const row = await db.ktConfig.get(ktConfigPinRowId(accountId));
+    if (!row) return { status: 'empty' };
+    const plain = await decryptValueAtRest(row.blob);
+    if (!plain) return { status: 'unreadable' };
+    const pin = parseKtConfigPin(JSON.parse(plain));
+    return pin ? { status: 'pin', pin } : { status: 'unreadable' };
+  } catch {
+    return { status: 'unreadable' };
+  }
+}
+
+/**
+ * Muat pin tersimpan (bentuk lama). `undefined` untuk ketiga keadaan tanpa pin —
+ * pemanggil yang perlu membedakannya memakai `resolveKtConfigPin`.
  */
 export async function loadKtConfigPin(): Promise<KtConfigPin | undefined> {
-  try {
-    const accountId = await currentKtAccountId();
-    if (!accountId) return undefined;
-    const row = await db.ktConfig.get(ktConfigPinRowId(accountId));
-    if (!row) return undefined;
-    const plain = await decryptValueAtRest(row.blob);
-    if (!plain) return undefined;
-    return parseKtConfigPin(JSON.parse(plain));
-  } catch {
-    return undefined;
-  }
+  const state = await resolveKtConfigPin();
+  return state.status === 'pin' ? state.pin : undefined;
 }
 
 /** Simpan pin (TOFU). Kegagalan tulis ditelan: pin adalah sinyal, bukan blocker. */

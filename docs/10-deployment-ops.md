@@ -128,7 +128,7 @@ ls /var/lib/nyx/kt-v2-snapshots/         # arsip snapshot KT terverifikasi (§10
 | `GROUP_RELEASE_JITTER_MS` | [docs/37 P8] Jitter rilis pesan grup (ms, default kosong = mati, clip 2000). Menambah latensi ACK? Tidak — ACK dikirim dulu; hanya relay yang ditunda. Metrik `nyx_group_release_delay_ms` |
 | `OHTTP_RELAY_EXTERNAL` | [docs/37 P7] `1` = relay OHTTP dijalankan proses terpisah; API tidak memasang `/api/ohttp/relay`. Butuh `nyx-ohttp-relay`; klien memakai default same-origin `/api/ohttp/relay` (nginx → `:4100`), `VITE_OHTTP_RELAY_URL` hanya bila relay berada di origin lain (§10.18) |
 | `OHTTP_TOKEN_MODE` | `on` (default) \| `off`. `off` = relay mencetak token sendiri (butuh sesi/CSRF, hanya loopback) — wajib `OHTTP_INTERNAL_TOKEN` atau `JWT_SECRET` yang sama di semua worker (§10.18) |
-| `OHTTP_INTERNAL_TOKEN` | [audit F-06] Rahasia relay → gateway saat `OHTTP_TOKEN_MODE=off` (≥32 karakter). Kosong = HMAC(`JWT_SECRET`) deterministik; tanpa keduanya boot gagal. Isi eksplisit bila relay adalah proses/systemd sendiri (§10.18) |
+| `OHTTP_INTERNAL_TOKEN` | [audit F-06/N9-01] Rahasia relay → gateway **dan** kunci HMAC tag klien relay (≥32 karakter). Saat `OHTTP_TOKEN_MODE=off` kosong = HMAC(`JWT_SECRET`) deterministik (tanpa keduanya boot gagal); pada mode `on` kosong = tanpa tag klien. Isi eksplisit **juga pada mode `on`** bila relay adalah proses/systemd sendiri, dengan nilai sama di API dan relay (§10.18) |
 | `OHTTP_GATEWAY_TARGET` / `OHTTP_GATEWAY_TRUSTED_HOSTS` | [docs/37 P7] Tujuan gateway untuk relay proses terpisah (wajib loopback kecuali host disebut di CSV `TRUSTED_HOSTS`) — §10.18 |
 | `CREDENTIAL_SUITE_ALLOWLIST` | [Fase 5–6 dihapus] CSV suite verifier untuk `POST /api/groups/:id/credential/present`. **Kosong = tolak semua** (fail-closed) dan tidak ada suite di build ini |
 | `PP_ISSUER_PRIVATE_JWK` | [docs/37 §37.3.3] JWK privat issuer Privacy Pass (RSA-2048, RSABSSA-SHA384-PSS-Deterministic). **Wajib di production**: `utils/privacyPass.ts` melempar bila kosong saat kunci diminta, karena kunci ephemeral membatalkan semua token klien setiap restart. Generate/rotasi: `pnpm --filter nyx-server run pp-key:generate` (cetak) atau `-- --write` (tulis `server/.env`, mode 0600). Nilai yang sama harus dipakai **semua worker** |
@@ -1293,6 +1293,42 @@ dari `JWT_SECRET` dengan label tetap — deterministik dan sama di semua worker.
 Tanpa keduanya **boot gagal** (bukan token acak). Header ini bukan rahasia
 klien: ia hanya membedakan "dipanggil relay" dari "dipanggil langsung", dan
 klien tidak pernah memegang `JWT_SECRET`.
+
+**[audit N9-01] Tag klien relay.** Alamat klien hanya terlihat oleh relay, jadi
+relay menghitung `HMAC(OHTTP_INTERNAL_TOKEN, alamat)` dan mengirimnya sebagai
+`x-nyx-ohttp-client-tag` bersama `x-nyx-ohttp-internal`. Gateway **membuang**
+klaim kedua header itu dari dalam amplop lalu memasang nilai dari relay, dan API
+(`utils/clientIp.ts`) memakai tag itu setelah di-pepper lagi — yang masuk Redis
+tetap opaque (bukan IP, bukan id akun). Tanpa tag, jalur OHTTP **tanpa akun**
+(bukti KT, N7-01) berbagi satu bucket `127.0.0.1` sebesar 240/menit; dua klien
+wajar sudah cukup menghabiskannya. Konsekuensi operasional:
+`OHTTP_INTERNAL_TOKEN` harus diset (≥32 karakter, sama persis) di **kedua**
+proses meski `OHTTP_TOKEN_MODE=on`. Bila kosong, relay menulis peringatan saat
+start dan limiter kembali ke perilaku lama — bukan jalur yang lebih longgar,
+karena tag tanpa token yang sah tidak pernah dipercaya.
+
+Status tag terekspos sebagai `nyx_ohttp_client_tag_total{status}` (dihitung per
+request gateway): `tagged`, `untagged`, `untrusted`, dan `no-token`. Labelnya
+enum saja — tidak ada alamat, nilai tag, atau id akun.
+
+```promql
+# Operasi tanpa OHTTP_INTERNAL_TOKEN (kondisi yang harus ditindak)
+sum(rate(nyx_ohttp_client_tag_total{status="no-token"}[15m])) by (job)
+# Relay hidup tetapi tidak menandatangani / token beda antar proses
+sum(rate(nyx_ohttp_client_tag_total{status=~"untagged|untrusted"}[15m])) by (status)
+```
+
+`no-token` muncul saat proses API tidak punya token (set juga di relay);
+`untagged` saat API punya token tetapi relay tidak mengirim tag; `untrusted`
+saat header tag ada tetapi tokennya tidak cocok (salah konfigurasi atau tag
+dikarang lewat gateway langsung).
+
+Alert `NyxOhttpClientTagMissing` (warning, `for: 10m`) menyala bila lebih dari
+separuh request gateway berstatus `no-token|untagged|untrusted` selama 10
+menit — rasio, bukan satu request, supaya probe/panggilan langsung ke gateway
+tidak membunyikan alarm. Aturannya punya satu kasus **firing** dan dua kasus
+**tidak menyala** (tag dipakai; hanya sebagian kecil untagged) di
+`ops/prometheus/tests.yml`, dijaga `scripts/drill-alerts.sh`.
 
 **Selfhost (`~/nyx-selfhost`, systemd user).** `scripts/sync-selfhost.sh`
 memasang `ops/nginx/nyx.conf` (setelah transformasi path) dan

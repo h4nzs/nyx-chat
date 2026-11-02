@@ -57,6 +57,7 @@ import {
   clearKtConfigPin,
   ktConfigPinRowId,
   loadKtConfigPin,
+  resolveKtConfigPin,
   saveKtConfigPin,
   type KtConfigPin,
 } from '../ktConfigPin';
@@ -121,6 +122,34 @@ describe('pin konfigurasi KT per akun', () => {
     await saveKtConfigPin(pinFor(3));
     expect(state.rows.size).toBe(1);
     expect(state.rows.has(ktConfigPinRowId('user-a'))).toBe(true);
+  });
+
+  // [audit N9-02] "belum di-pin" dan "tidak tahu pin" tidak boleh sama:
+  // `resolveConfig` hanya boleh menerima config tanpa perbandingan pada keadaan
+  // pertama. Akun belum terhidrasi / baris rusak = verifikasi ditunda.
+  it('membedakan belum-di-pin, akun tidak diketahui, dan baris tidak terbaca', async () => {
+    state.userId = 'user-a';
+    expect(await resolveKtConfigPin()).toEqual({ status: 'empty' });
+
+    await saveKtConfigPin(pinFor(1));
+    expect((await resolveKtConfigPin()).status).toBe('pin');
+
+    state.userId = undefined;
+    expect((await resolveKtConfigPin()).status).toBe('unknown-account');
+
+    state.userId = 'user-a';
+    state.rows.set(ktConfigPinRowId('user-a'), {
+      id: ktConfigPinRowId('user-a'),
+      blob: 'bukan-json',
+    });
+    expect((await resolveKtConfigPin()).status).toBe('unreadable');
+
+    // Pin ABI 2 yang bentuknya tidak sah juga bukan "belum di-pin".
+    state.rows.set(ktConfigPinRowId('user-a'), {
+      id: ktConfigPinRowId('user-a'),
+      blob: 'ENC1:' + JSON.stringify({ abiVersion: 2, mode: 1, signatureKey: 'pendek' }),
+    });
+    expect((await resolveKtConfigPin()).status).toBe('unreadable');
   });
 
   it('clearKtConfigPin menghapus SEMUA pin (rotasi yang disengaja), bukan satu akun', async () => {

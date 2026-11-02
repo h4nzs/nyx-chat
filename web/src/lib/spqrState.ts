@@ -279,6 +279,18 @@ export const SPQR_STATE_ARCHIVE_SLOTS = 3;
 const eraStateKey = (sessionId: string, slot: number): string =>
   `${SPQR_STATE_KEY_PREFIX}${sessionId}#era_${slot}`;
 
+function sameState(
+  a: { version: RatchetWireVersion; state: Uint8Array },
+  b: { version: RatchetWireVersion; state: Uint8Array },
+): boolean {
+  if (a.version !== b.version) return false;
+  if (a.state.length !== b.state.length) return false;
+  for (let index = 0; index < a.state.length; index++) {
+    if (a.state[index] !== b.state[index]) return false;
+  }
+  return true;
+}
+
 /** Baca satu slot arsip. `undefined` = kosong atau tidak bisa dibuka. */
 async function loadEraState(
   sessionId: string,
@@ -307,24 +319,35 @@ export async function rotateSpqrStateForNewSession(sessionId: string): Promise<v
   const current = await loadSpqrState(sessionId);
 
   if (current) {
-    // Geser FIFO: slot terakhir dibuang, sisanya turun satu posisi.
-    for (let slot = SPQR_STATE_ARCHIVE_SLOTS - 1; slot > 0; slot--) {
-      const older = await loadEraState(sessionId, slot - 1);
-      if (older) {
-        await writeSealedRow(eraStateKey(sessionId, slot), {
-          version: older.version,
-          state: older.state,
-          now: older.updatedAt,
-        });
-      } else {
-        await db.kvStore.delete(eraStateKey(sessionId, slot));
+    // [audit N9-03] Jangan menggeser arsip untuk era yang belum pernah maju.
+    // Sesi X3DH baru bisa lahir berulang tanpa satu pun pesan v2 di antaranya
+    // (retry handshake, kedua sisi mendirikan sesi berdekatan). Tanpa cek ini,
+    // setiap rotasi menulis ulang state yang nyaris identik ke slot 0 dan
+    // membuang era yang sebenarnya masih dibutuhkan — "tiga era terakhir"
+    // menjadi jauh lebih pendek daripada yang dijanjikan N5-01.
+    const newest = await loadEraState(sessionId, 0);
+    const unchanged = newest !== undefined && sameState(newest, current);
+
+    if (!unchanged) {
+      // Geser FIFO: slot terakhir dibuang, sisanya turun satu posisi.
+      for (let slot = SPQR_STATE_ARCHIVE_SLOTS - 1; slot > 0; slot--) {
+        const older = await loadEraState(sessionId, slot - 1);
+        if (older) {
+          await writeSealedRow(eraStateKey(sessionId, slot), {
+            version: older.version,
+            state: older.state,
+            now: older.updatedAt,
+          });
+        } else {
+          await db.kvStore.delete(eraStateKey(sessionId, slot));
+        }
       }
+      await writeSealedRow(eraStateKey(sessionId, 0), {
+        version: current.version,
+        state: current.state,
+        now: current.updatedAt || Date.now(),
+      });
     }
-    await writeSealedRow(eraStateKey(sessionId, 0), {
-      version: current.version,
-      state: current.state,
-      now: current.updatedAt || Date.now(),
-    });
   }
 
   await deleteSpqrState(sessionId);

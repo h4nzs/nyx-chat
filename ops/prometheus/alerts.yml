@@ -39,6 +39,30 @@ groups:
           summary: "Ada percobaan mencatat metrik dengan label identitas"
           description: "nyx_metrics_rejected_total naik (reason={{ $labels.reason }}). Ada kode baru yang mencoba mengirim userId/usernameHash/IP/token ke metrik. Perbaiki pemanggilnya (server/src/utils/metrics.ts akan selalu menolak nilainya)."
 
+      # [audit N9-01] Tag klien relay hanya aktif bila `OHTTP_INTERNAL_TOKEN`
+      # diset dengan nilai SAMA di proses API dan relay. Tanpa tag, limiter jalur
+      # OHTTP tanpa akun (bukti KT) kembali berbagi satu bucket `127.0.0.1` —
+      # kegagalannya hanya terlihat di klien sebagai `unavailable` + backoff,
+      # bukan di log, karena relay memang dibuat untuk tidak mencatat.
+      #
+      # Rasio, bukan "ada satu request untagged": satu probe atau panggilan
+      # langsung ke gateway tidak boleh membunyikan alarm, sementara konfigurasi
+      # yang salah di satu proses membuat hampir semua request untagged. Pembagi
+      # nol (fitur OHTTP mati) menghasilkan vektor kosong → tidak menyala.
+      - alert: NyxOhttpClientTagMissing
+        expr: |
+          (
+            sum(rate(nyx_ohttp_client_tag_total{status=~"no-token|untagged|untrusted"}[10m]))
+            /
+            sum(rate(nyx_ohttp_client_tag_total[10m]))
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tag klien relay OHTTP tidak dipakai (>50% request gateway)"
+          description: "Lebih dari separuh request gateway OHTTP berstatus no-token/untagged/untrusted selama 10 menit. Set OHTTP_INTERNAL_TOKEN (>=32 karakter, nilai SAMA) di proses nyx-api dan nyx-ohttp-relay, lalu restart keduanya. Tanpa itu rate limit OHTTP tanpa akun (bukti KT) kembali berbagi satu bucket 127.0.0.1. Metrik: nyx_ohttp_client_tag_total{status}."
+
       # Sweeper harian tidak jalan / gagal → data kedaluwarsa menumpuk
       # (token, session key, story, dead-man switch tidak tereksekusi).
       #

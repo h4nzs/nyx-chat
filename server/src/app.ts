@@ -43,6 +43,7 @@ import callTokensRouter from "./routes/callTokens.js";
 // [docs/35 Fase 3] OHTTP — router hanya dipasang bila OHTTP_ENABLED=1.
 import createOhttpRouter from "./routes/ohttp.js";
 import { loadOhttpConfig } from "./ohttp/config.js";
+import { setOhttpInternalToken } from "./ohttp/clientTag.js";
 // [docs/35 Fase 4b] PIR — proxy ke sidecar ChalametPIR, hanya bila PIR_ENABLED=1.
 import createPirRouter from "./routes/pir.js";
 import { loadPirConfig } from "./pir/config.js";
@@ -407,6 +408,9 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
 // scoped dicetak server dan gateway memvalidasi header internal relay. Tanpa
 // OHTTP_ENABLED=1, router tidak dipasang sama sekali (jalur 404, bukan 403).
 const ohttpConfig = loadOhttpConfig();
+// [audit N9-01] Token internal relay dipakai `utils/clientIp.ts` untuk memastikan
+// tag klien memang berasal dari relay (bukan dikarang lewat gateway langsung).
+setOhttpInternalToken(ohttpConfig?.internalToken);
 const pirConfig = loadPirConfig();
 if (ohttpConfig) {
   app.use(

@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🚦 Tiga penutupan audit pass 9: bucket OHTTP anonim, pin KT fail-closed, arsip braid (2026-11-02)
+
+**N9-01 — bukti KT anonim berbagi satu bucket.** Jalur `POST /api/keys/kt/search`
+sengaja tanpa token (N7-01), jadi limiter jatuh ke `req.ip` = `127.0.0.1` untuk
+semua pengguna OHTTP: dua klien wajar sudah cukup menghabiskan 240/menit, dan
+efeknya (backoff + `unavailable`) menghentikan verifikasi untuk semua orang.
+Sekarang relay — satu-satunya pihak yang melihat alamat klien — mengirim
+`HMAC(OHTTP_INTERNAL_TOKEN, alamat)` di header internal; gateway membuang klaim
+header itu dari dalam amplop dan memasang nilai relay; API memakai tag itu setelah
+di-pepper lagi. Tag tanpa token internal yang sah tidak dipercaya, jadi tidak bisa
+dikarang. Statusnya terekspos sebagai `nyx_ohttp_client_tag_total{status}`
+(`tagged`/`untagged`/`untrusted`/`no-token`), supaya operasi tanpa
+`OHTTP_INTERNAL_TOKEN` terlihat di Prometheus — bukan hanya sebagai `unavailable`
++ backoff di klien. Alert `NyxOhttpClientTagMissing` menyala bila lebih dari
+separuh request gateway tidak bertag selama 10 menit, dengan kasus firing dan
+dua kasus tidak-menyala di drill `ops/prometheus/tests.yml`. `OHTTP_INTERNAL_TOKEN` kini juga berarti pada
+`OHTTP_TOKEN_MODE=on` (harus sama di API dan relay).
+
+**N9-02 — pin KT "tidak ada" vs "akun tidak diketahui".** `resolveKtConfigPin`
+membedakan `pin`/`empty`/`unknown-account`/`unreadable`; dua yang terakhir
+**fail-closed** (`unavailable`), bukan diterima sebagai TOFU. Jendela
+logout/hidrasi tidak lagi mematikan TOFU untuk satu sesi verifikasi.
+
+**N9-03 — churn arsip era braid.** Rotasi sesi yang tidak menghasilkan pesan v2
+tidak lagi menggeser arsip tiga slot; era yang masih dibutuhkan tidak terbuang
+oleh handshake ulang, sehingga "tiga era terakhir" benar-benar tiga era.
+
+Dokumentasi: `docs/10` §10.18, `docs/33` §33.8, `docs/34` §34.7, ringkasan
+perbaikan di `docs/audit/pass-9/40-fixes.md`.
+
 ## 🕵️ Bukti Key Transparency diambil tanpa akun (2026-11-02, audit N7-01)
 
 Pass 7 memindahkan hash kontak dari URL ke body, tetapi server tetap menerima

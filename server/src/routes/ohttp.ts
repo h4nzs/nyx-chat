@@ -14,11 +14,19 @@
 import express, { type RequestHandler, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { encodeOhttpKeyConfigCollection } from '@nyx/shared';
-import { OHTTP_OPS, incCounter } from '../utils/metrics.js';
+import { OHTTP_CLIENT_TAG, OHTTP_OPS, incCounter } from '../utils/metrics.js';
 import { signOhttpToken } from '../utils/ohttpToken.js';
 import { newJti } from '../utils/jwt.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import type { OhttpConfig } from '../ohttp/config.js';
+import {
+  OHTTP_CLIENT_TAG_HEADER,
+  OHTTP_INTERNAL_HEADER,
+  classifyOhttpClientTag,
+  ohttpClientAddress,
+  relayClientTag,
+  trustedRelayClientTag,
+} from '../ohttp/clientTag.js';
 import { createLoopbackDispatcher, handleOhttpGateway, type OhttpDispatcher } from '../ohttp/gateway.js';
 
 const OHTTP_REQUEST_TYPE = 'message/ohttp-req';
@@ -85,6 +93,17 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
         return;
       }
       const upstreamHeaders: Record<string, string> = { 'content-type': OHTTP_REQUEST_TYPE };
+      if (config.internalToken) {
+        // [audit N9-01] Relay satu-satunya pihak yang masih melihat alamat klien.
+        // Tag per klien (HMAC, bukan alamatnya) ikut ke gateway supaya limiter
+        // API tidak memakai satu bucket loopback untuk semua pengguna OHTTP.
+        // Header ini dibuang bila datang dari dalam amplop (lihat gateway.ts).
+        upstreamHeaders[OHTTP_INTERNAL_HEADER] = config.internalToken;
+        upstreamHeaders[OHTTP_CLIENT_TAG_HEADER] = relayClientTag(
+          config.internalToken,
+          ohttpClientAddress(req),
+        );
+      }
       if (tokenMode === 'off') {
         if (!req.user || !config.internalToken) {
           res.status(401).json({ error: 'OHTTP_RELAY_AUTH_REQUIRED' });
@@ -95,7 +114,6 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
           deviceId: req.deviceId,
           jti: newJti(),
         })}`;
-        upstreamHeaders['x-nyx-ohttp-internal'] = config.internalToken;
       }
       const upstream = await fetch(config.relayTarget, {
         method: 'POST',
@@ -134,12 +152,18 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
         }
         injectedAuthorization = authorization;
       }
+      // Tag klien hanya dipercaya bersama token internal relay yang sah; tanpa
+      // itu `clientTag` = undefined dan limiter memakai identitas lain.
+      // Statusnya dihitung per request supaya keadaan "token belum diset" atau
+      // "relay tidak menandatangani" terlihat Prometheus, bukan hanya di klien.
+      incCounter(OHTTP_CLIENT_TAG, { status: classifyOhttpClientTag(req) });
+      const clientTag = trustedRelayClientTag(req);
       const encapsulated = await handleOhttpGateway(
         config,
         new Uint8Array(body),
         dispatch,
         config.allowlist,
-        { injectedAuthorization },
+        { injectedAuthorization, clientTag },
       );
       incCounter(OHTTP_OPS, { route: 'gateway', result: 'ok' });
       res.type(OHTTP_RESPONSE_TYPE).send(Buffer.from(encapsulated));
