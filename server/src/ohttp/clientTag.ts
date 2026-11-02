@@ -89,9 +89,13 @@ let cachedTrustedProxies: { raw: string; list: readonly string[] } | null = null
 
 /**
  * Proxy tepercaya dari `OHTTP_TRUSTED_PROXIES` (dipisah koma, alamat atau CIDR
- * IPv4). Kosong = hanya loopback. Deployment yang menaruh nginx di jaringan
+ * IPv4/IPv6). Kosong = hanya loopback. Deployment yang menaruh nginx di jaringan
  * container WAJIB menyetelnya (mis. `172.16.0.0/12`), kalau tidak semua klien
- * kembali berbagi satu tag milik alamat nginx.
+ * kembali berbagi satu tag milik alamat nginx. Selfhost mengosongkannya.
+ *
+ * [audit N11-05] CIDR IPv6 didukung; sebelumnya entri seperti `fd00::/8`
+ * diabaikan diam-diam sehingga hop nginx tidak dipercaya dan seluruh pengguna
+ * jatuh ke satu tag alamat nginx — tanpa error.
  */
 function defaultTrustedProxies(): readonly string[] {
   const raw = (process.env.OHTTP_TRUSTED_PROXIES ?? '').trim();
@@ -121,18 +125,74 @@ function ipv4ToInt(value: string): number | null {
   return acc >>> 0;
 }
 
-/** `entry` = alamat persis atau CIDR IPv4 (`172.16.0.0/12`). */
+/** IPv6 → 128-bit BigInt. `null` = bukan bentuk yang sah. */
+function ipv6ToBigInt(value: string): bigint | null {
+  const halves = value.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  if (halves.length === 1 && head.length !== 8) return null;
+  if (head.length + tail.length > 8) return null;
+  // Fragmen kosong di tengah (`fd00:::1`) bukan bentuk yang sah.
+  if ([...head, ...tail].some((group) => group === '')) return null;
+  const fill =
+    halves.length === 2
+      ? Array.from({ length: 8 - head.length - tail.length }, () => '0')
+      : [];
+  const groups = [...head, ...fill, ...tail];
+  if (groups.length !== 8) return null;
+  let acc = 0n;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    acc = (acc << 16n) + BigInt(Number.parseInt(group, 16));
+  }
+  return acc;
+}
+
+/** `entry` = alamat persis atau CIDR IPv4/IPv6 (`172.16.0.0/12`, `fd00::/8`). */
 function proxyMatches(peer: string, entry: string): boolean {
-  const [base, bitsRaw] = entry.split('/');
-  if (bitsRaw === undefined) return normalizeAddress(base ?? '') === peer;
+  const [baseRaw, bitsRaw] = entry.split('/');
+  const base = normalizeAddress(baseRaw ?? '');
+  if (bitsRaw === undefined) return base === peer;
   const bits = Number(bitsRaw);
-  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  if (!Number.isInteger(bits) || bits < 0) return false;
+
+  if (peer.includes(':')) {
+    if (bits > 128) return false;
+    const peerInt = ipv6ToBigInt(peer);
+    const baseInt = ipv6ToBigInt(base);
+    if (peerInt === null || baseInt === null) return false;
+    const mask = bits === 0 ? 0n : ((1n << BigInt(bits)) - 1n) << BigInt(128 - bits);
+    return (peerInt & mask) === (baseInt & mask);
+  }
+
+  if (bits > 32) return false;
   const peerInt = ipv4ToInt(peer);
-  const baseInt = ipv4ToInt(normalizeAddress(base ?? ''));
+  const baseInt = ipv4ToInt(base);
   if (peerInt === null || baseInt === null) return false;
   if (bits === 0) return true;
   const mask = (0xffffffff << (32 - bits)) >>> 0;
   return ((peerInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
+}
+
+/**
+ * [audit N11-05] Entri `OHTTP_TRUSTED_PROXIES` yang tidak bisa diparse tidak
+ * boleh hilang diam-diam: relay mencetak alasannya saat start. `null` = sah.
+ */
+export function invalidTrustedProxyReason(entry: string): string | null {
+  const [baseRaw, bitsRaw] = entry.split('/');
+  const base = normalizeAddress(baseRaw ?? '');
+  if (base === '') return 'entri kosong';
+  const isV4 = ipv4ToInt(base) !== null;
+  const isV6 = !isV4 && ipv6ToBigInt(base) !== null;
+  if (!isV4 && !isV6) return 'bukan alamat IP';
+  if (bitsRaw === undefined) return null;
+  const bits = Number(bitsRaw);
+  const max = isV4 ? 32 : 128;
+  if (!Number.isInteger(bits) || bits < 0 || bits > max) {
+    return `prefix /${bitsRaw} tidak sah untuk ${isV4 ? 'IPv4' : 'IPv6'} (0–${max})`;
+  }
+  return null;
 }
 
 export function ohttpClientAddress(

@@ -102,8 +102,9 @@ describe('saveSpqrState / loadSpqrState', () => {
     expect(loaded?.sessionId).toBe(SESSION);
     expect(loaded?.version).toBe('v2');
     expect(loaded?.state).toEqual(stateBytes(7));
-    // [audit N10-04] Penanda kemajuan ikut tersimpan; default = belum maju.
-    expect(loaded?.advanced).toBe(false);
+    // [audit N10-04 → N11-02] Penanda kemajuan ikut tersimpan; default =
+    // sudah maju (konservatif: era tidak dibuang diam-diam).
+    expect(loaded?.advanced).toBe(true);
   });
 
   it('beberapa simpan dalam satu jendela = SATU tulis (state terakhir yang menang)', async () => {
@@ -266,7 +267,13 @@ describe('arsip era braid (N5-01)', () => {
     await rotateSpqrStateForNewSession(SESSION);
 
     // Era baru: state awal BERBEDA dari slot 0, tetapi belum ada pesan v2.
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2' });
+    // [audit N11-02] Status "belum maju" harus eksplisit; default konservatif.
+    await saveSpqrState({
+      sessionId: SESSION,
+      state: stateBytes(2),
+      version: 'v2',
+      advanced: false,
+    });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -288,5 +295,34 @@ describe('arsip era braid (N5-01)', () => {
     const archived = await loadArchivedSpqrStates(SESSION);
     expect(archived.map((record) => record.state[0])).toEqual([2, 1]);
     expect(archived.every((record) => record.advanced)).toBe(true);
+  });
+
+  // [audit N11-02] Default konservatif: pemanggil baru yang lupa menandai
+  // TIDAK boleh membuang era lama. Hanya `advanced: false` eksplisit yang
+  // menandai era belum maju.
+  it('simpan tanpa penanda dianggap maju: era lama tetap diarsipkan', async () => {
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    expect((await loadArchivedSpqrStates(SESSION)).map((record) => record.state[0])).toEqual([1]);
+  });
+
+  it('penanda false eksplisit menang atas default konservatif', async () => {
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    await saveSpqrState({
+      sessionId: SESSION,
+      state: stateBytes(2),
+      version: 'v2',
+      advanced: false,
+    });
+    await flushSpqrState(SESSION);
+    expect((await loadSpqrState(SESSION))?.advanced).toBe(false);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    expect((await loadArchivedSpqrStates(SESSION)).map((record) => record.state[0])).toEqual([1]);
   });
 });

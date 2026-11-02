@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛠️ Audit pass 11: arsip braid aman-default, CIDR IPv6, pesan relay, timeout oracle (2026-11-02)
+
+**N11-01/N11-02 — suite web merah dan default `advanced` yang salah arah.**
+Dua tes arsip era braid menulis state tanpa penanda, sehingga `expected [] to
+have a length of 1`. Akarnya lebih dalam: default `advanced: false` membuat
+pemanggil baru yang lupa menandai diam-diam membuang era lama (kelas bug N5-01).
+Sekarang state dianggap sudah maju **kecuali** pemanggil menulis
+`advanced: false` eksplisit; hanya state awal era tanpa lalu lintas yang boleh
+memakainya, dan tidak ada penulis produksi seperti itu. Fixture arsip kembali
+hijau tanpa melonggarkan asersi, ditambah kasus era tanpa lalu lintas.
+
+**N11-03 — `docs/33` mengklaim hasil tes yang merah.** Angka dikoreksi: era
+tanpa lalu lintas menghasilkan nol slot (bukan satu); era yang maju menggeser ke
+`[baru, lama]`. Paragraf merujuk berkas dan kasus tes, bukan ringkasan bebas.
+
+**N11-04 — peringatan start relay bertentangan dengan selfhost.** Relay mencetak
+saran menyetel `OHTTP_TRUSTED_PROXIES` setiap boot, padahal profil selfhost wajib
+mengosongkannya. Sekarang selfhost mendapat satu baris informasi bahwa nilai
+kosong benar; saran CIDR hanya untuk target gateway non-loopback (Docker).
+
+**N11-05 — CIDR IPv6 diabaikan diam-diam.** `proxyMatches` hanya mendukung
+IPv4, jadi `OHTTP_TRUSTED_PROXIES=fd00::/8` membuat hop nginx tidak dipercaya dan
+semua klien berbagi satu tag tanpa error. CIDR IPv6 kini didukung (perbandingan
+128-bit), dan entri yang tidak bisa diparse dilaporkan per entri saat start
+relay. `.env.example`, unit env example, dan `docs/10` §10.18 diperbarui;
+`verify-boot.sh` §9 tetap menolak CIDR apa pun untuk selfhost.
+
+**N11-06 — interop oracle timeout saat cache Go dingin.** Dua tes
+`x3dhOracleInterop` memakai batas 180 dtk (dulu bawaan 60 dtk) supaya `go run .`
+yang mengompilasi oracle tidak membuat suite tampak merah di mesin bersih.
+
 ## 🛠️ Audit pass 10: limiter OHTTP per klien, trust header relay, penanda era braid, urutan monitor KT (2026-11-02)
 
 **N10-02 — dua limiter OHTTP lain masih satu bucket.** `ohttpLimiter` gateway

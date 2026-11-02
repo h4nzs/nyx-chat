@@ -118,6 +118,8 @@ hdr "9. Trust proxy relay OHTTP (audit N10-03)"
 # 127.0.0.1:4100. Nilai yang benar karena itu KOSONG (default loopback); CIDR
 # jaringan container hanya untuk profil Docker. Nilai yang salah membuat relay
 # memakai alamat nginx untuk semua klien → satu bucket rate-limit bersama.
+# CIDR IPv4 maupun IPv6 sama-sama tidak sah di sini: keduanya ditandai `bad`,
+# sehingga salah-setel tidak berubah menjadi satu bucket tanpa gejala (N11-05).
 SELFHOST_STATE_DIR="${SELFHOST_DIR:-$HOME/nyx-selfhost}"
 RELAY_ENV="$SELFHOST_STATE_DIR/ohttp/relay.env"
 if [ ! -f "$RELAY_ENV" ]; then

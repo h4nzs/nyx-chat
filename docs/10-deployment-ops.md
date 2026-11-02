@@ -1315,7 +1315,7 @@ enum saja — tidak ada alamat, nilai tag, atau id akun.
 gateway dan limiter relay dulu memakai `req.ip` (loopback/alamat nginx) sehingga
 140 klien berbeda kena 429 di request #121; keduanya kini memakai identitas
 klien seperti tag di atas. `CF-Connecting-IP` hanya dipercaya bila hop langsung
-ada di `OHTTP_TRUSTED_PROXIES` (CSV alamat atau CIDR IPv4; kosong = hanya
+ada di `OHTTP_TRUSTED_PROXIES` (CSV alamat atau CIDR IPv4/IPv6; kosong = hanya
 loopback). **Deployment dengan nginx di jaringan container wajib menyetelnya**
 (mis. `172.16.0.0/12`), kalau tidak semua klien kembali berbagi tag alamat
 nginx. Deployment selfhost (nginx + relay sama-sama di host, `127.0.0.1:4100`)
@@ -1323,7 +1323,12 @@ nginx. Deployment selfhost (nginx + relay sama-sama di host, `127.0.0.1:4100`)
 bagian 9 memeriksa nilai itu dan baris `CF-Connecting-IP $remote_addr` di site
 config (`deploy/selfhost/README.md`). nginx menimpa header itu dengan `$remote_addr` (hasil `real_ip` dari
 rentang Cloudflare) di blok relay dan `/api`, jadi nilai yang diteruskan bukan
-header kiriman klien; tanpa penyetelan itu relay mencatat peringatan saat start.
+header kiriman klien. Sejak audit N11-04 relay mencetak saran hanya bila target
+gateway bukan loopback; untuk selfhost baris log-nya justru menegaskan bahwa
+nilai kosong memang benar, sehingga tidak menuntun operator ke nilai yang
+ditolak `verify-boot.sh`. Entri `OHTTP_TRUSTED_PROXIES` yang tidak bisa diparse
+(CIDR IPv6 salah prefix, nama host) dilaporkan per entri saat start dan entri
+itu tidak dipercaya (audit N11-05).
 
 ```promql
 # Operasi tanpa OHTTP_INTERNAL_TOKEN (kondisi yang harus ditindak)

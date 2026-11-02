@@ -446,9 +446,20 @@ langkah ratchet nyata (`encryptSpqrMessage` dan jalur decrypt di
 mengarsipkan **hanya** era yang pernah maju; era tanpa lalu lintas v2 dihapus
 tanpa menggeser FIFO. Baris lama yang belum punya penanda dianggap pernah maju
 (lebih baik menyimpan era yang mungkin berisi lalu lintas daripada membuangnya).
-Tes: dua era dengan state awal berbeda dan tanpa pesan → arsip tetap **satu**
-slot; era yang maju tetap menggeser ke `[baru, lama]` dan penandanya ikut
-terbawa ke arsip.
+**[AUDIT PASS 11 — N11-01/N11-02/N11-03] Default dibalik, angka tes dikoreksi.**
+Penanda yang default `false` membuat pemanggil baru yang lupa menandai
+**diam-diam** membuang era lama — kelas bug N5-01 kembali tanpa suara. Sekarang
+`saveSpqrState` memperlakukan state sebagai sudah maju **kecuali** pemanggil
+menulis `advanced: false` secara eksplisit; hanya state awal era yang belum
+membawa pesan yang boleh memakai nilai itu, dan saat ini tidak ada penulis
+produksi seperti itu (kedua jalur di `utils/crypto.ts` menandai `true`). Angka
+yang benar: dua era tanpa lalu lintas yang **ditandai** `advanced: false` →
+arsip **nol** slot (era lama dibuang, era baru dihapus saat rotasi); era yang
+maju menggeser ke `[baru, lama]` dan penandanya ikut terbawa. Dikunci
+`spqrState.test.ts` (“rotate era baru tanpa lalu lintas tidak menggeser arsip”,
+“simpan tanpa penanda dianggap maju: era lama tetap diarsipkan”) dan
+`spqrEraArchive.test.ts` (frame era lama tetap terbuka dari arsip setelah
+rotasi, termasuk kasus era baru tanpa lalu lintas).
 
 Dua jalur, keduanya **tidak menghapus** state apa pun:
 

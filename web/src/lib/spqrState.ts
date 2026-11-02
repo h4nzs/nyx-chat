@@ -170,9 +170,13 @@ export async function saveSpqrState(input: {
   version: RatchetWireVersion;
   now?: number;
   /**
-   * Set `true` HANYA bila state ini hasil langkah ratchet (encrypt/decrypt).
-   * Default `false` = state awal era, yang tidak boleh menggeser arsip
-   * (audit N10-04).
+   * State ini sudah membawa lalu lintas ratchet (encrypt/decrypt)?
+   *
+   * [audit N11-02] Default `true` — konservatif: era diarsipkan, bukan dibuang.
+   * Set `false` HANYA untuk state awal era yang belum pernah membawa pesan;
+   * pemanggil baru yang lupa menandai tidak boleh diam-diam menghapus era lama
+   * (kelas bug N5-01). Tidak ada penulis produksi yang menyetel `false`: kedua
+   * jalur di `utils/crypto.ts` menandai `true`.
    */
   advanced?: boolean;
 }): Promise<void> {
@@ -193,8 +197,9 @@ export async function saveSpqrState(input: {
     // Salin: pemanggil (langkah ratchet) boleh saja memakai ulang/memzero buffer.
     state: input.state.slice(),
     // Menempel: satu langkah yang sudah maju tidak boleh "dibatalkan" oleh
-    // tulis berikutnya di era yang sama (mis. flush setelah decrypt).
-    advanced: input.advanced === true || existing?.advanced === true,
+    // tulis berikutnya di era yang sama (mis. flush setelah decrypt). Hanya
+    // `advanced: false` eksplisit yang menandai era belum maju (N11-02).
+    advanced: input.advanced !== false || existing?.advanced === true,
     timer: null,
   };
   entry.timer = setTimeout(() => {
@@ -331,12 +336,14 @@ export async function rotateSpqrStateForNewSession(sessionId: string): Promise<v
   const current = await loadSpqrState(sessionId);
 
   if (current) {
-    // [audit N9-03 → N10-04] Jangan menggeser arsip untuk era yang belum pernah
-    // maju. Perbandingan byte (N9-03) hanya mengenali kasus yang jarang terjadi:
-    // state awal sesi X3DH baru SELALU berbeda karena `authKey`-nya berbeda,
-    // sehingga dua era tanpa pesan tetap memakan dua slot (probe pass 10: 118 B
-    // berbeda, arsip terisi 2 slot). Penanda `advanced` menjawab pertanyaan yang
-    // sebenarnya: era ini pernah membawa lalu lintas v2 atau tidak.
+    // [audit N9-03 → N10-04 → N11-02] Jangan menggeser arsip untuk era yang
+    // belum pernah maju. Perbandingan byte (N9-03) hanya mengenali kasus yang
+    // jarang terjadi: state awal sesi X3DH baru SELALU berbeda karena
+    // `authKey`-nya berbeda, sehingga dua era tanpa pesan tetap memakan dua slot
+    // (probe pass 10: 118 B berbeda, arsip terisi 2 slot). Penanda `advanced`
+    // menjawab pertanyaan yang sebenarnya: era ini pernah membawa lalu lintas v2
+    // atau tidak. Sejak N11-02 penanda itu default `true`; hanya pemanggil yang
+    // menulis state awal era secara eksplisit (`advanced: false`) yang dilewati.
     if (current.advanced) {
       // Geser FIFO: slot terakhir dibuang, sisanya turun satu posisi.
       for (let slot = SPQR_STATE_ARCHIVE_SLOTS - 1; slot > 0; slot--) {

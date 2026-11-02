@@ -199,4 +199,24 @@ withSkip('arsip era braid SPQR (dua sesi X3DH)', () => {
     ]);
     expect(archived[0]?.state).toEqual(states[SPQR_STATE_ARCHIVE_SLOTS]);
   });
+
+  // [audit N11-01/N11-02] Sesi baru bisa lahir tanpa satu pun pesan v2.
+  // Era seperti itu harus DITANDAI `advanced: false` secara eksplisit; default
+  // konservatif mengarsipkan, jadi lupa menandai hanya kehilangan slot, bukan
+  // era (kelas bug N5-01).
+  it('era baru tanpa lalu lintas tidak menggeser arsip (advanced: false)', async () => {
+    const era1 = makeEra(0x11, 0xa1, 0xb1);
+    await saveSpqrState({ sessionId: SESSION, state: era1.bob, version: 'v2', advanced: true });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    const era2 = makeEra(0x22, 0xa2, 0xb2);
+    await saveSpqrState({ sessionId: SESSION, state: era2.bob, version: 'v2', advanced: false });
+    await flushSpqrState(SESSION);
+    await rotateSpqrStateForNewSession(SESSION);
+
+    const archived = await loadArchivedSpqrStates(SESSION);
+    expect(archived).toHaveLength(1);
+    expect(archived[0]?.state).toEqual(era1.bob);
+  });
 });

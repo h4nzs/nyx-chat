@@ -38,6 +38,7 @@ import { handleOhttpGateway } from '../src/ohttp/gateway.js';
 import {
   OHTTP_CLIENT_TAG_HEADER,
   OHTTP_INTERNAL_HEADER,
+  invalidTrustedProxyReason,
   ohttpClientAddress,
   setOhttpInternalToken,
 } from '../src/ohttp/clientTag.js';
@@ -721,4 +722,21 @@ test('alamat relay: CF-Connecting-IP diabaikan bila hop bukan proxy tepercaya', 
   // Jaringan container hanya dipercaya bila dicantumkan eksplisit.
   assert.equal(addressOf('172.18.0.5', { trustedProxies: ['172.16.0.0/12'] }), '203.0.113.9');
   assert.equal(addressOf('172.18.0.5', { trustedProxies: ['10.0.0.0/8'] }), '172.18.0.5');
+  // [audit N11-05] CIDR IPv6 juga berlaku. Sebelumnya entri ini diabaikan
+  // diam-diam → nginx tidak dipercaya dan semua klien berbagi satu tag.
+  assert.equal(addressOf('fd00::5', { trustedProxies: ['fd00::/8'] }), '203.0.113.9');
+  assert.equal(addressOf('fd00::5', { trustedProxies: ['fd00:1::/32'] }), 'fd00::5');
+  // Prefix di luar rentang keluarga alamatnya tidak pernah cocok.
+  assert.equal(addressOf('fd00::5', { trustedProxies: ['fd00::/129'] }), 'fd00::5');
+});
+
+// [audit N11-05] Entri yang salah bentuk harus terlihat saat start, bukan
+// berubah menjadi satu bucket tanpa gejala.
+test('OHTTP_TRUSTED_PROXIES: entri tidak sah dilaporkan, bukan diabaikan diam-diam', () => {
+  assert.equal(invalidTrustedProxyReason('172.16.0.0/12'), null);
+  assert.equal(invalidTrustedProxyReason('fd00::/8'), null);
+  assert.equal(invalidTrustedProxyReason('::1'), null);
+  assert.match(invalidTrustedProxyReason('fd00::/129') ?? '', /IPv6/);
+  assert.match(invalidTrustedProxyReason('172.16.0.0/33') ?? '', /IPv4/);
+  assert.equal(invalidTrustedProxyReason('nginx.internal'), 'bukan alamat IP');
 });

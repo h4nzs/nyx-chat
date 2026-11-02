@@ -17,6 +17,7 @@
 
 import { createServer } from 'node:http';
 import { createOhttpRelayApp } from './relayApp.js';
+import { invalidTrustedProxyReason } from './clientTag.js';
 
 const DEFAULT_PORT = 4100;
 const LOOPBACK_BINDS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -37,6 +38,18 @@ function main(): void {
       'OHTTP relay: OHTTP_GATEWAY_TARGET wajib diisi (mis. http://127.0.0.1:4000/api/ohttp/gateway)'
     );
   }
+  // [audit N11-04] Peringatan trust proxy hanya relevan bila ada hop jaringan
+  // nyata. Profil selfhost (gateway 127.0.0.1) justru WAJIB mengosongkan
+  // OHTTP_TRUSTED_PROXIES; mencetak "setel ke CIDR nginx" di sana menuntun
+  // operator ke nilai yang ditolak `verify-boot.sh`.
+  const gatewayHost = (() => {
+    try {
+      return new URL(gatewayTarget).hostname.replace(/^\[|\]$/g, '');
+    } catch {
+      return '';
+    }
+  })();
+  const gatewayOnLoopback = LOOPBACK_BINDS.has(gatewayHost);
   // Token mode "off" berarti relay harus mencetak token auth/CSRF — itu butuh
   // sesi & DB, yang tidak dimiliki proses ini. Tolak saat boot, jangan diam-diam
   // meneruskan request tanpa identitas.
@@ -91,11 +104,30 @@ function main(): void {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
+  // [audit N11-05] Entri yang tidak bisa diparse dulu hilang tanpa gejala →
+  // hop nginx tidak dipercaya dan semua klien berbagi satu bucket. Sekarang
+  // alasan per entri terlihat di log start.
+  for (const entry of trustedProxies) {
+    const reason = invalidTrustedProxyReason(entry);
+    if (reason) {
+      console.warn(
+        `[ohttp-relay] OHTTP_TRUSTED_PROXIES: entri "${entry}" diabaikan (${reason}) — ` +
+          'hop itu TIDAK dipercaya, jadi header klien dari sana diabaikan.'
+      );
+    }
+  }
   if (trustedProxies.length === 0) {
-    console.log(
-      '[ohttp-relay] OHTTP_TRUSTED_PROXIES kosong: hanya loopback yang dipercaya sebagai proxy. ' +
-        'Setel ke alamat/CIDR nginx bila relay diakses lewat jaringan container.'
-    );
+    if (gatewayOnLoopback) {
+      console.log(
+        '[ohttp-relay] OHTTP_TRUSTED_PROXIES kosong: benar untuk selfhost (nginx → relay lewat loopback). ' +
+          'Isi hanya bila nginx berada di jaringan container.'
+      );
+    } else {
+      console.warn(
+        '[ohttp-relay] OHTTP_TRUSTED_PROXIES kosong padahal target gateway bukan loopback: ' +
+          'setel alamat/CIDR nginx (IPv4 atau IPv6), kalau tidak semua klien berbagi tag alamat nginx.'
+      );
+    }
   }
 
   const app = createOhttpRelayApp({
