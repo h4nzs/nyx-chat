@@ -396,3 +396,23 @@ tidak terpengaruh).
 Rate limit lintas klien OHTTP: gateway memanggil API lewat loopback, jadi tag
 limiter memakai subjek token OHTTP (per akun) alih-alih `127.0.0.1` bersama
 (audit N8-02, `server/src/utils/clientIp.ts`).
+
+**Bukti KT tanpa akun (N7-01, ditutup).** `POST /api/keys/kt/search` tidak lagi
+mensyaratkan autentikasi, dan klien mengambilnya **tanpa cookie**
+(`fetchKtProofAnonymously`, `credentials: 'omit'`) — juga tanpa token di dalam
+amplop OHTTP (`withToken: false`). Alasannya: bukti log KT adalah data publik,
+sedangkan yang dilindungi adalah keterkaitan "akun ini memeriksa hash itu";
+selama route masih membaca sesi, memindahkan hash ke body hanya memindahkan
+kebocoran dari log URL ke pasangan akun→hash di server. Konsekuensi yang
+disengaja: klien tidak lagi menerima "tidak ada di log" sebagai `unavailable`
+karena 401, dan endpoint itu dapat dipanggil siapa pun.
+
+Batas yang tetap ada, dinyatakan jujur: (1) tanpa OHTTP, server masih melihat
+**IP** yang meminta hash tertentu — anonimitas akun, bukan anonimitas jaringan;
+(2) request anonim lewat OHTTP semuanya tiba dari `127.0.0.1`, jadi limiter
+`ktProofLimiter` (240/menit per IP, store `rl:ktproof:` terpisah) berbagi satu
+bucket untuk jalur itu — relay tetap membatasi tiap klien 120/menit, dan bukti
+tidak lagi berbagi bucket dengan group sync/PIR; (3) route lain
+(`/monitor`, `/config`, `/head`, `/distinguished`) tetap terautentikasi karena
+bukan pencarian kontak. Anonimitas **penuh** (server tidak tahu IP) tetap butuh
+OHTTP menyala atau PIR.

@@ -73,7 +73,9 @@ import {
 import {
   deleteSpqrState,
   flushSpqrState,
+  loadArchivedSpqrStates,
   loadSpqrState,
+  rotateSpqrStateForNewSession,
   saveSpqrState,
 } from '@lib/spqrState';
 // [docs/30 §30.5 tahap C] Gossip tree head KT: field `ktG` di dalam payload
@@ -525,31 +527,66 @@ async function decryptSpqrMessage(input: {
 
   const frames = decodeSpqrFrames(input.header);
   const combined = sodium.from_base64(input.actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const result = await worker_spqr_ratchet_decrypt({
-    serializedState: spqrState,
-    frames,
-    ciphertext: combined,
-  });
+  const decryptWith = (serializedState: Uint8Array) =>
+    worker_spqr_ratchet_decrypt({
+      serializedState,
+      frames,
+      ciphertext: combined,
+    });
+
+  let result: Awaited<ReturnType<typeof decryptWith>>;
+  let fromArchivedEra = false;
+  try {
+    result = await decryptWith(spqrState);
+  } catch (currentEraError) {
+    // [audit N5-01] Pesan v2 yang tertunda melewati rotasi sesi membawa frame
+    // era X3DH LAMA, jadi state era sekarang menolaknya. Arsip era
+    // (`rotateSpqrStateForNewSession`) memberi state yang cocok — pola yang
+    // sama dengan tiga slot arsip DR v1. State arsip TIDAK dipromosikan dan
+    // TIDAK disimpan maju: era sekarang tetap milik baris aktif, dan pesan
+    // lama yang sama tetap bisa dicoba ulang dari arsip yang sama.
+    let archivedError: unknown;
+    for (const era of await loadArchivedSpqrStates(input.conversationId)) {
+      try {
+        result = await decryptWith(era.state);
+        fromArchivedEra = true;
+        break;
+      } catch (error) {
+        archivedError = error;
+      }
+    }
+    if (!fromArchivedEra) {
+      // Tidak ada era yang cocok: laporkan kegagalan era sekarang (penyebab
+      // yang paling mungkin), bukan error arsip terakhir yang menyesatkan.
+      void archivedError;
+      throw currentEraError;
+    }
+  }
+  const decodeResult = result!;
 
   // State braid disimpan lebih dulu: rangkaian frame peer sudah dikonsumsi, dan
   // membuang state yang sudah maju akan memutus rantai untuk pesan berikutnya.
-  await saveSpqrState({
-    sessionId: input.conversationId,
-    state: result.state,
-    version: 'v2',
-  });
+  // Era arsip dikecualikan: menulis state maju era lama ke baris aktif akan
+  // memutar balik braid era sekarang.
+  if (!fromArchivedEra) {
+    await saveSpqrState({
+      sessionId: input.conversationId,
+      state: decodeResult.state,
+      version: 'v2',
+    });
+  }
 
-  if (!result.plaintext || !result.mk) {
+  if (!decodeResult.plaintext || !decodeResult.mk) {
     // Rangkaian frame tanpa message key = peer hanya mengirim braid (belum ada
     // konten). State sudah maju; pesan ini menunggu pesan berikutnya.
     return { status: 'pending', reason: 'waiting_for_key' };
   }
 
   if (input.messageId) {
-    await storeMessageKeySecurely(input.messageId, result.mk);
+    await storeMessageKeySecurely(input.messageId, decodeResult.mk);
   }
 
-  const plaintext = sodium.to_string(result.plaintext);
+  const plaintext = sodium.to_string(decodeResult.plaintext);
   const peerVersion = extractVersionDeclaration(plaintext);
   // [docs/30 §30.5 tahap C] Sama seperti jalur v1: head gossip peer dicatat dari
   // plaintext yang sudah lolos AEAD braid. Fail-open (lihat ktGossip).
@@ -2181,7 +2218,10 @@ async function doEncryptMessage(
           // yang sama di kedua sisi. State braid sendiri lahir malas saat v2
           // pertama benar-benar dipakai (modul WASM 506 KiB tidak dibayar oleh
           // percakapan yang tetap di v1); yang disimpan di sini hanya akarnya.
-          await deleteSpqrState(conversationId);
+          // [audit N5-01] Era lama DIARSIPKAN, bukan dibuang: pesan v2 yang
+          // masih di jalan membawa frame era X3DH lama dan hanya bisa dibuka
+          // dengan state era itu (pola arsip DR v1).
+          await rotateSpqrStateForNewSession(conversationId);
           state = attachClientProtocolFields(state, {}, {
               spqrAuthKey: sodium.to_base64(sessionKey, sodium.base64_variants.URLSAFE_NO_PADDING),
               spqrDirection: 'A2B',

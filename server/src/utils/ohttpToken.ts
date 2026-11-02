@@ -12,6 +12,9 @@
  *  - hanya berlaku untuk target allowlist OHTTP (GET search/prekey, POST
  *    `/api/pir/query`, `/api/groups/sync`, dan `/api/keys/kt/search`) — token
  *    yang bocor tidak bisa dipakai untuk mengirim pesan/mengubah apa pun;
+ *    khusus `/api/keys/kt/search` token bersifat OPSIONAL: route itu anonim
+ *    (audit N7-01), jadi klien mengirimnya tanpa token agar amplop tidak
+ *    membawa akun;
  *  - punya `jti` sehingga bisa dicabut lewat blacklist Redis yang sudah ada
  *    (`revoked_jti:<jti>`) tanpa mekanisme baru;
  *  - tidak pernah ditulis ke storage klien (hanya di memori modul klien).

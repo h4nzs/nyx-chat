@@ -46,6 +46,7 @@
  */
 
 import { api } from './api';
+import { clientVersionHeaders } from './clientVersion';
 import { ohttpEnabled, ohttpFetch } from './ohttpClient';
 import {
   hexToBytes,
@@ -349,6 +350,29 @@ async function defaultFetchConfig(): Promise<KtRemoteConfig> {
   return await api<KtRemoteConfig>('/api/keys/kt/config');
 }
 
+/**
+ * [audit N7-01] Jalur langsung bukti KT: **tanpa cookie/kredensial**.
+ *
+ * `api()` selalu mengirim cookie sesi, sehingga server bisa mencatat "akun X
+ * meminta hash Y" walau hash sudah pindah ke body. Route-nya kini menerima
+ * bukti tanpa akun (data publik), jadi permintaan ini sengaja `credentials:
+ * 'omit'`: tidak ada Authorization, tidak ada cookie, tidak ada CSRF token.
+ * Identitas jaringan tetap bisa terlihat tanpa OHTTP — itu lapisan yang dijaga
+ * relay, bukan route ini.
+ */
+async function fetchKtProofAnonymously(body: string): Promise<{ fullTreeHead: string; condensed: string }> {
+  const response = await fetch('/api/keys/kt/search', {
+    method: 'POST',
+    credentials: 'omit',
+    headers: { 'content-type': 'application/json', ...clientVersionHeaders() },
+    body,
+  });
+  if (!response.ok) {
+    throw new Error(`kt: search dijawab HTTP ${response.status}`);
+  }
+  return (await response.json()) as { fullTreeHead: string; condensed: string };
+}
+
 async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
   // [audit N7-01] Username hash + tree size adalah metadata sosial. Kirim lewat
   // body (dan OHTTP bila aktif), jangan pernah taruh di URL yang dicatat edge.
@@ -367,6 +391,9 @@ async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
         method: 'POST',
         headers: [['content-type', 'application/json']],
         body: new TextEncoder().encode(body),
+        // [audit N7-01] Tanpa token: amplop tidak membawa akun, jadi gateway
+        // tidak bisa dikaitkan ke akun mana pun. Route-nya memang anonim.
+        withToken: false,
       });
     } catch (error) {
       // [audit N8-04] Kegagalan transport (relay mati, koneksi putus) memang
@@ -397,7 +424,7 @@ async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
     }
   }
 
-  response ??= await api<ProofResponse>('/api/keys/kt/search', { method: 'POST', body });
+  response ??= await fetchKtProofAnonymously(body);
   return {
     fullTreeHead: base64UrlToBytes(response.fullTreeHead),
     condensed: base64UrlToBytes(response.condensed),

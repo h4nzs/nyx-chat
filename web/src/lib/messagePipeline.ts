@@ -426,8 +426,11 @@ export async function decryptMessageObject(
                     // dipakai; yang disimpan di sini hanya akarnya, ter-seal
                     // bersama baris state DR yang lain (`ENC1:`).
                     const { attachClientProtocolFields } = await import('@lib/drProtocol');
-                    const { deleteSpqrState } = await import('@lib/spqrState');
-                    await deleteSpqrState(rawMsg.conversationId);
+                    // [audit N5-01] Era braid lama diarsipkan (bukan dihapus), sesuai
+                    // pola tiga slot arsip DR v1: pesan v2 yang tertunda melewati
+                    // rotasi sesi tetap bisa dibuka dari state era-nya sendiri.
+                    const { rotateSpqrStateForNewSession } = await import('@lib/spqrState');
+                    await rotateSpqrStateForNewSession(rawMsg.conversationId);
                     const sodiumForBraid = await getSodium();
                     const bobState = attachClientProtocolFields(newState, {}, {
                         spqrAuthKey: sodiumForBraid.to_base64(sessionKey, sodiumForBraid.base64_variants.URLSAFE_NO_PADDING),

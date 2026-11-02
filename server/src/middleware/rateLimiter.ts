@@ -160,6 +160,31 @@ export const searchIpLimiter = rateLimit({
   })
 })
 
+/**
+ * [audit N7-01] Batas pengambilan bukti KT: 240/menit per IP.
+ *
+ * Route `POST /api/keys/kt/search` sengaja **tanpa akun** (bukti log KT adalah
+ * data publik; yang ingin disembunyikan adalah "akun mana tertarik pada hash
+ * siapa"). Karena itu ia tidak bisa memakai `generalLimiter` bersama: satu
+ * klien yang memverifikasi ratusan kontak akan menghabiskan bucket group sync
+ * dan PIR. Store terpisah + batas lebih longgar membuat ledakan permintaan bukti
+ * tidak menyeret route lain; relay OHTTP tetap membatasi tiap klien 120/menit.
+ */
+export const ktProofLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 240,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
+  message: { error: 'KT_PROOF_RATE_LIMITED: Too many proof requests. Please wait a minute.' },
+  store: new RedisStore({
+    prefix: 'rl:ktproof:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
 export const adminCleanupLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,

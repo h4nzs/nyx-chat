@@ -398,24 +398,31 @@ menghapus state braid.
 
 ## 33.8 Rollback
 
-**[AUDIT PASS 5 — N5-01] Batas yang sekarang eksplisit: state braid tidak punya
-arsip per-era.** Jalur v1 menyelamatkan pesan yang datang dari era sesi lama
-lewat tiga slot `previous_session_states` ("FALLBACK ERA ARSIP"). Jalur v2
-**tidak** punya padanannya: `spqrState` menyimpan satu baris per percakapan
-(`nyx_spqr_state_v1:<conversationId>`) dan baris itu **dihapus** saat sesi baru
-didirikan (`deleteSpqrState`). Konsekuensinya, pesan v2 yang tertunda (offline,
-transport putus) lalu melewati rotasi sesi akan gagal dibuka dengan error
-dekripsi — perilaku yang **disengaja** (bukan bug yang lolos): braid hanya
-menjamin pemulihan pesan hilang/keluar urutan **di dalam satu sesi**, sedangkan
-rotasi sesi berarti akar X3DH baru, jadi frame era lama tidak punya state yang
-cocok.
+**[AUDIT PASS 8 — N5-01 TERTUTUP] Arsip era braid, pola yang sama dengan v1.**
+Pass 5 mencatat batas yang jujur: jalur v1 menyelamatkan pesan era sesi lama
+lewat tiga slot arsip, jalur v2 tidak — `spqrState` hanya punya satu baris per
+percakapan dan baris itu dihapus saat sesi X3DH baru lahir, sehingga pesan v2
+yang tertunda (peer offline, transport putus) menjadi tidak terbaca permanen.
 
-Untuk operator dan dukungan: jangan menjanjikan "semua pesan v2 selalu bisa
-dibuka"; pesan v1 pada posisi yang sama tetap diselamatkan arsip. Bila suatu saat
-perilaku ini ingin diubah, jalannya adalah menyimpan state braid per
-`sessionId` dan membiarkan pembaca mencoba era yang tersedia (pola arsip v1) —
-itu perubahan protokol/penyimpanan, harus disertai tes dua-era dan E2E
-`spqr.spec.ts`, dan tidak boleh dilakukan sebagai patch diam-diam.
+Sekarang setiap rotasi sesi **mengarsipkan** state braid lebih dulu
+(`rotateSpqrStateForNewSession`): baris aktif digeser ke
+`nyx_spqr_state_v1:<conversationId>#era_0..2` (FIFO, tiga slot, terbaru di slot
+0, ter-seal `ENC1:`), baru kemudian baris aktif dihapus. Pembaca mencoba state
+era sekarang; bila frame ditolak, ia mencoba slot arsip secara berurutan
+(`loadArchivedSpqrStates`). Arsip **tidak pernah dipromosikan** dan tidak
+disimpan maju — menulis state era lama ke baris aktif akan memutar balik braid
+era sekarang — jadi era aktif tetap satu-satunya pemilik baris aktif, persis
+seperti `previous_session_states` di v1.
+
+Yang dibuktikan: `spqrState.test.ts` (rotate mem-flush tulis tertunda, FIFO,
+ter-seal, `clearSpqrStates` ikut membersihkan arsip) dan
+`spqrEraArchive.test.ts` dengan modul WASM sungguhan — state era 2 **menolak**
+frame era 1, state era 1 dari arsip menghasilkan message key yang sama dengan
+pengirim, dan dekripsi dari arsip tidak mengubah baris aktif. Batas yang tetap
+ada: rotasi sesi menghapus kunci era lama dari state DR, jadi isi pesan era lama
+yang **baru** diterima setelah arsipnya terbuang (lebih dari tiga rotasi) tetap
+tidak bisa dibuka; arsip memperpanjang jendela, bukan menggantikan pengiriman
+ulang.
 
 Dua jalur, keduanya **tidak menghapus** state apa pun:
 

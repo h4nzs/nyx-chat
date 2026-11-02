@@ -416,10 +416,12 @@ describe('guard sumber jalur pesan (utils/crypto.ts + worker + proxy)', () => {
     expect(cryptoSource).toContain('negotiatedCapabilities: await transportCapabilities(),');
   });
 
-  it('(3) state braid: lahir malas, disimpan/dimuat, dibuang saat sesi baru, di-flush', () => {
+  it('(3) state braid: lahir malas, disimpan/dimuat, diarsipkan saat sesi baru, di-flush', () => {
     expect(occurrences(cryptoSource, 'await saveSpqrState({')).toBeGreaterThanOrEqual(2); // kirim + terima
     expect(cryptoSource).toContain('(await loadSpqrState(input.conversationId))?.state');
-    expect(cryptoSource).toContain('await deleteSpqrState(conversationId);');
+    // [audit N5-01] Sesi baru mengarsipkan era braid (bukan menghapusnya) supaya
+    // pesan v2 yang tertunda tetap bisa dibuka.
+    expect(cryptoSource).toContain('await rotateSpqrStateForNewSession(conversationId);');
     expect(cryptoSource).toContain('void flushSpqrState().catch(() => {});');
     // Jalur baca v2 tidak dimatikan oleh kill switch: yang diperiksa hanya akar
     // braid, bukan `spqrSendingEnabled()`.

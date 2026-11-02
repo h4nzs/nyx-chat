@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🕵️ Bukti Key Transparency diambil tanpa akun (2026-11-02, audit N7-01)
+
+Pass 7 memindahkan hash kontak dari URL ke body, tetapi server tetap menerima
+pasangan "akun X meminta hash Y" karena route masih membaca sesi cookie. Selama
+itu terjadi, rekonstruksi social graph oleh server tidak bisa diputus dengan
+perubahan transport apa pun.
+
+Sekarang `POST /api/keys/kt/search` **tidak lagi memerlukan autentikasi**, dan
+klien mengambil bukti dengan `credentials: 'omit'` (tanpa cookie, tanpa header
+Authorization, tanpa CSRF) — juga tanpa token di dalam amplop OHTTP
+(`withToken: false`). Bukti log KT adalah data publik; yang dilindungi adalah
+ketertarikan akun terhadap hash tertentu, dan server tidak lagi menerima akun
+itu sama sekali. Route monitor/config/head/distinguished tetap terautentikasi
+karena bukan pencarian kontak, dan GET search lama (hash di URL) tetap untuk
+klien lama.
+
+Penyalahgunaan dibatasi limiter khusus `ktProofLimiter` (240/menit per IP, store
+`rl:ktproof:` terpisah dari bucket group sync/PIR) plus limiter relay. Batas yang
+tetap ada dan didokumentasikan di `docs/34` §34.7: tanpa OHTTP server masih
+melihat IP peminta, dan request anonim lewat OHTTP berbagi satu bucket loopback.
+
+## 🔁 Arsip era braid SPQR: pesan v2 lintas sesi tetap bisa dibuka (2026-11-02, audit N5-01)
+
+Jalur v1 menyelamatkan pesan dari era sesi lama lewat tiga slot arsip; jalur v2
+tidak punya padanannya. `spqrState` hanya menyimpan satu baris per percakapan
+dan baris itu dihapus saat sesi X3DH baru lahir, sehingga pesan v2 yang tertunda
+(peer offline, transport putus) lalu melewati rotasi sesi menjadi tidak terbaca
+permanen.
+
+Sekarang rotasi sesi **mengarsipkan** state braid lebih dulu
+(`rotateSpqrStateForNewSession`): baris aktif digeser ke `#era_0..2` (FIFO tiga
+slot, ter-seal `ENC1:`), baru dihapus. Pembaca mencoba era sekarang dulu, lalu
+setiap era arsip; arsip tidak pernah dipromosikan dan tidak disimpan maju supaya
+braid era sekarang tidak terputar balik. Dua titik sesi baru (pengirim dan
+penerima) memakai rotate, bukan delete. Dikunci `spqrState.test.ts` dan
+`spqrEraArchive.test.ts` dengan modul WASM sungguhan (dua era X3DH, key harus
+cocok, baris aktif tidak berubah). Detail: `docs/33` §33.8.
+
 ## 🔑 State KT pulih setelah KDF-nya melempar; OHTTP punya bucket per akun; pin TOFU bertahan lintas sesi (2026-11-02, audit pass 8)
 
 Pass 8 memverifikasi fix pass 7 dengan **menjalankan** panggilan library, bukan

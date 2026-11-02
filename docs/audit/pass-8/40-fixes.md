@@ -4,8 +4,8 @@ Tanggal: 2026-11-02. Basis: `dd1426be` + fix pass 7 di working tree (belum
 di-commit saat audit). Temuan: `20-findings.md`; verifikasi fix pass 7:
 `30-verify-fixes.md`.
 
-Keempat temuan pass 8 ditutup. N7-01 tetap **PARTIAL** (butuh jalur anonim,
-bukan patch), N5-01 tetap terbuka (keputusan protokol).
+Keempat temuan pass 8 ditutup. **N5-01** (arsip era braid) dan **N7-01** (bukti
+KT tanpa akun) ikut ditutup pada lanjutan pass ini.
 
 ## N8-01 (High) — KDF libsodium salah API; state KT tidak pernah tersimpan
 
@@ -95,6 +95,56 @@ terdaftar** tetap sampai ke server pada setiap percobaan — persis yang ingin
 dicegah OHTTP — dan request berlipat. Log terstruktur (bukan `console.warn`
 lepas) membuat degradasi privasi terlihat oleh operator.
 
+## N7-01 — bukti KT tanpa akun (dari pass 7)
+
+**Perbaikan.** `POST /api/keys/kt/search` tidak lagi memakai `requireAuth`, dan
+klien mengambil bukti **tanpa kredensial**:
+
+- `server/src/routes/ktQuery.ts` — route POST `/search` memakai
+  `ktProofLimiter` (store `rl:ktproof:` terpisah, 240/menit per IP) dan tidak
+  membaca sesi. Route lain (`/monitor`, `/config`, `/head`, `/distinguished`,
+  dan GET `/search` lama) tetap terautentikasi karena bukan pencarian kontak.
+- `web/src/lib/ktBundleProof.ts` — `fetchKtProofAnonymously` memakai
+  `credentials: 'omit'` (tanpa cookie, Authorization, atau CSRF) untuk jalur
+  langsung, dan `ohttpFetch(..., { withToken: false })` untuk jalur amplop.
+  Server karena itu tidak pernah menerima pasangan akun→hash.
+
+**Kenapa ini menutup temuan.** Pass 7 hanya memindahkan hash dari URL ke body;
+route masih membaca cookie sesi, jadi server tetap tahu "akun X meminta hash Y"
+— persis yang direkonstruksi menjadi social graph. Anonimitas penuh butuh
+kredensial buta atau PIR; bukti log KT adalah data publik, jadi jalur yang lebih
+murah dan benar adalah berhenti mengirim identitas sama sekali.
+
+**Batas yang tetap ada** (didokumentasikan di `docs/34` §34.7): tanpa OHTTP
+server masih melihat IP peminta (anonimitas akun, bukan jaringan), dan request
+anonim lewat OHTTP berbagi satu bucket loopback `ktProofLimiter`; relay tetap
+membatasi 120/menit per klien dan bucket itu tidak lagi dipakai group sync/PIR.
+
+**Penjaga.** `server/tests/ktQuery.test.ts` mengunci bahwa POST `/search`
+memakai `ktProofLimiter` tanpa `requireAuth`, sementara route KT lain tetap
+terautentikasi.
+
+## N5-01 — arsip era braid SPQR (dari pass 5)
+
+**Perbaikan.** Jalur v2 kini punya arsip era seperti v1:
+
+- `web/src/lib/spqrState.ts` — `rotateSpqrStateForNewSession(sessionId)`
+  mem-flush tulis yang masih menunggu debounce, menggeser state aktif ke
+  `#era_0..2` (FIFO tiga slot, ter-seal `ENC1:`), lalu menghapus baris aktif.
+  `loadArchivedSpqrStates()` mengembalikan era terbaru lebih dulu.
+- `web/src/utils/crypto.ts` — titik dua sesi baru (pengirim `A2B` dan penerima
+  `B2A` di `messagePipeline.ts`) memanggil rotate, bukan delete.
+- `decryptSpqrMessage` mencoba state era sekarang dulu; bila frame ditolak, ia
+  mencoba setiap era arsip. State arsip **tidak** disimpan maju dan tidak
+  dipromosikan — menulisnya ke baris aktif akan memutar balik braid era
+  sekarang. Tanpa era yang cocok, error era sekarang yang dilempar (penyebab
+  paling mungkin), bukan error arsip terakhir.
+
+**Penjaga.** `spqrState.test.ts` (+6 tes) dan `spqrEraArchive.test.ts` (2 tes)
+dengan modul WASM sungguhan: state era 2 menolak frame era 1, arsip era 1
+menghasilkan message key yang sama dengan pengirim, dan baris aktif tidak
+berubah setelah dekripsi dari arsip.
+
 ## Checks yang dijalankan
 
 | Cek | Hasil |
@@ -104,15 +154,17 @@ lepas) membuat degradasi privasi terlihat oleh operator.
 | `tsx --test tests/rateLimitIdentity.test.ts tests/ohttp.test.ts` | **22 tes, 22 lulus** |
 | `npx tsc --noEmit` (web) | **exit 0** |
 | `vitest run` ktSearchIndexKey + ktConfigPinScope + ktBundleProofV2 | **16 tes, 16 lulus** |
+| `tsx --test` ktQuery + ohttp + searchRateLimit (setelah N7-01) | **35 tes, 35 lulus** |
+| `vitest run` 5 berkas SPQR (setelah N5-01) | **48 tes, 48 lulus** |
 
 Tidak dijalankan: E2E, fuzz, `cargo test`, tes Go KT, drill, DR oracle, seluruh
 suite vitest web (hanya berkas yang tersentuh).
 
-## Masih terbuka
+## Masih terbuka (residual)
+
+N7-01 dan N5-01 **tertutup** — lihat bagian di atas. Yang tersisa bukan patch:
 
 | ID | Status | Catatan |
 |---|---|---|
-| N7-01 | **PARTIAL** | Hash keluar dari URL/log, tetapi server tetap tahu akun→hash; anonimitas penuh butuh OHTTP+PIR/token tak terikat akun, dan `VITE_OHTTP_ENABLED` masih default mati. |
-| N5-01 | Terbuka | Pesan SPQR v2 lintas-era tanpa arsip braid (keputusan protokol, `docs/33` §33.8). |
 | CSP `style-src 'unsafe-inline'` | Terbuka, disengaja | Bukan vektor eksekusi skrip. |
 | Race single-active-device sidecar | Tidak diverifikasi | Warisan pass 4. |
