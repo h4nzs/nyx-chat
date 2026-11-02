@@ -84,9 +84,24 @@ function main(): void {
     );
   }
 
+  // [audit N10-03] Hanya hop di daftar ini yang boleh meneruskan
+  // `CF-Connecting-IP`. Default loopback; nginx di jaringan container harus
+  // dicantumkan, kalau tidak semua klien kembali berbagi tag alamat nginx.
+  const trustedProxies = (process.env.OHTTP_TRUSTED_PROXIES ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (trustedProxies.length === 0) {
+    console.log(
+      '[ohttp-relay] OHTTP_TRUSTED_PROXIES kosong: hanya loopback yang dipercaya sebagai proxy. ' +
+        'Setel ke alamat/CIDR nginx bila relay diakses lewat jaringan container.'
+    );
+  }
+
   const app = createOhttpRelayApp({
     gatewayTarget,
     trustedGatewayHosts,
+    trustedProxies: trustedProxies.length > 0 ? trustedProxies : undefined,
     internalToken: internalToken || undefined,
     maxBody: process.env.OHTTP_RELAY_MAX_BODY,
     rateLimitPerMinute: process.env.OHTTP_RELAY_RATE_LIMIT

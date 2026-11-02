@@ -113,6 +113,46 @@ tree=$(ss -ltn 2>/dev/null | grep -q ':8089 ' && echo ya || echo tidak)
 [ "$rounds" -gt 0 ] && ok "auditor v2: $rounds putaran sejak nyala" || bad "auditor v2 belum menyelesaikan putaran"
 [ "$tree" = "ya" ] && ok "log KT v2 (baca :8089) siap" || bad "log KT v2 (:8089) tidak mendengarkan"
 
+hdr "9. Trust proxy relay OHTTP (audit N10-03)"
+# Selfhost: nginx dan relay sama-sama di host ini, nginx menyambung ke
+# 127.0.0.1:4100. Nilai yang benar karena itu KOSONG (default loopback); CIDR
+# jaringan container hanya untuk profil Docker. Nilai yang salah membuat relay
+# memakai alamat nginx untuk semua klien → satu bucket rate-limit bersama.
+SELFHOST_STATE_DIR="${SELFHOST_DIR:-$HOME/nyx-selfhost}"
+RELAY_ENV="$SELFHOST_STATE_DIR/ohttp/relay.env"
+if [ ! -f "$RELAY_ENV" ]; then
+  ok "relay env belum ada ($RELAY_ENV) — OHTTP belum diaktifkan di mesin ini"
+else
+  trust_raw=$(grep -E '^[[:space:]]*OHTTP_TRUSTED_PROXIES=' "$RELAY_ENV" 2>/dev/null \
+    | tail -1 | sed 's/^[^=]*=//; s/[[:space:]"'"'"']//g' || true)
+  if [ -z "$trust_raw" ]; then
+    ok "OHTTP_TRUSTED_PROXIES kosong (benar untuk selfhost: hop relay = loopback)"
+  elif printf '%s' "$trust_raw" | tr ',' '\n' \
+      | grep -vqE '^(127\.0\.0\.1|::1|127\.0\.0\.0/8)$'; then
+    bad "OHTTP_TRUSTED_PROXIES=$trust_raw — selfhost tidak punya jaringan container; kosongkan (lihat deploy/selfhost/README.md)"
+  else
+    ok "OHTTP_TRUSTED_PROXIES=$trust_raw (loopback-only)"
+  fi
+fi
+
+SITE_CONF="$SELFHOST_STATE_DIR/nginx/nyx.conf"
+if [ ! -f "$SITE_CONF" ]; then
+  bad "site config tidak ada: $SITE_CONF (jalankan scripts/sync-selfhost.sh --apply)"
+else
+  # Baris ini yang mencegah klien memilih tag/bucket lewat header sendiri.
+  cf_lines=$(grep -c 'proxy_set_header CF-Connecting-IP \$remote_addr;' "$SITE_CONF" 2>/dev/null || true)
+  if [ "${cf_lines:-0}" -ge 4 ]; then
+    ok "nginx menimpa CF-Connecting-IP dengan \$remote_addr ($cf_lines blok)"
+  else
+    bad "nginx belum menimpa CF-Connecting-IP ($cf_lines/4 blok) — sync ulang config, tag klien bisa dikarang"
+  fi
+  if grep -qE '^[[:space:]]*set_real_ip_from 127\.0\.0\.1;' "$SITE_CONF"; then
+    ok "real_ip mempercayai cloudflared loopback (\$remote_addr = klien asli)"
+  else
+    bad "set_real_ip_from 127.0.0.1 hilang — di belakang cloudflared \$remote_addr tetap loopback"
+  fi
+fi
+
 printf '\n%s\n' "------------------------------------------------------------------"
 if [ "$FAILED" -eq 0 ]; then
   printf '\033[32mSEMUA LULUS\033[0m — seluruh layanan NYX menyala kembali setelah boot.\n'

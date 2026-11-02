@@ -64,14 +64,91 @@ function tokenMatches(presented: string): boolean {
 }
 
 /**
- * Alamat klien menurut relay. `CF-Connecting-IP` didahulukan karena edge
- * Cloudflare menimpanya; `X-Forwarded-For` tidak dipakai (entri depan bisa
- * dikendalikan klien). Nilai ini **tidak pernah dikirim** ke gateway/API.
+ * Alamat klien menurut relay. Nilai ini **tidak pernah dikirim** ke gateway/API;
+ * yang keluar hanya HMAC-nya.
+ *
+ * [audit N10-03] `CF-Connecting-IP` hanya dipercaya bila hop **langsung** adalah
+ * proxy tepercaya (loopback atau `OHTTP_TRUSTED_PROXIES`). Sebelumnya header itu
+ * dibaca tanpa syarat: relay menerima `Host` saja dari nginx, jadi header klien
+ * lain ikut diteruskan apa adanya — dan klien yang menjangkau origin langsung
+ * (bypass Cloudflare) bisa memilih tag sendiri, yaitu bucket API tanpa batas
+ * setelah N10-02. Karena itu urutannya sekarang: alamat soket dulu, header hanya
+ * bila soket itu memang proxy, `X-Forwarded-For` tetap tidak dipakai (entri
+ * depannya bisa dikendalikan klien).
  */
-export function ohttpClientAddress(req: Pick<Request, 'headers' | 'ip'>): string {
+export interface OhttpClientAddressOptions {
+  /** Daftar alamat/CIDR hop yang boleh meneruskan `CF-Connecting-IP`. */
+  trustedProxies?: readonly string[];
+}
+
+const DEFAULT_TRUSTED_PROXIES: readonly string[] = ['127.0.0.1', '::1'];
+/** Bentuk alamat yang diterima dari header (IPv4/IPv6, tanpa spasi/URL). */
+const CLIENT_ADDRESS_RE = /^[0-9a-fA-F:.[\]]{2,64}$/;
+
+let cachedTrustedProxies: { raw: string; list: readonly string[] } | null = null;
+
+/**
+ * Proxy tepercaya dari `OHTTP_TRUSTED_PROXIES` (dipisah koma, alamat atau CIDR
+ * IPv4). Kosong = hanya loopback. Deployment yang menaruh nginx di jaringan
+ * container WAJIB menyetelnya (mis. `172.16.0.0/12`), kalau tidak semua klien
+ * kembali berbagi satu tag milik alamat nginx.
+ */
+function defaultTrustedProxies(): readonly string[] {
+  const raw = (process.env.OHTTP_TRUSTED_PROXIES ?? '').trim();
+  if (raw === '') return DEFAULT_TRUSTED_PROXIES;
+  if (cachedTrustedProxies?.raw === raw) return cachedTrustedProxies.list;
+  const list = raw.split(',').map((entry) => entry.trim()).filter(Boolean);
+  cachedTrustedProxies = { raw, list };
+  return list;
+}
+
+function normalizeAddress(value: string): string {
+  const trimmed = value.trim().split('%')[0] ?? value.trim();
+  const lower = trimmed.toLowerCase();
+  return lower.startsWith('::ffff:') ? lower.slice('::ffff:'.length) : lower;
+}
+
+function ipv4ToInt(value: string): number | null {
+  const parts = value.split('.');
+  if (parts.length !== 4) return null;
+  let acc = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const byte = Number(part);
+    if (byte > 255) return null;
+    acc = acc * 256 + byte;
+  }
+  return acc >>> 0;
+}
+
+/** `entry` = alamat persis atau CIDR IPv4 (`172.16.0.0/12`). */
+function proxyMatches(peer: string, entry: string): boolean {
+  const [base, bitsRaw] = entry.split('/');
+  if (bitsRaw === undefined) return normalizeAddress(base ?? '') === peer;
+  const bits = Number(bitsRaw);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const peerInt = ipv4ToInt(peer);
+  const baseInt = ipv4ToInt(normalizeAddress(base ?? ''));
+  if (peerInt === null || baseInt === null) return false;
+  if (bits === 0) return true;
+  const mask = (0xffffffff << (32 - bits)) >>> 0;
+  return ((peerInt & mask) >>> 0) === ((baseInt & mask) >>> 0);
+}
+
+export function ohttpClientAddress(
+  req: Pick<Request, 'headers' | 'ip'> & { socket?: { remoteAddress?: string } },
+  options: OhttpClientAddressOptions = {},
+): string {
+  const peer = normalizeAddress(
+    req.socket?.remoteAddress ?? (typeof req.ip === 'string' ? req.ip : ''),
+  );
+  const trusted = options.trustedProxies ?? defaultTrustedProxies();
+  const fromTrustedProxy = peer !== '' && trusted.some((entry) => proxyMatches(peer, entry));
   const cfIp = req.headers['cf-connecting-ip'];
-  if (typeof cfIp === 'string' && cfIp.trim() !== '') return cfIp.trim();
-  if (typeof req.ip === 'string' && req.ip !== '') return req.ip;
+  if (fromTrustedProxy && typeof cfIp === 'string' && CLIENT_ADDRESS_RE.test(cfIp.trim())) {
+    return normalizeAddress(cfIp);
+  }
+  if (peer !== '') return peer;
   return 'unknown';
 }
 

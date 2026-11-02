@@ -102,6 +102,8 @@ describe('saveSpqrState / loadSpqrState', () => {
     expect(loaded?.sessionId).toBe(SESSION);
     expect(loaded?.version).toBe('v2');
     expect(loaded?.state).toEqual(stateBytes(7));
+    // [audit N10-04] Penanda kemajuan ikut tersimpan; default = belum maju.
+    expect(loaded?.advanced).toBe(false);
   });
 
   it('beberapa simpan dalam satu jendela = SATU tulis (state terakhir yang menang)', async () => {
@@ -190,7 +192,7 @@ describe('hapus state', () => {
 // arsip: era lama TETAP ada, FIFO, ter-seal, dan tidak pernah menjadi aktif.
 describe('arsip era braid (N5-01)', () => {
   it('rotate memindahkan state aktif ke arsip dan mengosongkan baris aktif', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
     await flushSpqrState(SESSION);
 
     await rotateSpqrStateForNewSession(SESSION);
@@ -203,7 +205,7 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('rotate men-flush tulis yang masih menunggu debounce', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(5), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(5), version: 'v2', advanced: true });
     // Belum ada flush: kalau rotate tidak mem-flush, arsip akan kosong/tertinggal.
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -212,7 +214,7 @@ describe('arsip era braid (N5-01)', () => {
 
   it('FIFO: era terbaru di slot 0 dan jumlah arsip dibatasi', async () => {
     for (let era = 0; era <= SPQR_STATE_ARCHIVE_SLOTS; era++) {
-      await saveSpqrState({ sessionId: SESSION, state: stateBytes(era), version: 'v2' });
+      await saveSpqrState({ sessionId: SESSION, state: stateBytes(era), version: 'v2', advanced: true });
       await flushSpqrState(SESSION);
       await rotateSpqrStateForNewSession(SESSION);
     }
@@ -227,7 +229,7 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('arsip ter-seal dan tidak memuat state plaintext', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(7), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(7), version: 'v2', advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -243,7 +245,7 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('clearSpqrStates ikut menghapus arsip era', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(3), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(3), version: 'v2', advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
     expect(await loadArchivedSpqrStates(SESSION)).toHaveLength(1);
@@ -254,16 +256,17 @@ describe('arsip era braid (N5-01)', () => {
     expect(await loadSpqrState(SESSION)).toBeUndefined();
   });
 
-  // [audit N9-03] Sesi X3DH baru bisa lahir berulang tanpa satu pun pesan v2 di
-  // antaranya. Rotasi seperti itu tidak boleh menggeser arsip: kalau menggeser,
-  // era yang masih dibutuhkan terbuang sebelum tiga slot benar-benar terpakai.
-  it('rotate tanpa kemajuan state tidak menggeser arsip', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+  // [audit N9-03 → N10-04] Sesi X3DH baru bisa lahir berulang tanpa satu pun
+  // pesan v2 di antaranya, dan rotasi seperti itu tidak boleh menggeser arsip.
+  // Perbandingan byte saja tidak cukup: state awal era baru SELALU berbeda
+  // (`authKey` berbeda), jadi penandanya adalah "era ini pernah maju".
+  it('rotate era baru tanpa lalu lintas tidak menggeser arsip', async () => {
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
-    // Era baru ditulis dengan state yang SAMA (handshake ulang, belum ada pesan).
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    // Era baru: state awal BERBEDA dari slot 0, tetapi belum ada pesan v2.
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2' });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -273,16 +276,17 @@ describe('arsip era braid (N5-01)', () => {
     expect(await loadSpqrState(SESSION)).toBeUndefined();
   });
 
-  it('rotate setelah state maju tetap menggeser arsip', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+  it('rotate setelah era maju tetap menggeser arsip', async () => {
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2', advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
     const archived = await loadArchivedSpqrStates(SESSION);
     expect(archived.map((record) => record.state[0])).toEqual([2, 1]);
+    expect(archived.every((record) => record.advanced)).toBe(true);
   });
 });

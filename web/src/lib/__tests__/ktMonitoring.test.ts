@@ -405,15 +405,19 @@ describe('monitorKeyTransparency', () => {
     resetKtBundleProofCaches();
 
     const fetchMonitor = vi.fn(async () => new Uint8Array([1]));
+    // [audit N10-01] Tanpa state, config tidak boleh dibaca sama sekali: akun
+    // yang belum terhidrasi membuat pin `unknown-account` (fail-closed N9-02),
+    // dan dulu throw itu terjadi sebelum jalur cepat ini sempat tercapai.
+    const fetchConfig = vi.fn(async () => ({
+      abiVersion: 2,
+      mode: config.mode,
+      signatureKey: fixture.signatureKey,
+      auditorKeys: fixture.auditorKeys,
+      valueFormat: 'nyx-kt-value-v2',
+    }));
     const outcome = await monitorKeyTransparency({
       verifier,
-      fetchConfig: async () => ({
-        abiVersion: 2,
-        mode: config.mode,
-        signatureKey: fixture.signatureKey,
-        auditorKeys: fixture.auditorKeys,
-        valueFormat: 'nyx-kt-value-v2',
-      }),
+      fetchConfig,
       fetchMonitor,
       // [docs/30 §30.5 tahap C] Jangkar gossip disegarkan di akhir langkah monitor;
       // disuntik supaya test ini tetap tanpa jaringan.
@@ -423,6 +427,7 @@ describe('monitorKeyTransparency', () => {
 
     expect(outcome).toEqual({ checked: 0, changed: [] });
     expect(fetchMonitor).not.toHaveBeenCalled();
+    expect(fetchConfig).not.toHaveBeenCalled();
     },
     20_000
   );

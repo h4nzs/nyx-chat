@@ -34,6 +34,49 @@ bash scripts/sync-selfhost.sh --apply
 bash deploy/selfhost/scripts/rebuild.sh --restart
 ```
 
+## OHTTP relay dan `OHTTP_TRUSTED_PROXIES`
+
+Selfhost **tidak** memakai Docker: nginx (`nyx-nginx`) dan relay
+(`nyx-ohttp-relay`) berjalan di host yang sama, dan nginx menyambung ke relay
+di `127.0.0.1:4100` (hasil render `sync-selfhost.sh`). Karena itu alamat hop
+langsung relay **selalu loopback**, dan nilai yang benar untuk
+`OHTTP_TRUSTED_PROXIES` di `~/nyx-selfhost/ohttp/relay.env` (dan `server/.env`)
+adalah **kosong** — default-nya hanya memercayai `127.0.0.1`/`::1`.
+
+| Profil | `OHTTP_TRUSTED_PROXIES` | Alasan |
+|---|---|---|
+| `selfhost` (mesin ini) | *(kosong)* | nginx → relay lewat loopback |
+| `docker` (`SELFHOST_PROFILE=docker`) | `172.16.0.0/12` (atau IP nginx) | nginx container → relay lewat jaringan container |
+
+Jangan menyalin nilai profil Docker ke sini: relay lalu memakai alamat nginx
+container untuk semua klien, dan `OHTTP_TRUSTED_PROXIES` yang salah lebih buruk
+daripada kosong — tag per klien hilang tanpa error.
+
+Yang harus ada di sisi nginx (sudah dibawa `ops/nginx/nyx.conf`, jangan diedit di
+`~/nyx-selfhost`):
+
+- `set_real_ip_from 127.0.0.1; set_real_ip_from ::1;` — cloudflared menyambung
+dari loopback (nginx listen `127.0.0.1:3000`), jadi tanpa ini `$remote_addr`
+tetap `127.0.0.1` untuk semua pengunjung;
+- `proxy_set_header CF-Connecting-IP $remote_addr;` di blok relay dan `/api`
+ (audit N10-03) — nilai yang diteruskan adalah hasil restorasi `real_ip`, bukan
+ header kiriman klien.
+
+Cek setelah instal/update — `verify-boot.sh` bagian 9 menguji keduanya:
+
+```bash
+bash deploy/selfhost/scripts/verify-boot.sh
+# manual:
+grep -E '^OHTTP_TRUSTED_PROXIES=' ~/nyx-selfhost/ohttp/relay.env   # harus kosong
+grep -c 'CF-Connecting-IP \$remote_addr' ~/nyx-selfhost/nginx/nyx.conf  # ≥ 4
+journalctl --user -u nyx-ohttp-relay -n 5 --no-pager              # tidak ada peringatan trust proxy
+```
+
+Gejala bila salah: semua pengguna OHTTP berbagi satu bucket rate-limit (429
+massal saat beberapa klien memverifikasi kontak) dan
+`nyx_ohttp_client_tag_total{status="tagged"}` hampir tidak naik padahal trafik
+relay jalan.
+
 ## Backup
 
 RPO 24 jam, RTO 4 jam (lihat `docs/39-disaster-recovery-runbook.md`).

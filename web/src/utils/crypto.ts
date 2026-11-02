@@ -471,6 +471,8 @@ async function encryptSpqrMessage(input: {
       sessionId: input.conversationId,
       state: result.state,
       version: 'v2',
+      // Langkah ratchet nyata → era ini layak diarsipkan (audit N10-04).
+      advanced: true,
     });
 
     return { state: input.state, header, ciphertext: result.ciphertext, mk: result.mk };
@@ -573,6 +575,8 @@ async function decryptSpqrMessage(input: {
       sessionId: input.conversationId,
       state: decodeResult.state,
       version: 'v2',
+      // Frame peer sudah dikonsumsi: state maju (audit N10-04).
+      advanced: true,
     });
   }
 

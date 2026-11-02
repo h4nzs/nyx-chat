@@ -429,6 +429,32 @@ IP berbagi bucket), dan operasi tanpa `OHTTP_INTERNAL_TOKEN` di kedua proses
 kembali ke bucket bersama — dinyatakan lewat peringatan start relay, bukan
 diam-diam.
 
+**Limiter lain di jalur yang sama (N10-02, ditutup).** N9-01 hanya menutup
+`ktProofLimiter`; dua limiter 120/menit lain di jalur OHTTP masih memakai
+`req.ip`: `ohttpLimiter` gateway (dipanggil relay lewat loopback → `127.0.0.1`
+untuk semua orang) dan limiter relay (dipanggil nginx tanpa XFF → alamat nginx
+untuk semua orang). Probe pass 10 dengan router asli: 140 request dari dua tag
+sah tetap kena 429 di #121. Keduanya sekarang memakai identitas klien — gateway
+`clientRateLimitTag(req)` (tag relay → subjek token → IP), relay
+`HMAC(OHTTP_INTERNAL_TOKEN, alamat klien)` sehingga key di memori relay pun
+bukan alamat mentah. Kontrolnya tetap: satu tag/klien yang sama masih dibatasi
+120/menit.
+
+**Header identitas relay (N10-03, ditutup).** `CF-Connecting-IP` dulu dipercaya
+tanpa syarat, padahal nginx hanya menyetel `Host` untuk blok relay — header
+klien lain diteruskan apa adanya, sehingga klien yang menjangkau origin langsung
+bisa memilih tag sendiri. Sekarang header itu hanya dipakai bila hop **langsung**
+ada di `OHTTP_TRUSTED_PROXIES` (default loopback; CIDR IPv4 didukung), selain
+itu alamat soket. nginx juga menimpa header dengan `$remote_addr` (hasil
+restorasi `real_ip`) di blok relay maupun `/api`.
+
+**Urutan monitor (N10-01, regresi N9-02).** Karena pin fail-closed, tick monitor
+melempar saat akun belum terhidrasi — sebelum jalur cepat `{checked:0}` sempat
+diperiksa. `monitorKeyTransparency` sekarang merencanakan lebih dulu
+(`planKtMonitor`); tanpa state siap ia langsung mengembalikan `{checked:0}`
+tanpa membaca config. Fail-closed pada jalur yang benar-benar memverifikasi
+tidak berubah.
+
 **Pin saat akun belum diketahui (N9-02, ditutup).** `resolveKtConfigPin`
 membedakan `pin`, `empty` (TOFU), `unknown-account`, dan `unreadable`. Dua yang
 terakhir **fail-closed**: `resolveConfig` melempar, jalur pemanggil melaporkan

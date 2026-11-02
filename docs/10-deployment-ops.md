@@ -1311,6 +1311,20 @@ Status tag terekspos sebagai `nyx_ohttp_client_tag_total{status}` (dihitung per
 request gateway): `tagged`, `untagged`, `untrusted`, dan `no-token`. Labelnya
 enum saja — tidak ada alamat, nilai tag, atau id akun.
 
+**[audit N10-02/N10-03] Dua limiter lain dan trust proxy.** `ohttpLimiter`
+gateway dan limiter relay dulu memakai `req.ip` (loopback/alamat nginx) sehingga
+140 klien berbeda kena 429 di request #121; keduanya kini memakai identitas
+klien seperti tag di atas. `CF-Connecting-IP` hanya dipercaya bila hop langsung
+ada di `OHTTP_TRUSTED_PROXIES` (CSV alamat atau CIDR IPv4; kosong = hanya
+loopback). **Deployment dengan nginx di jaringan container wajib menyetelnya**
+(mis. `172.16.0.0/12`), kalau tidak semua klien kembali berbagi tag alamat
+nginx. Deployment selfhost (nginx + relay sama-sama di host, `127.0.0.1:4100`)
+**tidak** boleh mengisinya — default loopback sudah benar; `verify-boot.sh`
+bagian 9 memeriksa nilai itu dan baris `CF-Connecting-IP $remote_addr` di site
+config (`deploy/selfhost/README.md`). nginx menimpa header itu dengan `$remote_addr` (hasil `real_ip` dari
+rentang Cloudflare) di blok relay dan `/api`, jadi nilai yang diteruskan bukan
+header kiriman klien; tanpa penyetelan itu relay mencatat peringatan saat start.
+
 ```promql
 # Operasi tanpa OHTTP_INTERNAL_TOKEN (kondisi yang harus ditindak)
 sum(rate(nyx_ohttp_client_tag_total{status="no-token"}[15m])) by (job)
@@ -1328,7 +1342,11 @@ separuh request gateway berstatus `no-token|untagged|untrusted` selama 10
 menit — rasio, bukan satu request, supaya probe/panggilan langsung ke gateway
 tidak membunyikan alarm. Aturannya punya satu kasus **firing** dan dua kasus
 **tidak menyala** (tag dipakai; hanya sebagian kecil untagged) di
-`ops/prometheus/tests.yml`, dijaga `scripts/drill-alerts.sh`.
+`ops/prometheus/tests.yml`, dijaga `scripts/drill-alerts.sh`. Dashboard
+`nyx-overview` memuat baris **OHTTP (relay & gateway)**: panel rasio tanpa tag
+(ambang sama dengan alert: kuning 10%, merah 50%) dan laju per status, sehingga
+penyebabnya (`no-token` vs `untagged` vs `untrusted`) terlihat sebelum alarm
+10 menit berbunyi.
 
 **Selfhost (`~/nyx-selfhost`, systemd user).** `scripts/sync-selfhost.sh`
 memasang `ops/nginx/nyx.conf` (setelah transformasi path) dan

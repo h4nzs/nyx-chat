@@ -32,9 +32,15 @@ import jwt from 'jsonwebtoken';
 import express from 'express';
 import { createServer, type Server } from 'node:http';
 import createOhttpRouter from '../src/routes/ohttp.js';
+import { createOhttpRelayApp } from '../src/ohttp/relayApp.js';
 import { loadOhttpConfig, type OhttpConfig } from '../src/ohttp/config.js';
 import { handleOhttpGateway } from '../src/ohttp/gateway.js';
-import { OHTTP_CLIENT_TAG_HEADER, OHTTP_INTERNAL_HEADER } from '../src/ohttp/clientTag.js';
+import {
+  OHTTP_CLIENT_TAG_HEADER,
+  OHTTP_INTERNAL_HEADER,
+  ohttpClientAddress,
+  setOhttpInternalToken,
+} from '../src/ohttp/clientTag.js';
 import {
   OHTTP_TOKEN_TTL_SEC,
   isOhttpScopeRequestAllowed,
@@ -568,4 +574,151 @@ test('gateway: tag klien tidak diteruskan bila relay tidak menandatanganinya', a
   const names = (received as OhttpRequest).headers.map(([key]) => key.toLowerCase());
   assert.ok(!names.includes(OHTTP_CLIENT_TAG_HEADER));
   assert.ok(!names.includes(OHTTP_INTERNAL_HEADER));
+});
+
+// ---------------------------------------------------------------------------
+// [audit N10-02] Dua limiter 120/menit lain di jalur OHTTP masih satu bucket
+// global: gateway dipanggil relay lewat loopback (`req.ip` = 127.0.0.1) dan
+// relay dipanggil nginx (`req.ip` = alamat nginx). Probe pass 10: 429 pertama
+// di request #121 meski 140 klien berbeda. Tes di bawah menjalankan router ASLI
+// dengan `express-rate-limit` sungguhan — bukan membaca konfigurasinya.
+// ---------------------------------------------------------------------------
+
+/** Kirim `count` request ke gateway, kembalikan status tiap request. */
+async function postGateway(
+  base: string,
+  headers: Record<string, string>,
+  count: number,
+): Promise<number[]> {
+  const statuses: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const response = await fetch(`${base}/api/ohttp/gateway`, {
+      method: 'POST',
+      headers: { 'content-type': 'message/ohttp-req', ...headers },
+      body: Buffer.from([1]),
+    });
+    statuses.push(response.status);
+    await response.arrayBuffer();
+  }
+  return statuses;
+}
+
+test('limiter gateway: bucket per tag relay, bukan satu loopback', async () => {
+  const secret = 'internal-limiter-secret';
+  setOhttpInternalToken(secret);
+  const config: OhttpConfig = { ...(await makeConfig()), internalToken: secret };
+  const app = express();
+  app.use('/api/ohttp', createOhttpRouter(config, {
+    dispatch: async () => ({ status: 200, headers: [], content: new Uint8Array() }),
+  }));
+  const server: Server = await new Promise((resolve) => {
+    const instance = createServer(app).listen(0, '127.0.0.1', () => resolve(instance as unknown as Server));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const base = `http://127.0.0.1:${address.port}`;
+  const signed = (tag: string) => ({
+    [OHTTP_INTERNAL_HEADER]: secret,
+    [OHTTP_CLIENT_TAG_HEADER]: tag,
+  });
+
+  try {
+    // 140 request bergantian antara DUA tag sah: masing-masing 70, jauh di bawah
+    // 120. Kalau limiter masih memakai `req.ip` loopback, request #121 kena 429.
+    const tagA = `tag-a-${'a'.repeat(20)}`;
+    const tagB = `tag-b-${'b'.repeat(20)}`;
+    const mixed: number[] = [];
+    for (let index = 0; index < 140; index += 1) {
+      const [status] = await postGateway(base, signed(index % 2 === 0 ? tagA : tagB), 1);
+      mixed.push(status!);
+    }
+    assert.deepEqual(
+      mixed.filter((status) => status === 429),
+      [],
+      'limiter gateway masih memakai satu bucket bersama',
+    );
+
+    // Kontrol: batas tetap berlaku per tag tunggal (120/menit).
+    const single = await postGateway(base, signed(`tag-c-${'c'.repeat(20)}`), 121);
+    assert.equal(single.filter((status) => status === 429).length, 1);
+    assert.equal(single[120], 429);
+  } finally {
+    setOhttpInternalToken(undefined);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('limiter relay: 140 klien berbeda tidak kena 429, satu klien tetap dibatasi', async () => {
+  const stub = express();
+  stub.post('/relay', express.raw({ type: () => true }), (_req, res) => {
+    res.type('message/ohttp-res').send(Buffer.alloc(0));
+  });
+  const stubServer: Server = await new Promise((resolve) => {
+    const instance = createServer(stub).listen(0, '127.0.0.1', () => resolve(instance as unknown as Server));
+  });
+  const stubAddress = stubServer.address();
+  assert.ok(stubAddress && typeof stubAddress === 'object');
+
+  const relay = createOhttpRelayApp({
+    gatewayTarget: `http://127.0.0.1:${stubAddress.port}/relay`,
+    internalToken: 'internal-limiter-secret',
+  });
+  const relayServer: Server = await new Promise((resolve) => {
+    const instance = createServer(relay).listen(0, '127.0.0.1', () => resolve(instance as unknown as Server));
+  });
+  const relayAddress = relayServer.address();
+  assert.ok(relayAddress && typeof relayAddress === 'object');
+  const base = `http://127.0.0.1:${relayAddress.port}`;
+
+  const send = async (clientIp: string): Promise<number> => {
+    const response = await fetch(`${base}/relay`, {
+      method: 'POST',
+      headers: { 'content-type': 'message/ohttp-req', 'cf-connecting-ip': clientIp },
+      body: Buffer.from([1]),
+    });
+    await response.arrayBuffer();
+    return response.status;
+  };
+
+  try {
+    // 140 alamat klien berbeda (dari loopback, yaitu proxy tepercaya): tiap
+    // alamat bucket-nya sendiri → tidak boleh ada 429 sama sekali.
+    const distinct: number[] = [];
+    for (let index = 0; index < 140; index += 1) {
+      distinct.push(await send(`10.0.${Math.floor(index / 256)}.${index % 256}`));
+    }
+    assert.deepEqual(distinct.filter((status) => status === 429), []);
+
+    // Kontrol: satu klien mengirim 121 request → 429 di request terakhir.
+    const single: number[] = [];
+    for (let index = 0; index < 121; index += 1) single.push(await send('203.0.113.77'));
+    assert.equal(single.filter((status) => status === 429).length, 1);
+    assert.equal(single[120], 429);
+  } finally {
+    await new Promise<void>((resolve) => relayServer.close(() => resolve()));
+    await new Promise<void>((resolve) => stubServer.close(() => resolve()));
+  }
+});
+
+// [audit N10-03] Header identitas hanya dipercaya bila hop langsung adalah
+// proxy tepercaya; kalau tidak, relay meneruskan tag pilihan klien dan bucket
+// API bisa dikarang.
+test('alamat relay: CF-Connecting-IP diabaikan bila hop bukan proxy tepercaya', () => {
+  const addressOf = (peer: string, options?: { trustedProxies: readonly string[] }) =>
+    ohttpClientAddress(
+      {
+        headers: { 'cf-connecting-ip': '203.0.113.9' },
+        ip: peer,
+        socket: { remoteAddress: peer },
+      } as never,
+      options,
+    );
+
+  // Klien langsung (bukan proxy) mengarang header → alamat soket yang dipakai.
+  assert.equal(addressOf('198.51.100.20'), '198.51.100.20');
+  // nginx loopback boleh meneruskan hasil restorasi real_ip.
+  assert.equal(addressOf('::ffff:127.0.0.1'), '203.0.113.9');
+  // Jaringan container hanya dipercaya bila dicantumkan eksplisit.
+  assert.equal(addressOf('172.18.0.5', { trustedProxies: ['172.16.0.0/12'] }), '203.0.113.9');
+  assert.equal(addressOf('172.18.0.5', { trustedProxies: ['10.0.0.0/8'] }), '172.18.0.5');
 });

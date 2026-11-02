@@ -52,6 +52,7 @@ import {
   hexToBytes,
   ktSearchKeyHex,
   loadKtStates,
+  planKtMonitor,
   runKtMonitorOnce,
   saveKtState,
   type KtMonitorOutcome,
@@ -851,13 +852,28 @@ export interface KtMonitorDeps {
  * cara menampilkannya). Kesalahan diteruskan ke pemanggil (penjadwal menangkap).
  */
 export async function monitorKeyTransparency(deps: KtMonitorDeps = {}): Promise<KtMonitorOutcome> {
+  // [audit N10-01] Tentukan dulu apakah ADA pekerjaan, baru baca config.
+  //
+  // `resolveConfig` fail-closed untuk pin yang tidak bisa dibaca (N9-02), dan
+  // pin itu `unknown-account` selama akun belum terhidrasi (boot, sesudah
+  // logout, verifikasi yang berjalan di jendela logout). Dulu urutannya
+  // terbalik: tick monitor melempar sebelum sempat tahu bahwa tidak ada state
+  // yang perlu diperiksa — jalur cepat `{checked:0}` tidak pernah tercapai dan
+  // tes penjaganya merah.
+  //
+  // Fail-closed tetap utuh: perencanaan hanya memeriksa data lokal, dan config
+  // tetap diresolusi (termasuk melempar untuk pin tak terbaca) sebelum satu pun
+  // byte dikirim ke layanan KT.
+  const states = deps.states ?? (await loadKtStates());
+  if (planKtMonitor(states) === null) return { checked: 0, changed: [] };
+
   const resolved = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
   const verifier = deps.verifier ?? (await loadKtVerifier());
   const outcome = await runKtMonitorOnce({
     verifier,
     config: resolved.config,
     fetchMonitor: deps.fetchMonitor ?? defaultFetchMonitor,
-    states: deps.states,
+    states,
     now: deps.now,
   });
   // Bukti monitor diterima → pin config boleh ditulis (termasuk upgrade v1 → v2).

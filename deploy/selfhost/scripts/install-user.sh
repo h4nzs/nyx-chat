@@ -141,6 +141,8 @@ echo "Catatan observability: butuh prometheus/conf/prometheus.yml + alerts.yml d
 echo "nyx-selfhost dan grafana/grafana.env (0600, password admin + secret key)."
 echo "Catatan relay OHTTP: butuh ohttp/relay.env (OHTTP_GATEWAY_TARGET loopback) dan"
 echo "OHTTP_RELAY_EXTERNAL=1 di server/.env; tanpa OHTTP_ENABLED=1 relay hanya menjawab 502."
+echo "  OHTTP_TRUSTED_PROXIES DIKOSONGKAN di selfhost (nginx→relay lewat loopback);"
+echo "  nilai CIDR (mis. 172.16.0.0/12) hanya untuk profil Docker."
 echo "Catatan PIR: butuh pir/pir.env (PIR_ADMIN_TOKEN sama dengan server/.env,"
 echo "PIR_MASTER_SECRET, PIR_SNAPSHOT_PATH sama dengan server) + snapshot dari"
 echo "'pnpm --filter nyx-server run pir:snapshot'. Tanpa snapshot, /params menjawab 503."

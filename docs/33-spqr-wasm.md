@@ -434,6 +434,22 @@ maju), arsip **tidak** digeser dan baris aktif tetap dihapus seperti biasa.
 Dikunci dua tes di `spqrState.test.ts` — rotasi yang tidak maju tidak menambah
 slot, dan rotasi setelah state maju tetap menggeser ke `[baru, lama]`.
 
+**[AUDIT PASS 10 — N10-04] Penanda kemajuan, bukan perbandingan byte.** Guard
+di atas hanya mengenali state yang **byte-identik** dengan slot 0. State awal
+sesi X3DH baru selalu berbeda karena `authKey`-nya berbeda, jadi dua era tanpa
+satu pun pesan v2 tetap memakan dua slot — probe pass 10 dengan `spqr.wasm`
+hasil build menunjukkan dua state awal 118 byte yang tidak sama dan arsip
+terisi 2 slot. Sekarang baris state membawa penanda `advanced` (field `a` pada
+JSON ter-seal): `saveSpqrState({ advanced: true })` dipakai **hanya** oleh
+langkah ratchet nyata (`encryptSpqrMessage` dan jalur decrypt di
+`utils/crypto.ts`), sedangkan state awal era tidak menyetelnya. `rotate…`
+mengarsipkan **hanya** era yang pernah maju; era tanpa lalu lintas v2 dihapus
+tanpa menggeser FIFO. Baris lama yang belum punya penanda dianggap pernah maju
+(lebih baik menyimpan era yang mungkin berisi lalu lintas daripada membuangnya).
+Tes: dua era dengan state awal berbeda dan tanpa pesan → arsip tetap **satu**
+slot; era yang maju tetap menggeser ke `[baru, lama]` dan penandanya ikut
+terbawa ke arsip.
+
 Dua jalur, keduanya **tidak menghapus** state apa pun:
 
 1. **Peer berhenti menyatakan v2** (`ackV` hilang) → pengiriman kembali ke v1.

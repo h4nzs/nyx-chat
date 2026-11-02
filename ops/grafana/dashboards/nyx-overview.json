@@ -2262,6 +2262,140 @@
         "justifyMode": "auto",
         "textMode": "auto"
       }
+    },
+    {
+      "id": 47,
+      "type": "row",
+      "title": "OHTTP (relay & gateway)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 93
+      }
+    },
+    {
+      "id": 48,
+      "title": "Request gateway tanpa tag klien (10m)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 94
+      },
+      "description": "Rasio request gateway OHTTP yang TIDAK memakai tag klien relay (10 menit): `no-token` = OHTTP_INTERNAL_TOKEN kosong di API/relay, `untagged` = relay tidak menandatangani, `untrusted` = token beda antar proses. Ambang sama dengan alert NyxOhttpClientTagMissing (kuning 10%, merah 50%, alarm setelah 10 menit). `or vector(0)` membuat panel menampilkan 0 saat OHTTP tidak dipakai — itu bukan tanda sehat: pastikan dulu gateway benar-benar menerima trafik lewat `nyx_ohttp_ops_total{route=\"gateway\"}`.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(\n  sum(rate(nyx_ohttp_client_tag_total{status=~\"no-token|untagged|untrusted\"}[10m]))\n  / clamp_min(sum(rate(nyx_ohttp_client_tag_total[10m])), 1e-9)\n) or vector(0)",
+          "legendFormat": "tanpa tag"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 49,
+      "title": "Status tag klien relay (per detik)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 8,
+        "y": 94
+      },
+      "description": "Laju request gateway per status tag (10 menit). `tagged` normal; `no-token` berarti proses API/relay tidak memegang OHTTP_INTERNAL_TOKEN; `untagged` berarti relay hidup tetapi tidak mengirim tag; `untrusted` berarti header tag ada tetapi tokennya tidak cocok. Tidak ada alamat, nilai tag, atau id akun di label — tag relay sendiri tidak pernah diekspos.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (rate(nyx_ohttp_client_tag_total[10m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ],
   "annotations": {

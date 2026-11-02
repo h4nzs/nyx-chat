@@ -15,6 +15,7 @@ import express, { type RequestHandler, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { encodeOhttpKeyConfigCollection } from '@nyx/shared';
 import { OHTTP_CLIENT_TAG, OHTTP_OPS, incCounter } from '../utils/metrics.js';
+import { clientRateLimitTag } from '../utils/clientIp.js';
 import { signOhttpToken } from '../utils/ohttpToken.js';
 import { newJti } from '../utils/jwt.js';
 import { safeEqualStrings } from '../utils/validate.js';
@@ -59,11 +60,20 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
   // Relay/gateway tidak punya sesi, jadi limiter ini satu-satunya penahan
   // penyalahgunaan. Angka konservatif: klien hanya memakai OHTTP untuk
   // endpoint yang di-allowlist (pencarian/prekey), bukan untuk semua trafik.
+  //
+  // [audit N10-02] Key HARUS identitas per klien, bukan `req.ip`: relay
+  // memanggil gateway lewat loopback, jadi `req.ip` = `127.0.0.1` untuk semua
+  // pengguna OHTTP dan 120 request dari dua klien wajar sudah menghabiskan
+  // bucket bersama (probe pass 10: 429 pertama di #121). `clientRateLimitTag`
+  // memakai tag relay (HMAC per alamat) bila ditandatangani, lalu subjek token
+  // OHTTP, lalu IP — sama seperti limiter API, sehingga batas ini benar-benar
+  // per klien dan tetap opaque di penyimpanan.
   const ohttpLimiter = rateLimit({
     windowMs: 60_000,
     limit: 120,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: (req) => clientRateLimitTag(req),
   });
 
   router.get('/config', (_req, res) => {
@@ -103,6 +113,10 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
           config.internalToken,
           ohttpClientAddress(req),
         );
+        // `ohttpClientAddress` hanya memakai `CF-Connecting-IP` bila hop
+        // langsung adalah proxy tepercaya (loopback / OHTTP_TRUSTED_PROXIES);
+        // selain itu alamat soket, sehingga header kiriman klien tidak bisa
+        // memilih bucket (audit N10-03).
       }
       if (tokenMode === 'off') {
         if (!req.user || !config.internalToken) {

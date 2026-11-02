@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛠️ Audit pass 10: limiter OHTTP per klien, trust header relay, penanda era braid, urutan monitor KT (2026-11-02)
+
+**N10-02 — dua limiter OHTTP lain masih satu bucket.** `ohttpLimiter` gateway
+dan limiter relay sama-sama memakai `req.ip` (loopback untuk gateway, alamat
+nginx untuk relay), jadi 140 klien berbeda tetap kena 429 di request #121.
+Keduanya kini memakai identitas klien: gateway `clientRateLimitTag(req)`, relay
+`HMAC(OHTTP_INTERNAL_TOKEN, alamat klien)` — key di memori relay pun bukan
+alamat mentah. Batas 120/menit dan kontrol per klien tetap berlaku.
+
+**N10-03 — `CF-Connecting-IP` dipercaya tanpa syarat.** Relay sekarang memakai
+alamat **soket** lebih dulu dan hanya membaca header itu bila hop langsung ada di
+`OHTTP_TRUSTED_PROXIES` (CSV alamat/CIDR IPv4; default loopback). nginx menimpa
+header dengan `$remote_addr` hasil `real_ip` di blok relay dan `/api`, sehingga
+klien yang menjangkau origin langsung tidak bisa memilih tag/bucket sendiri.
+Deployment nginx-di-container wajib mengisi `OHTTP_TRUSTED_PROXIES`.
+
+**N10-04 — arsip era braid hanya mengenali state byte-identik.** State awal sesi
+X3DH baru selalu berbeda, jadi dua era tanpa pesan tetap memakan dua slot.
+Baris state kini menyimpan penanda `advanced` yang hanya disetel langkah ratchet
+nyata; rotasi mengarsipkan **hanya** era yang pernah maju. Baris lama tanpa
+penanda dianggap pernah maju.
+
+**N10-01 — monitor KT melempar sebelum tahu ada pekerjaan.** Regresi dari pin
+fail-closed N9-02: `monitorKeyTransparency` meresolusi config sebelum memeriksa
+daun state, sehingga tick saat akun belum terhidrasi selalu error. Sekarang
+perencanaan (`planKtMonitor`) dijalankan lebih dulu dan tanpa state siap
+hasilnya `{checked:0}` tanpa membaca config; fail-closed pada jalur verifikasi
+tidak berubah.
+
+**N10-05 — suite server merah.** Tes wiring `ipKey` kembali menegaskan nama
+keyGenerator yang benar (`clientRateLimitTag`), tanpa melonggarkan asersi lain.
+
 ## 🚦 Tiga penutupan audit pass 9: bucket OHTTP anonim, pin KT fail-closed, arsip braid (2026-11-02)
 
 **N9-01 — bukti KT anonim berbagi satu bucket.** Jalur `POST /api/keys/kt/search`
