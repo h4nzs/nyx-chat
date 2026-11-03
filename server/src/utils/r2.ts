@@ -12,6 +12,15 @@ export const s3Client = new S3Client({
   forcePathStyle: true
 })
 
+/**
+ * Kredensial R2 lengkap? Presign tanpa nilai ini hanya menghasilkan 500 dari
+ * SDK ("No value provided for input HTTP label: Bucket") — di e2e/CI itu
+ * tampak seperti bug klien. Semua rute yang mem-presign WAJIB memeriksa ini
+ * lebih dulu dan menjawab 503 dengan kode yang bisa dibaca.
+ */
+export const r2Configured = (): boolean =>
+  Boolean(env.r2AccountId && env.r2AccessKeyId && env.r2SecretAccessKey && env.r2BucketName)
+
 // Generate URL upload yang valid selama 5 menit (default)
 // urlTtl: Berapa lama LINK upload valid (detik)
 // contentLength: Ukuran body yang diizinkan. WAJIB untuk upload dari klien:

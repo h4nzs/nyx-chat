@@ -85,7 +85,7 @@ vi.mock('../linkHistoryClient', async () => {
       sodium.to_hex(sodium.crypto_generichash(32, bytes)),
     generateArchiveKey: async () => sodium.randombytes_buf(32),
     // [docs/40 §40.7 langkah 8] Kuota dibaca sebelum unggah; default "cukup".
-    getHistoryLimits: vi.fn(async () => ({ maxBytes: 500 * 1024 * 1024, verified: true })),
+    getHistoryLimits: vi.fn(async () => ({ maxBytes: 500 * 1024 * 1024, verified: true, available: true })),
     markHistoryReady: vi.fn(),
     presignHistoryUpload: vi.fn(),
     sealArchiveKey: vi.fn(),
@@ -377,7 +377,7 @@ describe('arsip riwayat: kuota', () => {
   });
 
   it('membatalkan unggah sebelum presign bila arsip melebihi kuota', async () => {
-    vi.mocked(getHistoryLimits).mockResolvedValueOnce({ maxBytes: 64, verified: false });
+    vi.mocked(getHistoryLimits).mockResolvedValueOnce({ maxBytes: 64, verified: false, available: true });
 
     await expect(
       sendHistoryArchive({

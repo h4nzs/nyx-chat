@@ -18,8 +18,8 @@
     },
     {
       "path": "packages/pir-wasm/dist/pir-client.wasm",
-      "bytes": 156476,
-      "sha256": "b73794408831b8c0048c77320ad0ce3a1aac08e2b7a65b5340ae7ec882242051",
+      "bytes": 156324,
+      "sha256": "f3a3bd7d3247812c807f42d9c79032a0e8c49d71a831dc4e8805f6df665aac0a",
       "source": "packages/pir-wasm@nyx (chalametpir-client 0.8.0)"
     }
   ]

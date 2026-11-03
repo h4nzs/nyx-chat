@@ -26,7 +26,7 @@ import {
   validateHistorySize,
 } from '../utils/linkHistoryObject.js';
 import { LINK_HISTORY_OPS, incCounter } from '../utils/metrics.js'
-import { deleteR2File, getPresignedDownloadUrl, getPresignedUploadUrl, headR2Object } from '../utils/r2.js';
+import { deleteR2File, getPresignedDownloadUrl, getPresignedUploadUrl, headR2Object, r2Configured } from '../utils/r2.js';
 
 // [docs/40 §40.6] Arsip riwayat sekali-pakai untuk perangkat hasil link.
 //
@@ -130,6 +130,11 @@ router.post(
         urlTtl?: number;
       };
 
+      // [OPS 2026-11-03] Presign tanpa kredensial R2 hanya menghasilkan 500 dari
+      // SDK ("No value provided for input HTTP label: Bucket"), yang di e2e/CI
+      // tampak seperti bug klien. Jawab eksplisit, sejajar `/api/uploads`.
+      if (!r2Configured()) throw new ApiError(503, 'LINK_HISTORY_UNAVAILABLE');
+
       await assertFreshDeviceOfUser(req.user.id, deviceId);
 
       const account = await accountTier(req.user.id);
@@ -177,6 +182,11 @@ router.get('/limits', requireAuth, generalLimiter, async (req, res, next) => {
     res.json({
       maxBytes: historySizeLimit({ tier: account.tier, verified: account.isVerified }),
       verified: account.isVerified,
+      // [docs/40 §40.7 langkah 8] Prasyarat unggah yang sebenarnya: tanpa
+      // kredensial R2, presign dijawab 503 dan tidak ada byte yang dikirim.
+      // Klien berhenti SEBELUM mengekspor arsip, dan uji E2E memakai nilai ini
+      // untuk memberi alasan tertulis saat R2 tidak tersedia.
+      available: r2Configured(),
     });
   } catch (error) {
     next(error);

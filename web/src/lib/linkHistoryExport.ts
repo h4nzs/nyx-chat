@@ -226,6 +226,12 @@ export async function sendHistoryArchive(input: {
     // batasnya tidak bisa dibaca (jaringan), presign server tetap penegak
     // terakhir — jangan gagalkan transfer hanya karena endpoint limits.
     const limits = await getHistoryLimits().catch(() => null);
+    // [OPS 2026-11-03] Tanpa kredensial R2 server menjawab 503 di presign.
+    // Hentikan sebelum arkrip diekspor/diunggah: percuma, dan perangkat baru
+    // hanya menunggu intent yang tak akan pernah siap.
+    // `=== false` (bukan `!limits.available`): server lama tidak mengirim field
+    // ini, dan ketiadaannya berarti "belum tahu", bukan "tidak tersedia".
+    if (limits && limits.available === false) throw new Error('HISTORY_UNAVAILABLE');
     if (limits && limits.maxBytes > 0 && archive.size > limits.maxBytes) {
       // `catch` di bawah memanggil `abort` (intent/presign dibersihkan) supaya
       // perangkat baru tidak menunggu 60 detik untuk arsip yang tak akan datang.

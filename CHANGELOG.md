@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧪 CI hijau: privacyPass deterministik, PIR WASM ter-pin, link-history tanpa R2 (2026-11-03)
+
+**`Unit Tests` — tes privacyPass gagal sesekali (1 dari 1136 di CI).** Mock
+issuer menandatangani blinded representative dengan pasangan kunci LAIN. RFC 9474
+menandatangani representative apa adanya (`rsasp1(sk, m)`), dan representative
+hasil blinding dijamin < modulus *issuer* — belum tentu < modulus kunci lain.
+Bila lebih besar, pustaka melempar `signature representative out of range` dari
+DALAM mock; error itu lolos lewat `api()` (bukan jalur verifikasi klien) sehingga
+tes merah dengan pesan pustaka. Mock kini merusak satu byte tanda tangan jujur:
+sama-sama tidak bisa diverifikasi oleh klien, tanpa bergantung keberuntungan
+modulus.
+
+**`WASM reproducible` — `pir-client.wasm` tidak reprodusibel.**
+`packages/pir-wasm` satu-satunya paket tanpa `rust-toolchain.toml`, jadi
+`build.sh` memakai toolchain AKTIF milik pemanggil. `stable` dan `1.95.0`
+sama-sama melaporkan `rustc 1.95.0` tetapi membawa build std wasm32 yang berbeda
+(hash `b7379440…` vs `f3a3bd7d…`). Pin ditambahkan (paritas dengan `spqr-wasm` dan
+`keytrans-wasm-v2`), artefak + manifest di-build ulang dari resep ter-pin, dan
+`--verify` hijau dari root kanonik.
+
+**`E2E` — deviceLinking gagal karena R2 tidak dikonfigurasi.** Presign tanpa
+kredensial R2 menghasilkan 500 dari SDK ("No value provided for input HTTP
+label: Bucket"), yang terbaca seperti bug klien. `POST /history/presign` kini
+menjawab **503 `LINK_HISTORY_UNAVAILABLE`**, `GET /history/limits` menyertakan
+`available`, klien berhenti **sebelum** mengekspor arsip, dan spec menandai
+asersi arsip sebagai dilewati (dengan alasan tertulis) sementara alur tautan QR
+tetap diuji penuh.
+
 ## 🛡️ Sidecar WebTransport: single-active-device atomik (2026-11-03)
 
 **Race lama (dicatat pass 4, tidak pernah ditutup).** `main.rs` mencari sesi

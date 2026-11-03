@@ -47,6 +47,26 @@ test.describe('Tautan perangkat (QR)', () => {
     await registerUser(page, 'Link Owner', username);
     await waitForTransport(page);
 
+    // [OPS 2026-11-03] Arsip riwayat butuh kredensial R2. Tanpa itu presign
+    // dijawab 503 `LINK_HISTORY_UNAVAILABLE` dan tidak ada byte yang dikirim —
+    // jadi asersi arsip TIDAK bisa diverifikasi di lingkungan ini (CI tidak
+    // punya R2). Alur tautan itu sendiri (QR → SAS → approve → login) tetap
+    // diuji penuh; bagian arsip ditandai sebagai dilewati, bukan gagal palsu.
+    const historyAvailable = await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { authFetch } = await import('/src/lib/api.ts');
+      const limits = (await authFetch('/api/auth/link/history/limits').catch(() => null)) as
+        | { available?: boolean }
+        | null;
+      return limits?.available !== false;
+    });
+    test.info().annotations.push({
+      type: historyAvailable ? 'arsip-riwayat' : 'arsip-riwayat-dilewati',
+      description: historyAvailable
+        ? 'R2 tersedia: arsip riwayat diverifikasi penuh.'
+        : 'R2 tidak dikonfigurasi (LINK_HISTORY_UNAVAILABLE): asersi arsip riwayat dilewati, alur tautan tetap diuji.',
+    });
+
     // [LINK 2026-10-29] Simulasi blob kontak yang disegel identitas LAMA (byte
     // apa pun yang bukan milik perangkat baru). Setelah link, perangkat baru
     // WAJIB menggantinya dengan blob identitasnya sendiri — kalau tidak,
@@ -190,10 +210,18 @@ test.describe('Tautan perangkat (QR)', () => {
         hasConversation: conversations.some((c) => c.id === conversationId),
       };
     }, { peerId: HISTORY_PEER, conversationId: HISTORY_CONV });
-    expect(historyAfterLink.hasPeer).toBe(true);
-    expect(historyAfterLink.historyState).toBe('none');
-    expect(historyAfterLink.hasConversation).toBe(true);
-    expect(historyAfterLink.contents).toEqual(['halo lama 1', 'halo lama 2', 'halo lama 3']);
+    if (historyAvailable) {
+      expect(historyAfterLink.hasPeer).toBe(true);
+      expect(historyAfterLink.historyState).toBe('none');
+      expect(historyAfterLink.hasConversation).toBe(true);
+      expect(historyAfterLink.contents).toEqual(['halo lama 1', 'halo lama 2', 'halo lama 3']);
+    } else {
+      // Kebalikannya yang dibuktikan: tanpa R2 tidak ada arsip yang menyeberang.
+      console.warn('[deviceLinking] arsip riwayat dilewati: R2 tidak dikonfigurasi');
+      expect(historyAfterLink.hasPeer).toBe(false);
+      expect(historyAfterLink.hasConversation).toBe(false);
+      expect(historyAfterLink.contents).toEqual([]);
+    }
 
     await newDeviceContext.close();
   });

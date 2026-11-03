@@ -1,0 +1,14 @@
+# [R1 2026-11-03] Toolchain dipin untuk artefak WASM yang DI-COMMIT.
+#
+# Sebelum ini paket PIR satu-satunya yang tidak punya pin: `build.sh` memakai
+# toolchain AKTIF milik pemanggil. `stable` di mesin pengembang dan `1.95.0`
+# di CI sama-sama melaporkan `rustc 1.95.0 (59807616e)` tetapi membawa build
+# std wasm32 yang berbeda, jadi hash `dist/pir-client.wasm` bergeser:
+#   - toolchain `stable`          → b7379440… (artefak lama yang di-commit)
+#   - toolchain `1.95.0` (CI)     → f3a3bd7d… (job `wasm` merah)
+# Pin ini membuat satu-satunya sumber kebenaran = versi di berkas ini, sama
+# seperti `packages/spqr-wasm` dan `packages/keytrans-wasm-v2`.
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

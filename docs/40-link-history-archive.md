@@ -331,6 +331,24 @@ konsumsi sah `ok`/`missing` tidak memicunya); `scripts/drill-alerts.sh` lulus
 
 ---
 
+### 40.6.1 R2 tidak dikonfigurasi: 503, bukan 500 (2026-11-03)
+
+`POST /history/presign` memanggil presign R2 tanpa memeriksa kredensial, jadi
+deployment tanpa `R2_*` menjawab 500 dari SDK Aws ("No value provided for input
+HTTP label: Bucket"). Di e2e/CI itu terbaca seperti bug klien, dan perangkat
+lama tetap mengekspor arsip (bisa puluhan MB) sebelum ditolak. Sekarang:
+
+- `r2Configured()` (`server/src/utils/r2.ts`, satu sumber dengan
+  `/api/uploads`) diperiksa lebih dulu → **503 `LINK_HISTORY_UNAVAILABLE`**.
+- `GET /history/limits` menyertakan `available: boolean`; klien
+  (`getHistoryLimits`) memakainya untuk berhenti **sebelum** mengekspor arsip.
+- `web/e2e/deviceLinking.spec.ts` membaca nilai itu: bila `false`, asersi arsip
+ditandai **dilewati** lewat anotasi tes (alur QR → SAS → approve → login tetap
+diuji penuh), dan yang dibuktikan justru kebalikannya — tidak ada kontak maupun
+percakapan yang menyeberang tanpa R2. Field yang tidak dikirim server lama
+diperlakukan sebagai "belum tahu" (`available !== false`), bukan "tidak
+tersedia".
+
 ## 40.7 Ekspor di perangkat lama
 
 Modul baru `web/src/lib/linkHistoryExport.ts`, memakai **pembaca yang sudah

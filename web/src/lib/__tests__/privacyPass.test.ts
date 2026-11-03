@@ -137,13 +137,30 @@ describe('issuance', () => {
       if (path === '/api/groups/pp/issuer') return { suite: PP_SUITE, keyId: 'test-key', publicJwk };
       if (path === '/api/groups/pp/issue') {
         const body = JSON.parse(options?.body ?? '{}') as { blinded?: string[] };
-        // Signature dari kunci lain: klien harus menolaknya sebelum menyimpan.
-        const other = await RSABSSA.SHA384.generateKey({ modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) });
-        return {
-          signatures: await Promise.all((body.blinded ?? []).map(async (blinded) => base64url(await suite.blindSign(other.privateKey, bytes(blinded))))),
-          suite: PP_SUITE,
-          keyId: 'test-key',
-        };
+        // Signature yang TIDAK bisa diverifikasi: ambil tanda tangan jujur lalu
+        // rusak satu byte.
+        //
+        // [2026-11-03] Sebelumnya tes ini menandatangani blinded message dengan
+        // pasangan kunci LAIN. Terdengar lebih realistis, tetapi TIDAK
+        // deterministik: RFC 9474 menandatangani representative apa adanya
+        // (`rsasp1(sk, m)`), dan representative hasil blinding dijamin <
+        // modulus ISSUER — belum tentu < modulus kunci lain. Bila lebih besar,
+        // pustaka melempar "signature representative out of range" dari DALAM
+        // mock; error itu lolos lewat `api()` (bukan jalur verifikasi klien),
+        // jadi tes gagal sesekali dengan pesan pustaka (terjadi di CI
+        // 2026-11-03) padahal yang diuji bukan itu. Merusak byte memberi hasil
+        // yang sama untuk klien — `finalize` + verifikasi gagal — tanpa
+        // bergantung pada keberuntungan modulus.
+        const signatures = await Promise.all(
+          (body.blinded ?? []).map(async (blinded) => {
+            const honest = await suite.blindSign(keyPair.privateKey, bytes(blinded));
+            const corrupted = new Uint8Array(honest);
+            const last = corrupted.length - 1;
+            corrupted[last] = corrupted[last]! ^ 0x01;
+            return base64url(corrupted);
+          }),
+        );
+        return { signatures, suite: PP_SUITE, keyId: 'test-key' };
       }
       throw new Error(`unexpected path ${path}`);
     });

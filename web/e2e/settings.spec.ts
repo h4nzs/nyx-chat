@@ -33,8 +33,10 @@ test.describe('Settings & Emergency Eject', () => {
     await expect(confirmBtn).toBeVisible({ timeout: 10000 });
     await confirmBtn.click({ force: true });
 
-    // 4. Verify redirected to login/onboarding
-    await expect(page).toHaveURL(/(\/login|\/register|\/)$/, { timeout: 15000 });
+    // 4. Verify redirected to login/onboarding. `?reason=revoked` tetap sah:
+    //    emergency logout mematikan semua sesi, dan listener force_logout
+    //    menambahkan query itu. Yang diuji tujuan navigasinya, bukan query-nya.
+    await expect(page).toHaveURL(/^\/(login|register)?(\?.*)?$/, { timeout: 15000 });
 
     // 5. Verify IndexedDB is functionally cleared by attempting to go back to a protected route.
     //    Redirect `/chat` → login hanya terjadi SETELAH bootstrap selesai (GET

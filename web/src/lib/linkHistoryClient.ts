@@ -40,6 +40,12 @@ export interface HistoryLimits {
   /** Kuota satu arsip untuk akun ini (byte) — angka yang sama dipakai presign. */
   maxBytes: number;
   verified: boolean;
+  /**
+   * Server punya kredensial R2? `false` = presign akan dijawab 503
+   * (`LINK_HISTORY_UNAVAILABLE`), jadi arsip tidak perlu diekspor sama sekali.
+   * Server lama tidak mengirim field ini; dianggap tersedia.
+   */
+  available: boolean;
 }
 
 export interface HistoryDownloadTicket {
@@ -84,6 +90,7 @@ export async function getHistoryLimits(): Promise<HistoryLimits> {
   return {
     maxBytes: typeof res?.maxBytes === 'number' && res.maxBytes > 0 ? res.maxBytes : 0,
     verified: Boolean(res?.verified),
+    available: res?.available !== false,
   };
 }
 
