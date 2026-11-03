@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛡️ Sidecar WebTransport: single-active-device atomik (2026-11-03)
+
+**Race lama (dicatat pass 4, tidak pernah ditutup).** `main.rs` mencari sesi
+user dengan `sessions.iter()`, menghapusnya, lalu meng-insert sesi baru sebagai
+tiga langkah terpisah. Dua AUTH yang selesai bersamaan bisa sama-sama tidak
+melihat sesi lawan (belum di-insert) sehingga keduanya lolos — kebijakan
+satu-perangkat-aktif bolong justru pada jalur tercepat.
+
+**Perbaikan.** Registry sesi pindah ke `src/sessions.rs` (`SessionTable`) dengan
+lock per shard user: find+remove+insert menjadi satu blok kritis, jadi AUTH user
+yang sama selalu serial dan sesi terakhir adalah satu-satunya yang hidup.
+Fan-out downstream memakai `matching_prefix()` yang menyalin koneksi lebih dulu,
+sehingga tidak ada kunci DashMap yang dipegang saat mengirim frame. Uji konkuren
+16 AUTH × 50 putaran menuntut tepat satu sesi tersisa dan tepat 15 pemutusan.
+
 ## 🛠️ Audit pass 12: validator trust proxy fail-closed, perbaikan 426 di-commit (2026-11-03)
 
 **N12-01 — `OHTTP_TRUSTED_PROXIES` menerima CIDR tanpa prefix sebagai `/0`.**

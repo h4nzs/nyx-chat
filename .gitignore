@@ -87,6 +87,7 @@ server/pir-snapshot.json
 server/kt-query/nyx-kt-query-v2
 server/kt-query/nyx-kt-auditor-v2
 server/kt-query/nyx-kt-v2-init
+server/kt-query/nyx-kt-v2-check
 
 # Oracle DR lintas-implementasi (`tools/dr-oracle`, docs/30 WS-G(6)): sumber Go
 # di-commit, binernya tidak (`go build`/`go build ./...` meninggalkannya di sini).

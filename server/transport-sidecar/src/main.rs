@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use bytes::{BufMut, BytesMut};
-use dashmap::DashMap;
 use dotenvy::dotenv;
 use futures_util::StreamExt;
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -29,6 +28,7 @@ use transport_sidecar::protocol::{
     parse_transport_hello, InboundFrame, InboundHeader, ACK_OPCODE, FRAME_HEADER_BYTES,
     HANDSHAKE_OPCODE, KICK_OPCODE, MAX_BIDI_PAYLOAD_BYTES,
 };
+use transport_sidecar::sessions::SessionTable;
 
 // [docs/30 WS-G(6)] Metrik transport. Definisi + rendering hidup di crate lib
 // (`src/metrics.rs`, murni & teruji tanpa soket); di sini hanya jalur I/O.
@@ -106,7 +106,9 @@ struct DownstreamMessage {
     payload: String,
 }
 
-type SessionMap = Arc<DashMap<String, Arc<Connection>>>; // Key: "user_id:device_id"
+/// Key: `"user_id:device_id:session_uuid"`. Penggantian sesi per user
+/// dilakukan atomik di `SessionTable::replace_user` (`sessions.rs`).
+type SessionMap = Arc<SessionTable<Arc<Connection>>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -233,7 +235,7 @@ async fn main() -> Result<()> {
 
     let server = Endpoint::server(config).context("Failed to create server")?;
 
-    let sessions: SessionMap = Arc::new(DashMap::new());
+    let sessions: SessionMap = Arc::new(SessionTable::new());
 
     // [docs/30 WS-G(6) · docs/10 §10.12] Exporter `/metrics` sidecar.
     //
@@ -334,12 +336,8 @@ async fn main() -> Result<()> {
 
                 if let Some(target_device) = down_msg.device_id {
                     let prefix = format!("{}:{}:", down_msg.user_id, target_device);
-                    for item in sessions_clone
-                        .iter()
-                        .filter(|i| i.key().starts_with(&prefix))
-                    {
+                    for (_, conn) in sessions_clone.matching_prefix(&prefix) {
                         delivered += 1;
-                        let conn = item.value().clone();
                         let op_code = down_msg.op_code;
                         let payload_clone = payload_bytes.clone();
 
@@ -394,12 +392,8 @@ async fn main() -> Result<()> {
                 } else {
                     // Broadcast to all devices of this user
                     let prefix = format!("{}:", down_msg.user_id);
-                    for item in sessions_clone
-                        .iter()
-                        .filter(|i| i.key().starts_with(&prefix))
-                    {
+                    for (_, conn) in sessions_clone.matching_prefix(&prefix) {
                         delivered += 1;
-                        let conn = item.value().clone();
                         let op_code = down_msg.op_code;
                         let payload_clone = payload_bytes.clone();
 
@@ -640,32 +634,22 @@ async fn handle_connection(
         user_id, device_id
     );
 
-    // Enforce "One User, One Active Device"
-    let user_prefix = format!("{}:", user_id);
-    let mut sessions_to_kick = Vec::new();
-
-    // Find all active sessions for this user
-    for item in sessions.iter() {
-        if item.key().starts_with(&user_prefix) {
-            sessions_to_kick.push(item.key().clone());
-        }
-    }
-
-    // Kick existing sessions
-    for old_key in sessions_to_kick {
-        if let Some((_, old_conn)) = sessions.remove(&old_key) {
-            metrics.session_kicked();
-            info!("Kicking existing session for user {}: {}", user_id, old_key);
-            // Close with reason (1000 is generic closure, could use a custom app code)
-            old_conn.close(1000u32.into(), b"Logged in on another device");
-        }
-    }
-
+    // [audit pass 4, ditutup 2026-11-03] Enforce "One User, One Active Device"
+    // secara ATOMIK. Dulu kick-lalu-insert adalah dua langkah terpisah: dua
+    // AUTH bersamaan untuk user yang sama bisa sama-sama tidak melihat sesi
+    // lawan (belum di-insert) dan keduanya lolos. `replace_user` memegang lock
+    // per user selama find+remove+insert, jadi pemenang terakhir adalah
+    // satu-satunya sesi hidup (uji konkuren di `sessions.rs`).
     let session_uuid = uuid::Uuid::new_v4().to_string();
     let session_key = format!("{}:{}:{}", user_id, device_id, session_uuid);
 
     let conn = Arc::new(conn);
-    sessions.insert(session_key.clone(), conn.clone());
+    for (old_key, old_conn) in sessions.replace_user(&user_id, session_key.clone(), conn.clone()) {
+        metrics.session_kicked();
+        info!("Kicking existing session for user {}: {}", user_id, old_key);
+        // Close with reason (1000 is generic closure, could use a custom app code)
+        old_conn.close(1000u32.into(), b"Logged in on another device");
+    }
 
     // 2. Continuous Bidirectional Stream Loop (for Handshakes, etc.)
     let c_bi = conn.clone();
