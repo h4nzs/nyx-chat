@@ -35,8 +35,12 @@ test.describe('Settings & Emergency Eject', () => {
 
     // 4. Verify redirected to login/onboarding. `?reason=revoked` tetap sah:
     //    emergency logout mematikan semua sesi, dan listener force_logout
-    //    menambahkan query itu. Yang diuji tujuan navigasinya, bukan query-nya.
-    await expect(page).toHaveURL(/^\/(login|register)?(\?.*)?$/, { timeout: 15000 });
+    //    menambahkan query itu. Playwright `toHaveURL(regex)` mencocokkan URL
+    //    PENUH, sedangkan regex pathname dimulai `/` — jadi periksa pathname
+    //    lewat `poll`, bukan URL penuh.
+    await expect
+      .poll(() => new URL(page.url()).pathname, { timeout: 15000 })
+      .toMatch(/^\/(login|register)?$/);
 
     // 5. Verify IndexedDB is functionally cleared by attempting to go back to a protected route.
     //    Redirect `/chat` → login hanya terjadi SETELAH bootstrap selesai (GET
