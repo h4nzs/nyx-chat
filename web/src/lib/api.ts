@@ -155,7 +155,21 @@ export async function getCsrfToken(): Promise<string> {
         headers: { 'x-nyx-installation-id': await getClientInstallationId() },
         signal,
       });
-      if (!res.ok) throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+      if (!res.ok) {
+        // [R2] 426 di jalur ini juga penolakan gerbang versi. Tanpa ini klien
+        // yang terlalu tua tidak pernah melihat layar "perbarui NYX":
+        // `getCsrfToken` mengembalikan "" dan pemanggil hanya mendapat
+        // `CSRF_UNAVAILABLE` (status 0), padahal server sudah menyebut versi
+        // minimum dan semua request memang ditolak.
+        if (res.status === 426) {
+          try {
+            reportClientVersionRejection(await res.json());
+          } catch {
+            // Body bukan JSON: biarkan kegagalan biasa di bawah yang dilaporkan.
+          }
+        }
+        throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+      }
 
       const data = await res.json();
       csrfTokenCache = data.csrfToken;

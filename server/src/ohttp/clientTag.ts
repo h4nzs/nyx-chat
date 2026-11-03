@@ -149,13 +149,36 @@ function ipv6ToBigInt(value: string): bigint | null {
   return acc;
 }
 
+/**
+ * Pisahkan entri `alamat` / `alamat/prefix` menjadi bentuk yang dipakai
+ * `proxyMatches`. `null` = bentuk cacat, dan pemanggil **tidak boleh**
+ * mempercayainya.
+ *
+ * [audit N12-01] `Number('')` adalah `0`, jadi `10.0.0.0/` dulu lolos sebagai
+ * prefix `/0` — dan `/0` berarti "percaya semua hop". Salah-setel yang tampak
+ * sah justru memperluas kepercayaan `CF-Connecting-IP`. Prefix sekarang wajib
+ * angka desimal; garis miring ganda juga ditolak (dulu `split('/')` hanya
+ * mengambil dua bagian pertama sehingga `10.0.0.0/8/8` berlaku sebagai `/8`).
+ */
+function parseProxyEntry(entry: string): { base: string; bits: number | null } | null {
+  const parts = entry.split('/');
+  if (parts.length > 2) return null;
+  const base = normalizeAddress(parts[0] ?? '');
+  if (base === '') return null;
+  if (parts.length === 1) return { base, bits: null };
+  const bitsRaw = parts[1] ?? '';
+  if (!/^\d{1,3}$/.test(bitsRaw)) return null;
+  return { base, bits: Number(bitsRaw) };
+}
+
 /** `entry` = alamat persis atau CIDR IPv4/IPv6 (`172.16.0.0/12`, `fd00::/8`). */
 function proxyMatches(peer: string, entry: string): boolean {
-  const [baseRaw, bitsRaw] = entry.split('/');
-  const base = normalizeAddress(baseRaw ?? '');
-  if (bitsRaw === undefined) return base === peer;
-  const bits = Number(bitsRaw);
-  if (!Number.isInteger(bits) || bits < 0) return false;
+  const parsed = parseProxyEntry(entry);
+  // Fail-closed: entri yang tidak bisa diparse tidak pernah cocok, bahkan bila
+  // bentuknya kebetulan menghasilkan angka (lihat N12-01 di atas).
+  if (!parsed) return false;
+  const { base, bits } = parsed;
+  if (bits === null) return base === peer;
 
   if (peer.includes(':')) {
     if (bits > 128) return false;
@@ -180,16 +203,23 @@ function proxyMatches(peer: string, entry: string): boolean {
  * boleh hilang diam-diam: relay mencetak alasannya saat start. `null` = sah.
  */
 export function invalidTrustedProxyReason(entry: string): string | null {
-  const [baseRaw, bitsRaw] = entry.split('/');
-  const base = normalizeAddress(baseRaw ?? '');
+  const parts = entry.split('/');
+  if (parts.length > 2) return 'lebih dari satu tanda garis miring';
+  const base = normalizeAddress(parts[0] ?? '');
   if (base === '') return 'entri kosong';
   const isV4 = ipv4ToInt(base) !== null;
   const isV6 = !isV4 && ipv6ToBigInt(base) !== null;
   if (!isV4 && !isV6) return 'bukan alamat IP';
-  if (bitsRaw === undefined) return null;
-  const bits = Number(bitsRaw);
+  if (parts.length === 1) return null;
   const max = isV4 ? 32 : 128;
-  if (!Number.isInteger(bits) || bits < 0 || bits > max) {
+  const bitsRaw = parts[1] ?? '';
+  // [audit N12-01] Garis miring tanpa angka BUKAN `/0`: `Number('')` adalah 0,
+  // sehingga entri cacat dulu berubah menjadi "percaya semua hop". `/0` hanya
+  // berlaku bila operator menulisnya eksplisit (`0.0.0.0/0`).
+  if (bitsRaw === '') return `prefix kosong setelah garis miring (0–${max})`;
+  if (!/^\d+$/.test(bitsRaw)) return `prefix /${bitsRaw} bukan angka (0–${max})`;
+  const bits = Number(bitsRaw);
+  if (bits > max) {
     return `prefix /${bitsRaw} tidak sah untuk ${isV4 ? 'IPv4' : 'IPv6'} (0–${max})`;
   }
   return null;

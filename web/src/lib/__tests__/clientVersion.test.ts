@@ -40,6 +40,9 @@ function errorResponse(status: number, body: unknown) {
     status,
     statusText: 'Error',
     text: async () => JSON.stringify(body),
+    // `getCsrfToken` membaca body 426 sebagai JSON untuk melaporkan gerbang
+    // versi; tanpa ini jalur itu hanya terlihat sebagai kegagalan tak terbaca.
+    json: async () => body,
   } as unknown as Response
 }
 
@@ -129,9 +132,46 @@ describe('jawaban 426 → layar khusus, bukan toast (R2)', () => {
     })
   })
 
-  it('CLIENT_VERSION_REQUIRED dibedakan dari too-old (hanya mutasi yang ditolak)', async () => {
+  it('426 pada GET /api/csrf-token tetap menyalakan layar terlalu-tua', async () => {
+    // too-old menolak SEMUA request, termasuk pengambilan token CSRF. Tanpa
+    // pelaporan di jalur itu pengguna hanya melihat kegagalan CSRF generik dan
+    // layar "perbarui NYX" tidak pernah muncul — padahal tidak ada mutasi yang
+    // bisa berhasil sampai aplikasi diperbarui.
+    //
+    // Sengaja ditaruh sebagai mutasi PERTAMA di berkas ini: cache token CSRF
+    // hidup di scope modul `api.ts` dan tidak direset antar tes, jadi mutasi
+    // setelah tes lain tidak lagi melewati jalur `GET /api/csrf-token`.
     fetchMock.mockResolvedValue(
-      errorResponse(426, { error: 'CLIENT_VERSION_REQUIRED', minimumVersion: '3.2.0' })
+      errorResponse(426, {
+        error: 'CLIENT_TOO_OLD',
+        minimumVersion: '3.1.0',
+        clientVersion: '2.4.0',
+      })
+    )
+
+    await expect(api('/api/messages', { method: 'POST', timeoutMs: 1000 })).rejects.toThrow(
+      /CSRF_UNAVAILABLE/
+    )
+
+    expect(toastError).not.toHaveBeenCalled()
+    expect(useClientVersionGateStore.getState().rejection).toEqual({
+      kind: 'too-old',
+      minimumVersion: '3.1.0',
+      clientVersion: '2.4.0',
+    })
+  })
+
+  it('CLIENT_VERSION_REQUIRED dibedakan dari too-old (hanya mutasi yang ditolak)', async () => {
+    // Mutasi wajib melewati `GET /api/csrf-token` lebih dulu, dan di mode ini
+    // baca masih jalan — jadi endpoint CSRF menjawab 200. Mock yang menjawab
+    // 426 untuk SEMUA request menguji keadaan yang tidak ada di mode ini dan
+    // membuat POST berhenti sebagai `CSRF_UNAVAILABLE` sebelum sampai ke server.
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes('/api/csrf-token')
+          ? okResponse({ csrfToken: 'csrf-token' })
+          : errorResponse(426, { error: 'CLIENT_VERSION_REQUIRED', minimumVersion: '3.2.0' })
+      )
     )
 
     await expect(api('/api/messages', { method: 'POST', timeoutMs: 1000 })).rejects.toMatchObject({

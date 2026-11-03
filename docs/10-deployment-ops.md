@@ -1328,7 +1328,11 @@ gateway bukan loopback; untuk selfhost baris log-nya justru menegaskan bahwa
 nilai kosong memang benar, sehingga tidak menuntun operator ke nilai yang
 ditolak `verify-boot.sh`. Entri `OHTTP_TRUSTED_PROXIES` yang tidak bisa diparse
 (CIDR IPv6 salah prefix, nama host) dilaporkan per entri saat start dan entri
-itu tidak dipercaya (audit N11-05).
+itu tidak dipercaya (audit N11-05). Bentuk `10.0.0.0/` (garis miring tanpa
+angka) dan `10.0.0.0/8/8` kini ikut ditolak: dulu `Number('')` membuat yang
+pertama berlaku sebagai `/0`, yaitu "percaya semua hop", sehingga salah-setel
+justru membuka `CF-Connecting-IP` (audit N12-01). Prefix `/0` hanya berlaku bila
+ditulis eksplisit (`0.0.0.0/0`), dan entri cacat tidak pernah mencocokkan apa pun.
 
 ```promql
 # Operasi tanpa OHTTP_INTERNAL_TOKEN (kondisi yang harus ditindak)

@@ -728,6 +728,16 @@ test('alamat relay: CF-Connecting-IP diabaikan bila hop bukan proxy tepercaya', 
   assert.equal(addressOf('fd00::5', { trustedProxies: ['fd00:1::/32'] }), 'fd00::5');
   // Prefix di luar rentang keluarga alamatnya tidak pernah cocok.
   assert.equal(addressOf('fd00::5', { trustedProxies: ['fd00::/129'] }), 'fd00::5');
+  // [audit N12-01] Garis miring tanpa angka BUKAN `/0`. Dulu `Number('')`
+  // adalah 0 sehingga entri ini menjadi "percaya semua hop" — header klien
+  // dipakai untuk alamat apa pun. Sekarang entri cacat tidak cocok sama sekali.
+  assert.equal(addressOf('203.0.113.9', { trustedProxies: ['10.0.0.0/'] }), '203.0.113.9');
+  assert.equal(addressOf('fd00::5', { trustedProxies: ['fd00::/'] }), 'fd00::5');
+  // Garis miring ganda dulu dieksekusi sebagai `/8` (split mengambil dua bagian).
+  assert.equal(addressOf('172.18.0.5', { trustedProxies: ['172.16.0.0/8/8'] }), '172.18.0.5');
+  // `/0` yang ditulis eksplisit tetap dihormati: itu keputusan operator, bukan
+  // salah-setel yang tidak terlihat.
+  assert.equal(addressOf('172.18.0.5', { trustedProxies: ['0.0.0.0/0'] }), '203.0.113.9');
 });
 
 // [audit N11-05] Entri yang salah bentuk harus terlihat saat start, bukan
@@ -739,4 +749,11 @@ test('OHTTP_TRUSTED_PROXIES: entri tidak sah dilaporkan, bukan diabaikan diam-di
   assert.match(invalidTrustedProxyReason('fd00::/129') ?? '', /IPv6/);
   assert.match(invalidTrustedProxyReason('172.16.0.0/33') ?? '', /IPv4/);
   assert.equal(invalidTrustedProxyReason('nginx.internal'), 'bukan alamat IP');
+  // [audit N12-01] Bentuk cacat yang dulu lolos tanpa peringatan.
+  assert.match(invalidTrustedProxyReason('10.0.0.0/') ?? '', /prefix kosong/);
+  assert.match(invalidTrustedProxyReason('fd00::/') ?? '', /prefix kosong/);
+  assert.match(invalidTrustedProxyReason('10.0.0.0/8/8') ?? '', /garis miring/);
+  assert.match(invalidTrustedProxyReason('10.0.0.0/eight') ?? '', /bukan angka/);
+  // `/0` eksplisit tetap sah; nilainya memang "percaya semua hop".
+  assert.equal(invalidTrustedProxyReason('0.0.0.0/0'), null);
 });

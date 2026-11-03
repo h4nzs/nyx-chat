@@ -444,7 +444,8 @@ bukan alamat mentah. Kontrolnya tetap: satu tag/klien yang sama masih dibatasi
 tanpa syarat, padahal nginx hanya menyetel `Host` untuk blok relay — header
 klien lain diteruskan apa adanya, sehingga klien yang menjangkau origin langsung
 bisa memilih tag sendiri. Sekarang header itu hanya dipakai bila hop **langsung**
-ada di `OHTTP_TRUSTED_PROXIES` (default loopback; CIDR IPv4 didukung), selain
+ada di `OHTTP_TRUSTED_PROXIES` (default loopback; CIDR IPv4/IPv6 didukung,
+entri cacat fail-closed), selain
 itu alamat soket. nginx juga menimpa header dengan `$remote_addr` (hasil
 restorasi `real_ip`) di blok relay maupun `/api`.
 

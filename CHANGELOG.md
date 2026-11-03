@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛠️ Audit pass 12: validator trust proxy fail-closed, perbaikan 426 di-commit (2026-11-03)
+
+**N12-01 — `OHTTP_TRUSTED_PROXIES` menerima CIDR tanpa prefix sebagai `/0`.**
+`Number('')` adalah `0`, jadi entri seperti `10.0.0.0/` atau `fd00::/` dinyatakan
+sah dan berlaku sebagai "percaya semua hop": `CF-Connecting-IP` kiriman klien
+dipakai untuk alamat apa pun, persis lubang yang ditutup N10-02/N10-03. Validator
+kini menolak prefix kosong dan garis miring ganda (`10.0.0.0/8/8` dulu dieksekusi
+sebagai `/8`), dan `proxyMatches` fail-closed untuk entri yang tidak bisa
+diparse. `/0` hanya berlaku bila ditulis eksplisit (`0.0.0.0/0`). Dua asersi baru
+mengunci alasan penolakan dan alamat soket yang dipakai.
+
+**N12-02 — perbaikan `clientVersion` hanya di working tree.** `getCsrfToken`
+sekarang melaporkan body `426` ke `clientVersionGate` sebelum melempar, sehingga
+klien terlalu tua melihat layar pembaruan meski permintaan token CSRF sendiri
+yang ditolak; tesnya membedakan jalur CSRF dari mutasi. Kedua berkas di-commit
+sehingga CI pada commit (bukan hanya mesin maintainer) hijau.
+
 ## 🛠️ Audit pass 11: arsip braid aman-default, CIDR IPv6, pesan relay, timeout oracle (2026-11-02)
 
 **N11-01/N11-02 — suite web merah dan default `advanced` yang salah arah.**
