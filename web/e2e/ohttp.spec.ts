@@ -19,6 +19,25 @@
 import { test, expect } from '@playwright/test';
 import { registerUser } from './helpers/registration';
 
+/**
+ * Exporter metrik stack OHTTP (`playwright.ohttp.config.ts`). Harus sama dengan
+ * `E2E_METRICS_PORT` di sana; sengaja tidak diimpor karena mengimpor config
+ * Playwright akan menjalankan `defineConfig` (dan membuat kunci P-256) lagi.
+ */
+const OHTTP_METRICS_URL = 'http://127.0.0.1:19464/metrics';
+
+/** Ambil `nyx_ohttp_client_tag_total{status="…"}` dari teks `/metrics`. */
+function parseClientTagCounters(text: string): Record<string, number> {
+  const counters: Record<string, number> = {};
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('nyx_ohttp_client_tag_total{')) continue;
+    const status = /status="([^"]+)"/.exec(line)?.[1];
+    const value = Number(line.slice(line.lastIndexOf(' ') + 1));
+    if (status && Number.isFinite(value)) counters[status] = value;
+  }
+  return counters;
+}
+
 test.describe('OHTTP — pencarian lewat relay → gateway', () => {
   test.setTimeout(420_000);
 
@@ -42,6 +61,24 @@ test.describe('OHTTP — pencarian lewat relay → gateway', () => {
       }
     });
 
+    // Diagnostik: dari sisi UI, relay yang menolak (403/429/502) tampak persis
+    // sama dengan "pencarian kosong". Status + potongan body disimpan supaya
+    // kegagalan menyebut penyebabnya, bukan hanya "teks tidak muncul".
+    const relayResponses: { status: number; body: string }[] = [];
+    const consoleErrors: string[] = [];
+    page.on('response', (response) => {
+      if (new URL(response.url()).pathname !== '/api/ohttp/relay') return;
+      // Body sukses adalah amplop terenkripsi; yang berguna di sini hanya error
+      // JSON yang dikirim relay sendiri (bukan isi amplop).
+      void response
+        .text()
+        .then((text) => relayResponses.push({ status: response.status(), body: text.slice(0, 160) }))
+        .catch(() => relayResponses.push({ status: response.status(), body: '<body tidak terbaca>' }));
+    });
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text().slice(0, 200));
+    });
+
     // Peer harus ada lebih dulu supaya pencarian punya hasil.
     const peerUsername = `ohttppeer${Date.now()}`;
     const peerContext = await browser.newContext();
@@ -58,10 +95,35 @@ test.describe('OHTTP — pencarian lewat relay → gateway', () => {
     await searchInput.fill(peerUsername);
     await searchInput.press('Enter');
 
-    await expect(page.locator(`text=${peerUsername}`).first()).toBeVisible({ timeout: 40000 });
+    // Pesan gagal dirakit SETELAH menunggu: `expect(locator, "pesan")`
+    // mengevaluasi string-nya saat dipanggil, jadi daftar relay yang kosong di
+    // awal akan tetap kosong di dalam pesan.
+    try {
+      await expect(page.locator(`text=${peerUsername}`).first()).toBeVisible({ timeout: 40000 });
+    } catch (error) {
+      throw new Error(
+        `pencarian tidak menampilkan ${peerUsername} setelah 40 s. ` +
+          `relay=${JSON.stringify(relayResponses)} console=${JSON.stringify(consoleErrors)}\n${String(error)}`
+      );
+    }
 
     await expect.poll(() => relayTypes.length, { timeout: 20000 }).toBeGreaterThan(0);
+    const relayFailures = relayResponses.filter((entry) => entry.status !== 200);
+    expect(
+      relayFailures,
+      `relay tidak menjawab 200: ${JSON.stringify(relayFailures.length > 0 ? relayFailures : relayResponses)}`
+    ).toHaveLength(0);
     expect(relayTypes[0]).toContain('message/ohttp-req');
+
+    // Jalur tag klien relay (audit N9-01) harus benar-benar aktif di stack uji:
+    // relay menandatangani tag, gateway memercayainya. `no-token`/`untagged` di
+    // sini berarti konfigurasi stack yang salah, bukan sekadar test gagal.
+    const metricsText = await (await page.request.get(OHTTP_METRICS_URL)).text();
+    const tagCounters = parseClientTagCounters(metricsText);
+    expect(
+      tagCounters.tagged ?? 0,
+      `nyx_ohttp_client_tag_total tidak bertambah (status=${JSON.stringify(tagCounters)})`
+    ).toBeGreaterThan(0);
     expect(
       directSearches,
       `pencarian keluar dari jalur OHTTP: ${directSearches.join(', ')}`

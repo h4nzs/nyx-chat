@@ -19,6 +19,14 @@ import crypto from 'node:crypto';
 
 const API_PORT = 4100;
 const WEB_PORT = 5273;
+/**
+ * Exporter metrik stack uji. Bukan 9464: API dev pemilik port itu bisa hidup di
+ * mesin developer, dan EADDRINUSE hanya akan mengotori log. Spec OHTTP memakai
+ * port ini untuk membuktikan jalur tag klien relay benar-benar aktif.
+ */
+const E2E_METRICS_PORT = 19464;
+/** Token internal relay→gateway→API (≥32 karakter; lihat `server/src/ohttp/config.ts`). */
+const E2E_INTERNAL_TOKEN = crypto.randomBytes(32).toString('base64url');
 
 /** Kunci HPKE P-256 untuk gateway uji (raw 32-byte scalar + titik 65 byte). */
 function ohttpTestKeys(): { privateKey: string; publicKey: string } {
@@ -75,9 +83,16 @@ export default defineConfig({
         // menolak header Origin yang diteruskan proxy (request tetap jalan
         // karena same-origin, tapi log-nya penuh peringatan palsu).
         CORS_ORIGIN: `http://localhost:${WEB_PORT}`,
-        // API dev 4000 biasanya sudah memegang METRICS_PORT 9464; exporter
-        // kedua akan gagal listen (EADDRINUSE) dan mengotori log. Matikan.
-        METRICS_PORT: '0',
+        // Relay & gateway berbagi satu proses di stack ini. Token eksplisit
+        // (≥32 karakter) membuat jalur tag klien deterministik: relay
+        // menandatangani `x-nyx-ohttp-client-tag`, gateway memercayainya, dan
+        // `nyx_ohttp_client_tag_total{status="tagged"}` bertambah. Tanpa token,
+        // seluruh trafik OHTTP jatuh ke satu bucket limiter 127.0.0.1.
+        OHTTP_INTERNAL_TOKEN: E2E_INTERNAL_TOKEN,
+        // Exporter dipakai spec untuk membuktikan jalur tag aktif. Port bukan
+        // 9464: API dev pemilik port itu bisa hidup di mesin developer, dan
+        // EADDRINUSE hanya mengotori log.
+        METRICS_PORT: String(E2E_METRICS_PORT),
         ...e2eDatabaseEnv,
       },
     },

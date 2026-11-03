@@ -43,12 +43,22 @@ test.describe('Settings & Emergency Eject', () => {
       .toMatch(/^\/(login|register)?$/);
 
     // 5. Verify IndexedDB is functionally cleared by attempting to go back to a protected route.
-    //    Redirect `/chat` → login hanya terjadi SETELAH bootstrap selesai (GET
-    //    /api/users/me → 401) dan itu memakan waktu di mesin ini; `expect.poll`
-    //    memberi anggaran itu tanpa menunggu satu navigasi penuh lagi.
-    await page.goto('/chat');
+    //    Halaman BARU di context yang sama, bukan `page` yang baru di-eject: eject
+    //    berakhir dengan navigasi keras `window.location.replace('/')`
+    //    (nukeProtocol.ts) dan `force_logout` bisa menyusul dengan
+    //    `window.location.href = '/login?reason=revoked'` (socketListeners.ts).
+    //    Bila navigasi susulan itu jatuh saat `goto('/chat')` berjalan, Chromium
+    //    membatalkannya (`net::ERR_ABORTED`) — bukan bug produk, tapi juga bukan
+    //    bukti lulus (itu yang membuat spec ini merah di job Chrome).
+    //    Context browser berbagi IndexedDB/localStorage, jadi tab baru tetap
+    //    membuktikan state lokal sudah kosong.
+    //    Redirect `/chat` → login baru terjadi SETELAH bootstrap selesai
+    //    (GET /api/users/me → 401); `expect.poll` memberi anggaran itu.
+    const afterEject = await page.context().newPage();
+    await afterEject.goto('/chat');
     await expect
-      .poll(async () => new URL(page.url()).pathname, { timeout: 30000 })
+      .poll(async () => new URL(afterEject.url()).pathname, { timeout: 30000 })
       .toMatch(/^\/(login|register)?$/);
+    await afterEject.close();
   });
 });

@@ -400,6 +400,18 @@ jobs:
           done
           curl -fsS http://127.0.0.1:9464/metrics >/dev/null
           cd .. && PROMTOOL_VERSION=3.15.0 bash scripts/drill-alerts.sh
+      # Kegagalan E2E tanpa artifact memaksa orang menebak dari log 25 menit
+      # (dulu: apakah relay menolak, UI kosong, atau selector berubah?).
+      - name: Upload artifact Playwright saat gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-chromium-artifacts
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   e2e-chrome:
     name: E2E (Chrome penuh — WebTransport/QUIC aktif)
@@ -523,3 +535,14 @@ jobs:
       - name: Run E2E PQ v2 burner (WebTransport nyata)
         working-directory: web
         run: pnpm exec playwright test --project=chrome e2e/pqV2.spec.ts -g "burner init PQ-only"
+      - name: Upload artifact Playwright saat gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-chrome-artifacts
+          path: |
+            web/test-results/
+            web/playwright-report/
+            /tmp/sidecar.log
+          if-no-files-found: ignore
+          retention-days: 7
