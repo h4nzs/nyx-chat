@@ -114,3 +114,7 @@ deploy/selfhost/**/*.age
 deploy/selfhost/**/*.tar.gz
 deploy/selfhost/**/*.pem
 !deploy/selfhost/attestation/roots.pem
+
+# [DEBUG 2026-11-04] Reporter HTML Playwright kini selalu aktif (bukti kegagalan);
+# laporan dihasilkan tiap run dan tidak boleh masuk repo.
+playwright-report/

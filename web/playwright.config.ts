@@ -15,9 +15,16 @@ export default defineConfig({
   // `user:updated` & profil REST). Serial = deterministik untuk CI.
   workers: 1,
   globalSetup: './e2e/global.setup.ts',
+  // [DEBUG 2026-11-04] Reporternya eksplisit dan bukti kegagalan selalu disimpan.
+  // Sebelumnya `trace: 'on-first-retry'` TIDAK PERNAH menghasilkan trace: `retries`
+  // tidak diset (= 0 di CI), jadi syarat "first retry" tidak pernah terpenuhi dan
+  // artefak kegagalan hanya berisi `error-context.md` tanpa snapshot halaman.
+  // Kegagalan `e2e/auth.spec.ts` di run 41820476193 harus ditebak karena itu.
+  reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   projects: [
     {
