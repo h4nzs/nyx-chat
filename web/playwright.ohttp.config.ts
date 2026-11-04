@@ -109,6 +109,15 @@ export default defineConfig({
         // API 4100 — tanpa ini request langsung ke 4000 dan diblokir CORS.
         VITE_API_URL: `http://localhost:${WEB_PORT}`,
         NYX_E2E_API_PROXY_TARGET: `http://localhost:${API_PORT}`,
+        // [E2E OHTTP] Mode token `off` menaruh relay DI DALAM proses API (hanya
+        // di sana token sesi bisa dicetak), jadi route-nya `/api/ohttp/relay` —
+        // bukan `/relay` seperti relay proses terpisah yang dilayani nginx.
+        // Tanpa flag ini proxy Vite membuang prefix dan API menjawab
+        // `404 Cannot POST /relay`; gejalanya tampak seperti "hasil pencarian
+        // kosong", bukan seperti salah konfigurasi. Relay in-proses memakai
+        // `OHTTP_RELAY_TARGET` default (`http://127.0.0.1:${PORT}/api/ohttp/gateway`),
+        // yaitu dirinya sendiri — tidak ada proses relay kedua di stack ini.
+        NYX_OHTTP_RELAY_PROXY_KEEP_PATH: '1',
       },
     },
   ],

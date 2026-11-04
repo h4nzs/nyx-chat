@@ -20,6 +20,16 @@ export default defineConfig(({ mode }) => {
   // nginx (`location = /api/ohttp/relay`), path ini HARUS di atas '/api' agar
   // tidak tertelan proxy API — kalau tertelan, jawabannya 404 OHTTP_RELAY_EXTERNAL.
   const ohttpRelayTarget = process.env.NYX_OHTTP_RELAY_PROXY_TARGET || 'http://127.0.0.1:4100';
+  // [E2E OHTTP] Relay proses terpisah melayani `POST /relay` (nginx membuang
+  // prefix `/api/ohttp`). Tetapi `OHTTP_TOKEN_MODE=off` MEWAJIBKAN relay hidup di
+  // proses API — hanya di sana ia bisa mencetak token sesi — sehingga route-nya
+  // `/api/ohttp/relay`. Stack uji menyalakan `NYX_OHTTP_RELAY_PROXY_KEEP_PATH=1`
+  // supaya proxy tidak membuang prefix itu; tanpa ini request mendarat di
+  // `POST /relay` milik API dan dijawab 404 `Cannot POST /relay`.
+  const ohttpRelayRewrite =
+    process.env.NYX_OHTTP_RELAY_PROXY_KEEP_PATH === '1'
+      ? undefined
+      : (proxyPath: string) => proxyPath.replace(/^\/api\/ohttp\/relay/, '/relay');
 
   return {
   plugins: [
@@ -134,7 +144,7 @@ export default defineConfig(({ mode }) => {
         target: ohttpRelayTarget,
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api\/ohttp\/relay/, '/relay'),
+        rewrite: ohttpRelayRewrite,
       },
       '/api': {
         target: apiProxyTarget,
@@ -165,7 +175,7 @@ export default defineConfig(({ mode }) => {
         target: ohttpRelayTarget,
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api\/ohttp\/relay/, '/relay'),
+        rewrite: ohttpRelayRewrite,
       },
       '/api': {
         target: 'http://localhost:4000',
