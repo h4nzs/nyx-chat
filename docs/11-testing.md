@@ -96,6 +96,53 @@ NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing
   WS-A) dan parser framing bidi sisi sidecar yang membaca dari soket (hanya
   keputusan murninya yang diuji).
 
+## 11.1d Coverage — lantai per modul, bukan target global
+
+Coverage di repo ini **alat diagnosis**. Angka global (web: 30% lines) tidak
+pernah dipakai sebagai gerbang: itu bisa naik-turun karena berkas yang sudah
+teruji dan justru menutupi modul kritis yang tak diuji. Yang mengikat adalah
+lantai per-glob.
+
+```bash
+pnpm --filter nyx-web run test:coverage       # v8, laporan di web/coverage/
+pnpm --filter nyx-server run test:coverage    # Node native + daftar tes dari package.json
+node scripts/check-changed-lines.mjs --lcov web/coverage/lcov.info --base origin/main
+```
+
+- **Web** (`web/vite.config.ts` → `test.coverage`): reporter `text`, `json-summary`,
+  `html`, `lcov`; `reportOnFailure: true` supaya run merah tetap menghasilkan
+  angka (itu justru saat paling dibutuhkan). Lantai 4 Nov 2026 (baseline satu run
+  penuh, 137 berkas lulus, margin beberapa poin di bawah angka terukur):
+
+  | Glob | Lantai (lines/branches) | Terukur (agregat / berkas terlemah) |
+  |---|---|---|
+  | `src/lib/spqr*.ts` | 90 / 66 | 95,8 / 83,6 — 91,8 / 68,2 |
+  | `src/lib/kt*.ts` | 58 / 46 | 77,2 / 68,9 — 61,0 / 48,8 |
+  | `src/lib/group*.ts` | 45 / 41 | 76,8 / 67,8 — 47,7 / 43,7 |
+  | `src/lib/privacy*.ts` | 52 / 56 | 85,3 / 68,3 — 54,5 / 58,8 |
+  | `src/lib/keychainDb.ts` | 30 / 21 | 32,5 / 23,1 |
+  | `src/lib/messagePipeline.ts` | 2 / 3 | 2,1 / 3,3 |
+
+  Threshold glob di Vitest berlaku **per berkas**, jadi angka di kolom "lantai"
+  diturunkan dari berkas terlemah pada glob itu, bukan dari agregatnya. Naikkan
+  setiap kali tes ditambah; jangan turunkan tanpa alasan yang dicatat di sini.
+- **Celah yang diakui, bukan diklaim tertutup:** `src/utils/crypto.ts` (3.744
+  baris) hanya 1,2% lines di unit test — hampir seluruh permukaannya berjalan di
+  crypto worker dan diuji lewat E2E; `keychainDb.ts` 32% dan
+  `messagePipeline.ts` 2% karena jalurnya menuntut browser/Dexie sungguhan.
+  Karena itu ketiganya TIDAK diberi lantai 80%: lantai palsu hanya akan memaksa
+  orang menaikkan angka dengan tes yang tidak membuktikan apa pun.
+- **Server** (`server/scripts/test-coverage.mjs`): membaca script `test` (satu-
+  satunya daftar 99 berkas) lalu menjalankannya dengan flag Node, jadi tidak ada
+  daftar kedua yang bisa menyimpang. Baseline 3 Nov 2026 **lines 77,3% · branches
+  84,7% · functions 79,4%** → gate 72/78/74. Node native hanya mengeluarkan
+  laporan teks (tidak ada lcov), jadi changed-lines server belum mungkin.
+- **Changed-lines** (`scripts/check-changed-lines.mjs`): membandingkan baris yang
+  diubah terhadap `lcov.info`, tanpa dependensi Python. Di CI jalan di PR saja
+  pada job `unit` dan **belum memblokir** (`continue-on-error`) sampai angka
+  global stabil 10 run. Uji manual dengan fixture: `--diff-file <patch>`
+  menggantikan `git diff`, sehingga skrip ini bisa diuji tanpa repo berubah.
+
 ## 11.2 E2E (Playwright)
 
 ```bash

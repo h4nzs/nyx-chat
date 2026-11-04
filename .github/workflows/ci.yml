@@ -124,6 +124,24 @@ jobs:
           # Modul server mengimpor src/lib/prisma.ts saat load; tanpa URL ini
           # PrismaClient melempar sebelum test sempat memakai fake DB.
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
+      # [plan kualitas §6.3] "Coverage global naik" bisa berarti "baris baru tak
+      # diuji". Gate ini mengukur khusus baris yang diubah PR (lcov dari step
+      # web di atas + diff git). Dua titik (`<base> HEAD`) dan fetch satu commit
+      # dasar supaya tetap bekerja pada clone dangkal checkout default.
+      - name: Fetch commit dasar (changed-lines)
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
+      # Belum memblokir merge (plan §6.3): angkanya dilaporkan dulu, dijadikan
+      # gate setelah angka global stabil 10 run. Skripnya murni Node — tidak ada
+      # `diff-cover`/pip yang perlu dipin.
+      - name: Changed-lines coverage web (PR saja)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: >-
+          node scripts/check-changed-lines.mjs
+          --lcov web/coverage/lcov.info
+          --base ${{ github.event.pull_request.base.sha }}
+          --threshold 70
       # Coverage adalah alat diagnosis: artifact disimpan walau job hijau, supaya
       # tren bisa dilihat tanpa menjalankan ulang suite.
       - name: Upload artifact coverage web

@@ -270,11 +270,36 @@ export default defineConfig(({ mode }) => {
         'src/**/generated/**',
         'src/**/dist/**',
       ],
+      // [plan kualitas §6.1] Ini LANTAI, bukan target: angka diambil dari run
+      // penuh 4 Nov 2026 (137 berkas lulus) lalu diturunkan beberapa poin supaya
+      // mesin CI yang lebih lambat tidak menggagalkan run, sementara penurunan
+      // nyata tetap tertangkap. Global dibiarkan 0 karena angka global (30%
+      // lines) bisa naik-turun karena berkas yang sudah teruji dan justru
+      // menutupi modul kritis yang tak diuji — itu yang dikunci per-glob.
+      // Naikkan bertahap setiap kali tes ditambah; jangan turunkan tanpa catatan
+      // di `docs/11` §11.1d (angka acuan tiap modul ada di sana).
       thresholds: {
         lines: 0,
         functions: 0,
         branches: 0,
         statements: 0,
+        // Protokol ratchet v2 + parsing header/frame: paling berisiko, paling
+        // teruji (5 dari 6 berkas >90% lines).
+        'src/lib/spqr*.ts': { lines: 90, branches: 66 },
+        // Verifier/state key transparency (pin, gossip, monitor, bundel bukti).
+        'src/lib/kt*.ts': { lines: 58, branches: 46 },
+        // Siklus hidup grup: era, rotasi epoch, mailbox, pseudonim.
+        'src/lib/group*.ts': { lines: 45, branches: 41 },
+        'src/lib/privacy*.ts': { lines: 52, branches: 56 },
+        // Penyimpanan kunci lokal: 32% karena banyak jalur hanya dijalankan di
+        // browser sungguhan (E2E), bukan di jsdom.
+        'src/lib/keychainDb.ts': { lines: 30, branches: 21 },
+        // Pipeline pesan nyaris tak tersentuh unit test (2%) — jalurnya diuji
+        // E2E. Angka ini mencegahnya jadi 0 tanpa suara, bukan mengklaim aman.
+        'src/lib/messagePipeline.ts': { lines: 2, branches: 3 },
+        // `src/utils/crypto.ts` (3.744 baris) sengaja TIDAK dikunci: 1,2% lines
+        // karena hampir semua permukaannya berjalan di crypto worker/E2E. Lantai
+        // 0% hanya akan jadi hiasan; celahnya dicatat di docs/11 §11.1d.
       },
     },
   }
