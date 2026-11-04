@@ -241,6 +241,32 @@ export default defineConfig(({ mode }) => {
     environment: 'jsdom',
     setupFiles: './src/SetupTests.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
+    // [plan kualitas §6.1] Coverage = alat diagnosis, bukan target kosong.
+    // Angka global dibiarkan 0 sampai baseline stabil; modul berisiko dikunci
+    // per-glob supaya "global naik" tidak menutupi modul kritis yang tak diuji.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      // Default Vitest: laporan TIDAK ditulis bila ada tes gagal. Untuk alat
+      // diagnosis itu justru kebalikan dari yang dibutuhkan — run merah butuh
+      // angka "sebelum vs sesudah" lebih dari run hijau.
+      reportOnFailure: true,
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/**/__tests__/**',
+        'src/**/*.test.*',
+        'src/**/generated/**',
+        'src/**/dist/**',
+      ],
+      thresholds: {
+        lines: 0,
+        functions: 0,
+        branches: 0,
+        statements: 0,
+      },
+    },
   }
 };
 });

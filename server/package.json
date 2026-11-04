@@ -12,6 +12,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test:coverage": "node scripts/test-coverage.mjs",
     "start": "node --max-old-space-size=1024 dist/index.js",
     "dev": "tsx watch src/index.ts",
     "relay": "tsx src/ohttp/relay.ts",

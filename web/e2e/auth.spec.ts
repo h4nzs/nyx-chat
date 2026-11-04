@@ -45,33 +45,36 @@ test.describe('Authentication & Onboarding', () => {
       }
     });
 
-    // 3. FORCE PAGE RELOAD
-    // Wipes out Zustand/React state in memory so SPA knows the user is truly logged out
-    await page.reload();
+    // 3. Halaman BARU di context yang sama — bukan `page.reload()`.
+    // Logout memicu navigasi keras; reload yang berbarengan dengannya bisa
+    // dijawab `net::ERR_ABORTED`. Halaman baru tetap berbagi IndexedDB dan
+    // localStorage yang sudah dibersihkan, jadi bukti "state lokal hilang"
+    // tidak berubah, tanpa berebut dengan navigasi yang sedang berjalan.
+    const loginPage = await page.context().newPage();
+    await loginPage.goto('/login');
 
     // 4. Login
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: /Username/i }).fill(username);
-    await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
-    await page.getByRole('button', { name: /Login/i }).click();
+    await loginPage.getByRole('textbox', { name: /Username/i }).fill(username);
+    await loginPage.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
+    await loginPage.getByRole('button', { name: /Login/i }).click();
 
     // 5. Asersi Login berhasil: modal "New Device Detected" muncul (bukti sesi aktif
     //    tapi kunci lokal terhapus — recovery flow), modal bisa ditutup dan TIDAK reopen.
-    await expect(page.getByRole('heading', { name: /New Device Detected/i })).toBeVisible({ timeout: 30000 });
-    const closeNewDeviceBtn = page.getByRole('button', { name: /Close modal/i });
+    await expect(loginPage.getByRole('heading', { name: /New Device Detected/i })).toBeVisible({ timeout: 30000 });
+    const closeNewDeviceBtn = loginPage.getByRole('button', { name: /Close modal/i });
     await closeNewDeviceBtn.click();
-    await expect(page.getByRole('heading', { name: /New Device Detected/i })).toBeHidden({ timeout: 10000 });
+    await expect(loginPage.getByRole('heading', { name: /New Device Detected/i })).toBeHidden({ timeout: 10000 });
     // Tidak boleh ada error server di form
-    await expect(page.getByText('Internal server error')).toBeHidden();
+    await expect(loginPage.getByText('Internal server error')).toBeHidden();
 
     // Bypass modals lainnya (System Init / Quick Tour)
-    const skipSystemInitBtn = page.getByRole('button', { name: /Skip for now/i });
+    const skipSystemInitBtn = loginPage.getByRole('button', { name: /Skip for now/i });
     try {
       await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 5000 });
       await skipSystemInitBtn.click();
     } catch (e) {}
 
-    const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
+    const closeTourBtn = loginPage.getByRole('button', { name: /Close modal/i });
     try {
       await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
       await closeTourBtn.click();

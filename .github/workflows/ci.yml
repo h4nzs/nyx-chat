@@ -108,13 +108,32 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
         run: pnpm exec prisma generate
-      - name: Run unit tests
-        run: pnpm run test
+      # [plan kualitas §6.1] Web dijalankan DENGAN coverage, bukan `pnpm run test`
+      # terpisah: v8 hanya menambah sedikit overhead dibanding durasi tesnya,
+      # sedangkan dua kali menjalankan suite 8 menit tidak sepadan.
+      - name: Unit tests web (+ coverage)
+        run: pnpm --filter nyx-web run test:coverage
+      # [plan kualitas §6.2] Server: flag coverage Node diteruskan lewat runner
+      # (`server/scripts/test-coverage.mjs`) yang membaca daftar tes eksplisit
+      # dari package.json — tidak ada daftar kedua yang bisa menyimpang. Runner
+      # juga memegang threshold (lines/branches/functions).
+      - name: Unit tests server (+ coverage)
+        run: pnpm --filter nyx-server run test:coverage
         env:
           JWT_SECRET: ci-jwt-secret-not-for-prod
           # Modul server mengimpor src/lib/prisma.ts saat load; tanpa URL ini
           # PrismaClient melempar sebelum test sempat memakai fake DB.
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
+      # Coverage adalah alat diagnosis: artifact disimpan walau job hijau, supaya
+      # tren bisa dilihat tanpa menjalankan ulang suite.
+      - name: Upload artifact coverage web
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web
+          path: web/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
 
   pir-sidecar:
     name: PIR sidecar (Rust)

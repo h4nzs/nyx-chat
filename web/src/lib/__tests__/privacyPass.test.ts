@@ -168,9 +168,11 @@ describe('issuance', () => {
     await expect(issuePrivacyPassTokens('conv-1', 1)).rejects.toThrow('PP_TOKEN_UNVERIFIABLE');
     expect(kv.has('nyx_pp_tokens')).toBe(false);
   });
-  // Blind RSA 2048 di JS butuh detik per token; batas 5 detik default terlalu
-  // ketat saat seluruh suite berjalan paralel.
-}, 40_000);
+  // Blind RSA 2048 di JS butuh 3–5 detik per token di mesin 4 core; dengan
+  // seluruh suite berjalan paralel, anggaran 40 detik pun terlampaui (terukur
+  // timeout di sini, sementara berkas ini lulus 19,7 detik saat sendirian).
+  // Yang dinaikkan hanya anggaran waktu — asersi tidak diubah.
+}, 120_000);
 
 describe('redemption', () => {
   it('mengambil satu bukti, dan membuangnya setelah diterima server', async () => {
@@ -195,8 +197,11 @@ describe('redemption', () => {
         '/api/groups/pp/issue',
       ]);
       expect(await takePrivacyPassProof('conv-1')).toBeTypeOf('string');
-    }, { timeout: 30_000, interval: 250 });
-  }, 40_000);
+      // Anggaran inner-waitFor juga harus ikut naik: issuance latar menjalankan
+      // Blind RSA 2048 (3–5 detik/token di mesin 4 core), dan 30 detik terlampaui
+      // saat suite paralel — asersi tetap sama, hanya batas waktunya.
+    }, { timeout: 120_000, interval: 250 });
+  }, 120_000);
 
   it('drop menghapus seluruh stok grup', async () => {
     await issuePrivacyPassTokens('conv-1', 2);
@@ -228,6 +233,7 @@ describe('redemption', () => {
     const rotated = await RSABSSA.SHA384.generateKey({ modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) });
     const rotatedJwk = (await crypto.subtle.exportKey('jwk', rotated.publicKey)) as JsonWebKey;
     let issuerReads = 0;
+    let issueCalls = 0;
 
     apiMock.mockImplementation(async (path: string, options?: { body?: string }) => {
       if (path === '/api/groups/pp/issuer') {
@@ -237,11 +243,17 @@ describe('redemption', () => {
           : { suite: PP_SUITE, keyId: 'rotated-key', publicJwk: rotatedJwk };
       }
       if (path === '/api/groups/pp/issue') {
+        issueCalls += 1;
         const body = JSON.parse(options?.body ?? '{}') as { blinded?: string[] };
+        // Panggilan pertama masih memakai `blinded` dari modulus lama, jadi
+        // tidak bisa ditandatangani kunci baru (`signature representative out of
+        // range`). Yang penting bagi klien adalah `keyId` baru: ia memicu
+        // refresh issuer sebelum signature dipakai. Panggilan kedua sudah
+        // memakai modulus baru, sehingga tanda tangan asli bisa dibuat.
+        const signingKey = issueCalls === 1 ? keyPair.privateKey : rotated.privateKey;
         const signatures = await Promise.all(
-          (body.blinded ?? []).map(async (blinded) => base64url(await suite.blindSign(rotated.privateKey, bytes(blinded)))),
+          (body.blinded ?? []).map(async (blinded) => base64url(await suite.blindSign(signingKey, bytes(blinded)))),
         );
-        // Server menandatangani dengan kunci baru → keyId berbeda dari cache.
         return { signatures, suite: PP_SUITE, keyId: 'rotated-key' };
       }
       throw new Error(`unexpected path ${path}`);
@@ -255,4 +267,4 @@ describe('redemption', () => {
     expect(await suite.verify(rotated.publicKey, raw.subarray(32), await ppMessage('conv-1', raw.subarray(0, 32)))).toBe(true);
     expect(issuerReads).toBe(2);
   });
-}, 40_000);
+}, 120_000);
