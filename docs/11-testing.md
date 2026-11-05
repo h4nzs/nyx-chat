@@ -264,6 +264,18 @@ terjadwal — keduanya masih manual, dijalankan sebelum rilis besar (`docs/30`
 (`scripts/load/run-relay-load.sh`, 500 VU — send p95 74,4 ms / fetch p95 68,8 ms,
 0% error). Drill alert + vektor oracle **sudah** jalan per-PR (tabel di atas).
 
+**Branch protection — 14 required check (2026-11-05).** `main` sekarang meminta
+status check berikut sebelum PR bisa merge: 12 job `ci.yml` (Build, WASM
+reproducible, Unit Tests, PIR sidecar, Transport sidecar, Lint, Alerts, DR
+oracle, KT v2 recovery drill, Dependency Audit, E2E Chromium, E2E Chrome) plus
+kedua job CodeQL (`Analyze (actions)`, `Analyze (javascript-typescript)`).
+Namanya harus **persis** nama check-run (bukan id job di YAML) — ganti nama job
+berarti proteksi berhenti mencocokkan, jadi periksa ulang dengan
+`gh api repos/h4nzs/nyx-chat/commits/main/check-runs --jq '.check_runs[].name'`
+setiap kali nama job diubah. Kebijakan yang **tidak** dinyalakan: wajib-PR,
+review wajib, dan `enforce_admins` — bypass admin masih mungkin, jadi proteksi
+ini menahan merge biasa, bukan penyalahgunaan akses admin (`docs/30` §9.1).
+
 **Test internal crate `spqr` (gate `docs/30` §30.8 poin 1) — manual, bukan per-PR:**
 butuh toolchain nightly + dev-dependency besar (proptest, criterion, libcrux).
 Jalankan pada sumber ter-vendor (pin `06959b4708f9`, v1.6.0) — tidak perlu

@@ -12,10 +12,18 @@ on:
 permissions:
   contents: read
 
+# [plan §9.4] Run basi di PR dibatalkan supaya runner tidak terbakar ~25 menit
+# untuk commit yang sudah tergantikan. Push ke `main` TIDAK dibatalkan:
+# riwayat main lebih berguna utuh daripada cepat.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == "pull_request" }}
+
 jobs:
   build:
     name: Build (shared + web + server + marketing)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       # Gagal cepat bila artefak WASM (spqr/keytrans) tidak ikut ter-commit atau
@@ -72,6 +80,7 @@ jobs:
   wasm:
     name: WASM reproducible (rebuild dari vendor + bandingkan hash)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       # Toolchain dipin `packages/*/rust-toolchain.toml` (1.95.0); tindakan ini
@@ -90,6 +99,7 @@ jobs:
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -156,6 +166,7 @@ jobs:
   pir-sidecar:
     name: PIR sidecar (Rust)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
@@ -185,6 +196,7 @@ jobs:
     # otomatis kembali kacau dan diff review jadi bising.
     name: Transport sidecar (Rust — fmt + clippy + test)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
@@ -211,6 +223,7 @@ jobs:
     # ke error sebelum angkanya 0, atau CI jadi merah terus dan diabaikan.
     name: Lint (oxlint — rule error blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -243,6 +256,7 @@ jobs:
     # Postgres + Redis + API hidup.
     name: Alerts (drill promtool)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Drill alert (promtool diunduh skrip sendiri, dipin 3.15.0)
@@ -257,6 +271,7 @@ jobs:
     #   3. menjalankan test NYX vs vektor + test interop dua arah (NYX→oracle).
     name: DR oracle (vektor + interop)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -299,6 +314,7 @@ jobs:
     # pernah menimpa binary layanan hidup).
     name: KT v2 recovery drill
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -324,6 +340,7 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -348,6 +365,7 @@ jobs:
   e2e:
     name: E2E (Playwright, Chromium)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:18
@@ -480,6 +498,7 @@ jobs:
   e2e-chrome:
     name: E2E (Chrome penuh — WebTransport/QUIC aktif)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18
