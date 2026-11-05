@@ -200,6 +200,52 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 - Tombol tutup `×` modal onboarding **jangan** diklik lewat `locator(...).first().click()`: saat berpindah langkah, modal lama masih ber-animasi keluar sehingga Playwright menunggu "stabil" sampai timeout. Pakai `dismissModalCloseButton` dari `helpers/registration.ts` (resolve ulang + `force`).
 - Kalau registrasi "berhasil" (201) tapi onboarding tak lanjut, cek apakah muncul `PasswordPromptModal`: jalur at-rest tidak boleh memanggil `getMasterSeed()` (yang memunculkan prompt) — pakai `getMasterSeedIfUnlocked()` (lihat `CHANGELOG` 2026-10-13).
 
+### 11.2b Manifest tes wajib (plan kualitas §6.5)
+
+Exit code Playwright tidak membedakan "4 skip yang sah" dari "suite tidak menguji
+apa pun": tes yang ter-skip tetap menghasilkan baris hijau (dengan reporter dot
+bahkan tanpa nama). Karena itu tes wajib didaftarkan di
+`web/e2e/required-tests.json` dan diperiksa dari **report JSON**, bukan output
+teks.
+
+```bash
+cd web
+pnpm exec playwright test --project=chromium   # menulis playwright-report/results.json
+node e2e/verify-required-tests.mjs --project chromium
+node e2e/verify-required-tests.mjs --self-test  # buktikan gate ini bisa gagal
+```
+
+Tiga pemeriksaan per project:
+
+- `minTotal` — jumlah tes yang terkumpul tidak menyusut (spec hilang, `testIgnore`
+  baru, atau config yang mempersempit suite).
+- `mustPass` — tes wajib **ada** dan benar-benar dijalankan; skip pada tes ini
+  selalu pelanggaran, sekalipun alasannya masuk akal.
+- `allowedSkipReasons` — setiap skip wajib punya alasan tertulis **dan** alasannya
+  cocok dengan daftar. Skip tanpa alasan atau dengan alasan baru = pelanggaran,
+  jadi menambah skip harus lewat PR yang mengubah manifest: terlihat saat review,
+  bukan hilang di log.
+
+Job `e2e` memeriksa project `chromium` (spec WebTransport/coturn/R2 boleh skip
+dengan alasan tertulis); job `e2e-chrome` memeriksa `chrome` dan **mewajibkan**
+transport + chat benar-benar jalan — di situlah skip senyap pernah membuat suite
+tampak hijau (`docs/11` §11.5: probe `WebTransport` di `about:blank`).
+
+Kedua project mewajibkan alur inti akun untuk selalu dijalankan: auth (login,
+registrasi, login gagal), profile, security (sesi aktif), settings (emergency
+eject), recovery v2 (frasa pemulihan + tanda tangan ML-DSA), dan deviceLinking
+(tautan QR). Spec-spec itu tidak butuh WebTransport/coturn/R2, jadi skip di
+salah satunya berarti lingkungannya rusak — bukan alasan yang sah.
+
+`--self-test` menjalankan 7 skenario sintetis (lulus; skip beralasan; tes wajib
+di-skip; skip tanpa alasan; alasan belum diizinkan; tes hilang; jumlah menyusut)
+dan ikut jalan di CI. Tanpa itu, gate hijau tidak membedakan gate yang bekerja
+dari gate yang tidak memeriksa apa pun.
+
+Menambah spec baru tidak menuntut perubahan manifest (`minTotal` hanya menjaga
+suite tidak menyusut); masukkan ke `mustPass` bila spec itu tidak boleh pernah
+skip di project tersebut.
+
 ## 11.3 CI matrix
 
 | Job | Browser | Transport |

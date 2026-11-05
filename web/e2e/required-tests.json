@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "note": "Manifest tes wajib E2E (plan kualitas §6.5). Dibaca oleh web/e2e/verify-required-tests.mjs dari report JSON Playwright. Aturannya: `minTotal` = jumlah tes yang harus terkumpul untuk project itu; `mustPass` = tes yang wajib ada DAN benar-benar dijalankan (skip selalu pelanggaran); `allowedSkipReasons` = substring/regex alasan skip yang boleh (skip tanpa alasan atau dengan alasan baru = pelanggaran, jadi skip baru harus lewat PR yang mengubah berkas ini).",
+  "projects": {
+    "chromium": {
+      "minTotal": 21,
+      "mustPass": [
+        {
+          "file": "auth.spec.ts",
+          "title": "Authentication & Onboarding › Register with Proof of Work"
+        },
+        {
+          "file": "auth.spec.ts",
+          "title": "Authentication & Onboarding › Login with correct password"
+        },
+        {
+          "file": "auth.spec.ts",
+          "title": "Authentication & Onboarding › Fail login with incorrect password"
+        },
+        {
+          "file": "profile.spec.ts",
+          "title": "Profile & Identity Settings › Update profile display name and bio"
+        },
+        {
+          "file": "security.spec.ts",
+          "title": "Security & Sessions › View active sessions and verify current device"
+        },
+        {
+          "file": "settings.spec.ts",
+          "title": "Settings & Emergency Eject › Emergency eject clears session data"
+        },
+        {
+          "file": "recovery.spec.ts",
+          "title": "Pemulihan akun (recovery v2) › frasa memulihkan akun dan server menerima tanda tangan ML-DSA"
+        },
+        {
+          "file": "deviceLinking.spec.ts",
+          "title": "Tautan perangkat (QR) › perangkat baru ditautkan lewat QR dan disetujui perangkat lama"
+        }
+      ],
+      "allowedSkipReasons": [
+        "WebTransport tidak tersedia di environment ini",
+        "WebTransport/uplink sidecar tidak tersedia",
+        "TURN self-host",
+        "Object storage",
+        "opt-in: jalankan",
+        "OHTTP tidak aktif di server uji",
+        "VITE_PQ_V2 tidak aktif",
+        "relay tidak mengiklankan spqr-ratchet",
+        "integrasi jalur v2 dimatikan"
+      ]
+    },
+    "chrome": {
+      "minTotal": 21,
+      "mustPass": [
+        {
+          "file": "auth.spec.ts",
+          "title": "Authentication & Onboarding › Register with Proof of Work"
+        },
+        {
+          "file": "auth.spec.ts",
+          "title": "Authentication & Onboarding › Login with correct password"
+        },
+        {
+          "file": "auth.spec.ts",
+          "title": "Authentication & Onboarding › Fail login with incorrect password"
+        },
+        {
+          "file": "transport.spec.ts",
+          "title": "Real-time Transport (WebTransport) › kirim pesan → terima di peer (latency end-to-end)"
+        },
+        {
+          "file": "transport.spec.ts",
+          "title": "Real-time Transport (WebTransport) › unsend: pengirim menghapus → pesan hilang di kedua sisi"
+        },
+        {
+          "file": "chat.spec.ts",
+          "title": "Chat Functionality › Start a new conversation and send a message"
+        },
+        {
+          "file": "profile.spec.ts",
+          "title": "Profile & Identity Settings › Update profile display name and bio"
+        },
+        {
+          "file": "security.spec.ts",
+          "title": "Security & Sessions › View active sessions and verify current device"
+        },
+        {
+          "file": "settings.spec.ts",
+          "title": "Settings & Emergency Eject › Emergency eject clears session data"
+        },
+        {
+          "file": "recovery.spec.ts",
+          "title": "Pemulihan akun (recovery v2) › frasa memulihkan akun dan server menerima tanda tangan ML-DSA"
+        },
+        {
+          "file": "deviceLinking.spec.ts",
+          "title": "Tautan perangkat (QR) › perangkat baru ditautkan lewat QR dan disetujui perangkat lama"
+        }
+      ],
+      "allowedSkipReasons": [
+        "WebTransport/uplink sidecar tidak tersedia",
+        "TURN self-host",
+        "Object storage",
+        "opt-in: jalankan",
+        "OHTTP tidak aktif di server uji",
+        "VITE_PQ_V2 tidak aktif",
+        "relay tidak mengiklankan spqr-ratchet",
+        "integrasi jalur v2 dimatikan"
+      ]
+    }
+  }
+}

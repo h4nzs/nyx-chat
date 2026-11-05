@@ -20,7 +20,14 @@ export default defineConfig({
   // tidak diset (= 0 di CI), jadi syarat "first retry" tidak pernah terpenuhi dan
   // artefak kegagalan hanya berisi `error-context.md` tanpa snapshot halaman.
   // Kegagalan `e2e/auth.spec.ts` di run 41820476193 harus ditebak karena itu.
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // [plan kualitas §6.5] Report JSON dipakai `e2e/verify-required-tests.mjs`:
+  // gate itu membuktikan tes wajib benar-benar DIJALANKAN, sesuatu yang tidak
+  // bisa dibaca dari exit code (suite tetap hijau walau seluruh tes ter-skip).
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
+    ['json', { outputFile: 'playwright-report/results.json' }],
+  ],
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'retain-on-failure',

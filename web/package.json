@@ -16,6 +16,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:ohttp": "playwright test --config playwright.ohttp.config.ts --project=chromium",
+    "test:e2e:verify-required": "node e2e/verify-required-tests.mjs",
     "lint": "oxlint src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

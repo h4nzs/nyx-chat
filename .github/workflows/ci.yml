@@ -407,6 +407,17 @@ jobs:
           # dipakai: volumenya bisa puluhan MB per suite.)
           DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chromium
+      # [plan kualitas §6.5] Suite hijau bisa berarti "tesnya tidak jalan":
+      # exit code Playwright tidak membedakan 4 skip yang sah dari suite yang
+      # seluruh tesnya ter-skip. Gate ini membaca report JSON (jumlah tes tidak
+      # menyusut, tes wajib benar-benar dijalankan, setiap skip beralasan dan
+      # alasannya sudah diizinkan manifest). `--self-test` membuktikan gate-nya
+      # sendiri bisa gagal, bukan selalu hijau.
+      - name: Gate tes wajib E2E (plan §6.5, chromium)
+        working-directory: web
+        run: |
+          node e2e/verify-required-tests.mjs --self-test
+          node e2e/verify-required-tests.mjs --project chromium
       # [docs/35 §35.9] Build ini PQ-only: `VITE_PQ_V2` sudah tidak berpengaruh
       # dan tidak ada fallback v1. Step terpisah ini tetap ada supaya jalur X3DH
       # v2 / grup `sigV:2` / burner PQ-only punya bukti otomatis; suite utama
@@ -587,6 +598,14 @@ jobs:
           # [DEBUG 2026-11-04] Lihat catatan di job `e2e`.
           DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chrome
+      # [plan kualitas §6.5] Di job inilah skip senyap paling berbahaya: transport
+      # dan chat WAJIB jalan (lihat `mustPass` project `chrome`), jadi sidecar
+      # yang tidak benar-benar terpakai tidak bisa lagi lolos sebagai hijau.
+      - name: Gate tes wajib E2E (plan §6.5, chrome)
+        working-directory: web
+        run: |
+          node e2e/verify-required-tests.mjs --self-test
+          node e2e/verify-required-tests.mjs --project chrome
 
       - name: Run E2E PQ v2 burner (WebTransport nyata)
         working-directory: web
