@@ -64,16 +64,27 @@ test.describe('Authentication & Onboarding', () => {
       const attempts: Array<{ attempt: number; ok: boolean; error?: string }> = [];
 
       for (let attempt = 1; attempt <= 2; attempt++) {
-        const result = await page.evaluate(async () => {
-          try {
-            // @ts-ignore — path absolut Vite dev server (runtime-only)
-            const { useAuthStore } = await import('/src/store/auth.ts');
-            await useAuthStore.getState().logout();
-            return { ok: true };
-          } catch (e) {
-            return { ok: false, error: String(e) };
-          }
-        });
+        // [E2E FLAKE 2026-11-04, run 41830562296] `logout()` memicu navigasi keras
+        // (halaman lama ditinggalkan), dan `page.evaluate` yang sedang berjalan di
+        // halaman itu bisa ditolak Playwright dengan "Execution context was
+        // destroyed", bukan oleh skripnya sendiri. Itu bukan bukti logout gagal —
+        // buktinya tetap cookie `rt` di bawah — jadi penolakan dicatat, bukan
+        // dilempar sebagai kegagalan tes.
+        let result: { ok: boolean; error?: string };
+        try {
+          result = await page.evaluate(async () => {
+            try {
+              // @ts-ignore — path absolut Vite dev server (runtime-only)
+              const { useAuthStore } = await import('/src/store/auth.ts');
+              await useAuthStore.getState().logout();
+              return { ok: true };
+            } catch (e) {
+              return { ok: false, error: String(e) };
+            }
+          });
+        } catch (e) {
+          result = { ok: false, error: String(e) };
+        }
         attempts.push({ attempt, ...result });
 
         // Bukti yang dipakai adalah cookie, bukan hasil promise: `logout()`
@@ -97,8 +108,14 @@ test.describe('Authentication & Onboarding', () => {
       ).toBeUndefined();
     });
 
+    // Dibersihkan dari `loginPage` (halaman yang tidak sedang ditinggalkan
+    // navigasi logout), bukan dari `page`: `page.evaluate` di halaman yang sedang
+    // dinavigasi ditolak dengan "Execution context was destroyed", dan itulah
+    // yang menggagalkan langkah ini di CI (run 41830562296). Origin-nya sama,
+    // jadi localStorage/IndexedDB yang dibersihkan tetap milik context yang sama.
     await test.step('kosongkan state lokal (localStorage/sessionStorage/IndexedDB)', async () => {
-      const localState = await page.evaluate(async () => {
+      await loginPage.goto('/login');
+      const localState = await loginPage.evaluate(async () => {
         localStorage.clear();
         sessionStorage.clear();
         document.cookie.split(';').forEach((c) => {
