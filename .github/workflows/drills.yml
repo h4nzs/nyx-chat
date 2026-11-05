@@ -1,0 +1,166 @@
+# Drill terjadwal (docs/39 §39.4b + §39.5, docs/30 WS-G(2)).
+#
+# Kenapa dijadwalkan, bukan hanya per-PR: ketiga drill ini lambat dan/atau butuh
+# layanan yang tidak ada di setiap PR, jadi sebelumnya dijalankan manual —
+# artinya "pernah lulus bulan lalu" dibaca sebagai "lulus sekarang". PR hanya
+# menyentuh satu bagian kode, sedangkan kemampuan **memulihkan** (dump → klien,
+# arsip KT → log, aturan alert → menyala) bergantung pada skrip, kunci, dan
+# konfigurasi yang berubah tanpa PR yang menyebutnya.
+#
+# Job `alerts` dan `kt-recovery-v2` yang sama juga jalan per-PR di `ci.yml`;
+# yang di sini adalah bukti berkala bahwa jalur pemulihan tetap utuh di `main`,
+# termasuk saat minggu itu tidak ada PR yang menyentuhnya. `client-restore`
+# belum pernah jalan di CI sama sekali (butuh Postgres + dump nyata), jadi job
+# di bawah ini juga satu-satunya jalur otomatis untuk drill itu.
+#
+# Manual: `gh workflow run drills.yml` atau tab Actions → Drills (terjadwal).
+name: Drills (terjadwal)
+
+on:
+  schedule:
+    # Senin 04:00 UTC — mingguan, di luar jam sibuk, sebelum rotasi backup harian
+    # VPS (03:30) selesai dipakai orang.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Satu run pada satu waktu: drill KT v2 memakai port tetap (18087–18089, 19468)
+# dan drill klien memakai port 15433 + klaster /tmp sendiri. Dua run paralel di
+# runner terpisah tidak bentrok, tapi menumpuknya tidak memberi bukti tambahan.
+concurrency:
+  group: drills-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  alerts:
+    name: Drill alert (promtool)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Lapis scrape-nyata (`METRICS_URL`) sengaja dilewati: tidak ada exporter
+      # hidup di job ini, dan `ci.yml` sudah menjalankannya di job `e2e` terhadap
+      # API sungguhan. Berlaku sama seperti job `alerts` di `ci.yml`.
+      - name: Drill alert (config + aturan + kasus menyala/tidak-menyala)
+        run: SKIP_LIVE=1 bash scripts/drill-alerts.sh
+
+  kt-v2-restore:
+    name: Drill pemulihan KT v2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/kt-query/go.mod
+          cache-dependency-path: server/kt-query/go.sum
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      # `@nyx/shared` dikonsumsi dari dist/; penulis drill memakainya lewat
+      # `server/src/utils/keyTransparency.ts`.
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      # Batas waktu eksplisit seperti docs/39 §39.5: drill yang menggantung tidak
+      # boleh menahan runner sampai batas 6 jam.
+      - name: Drill pemulihan KT v2 (11 langkah)
+        run: timeout 600 bash scripts/kt-v2-restore-drill.sh
+
+  client-restore:
+    name: Drill restore klien (.nyxbak)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        # Postgres 16: klien `pg_dump` di runner boleh lebih baru (dump dari
+        # server lama didukung), tapi server yang lebih baru dari klien membuat
+        # `pg_dump` menolak bekerja — jadi server dipin ke versi yang aman.
+        image: postgres:16
+        env:
+          POSTGRES_USER: nyx_drill
+          POSTGRES_PASSWORD: nyx_drill
+          POSTGRES_DB: nyx_drill
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nyx_drill"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://nyx_drill:nyx_drill@127.0.0.1:5432/nyx_drill
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Prisma generate + db push (DB drill sementara)
+        working-directory: server
+        env:
+          PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'consent for scheduled drill ephemeral database schema push'
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma db push
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      # Drill menuntut setiap tabel backup punya minimal satu baris (penjaga
+      # cakupan di `web/scripts/client-restore-drill.ts`), jadi database kosong
+      # tidak bisa dipakai: barisnya ditulis dulu lewat jalur Prisma, bukan
+      # `prisma/seed.ts` legacy yang masih merujuk kolom yang sudah dihapus.
+      - name: Seed baris minimum untuk drill
+        working-directory: server
+        run: pnpm exec tsx scripts/client-drill-seed.ts
+      # `initdb`/`pg_ctl` ada di image runner tapi tidak selalu di PATH
+      # (`/usr/lib/postgresql/<major>/bin`). Tanpa keduanya drill gagal di
+      # langkah 1 dengan pesan "initdb tidak ada di PATH" — jadi dipasang di sini,
+      # bukan dibiarkan bergantung pada image.
+      - name: Siapkan perkakas PostgreSQL (initdb/pg_ctl) di PATH
+        run: |
+          if ! command -v initdb >/dev/null 2>&1; then
+            pg_bin="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1 || true)"
+            if [ -z "$pg_bin" ]; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq postgresql postgresql-client
+              pg_bin="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)"
+            fi
+            echo "$pg_bin" >> "$GITHUB_PATH"
+            echo "initdb diambil dari $pg_bin"
+          fi
+          pg_dump --version
+          psql --version
+      # Skrip drill membaca `server/.env` sebagai sumber DATABASE_URL (cara yang
+      # sama seperti di mesin operator). Berkas ini gitignored; isinya hanya
+      # alamat database sementara di atas.
+      - name: Tulis server/.env sumber dump
+        run: |
+          printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > server/.env
+          # Jangan bocorkan kredensial: email/URL tidak dicetak.
+          grep -c '^DATABASE_URL=' server/.env
+      - name: Drill restore klien (.nyxbak di atas dump nyata)
+        run: bash scripts/client-restore-drill.sh
+      # Kegagalan drill tanpa jejak memaksa orang menebak apakah dump gagal,
+      # klaster tidak start, atau round-trip klien yang rusak.
+      - name: Dump log drill saat gagal
+        if: failure()
+        run: |
+          echo '--- /tmp/nyx-client-restore-drill ---'
+          ls -la /tmp/nyx-client-restore-drill 2>/dev/null || echo '(workspace sudah dibersihkan trap)'
+          for f in dump.err initdb.log pg.log pgctl.log restore.log; do
+            echo "--- $f ---"
+            tail -n 40 "/tmp/nyx-client-restore-drill/$f" 2>/dev/null || echo '(tidak ada)'
+          done
+          ss -ltnp 2>/dev/null || true

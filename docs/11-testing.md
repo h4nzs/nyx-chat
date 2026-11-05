@@ -253,10 +253,13 @@ skip di project tersebut.
 | `e2e` | Playwright chromium (headless shell) | transport specs skipped; diakhiri **drill alert terhadap exporter nyata** (`scripts/drill-alerts.sh`, metrik dari API yang baru dinyalakan) |
 | `e2e-chrome` | Google Chrome via apt (`channel: 'chrome'`) | `cargo test` (protokol murni + fuzz 20k) → **sidecar built + running**, cert hash parsed from its banner → transport + chat specs run fully; **coturn diinstal + dijalankan** (`TURN_URLS`/`TURN_STATIC_AUTH_SECRET` di env job) → `call.spec` run fully |
 | `alerts` | — | `promtool check config`/`check rules`/`test rules` atas 14 aturan (`SKIP_LIVE=1`) |
+| `drills` (**terjadwal**, `.github/workflows/drills.yml`) | — | Senin 04:00 UTC + `workflow_dispatch`: ketiga drill dalam satu tempat — promtool (`SKIP_LIVE=1`), pemulihan KT v2 11 langkah, dan **restore klien** (`.nyxbak` di atas dump Postgres nyata: seed → `pg_dump` → klaster `initdb` sementara → `pg_restore` → Dexie/IndexedDB). Alasan dijadwalkan: kemampuan memulihkan bergantung pada skrip/kunci/konfigurasi yang berubah tanpa PR yang menyebutnya, dan `client-restore` tidak pernah jalan per-PR |
 | `dr-oracle` | — | oracle Go: `build`/`vet`/`test` + gate drift vektor (`go run . -check`) + `x3dhOracleVectors.test.ts` + `x3dhOracleInterop.test.ts` |
 
-Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR: keduanya dijalankan
-nightly / sebelum rilis besar (`docs/30` §30.20 sisa WS-G). Terakhir dijalankan
+Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR dan **belum** punya workflow
+terjadwal — keduanya masih manual, dijalankan sebelum rilis besar (`docs/30`
+§30.20 sisa WS-G). Satu-satunya yang terjadwal sekarang adalah drill
+(`.github/workflows/drills.yml`, Senin 04:00 UTC). Terakhir dijalankan
 (2026-10-14): fuzz sidecar 160,9 juta iterasi/300 s (0 temuan) dan k6 beban penuh
 (`scripts/load/run-relay-load.sh`, 500 VU — send p95 74,4 ms / fetch p95 68,8 ms,
 0% error). Drill alert + vektor oracle **sudah** jalan per-PR (tabel di atas).

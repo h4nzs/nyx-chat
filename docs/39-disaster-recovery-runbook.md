@@ -108,6 +108,8 @@ memakai store dan backend kripto palsu, jadi yang terbukti hanya logika pemetaan
 
 ```bash
 bash scripts/client-restore-drill.sh          # ~20 dtk, tidak menyentuh DB hidup
+gh workflow run drills.yml                    # jalur otomatis: job `client-restore`
+                                              # (mingguan, Senin 04:00 UTC)
 ```
 
 Yang dijalankan (semua langkah ❌ menggagalkan skrip):
@@ -236,6 +238,7 @@ itu disengaja, bukan regresi. Untuk drill yang bermakna, arahkan
 ```bash
 bash scripts/kt-v2-restore-drill.sh                  # ~2 menit, tanpa layanan produksi
 timeout 600 bash scripts/kt-v2-restore-drill.sh      # dipakai CI (job kt-recovery-v2)
+gh workflow run drills.yml                           # terjadwal mingguan (Senin 04:00 UTC)
 ```
 
 Workspace sendiri (`NYX_KT_DRILL_DIR`, default `/tmp/nyx-kt-v2-restore-drill`),

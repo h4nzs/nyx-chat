@@ -68,6 +68,7 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 | `gemini-invoke.yml` | Invoke the agent for a task |
 | `gemini-plan-execute.yml` | Plan-then-execute agent loop |
 | `gemini-review.yml` | Automated code review |
+| `drills.yml` | **Terjadwal** (Senin 04:00 UTC) + `workflow_dispatch`: menjalankan ketiga drill di satu tempat — `alerts` (promtool, `SKIP_LIVE=1`), `kt-v2-restore` (11 langkah), dan `client-restore` (`.nyxbak` di atas dump Postgres nyata; satu-satunya jalur otomatis untuk drill ini). Bukti berkala bahwa jalur pemulihan tetap utuh walau tidak ada PR yang menyentuhnya |
 | `gemini-scheduled-triage.yml` | Scheduled issue triage |
 
 ### 25.5b Dependabot & lockfile workspace (plan kualitas §9.2)
