@@ -1,3 +1,10 @@
+# [plan kualitas §9.2] Entri `npm` di bawah sengaja tetap per-paket (bukan satu
+# entri root) supaya grup frontend/backend tetap terpisah. Konsekuensinya:
+# Dependabot TIDAK menulis `pnpm-lock.yaml` workspace di root, jadi setiap PR
+# Dependabot digagalkan `ERR_PNPM_OUTDATED_LOCKFILE` di CI. Itu diperbaiki
+# otomatis oleh `.github/workflows/dependabot-lockfile.yml` (regenerasi
+# `--lockfile-only` + push ke branch PR). Jangan "menghijaukan" PR dependabot
+# dengan melonggarkan `--frozen-lockfile` di CI.
 version: 2
 updates:
   # Maintain dependencies for the Frontend (Web)

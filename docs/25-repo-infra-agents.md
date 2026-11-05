@@ -61,6 +61,7 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 | Workflow | Purpose |
 |---|---|
 | `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit (web+server) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → `pnpm audit --prod` → job Rust `pir-sidecar`/`sidecar` (`cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test`) → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata) |
+| `dependabot-lockfile.yml` | PR Dependabot (bot, branch di repo ini): regenerasi `pnpm-lock.yaml` root (`pnpm install --lockfile-only --no-frozen-lockfile`) lalu commit+push ke branch PR lewat GitHub App, karena Dependabot per-`directory` tidak menulis lockfile workspace — tanpa ini setiap PR-nya mati di `ERR_PNPM_OUTDATED_LOCKFILE` (§25.5b) |
 | `deploy.yml` | On push to `main`: guard → build web + marketing + server + Rust sidecar + `nyx-kt-query-v2`/`nyx-kt-auditor-v2`/`nyx-kt-v2-init` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd KT v2 (`nyx-kt-query-v2`, `nyx-kt-auditor-v2`; unit v1 yang masih `enabled` dimatikan + dihapus) dan `nyx-ohttp-relay` dari `ops/systemd/`, lalu restart+verifikasi **bila unitnya sudah `enabled`** (gagal ⇒ deploy merah; relay butuh `server/dist/ohttp/relay.js`) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
 | `codeql.yml` | Static security analysis |
 | `gemini-dispatch.yml` | Route issues/PRs to the Gemini agent |
@@ -68,6 +69,40 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 | `gemini-plan-execute.yml` | Plan-then-execute agent loop |
 | `gemini-review.yml` | Automated code review |
 | `gemini-scheduled-triage.yml` | Scheduled issue triage |
+
+### 25.5b Dependabot & lockfile workspace (plan kualitas §9.2)
+
+pnpm workspace punya **satu** lockfile di root, sementara `.github/dependabot.yml`
+memakai entri `npm` per direktori (`/web`, `/server`, `/marketing`,
+`/packages/shared`) supaya grup frontend/backend tetap terpisah. Dengan bentuk
+itu Dependabot hanya mengubah `<workspace>/package.json`; `pnpm-lock.yaml` tidak
+ikut berubah, jadi CI-nya gagal di langkah pertama:
+
+```
+[ERR_PNPM_OUTDATED_LOCKFILE] Cannot install with "frozen-lockfile" because
+pnpm-lock.yaml is not up to date with <ROOT>/server/package.json
+* 15 dependencies are mismatched: @aws-sdk/client-s3 (lockfile: ^3.1138.0, manifest: ^3.1161.0) …
+```
+
+`.github/workflows/dependabot-lockfile.yml` menutupnya di sisi repo: pada PR dari
+`dependabot[bot]` ia menjalankan `pnpm install --lockfile-only
+--no-frozen-lockfile` (resolusi saja: tanpa build script, tanpa `node_modules`),
+lalu commit + push **hanya bila** `pnpm-lock.yaml` benar-benar berubah. Push itu
+memakai GitHub App (`vars.APP_ID` + `secrets.APP_PRIVATE_KEY`, permission
+`contents: write`) karena push dengan `GITHUB_TOKEN` tidak memicu workflow
+berikutnya — CI harus jalan ulang di atas lockfile yang baru. Tanpa App
+(`vars.APP_ID` kosong) job ini sengaja tidak jalan, dan PR tetap merah dengan
+pesan lockfile yang jujur.
+
+- Jangan “menghijaukan” PR Dependabot dengan `--no-frozen-lockfile` di `ci.yml`:
+  itu menerima PR yang lockfile-nya tetap basi, sehingga `main` (dan deploy)
+  gagal setelah merge.
+- Periksa hasilnya: `gh run list -w "Dependabot lockfile"`; PR yang sudah
+  diperbaiki menampilkan commit `chore(deps): sinkronkan pnpm-lock.yaml …` di
+  branch `dependabot/*`.
+- Kalau PR masih gagal di install: jalankan `pnpm install --lockfile-only` lokal
+  pada branch PR dan bandingkan — biasanya ada overrides di
+  `pnpm-workspace.yaml` yang membuat resolusi Dependabot dan pnpm berbeda.
 
 ## 25.6 Agent discoverability content (`marketing/public/`)
 

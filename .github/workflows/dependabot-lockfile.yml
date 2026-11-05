@@ -1,0 +1,77 @@
+# [plan kualitas §9.2] Dependabot + pnpm workspace: PR Dependabot hanya mengubah
+# `<workspace>/package.json`, sedangkan sumber resolusi ada di SATU lockfile di
+# root (`pnpm-lock.yaml`). Dengan entri `directory: /web` atau `/server` seperti
+# sekarang, Dependabot tidak menulis lockfile workspace itu — jadi setiap PR-nya
+# mati di langkah `pnpm install --frozen-lockfile` dengan
+# `ERR_PNPM_OUTDATED_LOCKFILE` (8 job merah karena satu berkas yang tidak pernah
+# ditulis, bukan karena dependensinya rusak).
+#
+# Workflow ini menutup celah itu di sisi repo, bukan dengan melonggarkan CI:
+# lockfile diregenerasi (`--lockfile-only`: resolusi saja, tanpa build script,
+# tanpa menyentuh node_modules) lalu di-commit ke branch PR Dependabot. Push
+# memakai GitHub App (`vars.APP_ID` + `secrets.APP_PRIVATE_KEY`) karena push
+# dengan `GITHUB_TOKEN` **tidak** memicu workflow berikutnya — CI harus benar-
+# benar jalan ulang di atas lockfile yang baru. Idempoten: bila lockfile sudah
+# sinkron, tidak ada commit dan tidak ada push.
+name: Dependabot lockfile
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-lockfile-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sync-lockfile:
+    # Hanya PR Dependabot dari repo ini (bukan fork), dan hanya bila GitHub App
+    # tersedia. Tanpa App, job ini tidak boleh berpura-pura sudah memperbaiki
+    # apa pun: PR tetap merah dengan pesan lockfile yang jujur.
+    if: |
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Mint token App (agar push memicu ulang CI)
+        id: app
+        uses: 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' # ratchet:actions/create-github-app-token@v2
+        with:
+          app-id: '${{ vars.APP_ID }}'
+          private-key: '${{ secrets.APP_PRIVATE_KEY }}'
+          permission-contents: 'write'
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ steps.app.outputs.token }}
+
+      # Versi pnpm mengikuti `packageManager` di package.json (pnpm 11), jadi
+      # lockfile yang dihasilkan identik dengan yang dipakai CI & deploy.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Regenerasi lockfile workspace
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+
+      - name: Commit & push bila lockfile berubah
+        run: |
+          if git diff --quiet -- pnpm-lock.yaml; then
+            echo "pnpm-lock.yaml sudah sinkron dengan manifest — tidak ada yang perlu di-push."
+            exit 0
+          fi
+          git config user.name 'nyx-lockfile-bot'
+          git config user.email 'nyx-lockfile-bot@users.noreply.github.com'
+          git add pnpm-lock.yaml
+          git commit -m "chore(deps): sinkronkan pnpm-lock.yaml dengan manifest Dependabot"
+          git push
+          echo "Lockfile diperbarui; CI dijalankan ulang oleh push dari App."
