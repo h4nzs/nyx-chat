@@ -37,11 +37,17 @@ pengguna klien-terlalu-tua tetap tidak melihat layar pembaruan.
 
 ## B. Masih terbuka
 
+> Diperbarui 2026-11-05: kedua temuan "baru" pass ini sudah ditutup di commit
+> `a274175e` (`40-fixes.md`), dan F-13 kini benar-benar dijalankan. Bukti ulang
+> N12-01 pada HEAD: `npx tsx --test tests/ohttp.test.ts tests/ohttpRelay.test.ts`
+> → **31/31 lulus**; entri cacat `10.0.0.0/`, `fd00::/`, dan `10.0.0.0/8/8`
+> tidak lagi mencocokkan hop mana pun.
+
 | ID | Status | Catatan |
 |---|---|---|
-| N12-01 | **Baru (Low, keyakinan tinggi)** | `OHTTP_TRUSTED_PROXIES=10.0.0.0/` atau `fd00::/` diterima dan berlaku sebagai `/0` → semua hop tepercaya, `CF-Connecting-IP` bisa dikarang (probe fungsi asli) |
-| N12-02 | **Baru (Info, keyakinan tinggi)** | Fix `clientVersion` hanya di working tree; HEAD tetap merah pada satu tes dan layar versi tidak muncul untuk klien terlalu tua |
-| F-13 | Tidak diverifikasi | `pnpm audit --prod` butuh jaringan |
+| N12-01 | **Tertutup** (`40-fixes.md`) | Dulu: `OHTTP_TRUSTED_PROXIES=10.0.0.0/` atau `fd00::/` diterima dan berlaku sebagai `/0` → semua hop tepercaya, `CF-Connecting-IP` bisa dikarang (probe fungsi asli). Kini `parseProxyEntry` menolak prefix kosong/ganda dan `proxyMatches` fail-closed; `/0` hanya berlaku bila operator menulisnya eksplisit |
+| N12-02 | **Tertutup** (`40-fixes.md`) | Dulu: fix `clientVersion` hanya di working tree; HEAD merah pada satu tes. Kini kedua berkas masuk commit `a274175e` |
+| F-13 | **Terverifikasi 2026-11-05** | `pnpm audit --prod` → `No known vulnerabilities found`, exit 0. GitHub tetap melaporkan 11 advisory di default branch karena menghitung **devDependency** juga (2 high, 5 moderate, 4 low) — itu wilayah PR Dependabot (`docs/25` §25.5b) |
 | CSP `style-src 'unsafe-inline'` | Terbuka, disengaja | Bukan vektor eksekusi skrip |
 | E2E / drill / beban | Terbuka | E2E, drill DR & KT, drill alert, uji beban relay tidak dijalankan pass ini |
 
@@ -78,6 +84,8 @@ samping:
 - Probe `ohttpClientAddress`/`invalidTrustedProxyReason` → N12-01.
 
 ## F. Rekomendasi urutan tindak lanjut
+
+> Item 1–2 sudah dikerjakan (commit `a274175e`); item 3–4 tetap terbuka.
 
 1. **N12-01** — tolak prefix kosong dan garis miring ganda di validator; buat
    `proxyMatches` fail-closed untuk prefix yang tidak bisa diparse; tambah dua
