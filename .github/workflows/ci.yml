@@ -40,7 +40,7 @@ jobs:
         run: bash scripts/check-vendor.sh
       # Bukti bahwa modul Go yang di-vendor benar-benar membangun & lulus test
       # tanpa checkout upstream (vendor mode, tanpa `replace`).
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: server/kt-query/go.mod
           cache-dependency-path: server/kt-query/go.sum
@@ -316,7 +316,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: tools/dr-oracle/go.mod
           cache-dependency-path: tools/dr-oracle/go.sum
@@ -359,7 +359,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: server/kt-query/go.mod
           cache-dependency-path: server/kt-query/go.sum
