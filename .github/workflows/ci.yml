@@ -17,7 +17,9 @@ permissions:
 # riwayat main lebih berguna utuh daripada cepat.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == "pull_request" }}
+  # Ekspresi GitHub hanya menerima string literal berkutip tunggal; kutip ganda
+  # membuat file workflow ditolak sebelum job pertama dibuat (run 42347177239).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
