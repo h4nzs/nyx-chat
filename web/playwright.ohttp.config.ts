@@ -89,6 +89,19 @@ export default defineConfig({
         // `nyx_ohttp_client_tag_total{status="tagged"}` bertambah. Tanpa token,
         // seluruh trafik OHTTP jatuh ke satu bucket limiter 127.0.0.1.
         OHTTP_INTERNAL_TOKEN: E2E_INTERNAL_TOKEN,
+        // Stack ini tidak memasang PIR. Tanpa `PIR_ENABLED=0` eksplisit,
+        // `server/.env` selfhost (yang menyalakannya) membuat klien memanggil
+        // `/api/pir/params` → 404 dan pencarian selalu kosong — gejalanya
+        // "OHTTP rusak", padahal hanya jalur PIR yang tidak ada di sini.
+        PIR_ENABLED: '0',
+        // Selfhost `.env` memasang relay OHTTP eksternal (nginx → :4100), jadi
+        // route in-proses menjawab 404 `OHTTP_RELAY_EXTERNAL`. Stack uji ini
+        // tidak punya relay kedua; paksa relay in-proses milik API sendiri.
+        OHTTP_RELAY_EXTERNAL: '0',
+        // Suite membuat >20 akun/jam dari satu IP; selfhost `.env` memasang
+        // guard `on` (batas 20/jam). Stack uji ini terisolasi (port + kunci
+        // acak), jadi guard dimatikan di sini alih-alih menyunting `.env`.
+        ABUSE_REGISTRATION_GUARD: 'off',
         // Exporter dipakai spec untuk membuktikan jalur tag aktif. Port bukan
         // 9464: API dev pemilik port itu bisa hidup di mesin developer, dan
         // EADDRINUSE hanya mengotori log.
@@ -104,6 +117,9 @@ export default defineConfig({
       env: {
         VITE_OHTTP_ENABLED: '1',
         VITE_OHTTP_TOKEN_MODE: 'off',
+        // PIR tidak dipasang di stack ini; `VITE_PIR_ENABLED=1` dari `web/.env`
+        // lokal akan membuat pencarian gagal sebelum OHTTP sempat dipakai.
+        VITE_PIR_ENABLED: '0',
         // `api.ts` memakai VITE_API_URL bila ada (web/.env dev menunjuk 4000),
         // jadi arahkan ke origin Vite sendiri agar semua trafik lewat proxy ke
         // API 4100 — tanpa ini request langsung ke 4000 dan diblokir CORS.

@@ -17,6 +17,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ohttp": "playwright test --config playwright.ohttp.config.ts --project=chromium",
     "test:e2e:verify-required": "node e2e/verify-required-tests.mjs",
+    "test:a11y": "playwright test --config playwright.a11y.config.ts --project=chromium",
+    "test:quarantine": "node e2e/verify-required-tests.mjs --self-test",
     "lint": "oxlint src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -74,6 +76,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",

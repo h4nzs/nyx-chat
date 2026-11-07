@@ -1,4 +1,4 @@
-# [plan kualitas §9.2] Entri `npm` di bawah sengaja tetap per-paket (bukan satu
+# [docs/41 §9.2] Entri `npm` di bawah sengaja tetap per-paket (bukan satu
 # entri root) supaya grup frontend/backend tetap terpisah. Konsekuensinya:
 # Dependabot TIDAK menulis `pnpm-lock.yaml` workspace di root, jadi setiap PR
 # Dependabot digagalkan `ERR_PNPM_OUTDATED_LOCKFILE` di CI. Itu diperbaiki

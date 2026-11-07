@@ -99,7 +99,9 @@ jobs:
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Web coverage (~8m) + server coverage (~3m) + MinIO smoke (~1m) + setup.
+    # Batas lama 15m terlalu dekat; kehabisan waktu terlihat seperti tes gagal.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -118,12 +120,12 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
         run: pnpm exec prisma generate
-      # [plan kualitas §6.1] Web dijalankan DENGAN coverage, bukan `pnpm run test`
+      # [docs/41 §6.1] Web dijalankan DENGAN coverage, bukan `pnpm run test`
       # terpisah: v8 hanya menambah sedikit overhead dibanding durasi tesnya,
       # sedangkan dua kali menjalankan suite 8 menit tidak sepadan.
       - name: Unit tests web (+ coverage)
         run: pnpm --filter nyx-web run test:coverage
-      # [plan kualitas §6.2] Server: flag coverage Node diteruskan lewat runner
+      # [docs/41 §6.2] Server: flag coverage Node diteruskan lewat runner
       # (`server/scripts/test-coverage.mjs`) yang membaca daftar tes eksplisit
       # dari package.json — tidak ada daftar kedua yang bisa menyimpang. Runner
       # juga memegang threshold (lines/branches/functions).
@@ -134,7 +136,32 @@ jobs:
           # Modul server mengimpor src/lib/prisma.ts saat load; tanpa URL ini
           # PrismaClient melempar sebelum test sempat memakai fake DB.
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
-      # [plan kualitas §6.3] "Coverage global naik" bisa berarti "baris baru tak
+      # [docs/41 §6.6] Jalur sukses presign→PUT→HEAD→GET tidak bisa dibuktikan
+      # tanpa S3 nyata. Job ini sudah punya Node + dependency, jadi MinIO
+      # ephemeral lebih murah daripada job baru (dan tidak mengubah daftar
+      # required check). Bucket dibuat oleh tes (`NYX_R2_SMOKE_CREATE_BUCKET=1`),
+      # sesuatu yang tidak dilakukan terhadap akun R2 sungguhan.
+      - name: S3 smoke (MinIO ephemeral) — presign PUT/GET
+        env:
+          JWT_SECRET: ci-s3-smoke
+          R2_ENDPOINT: http://127.0.0.1:9000
+          R2_BUCKET_NAME: nyx-smoke
+          R2_ACCESS_KEY_ID: nyxminio
+          R2_SECRET_ACCESS_KEY: nyxminio123
+          NYX_R2_SMOKE: '1'
+          NYX_R2_SMOKE_CREATE_BUCKET: '1'
+        run: |
+          docker run -d --name nyx-minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=nyxminio -e MINIO_ROOT_PASSWORD=nyxminio123 \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
+          pnpm --filter nyx-server exec node --import tsx --test tests/r2Endpoint.test.ts
+          docker rm -f nyx-minio
+      # [docs/41 §6.3] "Coverage global naik" bisa berarti "baris baru tak
       # diuji". Gate ini mengukur khusus baris yang diubah PR (lcov dari step
       # web di atas + diff git). Dua titik (`<base> HEAD`) dan fetch satu commit
       # dasar supaya tetap bekerja pada clone dangkal checkout default.
@@ -425,7 +452,7 @@ jobs:
           # dipakai: volumenya bisa puluhan MB per suite.)
           DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chromium
-      # [plan kualitas §6.5] Suite hijau bisa berarti "tesnya tidak jalan":
+      # [docs/41 §6.5] Suite hijau bisa berarti "tesnya tidak jalan":
       # exit code Playwright tidak membedakan 4 skip yang sah dari suite yang
       # seluruh tesnya ter-skip. Gate ini membaca report JSON (jumlah tes tidak
       # menyusut, tes wajib benar-benar dijalankan, setiap skip beralasan dan
@@ -617,7 +644,7 @@ jobs:
           # [DEBUG 2026-11-04] Lihat catatan di job `e2e`.
           DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chrome
-      # [plan kualitas §6.5] Di job inilah skip senyap paling berbahaya: transport
+      # [docs/41 §6.5] Di job inilah skip senyap paling berbahaya: transport
       # dan chat WAJIB jalan (lihat `mustPass` project `chrome`), jadi sidecar
       # yang tidak benar-benar terpakai tidak bisa lagi lolos sebagai hijau.
       - name: Gate tes wajib E2E (plan §6.5, chrome)

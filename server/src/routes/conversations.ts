@@ -309,7 +309,7 @@ router.put('/:id/details', async (req, res, next) => {
     const sanitizedMetadata = sanitizeGroupMetadataBlob(encryptedMetadata)
     const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata: sanitizedMetadata } })
     // Opaque Mailbox: notify explicit targetRecipients passed from client
-    const targetRecipients = req.body.targetRecipients as string[] | undefined;
+    const targetRecipients = req.body?.targetRecipients as string[] | undefined;
     if (Array.isArray(targetRecipients) && targetRecipients.length > 0) {
       await emitEventToUsers(targetRecipients, 'conversation:updated', { id: asConversationId(id), encryptedMetadata: updatedConversation.encryptedMetadata ?? undefined });
     }
@@ -359,7 +359,7 @@ router.post('/:id/participants', async (req, res, next) => {
   }
   
   // Opaque Mailbox: notify explicit targetRecipients passed from client
-  const addRecipients = req.body.targetRecipients as string[] | undefined;
+  const addRecipients = req.body?.targetRecipients as string[] | undefined;
   if (Array.isArray(addRecipients) && addRecipients.length > 0) {
     await emitEventToUsers(addRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
@@ -376,7 +376,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
   if (!kickGate.ok) return res.status(kickGate.status).json({ error: kickGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
-  const removeRecipients = req.body.targetRecipients as string[] | undefined;
+  // [E2E groupLifecycle 2026-11-05] DELETE tanpa body membuat `req.body`
+  // undefined; akses properti langsung = TypeError → 500 pada kick yang sah.
+  const removeRecipients = req.body?.targetRecipients as string[] | undefined;
   if (Array.isArray(removeRecipients) && removeRecipients.length > 0) {
     await emitEventToUsers(removeRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(removeRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
@@ -415,7 +417,7 @@ router.delete('/:id/leave', async (req, res, next) => {
   if (!leaveGate.ok) return res.status(leaveGate.status).json({ error: leaveGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
-  const leaveRecipients = req.body.targetRecipients as string[] | undefined;
+  const leaveRecipients = req.body?.targetRecipients as string[] | undefined;
   if (Array.isArray(leaveRecipients) && leaveRecipients.length > 0) {
     await emitEventToUsers(leaveRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(leaveRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });

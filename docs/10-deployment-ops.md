@@ -31,7 +31,7 @@ On PR and push to `main`:
 |---|---|
 | `build` | gate cepat `scripts/check-wasm-artifacts.sh` + `scripts/check-vendor.sh` → Go build/vet/test `server/kt-query` **dari vendor** → frozen-lockfile install → prisma generate → `pnpm run build` |
 | `wasm` | [R1] bangun ULANG `packages/spqr-wasm`, `packages/keytrans-wasm-v2` (fork lokal), dan `packages/pir-wasm` lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
-| `unit` | `pnpm run test` — seluruh test server (`node:test` + `tsx`) dan web (vitest). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
+| `unit` | `pnpm run test` + `test:coverage` — seluruh test server (`node:test` + `tsx`) dan web (vitest), dengan lantai coverage per-glob (`docs/11` §11.1d); pada PR, `scripts/check-changed-lines.mjs` melaporkan baris baru yang belum teruji (non-blocking). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
 | `lint` | **BLOCKING** — `pnpm run lint` = `oxlint src` per paket (ESLint dihapus 2026-10-15). Nol temuan untuk rule level `error` + kategori `correctness`; `no-unused-vars` sengaja `warn` |
 | `alerts` | `SKIP_LIVE=1 scripts/drill-alerts.sh` — drill aturan Prometheus 4 lapis (§10.12); aturan yang merujuk metrik tak terdeklarasi ditolak di sini |
 | `dr-oracle` | [WS-G(6)] `tools/dr-oracle` (Go, implementasi kedua tanpa libsodium): vet/test + gate drift vektor ter-commit + test NYX↔oracle & interop dua arah |
@@ -39,9 +39,11 @@ On PR and push to `main`:
 | `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip; setelah suite, `nyx-api` dinyalakan dan drill alert dijalankan terhadap exporter nyata (`METRICS_URL`) |
 | `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; **coturn installed & started** (loopback relay, `allow-loopback-peers` only in CI) with `TURN_URLS`/`TURN_STATIC_AUTH_SECRET` in the job env; runs `--project=chrome` (WebTransport + real TURN relay active) |
 
+Pemulihan tidak hanya per-PR: **`drills.yml`** berjalan terjadwal (Senin 04:00 UTC) + `workflow_dispatch` dan menjalankan tiga drill sekaligus — alert promtool (`SKIP_LIVE=1`), pemulihan KT v2 11 langkah, dan restore klien (`.nyxbak` di atas dump Postgres sementara). Ini satu-satunya jalur otomatis untuk `client-restore`; rincian prosedur di `docs/39` §39.4b/§39.5.
+
 ## 10.3 Deploy pipeline (`deploy.yml`)
 
-Push to `main` triggers:
+`deploy.yml` bersifat **manual** (`workflow_dispatch`) — push ke `main` hanya menjalankan `ci.yml`, tidak men-deploy apa pun. Saat dijalankan, ia menjalankan:
 
 - **Guards (gagal cepat, sebelum install):** `scripts/check-wasm-artifacts.sh` (artefak WASM ter-commit + cocok hash manifest `packages/wasm-artifacts.json`) dan `scripts/check-vendor.sh` (sumber Signal ter-vendor cocok pin `NOTICE`) — tanpa keduanya, clone bersih tidak bisa dibangun ulang.
 1. Install (frozen lockfile) → assert secrets (`VITE_TURNSTILE_SITE_KEY` — satu-satunya yang di-assert hari ini) → build shared → web → marketing → server (incl. `prisma generate`) → Rust sidecar (`cargo build --release`) → binary layanan log KT (`bash server/kt-query/build.sh`, dari vendor; §10.15).

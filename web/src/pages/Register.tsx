@@ -325,7 +325,8 @@ export default function Register() {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.anonymous_reg')}</h2>
+            {/* [docs/41 §8] Sama seperti Login: aksen di atas surface gagal WCAG AA. */}
+            <h2 className="text-2xl font-bold text-text-primary mb-2">{t('auth:titles.anonymous_reg')}</h2>
             <p className="text-text-secondary">{t('auth:subtitles.register_desc')}</p>
           </div>
 
@@ -357,7 +358,7 @@ export default function Register() {
           </div>
 
           <div className="text-center mt-6">
-            <p className="text-stone-500 text-sm">
+            <p className="text-text-secondary text-sm">
               {t('auth:links.has_account')} <Link to="/login" className="font-semibold text-teal-500 hover:underline">{t('auth:buttons.login')}</Link>
             </p>
           </div>

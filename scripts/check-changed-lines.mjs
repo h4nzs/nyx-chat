@@ -1,7 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 //
-// [plan kualitas §6.3] Gate changed-lines untuk coverage web.
+// [docs/41 §6.3] Gate changed-lines untuk coverage web.
 //
 // Kenapa bukan `diff-cover`: itu alat Python (butuh pip di runner) dan hanya
 // membaca lcov. Di repo ini lcov sudah dihasilkan Vitest v8, sedangkan coverage

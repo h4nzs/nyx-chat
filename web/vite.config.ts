@@ -251,7 +251,7 @@ export default defineConfig(({ mode }) => {
     environment: 'jsdom',
     setupFiles: './src/SetupTests.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
-    // [plan kualitas §6.1] Coverage = alat diagnosis, bukan target kosong.
+    // [docs/41 §6.1] Coverage = alat diagnosis, bukan target kosong.
     // Angka global dibiarkan 0 sampai baseline stabil; modul berisiko dikunci
     // per-glob supaya "global naik" tidak menutupi modul kritis yang tak diuji.
     coverage: {
@@ -270,7 +270,7 @@ export default defineConfig(({ mode }) => {
         'src/**/generated/**',
         'src/**/dist/**',
       ],
-      // [plan kualitas §6.1] Ini LANTAI, bukan target: angka diambil dari run
+      // [docs/41 §6.1] Ini LANTAI, bukan target: angka diambil dari run
       // penuh 4 Nov 2026 (137 berkas lulus) lalu diturunkan beberapa poin supaya
       // mesin CI yang lebih lambat tidak menggagalkan run, sementara penurunan
       // nyata tetap tertangkap. Global dibiarkan 0 karena angka global (30%

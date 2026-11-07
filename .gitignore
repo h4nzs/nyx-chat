@@ -118,3 +118,6 @@ deploy/selfhost/**/*.pem
 # [DEBUG 2026-11-04] Reporter HTML Playwright kini selalu aktif (bukti kegagalan);
 # laporan dihasilkan tiap run dan tidak boleh masuk repo.
 playwright-report/
+
+# [docs/41] Output graphify lokal (bisa puluhan MB) — bukan artefak repo.
+graphify-out/

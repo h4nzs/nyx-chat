@@ -49,6 +49,18 @@ test.describe('OHTTP — pencarian lewat relay → gateway', () => {
     );
     expect(config.ok(), `key config OHTTP harus tersedia: HTTP ${config.status()}`).toBe(true);
 
+    // Suite utama bisa berjalan di mesin yang API-nya mengaktifkan OHTTP tetapi
+    // stack uji terpisah (`playwright.ohttp.config.ts`, metrics :19464) tidak
+    // hidup. Tanpa probe ini spec masuk lalu gagal di asersi metrics — gejalanya
+    // "OHTTP rusak", padahal yang tidak ada hanya stack ujinya.
+    const metricsProbe = await page.request
+      .get(OHTTP_METRICS_URL, { timeout: 2000 })
+      .catch(() => null);
+    test.skip(
+      !metricsProbe?.ok(),
+      'stack OHTTP terpisah tidak berjalan (metrics :19464 tidak terjangkau); jalankan test:e2e:ohttp'
+    );
+
     const relayTypes: string[] = [];
     const directSearches: string[] = [];
     page.on('request', (request) => {

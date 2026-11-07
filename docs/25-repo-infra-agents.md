@@ -60,18 +60,20 @@ Production does **not** use Compose — see `10-deployment-ops.md` (VPS + PM2 + 
 
 | Workflow | Purpose |
 |---|---|
-| `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit (web+server) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → `pnpm audit --prod` → job Rust `pir-sidecar`/`sidecar` (`cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test`) → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata) |
+| `ci.yml` | Guard vendor/artefak WASM → Go build+test `server/kt-query` (dari vendor) → build + unit **+ coverage** (web v8, server native; lantai per-glob `docs/11` §11.1d, changed-lines dilaporkan pada PR) → lint **blocking** (`oxlint`, rule level `error` + kategori `correctness`; ESLint dihapus) → drill alert Prometheus (`alerts`) → vektor/interop DR oracle (`dr-oracle`) → `pnpm audit --prod` → job Rust `pir-sidecar`/`sidecar` (`cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings` + `cargo test`) → E2E Chromium + Chrome penuh (WebTransport sidecar + coturn nyata, ditutup gate `web/e2e/verify-required-tests.mjs` atas report JSON; manifest `docs/41` §6.5). Setiap job punya `timeout-minutes` (5–45) dan `concurrency` per ref — run PR dibatalkan saat tersalip, push ke `main` tidak |
 | `dependabot-lockfile.yml` | PR Dependabot (bot, branch di repo ini): regenerasi `pnpm-lock.yaml` root (`pnpm install --lockfile-only --no-frozen-lockfile`) lalu commit+push ke branch PR lewat GitHub App, karena Dependabot per-`directory` tidak menulis lockfile workspace — tanpa ini setiap PR-nya mati di `ERR_PNPM_OUTDATED_LOCKFILE` (§25.5b) |
-| `deploy.yml` | On push to `main`: guard → build web + marketing + server + Rust sidecar + `nyx-kt-query-v2`/`nyx-kt-auditor-v2`/`nyx-kt-v2-init` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd KT v2 (`nyx-kt-query-v2`, `nyx-kt-auditor-v2`; unit v1 yang masih `enabled` dimatikan + dihapus) dan `nyx-ohttp-relay` dari `ops/systemd/`, lalu restart+verifikasi **bila unitnya sudah `enabled`** (gagal ⇒ deploy merah; relay butuh `server/dist/ohttp/relay.js`) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
+| `deploy.yml` | **Manual** (`workflow_dispatch`; push ke `main` hanya menjalankan `ci.yml` — diverifikasi 2026-11-05, tidak ada trigger `push`): guard → build web + marketing + server + Rust sidecar + `nyx-kt-query-v2`/`nyx-kt-auditor-v2`/`nyx-kt-v2-init` (Go, dari vendor) → zip → SCP ke VPS → `pnpm install` + `prisma db push` → pm2 restart `nyx-api`/`nyx-sidecar` → segarkan unit systemd KT v2 (`nyx-kt-query-v2`, `nyx-kt-auditor-v2`; unit v1 yang masih `enabled` dimatikan + dihapus) dan `nyx-ohttp-relay` dari `ops/systemd/`, lalu restart+verifikasi **bila unitnya sudah `enabled`** (gagal ⇒ deploy merah; relay butuh `server/dist/ohttp/relay.js`) → overwrite `server/.env` dengan `/root/nyx-app/.env` |
 | `codeql.yml` | Static security analysis |
 | `gemini-dispatch.yml` | Route issues/PRs to the Gemini agent |
 | `gemini-invoke.yml` | Invoke the agent for a task |
 | `gemini-plan-execute.yml` | Plan-then-execute agent loop |
 | `gemini-review.yml` | Automated code review |
 | `drills.yml` | **Terjadwal** (Senin 04:00 UTC) + `workflow_dispatch`: menjalankan ketiga drill di satu tempat — `alerts` (promtool, `SKIP_LIVE=1`), `kt-v2-restore` (11 langkah), dan `client-restore` (`.nyxbak` di atas dump Postgres nyata; satu-satunya jalur otomatis untuk drill ini). Bukti berkala bahwa jalur pemulihan tetap utuh walau tidak ada PR yang menyentuhnya |
+| `nightly.yml` | **Terjadwal** (02:00 UTC) + `workflow_dispatch`: fuzz web 1 jam, fuzz framing sidecar 1 jam, k6 100 VU di stack ephemeral (Postgres+Redis service; **menulis pesan**, jangan diarahkan ke prod), smoke Firefox/WebKit (`auth`+`settings`), a11y (`a11y.spec.ts`), dan contract test HTTP (`httpContract.test.ts`, butuh Redis+Postgres) |
 | `gemini-scheduled-triage.yml` | Scheduled issue triage |
+| `gemini-triage.yml` | Sub-workflow `workflow_call` yang dipanggil dispatch: memilih dan menjalankan triage issue (label + routing). Tidak punya trigger sendiri |
 
-### 25.5b Dependabot & lockfile workspace (plan kualitas §9.2)
+### 25.5b Dependabot & lockfile workspace (docs/41 §9.2)
 
 pnpm workspace punya **satu** lockfile di root, sementara `.github/dependabot.yml`
 memakai entri `npm` per direktori (`/web`, `/server`, `/marketing`,
@@ -104,6 +106,30 @@ pesan lockfile yang jujur.
 - Kalau PR masih gagal di install: jalankan `pnpm install --lockfile-only` lokal
   pada branch PR dan bandingkan — biasanya ada overrides di
   `pnpm-workspace.yaml` yang membuat resolusi Dependabot dan pnpm berbeda.
+
+### 25.5c Branch protection `main` (aktif 2026-11-05)
+
+`main` dijaga di sisi GitHub, bukan hanya oleh workflow. Konfigurasi terpasang
+(`gh api repos/h4nzs/nyx-chat/branches/main/protection`):
+
+- **14 required status checks** = 12 job `ci.yml` (`build`, `wasm`, `unit`,
+  `pir-sidecar`, `sidecar`, `lint`, `alerts`, `dr-oracle`, `kt-recovery-v2`,
+  `audit`, `e2e`, `e2e-chrome`) + dua job CodeQL (`Analyze (actions)`,
+  `Analyze (javascript-typescript)`). Nama konteks diambil dari `check-runs`
+  HEAD, bukan dari nama job di YAML — mengganti `name:` sebuah job berarti
+  daftar ini harus diperbarui, atau merge akan menggantung menunggu konteks
+  yang tidak pernah muncul.
+- `strict: false` — branch tidak harus up-to-date sebelum merge (suite E2E
+  ~20 menit membuat ini mahal); CI tetap berjalan di merge commit.
+- **Tidak** ada kewajiban pull request atau review approval: alur maintainer
+  langsung ke `main` dipertahankan.
+- `enforce_admins: false` — admin boleh bypass untuk keadaan darurat; alasannya
+  wajib dicatat di commit/PR. Force-push dan penghapusan branch **diblokir**.
+
+Gate-nya hanya sekuat job-nya: job yang di-skip di YAML (mis. `if:` yang
+menyala) tetap memuaskan required check. Karena itu gate isi (manifest tes
+wajib, `verify-required-tests.mjs`, lantai coverage) hidup **di dalam** job,
+bukan di branch protection.
 
 ## 25.6 Agent discoverability content (`marketing/public/`)
 
@@ -142,7 +168,7 @@ The `.well-known` endpoints themselves are documented in `22-backend-reference.m
 | File | Purpose |
 |---|---|
 | `ops/prometheus/prometheus.yml` | Scrape config untuk metrik loopback: `nyx-api` :9464, sidecar Rust :9465, log KT v2 :9468, auditor KT v2 :9469, + exporter node/postgres/redis. Blok `alerting:` menunjuk Alertmanager `127.0.0.1:9093` |
-| `ops/prometheus/alerts.yml` | 40 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query-v2`, `nyx-kt-auditor-v2`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, Privacy Pass ditolak, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
+| `ops/prometheus/alerts.yml` | 44 aturan alert dalam 5 grup (`nyx-app`, `nyx-transport`, `nyx-kt-query-v2`, `nyx-kt-auditor-v2`, `nyx-host`) — relay, blokir keamanan, sweeper, backup, KT tulis/baca/snapshot, guard anti-abuse, Privacy Pass ditolak, cleanup admin, versi klien, latensi & pemakaian jalur WT vs WSS, disk/RAM/Redis/exporter |
 | `ops/prometheus/tests.yml` | Kasus uji `promtool test rules` — tiap aturan punya kasus MENYALA dan TIDAK MENYALA; dijalankan `scripts/drill-alerts.sh` (job CI `alerts` + versi scrape-nyata di job `e2e`) |
 | `ops/alertmanager/` | `alertmanager.yml` (tanpa rahasia: receiver = relay loopback), `ntfy-relay.mjs` (Alertmanager → ntfy, prioritas dari `severity`, `--self-test`), `ntfy-relay.env.example` (topik + token, 0600 di VPS) |
 | `server/src/utils/transportLatency.ts` | Pembungkus pengukuran ingress jalur WSS (`nyx_wss_ingress_seconds`); dipisah dari `gateway.ts` supaya bagian yang bisa salah (satu observasi per pengerjaan, error tidak dihitung, satuan detik) bisa diuji tanpa soket |

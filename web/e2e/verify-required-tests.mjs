@@ -1,7 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 //
-// [plan kualitas §6.5] Gate "tes wajib" E2E: suite tidak boleh hijau karena
+// [docs/41 §6.5] Gate "tes wajib" E2E: suite tidak boleh hijau karena
 // tesnya tidak jalan.
 //
 // Kenapa perlu: dengan reporter dot, `test.skip(...)` yang salah (guard yang
@@ -33,6 +33,7 @@
 //   --project <name>    project Playwright yang diperiksa (wajib kecuali --self-test)
 //   --report <path>     report JSON (default: playwright-report/results.json)
 //   --manifest <path>   manifest (default: e2e/required-tests.json)
+//   --quarantine <path> daftar karantina flake (default: e2e/quarantine.json)
 //   --self-test         buktikan gate ini bisa gagal, dengan report sintetis
 //
 // Keluar 0 bila lolos, 1 bila ada pelanggaran, 2 bila argumen/berkas salah.
@@ -61,12 +62,13 @@ function arg(name, fallback) {
  */
 function flattenTests(report) {
   const rows = [];
-  const walk = (suite, ancestors) => {
+  const walk = (suite, ancestors, depth) => {
     // Suite kedalaman 0 selalu mewakili satu berkas (judulnya nama berkas) dan
-    // TIDAK ikut jadi bagian judul tes. Jangan dikenali dari judulnya: fixture
-    // dan versi reporter bisa memberi judul berbeda, dan kesalahan di sini
-    // membuat setiap tes wajib terlihat "hilang" (gate merah palsu).
-    const isFileSuite = ancestors.length === 0;
+    // TIDAK ikut jadi bagian judul tes. Kedalaman harus dilacak terpisah dari
+    // `ancestors`: setelah suite berkas, `ancestors` masih kosong, sehingga
+    // memakai panjangnya membuat suite `describe` ikut dibuang dan setiap tes
+    // wajib terlihat "hilang" (gate merah palsu — terukur 2026-11-06).
+    const isFileSuite = depth === 0;
     const titles = isFileSuite ? ancestors : [...ancestors, suite.title];
     for (const spec of suite.specs ?? []) {
       const file = path.basename(spec.file ?? suite.file ?? '');
@@ -82,9 +84,9 @@ function flattenTests(report) {
         });
       }
     }
-    for (const child of suite.suites ?? []) walk(child, titles);
+    for (const child of suite.suites ?? []) walk(child, titles, depth + 1);
   };
-  for (const suite of report.suites ?? []) walk(suite, []);
+  for (const suite of report.suites ?? []) walk(suite, [], 0);
   return rows;
 }
 
@@ -147,6 +149,49 @@ export function evaluate(report, manifest, project) {
     }
   }
 
+  return violations;
+}
+
+/**
+ * [docs/41 §7.4] Karantina flake.
+ *
+ * Sebuah tes boleh berhenti menahan merge untuk sementara, tetapi hanya dengan
+ * kontrak yang bisa kedaluwarsa: owner, alasan, dan tanggal. Entri yang lewat
+ * tanggal, menunjuk tes yang sudah tidak ada, atau menunjuk tes yang ternyata
+ * masih dijalankan adalah pelanggaran — karantina yang tidak pernah dibersihkan
+ * lebih buruk daripada tidak ada karantina, karena tesnya berhenti memberi
+ * sinyal tanpa ada yang menyadarinya.
+ *
+ * Tes karantina harus di-skip di spec dengan alasan yang memuat kata
+ * "karantina" (mis. `test.skip('karantina: @han — flaky saat rotasi', ...)`).
+ * Dengan begitu report tetap menunjukkan tes itu ada, tetapi gate tahu ia tidak
+ * dijalankan dan mengapa.
+ */
+export function evaluateQuarantine(report, quarantine, today = new Date()) {
+  const violations = [];
+  const tests = flattenTests(report);
+  for (const entry of quarantine.entries ?? []) {
+    const label = `${entry.file ?? '?'} › ${entry.title ?? '?'}`;
+    for (const field of ['file', 'title', 'owner', 'reason', 'expires']) {
+      if (!entry[field] || typeof entry[field] !== 'string') {
+        violations.push(`karantina tanpa "${field}": ${label}`);
+      }
+    }
+    const expires = Date.parse(entry.expires ?? '');
+    if (Number.isNaN(expires)) {
+      violations.push(`karantina dengan tanggal kedaluwarsa tidak valid: ${label} (${entry.expires})`);
+    } else if (expires < today.getTime()) {
+      violations.push(`karantina kedaluwarsa: ${label} (${entry.expires}) — perbaiki tesnya atau hapus entrinya`);
+    }
+    const test = tests.find((t) => t.file === entry.file && t.title === entry.title);
+    if (!test) {
+      violations.push(`karantina menunjuk tes yang tidak ada di report: ${label}`);
+    } else if (test.status !== 'skipped') {
+      violations.push(`tes karantina masih dijalankan (${test.status}): ${label} — tandai skip dengan alasan "karantina: <owner>"`);
+    } else if (!(test.skipReason ?? '').toLowerCase().includes('karantina')) {
+      violations.push(`tes karantina di-skip tanpa alasan "karantina: …": ${label}`);
+    }
+  }
   return violations;
 }
 
@@ -249,6 +294,33 @@ function selfTest() {
       report: makeReport([{ file: 'wajib.spec.ts', title: 'Grup › wajib jalan' }]),
       expectFail: true,
     },
+    {
+      // Bentuk report Playwright yang sebenarnya: suite berkas → suite
+      // `describe` → spec. Judul `describe` HARUS ikut, kalau tidak setiap
+      // mustPass dilaporkan "hilang" padahal lulus (bug 2026-11-06).
+      name: 'judul describe dari report asli ikut dihitung',
+      report: {
+        suites: [
+          {
+            title: 'wajib.spec.ts',
+            file: 'wajib.spec.ts',
+            specs: [],
+            suites: [
+              {
+                title: 'Grup',
+                file: 'wajib.spec.ts',
+                specs: ['wajib jalan', 'lain'].map((title) => ({
+                  title,
+                  file: 'wajib.spec.ts',
+                  tests: [{ projectName: 'demo', status: 'expected', annotations: [] }],
+                })),
+              },
+            ],
+          },
+        ],
+      },
+      expectFail: false,
+    },
   ];
 
   let failed = 0;
@@ -260,11 +332,76 @@ function selfTest() {
     console.log(`${ok ? '✓' : '✗'} self-test: ${testCase.name} → ${got ? 'menolak' : 'lolos'}`);
     if (!ok) console.log(`   pelanggaran: ${JSON.stringify(violations)}`);
   }
+  // [docs/41 §7.4] Karantina: buktikan keempat arahnya (valid, kedaluwarsa,
+  // tes hilang, tes masih jalan). Tanpa ini, gate karantina hanya dokumen.
+  const today = new Date('2026-11-05T00:00:00Z');
+  const quarantineBase = {
+    file: 'wajib.spec.ts',
+    title: 'Grup › wajib jalan',
+    owner: '@han',
+    reason: 'flaky saat rotasi',
+    expires: '2026-11-30',
+  };
+  const quarantineCases = [
+    {
+      name: 'karantina valid (skip beralasan, belum kedaluwarsa)',
+      entries: [quarantineBase],
+      report: makeReport([
+        {
+          file: 'wajib.spec.ts',
+          title: 'Grup › wajib jalan',
+          status: 'skipped',
+          reason: 'karantina: @han — flaky saat rotasi',
+        },
+        { title: 'lain' },
+      ]),
+      expectFail: false,
+    },
+    {
+      name: 'karantina kedaluwarsa',
+      entries: [{ ...quarantineBase, expires: '2026-11-04' }],
+      report: makeReport([
+        {
+          file: 'wajib.spec.ts',
+          title: 'Grup › wajib jalan',
+          status: 'skipped',
+          reason: 'karantina: @han — flaky saat rotasi',
+        },
+        { title: 'lain' },
+      ]),
+      expectFail: true,
+    },
+    {
+      name: 'karantina menunjuk tes yang tidak ada',
+      entries: [{ ...quarantineBase, title: 'Grup › sudah dihapus' }],
+      report: makeReport([{ title: 'lain' }, { title: 'lain 2' }]),
+      expectFail: true,
+    },
+    {
+      name: 'tes karantina masih dijalankan',
+      entries: [quarantineBase],
+      report: makeReport([
+        { file: 'wajib.spec.ts', title: 'Grup › wajib jalan' },
+        { title: 'lain' },
+      ]),
+      expectFail: true,
+    },
+  ];
+
+  for (const testCase of quarantineCases) {
+    const violations = evaluateQuarantine(testCase.report, { entries: testCase.entries }, today);
+    const got = violations.length > 0;
+    const ok = got === testCase.expectFail;
+    if (!ok) failed += 1;
+    console.log(`${ok ? '✓' : '✗'} self-test karantina: ${testCase.name} → ${got ? 'menolak' : 'lolos'}`);
+    if (!ok) console.log(`   pelanggaran: ${JSON.stringify(violations)}`);
+  }
+
   if (failed > 0) {
-    console.error(`✗ self-test gate gagal: ${failed}/${cases.length} skenario tidak sesuai harapan`);
+    console.error(`✗ self-test gate gagal: ${failed}/${cases.length + quarantineCases.length} skenario tidak sesuai harapan`);
     process.exit(1);
   }
-  console.log(`✓ self-test gate: ${cases.length}/${cases.length} skenario sesuai harapan`);
+  console.log(`✓ self-test gate: ${cases.length + quarantineCases.length}/${cases.length + quarantineCases.length} skenario sesuai harapan`);
 }
 
 if (process.argv.includes('--self-test')) {
@@ -294,7 +431,21 @@ if (process.argv.includes('--self-test')) {
   }
 
   summarize(report, project);
-  const violations = evaluate(report, manifest, project);
+  let violations = evaluate(report, manifest, project);
+
+  // [docs/41 §7.4] Karantina dijalankan pada report yang sama: entri yang
+  // kedaluwarsa/menunjuk tes hilang/masih dijalankan menggagalkan job.
+  const quarantinePath = path.resolve(arg('quarantine', 'e2e/quarantine.json'));
+  let quarantine = { entries: [] };
+  try {
+    quarantine = JSON.parse(readFileSync(quarantinePath, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.error(`verify-required-tests: gagal membaca karantina ${quarantinePath} — ${error.message}`);
+      process.exit(2);
+    }
+  }
+  violations = violations.concat(evaluateQuarantine(report, quarantine));
   if (violations.length > 0) {
     for (const violation of violations) console.error(`✗ ${violation}`);
     console.error(

@@ -27,8 +27,8 @@
    di §4.3/§7.1. NYX tidak perlu merasa kalah di layer protokol.
 2. **Celah "kepercayaan pada server" sudah menyusut drastis.** Key transparency
    **sudah berjalan di jalur produksi**: penulis log + verifier WASM + monitor loop +
-   auditor mode 3 + gossip tree head, dengan log v2 ML-DSA-65 berjalan sebagai
-   **dual-write**. Verifikasi kunci kini **bukan** lagi TOFU murni: verdict KT
+   auditor mode 3 + gossip tree head; log v2 ML-DSA-65 adalah **satu-satunya log**
+   sejak 2026-10-28 (`docs/38`), dan baca sudah cutover ke v2. Verifikasi kunci kini **bukan** lagi TOFU murni: verdict KT
    ikut memblokir pin. Sisa pekerjaan KT bersifat operasional/interop (§5.1).
 3. **Celah besar yang masih tersisa bukan kripto, tapi perangkat & ekosistem.**
    (a) **multi-device tetap non-goal permanen** (satu perangkat aktif sebagai
@@ -54,7 +54,7 @@
 
 | Item | 2026-10-10 | Sekarang (2026-10-28) | Bukti |
 |---|---|---|---|
-| Key transparency | belum ada | log + verifier + monitor + auditor + gossip; v2 dual-write | `docs/32`, `docs/34`, `server/kt-query` |
+| Key transparency | belum ada | log v2 (satu-satunya sejak `docs/38`) + verifier ABI 2 + monitor + auditor + gossip | `docs/32`, `docs/34`, `server/kt-query` |
 | PQ ratchet (PCS) | DR hybrid (FS saja) | braid SPQR v2 **live** berdampingan, dipilih via `ackV` | `docs/33` §33.10, `packages/spqr-wasm` |
 | Backup | satu JSON export | **`NYXB` v1**: ber-frame, AEAD+AAD, BIP39→Argon2id 128 MB, streaming | `docs/31`, `web/src/lib/backupFormat.ts` |
 | Negosiasi kapabilitas | tidak ada | HELLO bidi (WT) + `handshake.auth.capabilities` (WSS) | `packages/shared/src/transport.ts` |
@@ -101,7 +101,7 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 | 3 | Ratchet 1:1 | DR hybrid + **braid SPQR jalur v2** (FS+PCS), dipilih setelah peer meng-ack (`ackV`) | DR + **SPQR** (ML-KEM Braid) — FS+PCS, terverifikasi formal | **≈** (kripto setara; formal verification & laporan audit masih SIG+) |
 | 4 | Grup | sender key v2 + rotasi era, pseudonym, metadata-key terpisah, envelope v2/v3/v4 (77/85/2037 B) | Sender Keys + zkgroup GroupSendEndorsement, menuju QR/MLS | **≈** |
 | 5 | Kredensial keanggotaan | **token-first** (group/delivery token); blind RSA dihapus 2026-10-23 | zkgroup (pairing, redemption time, presentation context) | **≈** (NYX lebih sederhana, tanpa unlinkability) |
-| 6 | Key transparency | **ada**: penulis log, `kt-query` (pemilik LevelDB), verifier WASM, monitor loop, auditor mode 3, gossip; v2 dual-write | key-transparency-server (Merkle log, VRF, monitor) + klien `keytrans` | **≈** (fitur setara; interop `kt-client` & cutover baca v2 masih SIG+) |
+| 6 | Key transparency | **ada**: penulis log, `kt-query` v2 (pemilik LevelDB), verifier ABI 2, monitor loop, auditor mode 3, gossip; log v2 satu-satunya (`docs/38`) | key-transparency-server (Merkle log, VRF, monitor) + klien `keytrans` | **≈** (fitur setara; cutover baca selesai di kode, sisa interop `kt-client`) |
 | 7 | Verifikasi kunci user | KT verdict + pin terenkripsi + gate kirim saat `mismatch`; safety number manual tersedia | otomatis + monitor, manual opsional | **≈** (residual: `unavailable`/`unknown-subject` fail-open yang terlihat) |
 | 8 | Contact discovery | hash identifier → OPRF → PIR di balik OHTTP; tanpa social graph; default mati di repo | SGX/Icelake PSI atas nomor telepon; username links | **≈** (fitur) / NYX+ (privasi terhadap Intel, tanpa PII) |
 | 9 | Multi-device | **1 perangkat aktif** (non-goal permanen, `docs/30` §30.6/§30.18) | device list, linked devices, provisioning, device-transfer, storage service | **SIG+** (dipilih tidak ditutup) |
@@ -117,7 +117,7 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 | 19 | Burner/ephemeral | burner room (guest, PQ-DR, RAM-only) | tidak ada | **NYX+** |
 | 20 | Cover traffic | chaff 1000 B/3 s (visibility-aware) + padding 8 KB + dummy message ber-jitter, opt-in | tidak ada (Signal menolak trade-off ini) | **NYX+** |
 | 21 | Negosiasi kapabilitas | **ada** di kedua relay: `hello-v1`, `spqr-ratchet`, `pq-v2`; klien lama (tanpa daftar) tetap legacy | `DeviceCapability`, `ClientRelease`, gRPC/protobuf ter-skema | **≈** |
-| 22 | Jaminan rekayasa | 128 berkas tes web, 86/693 server, 147 Go, 2 crate Rust, 14 spec Playwright; fuzz deterministik; oracle DR non-libsodium; 40 aturan alert + drill; oxlint blocking; **tanpa** formal method/audit eksternal | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
+| 22 | Jaminan rekayasa | 137 berkas tes web, 99 berkas tes server, 58 tes Go KT + oracle DR, 2 crate Rust, 14 spec Playwright; fuzz deterministik; oracle DR non-libsodium; 44 aturan alert + drill; oxlint blocking; **tanpa** formal method/audit eksternal | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
 | 23 | Operabilitas/self-host | 1 VPS, pm2 + beberapa unit systemd — siapa pun bisa jalankan | butuh FDB/Dynamo/Scylla — praktis tidak self-hostable | **NYX+** |
 | 24 | Ekosistem produk | web + marketing + tenant B2B/subscription | semua platform, stickers, call links, backup, donations | **SIG+** |
 | 25 | Privasi pencarian | OPRF + PIR + OHTTP; snapshot PIR disegarkan lewat penanda generasi (≤3 menit) | ContactDiscovery (SGX), tanpa PIR | **NYX+** (privasi kueri) / SIG+ (laten si & skala) |
@@ -187,10 +187,10 @@ server; bundle palsu terarah tak bisa dibuktikan siapa pun.
 
 | Bagian | Implementasi |
 |---|---|
-| Penulis log | `server/src/utils/keyTransparency.ts` — tulis update saat register/rotasi; nonaktif tanpa `KT_SERVER_URL`; **dual-write** ke log v2 (ML-DSA-65) bila `KT_V2_SERVER_URL` diisi |
+| Penulis log | `server/src/utils/keyTransparency.ts` — tulis update saat register/rotasi; nonaktif tanpa `KT_V2_SERVER_URL`; hanya log v2 (ML-DSA-65) — jalur v1/`KT_SERVER_URL` dihapus 2026-10-28 (`docs/38`) |
 | Penyaji bukti | `server/kt-query` (Go) — **pemilik tunggal** LevelDB (goleveldb `LOCK_EX`), `/search`, `/distinguished`, `/monitor`, `/config`, `/head`; 147 test Go |
 | Proxy API | `/api/keys/kt/*` meneruskan protobuf base64url apa adanya (server tidak mem-parse bukti) |
-| Verifier | `packages/keytrans-wasm` (+ `keytrans-wasm-v2`) dipanggil dari `web/src/lib/keyTransparency.ts`; jangkar `distinguished` di-pin (`ktConfigPin.ts`) |
+| Verifier | `packages/keytrans-wasm-v2` (ABI 2) dipanggil dari `web/src/lib/keyTransparencyV2.ts`; jangkar `distinguished` di-pin (`ktConfigPin.ts`); verifier ABI 1 dihapus (`docs/38`) |
 | Integrasi pin | `ktBundleProof.ts` → `peerIdentityTrust.ts`: verdict `confirmed`/`mismatch`/`unverifiable`/`unavailable`/`unknown-subject`; hanya `mismatch` (yang butuh bukti terverifikasi) memblokir kirim |
 | Monitor | `runKtMonitorOnce` **fail-closed** (state hanya ditulis setelah `verifyMonitor` sukses) + loop di `App.tsx` |
 | Auditor | `server/kt-query/cmd/nyx-kt-auditor` (mode 3, `TreeSize`/`Audit`/`SetAuditorHead`) + varian v2 |
@@ -206,8 +206,8 @@ Username peer datang dari profil E2EE yang dibagikan peer, jadi peer tanpa profi
 tidak bisa di-*search* di log.
 
 **Sisa pekerjaan** (`docs/34` §34.6): interop `cmd/kt-client` upstream, dua
-implementasi auditor berdampingan, auditor di host terpisah dari log, dan
-**cutover baca ke v2** (sekarang: dual-write, baca tetap v1). Kapabilitas
+implementasi auditor berdampingan, auditor di host terpisah dari log; cutover
+baca ke v2 **sudah selesai di kode** (`docs/38`). Kapabilitas
 `KT_LITE` masih dideklarasikan klien tetapi tidak pernah diiklankan relay — sisa
 tahap A yang dibatalkan; jangan dihidupkan kembali tanpa alasan.
 
@@ -485,7 +485,7 @@ rebuild tidak hilang" dan "Redis mati = lewati, bukan rebuild buta").
 | # | Item | Kenapa / target |
 |---|---|---|
 | 1 | **Review kripto eksternal** (`docs/36`) | Satu-satunya cara menutup "tidak ada audit pihak ketiga"; paketnya sudah disusun |
-| 2 | **KT: cutover baca ke v2** + interop `cmd/kt-client` | Log v2 baru dual-write; pembacaan masih v1 (`KT_QUERY_URL`) |
+| 2 | **KT: interop `cmd/kt-client`** | Cutover baca v2 selesai di kode (`KT_QUERY_URL` → v2, `docs/38`); yang tersisa hanya interop upstream |
 | 3 | **KT: dua auditor berdampingan + auditor di host terpisah** | Auditor yang tinggal semeja dengan log tidak membuktikan banyak |
 | 4 | **PIR skala**: sharding / epoch inkremental | Setup ChalametPIR superlinear (10k user ≈ 18 menit); NYX hanya menutup staleness, bukan skalanya |
 | 5 | **Ukur false-positive ASN/NAT** | Heuristik per-ASN sudah ada, angka lapangan belum |

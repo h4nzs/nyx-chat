@@ -1,4 +1,4 @@
-# [plan kualitas §9.2] Dependabot + pnpm workspace: PR Dependabot hanya mengubah
+# [docs/41 §9.2] Dependabot + pnpm workspace: PR Dependabot hanya mengubah
 # `<workspace>/package.json`, sedangkan sumber resolusi ada di SATU lockfile di
 # root (`pnpm-lock.yaml`). Dengan entri `directory: /web` atau `/server` seperti
 # sekarang, Dependabot tidak menulis lockfile workspace itu — jadi setiap PR-nya

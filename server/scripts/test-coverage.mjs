@@ -1,7 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 //
-// [plan kualitas §6.2] Coverage server **tanpa** menduplikasi daftar tes.
+// [docs/41 §6.2] Coverage server **tanpa** menduplikasi daftar tes.
 //
 // `package.json` sudah memuat ~99 berkas tes di script `test`, dan daftar kedua
 // di sini akan cepat menyimpang (itu juga alasan daftar tes tidak memakai glob:

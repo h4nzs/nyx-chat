@@ -93,6 +93,9 @@ export const env = {
   linkHistoryEnabled: !['off', '0', 'false'].includes(
     (process.env.LINK_HISTORY_ENABLED || 'on').trim().toLowerCase()
   ),
+  // [docs/41 §6.6] Endpoint S3 eksplisit untuk uji jalur sukses object storage
+  // (MinIO di CI). Kosong = perilaku produksi: Cloudflare R2 dari account id.
+  r2Endpoint: process.env.R2_ENDPOINT || "",
   r2AccountId: process.env.R2_ACCOUNT_ID || "",
   r2AccessKeyId: process.env.R2_ACCESS_KEY_ID || "",
   r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",

@@ -1,0 +1,270 @@
+# Nightly (docs/41 §7.1 + §7.3) — pekerjaan yang terlalu lambat/mahal untuk
+# setiap PR, tetapi tidak boleh hanya "pernah dijalankan bulan lalu".
+#
+# Isi:
+#   - fuzz web 1 jam (`fuzz:parsers:hour`, xorshift deterministik dari seed)
+#   - fuzz sidecar 1 jam (`NYX_FUZZ_SECONDS=3600`, binary rilis)
+#   - k6 relay load 100 VU di stack sementara (Postgres + Redis service CI)
+#   - smoke Firefox + WebKit (register/login, settings) — naik ke PR hanya
+#     setelah 7 hari hijau, sesuai docs/41 §7.1
+#
+# Drill pemulihan tetap di `drills.yml` (Senin 04:00 UTC); jangan diduplikasi di
+# sini. k6 MENULIS pesan: stack-nya ephemeral (service container), jangan pernah
+# mengarahkan `BASE_URL` job ini ke produksi.
+name: Nightly
+
+on:
+  schedule:
+    # 02:00 UTC — setelah backup harian VPS (03:30 lokal) dan sebelum drill Senin.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fuzz-web:
+    name: Fuzz parser web (1 jam)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      # Gate 1 jam (WS-G(5)): deterministik, jadi temuan bisa direproduksi dari
+      # seed yang dicetak. Tanpa ini, kampanye panjang hanya hidup di laptop.
+      - name: Fuzz parser web 1 jam
+        run: pnpm --filter nyx-web run fuzz:parsers:hour
+
+  fuzz-sidecar:
+    name: Fuzz framing sidecar (1 jam)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server/transport-sidecar
+      - name: Unit test protokol + fuzz pendek
+        working-directory: server/transport-sidecar
+        run: cargo test
+      - name: Fuzz framing 1 jam
+        working-directory: server/transport-sidecar
+        run: NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing
+
+  k6-relay:
+    name: k6 relay load (100 VU, stack ephemeral)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nyx_load
+          POSTGRES_PASSWORD: nyx_load
+          POSTGRES_DB: nyx_load
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nyx_load"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://nyx_load:nyx_load@127.0.0.1:5432/nyx_load
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: nightly-load-secret
+      CSRF_SECRET: nightly-load-csrf
+      CORS_ORIGIN: http://localhost:5173
+      PORT: '4000'
+      NODE_ENV: test
+      PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'consent for ephemeral nightly load database schema push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - uses: grafana/setup-k6-action@v1
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+      - name: Prisma generate + db push (DB load sementara)
+        working-directory: server
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma db push
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Start API
+        run: |
+          pnpm --filter nyx-server dev > /tmp/nyx-api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4000/health >/dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo 'API tidak siap dalam 120 detik'; tail -n 60 /tmp/nyx-api.log; exit 1
+      # `run-relay-load.sh` memverifikasi API hidup, membuat akun/percakapan uji
+      # yang idempoten, lalu menjalankan SMOKE 5 VU sebelum profil penuh — auth
+      # rusak tidak boleh terlihat seperti "load ringan".
+      - name: k6 smoke + load
+        env:
+          BASE_URL: http://127.0.0.1:4000
+          NYX_MAX_VUS: '100'
+        run: bash scripts/load/run-relay-load.sh
+      - name: Log API saat gagal
+        if: failure()
+        run: tail -n 200 /tmp/nyx-api.log || true
+
+  http-contract:
+    name: Contract test HTTP
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nyx_contract
+          POSTGRES_PASSWORD: nyx_contract
+          POSTGRES_DB: nyx_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nyx_contract"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://nyx_contract:nyx_contract@127.0.0.1:5432/nyx_contract
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: nightly-contract-secret
+      CSRF_SECRET: nightly-contract-csrf
+      CORS_ORIGIN: http://localhost:5173
+      NODE_ENV: test
+      NYX_HTTP_CONTRACT: '1'
+      PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'consent for ephemeral nightly contract database schema push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+      - name: Prisma generate + db push (DB contract sementara)
+        working-directory: server
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma db push
+      - name: Contract test HTTP
+        working-directory: server
+        run: pnpm exec tsx --test tests/httpContract.test.ts
+
+  browsers:
+    name: Smoke Firefox + WebKit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nyx_browser
+          POSTGRES_PASSWORD: nyx_browser
+          POSTGRES_DB: nyx_browser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nyx_browser"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://nyx_browser:nyx_browser@127.0.0.1:5432/nyx_browser
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_SECRET: nightly-browser-secret
+      CSRF_SECRET: nightly-browser-csrf
+      CORS_ORIGIN: http://localhost:5173
+      NODE_ENV: test
+      PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'consent for ephemeral nightly browser database schema push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+      - name: Prisma generate + db push
+        working-directory: server
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma db push
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Install Playwright Firefox + WebKit
+        working-directory: web
+        run: pnpm exec playwright install --with-deps firefox webkit
+      # Smoke = alur yang paling sering rusak di engine lain (registrasi, login,
+      # settings). WebTransport memang tidak diuji di sini; itu tetap milik
+      # `e2e-chrome` yang punya sidecar.
+      - name: Install Playwright Chromium untuk a11y
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Smoke Firefox + WebKit
+        working-directory: web
+        run: pnpm exec playwright test e2e/auth.spec.ts e2e/settings.spec.ts --project=firefox --project=webkit
+      - name: Aksesibilitas (axe, halaman tanpa sesi)
+        working-directory: web
+        # Config khusus: tanpa global reset DB. Lewat config default, step ini
+        # menghapus database job — bertentangan dengan alasan config itu ada.
+        run: pnpm run test:a11y
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-browser-results
+          path: |
+            web/test-results/
+            web/playwright-report/
+          retention-days: 7

@@ -20,6 +20,11 @@ async function burnerStorageConfigured(page: Page): Promise<boolean> {
         body: JSON.stringify({
           fileName: 'probe.png',
           fileType: 'application/octet-stream',
+          // [uploadLimits] Presign burner WAJIB menyertakan ukuran: server
+          // mengunci `content-length` di tanda tangan, jadi probe tanpa
+          // `fileSize` dijawab `FILE_SIZE_REQUIRED` — bukan
+          // `STORAGE_NOT_CONFIGURED`, dan skip beralasan berubah jadi gagal.
+          fileSize: 1024,
           folder: 'attachments',
         }),
       });

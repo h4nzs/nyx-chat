@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🛡️ Sinyal CI bisa dipercaya: coverage ber-lantai, gate tes wajib, drill terjadwal, main terproteksi (2026-11-05)
+
+**Nightly dan a11y mengisi celah yang tidak muat di PR.**
+`.github/workflows/nightly.yml` menjalankan fuzz web + framing sidecar 1 jam,
+k6 100 VU di stack ephemeral, smoke Firefox/WebKit, a11y, dan contract test HTTP
+(7 tes: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS) — tes kontrak
+itu opt-in karena butuh Redis/Postgres, jadi suite unit tetap bebas infra.
+`web/e2e/quarantine.json` + `evaluateQuarantine` memberi karantina flake yang
+kedaluwarsa (owner/reason/expiry; self-test 12/12). Pemindaian axe menemukan
+kontras gagal di Login/Register; **warnanya diperbaiki**, bukan aturannya
+dimatikan. Seam `R2_ENDPOINT` menyiapkan jalur sukses object storage untuk MinIO; jalur
+presign → PUT → HEAD → GET → DELETE kini benar-benar dijalankan (opt-in
+`NYX_R2_SMOKE=1`, lulus 5/5 terhadap `rclone serve s3`), dan job `unit` di CI
+menyalakan MinIO ephemeral untuk mengulang jalur yang sama di setiap PR.
+
+**Coverage akhirnya punya arti.** Web memakai `@vitest/coverage-v8` dengan
+**lantai per-glob** (SPQR 90/66, KT 58/46, grup 45/41, privacy 52/56,
+`keychainDb` 30/21, `messagePipeline` 2/3 lines/branches) dan angka global 0
+supaya kenaikan global tidak menutupi modul kritis; server memakai reporter
+native Node lewat `server/scripts/test-coverage.mjs` (lantai 72/78/74 dari
+baseline 77,34/84,65/79,44). `scripts/check-changed-lines.mjs` melaporkan baris
+baru yang tidak teruji pada PR (web saja — Node tidak mengeluarkan lcov) dan
+sengaja masih `continue-on-error` sampai angka global stabil 10 run.
+
+**Suite E2E tidak bisa lagi hijau karena tesnya tidak jalan.**
+`web/e2e/required-tests.json` + `web/e2e/verify-required-tests.mjs` membaca
+report JSON Playwright: `minTotal` (suite tidak menyusut), `mustPass` (tes yang
+wajib benar-benar jalan di project itu) dan `allowedSkipReasons` (skip hanya sah
+bila alasannya terdaftar). `--self-test` 12 skenario (8 gate + 4 karantina) membuktikan gate bisa gagal.
+Manifest mencakup auth, profile, security, settings, recovery, deviceLinking,
+transport, chat, grup — 9 tes wajib di chromium, 12 di chrome, `minTotal` 22.
+
+**Flake E2E dibereskan di akarnya, bukan dengan retry.** Logout kini
+membuktikan sesi tercabut sebelum login ulang, dan pembersihan state lokal
+pindah ke halaman yang stabil sehingga navigasi keras `window.location.replace`
+tidak lagi membatalkan `goto()` (`Execution context was destroyed`).
+
+**PR Dependabot berhenti mati di lockfile.** `dependabot-lockfile.yml`
+meregenerasi `pnpm-lock.yaml` root (`--lockfile-only`) dan mendorongnya ke branch
+PR lewat GitHub App, karena push `GITHUB_TOKEN` tidak memicu CI ulang; CI tetap
+memakai `--frozen-lockfile`.
+
+**Tiga drill pemulihan dijadwalkan** (`drills.yml`, Senin 04:00 UTC): alert
+promtool, pemulihan KT v2 11 langkah, dan restore klien (`.nyxbak` di atas dump
+Postgres nyata, satu-satunya jalur otomatisnya).
+
+**CI hygiene + `main` terproteksi.** 12 job `ci.yml` punya `timeout-minutes`
+(5–45) dan `concurrency` yang membatalkan run PR yang tersalip (push ke `main`
+tidak pernah dibatalkan). Branch protection aktif dengan **14 required
+contexts** — 12 job `ci.yml` + kedua job CodeQL — `enforce_admins: false`,
+tanpa wajib PR/review, force-push dan penghapusan branch diblokir.
+
+**Audit pass 12:** N12-01/N12-02 tertutup dan F-13 terverifikasi
+(`docs/audit/pass-12/10-delta.md`).
+
 ## 🧪 CI hijau: privacyPass deterministik, PIR WASM ter-pin, link-history tanpa R2 (2026-11-03)
 
 **`Unit Tests` — tes privacyPass gagal sesekali (1 dari 1136 di CI).** Mock

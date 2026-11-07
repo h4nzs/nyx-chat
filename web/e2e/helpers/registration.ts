@@ -84,13 +84,38 @@ export async function dismissOnboardingTour(page: Page, timeoutMs = 20000): Prom
   await expect(tour).toBeHidden({ timeout: 15000 });
 }
 
+/**
+ * Isi field lalu BUKTIKAN nilainya sudah ter-commit sebelum event berikutnya.
+ *
+ * Flake 2026-11-05: `fill` tiga field lalu klik submit bisa tiba di handler
+ * dengan state nama masih kosong ("Name is required" padahal field sempat
+ * terisi) ketika form baru saja remount/hydrate — username & password lolos,
+ * nama tidak. Membaca ulang nilai lewat `toHaveValue` (auto-retry) memaksa
+ * React menyelesaikan update; kalau field di-reset oleh remount, nilainya diisi
+ * ulang, bukan dibiarkan kosong.
+ */
+async function fillStable(locator: import('@playwright/test').Locator, value: string) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await locator.fill(value);
+    try {
+      await expect(locator).toHaveValue(value, { timeout: 3000 });
+      return;
+    } catch {
+      // Field ter-reset oleh render ulang — ulangi, jangan klik dengan nilai kosong.
+    }
+  }
+  await expect(locator).toHaveValue(value, { timeout: 5000 });
+}
+
 /** Registrasi akun + bypass seluruh modal onboarding (rantai standar). */
 export async function registerUser(page: Page, displayName: string, username: string) {
   await page.goto('/register');
+  // Tunggu form benar-benar siap (i18n/hydration selesai) sebelum mengisi.
+  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 30000 });
 
-  await page.getByRole('textbox', { name: /Display Name/i }).fill(displayName);
-  await page.getByRole('textbox', { name: /Username/i }).fill(username);
-  await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
+  await fillStable(page.getByRole('textbox', { name: /Display Name/i }), displayName);
+  await fillStable(page.getByRole('textbox', { name: /Username/i }), username);
+  await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
   // 1. Trust level verification (muncul setelah registrasi selesai, ~15-20 dtk di
@@ -144,10 +169,11 @@ export async function registerUser(page: Page, displayName: string, username: st
 /** Registrasi varian spec Settings: skip biometric dulu, lalu recovery/init/tour. */
 export async function registerUserViaBiometric(page: Page, displayName: string, username: string) {
   await page.goto('/register');
+  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 30000 });
 
-  await page.getByRole('textbox', { name: /Display Name/i }).fill(displayName);
-  await page.getByRole('textbox', { name: /Username/i }).fill(username);
-  await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
+  await fillStable(page.getByRole('textbox', { name: /Display Name/i }), displayName);
+  await fillStable(page.getByRole('textbox', { name: /Username/i }), username);
+  await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
   // 1. Bypass biometric.

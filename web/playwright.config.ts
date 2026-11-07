@@ -9,6 +9,11 @@ const e2eDatabaseEnv = process.env.NYX_E2E_DATABASE_URL
 
 export default defineConfig({
   testDir: './e2e',
+  // [docs/41 §8] a11y punya config sendiri (`playwright.a11y.config.ts`) karena
+  // tidak butuh — dan tidak boleh — menjalankan global reset DB. Tanpa baris
+  // ini spec-nya ikut terhitung di suite utama (24 tes, bukan 22) sehingga
+  // `minTotal` di required-tests.json tidak lagi menjaga jumlah yang benar.
+  testIgnore: /a11y\.spec\.ts/,
   fullyParallel: true,
   // workers: 1 (serial) — suite berbagi 1 server dev + Postgres/Redis lokal;
   // spec profile/settings flaky bila >1 browser berjalan bersamaan (timing event
@@ -20,7 +25,7 @@ export default defineConfig({
   // tidak diset (= 0 di CI), jadi syarat "first retry" tidak pernah terpenuhi dan
   // artefak kegagalan hanya berisi `error-context.md` tanpa snapshot halaman.
   // Kegagalan `e2e/auth.spec.ts` di run 41820476193 harus ditebak karena itu.
-  // [plan kualitas §6.5] Report JSON dipakai `e2e/verify-required-tests.mjs`:
+  // [docs/41 §6.5] Report JSON dipakai `e2e/verify-required-tests.mjs`:
   // gate itu membuktikan tes wajib benar-benar DIJALANKAN, sesuatu yang tidak
   // bisa dibaca dari exit code (suite tetap hijau walau seluruh tes ter-skip).
   reporter: [
@@ -43,6 +48,17 @@ export default defineConfig({
       // WebTransport/QUIC di CI. Dipakai oleh job `e2e-chrome`.
       name: 'chrome',
       use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    },
+    {
+      // [docs/41 §7.1] Engine non-Chromium: smoke nightly dulu, naik ke PR
+      // setelah 7 hari hijau. WebTransport memang tidak tersedia di sini, jadi
+      // spec transport/chat tetap skip dengan alasan tertulis.
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
     },
   ],
   webServer: [

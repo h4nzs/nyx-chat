@@ -4,7 +4,7 @@
 > Fase 0–8 selesai di kode (Fase 4a OPRF landed dan ter-wire hibrida ke
 > `oprfIndex` register/login/search; **PIR 4b service+proxy + 4c client landed,
 > 4d benchmark harness landed 2026-10-24, audit + angka produksi belum**; Fase 7
-> = log KT ML-DSA + dual-write + backfill login opt-in, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
+> = log KT ML-DSA + backfill login opt-in, **cutover tulis+baca selesai di kode** (`docs/38`)). Fase 8 mendaratkan KAT resmi **ML-DSA-65
 > ACVP** + **X-Wing draft-06**, KAT lintas-implementasi X3DH v2/group v4/KT v2,
 > `bench:pq`, audit residual v1, dan E2E recovery/device-linking/OHTTP.
 >
@@ -40,7 +40,7 @@
 | 4 | Discovery (tutup R5, OHTTP search, PIR) | **landed sebagian** — R5 penuh, OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa OTPK. **4a OPRF landed 2026-10-23** (`ristretto255-SHA512`, endpoint default mati); kolom `oprfIndex` diisi register/login dan dipakai search saat gate aktif, `usernameHash` legacy tetap. **4b PIR landed di kode** (ChalametPIR sidecar + proxy, snapshot 2 KB, default mati) dan **4c client landed** (WASM/worker, hint cache, epoch retry, OHTTP POST biner); **4d benchmark harness landed 2026-10-24** (`bench:pir`, N=1k/10k), audit + angka produksi belum | §35.7 Fase 4 |
 | 5 | Credential PQ (suite abstraction, BRaccoon) | **dihapus 2026-10-23** — cutover PQ-only menghapus suite credential blind RSA, endpoint, persist Dexie, dan tesnya. Tidak ada pengganti PQ; BRaccoon/blind UOV tetap riset | §35.2.3, §35.6.6 |
 | 6 | Anonymous issuance | **dihapus 2026-10-23** — bank token/redeem/commit ikut dihapus bersama credential; tidak ada endpoint `/api/credentials/*` | §35.6.7 |
-| 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
+| 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, cutover tulis+baca server + pemilihan ABI klien. Log v1 dipensiunkan 2026-10-28 (`docs/38`) | §35.7 Fase 7 |
 | 8 | Removal, audit, dokumentasi | **selesai di kode** 2026-10-23 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop + throttle, audit residual v1, E2E recovery/device-linking/OHTTP; denylist baru 0, sisa 2 exception `hybrid-v2-identity` + 2 `tier-b` (Privacy Pass) | §35.8, §35.10 |
 
 **PQ-only:** `resolvePqV2Enabled()` selalu `true`; `VITE_PQ_V2` tidak lagi
@@ -1404,11 +1404,9 @@ Residual yang harus ditulis jujur:
    dua peran (`/api/ohttp/relay` + `/api/ohttp/gateway`, default mati).
    Yang masih terbuka: apakah relay dipindah ke host/operator lain (hanya
    mengganti `OHTTP_RELAY_TARGET`), dan kapan carriage token diaktifkan.
-5. Kapan cutover **baca** KT ke v2 (`KT_QUERY_URL` diarahkan ke `:8089`)
-   setelah populasi log v2 cukup. Scope B sudah dimulai dan berjalan sebagai
-   **dual-write** (`KT_V2_SERVER_URL`); akun lama dapat di-backfill opt-in saat
-   login (`KT_V2_BACKFILL_ON_LOGIN=1`, hanya perangkat ber-`signingKeyV2`),
-   tetapi pembacaan masih v1. Rollback baca setelah klien mem-pin ABI 2
+5. Cutover **baca** KT ke v2 **sudah selesai di kode** (`KT_QUERY_URL` diarahkan
+   ke `:8089`, `docs/38`); akun lama di-backfill opt-in saat login
+   (`KT_V2_BACKFILL_ON_LOGIN=1`, hanya perangkat ber-`signingKeyV2`). Rollback baca setelah klien mem-pin ABI 2
    bersifat satu arah sampai ada jalur reset pin.
 
 ## 35.12 Referensi

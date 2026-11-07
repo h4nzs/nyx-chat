@@ -2,9 +2,27 @@ import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, Delete
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
+/**
+ * [docs/41 §6.6] Endpoint efektif object storage.
+ *
+ * Produksi memakai R2 (`https://<account>.r2.cloudflarestorage.com`), tetapi
+ * jalur sukses (presign → PUT → GET → HEAD) hanya bisa diuji tanpa akun R2 bila
+ * endpoint bisa diarahkan ke MinIO. `R2_ENDPOINT` adalah seam itu; kosong =
+ * perilaku lama persis. Trailing slash dibuang supaya SDK tidak menghasilkan
+ * `//bucket` saat `forcePathStyle` aktif.
+ */
+export function resolveR2Endpoint(input: { r2Endpoint?: string; r2AccountId?: string }): string {
+  const explicit = (input.r2Endpoint || '').trim().replace(/\/+$/, '')
+  if (explicit) return explicit
+  return `https://${input.r2AccountId || ''}.r2.cloudflarestorage.com`
+}
+
 export const s3Client = new S3Client({
-  region: 'auto',
-  endpoint: `https://${env.r2AccountId}.r2.cloudflarestorage.com`,
+  // MinIO menandatangani dengan region nyata (`us-east-1` bawaan) dan menolak
+  // SigV4 ber-region `auto`; R2 justru memakai `auto`. Region ikut endpoint:
+  // seam uji tidak boleh mengubah perilaku produksi.
+  region: env.r2Endpoint ? 'us-east-1' : 'auto',
+  endpoint: resolveR2Endpoint(env),
   credentials: {
     accessKeyId: env.r2AccessKeyId,
     secretAccessKey: env.r2SecretAccessKey
@@ -19,7 +37,9 @@ export const s3Client = new S3Client({
  * lebih dulu dan menjawab 503 dengan kode yang bisa dibaca.
  */
 export const r2Configured = (): boolean =>
-  Boolean(env.r2AccountId && env.r2AccessKeyId && env.r2SecretAccessKey && env.r2BucketName)
+  // `R2_ENDPOINT` eksplisit menggantikan account id: MinIO tidak punya account
+  // id, jadi tanpa ini seam uji selalu dijawab 503 oleh rute yang mem-presign.
+  Boolean((env.r2AccountId || env.r2Endpoint) && env.r2AccessKeyId && env.r2SecretAccessKey && env.r2BucketName)
 
 // Generate URL upload yang valid selama 5 menit (default)
 // urlTtl: Berapa lama LINK upload valid (detik)

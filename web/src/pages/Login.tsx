@@ -443,7 +443,10 @@ export default function Login() {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.access_terminal')}</h2>
+            {/* [docs/41 §8] Kontras: `text-accent` di atas `bg-bg-surface` gagal
+                ambang WCAG AA (axe color-contrast, serious). Judul memakai warna
+                teks utama; aksen tetap hadir lewat elemen dekoratif di sekitarnya. */}
+            <h2 className="text-2xl font-bold text-text-primary mb-2">{t('auth:titles.access_terminal')}</h2>
             <p className="text-text-secondary">{t('auth:subtitles.login_desc')}</p>
           </div>
 
@@ -481,10 +484,10 @@ export default function Login() {
 
           <div className="text-center mt-8 pt-6 border-t border-text-secondary/10 dark:border-white/5">
             <p className="text-text-secondary text-sm mb-4">
-              {t('auth:links.no_account')} <Link to="/register" className="font-bold text-accent hover:underline">{t('auth:links.sign_up')}</Link>
+              {t('auth:links.no_account')} <Link to="/register" className="font-bold text-text-primary underline decoration-accent decoration-2 underline-offset-4 hover:text-accent">{t('auth:links.sign_up')}</Link>
             </p>
             <div className="flex justify-center">
-              <Link to="/restore" className="text-sm text-accent hover:underline">{t('auth:links.restore')}</Link>
+              <Link to="/restore" className="text-sm text-text-primary underline decoration-accent decoration-2 underline-offset-4 hover:text-accent">{t('auth:links.restore')}</Link>
             </div>
             <div className="mt-4 pt-4 border-t border-text-secondary/10 dark:border-white/5">
               <a href="https://nyx-app.my.id/privacy" target="_blank" rel="noopener noreferrer" className="text-xs text-text-secondary hover:text-accent transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</a>

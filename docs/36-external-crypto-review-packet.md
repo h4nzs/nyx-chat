@@ -90,7 +90,7 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 | Oracle lintas bahasa | `cd tools/dr-oracle && go run . -check` | X3DH v2, KEM, kdfChain, AEAD — implementasi Go tanpa libsodium |
 | Vektor oracle di klien | `cd web && npx vitest run src/lib/__tests__/x3dhOracleVectors.test.ts src/lib/__tests__/x3dhOracleInterop.test.ts` | Klien memakai vektor yang sama |
 | Grup v4 | `cd web && npx vitest run src/lib/__tests__/groupV4Signature.test.ts` | Tanda tangan ML-DSA atas amplop grup |
-| KT v1/v2 | `cd server/kt-query && bash build.sh test` + `web/src/lib/__tests__/keyTransparency.test.ts`, `ktMonitoring.test.ts`, `ktGossip.test.ts` | Proof/read, auditor, snapshot, fail-closed monitor, split-view |
+| KT (log v2 — satu-satunya log sejak `docs/38`) | `cd server/kt-query && bash build.sh test` + `web/src/lib/__tests__/keyTransparencyV2.test.ts`, `ktBundleProofV2.test.ts`, `ktMonitoring.test.ts`, `ktGossip.test.ts` | Proof/read, auditor, snapshot, fail-closed monitor, split-view |
 | E2E browser | `cd web && pnpm exec playwright test --project=chromium` | X3DH v2, grup `sigV:2`, burner PQ-only, recovery ML-DSA, device linking, credential grup, OHTTP |
 | Benchmark | `pnpm --filter nyx-web run bench:pq` dan `bench:pq:throttle` | Desktop + proxy CPU throttling 6x |
 | PIR service | `cd server/pir-sidecar && cargo test && cargo clippy --all-targets -- -D warnings`; `cd server && npx tsx --test tests/pir.test.ts tests/pirSnapshot.test.ts tests/pirSnapshotJob.test.ts` | Snapshot/epoch, query opaque, proxy auth/rate-limit, end-to-end ChalametPIR |
@@ -114,10 +114,10 @@ Ini bukan "catatan kaki" — semuanya membatasi klaim keamanan:
   N=1000/record 2 KB, startup ~20,6 s, dan setup superlinear (~18,2 menit di
   N=10.000); default mati. Staleness epoch dibatasi job refresh snapshot
   harian (~24 jam); rebuild manual tetap ada. Jangan klaim produksi.
-- **KT v1 masih classical** (Ed25519 + ECVRF) dan **masih dipakai untuk baca**;
-  KT v2 berjalan dual-write, dengan backfill login opt-in
-  (`KT_V2_BACKFILL_ON_LOGIN=1`) untuk perangkat ber-ML-DSA-65. Cutover baca
-  belum dilakukan.
+- **KT v1 sudah dipensiunkan** (`docs/38`, 2026-10-28): satu-satunya log adalah
+  KT v2 (ML-DSA-65) dan baca sudah cutover ke v2; `KT_SERVER_URL` sisa hanya
+  memicu satu peringatan boot. Backfill login opt-in (`KT_V2_BACKFILL_ON_LOGIN=1`)
+  tetap ada untuk perangkat ber-ML-DSA-65.
 - **Tier B** tetap hybrid/classical (lihat §36.2).
 - **Blind RSA dan anonymous issuance sudah dihapus 2026-10-23**; group auth
   sekarang token-first. Kredensial PQ (BRaccoon/blind UOV) belum ada dan belum
