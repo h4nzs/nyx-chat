@@ -156,12 +156,16 @@ jobs:
           R2_SECRET_ACCESS_KEY: nyxminio123
           NYX_R2_SMOKE: '1'
           NYX_R2_SMOKE_CREATE_BUCKET: '1'
-          RCLONE_VERSION: v1.75.2
+          # Jangan pakai nama RCLONE_*: rclone memperlakukan setiap env RCLONE_x
+          # sebagai flag `--x`, jadi RCLONE_VERSION dianggap `--version` (bool) dan
+          # server gagal start ("strconv.ParseBool: parsing \"v1.75.2\""), yang
+          # tampak seperti curl exit 7. Run 42349470629 membuktikannya.
+          NYX_RCLONE_VERSION: v1.75.2
         run: |
-          curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
+          curl -fsSL "https://downloads.rclone.org/${NYX_RCLONE_VERSION}/rclone-${NYX_RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
           unzip -q /tmp/rclone.zip -d /tmp
           mkdir -p /tmp/s3-root/nyx-smoke
-          "/tmp/rclone-${RCLONE_VERSION}-linux-amd64/rclone" serve s3 :local:/tmp/s3-root \
+          "/tmp/rclone-${NYX_RCLONE_VERSION}-linux-amd64/rclone" serve s3 :local:/tmp/s3-root \
             --addr 127.0.0.1:9000 --auth-key nyxminio,nyxminio123 &
           RCLONE_PID=$!
           trap 'kill $RCLONE_PID 2>/dev/null || true' EXIT
