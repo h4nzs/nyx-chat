@@ -841,19 +841,37 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     logout: async () => {
+      // [BUG 2026-11-07] `getSubscription()` MELEMPAR di Firefox
+      // (`AbortError: Error retrieving push subscription`). Dulu seluruh blok
+      // ada dalam satu `try`, jadi lemparan itu melompat ke `catch` dan
+      // `POST /api/auth/logout` TIDAK PERNAH dikirim — cookie refresh HttpOnly
+      // `rt` hanya bisa dibersihkan server, sehingga sesi tetap hidup dan
+      // `/login` mengalihkan ke `/chat` (smoke Firefox/WebKit nightly merah,
+      // run 42356420274). Push subscription bersifat pelengkap: kegagalannya
+      // tidak boleh membatalkan pencabutan sesi.
+      let pushEndpoint: string | null = null;
       try {
         if ('serviceWorker' in navigator && 'PushManager' in window) {
-           const registration = await navigator.serviceWorker.ready;
-           const subscription = await registration.pushManager.getSubscription();
-           if (subscription) {
-             const endpoint = subscription.endpoint;
-             await api("/api/auth/logout", { method: "POST", body: JSON.stringify({ endpoint }) }).catch(() => {});
-             await subscription.unsubscribe();
-           } else {
-             await api("/api/auth/logout", { method: "POST" }).catch(() => {});
-           }
-        } else {
-           await api("/api/auth/logout", { method: "POST" }).catch(() => {});
+          const registration = await navigator.serviceWorker.ready;
+          const subscription = await registration.pushManager.getSubscription();
+          pushEndpoint = subscription?.endpoint ?? null;
+        }
+      } catch (e) {
+        console.warn('Push subscription tidak bisa dibaca saat logout:', e);
+      }
+
+      try {
+        await api("/api/auth/logout", {
+          method: "POST",
+          ...(pushEndpoint ? { body: JSON.stringify({ endpoint: pushEndpoint }) } : {}),
+        }).catch(() => {});
+        if (pushEndpoint) {
+          // Best-effort: endpoint server sudah dihapus; unsubscribe lokal gagal
+          // tidak boleh menghidupkan kembali sesi.
+          await navigator.serviceWorker.ready
+            .then((registration) => registration.pushManager.getSubscription())
+            .then((subscription) => subscription?.unsubscribe())
+            .catch(() => {});
         }
       } catch (e) { console.error("Logout error", e); } finally {
         clearAuthCookies();

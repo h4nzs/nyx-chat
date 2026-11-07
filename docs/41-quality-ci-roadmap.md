@@ -19,7 +19,7 @@ Prinsip yang tidak berubah:
 
 | Area | Status | Artefak |
 |---|---|---|
-| Phase 0 — hijaukan E2E | ✅ selesai di kode; hijau belum dibuktikan run CI (commit lokal belum di-push) | `web/e2e/settings.spec.ts` (page baru pasca-eject), `web/e2e/auth.spec.ts` (bukti logout + pembersihan state), `1fb27815` (prefix `/api/ohttp` di stack uji) |
+| Phase 0 — hijaukan E2E | ✅ selesai **dan terbukti di CI** — run [42351711379](https://github.com/h4nzs/nyx-chat/actions/runs/42351711379), 12/12 job hijau termasuk kedua job E2E | `web/e2e/settings.spec.ts` (page baru pasca-eject), `web/e2e/auth.spec.ts` (bukti logout + pembersihan state), `1fb27815` (prefix `/api/ohttp` di stack uji) |
 | §6.1 coverage web | ✅ selesai | `web/vite.config.ts` (`test.coverage`), `pnpm --filter nyx-web run test:coverage` |
 | §6.2 coverage server | ✅ selesai | `server/scripts/test-coverage.mjs` |
 | §6.3 changed-lines | ✅ selesai (web; non-blocking) | `scripts/check-changed-lines.mjs`, step di job `unit` |
@@ -57,11 +57,17 @@ mengukurnya kembali.
 | Durasi job E2E | ≈20–22 menit | halaman run Actions |
 | Alert Dependabot terbuka | 11 (2 high / 5 medium / 4 low) — per cek terakhir | `gh api .../dependabot/alerts?state=open` |
 
-## 41.3 Phase 0 — hijaukan main (kode selesai, verifikasi CI tertunda)
+## 41.3 Phase 0 — hijaukan main (terbukti hijau di CI)
 
-> Commit perbaikan E2E (`82b94359`, `04fd58af`) ada di lokal dan **belum
-di-push**, jadi belum ada run CI yang membuktikan kedua job E2E hijau. Jangan
-menulis "main hijau" sebelum run itu ada.
+> Perbaikan E2E (`82b94359`, `04fd58af`) sudah di-push dan run CI
+> [42351711379](https://github.com/h4nzs/nyx-chat/actions/runs/42351711379)
+> (commit `dabeb44c`) menutup phase ini: **12/12 job hijau**, termasuk
+> `E2E (Playwright, Chromium)` dan `E2E (Chrome penuh — WebTransport/QUIC
+> aktif)`. Perbaikan lanjutan yang ikut terbukti di run itu: kutip tunggal pada
+> ekspresi `concurrency` (`e7953b80`), S3 smoke memakai `rclone serve s3`
+> menggantikan image MinIO yang tidak lagi terdistribusi (`805c06fe`), dan nama
+> env `NYX_RCLONE_VERSION` agar tidak dibaca rclone sebagai flag `--version`
+> (`dabeb44c`).
 
 - `settings.spec.ts` memeriksa route terproteksi lewat **page baru di context yang
   sama**, bukan `goto()` di page yang sedang menjalankan `window.location.replace('/')`
@@ -94,7 +100,7 @@ crypto worker dan diuji lewat E2E.
 ### 6.2 Coverage server — selesai
 
 `server/scripts/test-coverage.mjs` membaca script `test` dari `package.json`
-(satu-satunya daftar 99 berkas) lalu menjalankannya dengan
+(satu-satunya daftar 101 berkas) lalu menjalankannya dengan
 `--experimental-test-coverage`; tidak ada daftar kedua yang bisa menyimpang.
 Gagal karena `NODE_OPTIONS` menolak flag itu, jadi runner memanggil
 `process.execPath` langsung dengan `--import tsx` dan `--enable-source-maps`.
@@ -109,7 +115,7 @@ mengubah repo. Di CI jalan di job `unit` pada PR dengan `continue-on-error`
 sampai angka global stabil 10 run. Server belum mungkin: reporter native Node
 tidak mengeluarkan lcov.
 
-### 6.4 `groupLifecycle.spec.ts` — belum
+### 6.4 `groupLifecycle.spec.ts` — kontrak HTTP selesai; era kripto + fault injection belum
 
 Tiga context browser, memakai endpoint yang sudah ada (`POST /api/conversations`,
 `/participants`, `/leave`, `/group`, `/key-rotation`, `POST /api/groups/:id/epoch`,
@@ -118,6 +124,13 @@ keluarkan anggota (pull era baru harus gagal), tambah kembali, rotasi epoch
 dipaksa dengan `X-Admin-Token`, pesan era lama tetap terbaca dari arsip. Plus
 fault injection: tunda `metadata:updated`, kirim `group:fulfilled_key` sebelum
 metadata, putuskan socket saat rotasi, reload saat rotasi.
+
+**Status 7 November 2026:** yang berjalan baru **kontrak HTTP** (3 context
+nyata: buat grup, token gate `403 BLIND_AUTH_REQUIRED`, rotasi admin, kick
+merotasi era token, purge `409 MEMBERS_REMAIN` → 204) dan itu sudah masuk
+`mustPass`. **Belum**: pesan terenkripsi per era, arsip era lama, dan keempat
+skenario fault injection di atas — semuanya butuh klien kripto, bukan sekadar
+endpoint.
 
 ### 6.5 Required-tests gate — selesai
 

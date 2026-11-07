@@ -189,7 +189,11 @@ jobs:
           pnpm exec prisma db push
       - name: Contract test HTTP
         working-directory: server
-        run: pnpm exec tsx --test tests/httpContract.test.ts
+        # `--test-force-exit`: mengimpor `app.js` membuka handle milik gateway /
+        # Redis bridge yang tidak ditutup oleh `finally` tes. Tanpa flag ini
+        # proses tidak pernah keluar dan job mati di timeout 15 menit
+        # (run 42356420274) — exit code tes tetap menentukan hasil.
+        run: pnpm exec tsx --test --test-force-exit tests/httpContract.test.ts
 
   browsers:
     name: Smoke Firefox + WebKit
