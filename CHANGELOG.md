@@ -15,7 +15,8 @@ kontras gagal di Login/Register; **warnanya diperbaiki**, bukan aturannya
 dimatikan. Seam `R2_ENDPOINT` menyiapkan jalur sukses object storage untuk MinIO; jalur
 presign → PUT → HEAD → GET → DELETE kini benar-benar dijalankan (opt-in
 `NYX_R2_SMOKE=1`, lulus 5/5 terhadap `rclone serve s3`), dan job `unit` di CI
-menyalakan MinIO ephemeral untuk mengulang jalur yang sama di setiap PR.
+menjalankan `rclone serve s3` versi terpin untuk mengulang jalur yang sama di
+setiap PR (image/binary MinIO sudah tidak didistribusikan gratis).
 
 **Coverage akhirnya punya arti.** Web memakai `@vitest/coverage-v8` dengan
 **lantai per-glob** (SPQR 90/66, KT 58/46, grup 45/41, privacy 52/56,

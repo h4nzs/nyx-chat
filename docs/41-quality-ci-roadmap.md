@@ -25,7 +25,7 @@ Prinsip yang tidak berubah:
 | §6.3 changed-lines | ✅ selesai (web; non-blocking) | `scripts/check-changed-lines.mjs`, step di job `unit` |
 | §6.4 `groupLifecycle.spec.ts` | ✅ (kontrak HTTP) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). Pesan terenkripsi/era kripto belum dikirim (batas jujur di kepala spec) |
 | §6.5 required-tests gate | ✅ selesai | `web/e2e/required-tests.json`, `web/e2e/verify-required-tests.mjs`, 2 step di `ci.yml` |
-| §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menyalakan MinIO ephemeral (`minio/minio`, `NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
+| §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
 | §6.7 PIR live E2E | ⬜ belum | butuh sidecar PIR + gateway OHTTP hidup |
 | §6.8 KT live E2E | ⬜ belum | butuh layanan KT v2 (`nyx-kt-query-v2`) + snapshot; keputusan di §41.5 |
 | §7.1 WebKit/Firefox smoke | 🟡 project + nightly | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`; belum ada run hijau (butuh runner ber-browser) |
@@ -145,10 +145,12 @@ terhadap endpoint S3-compatible nyata. Dijalankan 5 November 2026 di
 mesin selfhost dengan `rclone serve s3` (`:9000`, SigV4 divalidasi): **5/5 lulus**.
 Dua koreksi yang ditemukan jalur ini: SigV4 `region: 'auto'` ditolak endpoint
 non-R2 (kini `us-east-1` bila `R2_ENDPOINT` diset) dan `r2Configured()` dulu
-mewajibkan `R2_ACCOUNT_ID` sehingga MinIO selalu 503. Sejak 6 November 2026 job
-`unit` di `ci.yml` menyalakan MinIO ephemeral (`docker run minio/minio`,
-health-check `/minio/health/live`) lalu menjalankan tes yang sama dengan
-`NYX_R2_SMOKE=1 NYX_R2_SMOKE_CREATE_BUCKET=1` — sengaja di job yang sudah ada
+mewajibkan `R2_ACCOUNT_ID` sehingga MinIO selalu 503. Sejak 7 November 2026 job
+`unit` di `ci.yml` menjalankan `rclone serve s3` (versi dipin `v1.75.2`) — MinIO
+tidak lagi mendistribusikan image/binary gratis (`docker minio/minio` ditolak,
+`dl.min.io` 410), sementara rclone tetap memvalidasi SigV4 penuh — lalu
+menjalankan tes yang sama dengan
+`NYX_R2_SMOKE=1 NYX_R2_SMOKE_CREATE_BUCKET=1`; sengaja di job yang sudah ada
 supaya daftar 12 required check tidak berubah. **Belum**: skenario E2E
 `available: true` → arsip terunggah → perangkat baru mengunduh; jalur negatif
 503 sudah ada dan harus tetap lulus.

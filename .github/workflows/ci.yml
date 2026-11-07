@@ -143,7 +143,11 @@ jobs:
       # ephemeral lebih murah daripada job baru (dan tidak mengubah daftar
       # required check). Bucket dibuat oleh tes (`NYX_R2_SMOKE_CREATE_BUCKET=1`),
       # sesuatu yang tidak dilakukan terhadap akun R2 sungguhan.
-      - name: S3 smoke (MinIO ephemeral) — presign PUT/GET
+      # MinIO berhenti mendistribusikan image/binary-nya (docker `minio/minio`
+      # ditolak, `dl.min.io` menjawab 410), jadi jalur S3 nyata diuji dengan
+      # `rclone serve s3` — server S3-compatible yang tetap memvalidasi SigV4
+      # penuh, termasuk presigned PUT/GET. Versi dipin; arsipnya ~30 MB.
+      - name: S3 smoke (rclone serve s3) — presign PUT/GET
         env:
           JWT_SECRET: ci-s3-smoke
           R2_ENDPOINT: http://127.0.0.1:9000
@@ -152,17 +156,22 @@ jobs:
           R2_SECRET_ACCESS_KEY: nyxminio123
           NYX_R2_SMOKE: '1'
           NYX_R2_SMOKE_CREATE_BUCKET: '1'
+          RCLONE_VERSION: v1.75.2
         run: |
-          docker run -d --name nyx-minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=nyxminio -e MINIO_ROOT_PASSWORD=nyxminio123 \
-            minio/minio server /data
+          curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
+          unzip -q /tmp/rclone.zip -d /tmp
+          mkdir -p /tmp/s3-root/nyx-smoke
+          "/tmp/rclone-${RCLONE_VERSION}-linux-amd64/rclone" serve s3 :local:/tmp/s3-root \
+            --addr 127.0.0.1:9000 --auth-key nyxminio,nyxminio123 &
+          RCLONE_PID=$!
+          trap 'kill $RCLONE_PID 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null && break
+            # Respons apa pun (termasuk 404) berarti server sudah mendengarkan.
+            curl -s -o /dev/null http://127.0.0.1:9000/ && break
             sleep 1
           done
-          curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
+          curl -s -o /dev/null http://127.0.0.1:9000/
           pnpm --filter nyx-server exec node --import tsx --test tests/r2Endpoint.test.ts
-          docker rm -f nyx-minio
       # [docs/41 §6.3] "Coverage global naik" bisa berarti "baris baru tak
       # diuji". Gate ini mengukur khusus baris yang diubah PR (lcov dari step
       # web di atas + diff git). Dua titik (`<base> HEAD`) dan fetch satu commit
