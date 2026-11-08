@@ -266,9 +266,12 @@ jobs:
       - name: Install Playwright Chromium untuk a11y
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
-      - name: Smoke Firefox + WebKit
+      - name: Smoke Firefox
         working-directory: web
-        run: pnpm exec playwright test e2e/auth.spec.ts e2e/settings.spec.ts --project=firefox --project=webkit
+        run: pnpm exec playwright test e2e/auth.spec.ts e2e/settings.spec.ts --project=firefox
+      - name: Smoke WebKit
+        working-directory: web
+        run: pnpm exec playwright test e2e/auth.spec.ts e2e/settings.spec.ts --project=webkit
       - name: Aksesibilitas (axe, halaman tanpa sesi)
         working-directory: web
         # Config khusus: tanpa global reset DB. Lewat config default, step ini

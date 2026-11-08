@@ -17,11 +17,11 @@ test.describe('Settings & Emergency Eject', () => {
     // 1. Navigate to Settings
     const settingsLink = page.locator('a[href="/settings"]').first();
     await settingsLink.click();
-    await page.waitForTimeout(1000);
+    await expect(page).toHaveURL(/\/settings/, { timeout: 15000 });
 
     // 2. Click Logout / Eject button
     const logoutBtn = page.locator('button', { hasText: /eject|logout|sign out|disconnect/i }).first();
-    await expect(logoutBtn).toBeVisible({ timeout: 10000 });
+    await expect(logoutBtn).toBeVisible({ timeout: 30000 });
     await logoutBtn.click();
 
     // 3. Handle confirmation modal if it appears (Emergency Eject triggers showConfirm).

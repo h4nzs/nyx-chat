@@ -231,6 +231,14 @@ type Actions = {
   silentRefresh: () => Promise<boolean>;
 };
 
+async function getReadyServiceWorker(timeoutMs = 1500): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
+
 let privateKeysCache: RetrievedKeys | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let keysRetrievalPromise: Promise<RetrievedKeys> | null = null;
@@ -849,12 +857,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       // `/login` mengalihkan ke `/chat` (smoke Firefox/WebKit nightly merah,
       // run 42356420274). Push subscription bersifat pelengkap: kegagalannya
       // tidak boleh membatalkan pencabutan sesi.
+      // [BUG 2026-11-08] `navigator.serviceWorker.ready` tidak pernah resolve bila
+      // service worker tidak aktif (dev mode / WebKit headless). Beri batas waktu
+      // agar logout tidak hang tanpa batas waktu.
       let pushEndpoint: string | null = null;
       try {
         if ('serviceWorker' in navigator && 'PushManager' in window) {
-          const registration = await navigator.serviceWorker.ready;
-          const subscription = await registration.pushManager.getSubscription();
-          pushEndpoint = subscription?.endpoint ?? null;
+          const registration = await getReadyServiceWorker(1500);
+          if (registration) {
+            const subscription = await registration.pushManager.getSubscription();
+            pushEndpoint = subscription?.endpoint ?? null;
+          }
         }
       } catch (e) {
         console.warn('Push subscription tidak bisa dibaca saat logout:', e);
@@ -868,10 +881,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         if (pushEndpoint) {
           // Best-effort: endpoint server sudah dihapus; unsubscribe lokal gagal
           // tidak boleh menghidupkan kembali sesi.
-          await navigator.serviceWorker.ready
-            .then((registration) => registration.pushManager.getSubscription())
-            .then((subscription) => subscription?.unsubscribe())
-            .catch(() => {});
+          const registration = await getReadyServiceWorker(1500);
+          if (registration) {
+            await registration.pushManager.getSubscription()
+              .then((subscription) => subscription?.unsubscribe())
+              .catch(() => {});
+          }
         }
       } catch (e) { console.error("Logout error", e); } finally {
         clearAuthCookies();
@@ -914,9 +929,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         await api("/api/auth/logout-all", { method: "POST" }).catch((e) => console.error("Server kill failed:", e));
         
         if ('serviceWorker' in navigator && 'PushManager' in window) {
-           const registration = await navigator.serviceWorker.ready;
-           const subscription = await registration.pushManager.getSubscription();
-           if (subscription) await subscription.unsubscribe();
+           const registration = await getReadyServiceWorker(1500);
+           if (registration) {
+             const subscription = await registration.pushManager.getSubscription();
+             if (subscription) await subscription.unsubscribe();
+           }
         }
       } catch (e) { 
         console.error("Emergency logout error", e); 
