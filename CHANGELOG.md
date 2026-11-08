@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔐 KT live, backup/restore, dan a11y ber-sesi terbukti di jalur nyata (2026-11-08)
+
+**Tiga lubang bukti ditutup tanpa melonggarkan gate.** `web/e2e/ktLive.spec.ts`
+menguji jalur KT yang dipakai klien — config ABI 2 + kunci ML-DSA-65, tree head,
+anchor `distinguished`, dan bukti publik `POST /search` — **lulus 1,4 menit**
+terhadap `nyx-kt-query-v2`. `web/e2e/backupRestore.spec.ts` membuat `.nyxbak`
+lewat Settings (magic `NYXB`, unduhan nyata) lalu merestore berkas itu dengan
+recovery phrase yang dibaca dari onboarding — **lulus 2,1 menit** dan masuk
+`mustPass`. `a11y.spec.ts` kini juga memindai Settings ber-sesi; pelanggaran yang
+ditemukan (label select/input, nama tombol swatch, kontras tombol Register dan
+`DefaultAvatar`) diperbaiki di UI, bukan dengan mematikan aturan. Contract test
+HTTP menjadi **8/8** dengan kasus 429. Perbaikan nightly ikut masuk: job contract
+membangun `@nyx/shared/dist`, k6 ephemeral memakai `GENERAL_RATE_LIMIT_MAX`
+(default produksi tetap 300) agar 100 VU satu IP tidak diukur sebagai limiter,
+dan cookie CSRF mengikuti opsi cookie sesi sehingga WebKit di stack http tidak
+lagi menolak double-submit.
+
 ## 🛡️ Sinyal CI bisa dipercaya: coverage ber-lantai, gate tes wajib, drill terjadwal, main terproteksi (2026-11-05)
 
 **Nightly dan a11y mengisi celah yang tidak muat di PR.**

@@ -26,14 +26,14 @@ Prinsip yang tidak berubah:
 | §6.4 `groupLifecycle.spec.ts` | ✅ (kontrak HTTP) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). Pesan terenkripsi/era kripto belum dikirim (batas jujur di kepala spec) |
 | §6.5 required-tests gate | ✅ selesai | `web/e2e/required-tests.json`, `web/e2e/verify-required-tests.mjs`, 2 step di `ci.yml` |
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
-| §6.7 PIR live E2E | ⬜ belum | butuh sidecar PIR + gateway OHTTP hidup |
-| §6.8 KT live E2E | ⬜ belum | butuh layanan KT v2 (`nyx-kt-query-v2`) + snapshot; keputusan di §41.5 |
+| §6.7 PIR live E2E | ⬜ menunggu mekanisme proof | keputusan 2026-11-08: verifikasi proof di klien **dulu**; ChalametPIR tidak menghasilkan proof, jadi butuh pemilihan mekanisme (Merkle+root bertanda tangan vs skema PIR terverifikasi). Belum diklaim teruji. |
+| §6.8 KT live E2E | ✅ ABI 2 | `web/e2e/ktLive.spec.ts`: config `abiVersion: 2` + kunci ML-DSA-65, `/head`, anchor `distinguished`, bukti publik `POST /search`; **lulus 1,4 menit** terhadap KT v2 lokal. Interop `cmd/kt-client` tetap item lanjutan. |
 | §7.1 WebKit/Firefox smoke | 🟡 project + nightly | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`; belum ada run hijau (butuh runner ber-browser) |
-| §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (7 tes: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
+| §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (**8 tes**: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS, **429**) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
 | §7.3 nightly fuzz/k6 | ✅ workflow | `.github/workflows/nightly.yml`: fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU ephemeral, smoke Firefox/WebKit, a11y, contract HTTP; belum ada run hijau di Actions |
 | §7.4 flake gate + karantina | ✅ gate | `web/e2e/quarantine.json` + `evaluateQuarantine` di `verify-required-tests.mjs` (owner/reason/expires wajib; kedaluwarsa/masih-jalan tes hilang = gagal); self-test 12/12 |
-| §7.5 backup/restore E2E | 🟡 terjadwal | `drills.yml` job `client-restore` menjalankan drill mingguan; belum per-PR |
-| §8 a11y (sisanya belum) | 🟡 a11y | `web/e2e/a11y.spec.ts` + `@axe-core/playwright` + `playwright.a11y.config.ts` (tanpa reset DB); kontras Login/Register diperbaiki; halaman ber-sesi, PWA/offline, visual, perf, mutation belum |
+| §7.5 backup/restore E2E | ✅ Playwright | `web/e2e/backupRestore.spec.ts`: ekspor `.nyxbak` (**magic `NYXB`**, unduhan nyata) lalu restore dengan recovery phrase yang dibaca dari onboarding; **lulus 2,1 menit**. Drill mingguan tetap ada. |
+| §8 a11y (sisanya belum) | 🟡 a11y (3 halaman) | `web/e2e/a11y.spec.ts`: login, register/landing, dan **Settings ber-sesi**; pelanggaran yang ditemukan diperbaiki di UI (label select/input, nama tombol swatch, kontras tombol Register, kontras `DefaultAvatar`). PWA/offline, visual, perf, mutation belum |
 | §9.1 branch protection | ✅ aktif | 14 required contexts (12 job `ci.yml` + 2 CodeQL) |
 | §9.2 Dependabot lockfile | ✅ selesai | `.github/workflows/dependabot-lockfile.yml` |
 | §9.4 CI hygiene | ✅ selesai | `concurrency` + `timeout-minutes` 12 job + artifact saat gagal |
@@ -47,13 +47,13 @@ mengukurnya kembali.
 |---|---|---|
 | Job `ci.yml` | 12 | `python3 -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']))"` |
 | Workflow total | 12 | `ls .github/workflows/` |
-| Spec E2E | 16 | `ls web/e2e/*.spec.ts | wc -l` |
+| Spec E2E | 18 | `ls web/e2e/*.spec.ts | wc -l` |
 | Berkas tes web | 137 | `find web/src -name '*.test.ts*' | wc -l` |
 | Berkas tes server | 101 | daftar eksplisit `server/package.json` |
 | Tes Go KT | 58 | `cd server/kt-query && ./build.sh test` |
 | Aturan alert | 44 | `grep -c '^\s*- alert:' ops/prometheus/alerts.yml` |
 | Required contexts `main` | 14 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
-| Manifest E2E | chromium 9 / chrome 12 `mustPass`, `minTotal` 22 | `web/e2e/required-tests.json` |
+| Manifest E2E | chromium 10 / chrome 13 `mustPass`, `minTotal` 24 | `web/e2e/required-tests.json` |
 | Durasi job E2E | ≈20–22 menit | halaman run Actions |
 | Alert Dependabot terbuka | 11 (2 high / 5 medium / 4 low) — per cek terakhir | `gh api .../dependabot/alerts?state=open` |
 
@@ -168,7 +168,7 @@ supaya daftar 12 required check tidak berubah. **Belum**: skenario E2E
 `available: true` → arsip terunggah → perangkat baru mengunduh; jalur negatif
 503 sudah ada dan harus tetap lulus.
 
-### 6.7 PIR live E2E — belum
+### 6.7 PIR live E2E — menunggu mekanisme proof (keputusan: verifikasi klien dulu)
 
 Klien menolak jalan tanpa OHTTP (`PIR_REQUIRES_OHTTP`), jadi stack PIR harus
 menyalakan gateway OHTTP. Skenario: params, query hit, `PIR_RECORD_MISS`, `409
@@ -176,7 +176,7 @@ PIR_EPOCH_STALE`, tidak ada username polos di body. **Catatan desain:** klien
 belum memverifikasi proof secara kriptografis — jangan menulis asersi "proof
 salah ditolak" sebelum mekanismenya ada.
 
-### 6.8 KT live E2E — belum, butuh keputusan
+### 6.8 KT live E2E — ABI 2 terbukti; interop `cmd/kt-client` menyusul
 
 Baca KT di klien kini **ABI 2** (config tanpa `abiVersion: 2` → `unavailable`,
 tidak ada fallback senyap ke verifier v1); tulis lewat `KT_V2_SERVER_URL`, baca
@@ -184,6 +184,14 @@ lewat `KT_QUERY_URL`, rollback kini butuh redeploy bukan env flip. E2E browser
 sebaiknya menguji jalur yang benar-benar dipakai: `/api/keys/kt/*` → layanan KT →
 verifier WASM, termasuk monitor fail-closed (`verifyMonitor` sukses sebelum state
 ditulis) dan proof dirusak → UI tidak menampilkan "terverifikasi".
+
+**Status 8 November 2026:** jalur transport ABI 2 sudah diuji nyata —
+`ktLive.spec.ts` mendaftar akun, lalu memeriksa `config` (abiVersion 2 + kunci
+ML-DSA-65 3904 hex), `/head`, anchor `distinguished`, dan bukti publik
+`POST /search`; **lulus 1,4 menit** terhadap `nyx-kt-query-v2` lokal. Verifikasi
+proof di WASM dan monitor fail-closed sudah dikunci unit test
+(`keyTransparency.test.ts`, `ktMonitoring.test.ts`), bukan diduplikasi di E2E.
+Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
 
 ## 41.5 P1/P2 — status per 5 November 2026
 
@@ -197,7 +205,9 @@ ditulis) dan proof dirusak → UI tidak menampilkan "terverifikasi".
   karena store limiter dibuat saat modul dimuat (kalau dibalik, semua request
   500 `ClientClosedError` — itu yang pertama ditemukan tes ini). Memakai
   `fetch` + `app.listen(0)`, bukan `supertest` (tidak perlu dependensi baru).
-  **Belum dicakup**: `COOKIE_DOMAIN`, rate-limit 429, OHTTP bearer scope, urutan
+  **Sudah ditambah 8 November 2026**: rate-limit 429 (bucket unik lewat
+  `CF-Connecting-IP` agar tidak memakan limiter 127.0.0.1 milik E2E) — suite
+  **8/8 lulus**. **Belum dicakup**: `COOKIE_DOMAIN`, OHTTP bearer scope, urutan
   gate `token → admin → member count` (butuh akun + DB nyata, kandidat lanjutan).
 - **§7.3** Nightly — **workflow dibuat**: `.github/workflows/nightly.yml`
   (02:00 UTC) berisi fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU di stack
@@ -210,15 +220,21 @@ ditulis) dan proof dirusak → UI tidak menampilkan "terverifikasi".
   **Belum**: metrik flake dari report dan `retries: 0` (butuh 10 run hijau dulu).
 - **§7.5** Backup/restore E2E — **terjadwal, bukan per-PR**: job
   `client-restore` di `drills.yml` menjalankan `scripts/client-restore-drill.sh`
-  mingguan di atas dump Postgres nyata. Jalur spec Playwright yang memakai
-  `backupFormat.ts`/`backupRestore.ts` belum ada.
+  mingguan di atas dump Postgres nyata. **Jalur Playwright ditambahkan 8 November
+  2026**: `web/e2e/backupRestore.spec.ts` membuat `.nyxbak` lewat Settings
+  (magic `NYXB`, unduhan nyata), lalu merestore berkas yang sama dengan recovery
+  phrase yang dibaca dari modal onboarding — **lulus 2,1 menit**, masuk
+  `mustPass`.
 - **§8** a11y — **halaman tanpa sesi selesai**: `web/e2e/a11y.spec.ts` +
   `@axe-core/playwright` + `playwright.a11y.config.ts` (tanpa global reset DB,
   supaya bisa jalan di mesin ber-`server/.env` produksi). Pemindaian pertama
   menemukan `color-contrast` serious di Login (3 node) dan Register (2 node);
-  **UI-nya diperbaiki**, bukan aturannya dimatikan — tes hijau 2/2. Halaman
-  ber-sesi, PWA/offline, visual regression, perf budget, chaos/race, kebocoran
-  lintas akun, dan mutation testing belum.
+  **UI-nya diperbaiki**, bukan aturannya dimatikan. Sejak 8 November 2026 spec
+  juga memindai **Settings ber-sesi** dan menemukan `select-name`, `label`,
+  `button-name`, serta kontras `DefaultAvatar`; semuanya diperbaiki di UI
+  (aria-label select/input, nama tombol swatch, kontras tombol Register dan
+  avatar). Tes hijau **3/3**. PWA/offline, visual regression, perf budget,
+  chaos/race, kebocoran lintas akun, dan mutation testing belum.
 
 ## 41.6 Engineering health
 
@@ -263,10 +279,12 @@ global — §6.1/§6.2); siapa boleh bypass branch protection (admin, dengan
 `enforce_admins: false` dan catatan alasan); cara memperbaiki PR Dependabot
 (opsi ketiga: GitHub App, bukan `--no-frozen-lockfile`).
 
-**Masih terbuka:** (a) KT E2E — cukup jalur ABI 2 yang sekarang, atau tunggu
-interop `cmd/kt-client`; (b) PIR — apakah verifikasi proof di klien ditambahkan;
-(c) WebKit/Firefox — nightly saja atau langsung PR; (d) apakah changed-lines
-server layak dikejar (butuh lcov dari toolchain lain).
+**Terjawab 8 November 2026:** (a) KT — **ABI 2 sekarang**, interop
+`cmd/kt-client` menjadi item lanjutan; (b) PIR — **verifikasi proof di klien
+dulu**, dan karena ChalametPIR tidak menghasilkan proof, mekanismenya masih
+terbuka (Merkle inclusion + root bertanda tangan vs skema PIR terverifikasi).
+**Masih terbuka:** (c) WebKit/Firefox — nightly saja atau langsung PR;
+(d) apakah changed-lines server layak dikejar (butuh lcov dari toolchain lain).
 
 ## 41.8 Cara verifikasi
 
@@ -277,6 +295,8 @@ npx playwright test --project=chromium          # per spek saat iterasi:
 npx playwright test e2e/auth.spec.ts --project=chromium
 node e2e/verify-required-tests.mjs --self-test        # 12 skenario (gate + karantina)
 npx playwright test e2e/a11y.spec.ts --config=playwright.a11y.config.ts --project=chrome
+npx playwright test e2e/ktLive.spec.ts --project=chrome      # butuh KT v2 hidup
+npx playwright test e2e/backupRestore.spec.ts --project=chrome
 
 # server
 cd server && npx tsc --noEmit && pnpm test && pnpm test:coverage

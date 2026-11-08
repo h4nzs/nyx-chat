@@ -299,7 +299,7 @@ export default function Register() {
             <button
               onClick={handleSkipBiometric}
               disabled={miningStatus !== 'idle' || isVerifyingBio}
-              className="w-full py-4 rounded-xl bg-bg-main text-text-secondary hover:text-accent font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark disabled:opacity-50 mt-4"
+              className="w-full py-4 rounded-xl bg-bg-main text-text-primary hover:text-accent font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark disabled:opacity-50 mt-4"
             >
               <FiSkipForward /> {t('auth:buttons.skip_now')}
             </button>

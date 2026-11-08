@@ -16,6 +16,7 @@
 // karena spec ini hijau.
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { registerUser } from './helpers/registration';
 
 async function scan(page: import('@playwright/test').Page, label: string) {
   const results = await new AxeBuilder({ page })
@@ -40,7 +41,12 @@ async function scan(page: import('@playwright/test').Page, label: string) {
       id: violation.id,
       impact: violation.impact,
       help: violation.help,
-      nodes: violation.nodes.slice(0, 3).map((node) => node.target.join(' ')),
+      nodes: violation.nodes.slice(0, 3).map((node) => ({
+        target: node.target.join(' '),
+        // Potongan HTML mempercepat perbaikan: selector saja tidak menunjukkan
+        // elemen mana yang dimaksud (mis. `.select-none` bisa avatar/teks lain).
+        html: node.html.slice(0, 200),
+      })),
     })),
     `${label} tidak boleh punya pelanggaran a11y serious/critical`
   ).toEqual([]);
@@ -65,5 +71,25 @@ test.describe('Aksesibilitas (axe)', () => {
     await expect(page.locator('h1, h2').first()).toBeVisible({ timeout: 30000 });
     await page.waitForTimeout(500);
     await scan(page, page.url().includes('/register') ? 'register' : 'landing');
+  });
+
+  // [docs/41 §8] Halaman ber-sesi: satu pendaftaran nyata (~40-70 dtk Argon2)
+  // lebih lambat, tetapi tanpa ini "a11y selesai" hanya berlaku untuk layar
+  // pra-login. Dipindai setelah modal onboarding ditutup dan Settings dirender.
+  //
+  // Config a11y TIDAK menjalankan reset DB, jadi akun uji memakai nama unik dan
+  // tidak menghapus data siapa pun. Bila stack uji tidak bisa mendaftar (mis.
+  // DB produksi terlindungi), tes gagal — bukan skip diam-diam, karena itu
+  // berarti klaim "halaman ber-sesi bersih" tidak punya bukti.
+  test('halaman settings (ber-sesi) tidak punya pelanggaran serious/critical', async ({ page }) => {
+    test.setTimeout(240000);
+    await registerUser(page, 'A11y Settings User', `a11y_settings_${Date.now()}`);
+    // Klik sidebar (SPA) lalu tunggu konten Settings benar-benar ter-mount;
+    // `goto` langsung bisa mendarat di shell "Loading" (lihat backupRestore).
+    await page.getByRole('link', { name: /settings/i }).first().click();
+    await expect(page).toHaveURL(/\/settings/, { timeout: 60000 });
+    await expect(page.getByTestId('settings-export-backup')).toBeVisible({ timeout: 90000 });
+    await page.waitForTimeout(500);
+    await scan(page, 'settings');
   });
 });

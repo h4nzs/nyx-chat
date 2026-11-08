@@ -108,7 +108,34 @@ async function fillStable(locator: import('@playwright/test').Locator, value: st
 }
 
 /** Registrasi akun + bypass seluruh modal onboarding (rantai standar). */
-export async function registerUser(page: Page, displayName: string, username: string) {
+export async function registerUser(page: Page, displayName: string, username: string): Promise<void> {
+  await walkOnboarding(page, displayName, username, false);
+}
+
+/**
+ * Registrasi yang sekaligus mengembalikan recovery phrase (12 kata).
+ *
+ * Dipakai spec backup/restore (`docs/41 §7.5`): berkas `.nyxbak` hanya bisa
+ * dibuka dengan phrase yang sama, jadi spec harus membacanya dari modal Secure
+ * Phrase — bukan mengarang kata. Reveal dilakukan sebelum "Sequence Recorded",
+ * lalu rantai modal diteruskan seperti `registerUser` (verifikasi kata ditutup
+ * lewat ×, sama seperti pengguna yang mencatat phrase di luar layar).
+ */
+export async function registerUserWithPhrase(
+  page: Page,
+  displayName: string,
+  username: string
+): Promise<string> {
+  return walkOnboarding(page, displayName, username, true);
+}
+
+async function walkOnboarding(
+  page: Page,
+  displayName: string,
+  username: string,
+  capturePhrase: boolean
+): Promise<string> {
+  let phrase = '';
   await page.goto('/register');
   // Tunggu form benar-benar siap (i18n/hydration selesai) sebelum mengisi.
   await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 30000 });
@@ -131,7 +158,16 @@ export async function registerUser(page: Page, displayName: string, username: st
   await page.getByRole('button', { name: /Acknowledge/i }).waitFor({ state: 'visible', timeout: 20000 });
   await page.getByRole('button', { name: /Acknowledge/i }).click();
 
-  // 3. Secure Phrase
+  // 3. Secure Phrase — rekam phrase SEBELUM lanjut (mask harus dibuka dulu).
+  if (capturePhrase) {
+    await page.getByTestId('recovery-reveal').click();
+    const words = page.getByTestId('recovery-phrase-word');
+    await expect(words.first()).toBeVisible({ timeout: 15000 });
+    const count = await words.count();
+    const parts: string[] = [];
+    for (let i = 0; i < count; i++) parts.push((await words.nth(i).innerText()).trim());
+    phrase = parts.join(' ');
+  }
   await page.getByRole('button', { name: /Sequence Recorded/i }).waitFor({ state: 'visible', timeout: 20000 });
   await page.getByRole('button', { name: /Sequence Recorded/i }).click();
 
@@ -164,6 +200,7 @@ export async function registerUser(page: Page, displayName: string, username: st
 
   // 7. Tutup Quick Tour SETELAH mendarat di /chat (di /register tour belum ada).
   await dismissOnboardingTour(page);
+  return phrase;
 }
 
 /** Registrasi varian spec Settings: skip biometric dulu, lalu recovery/init/tour. */

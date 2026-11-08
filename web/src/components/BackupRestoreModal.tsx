@@ -243,6 +243,7 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
             {t('modals:backup_restore.phrase_label', 'Recovery phrase')}
           </span>
           <textarea
+            data-testid="backup-restore-phrase"
             value={phrase}
             onChange={(e) => setPhrase(e.target.value)}
             disabled={isRestoring}
@@ -291,6 +292,7 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
           <button
             type="submit"
             disabled={isRestoring || !bytes || !phrase.trim()}
+            data-testid="backup-restore-submit"
             className="
               px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider
               bg-accent text-white shadow-neu-convex active:shadow-neu-pressed

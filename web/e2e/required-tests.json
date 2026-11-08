@@ -3,7 +3,7 @@
   "note": "Manifest tes wajib E2E (docs/41 §6.5). Dibaca oleh web/e2e/verify-required-tests.mjs dari report JSON Playwright. Aturannya: `minTotal` = jumlah tes yang harus terkumpul untuk project itu; `mustPass` = tes yang wajib ada DAN benar-benar dijalankan (skip selalu pelanggaran); `allowedSkipReasons` = substring/regex alasan skip yang boleh (skip tanpa alasan atau dengan alasan baru = pelanggaran, jadi skip baru harus lewat PR yang mengubah berkas ini).",
   "projects": {
     "chromium": {
-      "minTotal": 22,
+      "minTotal": 24,
       "mustPass": [
         {
           "file": "auth.spec.ts",
@@ -40,6 +40,10 @@
         {
           "file": "groupLifecycle.spec.ts",
           "title": "Group lifecycle (API contract) › admin rotate/kick/purge menegakkan gate dan era token"
+        },
+        {
+          "file": "backupRestore.spec.ts",
+          "title": "Backup & restore .nyxbak › ekspor dari Settings lalu restore dengan phrase yang sama"
         }
       ],
       "allowedSkipReasons": [
@@ -53,11 +57,12 @@
         "VITE_PQ_V2 tidak aktif",
         "relay tidak mengiklankan spqr-ratchet",
         "jalur v2 tidak aktif",
-        "integrasi jalur v2 dimatikan"
+        "integrasi jalur v2 dimatikan",
+        "KT_QUERY_URL tidak aktif di stack uji"
       ]
     },
     "chrome": {
-      "minTotal": 22,
+      "minTotal": 24,
       "mustPass": [
         {
           "file": "auth.spec.ts",
@@ -106,6 +111,10 @@
         {
           "file": "groupLifecycle.spec.ts",
           "title": "Group lifecycle (API contract) › admin rotate/kick/purge menegakkan gate dan era token"
+        },
+        {
+          "file": "backupRestore.spec.ts",
+          "title": "Backup & restore .nyxbak › ekspor dari Settings lalu restore dengan phrase yang sama"
         }
       ],
       "allowedSkipReasons": [
@@ -118,7 +127,8 @@
         "VITE_PQ_V2 tidak aktif",
         "relay tidak mengiklankan spqr-ratchet",
         "jalur v2 tidak aktif",
-        "integrasi jalur v2 dimatikan"
+        "integrasi jalur v2 dimatikan",
+        "KT_QUERY_URL tidak aktif di stack uji"
       ]
     }
   }

@@ -556,6 +556,7 @@ export default function SettingsPage() {
                     <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.display_name')}</label>
                     <input
                       type="text"
+                      aria-label={t('settings:identity.display_name')}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="
@@ -569,6 +570,7 @@ export default function SettingsPage() {
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.bio')}</label>
                     <textarea
+                      aria-label={t('settings:identity.bio')}
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       rows={2}
@@ -590,7 +592,7 @@ export default function SettingsPage() {
                   disabled={isLoading}
                   className="
                     px-8 py-3 rounded-xl font-bold uppercase tracking-wider text-sm
-                    text-accent bg-bg-main
+                    text-text-primary bg-bg-main
                     shadow-neu-flat-light dark:shadow-neu-flat-dark
                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
                     hover:text-white hover:bg-accent transition-all
@@ -691,7 +693,10 @@ export default function SettingsPage() {
                   {ACCENT_COLORS.map((color) => (
                     <button
                       key={color}
+                      type="button"
                       onClick={() => setAccent(color)}
+                      aria-label={`${t('settings:visual.accent_emitter', 'Accent colour')} ${color}`}
+                      aria-pressed={accent === color}
                       style={{ backgroundColor: colorMap[color] }}
                       className={`
                         h-10 w-full rounded-lg transition-all duration-300 relative
@@ -715,6 +720,7 @@ export default function SettingsPage() {
                 </span>
                 <div className="relative">
                   <select
+                    aria-label={t('settings:visual.language', 'Language')}
                     value={i18n.language.split('-')[0] === 'pt' ? 'pt-BR' : i18n.language.split('-')[0]}
                     onChange={(e) => i18n.changeLanguage(e.target.value)}
                     className="
@@ -864,6 +870,7 @@ export default function SettingsPage() {
              </div>
              <div className="flex gap-2 items-center">
                 <select
+                  aria-label={t('settings:privacy.dead_man', "Dead Man's Switch")}
                   value={user?.autoDestructDays || ''}
                   onChange={async (e) => {
                     const val = e.target.value;                     
@@ -914,6 +921,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
                  <button 
                    onClick={() => setShowRestoreModal(true)}
+                   data-testid="settings-restore-backup"
                    className="
                      col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
                      bg-bg-main text-purple-500 font-bold text-xs uppercase tracking-wider
@@ -927,6 +935,7 @@ export default function SettingsPage() {
                  </button>
                  <button 
                    onClick={() => setShowExportModal(true)}
+                   data-testid="settings-export-backup"
                    className="
                      col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
                      bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider

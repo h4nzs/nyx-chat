@@ -122,6 +122,23 @@ test(
           `origin asing tidak boleh diizinkan, dapat: ${allowOrigin}`
         );
       });
+
+      // [docs/41 §7.2] 429 adalah kontrak, bukan detail implementasi: klien
+      // (dan k6) harus bisa membedakan "dibatasi" dari "rusak". Dijalankan
+      // TERAKHIR karena bucket-nya sengaja dipenuhi. `CF-Connecting-IP` dipakai
+      // sebagai kunci bucket unik (header ini yang dibaca `clientRateLimitTag`),
+      // sehingga limiter 127.0.0.1 milik tes/E2E lain tidak ikut termakan.
+      await t.test('rate limit umum → 429 (bucket terpisah per IP)', async () => {
+        let status = 0;
+        for (let i = 0; i < 320; i++) {
+          const response = await fetch(`${base}/api/__contract_missing`, {
+            headers: { 'cf-connecting-ip': '203.0.113.77' },
+          });
+          status = response.status;
+          if (status === 429) break;
+        }
+        assert.equal(status, 429, 'melewati batas umum harus dijawab 429');
+      });
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await prisma.$disconnect();
