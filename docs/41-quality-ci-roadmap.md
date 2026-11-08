@@ -26,7 +26,7 @@ Prinsip yang tidak berubah:
 | §6.4 `groupLifecycle.spec.ts` | ✅ (kontrak HTTP) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). Pesan terenkripsi/era kripto belum dikirim (batas jujur di kepala spec) |
 | §6.5 required-tests gate | ✅ selesai | `web/e2e/required-tests.json`, `web/e2e/verify-required-tests.mjs`, 2 step di `ci.yml` |
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
-| §6.7 PIR live E2E | ⬜ menunggu mekanisme proof | keputusan 2026-11-08: verifikasi proof di klien **dulu**; ChalametPIR tidak menghasilkan proof, jadi butuh pemilihan mekanisme (Merkle+root bertanda tangan vs skema PIR terverifikasi). Belum diklaim teruji. |
+| §6.7 PIR dua server | 🟡 WP1–WP5 kode | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, dan proxy dua-server (`PIR_SERVERS`) sudah ada; klien/ops belum. Rencana + gate di `docs/42` (WP1–WP9). E2E menyusul di WP8; belum diklaim teruji. |
 | §6.8 KT live E2E | ✅ ABI 2 | `web/e2e/ktLive.spec.ts`: config `abiVersion: 2` + kunci ML-DSA-65, `/head`, anchor `distinguished`, bukti publik `POST /search`; **lulus 1,4 menit** terhadap KT v2 lokal. Interop `cmd/kt-client` tetap item lanjutan. |
 | §7.1 WebKit/Firefox smoke | 🟡 project + nightly | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`; belum ada run hijau (butuh runner ber-browser) |
 | §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (**8 tes**: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS, **429**) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
@@ -168,13 +168,34 @@ supaya daftar 12 required check tidak berubah. **Belum**: skenario E2E
 `available: true` → arsip terunggah → perangkat baru mengunduh; jalur negatif
 503 sudah ada dan harus tetap lulus.
 
-### 6.7 PIR live E2E — menunggu mekanisme proof (keputusan: verifikasi klien dulu)
+### 6.7 PIR dua server — rencana `docs/42` (WP1–WP2 kode, belum menyala)
 
-Klien menolak jalan tanpa OHTTP (`PIR_REQUIRES_OHTTP`), jadi stack PIR harus
-menyalakan gateway OHTTP. Skenario: params, query hit, `PIR_RECORD_MISS`, `409
-PIR_EPOCH_STALE`, tidak ada username polos di body. **Catatan desain:** klien
-belum memverifikasi proof secara kriptografis — jangan menulis asersi "proof
-salah ditolak" sebelum mekanismenya ada.
+**Keputusan 2026-11-09** mengubah arah: ChalametPIR (tanpa proof, hint ±11 MB,
+rebuild global tiap epoch) diganti **XOR-PIR dua server + sharding**. Alasan,
+kontrak wire, gate, dan paket kerja ada di `docs/42-pir-two-server-sharded.md`;
+bagian ini hanya mencatat status.
+
+- WP1 ✅ kontrak `xor-pir-v1` + record v2 + manifest (`packages/shared/src/pir.ts`).
+- WP2 ✅ builder per shard (cuckoo 3-kandidat, `dbRoot`, manifest ML-DSA-65) di
+  `server/src/pir/{shards,manifest}.ts`.
+- WP3 ✅ core XOR-PIR di `server/pir-sidecar/src/{pir,shard}.rs`: share bit
+  LSB-first, `answer(share)`, validasi `dbRoot` terhadap isi slot, hot-swap
+  per shard dengan epoch monoton.
+- WP4 ✅ sidecar role A/B: `/health`, `/manifest?shard=N`, `/query?shard=N`,
+  `/admin/rebuild` per shard; ChalametPIR (`/params`, snapshot lama, `bench:pir`)
+  dihapus dari binary.
+- WP5 ✅ proxy `/api/pir/:server/{manifest,query}?shard=N`: konfigurasi
+  `PIR_SERVERS` (≥2, gagal boot bila kurang), kunci manifest ter-pin, dan
+  verifikasi tanda tangan sebelum diteruskan; job rebuild menandatangani per
+  server, memastikan `dbRoot` identik, lalu hot-swap kedua sidecar.
+- Belum: klien (WP6), ops (WP7), uji/E2E (WP8), penghapusan jalur lama di paket
+  klien (WP9). Fitur tetap **default mati** sampai WP9, jadi
+  tidak ada perubahan perilaku pengguna.
+- Skenario E2E yang dituju (ditulis di WP8, bukan sekarang): manifest A=B
+  selain `operator`, query hit, `PIR_RECORD_MISS`, `PIR_TAMPERED` saat satu
+  server berbohong, `PIR_DESYNC` saat manifest berbeda, dan tidak ada identifier
+  polos di body. Jangan menulis asersi "proof salah ditolak" — `xor-pir-v1`
+  tidak memakai proof; jaminannya dua server dengan satu yang jujur.
 
 ### 6.8 KT live E2E — ABI 2 terbukti; interop `cmd/kt-client` menyusul
 

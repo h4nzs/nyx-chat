@@ -11,7 +11,7 @@ Jangan pernah menaruh nilai di file ini atau di git. Sumber nilai: `server/.env`
 | `GROUP_ISSUER_KEY_PKCS8` + versi | `server/.env` | Grup lama tidak bisa memverifikasi issuer |
 | `BACKUP_KEY_SECRET` | `server/.env` | Backup R2 lama tidak bisa didekripsi |
 | `NYX_OPRF_SEED` | `server/.env` | Token OPRF lama invalid |
-| `PIR_MASTER_SECRET` | `server/.env` | Snapshot PIR lama invalid |
+| `PIR_SIGNING_KEY_FILE` (ML-DSA-65) | berkas 0600 di server | `keyId` manifest berubah; klien yang mem-pin kunci lama menolak (`PIR_DESYNC`/tanda tangan gagal) |
 | `OHTTP_PRIVATE_KEY`, `OHTTP_NEXT_PRIVATE_KEY` | `server/.env` | Token/gateway OHTTP lama tidak cocok |
 | `KT v2 log keys` | `kt/v2/etc/config.yaml` | Bukti KT lama tidak bisa diverifikasi |
 | `KT v2 auditor key` | `kt/v2/etc/auditor.key` | Auditor tidak bisa melanjutkan state |

@@ -2,73 +2,71 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
-//! Loopback HTTP surface for the PIR sidecar.
+//! [docs/42 WP4] Permukaan HTTP sidecar XOR-PIR.
 //!
-//! Public routes (`/health`, `/params`, `/query`) are proxied by the Node API.
-//! `/admin/rebuild` is intentionally sidecar-only and requires the internal
-//! token; it is never mounted through nginx.
+//! Satu binary, satu role (`PIR_ROLE=a|b`). Endpoint publik diproxy oleh API
+//! Node; `/admin/rebuild` hanya loopback dan butuh token internal, jadi jangan
+//! pernah dipasang lewat nginx.
+//!
+//! | Route | Isi |
+//! |---|---|
+//! | `GET /health` | role, shard termuat, epoch tertinggi |
+//! | `GET /manifest?shard=N` | `{manifest, signature}` untuk satu shard |
+//! | `POST /query?shard=N` | share biner → jawaban XOR sepanjang `recordBytes` |
+//! | `POST /admin/rebuild` | `{manifest, signature, slots}` (base64url) |
 
 use std::sync::Arc;
 
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    extract::{DefaultBodyLimit, Query, State},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use data_encoding::BASE64URL_NOPAD;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
-use tokio::sync::RwLock;
 
-use crate::index::{PirIndex, SUITE, build_index};
-use crate::snapshot::Snapshot;
+use crate::pir::share_len;
+use crate::shard::{InstallError, Shard, ShardFile, ShardSet};
 
-pub const MAX_QUERY_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
+/// Cukup untuk `S = 524288` slot; query normal `S/8` byte (512 B pada S=4096).
+pub const MAX_SHARE_BYTES: usize = 64 * 1024;
+pub const MAX_SLOTS_BYTES: usize = 128 * 1024 * 1024;
+/// Base64url membengkak 4/3, plus amplop JSON.
+pub const MAX_REBUILD_BYTES: usize = MAX_SLOTS_BYTES / 3 * 4 + 1024;
 
 #[derive(Clone)]
 pub struct AppState {
-    index: Arc<RwLock<Option<Arc<PirIndex>>>>,
-    master_secret: Option<Arc<Vec<u8>>>,
+    pub shards: Arc<ShardSet>,
     admin_token: Option<Arc<Vec<u8>>>,
-    arity: u32,
-    max_entries: usize,
+    role: String,
 }
 
 impl AppState {
-    pub fn new(
-        master_secret: Option<Vec<u8>>,
-        admin_token: Option<Vec<u8>>,
-        arity: u32,
-        max_entries: usize,
-    ) -> Self {
+    pub fn new(role: impl Into<String>, admin_token: Option<Vec<u8>>) -> Self {
         Self {
-            index: Arc::new(RwLock::new(None)),
-            master_secret: master_secret.map(Arc::new),
+            shards: Arc::new(ShardSet::new()),
             admin_token: admin_token.map(Arc::new),
-            arity,
-            max_entries,
+            role: role.into(),
         }
-    }
-
-    pub async fn install(&self, index: PirIndex) {
-        *self.index.write().await = Some(Arc::new(index));
     }
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/params", get(params))
+        .route("/manifest", get(manifest))
         .route(
             "/query",
-            post(query).layer(DefaultBodyLimit::max(MAX_QUERY_BYTES)),
+            post(query).layer(DefaultBodyLimit::max(MAX_SHARE_BYTES)),
         )
         .route(
             "/admin/rebuild",
-            post(rebuild).layer(DefaultBodyLimit::max(MAX_SNAPSHOT_BYTES)),
+            post(rebuild).layer(DefaultBodyLimit::max(MAX_REBUILD_BYTES)),
         )
         .with_state(state)
 }
@@ -88,9 +86,9 @@ impl ApiError {
         }
     }
 
-    fn unavailable(code: &'static str, message: impl Into<String>) -> Self {
+    fn not_found(code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
+            status: StatusCode::NOT_FOUND,
             code,
             message: message.into(),
         }
@@ -132,94 +130,98 @@ impl IntoResponse for ApiError {
     }
 }
 
-async fn health(State(state): State<AppState>) -> Json<Value> {
-    let current = state.index.read().await;
-    match current.as_ref() {
-        Some(index) => Json(json!({
-            "status": "ok",
-            "epoch": index.epoch,
-            "entryCount": index.entry_count,
-            "recordBytes": index.record_bytes,
-            "suite": SUITE,
-            "arity": index.arity,
-        })),
-        None => Json(json!({
-            "status": "empty",
-            "epoch": 0,
-            "entryCount": 0,
-            "recordBytes": 0,
-            "suite": SUITE,
-            "arity": state.arity,
-        })),
-    }
+#[derive(Debug, Deserialize)]
+struct ShardQuery {
+    shard: Option<u32>,
 }
 
-async fn params(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
-    let current = state.index.read().await;
-    let index = current.as_ref().ok_or_else(|| {
-        ApiError::unavailable("PIR_NOT_READY", "belum ada snapshot PIR yang dimuat")
-    })?;
+fn shard_param(query: &ShardQuery) -> Result<u32, ApiError> {
+    query
+        .shard
+        .ok_or_else(|| ApiError::bad_request("PIR_SHARD_REQUIRED", "parameter shard wajib"))
+}
 
-    let etag = index.etag();
-    if let Some(inm) = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|value| value.to_str().ok())
-    {
-        if inm == etag || inm == "*" {
-            return Ok(StatusCode::NOT_MODIFIED.into_response());
-        }
-    }
+fn load_shard(state: &AppState, shard: u32) -> Result<Arc<Shard>, ApiError> {
+    state.shards.get(shard).ok_or_else(|| {
+        ApiError::not_found(
+            "PIR_SHARD_UNKNOWN",
+            format!("shard {shard} belum dimuat sidecar ini"),
+        )
+    })
+}
 
-    let mut response = Response::new(index.params().to_vec().into());
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    response.headers_mut().insert(
-        header::ETAG,
-        HeaderValue::from_str(&etag).map_err(|_| ApiError::internal("build etag", etag.clone()))?,
-    );
+async fn health(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "status": if state.shards.installed() == 0 { "empty" } else { "ok" },
+        "role": state.role,
+        "epoch": state.shards.epoch(),
+        "shards": state.shards.installed(),
+        "shardCount": state.shards.shard_count().unwrap_or(0),
+        "entryCount": state.shards.entry_count(),
+    }))
+}
+
+async fn manifest(
+    State(state): State<AppState>,
+    Query(query): Query<ShardQuery>,
+) -> Result<Response, ApiError> {
+    let shard = load_shard(&state, shard_param(&query)?)?;
+    let mut response = Json(json!({
+        "manifest": shard.manifest,
+        "signature": shard.signature,
+    }))
+    .into_response();
+    // Manifest harus bisa berubah kapan saja (rebuild per shard); cache lama
+    // akan membuat klien membandingkan dua epoch yang sudah tidak berlaku.
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=60"),
+        header::HeaderValue::from_static("no-store"),
     );
     Ok(response)
 }
 
-async fn query(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
-    if body.is_empty() {
+async fn query(
+    State(state): State<AppState>,
+    Query(query): Query<ShardQuery>,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    let shard = load_shard(&state, shard_param(&query)?)?;
+    if body.len() != shard.share_len() {
         return Err(ApiError::bad_request(
-            "PIR_QUERY_REQUIRED",
-            "body query PIR kosong",
+            "PIR_SHARE_INVALID",
+            format!("share harus {} byte", shard.share_len()),
         ));
     }
-
-    let index = {
-        let current = state.index.read().await;
-        current
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| ApiError::unavailable("PIR_NOT_READY", "belum ada snapshot PIR"))?
-    };
-    let query = body.to_vec();
-    let response = tokio::task::spawn_blocking(move || index.respond(&query))
+    if body.is_empty() {
+        return Err(ApiError::bad_request("PIR_SHARE_INVALID", "share kosong"));
+    }
+    let share = body.to_vec();
+    let response = tokio::task::spawn_blocking(move || shard.answer(&share))
         .await
         .map_err(|error| ApiError::internal("join query", error))?
-        .map_err(|error| ApiError::internal("respond query", error))?;
+        .map_err(|error| ApiError::internal("answer query", error))?;
 
     let mut response = Response::new(response.into());
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_static("application/octet-stream"),
+        header::HeaderValue::from_static("application/octet-stream"),
     );
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
     Ok(response)
 }
 
 fn token_matches(provided: &[u8], expected: &[u8]) -> bool {
     provided.len() == expected.len() && bool::from(provided.ct_eq(expected))
+}
+
+#[derive(Debug, Deserialize)]
+struct RebuildBody {
+    manifest: Value,
+    signature: String,
+    slots: String,
 }
 
 async fn rebuild(
@@ -242,59 +244,70 @@ async fn rebuild(
         ));
     }
 
-    let snapshot: Snapshot = serde_json::from_slice(&body)
-        .map_err(|_| ApiError::bad_request("PIR_SNAPSHOT_INVALID", "snapshot bukan JSON valid"))?;
-
-    let current_epoch = {
-        let current = state.index.read().await;
-        current.as_ref().map(|index| index.epoch).unwrap_or(0)
-    };
-    if snapshot.epoch <= current_epoch {
-        return Err(ApiError::conflict(
-            "PIR_EPOCH_STALE",
-            format!(
-                "epoch {} harus lebih besar dari epoch aktif {}",
-                snapshot.epoch, current_epoch
-            ),
+    let parsed: RebuildBody = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::bad_request("PIR_SHARD_INVALID", "body rebuild bukan JSON valid"))?;
+    let file: ShardFile = serde_json::from_value(json!({
+        "manifest": parsed.manifest,
+        "signature": parsed.signature,
+    }))
+    .map_err(|error| {
+        ApiError::bad_request("PIR_SHARD_INVALID", format!("manifest ditolak: {error}"))
+    })?;
+    let slots = BASE64URL_NOPAD
+        .decode(parsed.slots.as_bytes())
+        .map_err(|_| ApiError::bad_request("PIR_SHARD_INVALID", "slots bukan base64url"))?;
+    if slots.len() > MAX_SLOTS_BYTES {
+        return Err(ApiError::bad_request(
+            "PIR_SHARD_INVALID",
+            "slots melebihi batas",
         ));
     }
 
-    let master_secret = state
-        .master_secret
-        .as_ref()
-        .map(|secret| secret.as_slice().to_vec());
-    let arity = state.arity;
-    let max_entries = state.max_entries;
-    let built = tokio::task::spawn_blocking(move || {
-        let validated = snapshot.validate(max_entries)?;
-        build_index(validated, master_secret.as_deref(), arity)
-    })
-    .await
-    .map_err(|error| ApiError::internal("join rebuild", error))?
-    .map_err(|error| {
-        ApiError::bad_request("PIR_SNAPSHOT_INVALID", format!("snapshot ditolak: {error}"))
+    let shard = Shard::from_parts(file, slots).map_err(|error| {
+        ApiError::bad_request("PIR_SHARD_INVALID", format!("shard ditolak: {error}"))
     })?;
-
-    let epoch = built.epoch;
-    let entry_count = built.entry_count;
-    let record_bytes = built.record_bytes;
-    {
-        let mut current = state.index.write().await;
-        if let Some(existing) = current.as_ref() {
-            if epoch <= existing.epoch {
-                return Err(ApiError::conflict(
-                    "PIR_EPOCH_STALE",
-                    "epoch berubah selama rebuild; coba lagi dengan epoch lebih baru",
-                ));
-            }
-        }
-        *current = Some(Arc::new(built));
-    }
+    let manifest = shard.manifest.clone();
+    state
+        .shards
+        .install(shard)
+        .map_err(|error| install_error(error, manifest.shard))?;
 
     Ok(Json(json!({
         "status": "ok",
-        "epoch": epoch,
-        "entryCount": entry_count,
-        "recordBytes": record_bytes,
+        "shard": manifest.shard,
+        "shardCount": manifest.shard_count,
+        "epoch": manifest.epoch,
+        "slotCount": manifest.slot_count,
+        "entryCount": manifest.entry_count,
     })))
+}
+
+fn install_error(error: InstallError, shard: u32) -> ApiError {
+    let message = match error {
+        InstallError::ShardCountMismatch => {
+            format!("shard {shard} memakai shardCount yang berbeda dari index aktif")
+        }
+        InstallError::EpochStale => format!("epoch shard {shard} lebih kecil dari yang aktif"),
+        InstallError::EpochConflict => {
+            format!("epoch shard {shard} sama tetapi dbRoot berbeda")
+        }
+    };
+    ApiError::conflict(error.code(), message)
+}
+
+/// Share untuk `slot_count` slot; diekspor untuk tes integrasi.
+pub fn expected_share_len(slot_count: usize) -> usize {
+    share_len(slot_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limits_fit_real_shapes() {
+        const { assert!(MAX_REBUILD_BYTES > MAX_SLOTS_BYTES) };
+        assert!(MAX_SHARE_BYTES >= share_len(4096));
+        assert_eq!(share_len(4096), 512);
+    }
 }

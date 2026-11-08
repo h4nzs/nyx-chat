@@ -1384,7 +1384,16 @@ korelasi di log/state aplikasi. Pemisahan fisik = jalankan relay di host lain
 dan ubah `OHTTP_GATEWAY_TARGET` (butuh perubahan kode karena validasi loopback
 saat ini sengaja ketat).
 
-## 10.19 PIR sidecar lokal (`nyx-pir-sidecar`) — added 2026-10-25, docs/35 Fase 4b
+## 10.19 PIR sidecar lokal (`nyx-pir-sidecar`) — added 2026-10-25, diganti 2026-11-09
+
+> **Kontrak berubah (docs/42, WP4).** Sidecar kini menjalankan **dua server
+> XOR-PIR** dengan sharding, bukan ChalametPIR. Endpoint `/params` dan payload
+> snapshot lama **sudah tidak ada**; yang tersedia: `GET /manifest?shard=N`,
+> `POST /query?shard=N`, `POST /admin/rebuild` (`{manifest, signature, slots}`),
+> `GET /health`. Env: `PIR_BIND`, `PIR_ROLE=a|b`, `PIR_ADMIN_TOKEN`,
+> `PIR_SHARD_DIR`. `PIR_MASTER_SECRET`, `PIR_ARITY`, `PIR_SNAPSHOT_PATH`,
+> `PIR_MAX_ENTRIES` tidak dibaca lagi, dan `bench:pir` dihapus. Sisanya di
+> bawah ini adalah catatan sejarah sampai §10.19 ditulis ulang di WP7.
 
 Pencarian PIR (ChalametPIR) membutuhkan **index** yang dibangun dari `User.oprfIndex`
 dan sebuah proses yang menjawab `/params` (hint/filter/seed) serta `/query` biner.

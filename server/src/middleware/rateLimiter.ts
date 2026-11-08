@@ -151,6 +151,32 @@ export const searchLimiter = rateLimit({
 })
 
 /**
+ * [docs/42 WP5] Batas query PIR PER AKUN: 120/menit.
+ *
+ * Satu pencarian PIR = 3 slot × 2 server = **6** request query, jadi batas
+ * 30/menit milik `searchLimiter` hanya memberi 5 pencarian/menit. Limiter ini
+ * menghitung 20 pencarian/menit pada beban yang sama.
+ *
+ * Sengaja TIDAK memakai `searchIpLimiter`: seluruh trafik PIR lewat gateway
+ * OHTTP, sehingga semua klien tampak berasal dari satu IP dan batas per-IP akan
+ * memblokir semua orang sekaligus.
+ */
+export const pirQueryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: searchRateKey,
+  validate: { trustProxy: false },
+  message: { error: 'SEARCH_RATE_LIMITED: Too many private searches. Please wait a minute.' },
+  store: new RedisStore({
+    prefix: 'rl:pir-query:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
+/**
  * Batas per IP: 90/menit. Bukan pengganti batas akun, melainkan penahan
  * pembuatan banyak akun untuk mengakali batas akun di satu host.
  */

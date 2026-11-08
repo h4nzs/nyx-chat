@@ -45,7 +45,7 @@ import callTokensRouter from "./routes/callTokens.js";
 import createOhttpRouter from "./routes/ohttp.js";
 import { loadOhttpConfig } from "./ohttp/config.js";
 import { setOhttpInternalToken } from "./ohttp/clientTag.js";
-// [docs/35 Fase 4b] PIR — proxy ke sidecar ChalametPIR, hanya bila PIR_ENABLED=1.
+// [docs/42 WP5] PIR dua server — proxy ke sidecar role A/B, hanya bila PIR_ENABLED=1.
 import createPirRouter from "./routes/pir.js";
 import { loadPirConfig } from "./pir/config.js";
 import { requireAuth } from "./middleware/auth.js";
@@ -233,9 +233,9 @@ const corsMiddleware = cors({
     // permukaan preflight tanpa ada klien yang mengirimnya.
     "x-delete-token"
   ],
-  // `/api/pir/params` mengirim ETag; tanpa expose, browser tidak bisa
-  // membacanya dan cache ETag klien tidak pernah terisi.
-  exposedHeaders: ["ETag"],
+  // Tidak ada header respons non-sederhana yang perlu dibaca klien: manifest
+  // PIR kini `no-store` (docs/42 WP5), jadi ETag tidak diekspos lagi.
+  exposedHeaders: [],
 });
 
 app.use(corsMiddleware);
@@ -435,14 +435,15 @@ app.use((req, res, next) => {
   if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
     return next();
   }
-  // [docs/35 Fase 4b] Query PIR & search KT lewat OHTTP tidak membawa cookie:
+  // [docs/42] Query PIR & search KT lewat OHTTP tidak membawa cookie:
   // relay membuang header klien dan identitasnya adalah token OHTTP ber-scope
   // DI DALAM amplop (`requireAuth` menolak token itu di luar allowlist OHTTP).
   // CSRF adalah proteksi terhadap ambient authority cookie, jadi dilewati HANYA
   // bila tidak ada cookie sesi sama sekali — kalau ada, jalur cookie tetap
   // wajib CSRF.
   if (
-    (req.path === '/api/pir/query' || req.path === '/api/keys/kt/search') &&
+    (/^\/api\/pir\/[a-z0-9_-]+\/(manifest|query)$/.test(req.path) ||
+      req.path === '/api/keys/kt/search') &&
     !hasSessionCookie(req)
   ) {
     return next();

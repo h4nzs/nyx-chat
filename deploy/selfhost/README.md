@@ -131,7 +131,7 @@ yang dipulihkan lebih baru dari dump.
 ## Rahasia yang tidak boleh hilang
 
 `NYX_AT_REST_PEPPER`, kunci log KT v2 (`config.yaml`, `auditor.key`), `NYX_OPRF_SEED`,
-`PIR_MASTER_SECRET`, `BACKUP_KEY_SECRET`, kunci OHTTP, `JWT_SECRET`, `CHAT_SECRET`,
+`PIR_SIGNING_KEY_FILE` (kunci manifest), `BACKUP_KEY_SECRET`, kunci OHTTP, `JWT_SECRET`, `CHAT_SECRET`,
 `CSRF_SECRET`. Detail ada di `SECRETS.md`.
 
 ## Catatan
