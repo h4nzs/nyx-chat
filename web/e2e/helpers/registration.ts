@@ -176,10 +176,17 @@ export async function registerUserViaBiometric(page: Page, displayName: string, 
   await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-  // 1. Bypass biometric.
+  // 1. Bypass biometric BILA prompt-nya muncul. WebKit headless tidak selalu
+  //    punya platform authenticator, dan alur registrasi melewati langkah ini
+  //    ketika WebAuthn tidak tersedia — menunggu 30 dtk untuk tombol yang memang
+  //    tidak akan ada adalah kegagalan harness (run 42362200951), bukan produk.
   const skipBiometricBtn = page.locator('button:has-text("Skip"), button:has-text("Continue")').first();
-  await expect(skipBiometricBtn).toBeVisible({ timeout: 30000 });
-  await skipBiometricBtn.click();
+  try {
+    await expect(skipBiometricBtn).toBeVisible({ timeout: 8000 });
+    await skipBiometricBtn.click();
+  } catch {
+    console.log('Biometric prompt skipped or not found');
+  }
 
   // 2. Bypass recovery modal (acknowledge + tutup).
   await page.getByRole('button', { name: /Acknowledge/i }).click();

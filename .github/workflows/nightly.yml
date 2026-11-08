@@ -100,6 +100,12 @@ jobs:
       PORT: '4000'
       NODE_ENV: test
       PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'consent for ephemeral nightly load database schema push'
+      # [run 42362200951] 100 VU berbagi SATU IP di runner; `generalLimiter`
+      # (300/15 menit per IP, default produksi TIDAK diubah) habis di ~1 menit,
+      # sehingga 92% request dijawab 429 dan gate "baca" ini mengukur limiter,
+      # bukan relay. Stack ephemeral ini menaikkan batasnya agar tiap VU mengukur
+      # jalur relay; nilai besar tetap terbatas, bukan dimatikan.
+      GENERAL_RATE_LIMIT_MAX: '100000'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -187,6 +193,11 @@ jobs:
         run: |
           pnpm exec prisma generate
           pnpm exec prisma db push
+      # [run 42362200951] `@nyx/shared` dikonsumsi dari `dist/`; job ini tidak
+      # membangunnya, jadi `tsx` gagal me-resolve `@nyx/shared/dist/index.js`
+      # sebelum satu tes pun berjalan. Job lain sudah membangunnya.
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
       - name: Contract test HTTP
         working-directory: server
         # `--test-force-exit`: mengimpor `app.js` membuka handle milik gateway /

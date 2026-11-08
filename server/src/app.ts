@@ -20,6 +20,7 @@ import { purgeSealedUserRows } from "./utils/routingIdentity.js";
 import { authorizeAdminCleanup } from "./utils/adminCleanupAuth.js";
 import { runCleanup } from "./jobs/cleanup.js";
 import { ADMIN_CLEANUP, incCounter } from "./utils/metrics.js";
+import { authCookieOptions } from "./utils/sessionUtils.js";
 
 import authRouter from "./routes/auth.js";
 // [docs/40] Arsip riwayat perangkat hasil link — dimount SEBELUM `/api/auth`
@@ -386,17 +387,13 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
     return `ip:${cfAwareClientIp(req)}`;
   },
   cookieName: "x-csrf-token",
-  cookieOptions: {
-    httpOnly: true,
-    sameSite: "none", 
-    secure: true, 
-    path: "/",
-    // [OPS 2026-10-25] Dulu `isProd ? ".nyx-app.my.id" : undefined` — domain
-    // tetap hilang di produksi karena proses pm2 di VPS tidak pernah diberi
-    // NODE_ENV=production (lihat deploy.yml). Sekarang eksplisit: ikut
-    // COOKIE_DOMAIN, sama dengan cookie sesi (`authCookieOptions`).
-    domain: env.cookieDomain,
-  },
+  // [BUG 2026-11-07] Atribut cookie CSRF dulu hard-coded `secure: true` +
+  // `sameSite: "none"`, berbeda dari cookie sesi. Di stack uji (`NODE_ENV=test`,
+  // http://localhost:5173) WebKit MENOLAK menyimpan cookie Secure sehingga
+  // double-submit tidak pernah mengirim cookie → `403 Invalid CSRF token` dan
+  // semua smoke WebKit merah (run 42362200951). Satu sumber dengan sesi:
+  // produksi tetap `secure` + `SameSite=None`, dev/test jadi non-Secure + Lax.
+  cookieOptions: authCookieOptions(),
   size: 64,
   ignoredMethods: ["GET", "HEAD", "OPTIONS"],
   getCsrfTokenFromRequest: (req) => String(req.headers['csrf-token'] ?? ''),

@@ -29,10 +29,19 @@ const skipRules = (req: Request) => {
 };
 
 // 1. General Limiter: Untuk semua route API umum
-// Batas: 300 request per 15 menit per IP
+// Batas: 300 request per 15 menit per IP (default produksi).
+//
+// [nightly 42362200951] Load test k6 menjalankan 100 VU dari SATU IP runner,
+// sehingga bucket 300/15 menit habis dalam ~1 menit dan 92% request dijawab 429
+// — gate relay lalu mengukur limiter, bukan relay. `GENERAL_RATE_LIMIT_MAX`
+// hanya dinaikkan di stack ephemeral nightly (bukan default, bukan dimatikan),
+// karena beban nyata datang dari banyak IP klien, bukan satu host.
+const generalMax = Number(process.env.GENERAL_RATE_LIMIT_MAX || 300);
+
+/** Batas umum per IP; nilai env harus positif (salah ketik tidak boleh mematikan limiter). */
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 menit
-  max: 300,
+  max: Number.isFinite(generalMax) && generalMax > 0 ? generalMax : 300,
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skip: skipRules,
