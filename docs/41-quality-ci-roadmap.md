@@ -188,6 +188,16 @@ bagian ini hanya mencatat status.
   `PIR_SERVERS` (≥2, gagal boot bila kurang), kunci manifest ter-pin, dan
   verifikasi tanda tangan sebelum diteruskan; job rebuild menandatangani per
   server, memastikan `dbRoot` identik, lalu hot-swap kedua sidecar.
+- WP6 ✅ jalur klien baru: `web/src/lib/pirManifest.ts` (pin + verifikasi
+  manifest ML-DSA-65), `pirClient.ts` (XOR dua jawaban per shard),
+  `ohttpClient.ts` (relayUrl per request). Jalur lama dihapus — `packages/pir-wasm`,
+  entri `wasm-artifacts.json`, `pir.worker.ts`, `pirParams.ts`, dan kode galat
+  `PIR_PARAMS_INVALID` sudah tidak ada.
+- WP7 ✅ operasional: 8 metrik PIR (`server/src/utils/metrics.ts`), 4 alert +
+  kasus firing/non-firing di drill (`NyxPirTampered`, `NyxPirDesync`,
+  `NyxPirSidecarDown`, `NyxPirRebuildStale`), templat systemd
+  `nyx-pir@.service` (`%i` = a/b → :9470/:9471), dan docs/10 §10.19 ditulis
+  ulang untuk dua server.
 - Belum: uji/E2E (WP8), penghapusan jalur lama di paket
   klien (WP9). Fitur tetap **default mati** sampai WP9, jadi
   tidak ada perubahan perilaku pengguna.

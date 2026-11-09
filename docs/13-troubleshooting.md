@@ -27,15 +27,16 @@ Amplop OHTTP **tidak membawa cookie**: relay membuang header klien, dan identita
 
 ### `/api/pir/*` → 404 atau `503 PIR_UNAVAILABLE`
 - 404 = `PIR_ENABLED` kosong; router memang tidak dipasang (bukan 403).
-- 503 = `PIR_SERVICE_URL` salah atau sidecar mati: `curl -fsS http://127.0.0.1:9470/health`, `systemctl --user status nyx-pir-sidecar`.
-- Sidecar hidup tetapi params menolak: snapshot kosong/tidak ada. `pnpm --filter nyx-server run pir:snapshot` **menolak 0 user ber-oprfIndex** — pastikan `PIR_OPRF_ENABLED=1` sejak akun didaftarkan, lalu jalankan ulang dan `systemctl --user restart nyx-pir-sidecar`.
+- 503 = `PIR_SERVERS` salah atau salah satu sidecar mati: `curl -fsS http://127.0.0.1:9470/health` **dan** `:9471/health`, lalu `systemctl --user status nyx-pir@a nyx-pir@b`.
+- 404 `PIR_SHARD_UNKNOWN` = shard belum dibangun di sidecar itu. Snapshot kosong/tidak ada: `pnpm --filter nyx-server run pir:snapshot` **menolak 0 user ber-oprfIndex** — pastikan `PIR_OPRF_ENABLED=1` sejak akun didaftarkan, lalu jalankan ulang. Perintah itu mengirim shard ke `/admin/rebuild` kedua role (hot-swap), jadi **tidak perlu restart** `nyx-pir@a`/`nyx-pir@b`.
+- 502 `PIR_MANIFEST_INVALID` = manifest kedua server tidak identik atau tanda tangannya gagal diverifikasi. Jangan diteruskan ke klien: cek alert `NyxPirDesync`/`NyxPirTampered` dan bangun ulang shard yang menyimpang.
 
 ### Pencarian user yang baru mendaftar tidak menemukan apa pun (PIR aktif)
 Index PIR dibangun dari snapshot, bukan dibaca live dari DB. Akun baru/profil yang berubah menandai `pir:snapshot:gen` dan job interval (`*/3 * * * *`) membangun ulang, jadi normalnya terlihat ≤ 3 menit. Kalau lebih lama:
 
 - cek `redis-cli get pir:snapshot:gen` vs `redis-cli get pir:snapshot:built` — sama berarti tick sudah jalan (atau penanda tak pernah naik karena Redis mati saat registrasi);
 - cek log `[PIR] snapshot diperbarui (perubahan baru)`; `[PIR] status penanda tidak terbaca` berarti Redis tidak terhubung dan tick sengaja dilewati (cron 04:15 tetap jadi jaring);
-- rebuild manual: `pnpm --filter nyx-server run pir:snapshot && systemctl --user restart nyx-pir-sidecar` (lalu samakan `pir:snapshot:built` bila perlu).
+- rebuild manual: `pnpm --filter nyx-server run pir:snapshot` (membangun shard lalu hot-swap ke `/admin/rebuild` **kedua** role — tidak perlu restart unit) lalu samakan `pir:snapshot:built` bila perlu.
 
 Klien sengaja **tidak** punya fallback diam-diam ke `/api/users/search` (`web/src/lib/userSearch.ts`).
 
