@@ -198,7 +198,7 @@ jobs:
       # tren bisa dilihat tanpa menjalankan ulang suite.
       - name: Upload artifact coverage web
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-web
           path: web/coverage/
@@ -528,7 +528,7 @@ jobs:
       # (dulu: apakah relay menolak, UI kosong, atau selector berubah?).
       - name: Upload artifact Playwright saat gagal
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-chromium-artifacts
           path: |
@@ -690,7 +690,7 @@ jobs:
           ss -lun 2>/dev/null || true
       - name: Upload artifact Playwright saat gagal
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-chrome-artifacts
           path: |
