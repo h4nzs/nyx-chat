@@ -123,4 +123,68 @@ mod tests {
         share[0] = 0b0000_0001;
         assert_eq!(answer(&records, 256, &share).unwrap(), &records[..256]);
     }
+
+    /// [docs/42 WP8] Fixture yang sama dibaca tes TypeScript
+    /// (`server/tests/pirVectors.test.ts`). Record di sini dibangun ulang dari
+    /// layout v2, bukan dari kode Rust produksi — yang diuji adalah apakah
+    /// urutan bit, XOR, dan padding kedua implementasi benar-benar sama.
+    #[test]
+    fn cross_impl_vectors_match_fixture() {
+        use data_encoding::{BASE64URL_NOPAD, HEXLOWER_PERMISSIVE};
+        use sha2::{Digest, Sha256};
+
+        let raw = include_str!("../../tests/fixtures/pirVectors.json");
+        let fixture: serde_json::Value = serde_json::from_str(raw).expect("fixture JSON");
+        let slot_count = fixture["slotCount"].as_u64().expect("slotCount") as usize;
+        let record_bytes = fixture["recordBytes"].as_u64().expect("recordBytes") as usize;
+        let index = HEXLOWER_PERMISSIVE
+            .decode(fixture["oprfIndexHex"].as_str().expect("index").as_bytes())
+            .expect("index hex");
+        let body = BASE64URL_NOPAD
+            .decode(fixture["bodyBase64url"].as_str().expect("body").as_bytes())
+            .expect("body base64url");
+        let share = HEXLOWER_PERMISSIVE
+            .decode(fixture["shareHex"].as_str().expect("share").as_bytes())
+            .expect("share hex");
+        let q2 = HEXLOWER_PERMISSIVE
+            .decode(fixture["q2Hex"].as_str().expect("q2").as_bytes())
+            .expect("q2 hex");
+        let candidate = fixture["candidates"][0].as_u64().expect("candidate") as usize;
+
+        let mut record = vec![0u8; record_bytes];
+        record[0] = 2;
+        let mut ix = Sha256::new();
+        ix.update(b"nyx:pir:record-index:v1\0");
+        ix.update(&index);
+        record[1..33].copy_from_slice(&ix.finalize());
+        record[33] = (body.len() >> 8) as u8;
+        record[34] = body.len() as u8;
+        record[35..35 + body.len()].copy_from_slice(&body);
+        let mut tag = Sha256::new();
+        tag.update(&record[..record_bytes - 16]);
+        record[record_bytes - 16..].copy_from_slice(&tag.finalize()[..16]);
+
+        let mut slots = vec![0u8; slot_count * record_bytes];
+        for slot in 0..slot_count {
+            for byte in 0..record_bytes {
+                slots[slot * record_bytes + byte] = ((slot * 31 + byte * 7) & 0xff) as u8;
+            }
+        }
+        slots[candidate * record_bytes..(candidate + 1) * record_bytes].copy_from_slice(&record);
+
+        let a1 = answer(&slots, record_bytes, &share).expect("answer 1");
+        let a2 = answer(&slots, record_bytes, &q2).expect("answer 2");
+        let digest = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
+        assert_eq!(digest(&a1), fixture["answerQ1Sha256"].as_str().unwrap());
+        assert_eq!(digest(&a2), fixture["answerQ2Sha256"].as_str().unwrap());
+
+        let mut recovered = a1;
+        xor_in_place(&mut recovered, &a2);
+        assert_eq!(digest(&recovered), fixture["recordSha256"].as_str().unwrap());
+        assert_eq!(recovered, record);
+
+        let mut toggled = share.clone();
+        toggle(&mut toggled, candidate);
+        assert_eq!(toggled, q2);
+    }
 }

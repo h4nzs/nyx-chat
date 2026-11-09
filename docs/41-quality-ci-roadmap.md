@@ -198,14 +198,23 @@ bagian ini hanya mencatat status.
   `NyxPirSidecarDown`, `NyxPirRebuildStale`), templat systemd
   `nyx-pir@.service` (`%i` = a/b → :9470/:9471), dan docs/10 §10.19 ditulis
   ulang untuk dua server.
-- Belum: uji/E2E (WP8), penghapusan jalur lama di paket
-  klien (WP9). Fitur tetap **default mati** sampai WP9, jadi
-  tidak ada perubahan perilaku pengguna.
-- Skenario E2E yang dituju (ditulis di WP8, bukan sekarang): manifest A=B
-  selain `operator`, query hit, `PIR_RECORD_MISS`, `PIR_TAMPERED` saat satu
-  server berbohong, `PIR_DESYNC` saat manifest berbeda, dan tidak ada identifier
-  polos di body. Jangan menulis asersi "proof salah ditolak" — `xor-pir-v1`
-  tidak memakai proof; jaminannya dua server dengan satu yang jujur.
+- WP8 ✅ pengujian: vektor lintas-implementasi di
+  `server/tests/fixtures/pirVectors.json` dipakai bersama oleh
+  `server/tests/pirVectors.test.ts` (Node) dan tes Rust
+  `cross_impl_vectors_match_fixture`; E2E dua server nyata di
+  `web/e2e/pir.spec.ts` + `web/playwright.pir.config.ts`
+  (`pnpm --filter nyx-web run test:e2e:pir`, job `pir-e2e` di `drills.yml`)
+  membuktikan hit lewat XOR dua server + OHTTP, miss, dan nol permintaan ke
+  `/api/users/search`.
+- Belum: **WP9** — penghapusan jalur lama di paket klien dan pembaruan
+  `STATUS.md`. Fitur tetap **default mati** sampai WP9, jadi tidak ada
+  perubahan perilaku pengguna.
+- `PIR_TAMPERED`/`PIR_DESYNC` dibuktikan di `web/src/lib/__tests__/pirClient.test.ts`
+  (mock dua server), bukan dengan sidecar live yang sengaja dirusak: sidecar
+  menolak shard yang `dbRoot`-nya tidak cocok, jadi jalur rebuild tidak bisa
+  dipakai menyuntikkan record rusak. Jangan menulis asersi "proof salah
+  ditolak" — `xor-pir-v1` tidak memakai proof; jaminannya dua server dengan
+  satu yang jujur.
 
 ### 6.8 KT live E2E — ABI 2 terbukti; interop `cmd/kt-client` menyusul
 

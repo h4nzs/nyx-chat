@@ -161,7 +161,11 @@ export async function fetchPirSummary(server: PirClientServer): Promise<PirSumma
     response = await pirFetch(manifestUrl(server.id), server.relayUrl);
   } catch (error) {
     if (error instanceof PirError) throw error;
-    throw new PirError('PIR_UNAVAILABLE', 'manifest ringkasan tidak terjangkau');
+    // Sebab asli ikut dicetak: `OHTTP config: HTTP 404` / `OHTTP_HTTP_503` /
+    // worker error adalah tiga kegagalan yang sangat berbeda, dan pesan
+    // "tidak terjangkau" saja membuat semuanya tampak sama.
+    const cause = error instanceof Error ? error.message : String(error);
+    throw new PirError('PIR_UNAVAILABLE', `manifest ringkasan tidak terjangkau: ${cause}`);
   }
   if (!ok(response)) throw new PirError('PIR_UNAVAILABLE', `manifest HTTP ${response.status}`);
   const parsed = decodeJson(response, 'ringkasan');

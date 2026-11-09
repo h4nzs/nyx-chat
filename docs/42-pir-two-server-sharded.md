@@ -1,6 +1,9 @@
 # 42 — PIR dua server + sharding (pengganti ChalametPIR)
 
-**Status:** WP1–WP7 sudah ada di kode (`chalametpir-v1` dihapus), WP8–WP9 tersisa. Ditulis 9 November 2026.
+**Status:** WP1–WP8 sudah ada di kode (`chalametpir-v1` dihapus); WP9 tersisa.
+WP8 membuktikan E2E dua server nyata (hit, miss, tanpa fallback) dan vektor
+lintas-implementasi; injeksi tamper/desync tetap di level unit karena sidecar
+memverifikasi `dbRoot` saat rebuild. Ditulis 9 November 2026.
 **Menggantikan:** jalur PIR `chalametpir-v1` (`server/pir-sidecar`, `packages/pir-wasm`).
 **Rujukan silang:** `docs/37` §P7, `docs/41` §6.7, `docs/10` §10.19, `docs/03` (model ancaman).
 
@@ -231,9 +234,15 @@ blind-index dan **bukan** ke PIR satu server.
   `nyx_pir_shards`, `nyx_pir_manifest_mismatch_total`.
 - Alert (grup `nyx-pir`, sudah ada kasus drill di `ops/prometheus/tests.yml`):
   `NyxPirTampered`, `NyxPirDesync`, `NyxPirSidecarDown`, `NyxPirRebuildStale`.
-- Drill klien tamper/desync: `web/e2e/pir.spec.ts` (WP8) — satu server dijalankan
-  dengan injeksi record rusak, membuktikan klien menolak (`PIR_TAMPERED`) dan
-  **tidak** jatuh ke pencarian biasa.
+- Drill klien tamper/desync: `web/e2e/pir.spec.ts` (WP8) menjalankan dua
+  sidecar nyata dan membuktikan query hit lewat XOR + OHTTP, miss untuk indeks
+  tak dikenal, dan **tidak ada** fallback ke `/api/users/search`.
+- Injeksi record rusak **tidak** lewat rebuild: sidecar menolak shard yang
+  `dbRoot`-nya tidak cocok. Jadi `PIR_TAMPERED` dan `PIR_DESYNC` dibuktikan di
+  level klien (`web/src/lib/__tests__/pirClient.test.ts`) dan vektor
+  lintas-implementasi (`server/tests/pirVectors.test.ts` + tes Rust
+  `cross_impl_vectors_match_fixture`), bukan oleh sidecar yang sengaja dirusak.
+  Ini batas yang ditulis apa adanya, bukan drill live.
 
 ## 42.9 Yang dihapus
 
@@ -257,7 +266,7 @@ Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
 | WP5 ✅ | Proxy API: `PIR_SERVERS`, verifikasi manifest, dua relay | `server/src/routes/pir.ts`, `server/src/pir/{config,rebuild}.ts` | M |
 | WP6 ✅ | Klien: shard + 3 kandidat, dua query OHTTP, verifikasi record, verdict | `web/src/lib/{pirClient,pirManifest}.ts` | L |
 | WP7 ✅ | Ops: unit template `nyx-pir@`, metrik + 4 alert di `nyx-api`, docs/10 §10.19 ditulis ulang | `ops/`, `deploy/selfhost/scripts`, `server/src/{utils/metrics,pir/rebuild,routes/pir}.ts`, `docs/10` | M |
-| WP8 | Uji: vektor lintas-impl, injeksi tamper, E2E dua server | `server/tests/pir*.test.ts`, `web/e2e/pir*.spec.ts` | M |
+| WP8 ✅ | Uji: vektor lintas-impl, injeksi tamper (level unit), E2E dua server | `server/tests/fixtures/pirVectors.json`, `server/tests/pirVectors.test.ts`, `server/pir-sidecar/src/pir.rs`, `web/playwright.pir.config.ts`, `web/e2e/pir.spec.ts`, `server/scripts/pir-e2e-keys.ts` | M |
 | WP9 | Hapus jalur lama (§42.9) + `STATUS.md` | — | S |
 
 Urutan yang menjaga `main` tetap hijau: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → WP7

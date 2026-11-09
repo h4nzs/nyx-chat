@@ -164,3 +164,76 @@ jobs:
             tail -n 40 "/tmp/nyx-client-restore-drill/$f" 2>/dev/null || echo '(tidak ada)'
           done
           ss -ltnp 2>/dev/null || true
+
+  pir-e2e:
+    name: Drill PIR dua server (XOR-PIR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nyx_pir
+          POSTGRES_PASSWORD: nyx_pir
+          POSTGRES_DB: nyx_pir
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nyx_pir"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://nyx_pir:nyx_pir@127.0.0.1:5432/nyx_pir
+      REDIS_URL: redis://127.0.0.1:6379
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Prisma generate + db push (DB drill sementara)
+        working-directory: server
+        env:
+          PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: 'consent for scheduled drill ephemeral database schema push'
+        run: |
+          pnpm exec prisma generate
+          pnpm exec prisma db push
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      # Dua sidecar `pir-service` (role a/b) dibangun dan dijalankan oleh
+      # `playwright.pir.config.ts`; job ini hanya menyediakan DB + browser.
+      # Yang dibuktikan: pencarian nyata lewat dua server XOR + OHTTP (hit,
+      # miss, tanpa fallback ke `/api/users/search`). Injeksi tamper/desync
+      # tidak bisa lewat rebuild — sidecar memverifikasi `dbRoot` — jadi
+      # keduanya tetap diuji di `web/src/lib/__tests__/pirClient.test.ts`
+      # dan vektor lintas-impl `server/tests/pirVectors.test.ts` + Rust.
+      - name: E2E PIR dua server
+        working-directory: web
+        run: pnpm test:e2e:pir
+      - name: Dump log saat gagal
+        if: failure()
+        run: |
+          for f in /tmp/nyx-pir-e2e-*/api.log; do
+            echo "--- $f ---"
+            tail -n 60 "$f" 2>/dev/null
+          done
+          ss -ltnp 2>/dev/null || true
