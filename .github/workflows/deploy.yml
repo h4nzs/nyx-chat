@@ -93,7 +93,7 @@ jobs:
       # ada di `ops/systemd/`. Log v1 sudah pensiun (`docs/38`), jadi binari v1
       # tidak lagi dibangun.
       - name: 🐹 Setup Go (nyx-kt-query-v2)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: server/kt-query/go.mod
           cache-dependency-path: server/kt-query/go.sum
