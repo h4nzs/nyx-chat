@@ -81,7 +81,6 @@ mkdir -p "$STATE_DIR/ohttp" "$STATE_DIR/pir" "$STATE_DIR/grafana" \
          "$STATE_DIR/alertmanager" "$STATE_DIR/postgres-exporter" "$STATE_DIR/sidecar-cert-backup"
 for pair in \
   "ohttp-relay.env:$STATE_DIR/ohttp/relay.env" \
-  "pir.env:$STATE_DIR/pir/pir.env" \
   "grafana.env:$STATE_DIR/grafana/grafana.env" \
   "ntfy-relay.env:$STATE_DIR/alertmanager/ntfy-relay.env" \
   "NTFY-TOPIC:$STATE_DIR/alertmanager/NTFY-TOPIC" \
@@ -89,6 +88,10 @@ for pair in \
   "roots.pem:$STATE_DIR/attestation/roots.pem"; do
   src="${pair%%:*}"; dst="${pair#*:}"
   [[ -f "$STAGE/env/$src" ]] && install -m 600 "$STAGE/env/$src" "$dst"
+done
+# PIR: satu env per role (template nyx-pir@a/nyx-pir@b, docs/42 §42.8).
+for role in a b; do
+  [[ -f "$STAGE/env/pir-$role.env" ]] && install -m 600 "$STAGE/env/pir-$role.env" "$STATE_DIR/pir/pir-$role.env"
 done
 if [[ -f "$STAGE/env/sidecar-cert-backup.tgz" ]]; then
   tar -C "$STATE_DIR" -xzf "$STAGE/env/sidecar-cert-backup.tgz"

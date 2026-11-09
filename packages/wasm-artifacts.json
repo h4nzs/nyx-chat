@@ -1,5 +1,5 @@
 {
-  "note": "Dibuat scripts/wasm-repro-build.sh --update. Jangan diedit tangan: hash di sini adalah kontrak antara biner yang DI-COMMIT dan sumber ter-vendor yang bisa dibangun ulang (lihat CONTRIBUTING, NOTICE, docs/33 §33.10).",
+  "note": "Dibuat scripts/wasm-repro-build.sh --update. Jangan diedit tangan: hash di sini adalah kontrak antara biner yang DI-COMMIT dan sumber ter-vendor yang bisa dibangun ulang (lihat CONTRIBUTING, NOTICE, docs/33 \u00a733.10).",
   "canonicalRoot": "/tmp/nyx-wasm-repro",
   "toolchain": "1.95.0",
   "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
@@ -14,13 +14,7 @@
       "path": "packages/keytrans-wasm-v2/dist/keytrans-v2.wasm",
       "bytes": 279233,
       "sha256": "7e5dfe8034338bce02bea86894689d54a0e67482de8267e92e5423af42df7fa9",
-      "source": "packages/keytrans-v2@nyx-kt-v2-fork (docs/35 §35.7)"
-    },
-    {
-      "path": "packages/pir-wasm/dist/pir-client.wasm",
-      "bytes": 156324,
-      "sha256": "f3a3bd7d3247812c807f42d9c79032a0e8c49d71a831dc4e8805f6df665aac0a",
-      "source": "packages/pir-wasm@nyx (chalametpir-client 0.8.0)"
+      "source": "packages/keytrans-v2@nyx-kt-v2-fork (docs/35 \u00a735.7)"
     }
   ]
 }

@@ -14,13 +14,13 @@ set -uo pipefail
 # tidak selalu ada bila skrip dijalankan dari konteks non-interaktif).
 TARGET_USER="$(id -un)"
 
-USER_UNITS="nyx-api nyx-sidecar nyx-nginx nyx-kt-query-v2 nyx-kt-auditor-v2 nyx-prometheus nyx-grafana nyx-alertmanager nyx-ntfy-relay nyx-node-exporter nyx-postgres-exporter nyx-redis-exporter nyx-ohttp-relay nyx-pir-sidecar"
+USER_UNITS="nyx-api nyx-sidecar nyx-nginx nyx-kt-query-v2 nyx-kt-auditor-v2 nyx-prometheus nyx-grafana nyx-alertmanager nyx-ntfy-relay nyx-node-exporter nyx-postgres-exporter nyx-redis-exporter nyx-ohttp-relay nyx-pir@a nyx-pir@b"
 SYSTEM_UNITS="postgresql valkey cloudflared"
 # KT v1 (`nyx-kt-query`, `nyx-kt-auditor`, port 8081/8082/8085 + exporter
 # 9466/9467) pensiun 2026-10-28 (docs/38): daftar ini hanya memuat v2.
 # 9465 = exporter sidecar, 9468 = log KT v2, 9469 = auditor v2; 4100 = relay
 # OHTTP, 9470 = sidecar PIR; 8087/8088/8089 = KT v2 auditor/tulis/baca.
-TCP_PORTS="3000 4000 4100 9470 8087 8088 8089 9090 9093 9464 9465 9468 9469 3001 9100 9121 9187"
+TCP_PORTS="3000 4000 4100 9470 9471 8087 8088 8089 9090 9093 9464 9465 9468 9469 3001 9100 9121 9187"
 FAILED=0
 
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
@@ -85,7 +85,8 @@ check_http() { # $1=nama $2=url
 check_http "nyx-api /health"        "http://127.0.0.1:4000/health"
 check_http "nginx :3000 (frontend)" "http://127.0.0.1:3000/"
 check_http "ohttp-relay /healthz"   "http://127.0.0.1:4100/healthz"
-check_http "pir-sidecar /health"    "http://127.0.0.1:9470/health"
+check_http "pir-sidecar a /health"  "http://127.0.0.1:9470/health"
+check_http "pir-sidecar b /health"  "http://127.0.0.1:9471/health"
 check_http "prometheus /-/ready"    "http://127.0.0.1:9090/-/ready"
 check_http "grafana /api/health"    "http://127.0.0.1:3001/api/health"
 

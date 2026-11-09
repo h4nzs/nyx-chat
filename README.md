@@ -89,7 +89,7 @@ Registration is additionally guarded by tiered counters per source, installation
 * **State:** Zustand v5
 * **Styling:** Tailwind CSS v4
 * **Real-time:** native **WebTransport** in a dedicated Web Worker, with a Socket.IO WebSocket gateway as the second relay path
-* **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm-v2`, `pir-wasm`) loaded lazily
+* **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm-v2`) loaded lazily
 * **Storage:** IndexedDB via `dexie` ("Unified Shadow Vault"), OPFS for encrypted attachment cache
 * **PWA & i18n:** service worker (precache only), four languages (`en`, `es`, `id`, `pt-BR`)
 
@@ -122,7 +122,7 @@ nyx-chat/
 │   ├── transport-sidecar/   # Rust WebTransport sidecar
 │   ├── kt-query/        # Go Key Transparency v2 log + auditor
 │   └── prisma/          # schema
-├── packages/            # shared, spqr-wasm, keytrans-wasm-v2, pir-wasm
+├── packages/            # shared, spqr-wasm, keytrans-wasm-v2
 ├── vendor/signal/       # vendored Signal sources (unmodified)
 ├── tools/  scripts/  ops/  docs/  marketing/
 ```

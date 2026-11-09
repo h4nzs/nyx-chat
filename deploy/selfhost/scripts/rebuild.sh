@@ -55,9 +55,9 @@ fi
 if [[ $DO_PIR -eq 1 ]]; then
   echo "== 6/6  sidecar PIR (cargo build --release --locked) =="
   (cd server/pir-sidecar && cargo build --release --locked)
-  echo "   Catatan: snapshot PIR dimuat saat boot. Setelah user baru terdaftar:"
+  echo "   Catatan: shard PIR dimuat saat boot. Setelah user baru terdaftar:"
   echo "     pnpm --filter nyx-server run pir:snapshot"
-  echo "     systemctl --user restart nyx-pir-sidecar"
+  echo "     systemctl --user restart nyx-pir@a nyx-pir@b"
 else
   echo "== 6/6  sidecar PIR: dilewati (tambahkan --pir bila perlu) =="
 fi
@@ -71,8 +71,8 @@ if [[ $DO_RESTART -eq 1 ]]; then
     TOCheck="$TOCheck nyx-sidecar"
   fi
   if [[ $DO_PIR -eq 1 ]]; then
-    systemctl --user restart nyx-pir-sidecar
-    TOCheck="$TOCheck nyx-pir-sidecar"
+    systemctl --user restart nyx-pir@a nyx-pir@b
+    TOCheck="$TOCheck nyx-pir@a nyx-pir@b"
   fi
   sleep 3
   systemctl --user --no-pager --full --lines=0 status $TOCheck || true
@@ -82,4 +82,4 @@ echo
 echo "Selesai. Kalau web/ berubah, cukup nginx yang perlu di-reload:"
 echo "  systemctl --user reload nyx-nginx          # statis, tanpa downtime"
 echo "  systemctl --user restart nyx-api nyx-ohttp-relay  # kalau server/ berubah (relay.js ikut)"
-echo "  systemctl --user restart nyx-pir-sidecar   # hanya bila binary PIR dibangun ulang"
+echo "  systemctl --user restart nyx-pir@a nyx-pir@b   # hanya bila binary PIR dibangun ulang"

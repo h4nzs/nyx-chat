@@ -165,7 +165,20 @@ async fn manifest(
     State(state): State<AppState>,
     Query(query): Query<ShardQuery>,
 ) -> Result<Response, ApiError> {
-    let shard = load_shard(&state, shard_param(&query)?)?;
+    // Tanpa `shard`: ringkasan saja. Klien butuh `shardCount` untuk menghitung
+    // shard-nya sendiri sebelum bisa meminta manifest bertanda tangan.
+    let Some(shard_id) = query.shard else {
+        let shard_count = state.shards.shard_count().ok_or_else(|| {
+            ApiError::not_found("PIR_SHARD_UNKNOWN", "belum ada shard yang dimuat")
+        })?;
+        return Ok(Json(json!({
+            "shardCount": shard_count,
+            "epoch": state.shards.epoch(),
+            "suite": crate::pir::SUITE,
+        }))
+        .into_response());
+    };
+    let shard = load_shard(&state, shard_id)?;
     let mut response = Json(json!({
         "manifest": shard.manifest,
         "signature": shard.signature,

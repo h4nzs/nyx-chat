@@ -37,6 +37,9 @@ export const PIR_MAX_RECORD_BYTES = 16 * 1024;
 /** Jumlah slot kandidat per kunci (cuckoo 3-pilihan). */
 export const PIR_SLOT_CANDIDATES = 3;
 
+/** Context ML-DSA untuk tanda tangan manifest; dipakai server dan klien. */
+export const PIR_MANIFEST_DOMAIN = 'nyx-pir-manifest-v1';
+
 const RECORD_INDEX_DOMAIN = new TextEncoder().encode('nyx:pir:record-index:v1\0');
 const SLOT_DOMAIN = new TextEncoder().encode('nyx:pir:slot:v1\0');
 const MANIFEST_DOMAIN = 'nyx:pir:manifest:v1\0';
@@ -47,8 +50,7 @@ export type PirVerdict =
   | 'PIR_TAMPERED'
   | 'PIR_DESYNC'
   | 'PIR_UNAVAILABLE'
-  | 'PIR_ROLLBACK'
-  | 'PIR_PARAMS_INVALID';
+  | 'PIR_ROLLBACK';
 
 export class PirRecordError extends Error {
   constructor(
@@ -288,6 +290,45 @@ export function pirManifestMessage(manifest: PirManifest): Uint8Array {
  */
 export function pirManifestsAgree(a: PirManifest, b: PirManifest): boolean {
   return manifestFields(a, false) === manifestFields(b, false);
+}
+
+/**
+ * Shard untuk sebuah indeks: 4 byte pertama `sha256(oprfIndex)` mod `shardCount`.
+ * Builder dan klien WAJIB memakai fungsi ini; kalau keduanya menghitung sendiri,
+ * satu perbedaan kecil membuat semua pencarian "tidak ditemukan".
+ */
+export function pirShardFor(oprfIndex: Uint8Array, shardCount: number): number {
+  if (oprfIndex.length !== PIR_INDEX_BYTES) {
+    throw new PirRecordError('PIR_RECORD_INVALID', 'oprfIndex harus 32 byte');
+  }
+  if (!Number.isSafeInteger(shardCount) || shardCount < 1) {
+    throw new PirRecordError('PIR_RECORD_INVALID', 'shardCount tidak valid');
+  }
+  const digest = sha256(oprfIndex);
+  const value = ((digest[0]! << 24) | (digest[1]! << 16) | (digest[2]! << 8) | digest[3]!) >>> 0;
+  return value % shardCount;
+}
+
+/** Panjang share: `ceil(slotCount/8)` byte, bit i = byte i/8, LSB-first. */
+export function pirShareLen(slotCount: number): number {
+  return Math.ceil(slotCount / 8);
+}
+
+/** `share[slot/8] ^= 1 << (slot%8)` — membalik satu bit tanpa menyalin. */
+export function pirShareToggle(share: Uint8Array, slot: number): void {
+  const byte = slot >>> 3;
+  if (byte >= share.length) throw new PirRecordError('PIR_RECORD_INVALID', 'slot di luar share');
+  share[byte] = share[byte]! ^ (1 << (slot & 7));
+}
+
+/** XOR dua jawaban; panjang berbeda berarti salah satu server menjawab ngawur. */
+export function pirXor(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (a.length !== b.length) {
+    throw new PirRecordError('PIR_RECORD_INVALID', 'panjang jawaban server berbeda');
+  }
+  const out = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i += 1) out[i] = a[i]! ^ b[i]!;
+  return out;
 }
 
 /** `dbRoot` atas slot terurut; builder dan verifikator memakai fungsi yang sama. */

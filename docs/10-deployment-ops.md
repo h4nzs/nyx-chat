@@ -30,7 +30,7 @@ On PR and push to `main`:
 | Job | Content |
 |---|---|
 | `build` | gate cepat `scripts/check-wasm-artifacts.sh` + `scripts/check-vendor.sh` → Go build/vet/test `server/kt-query` **dari vendor** → frozen-lockfile install → prisma generate → `pnpm run build` |
-| `wasm` | [R1] bangun ULANG `packages/spqr-wasm`, `packages/keytrans-wasm-v2` (fork lokal), dan `packages/pir-wasm` lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
+| `wasm` | [R1] bangun ULANG `packages/spqr-wasm` dan `packages/keytrans-wasm-v2` (fork lokal) lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
 | `unit` | `pnpm run test` + `test:coverage` — seluruh test server (`node:test` + `tsx`) dan web (vitest), dengan lantai coverage per-glob (`docs/11` §11.1d); pada PR, `scripts/check-changed-lines.mjs` melaporkan baris baru yang belum teruji (non-blocking). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
 | `lint` | **BLOCKING** — `pnpm run lint` = `oxlint src` per paket (ESLint dihapus 2026-10-15). Nol temuan untuk rule level `error` + kategori `correctness`; `no-unused-vars` sengaja `warn` |
 | `alerts` | `SKIP_LIVE=1 scripts/drill-alerts.sh` — drill aturan Prometheus 4 lapis (§10.12); aturan yang merujuk metrik tak terdeklarasi ditolak di sini |
@@ -1384,56 +1384,74 @@ korelasi di log/state aplikasi. Pemisahan fisik = jalankan relay di host lain
 dan ubah `OHTTP_GATEWAY_TARGET` (butuh perubahan kode karena validasi loopback
 saat ini sengaja ketat).
 
-## 10.19 PIR sidecar lokal (`nyx-pir-sidecar`) — added 2026-10-25, diganti 2026-11-09
+## 10.19 PIR dua server (`nyx-pir@a`/`nyx-pir@b`) — ditulis ulang 2026-11-09
 
-> **Kontrak berubah (docs/42, WP4).** Sidecar kini menjalankan **dua server
-> XOR-PIR** dengan sharding, bukan ChalametPIR. Endpoint `/params` dan payload
-> snapshot lama **sudah tidak ada**; yang tersedia: `GET /manifest?shard=N`,
-> `POST /query?shard=N`, `POST /admin/rebuild` (`{manifest, signature, slots}`),
-> `GET /health`. Env: `PIR_BIND`, `PIR_ROLE=a|b`, `PIR_ADMIN_TOKEN`,
-> `PIR_SHARD_DIR`. `PIR_MASTER_SECRET`, `PIR_ARITY`, `PIR_SNAPSHOT_PATH`,
-> `PIR_MAX_ENTRIES` tidak dibaca lagi, dan `bench:pir` dihapus. Sisanya di
-> bawah ini adalah catatan sejarah sampai §10.19 ditulis ulang di WP7.
+> **Kontrak: `xor-pir-v1`, dua server + sharding (docs/42).** Endpoint `/params`
+> dan payload snapshot ChalametPIR **sudah tidak ada**. Satu instance saja tidak
+> cukup: klien menolak berjalan tanpa dua server, dan XOR atas dua share hanya
+> menyembunyikan indeks bila share dikirim lewat dua relay berbeda.
 
-Pencarian PIR (ChalametPIR) membutuhkan **index** yang dibangun dari `User.oprfIndex`
-dan sebuah proses yang menjawab `/params` (hint/filter/seed) serta `/query` biner.
-Node tidak memegang kripto PIR: `server/src/routes/pir.ts` hanya mem-proxy byte ke
-loopback, dan router `/api/pir` **tidak dipasang** tanpa `PIR_ENABLED=1` (404).
+Pencarian memakai **PIR XOR dua server**: klien menyusun `q1` acak dan
+`q2 = q1 ⊕ e_i`, mengirim masing-masing ke server berbeda lewat relay OHTTP
+berbeda, lalu XOR atas kedua jawaban. Tidak ada satu pun server yang melihat
+indeks yang dicari. Shard membatasi biaya per query: `shard = sha256(index)
+mod shardCount`.
 
 **Komponen.**
 
 | Bagian | Berkas | Catatan |
 |---|---|---|
-| Sidecar | `server/pir-sidecar` (`pir-service`) | Rust; index in-memory, snapshot JSON |
-| Unit user (selfhost) | `ops/systemd/user/nyx-pir-sidecar.service` | `systemctl --user`, env terpisah |
-| Proxy API | `server/src/routes/pir.ts` | auth + rate limit pencarian, byte opaque |
-| Snapshot | `pnpm --filter nyx-server run pir:snapshot` | tulis atomik dari `User.oprfIndex` |
-| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, hot-swap `/admin/rebuild` (jaring pengaman) |
-| Refresh perubahan | `server/src/jobs/pirSnapshot.ts` + `server/src/pir/dirty.ts` | cron `*/3 * * * *`, rebuild hanya bila penanda generasi naik |
-| Klien | `web/src/lib/pirClient.ts` + worker WASM | wajib `VITE_OHTTP_ENABLED=1` |
+| Sidecar | `server/pir-sidecar` (`pir-service`) | Rust; shard in-memory, satu proses per role |
+| Unit user (selfhost) | `ops/systemd/user/nyx-pir@.service` | template `%i` = role; `nyx-pir@a` (:9470), `nyx-pir@b` (:9471) |
+| Proxy API | `server/src/routes/pir.ts` | auth + rate limit, verifikasi manifest, byte opaque |
+| Builder | `server/src/pir/rebuild.ts` + `shards.ts` | artefak bertanda tangan per shard, `dbRoot` wajib sama A/B |
+| Snapshot manual | `pnpm --filter nyx-server run pir:snapshot` | tulis `shard-<n>.bin` + `shard-<n>.json`, lalu kirim |
+| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, jaring pengaman |
+| Refresh perubahan | `server/src/jobs/pirSnapshot.ts` + `server/src/pir/dirty.ts` | cron `*/3 * * * *`, hanya bila generasi naik |
+| Klien | `web/src/lib/pirManifest.ts`, `pirClient.ts` | OHTTP wajib; tanpa fallback |
 
-**Kesegaran snapshot.** Snapshot adalah artefak build, bukan view DB: user yang
-mendaftar setelah build terakhir tidak terlihat oleh `/api/pir/query` sampai
-rebuild berikutnya — dan klien tidak punya fallback saat miss (`[]`). Karena itu
-setiap penulisan yang bentuknya masuk snapshot menaikkan generasi di Redis
-(`pir:snapshot:gen` via `markPirSnapshotDirty`): registrasi, login yang mengubah
-`oprfIndex`/kunci perangkat, `PUT /api/users/me` (profil), verifikasi (PoW &
-WebAuthn device-bound), `complete-onboarding`, `PUT /api/users/me/keys`, tautan
-perangkat QR, dan `DELETE /api/users/me`. Job interval membaca generasi itu dan
-membangun ulang hanya bila `pir:snapshot:built` masih di belakang — satu rebuild
-per jendela 3 menit, bukan satu per pendaftaran (sidecar hanya punya
-`/admin/rebuild` yang mengganti seluruh index). Penanda **tidak pernah**
-menggagalkan request bila Redis mati; cron 04:15 tetap menutup ketertinggalan.
+**Endpoint sidecar** (loopback, tidak pernah lewat nginx langsung):
 
-**Env yang harus cocok (tiga tempat).**
+| Endpoint | Isi |
+|---|---|
+| `GET /manifest` | ringkasan `{suite, shardCount, epoch}` dari shard yang termuat |
+| `GET /manifest?shard=N` | manifest bertanda tangan (ML-DSA-65, domain `nyx-pir-manifest-v1`) |
+| `POST /query?shard=N` | body = satu share biner; jawaban = share biner |
+| `POST /admin/rebuild` | `{manifest, signature, slots}` + header `x-nyx-pir-internal` |
+| `GET /health` | role + jumlah shard termuat |
 
-- `server/.env`: `PIR_ENABLED=1`, `PIR_SERVICE_URL=http://127.0.0.1:9470`,
-  `PIR_ADMIN_TOKEN`, `PIR_SNAPSHOT_PATH`, `PIR_OPRF_ENABLED=1` (gate OPRF; tanpa ini
-  register/login tidak mengisi `oprfIndex` dan snapshot akan kosong).
-- Env sidecar: `PIR_BIND` (loopback), `PIR_MASTER_SECRET`, `PIR_ADMIN_TOKEN` (**sama**
-  dengan server), `PIR_SNAPSHOT_PATH` (**sama**), `PIR_ARITY`, `PIR_MAX_ENTRIES`,
-  `PIR_RECORD_BYTES`.
-- `web/.env`: `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`, `VITE_OHTTP_ENABLED=1`.
+Proxy meneruskan ke `/api/pir/<id>/manifest` dan `/api/pir/<id>/query?shard=N`;
+router `/api/pir` **tidak dipasang** tanpa `PIR_ENABLED=1` (404). Manifest
+diverifikasi proxy dengan kunci ter-pin sebelum diteruskan (pertahanan
+berlapis); klien tetap memverifikasi sendiri.
+
+**Env yang harus cocok.**
+
+- `server/.env`: `PIR_ENABLED=1`, `PIR_SERVERS` (JSON `[{id,url,relay}, …]`, ≥2
+  saat aktif — kurang dari 2 = gagal boot), `PIR_MANIFEST_KEYS`
+  (`{a,b}` = publik ML-DSA-65 base64url), `PIR_SIGNING_KEYS`
+  (`{a,b}` = path berkas kunci, 0600), `PIR_SHARD_DIR` (artefak lokal per
+  server), `PIR_ADMIN_TOKEN` (**sama** dengan kedua sidecar),
+  `PIR_RECORD_BYTES` (default 512), `PIR_OPRF_ENABLED=1` (tanpa ini register/
+  login tidak mengisi `oprfIndex` dan snapshot kosong).
+- Env sidecar `pir-a.env` / `pir-b.env`: `PIR_BIND` (loopback `:9470`/`:9471`),
+  `PIR_ADMIN_TOKEN`, `PIR_SHARD_DIR` (direktori berisi shard server itu).
+  `PIR_ROLE` diisi unit dari nama instance (`PIR_ROLE=%i`), bukan dari env.
+- `web/.env`: `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`,
+  `VITE_OHTTP_ENABLED=1`, `VITE_PIR_MANIFEST_KEYS`, `VITE_PIR_RELAYS`
+  (dua relay; satu relay ditolak saat build-mode ketat).
+
+**Kesegaran shard.** Shard adalah artefak build, bukan view DB: user yang
+mendaftar setelah build terakhir tidak terlihat sampai rebuild berikutnya — dan
+klien tidak punya fallback saat miss (`[]`). Setiap penulisan yang bentuknya
+masuk snapshot menaikkan generasi di Redis (`pir:snapshot:gen` via
+`markPirSnapshotDirty`): registrasi, login yang mengubah `oprfIndex`/kunci
+perangkat, `PUT /api/users/me`, verifikasi (PoW & WebAuthn device-bound),
+`complete-onboarding`, `PUT /api/users/me/keys`, tautan perangkat QR, dan
+`DELETE /api/users/me`. Job interval membaca generasi itu dan membangun ulang
+hanya bila `pir:snapshot:built` masih di belakang — satu rebuild per jendela 3
+menit. Penanda **tidak pernah** menggagalkan request bila Redis mati; cron 04:15
+tetap menutup ketertinggalan.
 
 **Menyalakan (selfhost).**
 
@@ -1441,23 +1459,50 @@ menggagalkan request bila Redis mati; cron 04:15 tetap menutup ketertinggalan.
 cd server/pir-sidecar && cargo build --release --locked
 pnpm --filter nyx-server run pir:snapshot          # butuh >=1 user ber-oprfIndex
 install -d -m 0750 ~/nyx-selfhost/pir
-install -m 0600 <env> ~/nyx-selfhost/pir/pir.env
+install -m 0600 <env-a> ~/nyx-selfhost/pir/pir-a.env
+install -m 0600 <env-b> ~/nyx-selfhost/pir/pir-b.env
 systemctl --user daemon-reload
-systemctl --user enable --now nyx-pir-sidecar
+systemctl --user enable --now nyx-pir@a nyx-pir@b
 curl -fsS http://127.0.0.1:9470/health
+curl -fsS http://127.0.0.1:9471/health
 ```
 
-Snapshot hanya dimuat **saat boot**. Setelah user baru mendaftar, index tidak
-berubah sampai cron `04:15` (hot-swap) atau operator menjalankan `pir:snapshot`
-lalu `systemctl --user restart nyx-pir-sidecar`. Tanpa salah satu itu, pencarian
-PIR untuk akun baru mengembalikan "tidak ditemukan"; klien sengaja **tidak**
-punya fallback diam-diam ke `/api/users/search` (lihat `web/src/lib/userSearch.ts`).
+Shard dimuat **saat boot**; penggantian hanya lewat `/admin/rebuild` (hot-swap
+per shard, shard lama tetap melayani sampai shard baru tiba). Karena itu user
+baru tidak perlu restart sidecar: cron `*/3` mengirim shard yang berubah.
 
-**CSRF pada query PIR.** `POST /api/pir/query` lewat OHTTP tidak membawa cookie
-(relay membuang header klien); identitasnya token OHTTP ber-scope di dalam amplop.
-Karena itu lapisan CSRF global melewati jalur ini **hanya** bila request tidak
-membawa cookie sesi sama sekali (`app.ts`); request berbasis cookie tetap wajib
-CSRF. Jangan melonggarkan aturan itu ke path lain tanpa alasan yang sama.
+**Metrik dan alert.** Semua metrik PIR berasal dari exporter **`nyx-api`**
+(`127.0.0.1:9464`, `server/src/utils/metrics.ts`) — proxy dan job rebuild ada di
+proses itu, jadi tidak ada exporter baru dan id server (`a`/`b`) tidak pernah
+jadi label.
+
+| Metrik | Arti |
+|---|---|
+| `nyx_pir_query_total{result}` | `ok|invalid|shard_unknown|unavailable` |
+| `nyx_pir_query_seconds` | histogram latensi proxy satu query share |
+| `nyx_pir_rebuild_total{result}` | `ok|error|mismatch` (`mismatch` = dbRoot A≠B) |
+| `nyx_pir_rebuild_seconds` | histogram durasi rebuild + pengiriman |
+| `nyx_pir_last_rebuild_timestamp_seconds` | umur shard (0 = belum pernah) |
+| `nyx_pir_entries`, `nyx_pir_shards` | isi rebuild terakhir |
+| `nyx_pir_manifest_mismatch_total` | manifest ditolak proxy (tanda tangan/bentuk/shard) |
+
+Alert (`ops/prometheus/alerts.yml`, grup `nyx-pir`, masing-masing punya kasus
+menyala/tidak di `tests.yml`): `NyxPirTampered` (setiap kenaikan),
+`NyxPirDesync` (`result="mismatch"`), `NyxPirSidecarDown` (query unavailable
+10 menit), `NyxPirRebuildStale` (umur > 30 menit, guard `> 0`).
+
+**CSRF pada query PIR.** `POST /api/pir/:server/query` lewat OHTTP tidak membawa
+cookie (relay membuang header klien); identitasnya token OHTTP ber-scope di
+dalam amplop. Karena itu lapisan CSRF global melewati jalur ini **hanya** bila
+request tidak membawa cookie sesi sama sekali (`app.ts`); request berbasis cookie
+tetap wajib CSRF. Jangan melonggarkan aturan itu ke path lain tanpa alasan yang
+sama.
+
+**Kegagalan yang terlihat, bukan diam.** Klien fail-closed dengan verdict
+eksplisit: `PIR_DESYNC` (ringkasan/manifest A-B tidak sepakat), `PIR_TAMPERED`
+(panjang jawaban ≠ manifest), `PIR_MANIFEST_INVALID` (tanda tangan), `PIR_ROLLBACK`
+(epoch mundur), `PIR_UNAVAILABLE` (satu server mati). Tidak ada satu pun yang
+jatuh ke `/api/users/search`.
 
 **Rollback.** Hapus `PIR_ENABLED` (router hilang, 404) dan `PIR_OPRF_ENABLED`
 (search kembali ke `usernameHash` legacy), lalu restart API. Sidecar boleh

@@ -16,11 +16,18 @@
  */
 
 import express, { type RequestHandler, type Router } from 'express';
-import { parsePirManifest } from '@nyx/shared';
+import { PIR_SUITE, parsePirManifest } from '@nyx/shared';
 import { requireAuth } from '../middleware/auth.js';
 import { pirQueryLimiter } from '../middleware/rateLimiter.js';
 import { findPirServer, type PirConfig, type PirServer } from '../pir/config.js';
 import { verifyPirManifest } from '../pir/manifest.js';
+import {
+  incCounter,
+  observeHistogram,
+  PIR_MANIFEST_MISMATCH,
+  PIR_QUERY,
+  PIR_QUERY_SECONDS,
+} from '../utils/metrics.js';
 
 const PIR_UNAVAILABLE = 'PIR_UNAVAILABLE';
 const PIR_MANIFEST_INVALID = 'PIR_MANIFEST_INVALID';
@@ -38,9 +45,65 @@ export interface PirRouterOptions {
   timeoutMs?: number;
 }
 
+type PirQueryResult = 'ok' | 'invalid' | 'shard_unknown' | 'unavailable';
+
+function recordQueryResult(result: PirQueryResult, startedAt: number): void {
+  incCounter(PIR_QUERY, { result });
+  observeHistogram(PIR_QUERY_SECONDS, (Date.now() - startedAt) / 1000);
+}
+
 function parseShard(raw: unknown): number | null {
   if (typeof raw !== 'string' || !/^\d{1,9}$/.test(raw)) return null;
   return Number(raw);
+}
+
+async function forwardSummary(
+  config: PirConfig,
+  server: PirServer,
+  res: express.Response,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<void> {
+  try {
+    const upstream = await fetchImpl(`${server.url}/manifest`, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!upstream.ok) {
+      await upstream.arrayBuffer().catch(() => undefined);
+      res.status(upstream.status === 404 ? 404 : 503).json({
+        error: upstream.status === 404 ? 'PIR_SHARD_UNKNOWN' : PIR_UNAVAILABLE,
+      });
+      return;
+    }
+    const payload = (await upstream.json().catch(() => null)) as {
+      shardCount?: unknown;
+      epoch?: unknown;
+      suite?: unknown;
+    } | null;
+    if (
+      payload?.suite !== PIR_SUITE ||
+      !Number.isSafeInteger(payload.shardCount) ||
+      (payload.shardCount as number) < 1 ||
+      !Number.isSafeInteger(payload.epoch)
+    ) {
+      console.warn(`[PIR] ringkasan manifest server ${server.id} tidak valid`);
+      incCounter(PIR_MANIFEST_MISMATCH);
+      res.status(502).json({ error: PIR_MANIFEST_INVALID });
+      return;
+    }
+    res.status(200);
+    res.set('Content-Type', 'application/json');
+    res.set('Cache-Control', 'no-store');
+    res.json({ shardCount: payload.shardCount, epoch: payload.epoch, suite: payload.suite });
+  } catch (error) {
+    console.warn(
+      '[PIR] ringkasan manifest gagal:',
+      error instanceof Error ? error.message : error,
+    );
+    res.status(503).json({ error: PIR_UNAVAILABLE });
+  }
 }
 
 export default function createPirRouter(
@@ -65,7 +128,15 @@ export default function createPirRouter(
       res.status(404).json({ error: 'PIR_SERVER_UNKNOWN' });
       return;
     }
-    const shard = parseShard(req.query.shard);
+    // Tanpa `shard`: ringkasan (shardCount/epoch) supaya klien tahu berapa
+    // shard sebelum meminta manifest bertanda tangan. Shard tidak diketahui
+    // sebelum server memberi tahu — bukan parameter wajib di sini.
+    const rawShard = req.query.shard;
+    if (rawShard === undefined) {
+      await forwardSummary(config, server, res, fetchImpl, timeoutMs);
+      return;
+    }
+    const shard = parseShard(rawShard);
     if (shard === null) {
       res.status(400).json({ error: 'PIR_SHARD_INVALID' });
       return;
@@ -95,6 +166,7 @@ export default function createPirRouter(
         signature = typeof payload?.signature === 'string' ? payload.signature : '';
       } catch {
         console.warn(`[PIR] manifest server ${server.id} bukan manifest v2`);
+        incCounter(PIR_MANIFEST_MISMATCH);
         res.status(502).json({ error: PIR_MANIFEST_INVALID });
         return;
       }
@@ -103,6 +175,7 @@ export default function createPirRouter(
         !verifyPirManifest(manifest, signature, publicKey)
       ) {
         console.warn(`[PIR] manifest server ${server.id} shard ${shard} tidak valid`);
+        incCounter(PIR_MANIFEST_MISMATCH);
         res.status(502).json({ error: PIR_MANIFEST_INVALID });
         return;
       }
@@ -120,18 +193,24 @@ export default function createPirRouter(
   });
 
   router.post('/:server/query', ...limiters, rawQuery, async (req, res) => {
+    const startedAt = Date.now();
     const server = resolve(String(req.params.server ?? ''));
     if (!server) {
+      recordQueryResult('invalid', startedAt);
       res.status(404).json({ error: 'PIR_SERVER_UNKNOWN' });
       return;
     }
+    // Query selalu butuh shard: share yang panjangnya salah ditolak sidecar,
+    // dan menebak shard akan membocorkan/menghasilkan jawaban tak berarti.
     const shard = parseShard(req.query.shard);
     if (shard === null) {
+      recordQueryResult('invalid', startedAt);
       res.status(400).json({ error: 'PIR_SHARD_INVALID' });
       return;
     }
     const body = req.body;
     if (!Buffer.isBuffer(body) || body.length === 0) {
+      recordQueryResult('invalid', startedAt);
       res.status(400).json({ error: 'PIR_QUERY_REQUIRED' });
       return;
     }
@@ -149,15 +228,19 @@ export default function createPirRouter(
       if (!upstream.ok) {
         await upstream.arrayBuffer().catch(() => undefined);
         if (upstream.status === 400) {
+          recordQueryResult('invalid', startedAt);
           res.status(400).json({ error: 'PIR_QUERY_INVALID' });
         } else if (upstream.status === 404) {
+          recordQueryResult('shard_unknown', startedAt);
           res.status(404).json({ error: 'PIR_SHARD_UNKNOWN' });
         } else {
+          recordQueryResult('unavailable', startedAt);
           res.status(503).json({ error: PIR_UNAVAILABLE });
         }
         return;
       }
       const bytes = Buffer.from(await upstream.arrayBuffer());
+      recordQueryResult('ok', startedAt);
       res.status(200);
       res.set('Content-Type', 'application/octet-stream');
       res.set('Cache-Control', 'no-store');
@@ -167,6 +250,7 @@ export default function createPirRouter(
         '[PIR] query gagal:',
         error instanceof Error ? error.message : error,
       );
+      recordQueryResult('unavailable', startedAt);
       res.status(503).json({ error: PIR_UNAVAILABLE });
     }
   });

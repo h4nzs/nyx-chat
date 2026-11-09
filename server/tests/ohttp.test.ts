@@ -159,8 +159,15 @@ test('allowlist: hanya target sempit yang boleh lewat gateway', () => {
   assert.equal(isOhttpTargetAllowed('GET', '/api/users/search'), true);
   assert.equal(isOhttpTargetAllowed('GET', '/api/keys/prekey-bundle/user-1'), true);
   assert.equal(isOhttpTargetAllowed('POST', '/api/users/search'), false);
-  assert.equal(isOhttpTargetAllowed('POST', '/api/pir/query'), true);
+  // [docs/42] Dua server PIR: id server di path, manifest GET + query POST.
+  assert.equal(isOhttpTargetAllowed('GET', '/api/pir/a/manifest'), true);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/pir/a/manifest?shard=0'), true);
+  assert.equal(isOhttpTargetAllowed('POST', '/api/pir/a/query'), true);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/pir/a/query'), false);
+  assert.equal(isOhttpTargetAllowed('POST', '/api/pir/a/manifest'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/pir/query'), false);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/pir//manifest'), false);
+  assert.equal(isOhttpTargetAllowed('GET', '/api/pir/ABCD/manifest'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/admin/cleanup'), false);
   assert.equal(isOhttpTargetAllowed('GET', '/api/ohttp/gateway'), false);
   // [docs/37 §37.4 P3] Sync anonim boleh POST, tapi hanya path persisnya.

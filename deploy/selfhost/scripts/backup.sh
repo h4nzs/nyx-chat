@@ -83,7 +83,9 @@ copy() { [[ -f "$1" ]] && install -m 600 "$1" "$2" || true; }
 copy "$REPO_DIR/server/.env" "$STAGE/env/server.env"
 copy "$REPO_DIR/web/.env" "$STAGE/env/web.env"
 copy "$STATE_DIR/ohttp/relay.env" "$STAGE/env/ohttp-relay.env"
-copy "$STATE_DIR/pir/pir.env" "$STAGE/env/pir.env"
+for role in a b; do
+  copy "$STATE_DIR/pir/pir-$role.env" "$STAGE/env/pir-$role.env"
+done
 copy "$STATE_DIR/grafana/grafana.env" "$STAGE/env/grafana.env"
 copy "$STATE_DIR/alertmanager/ntfy-relay.env" "$STAGE/env/ntfy-relay.env"
 copy "$STATE_DIR/alertmanager/NTFY-TOPIC" "$STAGE/env/NTFY-TOPIC"

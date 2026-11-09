@@ -1,6 +1,6 @@
 # 42 — PIR dua server + sharding (pengganti ChalametPIR)
 
-**Status:** rencana kerja, belum ada kode. Ditulis 9 November 2026.
+**Status:** WP1–WP7 sudah ada di kode (`chalametpir-v1` dihapus), WP8–WP9 tersisa. Ditulis 9 November 2026.
 **Menggantikan:** jalur PIR `chalametpir-v1` (`server/pir-sidecar`, `packages/pir-wasm`).
 **Rujukan silang:** `docs/37` §P7, `docs/41` §6.7, `docs/10` §10.19, `docs/03` (model ancaman).
 
@@ -190,39 +190,50 @@ Server (API):
 - `PIR_MANIFEST_KEYS` — `{ "a": "<base64url ml-dsa-65 pubkey>", ... }`, dipakai
   proxy untuk memverifikasi manifest sebelum diteruskan (pertahanan berlapis;
   klien tetap memverifikasi sendiri).
+- `PIR_SIGNING_KEYS` — `{ "a": "<path>", "b": "<path>" }` berkas kunci privat
+  ML-DSA-65 (0600), dipakai builder.
+- `PIR_SHARD_DIR` — direktori artefak lokal (`<dir>/<id>/shard-<n>.{bin,json}`).
+- `PIR_ADMIN_TOKEN` — header `x-nyx-pir-internal` untuk `/admin/rebuild`.
+- `PIR_RECORD_BYTES` — ukuran record (default 512); klien menolak jawaban
+  dengan panjang berbeda.
 
-Sidecar:
+Sidecar (satu proses per role, env `pir-a.env` / `pir-b.env`):
 
-- `PIR_ROLE=a|b`, `PIR_SHARDS=0-3` (rentang shard yang dilayani instance ini),
-  `PIR_BIND=127.0.0.1:9470`, `PIR_SNAPSHOT_DIR`, `PIR_SIGNING_KEY_FILE` (0600),
-  `PIR_MAX_SLOTS`.
-- Satu instance boleh melayani beberapa shard; role hanya memilih tanda tangan
-  dan identitas manifest.
+- `PIR_BIND=127.0.0.1:9470` (role a) / `:9471` (role b), `PIR_SHARD_DIR`
+  (direktori shard server itu), `PIR_ADMIN_TOKEN` (**sama** dengan server).
+- `PIR_ROLE` diisi unit dari nama instance (`Environment=PIR_ROLE=%i`), bukan
+  dari env — instance `@a` tidak bisa menjawab sebagai `b`.
+- Tidak ada exporter metrik di sidecar: proxy + job rebuild ada di `nyx-api`
+  (docs/10 §10.19).
 
 Klien: `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`, `VITE_OHTTP_ENABLED=1`,
-`VITE_PIR_RELAYS=[...]` (dua relay; satu relay = gagal saat build-mode ketat).
-`VITE_PIR_ENABLED=0` tetap jalur lama: pencarian kembali ke blind-index dan
-**bukan** ke PIR satu server.
+`VITE_PIR_MANIFEST_KEYS`, `VITE_PIR_RELAYS` (dua relay; satu relay = gagal saat
+build-mode ketat). `VITE_PIR_ENABLED=0` tetap jalur lama: pencarian kembali ke
+blind-index dan **bukan** ke PIR satu server.
 
 ## 42.8 Operasi
 
-- Unit: `nyx-pir-a.service`, `nyx-pir-b.service` (user unit, template
-  `ops/systemd/user/nyx-pir@.service`), masing-masing dengan `PIR_ROLE`.
-- Snapshot: satu artefak bertanda tangan per shard (`snapshot-<shard>.bin` +
-  `manifest-<shard>.json`) dibangun `pir:snapshot`, disalin ke kedua host dengan
+- Unit: `nyx-pir@a.service` + `nyx-pir@b.service` dari template
+  `ops/systemd/user/nyx-pir@.service` (selfhost, `systemctl --user`), port
+  loopback 9470/9471. `install-user.sh` memasang keduanya; `verify-boot.sh`
+  memeriksa unit, port, dan `/health` masing-masing.
+- Snapshot: satu artefak bertanda tangan per shard (`shard-<n>.bin` +
+  `shard-<n>.json`) dibangun `pir:snapshot`, disalin ke kedua host dengan
   `rsync`/objek storage, lalu `/admin/rebuild` per shard. Tidak ada jalur di mana
-  A dan B membangun snapshot sendiri-sendiri — itu sumber desync.
+  A dan B membangun snapshot sendiri-sendiri — itu sumber desync. `dbRoot` A dan
+  B dibandingkan sebelum satu byte pun dikirim; berbeda = build dibatalkan.
 - Rebuild: penanda dirty per shard (Redis set), cron `*/3` hanya membangun shard
-  yang kotor; cron `04:15` tetap jaring pengaman penuh.
-- Metrik (`server/pir-sidecar`, loopback, pola exporter yang ada):
-  `nyx_pir_query_total{result}`, `nyx_pir_query_seconds`, `nyx_pir_shard_epoch`,
-  `nyx_pir_manifest_mismatch_total`, `nyx_pir_snapshot_build_seconds`.
-- Alert: `NyxPirTampered` (setiap kenaikan), `NyxPirDesync` (timestamp manifest A
-  vs B > 10 menit), `NyxPirSidecarDown`, `NyxPirRebuildStale` (epoch tertinggal >
-  30 menit).
-- Drill: `scripts/pir-tamper-drill.sh` — satu server dijalankan dengan injeksi
-  record rusak, membuktikan klien menolak (`PIR_TAMPERED`) dan **tidak** jatuh
-  ke pencarian biasa.
+  yang kotor; cron `04:15` jaring pengaman penuh. Hot-swap tidak butuh restart.
+- Metrik (exporter `nyx-api`, `server/src/utils/metrics.ts`, docs/10 §10.19):
+  `nyx_pir_query_total{result}`, `nyx_pir_query_seconds`,
+  `nyx_pir_rebuild_total{result}`, `nyx_pir_rebuild_seconds`,
+  `nyx_pir_last_rebuild_timestamp_seconds`, `nyx_pir_entries`,
+  `nyx_pir_shards`, `nyx_pir_manifest_mismatch_total`.
+- Alert (grup `nyx-pir`, sudah ada kasus drill di `ops/prometheus/tests.yml`):
+  `NyxPirTampered`, `NyxPirDesync`, `NyxPirSidecarDown`, `NyxPirRebuildStale`.
+- Drill klien tamper/desync: `web/e2e/pir.spec.ts` (WP8) — satu server dijalankan
+  dengan injeksi record rusak, membuktikan klien menolak (`PIR_TAMPERED`) dan
+  **tidak** jatuh ke pencarian biasa.
 
 ## 42.9 Yang dihapus
 
@@ -244,8 +255,8 @@ Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
 | WP3 ✅ | Core XOR-PIR: build slot array, `answer(share)`, hot-swap per shard | `server/pir-sidecar/src/{pir,shard}.rs` (baru) | M |
 | WP4 ✅ | Mode ganda sidecar: role A/B, `/manifest`, `/query` | `server/pir-sidecar/src/{main,http}.rs` | M |
 | WP5 ✅ | Proxy API: `PIR_SERVERS`, verifikasi manifest, dua relay | `server/src/routes/pir.ts`, `server/src/pir/{config,rebuild}.ts` | M |
-| WP6 | Klien: shard + 3 kandidat, dua query OHTTP, verifikasi record, verdict | `web/src/lib/{pirClient,pirParams→pirManifest}.ts` | L |
-| WP7 | Ops: unit template, metrik, alert, docs/10 §10.19 ditulis ulang | `ops/`, `docs/10` | M |
+| WP6 ✅ | Klien: shard + 3 kandidat, dua query OHTTP, verifikasi record, verdict | `web/src/lib/{pirClient,pirManifest}.ts` | L |
+| WP7 ✅ | Ops: unit template `nyx-pir@`, metrik + 4 alert di `nyx-api`, docs/10 §10.19 ditulis ulang | `ops/`, `deploy/selfhost/scripts`, `server/src/{utils/metrics,pir/rebuild,routes/pir}.ts`, `docs/10` | M |
 | WP8 | Uji: vektor lintas-impl, injeksi tamper, E2E dua server | `server/tests/pir*.test.ts`, `web/e2e/pir*.spec.ts` | M |
 | WP9 | Hapus jalur lama (§42.9) + `STATUS.md` | — | S |
 

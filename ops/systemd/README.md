@@ -11,7 +11,7 @@ systemd. Repo ini mengirim unit-nya, jadi pembaruan binary tidak lagi manual.
 | `nyx-kt-auditor-v2.env.example` | Template `EnvironmentFile` auditor v2 |
 | `nyx-kt-query-v2` / `nyx-kt-auditor-v2` / `nyx-kt-v2-init` (binary) | Binary v2 + alat bootstrap; dibangun CI dan dikirim `deploy.yml` |
 | `user/nyx-ohttp-relay.service` | Unit **user** (`systemctl --user`) untuk selfhost `~/nyx-selfhost`: relay OHTTP proses terpisah (docs/10 §10.18) |
-| `user/nyx-pir-sidecar.service` | Unit **user** untuk selfhost: sidecar PIR ChalametPIR :9470 (docs/10 §10.19) |
+| `user/nyx-pir-sidecar.service` | Unit **user** untuk selfhost: sidecar PIR shard :9470 (docs/10 §10.19) |
 
 > **Log KT v1 sudah pensiun (2026-10-28).** Unit `nyx-kt-query.service` dan
 > `nyx-kt-auditor.service` dihapus dari repo bersama penulis v1 (`docs/38`).

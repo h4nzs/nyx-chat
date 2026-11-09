@@ -65,7 +65,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 | [39-disaster-recovery-runbook.md](39-disaster-recovery-runbook.md) | Runbook DR: inventaris rahasia, drill Postgres (belum dijalankan), drill KT otomatis, salinan offsite kunci log, status drill | Saat menyiapkan/menguji pemulihan |
 | [40-link-history-archive.md](40-link-history-archive.md) | **Landed (§40.1–§40.12):** arsip riwayat sekali-pakai untuk perangkat hasil `/link` — kontak + daftar percakapan + pesan, kunci acak diseal ke X-Wing perangkat baru, objek R2 sekali unduh, `NYXB` v1 tanpa perubahan format, ekspor lewat pembaca/impor lewat penulis | Mengerjakan riwayat untuk perangkat pengganti |
 | [41-quality-ci-roadmap.md](41-quality-ci-roadmap.md) | Roadmap kesehatan CI/tes dengan status terukur (5 Nov 2026): coverage lantai per-glob + changed-lines, manifest tes wajib E2E, drill terjadwal, Dependabot lockfile, branch protection 14 konteks — plus backlog yang masih terbuka | Menyentuh CI, gate, atau coverage |
-| [42-pir-two-server-sharded.md](42-pir-two-server-sharded.md) | PIR dua server berbasis XOR + sharding, pengganti ChalametPIR: record v2 ber-`ix`, manifest ML-DSA-65, verdict tamper/desync, paket kerja WP1–WP9 — **rencana, belum ada kode** | Mengerjakan ulang pencarian PIR |
+| [42-pir-two-server-sharded.md](42-pir-two-server-sharded.md) | PIR dua server berbasis XOR + sharding, pengganti ChalametPIR: record v2 ber-`ix`, manifest ML-DSA-65, verdict tamper/desync, paket kerja WP1–WP9 — **WP1–WP6 di kode, fitur default mati** | Mengerjakan ulang pencarian PIR |
 | [25-repo-infra-agents.md](25-repo-infra-agents.md) | Root repo files, CI/agent workflows, Docker Compose, agent-skills content, ambient type declarations |
 
 ## Quick facts

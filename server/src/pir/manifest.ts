@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
   ML_DSA_65_SECRET_KEY_BYTES,
+  PIR_MANIFEST_DOMAIN,
   mlDsaGetPublicKey,
   mlDsaKeygen,
   mlDsaSign,
@@ -27,9 +28,6 @@ import {
   pirManifestMessage,
   type PirManifest,
 } from '@nyx/shared';
-
-/** Domain ML-DSA (context), terpisah dari domain pesan di `@nyx/shared`. */
-export const PIR_MANIFEST_DOMAIN = 'nyx-pir-manifest-v1';
 
 export interface PirSigningKey {
   secretKey: Uint8Array;

@@ -123,7 +123,9 @@ async fn manifest_endpoint_returns_signed_manifest() {
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
     assert_eq!(json_body(unknown).await["error"], "PIR_SHARD_UNKNOWN");
 
-    let missing = app
+    // Tanpa `shard`: ringkasan supaya klien tahu shardCount sebelum meminta
+    // manifest bertanda tangan per shard.
+    let summary = app
         .oneshot(
             Request::builder()
                 .uri("/manifest")
@@ -132,8 +134,11 @@ async fn manifest_endpoint_returns_signed_manifest() {
         )
         .await
         .unwrap();
-    assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(json_body(missing).await["error"], "PIR_SHARD_REQUIRED");
+    assert_eq!(summary.status(), StatusCode::OK);
+    let summary = json_body(summary).await;
+    assert_eq!(summary["shardCount"], 2);
+    assert_eq!(summary["epoch"], 1);
+    assert_eq!(summary["suite"], "xor-pir-v1");
 }
 
 #[tokio::test]

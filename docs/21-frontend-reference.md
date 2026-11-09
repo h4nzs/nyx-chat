@@ -98,7 +98,6 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 ## 21.6 Workers (`workers/`)
 
 - `ohttp.worker.ts` (120 L) — bungkus/buka amplop OHTTP (HPKE + Binary HTTP) di worker supaya kunci sesi tidak menyentuh main thread.
-- `pir.worker.ts` (138 L) — ABI WASM ChalametPIR (`setup`/`query`/`process`), memuat `pir-client.wasm` dari asset URL (bukan bundle utama).
 - `crypto.worker.ts` (2498 L) — 45+ operations: identity keys, XChaCha primitives, Argon2id KDF, PoW, profiles, PQX3DH, Double Ratchet, group sender-key, burner PQ-DR, file secretstream, safety number. Protocol `{id,type,payload}` → `{id,success,result,error}`.
 - `transport.worker.ts` (472 L) — WebTransport QUIC: CONNECT/DISCONNECT/SEND_STREAM/SEND_DATAGRAM/START_HANDSHAKE; chaffing loop; frame parsing.
 
