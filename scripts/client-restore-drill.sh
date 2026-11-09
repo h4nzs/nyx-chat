@@ -23,7 +23,19 @@ WORK="${NYX_CLIENT_DRILL_DIR:-/tmp/nyx-client-restore-drill}"
 # ini membaca .env. Dulu nama yang sama membuat postgres drill mencoba mengikat
 # port 4000 → "could not create listen socket". Drill menemukannya sendiri.
 DRILL_PORT="${NYX_CLIENT_DRILL_PORT:-15433}"
-TSX="$ROOT/web/node_modules/.bin/tsx"
+# `tsx` bukan dependensi paket web: di CI (`pnpm install` workspace) binary-nya
+# hanya ada di `server/node_modules/.bin`, sehingga drill gagal di langkah 1
+# (run drills 42590613244). Cari di beberapa lokasi, lalu PATH sebagai fallback.
+TSX="${NYX_TSX:-}"
+if [ -z "$TSX" ]; then
+  for candidate in \
+    "$ROOT/web/node_modules/.bin/tsx" \
+    "$ROOT/server/node_modules/.bin/tsx" \
+    "$ROOT/node_modules/.bin/tsx"; do
+    if [ -x "$candidate" ]; then TSX="$candidate"; break; fi
+  done
+fi
+if [ -z "$TSX" ]; then TSX="$(command -v tsx 2>/dev/null || true)"; fi
 # Bisa ditimpa untuk MEMBUKTIKAN harness-nya tidak buta: jalankan dengan salinan
 # skrip yang sengaja dirusak (mis. ciphertext digeser 1 karakter) dan pastikan
 # drill jadi merah. Bukti "lulus" tanpa kontrol negatif tidak berarti apa-apa
@@ -50,7 +62,7 @@ missing=0
 for tool in initdb pg_ctl psql pg_dump createdb pg_restore; do
   command -v "$tool" >/dev/null 2>&1 || { bad "$tool tidak ada di PATH"; missing=1; }
 done
-[ -x "$TSX" ] || { bad "tsx tidak ada di $TSX (jalankan pnpm install di web)"; missing=1; }
+[ -n "$TSX" ] && [ -x "$TSX" ] || { bad "tsx tidak ditemukan (cek web/server/node_modules/.bin atau PATH; NYX_TSX bisa menimpa)"; missing=1; }
 [ -f "$DRILL_TS" ] || { bad "skrip drill hilang: $DRILL_TS"; missing=1; }
 [ -f "$ROOT/server/.env" ] || { bad "server/.env tidak ada — butuh DATABASE_URL sumber" ; missing=1; }
 [ "$missing" -eq 0 ] && ok "semua perkakas tersedia"

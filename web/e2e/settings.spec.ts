@@ -10,7 +10,12 @@ test.describe('Settings & Emergency Eject', () => {
     // selalu mati di tengah (`Target page, context or browser has been closed`)
     // dan TIDAK pernah benar-benar memverifikasi eject — hanya tampak seperti
     // kegagalan produk saat `page.goto('/chat')` belum sempat dialihkan ulang.
-    test.setTimeout(180000);
+    // [nightly 42588373126] WebKit butuh 3,2 m untuk tes ini (Firefox 39,7 s);
+    // budget 180 s habis tepat saat klik eject, dengan pesan yang terbaca
+    // seperti tombol tidak bisa diklik. Engine ini butuh budget registrasi
+    // sendiri — bukan asersi yang dilonggarkan.
+    const isWebKit = test.info().project.name === 'webkit';
+    test.setTimeout(isWebKit ? 360000 : 180000);
     const username = `logout_${Date.now()}`;
     await registerUser(page, 'Logout User', username);
 
@@ -22,7 +27,11 @@ test.describe('Settings & Emergency Eject', () => {
     // 2. Click Logout / Eject button
     const logoutBtn = page.locator('button', { hasText: /eject|logout|sign out|disconnect/i }).first();
     await expect(logoutBtn).toBeVisible({ timeout: 30000 });
-    await logoutBtn.click();
+    await logoutBtn.scrollIntoViewIfNeeded();
+    // `force`: overlay tour/transisi framer-motion di WebKit sempat tertinggal
+    // di atas tombol; klik biasa menunggu hit-test sampai test timeout. Asersi
+    // setelah klik (dialog konfirmasi + redirect) tetap membuktikan eject.
+    await logoutBtn.click({ force: true, timeout: 60000 });
 
     // 3. Handle confirmation modal if it appears (Emergency Eject triggers showConfirm).
     // Scoped ke dialog teratas + `force`: modal bisa ter-animasi (framer-motion)

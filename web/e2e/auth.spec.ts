@@ -42,7 +42,13 @@ test.describe('Authentication & Onboarding', () => {
   test('Login with correct password', async ({ page }) => {
     // Registrasi di runner CI bisa memakan >90 s dari budget 180 s; beri ruang
     // agar kegagalan yang tersisa benar-benar soal login, bukan budget habis.
-    test.setTimeout(240000);
+    // [nightly 42588373126] WebKit menghabiskan 4,2 m untuk tes yang sama
+    // (Firefox 1,2 m): Argon2/WASM jauh lebih lambat di engine ini. Budget 240 s
+    // habis SAAT registrasi, lalu `cookies()` ditolak karena context sudah
+    // ditutup — bukan bukti logout gagal. Beri WebKit budget terpisah, tetap
+    // terbatas supaya hang sungguhan tidak lolos.
+    const isWebKit = test.info().project.name === 'webkit';
+    test.setTimeout(isWebKit ? 480000 : 240000);
 
     const username = `loginuser_${Date.now()}`;
     const hasRefreshCookie = async () =>
@@ -57,9 +63,11 @@ test.describe('Authentication & Onboarding', () => {
     });
     loginPage.on('pageerror', (err) => console.log(`[auth.spec][login page pageerror] ${err.message}`));
 
+    const registrationStarted = Date.now();
     await test.step('registrasi akun uji', async () => {
       await registerUser(page, 'Test Login User', username);
     });
+    console.log(`[auth.spec] registrasi selesai dalam ${Date.now() - registrationStarted} ms`);
 
     await test.step('logout benar-benar memutus sesi server', async () => {
       const attempts: Array<{ attempt: number; ok: boolean; error?: string }> = [];
