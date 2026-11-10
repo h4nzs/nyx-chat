@@ -259,7 +259,11 @@ test.describe('Group lifecycle (API contract)', () => {
             },
             data: {},
           });
-          expect([204, 403], `leave ${installationId}`).toContain(left.status());
+          // 204 wajib: route leave sekarang menunggu penghapusan baris
+          // keanggotaan sebelum menjawab. 403 di sini berarti jalur leave rusak,
+          // bukan variasi sah (dulu diterima longgar dan menyembunyikan 409 purge
+          // di run 42784148182).
+          expect(left.status(), `leave ${installationId}`).toBe(204);
         }
 
         const purged = await pageA.request.delete(`/api/conversations/${conversationId}/group`, {
