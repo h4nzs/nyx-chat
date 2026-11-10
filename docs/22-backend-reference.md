@@ -35,7 +35,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `ktQuery.ts` | `/api/keys/kt` | proxy bukti KT (protobuf base64url, tanpa parsing di Node) |
 | `backup.ts` | `/api/backup` | arsip terenkripsi klien (header + chunk), R2 |
 | `ohttp.ts` | `/api/ohttp` | `GET /config` (`application/ohttp-keys`), `POST /relay` (404 bila `OHTTP_RELAY_EXTERNAL=1`), `POST /gateway` — docs/10 §10.18 |
-| `pir.ts` | `/api/pir` | `GET /params`, `POST /query` — proxy byte opaque ke sidecar ChalametPIR; tidak dipasang tanpa `PIR_ENABLED=1` (docs/10 §10.19) |
+| `pir.ts` | `/api/pir` | `GET /:server/manifest`, `POST /:server/query` — proxy byte opaque ke dua sidecar XOR-PIR (`PIR_SERVERS` ≥ 2); tidak dipasang tanpa `PIR_ENABLED=1` (docs/42, docs/10 §10.19) |
 
 ## 22.3 Middleware (`middleware/`, 3)
 

@@ -43,6 +43,12 @@
 | 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, cutover tulis+baca server + pemilihan ABI klien. Log v1 dipensiunkan 2026-10-28 (`docs/38`) | §35.7 Fase 7 |
 | 8 | Removal, audit, dokumentasi | **selesai di kode** 2026-10-23 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop + throttle, audit residual v1, E2E recovery/device-linking/OHTTP; denylist baru 0, sisa 2 exception `hybrid-v2-identity` + 2 `tier-b` (Privacy Pass) | §35.8, §35.10 |
 
+> **PIR (2026-11-09):** baris fasa 4 di atas menggambarkan jalur lama. PIR satu-server
+> sudah dihapus dan diganti `xor-pir-v1` dua server + sharding (`docs/42`,
+> `docs/10` §10.19): `packages/pir-wasm`, `pir.worker.ts`, `/params`, hint, dan
+> `PIR_ARITY`/`PIR_MASTER_SECRET` tidak ada lagi; rute kini
+> `/api/pir/:server/{manifest,query}`.
+
 **PQ-only:** `resolvePqV2Enabled()` selalu `true`; `VITE_PQ_V2` tidak lagi
 mengubah perilaku dan `VITE_ANON_CREDENTIALS` sudah tidak dipakai. Tidak ada
 fallback v1 untuk handshake/pesan baru. **Data v1 lama tidak punya pembaca di
@@ -162,7 +168,7 @@ gate alih-alih menumpang di daftar ini.
   requester → target.
 - OHTTP **sudah dipakai alur aplikasi** untuk `GET /api/users/search` bila
   diaktifkan (token scoped 120 s dengan mode `on`/`off`; §35.7 Fase 3).
-  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati), **4b ChalametPIR sidecar + proxy `/api/pir/*` landed tetapi default mati; klien WASM/worker (4c) landed; 4d benchmark harness landed (`bench:pir`), audit + angka produksi belum** (§35.11 #3).
+  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati), **4b ChalametPIR sidecar + proxy `/api/pir/*` landed tetapi default mati; klien WASM/worker (4c) landed; 4d benchmark harness landed (`bench:pir`), audit + angka produksi belum** (§35.11 #3). Sudah diganti `xor-pir-v1` dua server (docs/42).
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
   - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
@@ -962,8 +968,9 @@ Pekerjaan:
   tidak bisa menurunkan index dari `usernameHash` ter-pepper. **`usernameHash` ter-pepper tetap
   disimpan** karena KT butuh identifier Argon2id mentah; ini bukan cutover penuh.
 - 🟡 **4b PIR service (landed di kode 2026-10-23, belum deploy):** crate
-  `server/pir-sidecar` memakai **ChalametPIR 0.8.0** (keyword PIR, record
-  ~2 KB per OPRF index, arity 3 default). Snapshot epoch offline + `/params`
+  `server/pir-sidecar` dulu memakai **ChalametPIR 0.8.0** (keyword PIR, record
+  ~2 KB per OPRF index, arity 3 default) — **sudah diganti `xor-pir-v1` dua
+  server + sharding, 2026-11-09 (docs/42)**. Snapshot epoch offline + `/params`
   (hint/filter/seed) + `/query` opaque + `/admin/rebuild` loopback; proxy
   Node `/api/pir/*` hanya meneruskan byte setelah auth + rate limit, tanpa
   kripto PIR di JS. Default **mati** (`PIR_ENABLED=1`). **Di selfhost sudah
@@ -1362,7 +1369,8 @@ Residual yang harus ditulis jujur:
    menggantikan keputusan tunda 2026-10-21. 4a OPRF sudah landed dan ter-wire
    hibrida (`oprfIndex`, default mati). **4b landed di kode 2026-10-23, belum
    deploy:** library **ChalametPIR 0.8.0** (core MPL-2.0; client/server BSD-3)
-   dipilih setelah benchmark lokal — bukan menulis kripto PIR sendiri. Crate
+   dipilih setelah benchmark lokal — bukan menulis kripto PIR sendiri. **Jalur ini
+   sudah diganti `xor-pir-v1` dua server (docs/42).** Crate
    Rust `server/pir-sidecar` menyimpan record ~2 KB per OPRF index, dengan
    snapshot epoch + hint (`/params`) dan `/query` opaque; proxy Node
    `/api/pir/*` hanya meneruskan byte dengan auth + rate limit. Snapshot

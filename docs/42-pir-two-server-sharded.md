@@ -1,6 +1,7 @@
 # 42 — PIR dua server + sharding (pengganti ChalametPIR)
 
-**Status:** WP1–WP8 sudah ada di kode (`chalametpir-v1` dihapus); WP9 tersisa.
+**Status:** WP1–WP9 selesai di kode (`chalametpir-v1` dihapus; `STATUS.md`
+mencatat suite `xor-pir-v1` + rute `/api/pir/:server/{manifest,query}`).
 WP8 membuktikan E2E dua server nyata (hit, miss, tanpa fallback) dan vektor
 lintas-implementasi; injeksi tamper/desync tetap di level unit karena sidecar
 memverifikasi `dbRoot` saat rebuild. Ditulis 9 November 2026.
@@ -267,7 +268,7 @@ Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
 | WP6 ✅ | Klien: shard + 3 kandidat, dua query OHTTP, verifikasi record, verdict | `web/src/lib/{pirClient,pirManifest}.ts` | L |
 | WP7 ✅ | Ops: unit template `nyx-pir@`, metrik + 4 alert di `nyx-api`, docs/10 §10.19 ditulis ulang | `ops/`, `deploy/selfhost/scripts`, `server/src/{utils/metrics,pir/rebuild,routes/pir}.ts`, `docs/10` | M |
 | WP8 ✅ | Uji: vektor lintas-impl, injeksi tamper (level unit), E2E dua server | `server/tests/fixtures/pirVectors.json`, `server/tests/pirVectors.test.ts`, `server/pir-sidecar/src/pir.rs`, `web/playwright.pir.config.ts`, `web/e2e/pir.spec.ts`, `server/scripts/pir-e2e-keys.ts` | M |
-| WP9 | Hapus jalur lama (§42.9) + `STATUS.md` | — | S |
+| WP9 ✅ | Hapus jalur lama (§42.9) + `STATUS.md` | `STATUS.md`, `scripts/check-status.mjs`, docs | S |
 
 Urutan yang menjaga `main` tetap hijau: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → WP7
 → WP8 → WP9. Selama WP9 belum jalan, fitur tetap **default mati**, jadi setiap

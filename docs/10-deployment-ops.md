@@ -1387,7 +1387,7 @@ saat ini sengaja ketat).
 ## 10.19 PIR dua server (`nyx-pir@a`/`nyx-pir@b`) — ditulis ulang 2026-11-09
 
 > **Kontrak: `xor-pir-v1`, dua server + sharding (docs/42).** Endpoint `/params`
-> dan payload snapshot ChalametPIR **sudah tidak ada**. Satu instance saja tidak
+> dan payload snapshot PIR satu-server **sudah tidak ada**. Satu instance saja tidak
 > cukup: klien menolak berjalan tanpa dua server, dan XOR atas dua share hanya
 > menyembunyikan indeks bila share dikirim lewat dua relay berbeda.
 

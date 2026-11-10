@@ -251,18 +251,18 @@ Router hanya dipasang bila `OHTTP_ENABLED=1` (tanpa itu semuanya 404). Body adal
 | POST | `/relay` | Amplop → gateway. **404 `OHTTP_RELAY_EXTERNAL`** bila relay dijalankan proses terpisah (`OHTTP_RELAY_EXTERNAL=1`, nginx → `:4100/relay`) |
 | POST | `/gateway` | Buka amplop, tolak target di luar allowlist (`403 OHTTP_TARGET_NOT_ALLOWED` di dalam amplop), sanitasi header jaringan, teruskan ke loopback. Key id tak dikenal / amplop rusak → `400 OHTTP_INVALID_REQUEST` |
 
-Rate limit 120/menit per IP. Allowlist default: `GET /api/users/search`, `GET /api/keys/prekey-bundle/:id`, `POST /api/pir/query`, `POST /api/groups/sync` (batas body 64 KB).
+Rate limit 120/menit per IP. Allowlist default: `GET /api/users/search`, `GET /api/keys/prekey-bundle/:id`, `GET /api/pir/:server/manifest`, `POST /api/pir/:server/query`, `POST /api/groups/sync`, `POST /api/keys/kt/search` (batas body 64 KB).
 
-## pir — `/api/pir` (docs/35 Fase 4b, docs/10 §10.19)
+## pir — `/api/pir` (docs/42, docs/10 §10.19)
 
-Router hanya dipasang bila `PIR_ENABLED=1`; server hanya mem-proxy byte ke sidecar ChalametPIR loopback (`PIR_SERVICE_URL`), tidak ada kripto PIR di Node.
+Router hanya dipasang bila `PIR_ENABLED=1`. Server hanya mem-proxy byte ke dua sidecar XOR-PIR loopback (`PIR_SERVERS`, minimal 2 — kurang dari itu boot gagal) dan memverifikasi tanda tangan ML-DSA-65 manifest; tidak ada kripto PIR di Node.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/params` | requireAuth. `{epoch, recordBytes, entryCount, suite, arity, seed, hint, filter}` (~11 MB pada index kecil) + `ETag`; `304` bila `If-None-Match` cocok |
-| POST | `/query` | requireAuth + biner opaque (`application/octet-stream`, 8 MB). Dikirim **lewat OHTTP** dengan token ber-scope di amplop; CSRF dilewati hanya bila request tidak membawa cookie sesi. `503 PIR_UNAVAILABLE` bila sidecar mati |
+| GET | `/:server/manifest` | requireAuth. Tanpa `?shard=` → ringkasan (`shardCount`, `epoch`); dengan `?shard=` → manifest shard + tanda tangan. `404 PIR_SERVER_UNKNOWN`/`PIR_SHARD_UNKNOWN`, `502 PIR_MANIFEST_INVALID`, `503 PIR_UNAVAILABLE` |
+| POST | `/:server/query?shard=` | requireAuth + biner opaque (`application/octet-stream`, sepanjang `pirShareLen`). Dikirim **lewat OHTTP** dengan token ber-scope; CSRF dilewati hanya bila request tidak membawa cookie sesi |
 
-Tidak ada `PIR_SERVICE_URL` valid / sidecar tanpa index = `503`; snapshot kosong tidak bisa dibangun (`pir:snapshot` menolak 0 user ber-`oprfIndex`).
+Suite `xor-pir-v1` (record v2 ber-`ix`, 3 kandidat slot per indeks). Shard dibangun `pir:snapshot` dan di-hot-swap lewat `/admin/rebuild` tanpa restart.
 
 ## Misc
 
