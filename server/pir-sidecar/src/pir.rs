@@ -180,7 +180,10 @@ mod tests {
 
         let mut recovered = a1;
         xor_in_place(&mut recovered, &a2);
-        assert_eq!(digest(&recovered), fixture["recordSha256"].as_str().unwrap());
+        assert_eq!(
+            digest(&recovered),
+            fixture["recordSha256"].as_str().unwrap()
+        );
         assert_eq!(recovered, record);
 
         let mut toggled = share.clone();

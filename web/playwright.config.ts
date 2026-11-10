@@ -13,7 +13,10 @@ export default defineConfig({
   // tidak butuh — dan tidak boleh — menjalankan global reset DB. Tanpa baris
   // ini spec-nya ikut terhitung di suite utama (24 tes, bukan 22) sehingga
   // `minTotal` di required-tests.json tidak lagi menjaga jumlah yang benar.
-  testIgnore: /a11y\.spec\.ts/,
+  // `pir.spec.ts` butuh dua sidecar XOR-PIR + OHTTP (lihat
+  // `playwright.pir.config.ts` / `test:e2e:pir`). Di stack E2E default PIR mati,
+  // jadi spec itu dijalankan job drills `pir-e2e`, bukan di sini.
+  testIgnore: [/a11y\.spec\.ts/, /pir\.spec\.ts/],
   fullyParallel: true,
   // workers: 1 (serial) — suite berbagi 1 server dev + Postgres/Redis lokal;
   // spec profile/settings flaky bila >1 browser berjalan bersamaan (timing event
