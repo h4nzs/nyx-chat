@@ -275,19 +275,33 @@ Urutan yang menjaga `main` tetap hijau: WP1 → WP2 → WP3 → WP4 → WP5 → 
 `PIR_OPRF_ENABLED=1` wajib), jadi seluruh rangkaian mendarat tanpa mengubah
 pencarian pengguna.
 
-### Gate (target; hanya sebagian terukur otomatis)
+### Gate (target vs hasil terukur)
 
-- Query p95 (localhost) ≤ 10 ms untuk `S = 4096`, `R = 2048`.
-- Trafik per pencarian ≤ 16 KB (di luar OHTTP framing): 3 slot × 2 server × (512 B query + 2 KB response).
-- Injeksi tamper 100% terdeteksi, 200/200 percobaan.
-- Desync manifest terdeteksi sebelum query dikirim.
-- Satu server dimatikan → `PIR_UNAVAILABLE`, 0 fallback.
-- Memori sidecar ≤ 1,5× ukuran snapshot shard.
+Angka "terukur" di bawah berasal dari `scripts/bench/pir-query.mjs` (loopback,
+sidecar rilis, 1.000 query + 50 pemanasan, 11 November 2026). Jalankan ulang
+dengan `node scripts/bench/pir-query.mjs`; knob: `NYX_PIR_BENCH_SLOTS`,
+`NYX_PIR_BENCH_RECORD_BYTES`, `NYX_PIR_BENCH_QUERIES`, `NYX_PIR_BENCH_WARMUP`.
+Skrip gagal hanya pada batas regresi lebar (p95 < 50 ms, ≤ 16 KB/query,
+RSS ≤ 2×), bukan pada target riset — supaya angka target tidak berubah menjadi
+tes flaky di mesin bersama.
 
-**Bukti yang ada di CI:** tamper/desync (tes unit klien + vektor lintas-impl) dan
-`PIR_UNAVAILABLE` tanpa fallback (E2E dua server). **Belum** diukur otomatis:
-p95 query, total byte per pencarian, dan memori sidecar — jangan mengutip angka
-gate di atas sebagai hasil terukur.
+- Query p95 (localhost) ≤ 10 ms untuk `S = 4096`, `R = 2048` — **terukur
+  p50 2,5 ms / p95 3,8 ms / p99 5,1 ms**.
+- Trafik per pencarian ≤ 16 KB (di luar OHTTP framing): 3 slot × 2 server ×
+  (512 B query + 2 KB response) — **terukur 2.560 B per query sidecar; satu
+  pencarian penuh = 6 × 2.560 B = 15.360 B (15 KB)**.
+- Injeksi tamper 100% terdeteksi — dibuktikan tes unit klien + vektor
+  lintas-impl (bukan hitungan 200/200 di sidecar live; lihat §42.8).
+- Desync manifest terdeteksi sebelum query dikirim — tes unit klien.
+- Satu server dimatikan → `PIR_UNAVAILABLE`, 0 fallback — E2E dua server.
+- Memori sidecar ≤ 1,5× ukuran snapshot shard — **terukur 1,61× pada shard
+  8 MiB** (baseline proses ~5 MiB mendominasi) dan **1,16× pada shard 32 MiB**;
+  target 1,5× baru bermakna ketika baseline teramortisasi (shard produksi
+  lebih besar dari bench default).
+
+**Bukti yang ada di CI:** tamper/desync (tes unit klien + vektor lintas-impl),
+`PIR_UNAVAILABLE` tanpa fallback (E2E dua server), dan drill `pir-e2e`.
+Performa diukur manual lewat skrip di atas — belum dijalankan otomatis di CI.
 
 ### Definition of done
 
