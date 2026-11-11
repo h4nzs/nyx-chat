@@ -72,19 +72,35 @@ test.describe('Authentication & Onboarding', () => {
         // buktinya tetap cookie `rt` di bawah — jadi penolakan dicatat, bukan
         // dilempar sebagai kegagalan tes.
         let result: { ok: boolean; error?: string };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const evalTimeoutMs = 30_000;
         try {
-          result = await page.evaluate(async () => {
-            try {
-              // @ts-ignore — path absolut Vite dev server (runtime-only)
-              const { useAuthStore } = await import('/src/store/auth.ts');
-              await useAuthStore.getState().logout();
-              return { ok: true };
-            } catch (e) {
-              return { ok: false, error: String(e) };
-            }
-          });
+          result = await Promise.race([
+            page.evaluate(async () => {
+              try {
+                // @ts-ignore — path absolut Vite dev server (runtime-only)
+                const { useAuthStore } = await import('/src/store/auth.ts');
+                await useAuthStore.getState().logout();
+                return { ok: true };
+              } catch (e) {
+                return { ok: false, error: String(e) };
+              }
+            }),
+            // [BUG 2026-11-11] WebKit dulu menggantung di sini tanpa pernah
+            // menyelesaikan `evaluate`; tes lalu mati di timeout 240 dtk dan
+            // menyamar sebagai "context closed". Batas ini membuat penyebabnya
+            // tertulis di `attempts`, bukan hilang bersama timeout tes.
+            new Promise<{ ok: boolean; error?: string }>((resolve) => {
+              timer = setTimeout(
+                () => resolve({ ok: false, error: `logout() tidak selesai dalam ${evalTimeoutMs / 1000} dtk` }),
+                evalTimeoutMs,
+              );
+            }),
+          ]);
         } catch (e) {
           result = { ok: false, error: String(e) };
+        } finally {
+          if (timer) clearTimeout(timer);
         }
         attempts.push({ attempt, ...result });
 

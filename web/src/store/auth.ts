@@ -239,6 +239,37 @@ async function getReadyServiceWorker(timeoutMs = 1500): Promise<ServiceWorkerReg
   ]);
 }
 
+/**
+ * Jalankan satu langkah logout dengan batas waktu.
+ *
+ * [BUG 2026-11-11] WebKit menggantung `logout()` tanpa pernah menyelesaikan
+ * promise-nya (smoke nightly run 42987574442: `page.evaluate(logout)` tidak
+ * pernah kembali, tes mati di timeout 240 dtk). Kandidat yang paling mungkin:
+ * `fetch` logout atau transaksi IndexedDB/Dexie saat membersihkan kunci.
+ * Logout adalah soft-logout: kegagalan pembersihan lokal tidak boleh menahan
+ * seluruh sesi, sedangkan cookie HttpOnly `rt` sudah dicabut server. Jadi setiap
+ * langkah diberi batas dan dilanjutkan bila lewat.
+ */
+async function settleWithin<T>(promise: Promise<T>, label: string, ms = 5000): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn(`[logout] ${label} melewati ${ms} ms; dilanjutkan`);
+          resolve(undefined);
+        }, ms);
+      }),
+    ]);
+  } catch (e) {
+    console.warn(`[logout] ${label} gagal:`, e);
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 let privateKeysCache: RetrievedKeys | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let keysRetrievalPromise: Promise<RetrievedKeys> | null = null;
@@ -874,10 +905,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       }
 
       try {
-        await api("/api/auth/logout", {
-          method: "POST",
-          ...(pushEndpoint ? { body: JSON.stringify({ endpoint: pushEndpoint }) } : {}),
-        }).catch(() => {});
+        await settleWithin(
+          api("/api/auth/logout", {
+            method: "POST",
+            ...(pushEndpoint ? { body: JSON.stringify({ endpoint: pushEndpoint }) } : {}),
+          }),
+          "POST /api/auth/logout",
+          8000,
+        );
         if (pushEndpoint) {
           // Best-effort: endpoint server sudah dihapus; unsubscribe lokal gagal
           // tidak boleh menghidupkan kembali sesi.
@@ -895,12 +930,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First).
         // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
         // sesi unlock akun lain di tab yang sama tidak terganggu.
-        await clearKeys();
+        await settleWithin(clearKeys(), "clearKeys", 5000);
         // [docs/30 §30.5 WS-A] Identifier mentah ikut dibuang saat logout (slot
         // user ini saja). `lockApp` sengaja TIDAK menghapusnya: vault terkunci
         // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
         // user membuka kunci tanpa login ulang.
-        await clearKtIdentifier();
+        await settleWithin(clearKtIdentifier(), "clearKtIdentifier", 5000);
         // [audit N7-04] State monitoring adalah turunan kontak akun ini, jadi
         // tidak boleh diwarisi akun berikutnya di perangkat yang sama.
         // [audit N8-03] Pin config TIDAK dihapus di sini: pin kini ber-PK per
