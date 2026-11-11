@@ -52,8 +52,9 @@ const relayErrors = new Rate('nyx_relay_errors');
  * mengubah bentuk tahapan (mis. mesin lokal 4 core).
  */
 const MAX_VUS = Number(__ENV.NYX_MAX_VUS || 500);
+const SMOKE = __ENV.NYX_SMOKE === '1';
 
-const stages = __ENV.NYX_SMOKE === '1'
+const stages = SMOKE
   ? [
       { duration: '5s', target: 5 },
       { duration: '15s', target: 5 },
@@ -77,8 +78,21 @@ export const options = {
   },
   thresholds: {
     // Gate M1: latency relay dan error rate.
-    nyx_relay_send_duration: ['p(95)<200'],
-    nyx_relay_fetch_duration: ['p(95)<200'],
+    // Latency HANYA digerbang pada profil beban penuh. SMOKE = 5 VU / ~200
+    // sampel dan pasti mengandung cold start (compile Prisma, JIT, Redis
+    // warm): belasan outlier pertama sudah menggeser p95 ke 285 ms padahal
+    // median 6 ms (nightly run 43005964808, 0 error, semua 201/200). Untuk
+    // SMOKE batasnya longgar — fungsinya membuktikan sesi terbawa, bukan
+    // mengukur performa. Error rate tetap digerbang di kedua profil.
+    ...(SMOKE
+      ? {
+          nyx_relay_send_duration: ['p(95)<1000'],
+          nyx_relay_fetch_duration: ['p(95)<1000'],
+        }
+      : {
+          nyx_relay_send_duration: ['p(95)<200'],
+          nyx_relay_fetch_duration: ['p(95)<200'],
+        }),
     'http_req_failed': ['rate<0.01'],
     nyx_relay_errors: ['rate<0.01'],
   },

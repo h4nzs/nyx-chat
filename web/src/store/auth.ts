@@ -896,7 +896,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         if ('serviceWorker' in navigator && 'PushManager' in window) {
           const registration = await getReadyServiceWorker(1500);
           if (registration) {
-            const subscription = await registration.pushManager.getSubscription();
+            // [BUG 2026-11-11] `getSubscription()` juga bisa MENGGANTUNG (bukan
+            // hanya melempar seperti di Firefox), jadi beri batas waktu.
+            const subscription = await settleWithin(
+              registration.pushManager.getSubscription(),
+              "pushManager.getSubscription",
+              3000,
+            );
             pushEndpoint = subscription?.endpoint ?? null;
           }
         }
@@ -926,36 +932,44 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e) { console.error("Logout error", e); } finally {
         clearAuthCookies();
         privateKeysCache = null;
-        
-        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First).
-        // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
-        // sesi unlock akun lain di tab yang sama tidak terganggu.
-        await settleWithin(clearKeys(), "clearKeys", 5000);
-        // [docs/30 §30.5 WS-A] Identifier mentah ikut dibuang saat logout (slot
-        // user ini saja). `lockApp` sengaja TIDAK menghapusnya: vault terkunci
-        // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
-        // user membuka kunci tanpa login ulang.
-        await settleWithin(clearKtIdentifier(), "clearKtIdentifier", 5000);
-        // [audit N7-04] State monitoring adalah turunan kontak akun ini, jadi
-        // tidak boleh diwarisi akun berikutnya di perangkat yang sama.
-        // [audit N8-03] Pin config TIDAK dihapus di sini: pin kini ber-PK per
-        // akun (`ktConfigPinRowId`), sehingga isolasi lintas-akun tetap terjaga
-        // sementara akun yang sama mempertahankan kontinuitas TOFU lintas sesi.
-        // Menghapusnya membuat server bisa menukar `signatureKey` di sela
-        // logout→login tanpa terdeteksi.
-        const { clearKtStates } = await import('../lib/ktMonitoring');
-        await clearKtStates().catch(() => {});
-        localStorage.removeItem('user');
-        
-        set({ user: null, accessToken: null, hasRestoredKeys: false });
-        disconnectSocket();
-        const { clearReconnectTimer } = await import('./connection');
-        clearReconnectTimer();
-        const { clearBlobCache } = await import('../utils/blobCache');
-        clearBlobCache();
 
+        // [BUG 2026-11-11] State kritikal diubah LEBIH DULU; pembersihan
+        // penyimpanan lokal menyusul dengan batas waktu. Di WebKit `logout()`
+        // masih menggantung >30 dtk walau POST dan clearKeys sudah dibatasi
+        // (nightly run 43005964808: `logout() tidak selesai dalam 30 dtk`,
+        // cookie `rt` masih ada) — sisa await yang tak terbatas ada di
+        // `clearKtStates()` + dynamic import modul. Logout adalah soft logout:
+        // sesi server sudah dicabut, jadi UI tidak boleh ikut menggantung.
+        localStorage.removeItem('user');
+        set({ user: null, accessToken: null, hasRestoredKeys: false });
+        try { disconnectSocket(); } catch (e) { console.warn('disconnectSocket saat logout gagal:', e); }
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();
+
+        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First).
+        await settleWithin((async () => {
+          // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
+          // sesi unlock akun lain di tab yang sama tidak terganggu.
+          await clearKeys();
+          // [docs/30 §30.5 WS-A] Identifier mentah ikut dibuang saat logout (slot
+          // user ini saja). `lockApp` sengaja TIDAK menghapusnya: vault terkunci
+          // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
+          // user membuka kunci tanpa login ulang.
+          await clearKtIdentifier();
+          // [audit N7-04] State monitoring adalah turunan kontak akun ini, jadi
+          // tidak boleh diwarisi akun berikutnya di perangkat yang sama.
+          // [audit N8-03] Pin config TIDAK dihapus di sini: pin kini ber-PK per
+          // akun (`ktConfigPinRowId`), sehingga isolasi lintas-akun tetap terjaga
+          // sementara akun yang sama mempertahankan kontinuitas TOFU lintas sesi.
+          // Menghapusnya membuat server bisa menukar `signatureKey` di sela
+          // logout→login tanpa terdeteksi.
+          const { clearKtStates } = await import('../lib/ktMonitoring');
+          await clearKtStates();
+          const { clearReconnectTimer } = await import('./connection');
+          clearReconnectTimer();
+          const { clearBlobCache } = await import('../utils/blobCache');
+          clearBlobCache();
+        })(), "pembersihan sesi lokal", 10000);
       }
     },
 
