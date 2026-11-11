@@ -23,7 +23,7 @@ Keputusan yang mendasarinya (9 Nov 2026):
 
 ## 42.1 Masalah yang diselesaikan
 
-Keadaan sekarang (`chalametpir-v1`):
+Keadaan sebelum penggantian (`chalametpir-v1`):
 
 | Masalah | Sebab | Akibat |
 |---|---|---|
@@ -247,7 +247,7 @@ blind-index dan **bukan** ke PIR satu server.
 
 ## 42.9 Yang dihapus
 
-Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
+Dihapus pada WP6–WP9 (tidak ada masa transisi, tidak ada pengguna):
 
 - `packages/pir-wasm/` beserta entri `packages/wasm-artifacts.json`.
 - `web/src/workers/pir.worker.ts` dan jalur `setup/query/process` di `pirClient.ts`.
@@ -271,10 +271,11 @@ Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
 | WP9 ✅ | Hapus jalur lama (§42.9) + `STATUS.md` | `STATUS.md`, `scripts/check-status.mjs`, docs | S |
 
 Urutan yang menjaga `main` tetap hijau: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → WP7
-→ WP8 → WP9. Selama WP9 belum jalan, fitur tetap **default mati**, jadi setiap
-langkah bisa di-merge tanpa memengaruhi pencarian pengguna.
+→ WP8 → WP9. Selesai WP9 pun fitur tetap **default mati** (`PIR_ENABLED=1` dan
+`PIR_OPRF_ENABLED=1` wajib), jadi seluruh rangkaian mendarat tanpa mengubah
+pencarian pengguna.
 
-### Gate
+### Gate (target; hanya sebagian terukur otomatis)
 
 - Query p95 (localhost) ≤ 10 ms untuk `S = 4096`, `R = 2048`.
 - Trafik per pencarian ≤ 16 KB (di luar OHTTP framing): 3 slot × 2 server × (512 B query + 2 KB response).
@@ -283,13 +284,22 @@ langkah bisa di-merge tanpa memengaruhi pencarian pengguna.
 - Satu server dimatikan → `PIR_UNAVAILABLE`, 0 fallback.
 - Memori sidecar ≤ 1,5× ukuran snapshot shard.
 
+**Bukti yang ada di CI:** tamper/desync (tes unit klien + vektor lintas-impl) dan
+`PIR_UNAVAILABLE` tanpa fallback (E2E dua server). **Belum** diukur otomatis:
+p95 query, total byte per pencarian, dan memori sidecar — jangan mengutip angka
+gate di atas sebagai hasil terukur.
+
 ### Definition of done
 
 1. `docs/10` §10.19 menjelaskan arsitektur baru, bukan yang lama.
 2. `STATUS.md` menyebut suite `xor-pir-v1` dan rute `/api/pir/{manifest,query}`.
-3. Drill tamper dan drill desync berjalan di CI (job `drills`).
+3. Drill live dua server berjalan di CI (job `drills` → `pir-e2e`); `PIR_TAMPERED`
+   dan `PIR_DESYNC` dibuktikan tes unit klien + vektor, karena sidecar menolak
+   shard yang `dbRoot`-nya tidak cocok (§42.8).
 4. `PIR_SERVERS` berisi <2 entri = boot gagal, ada tesnya.
-5. Tidak ada lagi referensi `chalametpir` di `Cargo.toml`, `package.json`, atau docs.
+5. Tidak ada lagi referensi `chalametpir` sebagai **jalur aktif** di `Cargo.toml`
+   atau `package.json`. Docs hanya menyebutnya sebagai riwayat penggantian
+   (docs/29, docs/36, dokumen ini) — bukan dokumentasi fitur yang berjalan.
 
 ## 42.11 Risiko
 
