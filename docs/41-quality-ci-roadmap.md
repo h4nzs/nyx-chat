@@ -29,7 +29,7 @@ Prinsip yang tidak berubah:
 | §6.7 PIR dua server | ✅ WP1–WP9 | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, proxy dua-server (`PIR_SERVERS`), dan klien XOR (dua relay OHTTP + verifikasi manifest) sudah ada; jalur lama sudah dihapus. Unit template + metrik/alert ops juga sudah (WP7). E2E dua server + vektor lintas-impl sudah (WP8, drill CI `pir-e2e`); WP9 = pembersihan sisa jalur lama + `STATUS.md` (selesai). Performa diukur manual via `scripts/bench/pir-query.mjs` (2026-11-11: p95 3,8 ms; 2.560 B/query; RSS 1,61× pada shard 8 MiB, 1,16× pada 32 MiB — target gate di `docs/42`). |
 | §6.8 KT live E2E | ✅ ABI 2 | `web/e2e/ktLive.spec.ts`: config `abiVersion: 2` + kunci ML-DSA-65, `/head`, anchor `distinguished`, bukti publik `POST /search`; **lulus 1,4 menit** terhadap KT v2 lokal. Interop `cmd/kt-client` tetap item lanjutan. |
 | §7.1 WebKit/Firefox smoke | 🟡 project + nightly | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`; belum ada run hijau (butuh runner ber-browser) |
-| §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (**8 tes**: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS, **429**) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
+| §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (**7 sub-tes**: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS, **429**) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
 | §7.3 nightly fuzz/k6 | ✅ workflow | `.github/workflows/nightly.yml`: fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU ephemeral, smoke Firefox/WebKit, a11y, contract HTTP; belum ada run hijau di Actions |
 | §7.4 flake gate + karantina | ✅ gate | `web/e2e/quarantine.json` + `evaluateQuarantine` di `verify-required-tests.mjs` (owner/reason/expires wajib; kedaluwarsa/masih-jalan tes hilang = gagal); self-test 12/12 |
 | §7.5 backup/restore E2E | ✅ Playwright | `web/e2e/backupRestore.spec.ts`: ekspor `.nyxbak` (**magic `NYXB`**, unduhan nyata) lalu restore dengan recovery phrase yang dibaca dari onboarding; **lulus 2,1 menit**. Drill mingguan tetap ada. |
@@ -168,7 +168,7 @@ supaya daftar 12 required check tidak berubah. **Belum**: skenario E2E
 `available: true` → arsip terunggah → perangkat baru mengunduh; jalur negatif
 503 sudah ada dan harus tetap lulus.
 
-### 6.7 PIR dua server — rencana `docs/42` (WP1–WP7 kode, belum menyala)
+### 6.7 PIR dua server — selesai WP1–WP9 (fitur tetap default mati)
 
 **Keputusan 2026-11-09** mengubah arah: ChalametPIR (tanpa proof, hint ±11 MB,
 rebuild global tiap epoch) diganti **XOR-PIR dua server + sharding**. Alasan,
@@ -253,7 +253,8 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
   `fetch` + `app.listen(0)`, bukan `supertest` (tidak perlu dependensi baru).
   **Sudah ditambah 8 November 2026**: rate-limit 429 (bucket unik lewat
   `CF-Connecting-IP` agar tidak memakan limiter 127.0.0.1 milik E2E) — suite
-  **8/8 lulus**. **Belum dicakup**: `COOKIE_DOMAIN`, OHTTP bearer scope, urutan
+  **lulus** (`node:test` melaporkan 8 tes: 7 sub-tes di atas + pembungkusnya).
+  **Belum dicakup**: `COOKIE_DOMAIN`, OHTTP bearer scope, urutan
   gate `token → admin → member count` (butuh akun + DB nyata, kandidat lanjutan).
 - **§7.3** Nightly — **workflow dibuat**: `.github/workflows/nightly.yml`
   (02:00 UTC) berisi fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU di stack
