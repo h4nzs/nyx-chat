@@ -532,10 +532,14 @@ export default function SettingsPage() {
                            <FiShield size={10} /> {t('settings:identity.verified')}
                          </span>
                        ) : (
+                         /* [a11y 2026-11-13] `text-yellow-500` di atas tint 10% cuma ~1,4:1 pada
+                            tema terang; axe (nightly `Smoke Firefox + WebKit`) menandainya
+                            `color-contrast` serious. yellow-800 / dark:yellow-300 lolos 4,5:1
+                            di kedua tema tanpa mengubah tata letak. */
                          <button 
                            type="button"
                            onClick={() => setShowUpgradeModal(true)}
-                           className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
+                           className="text-[10px] bg-yellow-500/10 text-yellow-800 dark:text-yellow-300 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
                          >
                            <FiLock size={10} /> {t('settings:identity.sandboxed')}
                          </button>
@@ -667,7 +671,7 @@ export default function SettingsPage() {
               </div>
               <div className="mt-6 flex items-center justify-between">
                 <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary/50">Status</span>
-                <div className={`px-3 py-1 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${user?.subscriptionTier === 'SUBSCRIBER' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-black/5 dark:bg-white/5 text-text-secondary'}`}>
+                <div className={`px-3 py-1 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${user?.subscriptionTier === 'SUBSCRIBER' ? 'bg-yellow-500/10 text-yellow-800 dark:text-yellow-300' : 'bg-black/5 dark:bg-white/5 text-text-secondary'}`}>
                   {user?.subscriptionTier === 'SUBSCRIBER' ? 'Active PRO' : 'Free Tier'}
                 </div>
               </div>
