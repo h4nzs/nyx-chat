@@ -65,6 +65,13 @@ export function writeReloadMarker(): void {
 }
 
 export function registerServiceWorker() {
+  // [BUG 2026-11-12] `sw.js` hanya ada di build PWA. Di build dev Vite menjawab
+  // `/sw.js` dengan `index.html` (MIME `text/html`), registrasi ditolak dengan
+  // `SecurityError` — dan di WebKit menyentuh `navigator.serviceWorker`
+  // MEMBEKUKAN main thread (jejak yang sama dengan `logout()`). Tidak ada SW
+  // untuk didaftarkan di dev, jadi jalurnya dilewati — sejalan dengan
+  // `isPushSupported()`.
+  if (!import.meta.env.PROD) return;
   if ('serviceWorker' in navigator) {
     const wb = new Workbox('/sw.js');
 

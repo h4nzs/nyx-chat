@@ -1,6 +1,6 @@
 # 41 — Roadmap kesehatan development, audit, tes, E2E, coverage, dan CI
 
-**Status:** hidup — diperbarui 5 November 2026.
+**Status:** hidup — diperbarui 12 November 2026.
 **Menggantikan:** `~/.opencode/plan/nyx-quality-ci-roadmap.md` (plan eksternal, revisi 2).
 Dokumen ini ada **di dalam repo** supaya komentar `[docs/41 §6.1]` di kode bisa
 diresolusi tanpa akses ke direktori pribadi siapa pun. Nomor bagian sengaja
@@ -47,9 +47,9 @@ mengukurnya kembali.
 |---|---|---|
 | Job `ci.yml` | 12 | `python3 -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']))"` |
 | Workflow total | 12 | `ls .github/workflows/` |
-| Spec E2E | 18 | `ls web/e2e/*.spec.ts | wc -l` |
+| Spec E2E | 19 | `ls web/e2e/*.spec.ts | wc -l` |
 | Berkas tes web | 137 | `find web/src -name '*.test.ts*' | wc -l` |
-| Berkas tes server | 101 | daftar eksplisit `server/package.json` |
+| Berkas tes server | 102 (13 Nov 2026) | daftar eksplisit `server/package.json` |
 | Tes Go KT | 58 | `cd server/kt-query && ./build.sh test` |
 | Aturan alert | 44 | `grep -c '^\s*- alert:' ops/prometheus/alerts.yml` |
 | Required contexts `main` | 14 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
@@ -100,7 +100,7 @@ crypto worker dan diuji lewat E2E.
 ### 6.2 Coverage server — selesai
 
 `server/scripts/test-coverage.mjs` membaca script `test` dari `package.json`
-(satu-satunya daftar 101 berkas) lalu menjalankannya dengan
+(satu-satunya daftar berkas tes) lalu menjalankannya dengan
 `--experimental-test-coverage`; tidak ada daftar kedua yang bisa menyimpang.
 Gagal karena `NODE_OPTIONS` menolak flag itu, jadi runner memanggil
 `process.execPath` langsung dengan `--import tsx` dan `--enable-source-maps`.
@@ -143,9 +143,12 @@ hilang, jumlah menyusut; 4 karantina: sah, kedaluwarsa, tes hilang, masih
 berjalan) dan ikut jalan di CI.
 
 Cakupan `mustPass`: auth (register/login/wrong password), profile, security,
-settings, recovery, deviceLinking, group lifecycle — 9 tes di chromium — plus
-transport, chat, dan call di chrome (12 tes). Skip hanya sah bila labelnya cocok dengan
-`allowedSkipReasons`; alasan baru berarti PR yang mengubah manifest.
+settings, recovery, deviceLinking, group lifecycle, backup/restore — **10 tes di
+chromium** — plus transport (2), chat, profile, security, settings, recovery,
+deviceLinking, group lifecycle, dan backup/restore di chrome (**13 tes**). Skip
+hanya sah bila labelnya cocok dengan `allowedSkipReasons`; alasan baru berarti PR
+yang mengubah manifest. (`call.spec.ts` sengaja **tidak** ada di `mustPass`:
+butuh coturn, dan di luar job `e2e-chrome` ia skip dengan alasan tertulis.)
 
 ### 6.6 MinIO / jalur sukses R2 — jalur nyata sudah dijalankan
 
@@ -254,8 +257,13 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
   **Sudah ditambah 8 November 2026**: rate-limit 429 (bucket unik lewat
   `CF-Connecting-IP` agar tidak memakan limiter 127.0.0.1 milik E2E) — suite
   **lulus** (`node:test` melaporkan 8 tes: 7 sub-tes di atas + pembungkusnya).
-  **Belum dicakup**: `COOKIE_DOMAIN`, OHTTP bearer scope, urutan
-  gate `token → admin → member count` (butuh akun + DB nyata, kandidat lanjutan).
+  **Ditambahkan 12 November 2026**: `COOKIE_DOMAIN` (atribut `Domain` pada cookie
+  CSRF) dan token bearer OHTTP yang ditolak `403 OHTTP_SCOPE_DENIED` di luar
+  allowlist — keduanya lulus dalam suite kontrak (9/9). Urutan gate
+  `token → admin → member count` juga diuji lewat request HTTP nyata di
+  `groupLifecycle.spec.ts`: tanpa token → 403 `BLIND_AUTH_REQUIRED`, token saja
+  → 403 `ADMIN_AUTH_REQUIRED`, keduanya dengan anggota tersisa → 409
+  `MEMBERS_REMAIN`.
 - **§7.3** Nightly — **workflow dibuat**: `.github/workflows/nightly.yml`
   (02:00 UTC) berisi fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU di stack
   ephemeral, smoke Firefox/WebKit, a11y, contract HTTP. Drill tetap di
@@ -330,8 +338,12 @@ global — §6.1/§6.2); siapa boleh bypass branch protection (admin, dengan
 `cmd/kt-client` menjadi item lanjutan; (b) PIR — **verifikasi proof di klien
 dulu**, dan karena ChalametPIR tidak menghasilkan proof, mekanismenya masih
 terbuka (Merkle inclusion + root bertanda tangan vs skema PIR terverifikasi).
-**Masih terbuka:** (c) WebKit/Firefox — nightly saja atau langsung PR;
-(d) apakah changed-lines server layak dikejar (butuh lcov dari toolchain lain).
+**Diputuskan 12 November 2026:** (c) WebKit/Firefox tetap **nightly-only**;
+belum dipindah ke PR sampai ada 7 hari hijau. (d) Changed-lines server **tidak
+dikejar**: `node --test-reporter=lcov` di Node 26 hanya menghasilkan `TN:` dan
+exit 1 pada percobaan nyata, jadi butuh toolchain lcov baru yang tidak sepadan
+untuk gate non-blocking. Changed-lines web tetap dilaporkan dan belum memblokir
+sampai 10 run stabil.
 
 ## 41.8 Cara verifikasi
 

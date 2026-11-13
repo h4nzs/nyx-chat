@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { transportClient, } from '@lib/transportClient';
+import { isPushSupported } from '@lib/pushSupport';
 import { urlBase64ToUint8Array } from '@utils/url';
 import toast from 'react-hot-toast';
 import i18n from '../i18n';
@@ -63,9 +64,12 @@ export function usePushNotifications() {
     }
   }, []);
 
-  // 1. Cek status subscription saat pertama kali load
+  // 1. Cek status subscription saat pertama kali load.
+  //    Gerbangnya `isPushSupported()`: di build dev `sw.js` tidak ada dan
+  //    `navigator.serviceWorker.ready` MEMBEKUKAN main thread WebKit — halaman
+  //    /settings lalu mati total (trace WebKit run lokal `/tmp/opencode/wktrace6`).
   useEffect(() => {
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
+    if (isPushSupported()) {
       getReadyServiceWorker(1500).then(registration => {
         if (!registration) return;
         registration.pushManager.getSubscription().then(subscription => {
@@ -87,7 +91,7 @@ export function usePushNotifications() {
 
   // 2. Fungsi Subscribe (Dipanggil saat tombol diklik)
   const subscribeToPush = useCallback(async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!isPushSupported()) {
       toast.error(i18n.t('errors:push_notifications_not_supported', 'Push notifications not supported'));
       return;
     }

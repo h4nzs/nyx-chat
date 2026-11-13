@@ -95,7 +95,8 @@ export default function KeyManagementPage() {
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
             const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
             if (result.success) {
-                 // @ts-ignore
+                 // `RetrieveKeysResult` adalah union bertanda, jadi `result.keys`
+                 // sudah menyempit ke `RetrievedKeys` di cabang ini.
                  useAuthStore.getState().setDecryptedKeys(result.keys);
                  // Upload the newly minted keys to the server IMMEDIATELY to prevent race conditions
                  await setupAndUploadPreKeyBundle();

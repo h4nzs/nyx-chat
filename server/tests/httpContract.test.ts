@@ -38,6 +38,15 @@ test(
     process.env.JWT_SECRET ??= 'contract-jwt-secret';
     process.env.CSRF_SECRET ??= 'contract-csrf-secret';
     process.env.CORS_ORIGIN ??= 'https://app.example.test';
+    // [docs/41 §7.2] Tes kontrak tidak boleh bergantung pada fitur opsional di
+    // `.env` lokal. Tanpa ini, `PIR_ENABLED=1` dengan `PIR_SERVERS` yang tidak
+    // lengkap menggagalkan import `app` sebelum satu asersi pun berjalan.
+    process.env.PIR_ENABLED = '0';
+    process.env.OHTTP_ENABLED = '0';
+    // [docs/41 §7.2] Cookie CSRF memakai opsi yang sama dengan cookie sesi.
+    // Nilai ini harus diset SEBELUM `app` diimpor (config membacanya saat modul
+    // dimuat); test di bawah membuktikan atribut `Domain` benar-benar keluar.
+    process.env.COOKIE_DOMAIN = '.example.test';
 
     // Redis HARUS tersambung SEBELUM `app` diimpor: limiter membuat store dan
     // mencoba inisialisasi saat modul dimuat. Kalau urutannya dibalik, setiap
@@ -110,6 +119,25 @@ test(
         assert.ok(body.csrfToken && body.csrfToken.length > 10, 'token tidak boleh kosong');
         const cookies = response.headers.get('set-cookie') ?? '';
         assert.match(cookies, /x-csrf-token=/);
+        // [docs/41 §7.2] COOKIE_DOMAIN adalah kontrak deployment multi-host:
+        // tanpa `Domain`, cookie hanya dikirim ke host REST dan handshake socket
+        // ke `api.*` ditolak (insiden 2026-10-25). Diuji lewat header nyata,
+        // bukan hanya fungsi normalisasi config.
+        assert.match(cookies, /Domain=\.example\.test/i, `cookie CSRF harus membawa Domain: ${cookies}`);
+      });
+
+      await t.test('token bearer OHTTP ditolak di luar allowlist (403)', async () => {
+        const { signOhttpToken } = await import('../src/utils/ohttpToken.js');
+        const token = signOhttpToken({
+          userId: 'contract-ohttp-user',
+          deviceId: 'contract-ohttp-device',
+          jti: 'contract-ohttp-jti',
+        });
+        const response = await fetch(`${base}/api/users/me`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), { error: 'OHTTP_SCOPE_DENIED' });
       });
 
       await t.test('origin asing tidak mendapat Access-Control-Allow-Origin', async () => {

@@ -57,6 +57,17 @@ test.describe('Authentication & Onboarding', () => {
     });
     loginPage.on('pageerror', (err) => console.log(`[auth.spec][login page pageerror] ${err.message}`));
 
+    // [BUG 2026-11-11] Halaman utama juga perlu listener: tanda `[logout] …`
+    // dari store (DEV) hanya berguna kalau sampai ke log CI. Tanpa ini, "tidak
+    // ada tanda apa pun" tidak bisa dibedakan dari "main thread beku".
+    page.on('console', (msg) => {
+      const text = msg.text();
+      if (text.includes('[logout]') || msg.type() === 'error') {
+        console.log(`[auth.spec][page console] ${text}`);
+      }
+    });
+    page.on('pageerror', (err) => console.log(`[auth.spec][page pageerror] ${err.message}`));
+
     await test.step('registrasi akun uji', async () => {
       await registerUser(page, 'Test Login User', username);
     });
@@ -113,7 +124,12 @@ test.describe('Authentication & Onboarding', () => {
             (result.ok ? '' : ` (store melempar: ${result.error})`)
         );
         if (!stillLoggedIn) break;
-        await page.waitForTimeout(1000);
+        // [BUG 2026-11-11] Jeda ini dulu `page.waitForTimeout(1000)`. Playwright
+        // menyerialkan panggilan level-halaman: bila `page.evaluate(logout())`
+        // masih menggantung (WebKit), `waitForTimeout` ikut mengantre dan tes
+        // mati di timeout 240 dtk tanpa bukti tambahan. Jeda di sisi Node tidak
+        // pernah mengantre di belakang halaman.
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       const refreshCookie = (await page.context().cookies()).find((c) => c.name === 'rt');

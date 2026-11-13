@@ -71,7 +71,14 @@ export async function dismissModalCloseButton(page: Page, timeoutMs = 20000): Pr
  * jadi tour tidak muncul lagi setelah reload/navigasi berikutnya. Akun lama
  * (flag sudah true) dilewati tanpa error. (URL harus sudah di /chat.)
  */
-export async function dismissOnboardingTour(page: Page, timeoutMs = 20000): Promise<void> {
+// [BUG 2026-11-12] Batas 20 dtk terlalu pendek: tour baru dirender setelah
+// `POST /users/me/complete-onboarding` selesai, dan di WebKit (nightly run
+// 43015446345, repro lokal `/tmp/opencode/wktrace2`) itu terjadi ~32 dtk
+// setelah "System Ready". `waitFor` 20 dtk lalu menyerah, overlay Quick Tour
+// tertinggal, dan klik berikutnya (`settings.spec.ts` tombol eject) ditolak
+// overlay sampai tes mati di timeout 180 dtk. Tour selalu muncul untuk akun
+// baru, jadi tunggu lebih lama — bukan "opsional".
+export async function dismissOnboardingTour(page: Page, timeoutMs = 45000): Promise<void> {
   const tour = page.getByRole('dialog').filter({ hasText: /Quick Tour/i }).first();
   try {
     await tour.waitFor({ state: 'visible', timeout: timeoutMs });
@@ -213,19 +220,20 @@ export async function registerUserViaBiometric(page: Page, displayName: string, 
   await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-  // 1. Bypass biometric BILA prompt-nya muncul. WebKit headless tidak selalu
-  //    punya platform authenticator, dan alur registrasi melewati langkah ini
-  //    ketika WebAuthn tidak tersedia — menunggu 30 dtk untuk tombol yang memang
-  //    tidak akan ada adalah kegagalan harness (run 42362200951), bukan produk.
-  const skipBiometricBtn = page.locator('button:has-text("Skip"), button:has-text("Continue")').first();
-  try {
-    await expect(skipBiometricBtn).toBeVisible({ timeout: 8000 });
-    await skipBiometricBtn.click();
-  } catch {
-    console.log('Biometric prompt skipped or not found');
-  }
+  // 1. Langkah verifikasi kepercayaan SELALU muncul setelah registrasi selesai
+  //    (Argon2 + pembuatan kunci di worker; 40–70 dtk saat mesin sibuk).
+  //    Dulu langkah ini dicari lewat locator samar `Skip/Continue` dengan batas
+  //    8 dtk dan dianggap opsional: di WebKit tombol aslinya ("Skip for now")
+  //    belum ada dalam 8 dtk, langkah itu ditembus, lalu helper macet menunggu
+  //    `Acknowledge` sampai timeout 180 dtk milik spec (Smoke Firefox + WebKit).
+  //    Samakan dengan `walkOnboarding`: tunggu tombol yang benar, dengan anggaran
+  //    yang sama dengan rantai standar.
+  const skipTrustBtn = page.getByRole('button', { name: /Skip for now/i });
+  await skipTrustBtn.waitFor({ state: 'visible', timeout: 90000 });
+  await skipTrustBtn.click();
 
   // 2. Bypass recovery modal (acknowledge + tutup).
+  await page.getByRole('button', { name: /Acknowledge/i }).waitFor({ state: 'visible', timeout: 20000 });
   await page.getByRole('button', { name: /Acknowledge/i }).click();
   const closeRecoveryBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
   await expect(closeRecoveryBtn).toBeVisible({ timeout: 5000 });

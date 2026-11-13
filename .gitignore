@@ -91,6 +91,10 @@ tools/dr-oracle/nyx-dr-oracle
 # scripts/drill-alerts.sh) — jangan di-commit: ~110MB dan terikat platform.
 .cache/
 
+# pnpm store lokal (dibuat oleh `pnpm install` dengan store-dir di repo).
+# Tanpa entri ini `git add -A` ikut memasukkan ribuan berkas store.
+.pnpm-store/
+
 # [deepwork] state sesi lokal, bukan deliverable
 .slim/deepwork/
 

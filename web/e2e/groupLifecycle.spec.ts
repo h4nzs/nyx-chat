@@ -225,17 +225,37 @@ test.describe('Group lifecycle (API contract)', () => {
         groupToken = body.authSecret;
       });
 
-      await test.step('purge: anggota tersisa 409, setelah semua keluar 204', async () => {
+      await test.step('purge: urutan gate token → admin → anggota, lalu 204', async () => {
         const csrfA = ((await (await pageA.request.get('/api/csrf-token', {
           headers: { 'x-nyx-installation-id': 'e2e-group-a' },
         })).json()) as { csrfToken: string }).csrfToken;
+        const baseHeaders = {
+          'x-nyx-installation-id': 'e2e-group-a',
+          'csrf-token': csrfA,
+        };
+
+        // [docs/41 §7.2] Urutan ini kontrak, bukan detail implementasi: token
+        // grup harus dinilai sebelum capability admin, dan capability admin
+        // sebelum hitungan anggota. Setiap langkah memakai request nyata dengan
+        // anggota masih tersisa, sehingga status yang berbeda hanya bisa berasal
+        // dari gate yang sedang diuji.
+        const noToken = await pageA.request.delete(`/api/conversations/${conversationId}/group`, {
+          headers: baseHeaders,
+        });
+        expect(noToken.status(), 'tanpa X-Group-Token harus 403 token').toBe(403);
+        expect(((await noToken.json()) as { error: string }).error).toContain('BLIND_AUTH_REQUIRED');
+
+        const tokenOnly = await pageA.request.delete(`/api/conversations/${conversationId}/group`, {
+          headers: { ...baseHeaders, 'x-group-token': groupToken },
+        });
+        expect(tokenOnly.status(), 'token benar tanpa admin harus 403 admin').toBe(403);
+        expect(((await tokenOnly.json()) as { error: string }).error).toContain('ADMIN_AUTH_REQUIRED');
 
         const blocked = await pageA.request.delete(`/api/conversations/${conversationId}/group`, {
           headers: {
+            ...baseHeaders,
             'x-admin-token': adminToken,
             'x-group-token': groupToken,
-            'x-nyx-installation-id': 'e2e-group-a',
-            'csrf-token': csrfA,
           },
         });
         expect(blocked.status(), 'purge dengan anggota tersisa harus 409').toBe(409);

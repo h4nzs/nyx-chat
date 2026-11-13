@@ -138,7 +138,10 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
     } catch (_e) {}
 
     // 4. Unregister all Service Workers (removes PWA traces and caches)
-    if ('serviceWorker' in navigator) {
+    // [BUG 2026-11-12] Di build dev tidak ada SW yang terdaftar (registrasi
+    // dilewati) dan menyentuh `navigator.serviceWorker` membekukan WebKit —
+    // wipe lalu menggantung sebelum redirect. Produksi tetap membersihkannya.
+    if (import.meta.env.PROD && 'serviceWorker' in navigator) {
       const registrations = await navigator.serviceWorker.getRegistrations();
       for (const registration of registrations) {
         await registration.unregister();

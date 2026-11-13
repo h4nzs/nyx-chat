@@ -9,7 +9,7 @@ React 19, Vite 8, TypeScript (strict + `noUncheckedIndexedAccess`), Zustand v5, 
 1. `main.tsx`: `import './zodSetup'` (Zod jitless — must stay first) → i18n init → **wait for i18n `initialized` before rendering** (prevents transient missingKey warnings) → render `<App/>` → `registerServiceWorker()`.
 2. `App.tsx`: `bootstrap()` (silent refresh) → routes; global modals are `React.lazy` + render-on-demand via store flags.
 
-## 6.3 State — 21 Zustand stores
+## 6.3 State — 22 Zustand stores
 
 | Store | Responsibility |
 |---|---|
@@ -28,6 +28,7 @@ React 19, Vite 8, TypeScript (strict + `noUncheckedIndexedAccess`), Zustand v5, 
 | `theme.ts` | Theme/accent (persisted) |
 | `modal.ts` | Global modal flags (confirm, profile, password prompt, chat info) |
 | `callStore.ts` | WebRTC call state |
+| `clientVersionGate.ts` | Status gate versi klien (426 `too-old`/`version-required`, `dismissed`) |
 | `commandPalette.ts` | Command palette |
 | `contextMenu.ts` | Right-click menu state |
 | `dynamicIsland.ts` | Activity notifications |
