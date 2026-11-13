@@ -22,6 +22,29 @@
 import { expect, Page } from '@playwright/test';
 
 /**
+ * Anggaran menunggu langkah "Skip for now" (trust level) setelah
+ * `Initialize Identity` diklik.
+ *
+ * Langkah itu baru dirender setelah registrasi selesai, dan yang mahal
+ * seluruhnya ada di klien: Argon2id vault 128 MB/4 iterasi + index 64 MB/3
+ * iterasi di crypto worker, lalu pembuatan kunci pasca-kuantum. Di build dev
+ * Vite juga harus mentransformasi modul kripto saat pertama dibuka.
+ *
+ * Riwayat anggaran ini, semuanya terukur:
+ *   - 60 dtk → gagal di mesin dev yang sedang sibuk (rantai 40–70 dtk);
+ *   - 90 dtk → gagal di CI WebKit (`Smoke Firefox + WebKit`, nightly
+ *     43420308481): `Skip for now` tidak muncul dalam 90 dtk, padahal tes
+ *     Firefox di job yang sama menyelesaikan registrasi dalam 1,3 m dan WebKit
+ *     lokal (Docker) hanya 45–60 dtk. Runner CI 2 core + JSC jauh lebih lambat
+ *     untuk Argon2, jadi batas 90 dtk memotong pekerjaan yang sah.
+ *   - 180 dtk (sekarang): ~2,3× nilai WebKit lokal dan di atas angka apa pun
+ *     yang pernah terukur. Ini batas atas untuk pekerjaan nyata — bukan cara
+ *     menyembunyikan hang: `Crypto worker timeout` di proxy tetap 120 dtk dan
+ *     akan melempar galat bila worker benar-benar macet.
+ */
+export const TRUST_STEP_TIMEOUT_MS = 180_000;
+
+/**
  * Tutup modal onboarding yang sedang tampil lewat tombol `×`-nya.
  *
  * `locator(...).first().click()` rapuh di sini: saat berpindah langkah, modal
@@ -152,13 +175,9 @@ async function walkOnboarding(
   await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-  // 1. Trust level verification (muncul setelah registrasi selesai, ~15-20 dtk di
-  //    mesin idle). Di mesin dev ini rantai registrasi terukur 40-70 dtk saat box
-  //    sedang sibuk (Argon2 di worker), dan anggaran 60 dtk membuat spec mana pun
-  //    yang kebetulan berjalan paling lambat gagal di sini — gejalanya "Skip for
-  //    now tidak muncul" yang mudah disalahartikan sebagai bug registrasi. Beri
-  //    ruang untuk rentang yang terukur, bukan untuk hang tanpa batas.
-  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 90000 });
+  // 1. Trust level verification (muncul setelah registrasi selesai; lihat
+  //    `TRUST_STEP_TIMEOUT_MS` untuk riwayat anggaran dan angka terukurnya).
+  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: TRUST_STEP_TIMEOUT_MS });
   await page.getByRole('button', { name: /Skip for now/i }).click();
 
   // 2. Protocol: Recovery
@@ -221,15 +240,14 @@ export async function registerUserViaBiometric(page: Page, displayName: string, 
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
   // 1. Langkah verifikasi kepercayaan SELALU muncul setelah registrasi selesai
-  //    (Argon2 + pembuatan kunci di worker; 40–70 dtk saat mesin sibuk).
-  //    Dulu langkah ini dicari lewat locator samar `Skip/Continue` dengan batas
-  //    8 dtk dan dianggap opsional: di WebKit tombol aslinya ("Skip for now")
-  //    belum ada dalam 8 dtk, langkah itu ditembus, lalu helper macet menunggu
-  //    `Acknowledge` sampai timeout 180 dtk milik spec (Smoke Firefox + WebKit).
-  //    Samakan dengan `walkOnboarding`: tunggu tombol yang benar, dengan anggaran
-  //    yang sama dengan rantai standar.
+  //    (Argon2 + pembuatan kunci di worker). Dulu langkah ini dicari lewat
+  //    locator samar `Skip/Continue` dengan batas 8 dtk dan dianggap opsional:
+  //    di WebKit tombol aslinya ("Skip for now") belum ada dalam 8 dtk, langkah
+  //    itu ditembus, lalu helper macet menunggu `Acknowledge` sampai timeout
+  //    180 dtk milik spec (Smoke Firefox + WebKit). Samakan dengan
+  //    `walkOnboarding`: tombol yang benar, anggaran yang sama.
   const skipTrustBtn = page.getByRole('button', { name: /Skip for now/i });
-  await skipTrustBtn.waitFor({ state: 'visible', timeout: 90000 });
+  await skipTrustBtn.waitFor({ state: 'visible', timeout: TRUST_STEP_TIMEOUT_MS });
   await skipTrustBtn.click();
 
   // 2. Bypass recovery modal (acknowledge + tutup).

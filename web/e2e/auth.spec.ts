@@ -7,6 +7,11 @@ test.describe('Authentication & Onboarding', () => {
   test.setTimeout(180000);
 
   test('Register with Proof of Work', async ({ page }) => {
+    // Rantai onboarding kini punya anggaran 180 dtk untuk langkah trust saja
+    // (`TRUST_STEP_TIMEOUT_MS`), dan sisa rantainya ~60 dtk terukur di CI
+    // Firefox (nightly 43416725350: tes ini 1,3 m total). Batas 180 dtk milik
+    // describe akan memotong tes sebelum anggaran itu habis, jadi naikkan.
+    test.setTimeout(300000);
     const username = `testuser_pow_${Date.now()}`;
     await page.route('**/api/auth/pow/challenge', async route => {
       await route.fulfill({ status: 200, json: { challenge: 'mock_challenge', difficulty: 1 } });
