@@ -22,6 +22,13 @@
 import { expect, Page } from '@playwright/test';
 
 /**
+ * Halaman yang sudah dipasangi penangan otomatis Quick Tour. `addLocatorHandler`
+ * menolak pemasangan ganda pada locator yang sama, dan `registerUser` bisa
+ * dipanggil lebih dari sekali pada satu halaman (mis. spec multi-akun).
+ */
+const tourHandlerInstalled = new WeakSet<Page>();
+
+/**
  * Anggaran menunggu langkah "Skip for now" (trust level) setelah
  * `Initialize Identity` diklik.
  *
@@ -99,19 +106,36 @@ export async function dismissModalCloseButton(page: Page, timeoutMs = 20000): Pr
 // 43015446345, repro lokal `/tmp/opencode/wktrace2`) itu terjadi ~32 dtk
 // setelah "System Ready". `waitFor` 20 dtk lalu menyerah, overlay Quick Tour
 // tertinggal, dan klik berikutnya (`settings.spec.ts` tombol eject) ditolak
-// overlay sampai tes mati di timeout 180 dtk. Tour selalu muncul untuk akun
-// baru, jadi tunggu lebih lama — bukan "opsional".
+// overlay sampai tes mati di timeout 180 dtk.
+// [2026-11-14] Karena itu penanganannya tidak lagi berupa tunggu buta: lihat
+// komentar di dalam fungsi (`addLocatorHandler`).
 export async function dismissOnboardingTour(page: Page, timeoutMs = 45000): Promise<void> {
+  // [2026-11-14] Tour diurus sebagai penangan otomatis, bukan tunggu buta.
+  //
+  // Tour hanya dirender bila `user.hasCompletedOnboarding === false`, dan flag
+  // itu datang dari server. Setelah registrasi (jalur `/api/auth/register`)
+  // respons server TIDAK membawa flag tersebut, sedangkan setelah reload
+  // (`GET /api/users/me`) flag ada — jadi tour bisa muncul kapan saja, termasuk
+  // puluhan detik kemudian saat chunk lazy `OnboardingTour` baru selesai di CI.
+  // Tunggu buta 45 dtk per registrasi karena itu (a) sering membuang waktu saat
+  // tour memang tak akan muncul dan (b) tetap bisa meleset bila tour muncul
+  // lebih lambat. `addLocatorHandler` menutup tour tepat sebelum aksi
+  // berikutnya, berapa pun delay-nya, dan tanpa menahan tes.
   const tour = page.getByRole('dialog').filter({ hasText: /Quick Tour/i }).first();
-  try {
-    await tour.waitFor({ state: 'visible', timeout: timeoutMs });
-  } catch {
-    return; // bukan akun baru / tour sudah ditutup sebelumnya
+  if (!tourHandlerInstalled.has(page)) {
+    tourHandlerInstalled.add(page);
+    await page.addLocatorHandler(tour, async () => {
+      await page.getByRole('button', { name: /Close modal/i }).first().click({ force: true }).catch(() => {});
+      await expect(tour).toBeHidden({ timeout: 15000 }).catch(() => {});
+    }, { noWaitAfter: true });
   }
-  await tour.getByRole('button', { name: /Close modal/i }).first().click({ force: true });
+
+  // Kalau tour sudah tampil sekarang (jalur reload), tutup segera.
+  if (!(await tour.isVisible().catch(() => false))) return;
+  await page.getByRole('button', { name: /Close modal/i }).first().click({ force: true });
   // Modal baru lepas dari DOM setelah POST complete-onboarding selesai — kalau
   // overlay masih terpasang, klik pengguna berikutnya akan ditolak lagi.
-  await expect(tour).toBeHidden({ timeout: 15000 });
+  await expect(tour).toBeHidden({ timeout: timeoutMs });
 }
 
 /**
@@ -213,18 +237,13 @@ async function walkOnboarding(
     console.log('System Init modal skipped or not found');
   }
 
-  // 6. Quick Tour (opsional — muncul di /chat, setelah System Ready).
-  const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-  try {
-    await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await closeTourBtn.click();
-  } catch {
-    console.log('Quick Tour modal skipped or not found');
-  }
+  // 6. Quick Tour: tidak perlu di-probe di sini — tour hanya hidup di /chat
+  //    (dirender ChatWindow), dan `modal` apa pun yang dibuka di langkah ini
+  //    sudah ditutup di atas. Penanganan tour ada di `dismissOnboardingTour`.
 
   await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 30000 });
 
-  // 7. Tutup Quick Tour SETELAH mendarat di /chat (di /register tour belum ada).
+  // 7. Pasang penangan Quick Tour untuk sisa umur halaman (lihat komentarnya).
   await dismissOnboardingTour(page);
   return phrase;
 }
@@ -267,18 +286,12 @@ export async function registerUserViaBiometric(page: Page, displayName: string, 
     console.log('System Init modal skipped or not found');
   }
 
-  // 4. Quick Tour (opsional).
-  const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-  try {
-    await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await closeTourBtn.click();
-  } catch {
-    console.log('Quick Tour modal skipped or not found');
-  }
+  // 4. Quick Tour: tidak perlu di-probe di sini — tour hanya hidup di /chat.
+  //    Penanganan tour ada di `dismissOnboardingTour`.
 
   await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 15000 });
 
-  // 5. Tutup Quick Tour SETELAH mendarat di /chat (di /register tour belum ada).
+  // 5. Pasang penangan Quick Tour untuk sisa umur halaman.
   await dismissOnboardingTour(page);
 }
 
