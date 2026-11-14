@@ -3,7 +3,7 @@
   "note": "Manifest tes wajib E2E (docs/41 §6.5). Dibaca oleh web/e2e/verify-required-tests.mjs dari report JSON Playwright. Aturannya: `minTotal` = jumlah tes yang harus terkumpul untuk project itu; `mustPass` = tes yang wajib ada DAN benar-benar dijalankan (skip selalu pelanggaran); `allowedSkipReasons` = substring/regex alasan skip yang boleh (skip tanpa alasan atau dengan alasan baru = pelanggaran, jadi skip baru harus lewat PR yang mengubah berkas ini).",
   "projects": {
     "chromium": {
-      "minTotal": 24,
+      "minTotal": 25,
       "mustPass": [
         {
           "file": "auth.spec.ts",
@@ -42,6 +42,10 @@
           "title": "Group lifecycle (API contract) › admin rotate/kick/purge menegakkan gate dan era token"
         },
         {
+          "file": "groupEra.spec.ts",
+          "title": "Group era (kripto UI) › pesan era lama tetap terbaca setelah rotasi epoch"
+        },
+        {
           "file": "backupRestore.spec.ts",
           "title": "Backup & restore .nyxbak › ekspor dari Settings lalu restore dengan phrase yang sama"
         }
@@ -62,7 +66,7 @@
       ]
     },
     "chrome": {
-      "minTotal": 24,
+      "minTotal": 25,
       "mustPass": [
         {
           "file": "auth.spec.ts",
@@ -111,6 +115,10 @@
         {
           "file": "groupLifecycle.spec.ts",
           "title": "Group lifecycle (API contract) › admin rotate/kick/purge menegakkan gate dan era token"
+        },
+        {
+          "file": "groupEra.spec.ts",
+          "title": "Group era (kripto UI) › pesan era lama tetap terbaca setelah rotasi epoch"
         },
         {
           "file": "backupRestore.spec.ts",

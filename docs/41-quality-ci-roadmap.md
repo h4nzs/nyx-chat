@@ -23,7 +23,7 @@ Prinsip yang tidak berubah:
 | §6.1 coverage web | ✅ selesai | `web/vite.config.ts` (`test.coverage`), `pnpm --filter nyx-web run test:coverage` |
 | §6.2 coverage server | ✅ selesai | `server/scripts/test-coverage.mjs` |
 | §6.3 changed-lines | ✅ selesai (web; non-blocking) | `scripts/check-changed-lines.mjs`, step di job `unit` |
-| §6.4 `groupLifecycle.spec.ts` | ✅ (kontrak HTTP) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). Pesan terenkripsi/era kripto belum dikirim (batas jujur di kepala spec) |
+| §6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` | ✅ (kontrak HTTP + era kripto) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). `web/e2e/groupEra.spec.ts` menutup batas itu: dua akun sungguhan, grup dibuat lewat modal UI, pesan era awal, rotasi epoch dari panel info (`POST /:id/epoch` → `rotateGroupKey` → mailbox), lalu era lama **dan** era baru tetap terbaca setelah reload; **lulus 4,6 menit**. Belum: keempat skenario fault injection |
 | §6.5 required-tests gate | ✅ selesai | `web/e2e/required-tests.json`, `web/e2e/verify-required-tests.mjs`, 2 step di `ci.yml` |
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
 | §6.7 PIR dua server | ✅ WP1–WP9 | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, proxy dua-server (`PIR_SERVERS`), dan klien XOR (dua relay OHTTP + verifikasi manifest) sudah ada; jalur lama sudah dihapus. Unit template + metrik/alert ops juga sudah (WP7). E2E dua server + vektor lintas-impl sudah (WP8, drill CI `pir-e2e`); WP9 = pembersihan sisa jalur lama + `STATUS.md` (selesai). Performa diukur manual via `scripts/bench/pir-query.mjs` (2026-11-11: p95 3,8 ms; 2.560 B/query; RSS 1,61× pada shard 8 MiB, 1,16× pada 32 MiB — target gate di `docs/42`). |
@@ -115,7 +115,7 @@ mengubah repo. Di CI jalan di job `unit` pada PR dengan `continue-on-error`
 sampai angka global stabil 10 run. Server belum mungkin: reporter native Node
 tidak mengeluarkan lcov.
 
-### 6.4 `groupLifecycle.spec.ts` — kontrak HTTP selesai; era kripto + fault injection belum
+### 6.4 `groupLifecycle.spec.ts` — kontrak HTTP + era kripto selesai; fault injection belum
 
 Tiga context browser, memakai endpoint yang sudah ada (`POST /api/conversations`,
 `/participants`, `/leave`, `/group`, `/key-rotation`, `POST /api/groups/:id/epoch`,
@@ -128,9 +128,27 @@ metadata, putuskan socket saat rotasi, reload saat rotasi.
 **Status 7 November 2026:** yang berjalan baru **kontrak HTTP** (3 context
 nyata: buat grup, token gate `403 BLIND_AUTH_REQUIRED`, rotasi admin, kick
 merotasi era token, purge `409 MEMBERS_REMAIN` → 204) dan itu sudah masuk
-`mustPass`. **Belum**: pesan terenkripsi per era, arsip era lama, dan keempat
-skenario fault injection di atas — semuanya butuh klien kripto, bukan sekadar
-endpoint.
+`mustPass`.
+
+**Status 14 November 2026 — era kripto selesai:** `web/e2e/groupEra.spec.ts`
+(2 konteks, **lulus 4,6 menit** di chromium) membuat grup lewat modal UI yang
+sama dengan pengguna, mengirim pesan era awal dan memastikan anggota
+membacanya, memutar epoch dari panel info grup (`GroupInfoPanel` →
+`rotateGroupEpochNow`) bukan lewat request, lalu membuktikan pesan era baru
+terbaca anggota dan **pesan era lama tetap terbaca setelah halaman di-reload**
+di kedua sisi — itu bukti kunci era lama tersimpan, bukan hanya di memori. Spec
+ini masuk `mustPass` untuk `chromium` dan `chrome` (`minTotal` 24 → 25).
+
+Dua hal yang ditemukan saat menulisnya, keduanya dicatat di kepala spec:
+`playwright.config.ts` tidak menetapkan `actionTimeout`, jadi aksi lokator yang
+tidak pernah resolve menggantung sampai anggaran tes habis (spec memakai
+`setDefaultTimeout(60_000)` per halaman); dan grup harus dibuat **sebelum**
+navigasi percakapan apa pun, karena klik `New Group` saat navigasi masih
+berjalan membuat modal ter-unmount 200 ms kemudian.
+
+**Belum**: keempat skenario fault injection di atas (tunda `metadata:updated`,
+`group:fulfilled_key` sebelum metadata, socket putus saat rotasi, reload saat
+rotasi).
 
 ### 6.5 Required-tests gate — selesai
 
