@@ -28,9 +28,9 @@ Prinsip yang tidak berubah:
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
 | §6.7 PIR dua server | ✅ WP1–WP9 | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, proxy dua-server (`PIR_SERVERS`), dan klien XOR (dua relay OHTTP + verifikasi manifest) sudah ada; jalur lama sudah dihapus. Unit template + metrik/alert ops juga sudah (WP7). E2E dua server + vektor lintas-impl sudah (WP8, drill CI `pir-e2e`); WP9 = pembersihan sisa jalur lama + `STATUS.md` (selesai). Performa diukur manual via `scripts/bench/pir-query.mjs` (2026-11-11: p95 3,8 ms; 2.560 B/query; RSS 1,61× pada shard 8 MiB, 1,16× pada 32 MiB — target gate di `docs/42`). |
 | §6.8 KT live E2E | ✅ ABI 2 | `web/e2e/ktLive.spec.ts`: config `abiVersion: 2` + kunci ML-DSA-65, `/head`, anchor `distinguished`, bukti publik `POST /search`; **lulus 1,4 menit** terhadap KT v2 lokal. Interop `cmd/kt-client` tetap item lanjutan. |
-| §7.1 WebKit/Firefox smoke | 🟡 project + nightly | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`; belum ada run hijau (butuh runner ber-browser) |
+| §7.1 WebKit/Firefox smoke | ✅ hijau di nightly (belum PR gating) | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`. **Run hijau pertama 13 November 2026** (`43433660755`, head `ee2c0f2f`, job 12,6 menit): Firefox **4/4 (4,7 m)** dan WebKit **4/4 (4,8 m)** untuk `auth.spec` + `settings.spec`, lalu a11y **3/3 (1,4 m)** di job yang sama. Naik ke PR setelah 7 hari hijau (paling cepat 20 November 2026). `transport`/`chat` tetap di `e2e-chrome`: WebTransport tidak ada di Firefox/WebKit headless |
 | §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (**7 sub-tes**: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS, **429**) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
-| §7.3 nightly fuzz/k6 | ✅ workflow | `.github/workflows/nightly.yml`: fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU ephemeral, smoke Firefox/WebKit, a11y, contract HTTP; belum ada run hijau di Actions |
+| §7.3 nightly fuzz/k6 | ✅ hijau penuh | `.github/workflows/nightly.yml`: fuzz web 1 jam (60,5 m), fuzz sidecar 1 jam (61,1 m), k6 100 VU ephemeral (5,8 m), contract HTTP (55 dtk), smoke Firefox/WebKit + a11y (12,6 m). **5/5 job hijau** di run `43433660755` (13 November 2026, head `ee2c0f2f`) |
 | §7.4 flake gate + karantina | ✅ gate | `web/e2e/quarantine.json` + `evaluateQuarantine` di `verify-required-tests.mjs` (owner/reason/expires wajib; kedaluwarsa/masih-jalan tes hilang = gagal); self-test 12/12 |
 | §7.5 backup/restore E2E | ✅ Playwright | `web/e2e/backupRestore.spec.ts`: ekspor `.nyxbak` (**magic `NYXB`**, unduhan nyata) lalu restore dengan recovery phrase yang dibaca dari onboarding; **lulus 2,1 menit**. Drill mingguan tetap ada. |
 | §8 a11y (sisanya belum) | 🟡 a11y (3 halaman) | `web/e2e/a11y.spec.ts`: login, register/landing, dan **Settings ber-sesi**; pelanggaran yang ditemukan diperbaiki di UI (label select/input, nama tombol swatch, kontras tombol Register, kontras `DefaultAvatar`). PWA/offline, visual, perf, mutation belum |
@@ -244,10 +244,18 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
 
 ## 41.5 P1/P2 — status per 5 November 2026
 
-- **§7.1** WebKit/Firefox smoke — **project + job nightly siap**: `firefox` dan
-  `webkit` di `web/playwright.config.ts`, job `browsers` di `nightly.yml`
-  (auth + settings). Naik ke PR setelah 7 hari hijau. **Belum ada run hijau**:
-  job-nya belum pernah dieksekusi di Actions.
+- **§7.1** WebKit/Firefox smoke — **hijau di nightly 13 November 2026**:
+  `firefox` dan `webkit` di `web/playwright.config.ts`, job `browsers` di
+  `nightly.yml` (auth + settings + a11y dalam satu job). Run `43433660755`
+  (head `ee2c0f2f`) selesai 5/5 job hijau: Firefox 4/4 (4,7 m), WebKit 4/4
+  (4,8 m), a11y 3/3 (1,4 m). Yang membuat WebKit menggantung bukan tesnya:
+  build dev tidak punya `sw.js`, dan menyentuh `navigator.serviceWorker` di
+  WebKit membekukan main thread — karena itu semua jalur push/SW sekarang
+  lewat `isPushSupported()` (`web/src/lib/pushSupport.ts`) yang mensyaratkan
+  build produksi sebelum menyentuh `navigator`. Anggaran langkah trust adalah
+  `TRUST_STEP_TIMEOUT_MS` = 180 dtk dengan angka terukur (Firefox CI 1,3 m,
+  WebKit lokal 45–60 dtk), bukan 90 dtk yang memotong pekerjaan sah.
+  **Naik ke PR setelah 7 hari hijau** (paling cepat 20 November 2026).
 - **§7.2** Contract test HTTP — **selesai sebagai tes opt-in**:
   `server/tests/httpContract.test.ts` (7 tes) dijalankan job `http-contract`
   nightly. Env diset sebelum `import app`; Redis disambungkan **sebelum** import
@@ -264,10 +272,13 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
   `groupLifecycle.spec.ts`: tanpa token → 403 `BLIND_AUTH_REQUIRED`, token saja
   → 403 `ADMIN_AUTH_REQUIRED`, keduanya dengan anggota tersisa → 409
   `MEMBERS_REMAIN`.
-- **§7.3** Nightly — **workflow dibuat**: `.github/workflows/nightly.yml`
-  (02:00 UTC) berisi fuzz web 1 jam, fuzz sidecar 1 jam, k6 100 VU di stack
-  ephemeral, smoke Firefox/WebKit, a11y, contract HTTP. Drill tetap di
-  `drills.yml`. **Belum ada run hijau**; k6 hanya boleh ke stack ephemeral.
+- **§7.3** Nightly — **hijau penuh 13 November 2026**:
+  `.github/workflows/nightly.yml` (02:00 UTC) berisi fuzz web 1 jam, fuzz
+  sidecar 1 jam, k6 100 VU di stack ephemeral, smoke Firefox/WebKit, a11y,
+  contract HTTP. Run `43433660755` (head `ee2c0f2f`) menyelesaikan **5/5 job
+  hijau**: fuzz web 60,5 m, fuzz sidecar 61,1 m, k6 5,8 m, contract HTTP 55 dtk,
+  browsers 12,6 m. Drill tetap di `drills.yml`; k6 hanya boleh ke stack
+  ephemeral.
 - **§7.4** Karantina flake — **selesai**: `web/e2e/quarantine.json` +
   `evaluateQuarantine` di `verify-required-tests.mjs`. Entri wajib
   `owner`/`reason`/`expires`; kedaluwarsa, tes hilang, atau tes yang masih
@@ -288,8 +299,12 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
   juga memindai **Settings ber-sesi** dan menemukan `select-name`, `label`,
   `button-name`, serta kontras `DefaultAvatar`; semuanya diperbaiki di UI
   (aria-label select/input, nama tombol swatch, kontras tombol Register dan
-  avatar). Tes hijau **3/3**. PWA/offline, visual regression, perf budget,
-  chaos/race, kebocoran lintas akun, dan mutation testing belum.
+  avatar). **13 November 2026**: job `browsers` menemukan satu lagi
+  `color-contrast` serious — badge "SANDBOXED" di Settings
+  (`text-yellow-500` di atas tint `bg-yellow-500/10` ≈ 1,4:1) — diperbaiki di
+  UI menjadi `text-yellow-800 dark:text-yellow-300`; fase a11y lalu hijau
+  **3/3 (1,4 m)** di run `43433660755`. PWA/offline, visual regression, perf
+  budget, chaos/race, kebocoran lintas akun, dan mutation testing belum.
 
 ## 41.6 Engineering health
 
