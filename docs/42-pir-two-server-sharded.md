@@ -1,6 +1,7 @@
 # 42 — PIR dua server + sharding (pengganti ChalametPIR)
 
-**Status:** WP1–WP8 sudah ada di kode (`chalametpir-v1` dihapus); WP9 tersisa.
+**Status:** WP1–WP9 selesai di kode (`chalametpir-v1` dihapus; `STATUS.md`
+mencatat suite `xor-pir-v1` + rute `/api/pir/:server/{manifest,query}`).
 WP8 membuktikan E2E dua server nyata (hit, miss, tanpa fallback) dan vektor
 lintas-implementasi; injeksi tamper/desync tetap di level unit karena sidecar
 memverifikasi `dbRoot` saat rebuild. Ditulis 9 November 2026.
@@ -22,7 +23,7 @@ Keputusan yang mendasarinya (9 Nov 2026):
 
 ## 42.1 Masalah yang diselesaikan
 
-Keadaan sekarang (`chalametpir-v1`):
+Keadaan sebelum penggantian (`chalametpir-v1`):
 
 | Masalah | Sebab | Akibat |
 |---|---|---|
@@ -246,7 +247,7 @@ blind-index dan **bukan** ke PIR satu server.
 
 ## 42.9 Yang dihapus
 
-Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
+Dihapus pada WP6–WP9 (tidak ada masa transisi, tidak ada pengguna):
 
 - `packages/pir-wasm/` beserta entri `packages/wasm-artifacts.json`.
 - `web/src/workers/pir.worker.ts` dan jalur `setup/query/process` di `pirClient.ts`.
@@ -267,28 +268,52 @@ Setelah XOR-PIR hijau (tidak ada masa transisi, tidak ada pengguna):
 | WP6 ✅ | Klien: shard + 3 kandidat, dua query OHTTP, verifikasi record, verdict | `web/src/lib/{pirClient,pirManifest}.ts` | L |
 | WP7 ✅ | Ops: unit template `nyx-pir@`, metrik + 4 alert di `nyx-api`, docs/10 §10.19 ditulis ulang | `ops/`, `deploy/selfhost/scripts`, `server/src/{utils/metrics,pir/rebuild,routes/pir}.ts`, `docs/10` | M |
 | WP8 ✅ | Uji: vektor lintas-impl, injeksi tamper (level unit), E2E dua server | `server/tests/fixtures/pirVectors.json`, `server/tests/pirVectors.test.ts`, `server/pir-sidecar/src/pir.rs`, `web/playwright.pir.config.ts`, `web/e2e/pir.spec.ts`, `server/scripts/pir-e2e-keys.ts` | M |
-| WP9 | Hapus jalur lama (§42.9) + `STATUS.md` | — | S |
+| WP9 ✅ | Hapus jalur lama (§42.9) + `STATUS.md` | `STATUS.md`, `scripts/check-status.mjs`, docs | S |
 
 Urutan yang menjaga `main` tetap hijau: WP1 → WP2 → WP3 → WP4 → WP5 → WP6 → WP7
-→ WP8 → WP9. Selama WP9 belum jalan, fitur tetap **default mati**, jadi setiap
-langkah bisa di-merge tanpa memengaruhi pencarian pengguna.
+→ WP8 → WP9. Selesai WP9 pun fitur tetap **default mati** (`PIR_ENABLED=1` dan
+`PIR_OPRF_ENABLED=1` wajib), jadi seluruh rangkaian mendarat tanpa mengubah
+pencarian pengguna.
 
-### Gate
+### Gate (target vs hasil terukur)
 
-- Query p95 (localhost) ≤ 10 ms untuk `S = 4096`, `R = 2048`.
-- Trafik per pencarian ≤ 16 KB (di luar OHTTP framing): 3 slot × 2 server × (512 B query + 2 KB response).
-- Injeksi tamper 100% terdeteksi, 200/200 percobaan.
-- Desync manifest terdeteksi sebelum query dikirim.
-- Satu server dimatikan → `PIR_UNAVAILABLE`, 0 fallback.
-- Memori sidecar ≤ 1,5× ukuran snapshot shard.
+Angka "terukur" di bawah berasal dari `scripts/bench/pir-query.mjs` (loopback,
+sidecar rilis, 1.000 query + 50 pemanasan, 11 November 2026). Jalankan ulang
+dengan `node scripts/bench/pir-query.mjs`; knob: `NYX_PIR_BENCH_SLOTS`,
+`NYX_PIR_BENCH_RECORD_BYTES`, `NYX_PIR_BENCH_QUERIES`, `NYX_PIR_BENCH_WARMUP`.
+Skrip gagal hanya pada batas regresi lebar (p95 < 50 ms, ≤ 16 KB/query,
+RSS ≤ 2×), bukan pada target riset — supaya angka target tidak berubah menjadi
+tes flaky di mesin bersama.
+
+- Query p95 (localhost) ≤ 10 ms untuk `S = 4096`, `R = 2048` — **terukur
+  p50 2,5 ms / p95 3,8 ms / p99 5,1 ms**.
+- Trafik per pencarian ≤ 16 KB (di luar OHTTP framing): 3 slot × 2 server ×
+  (512 B query + 2 KB response) — **terukur 2.560 B per query sidecar; satu
+  pencarian penuh = 6 × 2.560 B = 15.360 B (15 KB)**.
+- Injeksi tamper 100% terdeteksi — dibuktikan tes unit klien + vektor
+  lintas-impl (bukan hitungan 200/200 di sidecar live; lihat §42.8).
+- Desync manifest terdeteksi sebelum query dikirim — tes unit klien.
+- Satu server dimatikan → `PIR_UNAVAILABLE`, 0 fallback — E2E dua server.
+- Memori sidecar ≤ 1,5× ukuran snapshot shard — **terukur 1,61× pada shard
+  8 MiB** (baseline proses ~5 MiB mendominasi) dan **1,16× pada shard 32 MiB**;
+  target 1,5× baru bermakna ketika baseline teramortisasi (shard produksi
+  lebih besar dari bench default).
+
+**Bukti yang ada di CI:** tamper/desync (tes unit klien + vektor lintas-impl),
+`PIR_UNAVAILABLE` tanpa fallback (E2E dua server), dan drill `pir-e2e`.
+Performa diukur manual lewat skrip di atas — belum dijalankan otomatis di CI.
 
 ### Definition of done
 
 1. `docs/10` §10.19 menjelaskan arsitektur baru, bukan yang lama.
 2. `STATUS.md` menyebut suite `xor-pir-v1` dan rute `/api/pir/{manifest,query}`.
-3. Drill tamper dan drill desync berjalan di CI (job `drills`).
+3. Drill live dua server berjalan di CI (job `drills` → `pir-e2e`); `PIR_TAMPERED`
+   dan `PIR_DESYNC` dibuktikan tes unit klien + vektor, karena sidecar menolak
+   shard yang `dbRoot`-nya tidak cocok (§42.8).
 4. `PIR_SERVERS` berisi <2 entri = boot gagal, ada tesnya.
-5. Tidak ada lagi referensi `chalametpir` di `Cargo.toml`, `package.json`, atau docs.
+5. Tidak ada lagi referensi `chalametpir` sebagai **jalur aktif** di `Cargo.toml`
+   atau `package.json`. Docs hanya menyebutnya sebagai riwayat penggantian
+   (docs/29, docs/36, dokumen ini) — bukan dokumentasi fitur yang berjalan.
 
 ## 42.11 Risiko
 
