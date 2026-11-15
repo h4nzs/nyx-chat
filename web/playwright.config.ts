@@ -77,6 +77,13 @@ export default defineConfig({
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
+      // [E2E PIR MATI] Stack ini TIDAK menjalankan sidecar XOR-PIR, jadi klien
+      // wajib mati juga. `web/.env` lokal boleh menyalakan `VITE_PIR_ENABLED=1`
+      // (untuk kerja PIR manual); tanpa baris ini setiap `searchUsers` melempar
+      // `PirError: VITE_PIR_MANIFEST_KEYS kosong` dan hasil pencarian kosong —
+      // itulah yang dulu menggagalkan `groupFaults.spec.ts` di modal grup
+      // ("user anggota tidak muncul"), padahal alur UI-nya benar. Stack PIR
+      // sungguhan tetap di `playwright.pir.config.ts`.
       // [E2E ISOLASI] `web/.env` lokal boleh berisi `VITE_API_URL` ABSOLUT yang
       // menunjuk API produksi. Tanpa paksaan ini seluruh suite menulis ke sana
       // (registrasi akun uji, pesan, unggahan) sementara spec-nya mengira sedang
@@ -84,7 +91,7 @@ export default defineConfig({
       // menang atas berkas `.env` di Vite, jadi API dipaksa relatif: request
       // lewat proxy dev server, yaitu stack lokal (`NYX_E2E_API_PROXY_TARGET`
       // bila diset, default 4000).
-      env: { VITE_API_URL: '/api' },
+      env: { VITE_API_URL: '/api', VITE_PIR_ENABLED: '0' },
     }
   ],
 });

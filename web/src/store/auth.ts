@@ -37,6 +37,7 @@ const apiErrorText = (error: unknown): string =>
     i18n.t('errors:api_unknown')
   );
 import { prefetchAppChunks } from '@lib/prefetch';
+import { isPushSupported } from '@lib/pushSupport';
 
 // ✅ Helper pendeteksi nama perangkat
 // [LINK 2026-10-18] diekspor agar halaman tautkan-perangkat memakai label yang
@@ -237,6 +238,50 @@ async function getReadyServiceWorker(timeoutMs = 1500): Promise<ServiceWorkerReg
     navigator.serviceWorker.ready,
     new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
   ]);
+}
+
+/**
+ * Jalankan satu langkah logout dengan batas waktu.
+ *
+ * [BUG 2026-11-11] WebKit menggantung `logout()` tanpa pernah menyelesaikan
+ * promise-nya (smoke nightly run 42987574442: `page.evaluate(logout)` tidak
+ * pernah kembali, tes mati di timeout 240 dtk). Kandidat yang paling mungkin:
+ * `fetch` logout atau transaksi IndexedDB/Dexie saat membersihkan kunci.
+ * Logout adalah soft-logout: kegagalan pembersihan lokal tidak boleh menahan
+ * seluruh sesi, sedangkan cookie HttpOnly `rt` sudah dicabut server. Jadi setiap
+ * langkah diberi batas dan dilanjutkan bila lewat.
+ */
+async function settleWithin<T>(promise: Promise<T>, label: string, ms = 5000): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn(`[logout] ${label} melewati ${ms} ms; dilanjutkan`);
+          resolve(undefined);
+        }, ms);
+      }),
+    ]);
+  } catch (e) {
+    console.warn(`[logout] ${label} gagal:`, e);
+    return undefined;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * [BUG 2026-11-11] Jejak langkah logout, HANYA di build DEV.
+ *
+ * Smoke WebKit mendarat di `logout()` yang tidak pernah selesai dan tidak ada
+ * satu pun peringatan `settleWithin` yang muncul — jadi timer di halaman tidak
+ * pernah berbunyi dan langkah yang membekukan main thread tidak terlihat dari
+ * luar. Penanda ini membuat langkah terakhir yang tercetak menjadi bukti, bukan
+ * dugaan (nightly run 43015446345). Murah, dan tidak ikut ke build produksi.
+ */
+function logoutMark(step: string): void {
+  if (import.meta.env.DEV) console.debug(`[logout] ${step}`);
 }
 
 let privateKeysCache: RetrievedKeys | null = null;
@@ -849,35 +894,53 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     logout: async () => {
-      // [BUG 2026-11-07] `getSubscription()` MELEMPAR di Firefox
-      // (`AbortError: Error retrieving push subscription`). Dulu seluruh blok
-      // ada dalam satu `try`, jadi lemparan itu melompat ke `catch` dan
-      // `POST /api/auth/logout` TIDAK PERNAH dikirim — cookie refresh HttpOnly
-      // `rt` hanya bisa dibersihkan server, sehingga sesi tetap hidup dan
-      // `/login` mengalihkan ke `/chat` (smoke Firefox/WebKit nightly merah,
-      // run 42356420274). Push subscription bersifat pelengkap: kegagalannya
-      // tidak boleh membatalkan pencabutan sesi.
-      // [BUG 2026-11-08] `navigator.serviceWorker.ready` tidak pernah resolve bila
-      // service worker tidak aktif (dev mode / WebKit headless). Beri batas waktu
-      // agar logout tidak hang tanpa batas waktu.
+      // Push bersifat pelengkap: kegagalannya TIDAK BOLEH membatalkan pencabutan
+      // sesi. `getSubscription()` melempar di Firefox (`AbortError`), dan dulu
+      // lemparan itu membuat `POST /api/auth/logout` tidak pernah dikirim —
+      // cookie refresh HttpOnly `rt` hanya bisa dicabut server, jadi sesi tetap
+      // hidup dan `/login` mengalihkan ke `/chat` (nightly run 42356420274).
+      // Karena itu blok push dipisah dari blok POST dan tiap langkahnya dibatasi
+      // waktu: `navigator.serviceWorker.ready` tidak pernah resolve bila service
+      // worker tidak aktif (nightly run 2026-11-08).
+      // [BUG 2026-11-12] Lebih buruk: saat `sw.js` GAGAL DIMUAT (build dev tidak
+      // punya `sw.js`, hanya build PWA), WebKit MEMBEKUKAN main thread begitu
+      // `navigator.serviceWorker` disentuh — penanda `mulai` tercetak, lalu tidak
+      // ada apa pun lagi, termasuk timer pemutus (repro lokal Docker WebKit).
+      // Batas waktu tidak menolong blok sinkron, jadi jalur push dijaga
+      // `isPushSupported()`: di dev tidak ada langganan yang perlu dicabut,
+      // `POST /api/auth/logout` tetap dikirim sehingga cookie `rt` hilang.
       let pushEndpoint: string | null = null;
+      logoutMark('mulai');
       try {
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
+        if (isPushSupported()) {
           const registration = await getReadyServiceWorker(1500);
           if (registration) {
-            const subscription = await registration.pushManager.getSubscription();
+            // [BUG 2026-11-11] `getSubscription()` juga bisa MENGGANTUNG (bukan
+            // hanya melempar seperti di Firefox), jadi beri batas waktu.
+            const subscription = await settleWithin(
+              registration.pushManager.getSubscription(),
+              "pushManager.getSubscription",
+              3000,
+            );
             pushEndpoint = subscription?.endpoint ?? null;
           }
         }
       } catch (e) {
         console.warn('Push subscription tidak bisa dibaca saat logout:', e);
       }
+      logoutMark(`push selesai (endpoint ${pushEndpoint ? 'ada' : 'tidak ada'})`);
 
       try {
-        await api("/api/auth/logout", {
-          method: "POST",
-          ...(pushEndpoint ? { body: JSON.stringify({ endpoint: pushEndpoint }) } : {}),
-        }).catch(() => {});
+        logoutMark('POST /api/auth/logout');
+        await settleWithin(
+          api("/api/auth/logout", {
+            method: "POST",
+            ...(pushEndpoint ? { body: JSON.stringify({ endpoint: pushEndpoint }) } : {}),
+          }),
+          "POST /api/auth/logout",
+          8000,
+        );
+        logoutMark('POST selesai');
         if (pushEndpoint) {
           // Best-effort: endpoint server sudah dihapus; unsubscribe lokal gagal
           // tidak boleh menghidupkan kembali sesi.
@@ -891,36 +954,53 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e) { console.error("Logout error", e); } finally {
         clearAuthCookies();
         privateKeysCache = null;
-        
-        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First).
-        // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
-        // sesi unlock akun lain di tab yang sama tidak terganggu.
-        await clearKeys();
-        // [docs/30 §30.5 WS-A] Identifier mentah ikut dibuang saat logout (slot
-        // user ini saja). `lockApp` sengaja TIDAK menghapusnya: vault terkunci
-        // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
-        // user membuka kunci tanpa login ulang.
-        await clearKtIdentifier();
-        // [audit N7-04] State monitoring adalah turunan kontak akun ini, jadi
-        // tidak boleh diwarisi akun berikutnya di perangkat yang sama.
-        // [audit N8-03] Pin config TIDAK dihapus di sini: pin kini ber-PK per
-        // akun (`ktConfigPinRowId`), sehingga isolasi lintas-akun tetap terjaga
-        // sementara akun yang sama mempertahankan kontinuitas TOFU lintas sesi.
-        // Menghapusnya membuat server bisa menukar `signatureKey` di sela
-        // logout→login tanpa terdeteksi.
-        const { clearKtStates } = await import('../lib/ktMonitoring');
-        await clearKtStates().catch(() => {});
-        localStorage.removeItem('user');
-        
-        set({ user: null, accessToken: null, hasRestoredKeys: false });
-        disconnectSocket();
-        const { clearReconnectTimer } = await import('./connection');
-        clearReconnectTimer();
-        const { clearBlobCache } = await import('../utils/blobCache');
-        clearBlobCache();
 
+        // [BUG 2026-11-11] State kritikal diubah LEBIH DULU; pembersihan
+        // penyimpanan lokal menyusul dengan batas waktu. Di WebKit `logout()`
+        // masih menggantung >30 dtk walau POST dan clearKeys sudah dibatasi
+        // (nightly run 43005964808: `logout() tidak selesai dalam 30 dtk`,
+        // cookie `rt` masih ada) — sisa await yang tak terbatas ada di
+        // `clearKtStates()` + dynamic import modul. Logout adalah soft logout:
+        // sesi server sudah dicabut, jadi UI tidak boleh ikut menggantung.
+        localStorage.removeItem('user');
+        set({ user: null, accessToken: null, hasRestoredKeys: false });
+        try { disconnectSocket(); } catch (e) { console.warn('disconnectSocket saat logout gagal:', e); }
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();
+        logoutMark('reset state sinkron selesai');
+
+        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First).
+        await settleWithin((async () => {
+          logoutMark('pembersihan lokal mulai');
+          // [FIX #5] clearKeys hanya menghapus slot auto-unlock milik user ini —
+          // sesi unlock akun lain di tab yang sama tidak terganggu.
+          await clearKeys();
+          logoutMark('clearKeys selesai');
+          // [docs/30 §30.5 WS-A] Identifier mentah ikut dibuang saat logout (slot
+          // user ini saja). `lockApp` sengaja TIDAK menghapusnya: vault terkunci
+          // membuat pembacaan gagal (null), dan nilai itu dibutuhkan lagi begitu
+          // user membuka kunci tanpa login ulang.
+          await clearKtIdentifier();
+          logoutMark('clearKtIdentifier selesai');
+          // [audit N7-04] State monitoring adalah turunan kontak akun ini, jadi
+          // tidak boleh diwarisi akun berikutnya di perangkat yang sama.
+          // [audit N8-03] Pin config TIDAK dihapus di sini: pin kini ber-PK per
+          // akun (`ktConfigPinRowId`), sehingga isolasi lintas-akun tetap terjaga
+          // sementara akun yang sama mempertahankan kontinuitas TOFU lintas sesi.
+          // Menghapusnya membuat server bisa menukar `signatureKey` di sela
+          // logout→login tanpa terdeteksi.
+          logoutMark('clearKtStates mulai');
+          const { clearKtStates } = await import('../lib/ktMonitoring');
+          await clearKtStates();
+          logoutMark('clearKtStates selesai');
+          const { clearReconnectTimer } = await import('./connection');
+          clearReconnectTimer();
+          logoutMark('clearReconnectTimer selesai');
+          const { clearBlobCache } = await import('../utils/blobCache');
+          clearBlobCache();
+          logoutMark('clearBlobCache selesai');
+        })(), "pembersihan sesi lokal", 10000);
+        logoutMark('selesai');
       }
     },
 
@@ -928,7 +1008,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       try {
         await api("/api/auth/logout-all", { method: "POST" }).catch((e) => console.error("Server kill failed:", e));
         
-        if ('serviceWorker' in navigator && 'PushManager' in window) {
+        // `isPushSupported()` sama seperti `logout()`: menyentuh
+        // `navigator.serviceWorker` membekukan WebKit saat `sw.js` tidak ada
+        // (build dev), dan blok itu sinkron sehingga `finally` pun tak tercapai.
+        if (isPushSupported()) {
            const registration = await getReadyServiceWorker(1500);
            if (registration) {
              const subscription = await registration.pushManager.getSubscription();
