@@ -349,15 +349,21 @@ const AppContent = () => {
       return;
     }
     if (user && useAuthStore.getState().hasRestoredKeys) {
-      const token = useAuthStore.getState().accessToken;
-      if (token) {
-        connectSocket();
-        const socket = transportClient;
-        // Safely attach WebRTC listeners immediately to the socket instance
-        import('./lib/webrtc').then(({ initWebRTCListeners }) => {
-          initWebRTCListeners();
-        });
-      }
+      // [BUG 2026-11-15] Jangan gerbang pada `accessToken` di memori. Pada
+      // deployment berbasis cookie HttpOnly, `silentRefresh()` cukup memvalidasi
+      // sesi lewat probe `GET /api/users/me` lalu mengembalikan `true` TANPA
+      // menerbitkan token JS — sehingga sesudah reload token selalu kosong di
+      // sini. Gerbang lama membuat `connectSocket()` tidak pernah dipanggil:
+      // status tersangkut `connecting`, banner ESTABLISHING_UPLINK abadi, dan
+      // composer mati (E2E `groupFaults` 2026-11-15; REST tetap 200 karena
+      // cookie). Socket mengautentikasi lewat cookie (WSS `withCredentials`)
+      // atau tiket `/api/auth/transport-ticket` (WebTransport), jadi token
+      // kosong sah — `connectSocket()` sendiri yang meneruskannya.
+      connectSocket();
+      // Safely attach WebRTC listeners immediately to the socket instance
+      import('./lib/webrtc').then(({ initWebRTCListeners }) => {
+        initWebRTCListeners();
+      });
     } else {
       // Don't disconnect if on Burner Chat drop route (guest needs it)
       // or if on a device flow route that requires the socket for migration
@@ -459,8 +465,14 @@ const AppContent = () => {
     let stop: (() => void) | undefined;
     void (async () => {
       try {
-        const { startGroupEpochLoop } = await import('@lib/groupEpochRotation');
+        const { startGroupEpochLoop, resumePendingGroupRotations } = await import('@lib/groupEpochRotation');
         if (cancelled) return;
+        // Rotasi yang terputus (reload saat metadata belum ditulis) diselesaikan
+        // lebih dulu: selama metadata memakai token lama, mailbox pull ditolak
+        // 403 dan grup tak bisa dipakai sampai tick 2 menit pertama.
+        void resumePendingGroupRotations().catch((error) => {
+          console.warn('[Epoch] Rotasi tertunda tidak bisa diselesaikan:', error);
+        });
         stop = startGroupEpochLoop();
       } catch (error) {
         console.warn('[Epoch] Loop rotasi era grup tidak bisa dimulai:', error);

@@ -25,6 +25,11 @@
 - /api/pir
 - /api/ohttp
 
+## PIR
+
+- suite: `xor-pir-v1`
+- rute: `GET /:server/manifest`, `POST /:server/query`
+
 ## Saklar privasi
 
 | Flag | Default | Efek bila mati |
