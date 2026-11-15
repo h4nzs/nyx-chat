@@ -23,7 +23,7 @@ Prinsip yang tidak berubah:
 | §6.1 coverage web | ✅ selesai | `web/vite.config.ts` (`test.coverage`), `pnpm --filter nyx-web run test:coverage` |
 | §6.2 coverage server | ✅ selesai | `server/scripts/test-coverage.mjs` |
 | §6.3 changed-lines | ✅ selesai (web; non-blocking) | `scripts/check-changed-lines.mjs`, step di job `unit` |
-| §6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` | ✅ (kontrak HTTP + era kripto) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). `web/e2e/groupEra.spec.ts` menutup batas itu: dua akun sungguhan, grup dibuat lewat modal UI, pesan era awal, rotasi epoch dari panel info (`POST /:id/epoch` → `rotateGroupKey` → mailbox), lalu era lama **dan** era baru tetap terbaca setelah reload; **lulus 4,6 menit**. Belum: keempat skenario fault injection |
+| §6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` + `groupFaults.spec.ts` | 🟡 (kontrak HTTP + era kripto + 2/4 fault injection) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). `web/e2e/groupEra.spec.ts` menutup batas itu: dua akun sungguhan, grup dibuat lewat modal UI, pesan era awal, rotasi epoch dari panel info (`POST /:id/epoch` → `rotateGroupKey` → mailbox), lalu era lama **dan** era baru tetap terbaca setelah reload; **lulus 4,6 menit**. `web/e2e/groupFaults.spec.ts`: socket putus saat rotasi dan reload di tengah rotasi; **lulus 2,5 menit** — menemukan dua bug produk, satu sudah diperbaiki (`App.tsx` menggantungkan koneksi socket pada `accessToken` JS sehingga sesi cookie tersangkut `connecting` setelah reload), satu masih terbuka (rotasi terputus: `pendingToken` tak pernah diselesaikan → `mailbox/pull` 403 berulang). Belum: 2 skenario fault injection (tunda `mailbox/pull`, `group:fulfilled_key` sebelum metadata) yang butuh lever selain `page.route` |
 | §6.5 required-tests gate | ✅ selesai | `web/e2e/required-tests.json`, `web/e2e/verify-required-tests.mjs`, 2 step di `ci.yml` |
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
 | §6.7 PIR dua server | ✅ WP1–WP9 | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, proxy dua-server (`PIR_SERVERS`), dan klien XOR (dua relay OHTTP + verifikasi manifest) sudah ada; jalur lama sudah dihapus. Unit template + metrik/alert ops juga sudah (WP7). E2E dua server + vektor lintas-impl sudah (WP8, drill CI `pir-e2e`); WP9 = pembersihan sisa jalur lama + `STATUS.md` (selesai). Performa diukur manual via `scripts/bench/pir-query.mjs` (2026-11-11: p95 3,8 ms; 2.560 B/query; RSS 1,61× pada shard 8 MiB, 1,16× pada 32 MiB — target gate di `docs/42`). |
@@ -115,7 +115,7 @@ mengubah repo. Di CI jalan di job `unit` pada PR dengan `continue-on-error`
 sampai angka global stabil 10 run. Server belum mungkin: reporter native Node
 tidak mengeluarkan lcov.
 
-### 6.4 `groupLifecycle.spec.ts` — kontrak HTTP + era kripto selesai; fault injection belum
+### 6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` + `groupFaults.spec.ts` — kontrak HTTP, era kripto, 2 dari 4 fault injection selesai
 
 Tiga context browser, memakai endpoint yang sudah ada (`POST /api/conversations`,
 `/participants`, `/leave`, `/group`, `/key-rotation`, `POST /api/groups/:id/epoch`,
@@ -146,9 +146,48 @@ tidak pernah resolve menggantung sampai anggaran tes habis (spec memakai
 navigasi percakapan apa pun, karena klik `New Group` saat navigasi masih
 berjalan membuat modal ter-unmount 200 ms kemudian.
 
-**Belum**: keempat skenario fault injection di atas (tunda `metadata:updated`,
-`group:fulfilled_key` sebelum metadata, socket putus saat rotasi, reload saat
-rotasi).
+**Status 15 November 2026 — dua dari empat fault injection selesai:**
+`web/e2e/groupFaults.spec.ts` (satu grup dipakai bersama, **lulus 2,5 menit** di
+chromium) menjalankan dua skenario yang bisa dipicu dari klien tanpa mengubah
+server:
+
+1. **Socket putus saat rotasi** — `context.setOffline(true)` sebelum klik
+   "Rotate Encryption Keys Now": tombol rotasi harus gagal dengan toast
+   `Key rotation failed`, grup tetap di era lama, dan setelah jaringan kembali
+   pesan berikutnya masih terkirim dan terbaca anggota.
+2. **Reload di tengah rotasi** — klik rotasi lalu `page.reload()` segera:
+   arsip era lama harus tetap terbaca, composer harus hidup lagi, pesan baru
+   terkirim, dan rotasi berikutnya (jaringan sehat) berhasil — bukti tidak ada
+   grup setengah berputar.
+
+Spec ini menemukan **dua bug produk**, keduanya bukan masalah tes:
+
+- **Sudah diperbaiki (`web/src/App.tsx`)**: effect "Manage Socket Connection"
+  dijaga oleh `if (token)` pada `accessToken` di memori. Pada sesi berbasis
+  cookie HttpOnly, `silentRefresh()` cukup memvalidasi lewat probe
+  `GET /api/users/me` lalu mengembalikan `true` **tanpa** menerbitkan token JS,
+  jadi setelah reload gerbang itu selalu false → `connectSocket()` tak pernah
+  dipanggil → status tersangkut `connecting`, banner `ESTABLISHING_UPLINK`
+  abadi, composer mati, padahal REST 200 (cookie sah). Socket mengautentikasi
+  lewat cookie (WSS `withCredentials`) atau tiket `/api/auth/transport-ticket`
+  (WebTransport), jadi token kosong sah; gerbang dihapus.
+- **Belum diperbaiki**: rotasi yang terputus meninggalkan `pendingToken` di
+  `nyx_group_epoch_state`, tetapi tidak ada yang menyelesaikannya setelah
+  reload (hanya loop yang tick pertamanya 2 menit, dan hanya admin). Klien lalu
+  mem-poll `POST /api/groups/:id/mailbox/pull` dengan token grup lama → 403
+  tiap ~10 detik (12+ kali per 120 detik) dan distribusi kunci macet sampai
+  admin merotasi manual; pengiriman jatuh ke jalur envelope lama
+  (`GROUP_AUTH_REQUIRED`). Perbaikan yang benar adalah menyelesaikan rotasi
+  tertunda saat start (pakai `pendingToken` yang sama, sesuai aturan docs/37
+  §37.3.6), bukan menghapus asersi tes.
+
+Spec masuk `mustPass` untuk `chromium` dan `chrome` (`minTotal` 25 → 26).
+
+**Belum**: dua skenario sisanya — menunda `mailbox/pull` lewat `page.route`
+(distribusi kunci terlambat) dan `group:fulfilled_key` sebelum
+`metadata:updated`. Keduanya event socket (`transportClient.ts`,
+`realtimeHandlers.ts`), jadi `page.route` tidak bisa menyuntikkannya; perlu
+lever lain (delay di server atau tes unit jalur terima store).
 
 ### 6.5 Required-tests gate — selesai
 

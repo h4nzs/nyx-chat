@@ -349,15 +349,21 @@ const AppContent = () => {
       return;
     }
     if (user && useAuthStore.getState().hasRestoredKeys) {
-      const token = useAuthStore.getState().accessToken;
-      if (token) {
-        connectSocket();
-        const socket = transportClient;
-        // Safely attach WebRTC listeners immediately to the socket instance
-        import('./lib/webrtc').then(({ initWebRTCListeners }) => {
-          initWebRTCListeners();
-        });
-      }
+      // [BUG 2026-11-15] Jangan gerbang pada `accessToken` di memori. Pada
+      // deployment berbasis cookie HttpOnly, `silentRefresh()` cukup memvalidasi
+      // sesi lewat probe `GET /api/users/me` lalu mengembalikan `true` TANPA
+      // menerbitkan token JS — sehingga sesudah reload token selalu kosong di
+      // sini. Gerbang lama membuat `connectSocket()` tidak pernah dipanggil:
+      // status tersangkut `connecting`, banner ESTABLISHING_UPLINK abadi, dan
+      // composer mati (E2E `groupFaults` 2026-11-15; REST tetap 200 karena
+      // cookie). Socket mengautentikasi lewat cookie (WSS `withCredentials`)
+      // atau tiket `/api/auth/transport-ticket` (WebTransport), jadi token
+      // kosong sah — `connectSocket()` sendiri yang meneruskannya.
+      connectSocket();
+      // Safely attach WebRTC listeners immediately to the socket instance
+      import('./lib/webrtc').then(({ initWebRTCListeners }) => {
+        initWebRTCListeners();
+      });
     } else {
       // Don't disconnect if on Burner Chat drop route (guest needs it)
       // or if on a device flow route that requires the socket for migration
