@@ -39,7 +39,7 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 | `system.ts` | `/status` (VPS metrics) |
 | `wellKnown.ts` | RFC 9727 API catalog + OAuth/OIDC/MCP discovery docs |
 | `ohttp.ts` | OHTTP relay + gateway (`/api/ohttp/config`, `/relay`, `/gateway`), hanya dipasang bila `OHTTP_ENABLED=1` |
-| `pir.ts` | Proxy byte opaque ke sidecar ChalametPIR (`/api/pir/params`, `/query`), hanya bila `PIR_ENABLED=1` |
+| `pir.ts` | Proxy byte opaque ke sidecar PIR dua server (`/api/pir/:server/manifest`, `/query`), verifikasi tanda tangan manifest, hanya bila `PIR_ENABLED=1` |
 | `groups.ts` | Sync anonim grup (token di body, tanpa cookie/JWT), mailbox + epoch |
 | `callTokens.ts` | Token relay panggilan (userId tidak masuk envelope) |
 | `ktQuery.ts` | Proxy bukti Key Transparency (protobuf base64url, tanpa parsing) |

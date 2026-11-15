@@ -16,6 +16,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:ohttp": "playwright test --config playwright.ohttp.config.ts --project=chromium",
+    "test:e2e:pir": "playwright test --config playwright.pir.config.ts --project=chromium",
     "test:e2e:verify-required": "node e2e/verify-required-tests.mjs",
     "test:a11y": "playwright test --config playwright.a11y.config.ts --project=chromium",
     "test:quarantine": "node e2e/verify-required-tests.mjs --self-test",

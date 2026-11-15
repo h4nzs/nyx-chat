@@ -56,7 +56,7 @@ Satu hal yang **harus** diputuskan manusia sebelum rilis: **F-11** — apakah kl
 - `crypto.worker.ts` baris 1–664 dan sebagian besar isi op (hanya inventaris + titik nonce/AEAD yang dibaca) — **bukan** audit kriptografis penuh.
 - `packages/keytrans-wasm-v2`, `packages/keytrans-v2`, `packages/spqr-wasm`, `vendor/signal/**` (WASM/Rust/Go vendored).
 - `server/kt-query/**` (Go KT log/auditor), `server/transport-sidecar/src/*.rs` isi protokol.
-- `web/src/workers/transport.worker.ts`, `ohttp.worker.ts`, `pir.worker.ts`.
+- `web/src/workers/transport.worker.ts`, `ohttp.worker.ts`.
 - Sebagian besar `routes/auth.ts` (1875 baris) — hanya pola token/refresh yang di-grep; **alur register/login/recovery/PoW/WebAuthn tidak dibaca penuh**.
 - `routes/users.ts`, `stories.ts`, `burner.ts`, `subscriptions.ts`, `admin.ts`, `engine.ts`, `linkHistory.ts`, `ktQuery.ts`, `pir.ts`, `ohttp.ts`, `callTokens.ts`.
 - `web/src/store/{auth,conversation,burner}.ts`, semua `components/` (kecuali `MessageItem`), `pages/`.

@@ -9,8 +9,9 @@
  * Solusinya token bearer berumur SANGAT pendek yang diletakkan DI DALAM amplop:
  *
  *  - `scope: 'ohttp'` + `aud: 'ohttp'`, TTL 120 detik (`OHTTP_TOKEN_TTL_SEC`);
- *  - hanya berlaku untuk target allowlist OHTTP (GET search/prekey, POST
- *    `/api/pir/query`, `/api/groups/sync`, dan `/api/keys/kt/search`) — token
+ *  - hanya berlaku untuk target allowlist OHTTP (GET search/prekey, GET/POST
+ *    `/api/pir/:server/{manifest,query}`, `/api/groups/sync`, dan
+ *    `/api/keys/kt/search`) — token
  *    yang bocor tidak bisa dipakai untuk mengirim pesan/mengubah apa pun;
  *    khusus `/api/keys/kt/search` token bersifat OPSIONAL: route itu anonim
  *    (audit N7-01), jadi klien mengirimnya tanpa token agar amplop tidak

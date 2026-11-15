@@ -10,6 +10,10 @@ interface ImportMetaEnv {
   readonly VITE_OHTTP_TOKEN_MODE?: string;
   readonly VITE_PIR_OPRF_ENABLED?: string;
   readonly VITE_PIR_ENABLED?: string;
+  /** Kunci publik ML-DSA-65 per server manifest: JSON { "a": "<base64url>" }. */
+  readonly VITE_PIR_MANIFEST_KEYS?: string;
+  /** Dua relay OHTTP (dipisah koma) — satu per server PIR. */
+  readonly VITE_PIR_RELAYS?: string;
 }
 
 interface ImportMeta {

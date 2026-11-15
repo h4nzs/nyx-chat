@@ -33,7 +33,10 @@ SRC="$SELFHOST_DIR"
 # nyx-{node,postgres,redis}-exporter = sumber metrik host/Postgres/Valkey untuk
 # job `node`/`postgres`/`redis` di prometheus.yml. Tanpa ketiganya target itu
 # `up == 0` dan alert disk/RAM/eviction tidak pernah punya data.
-UNITS=(nyx-api nyx-nginx nyx-kt-query-v2 nyx-kt-auditor-v2 nyx-sidecar nyx-ohttp-relay nyx-pir-sidecar nyx-prometheus nyx-grafana nyx-alertmanager nyx-ntfy-relay nyx-node-exporter nyx-postgres-exporter nyx-redis-exporter)
+UNITS=(nyx-api nyx-nginx nyx-kt-query-v2 nyx-kt-auditor-v2 nyx-sidecar nyx-ohttp-relay nyx-prometheus nyx-grafana nyx-alertmanager nyx-ntfy-relay nyx-node-exporter nyx-postgres-exporter nyx-redis-exporter)
+# PIR = dua instance dari template `nyx-pir@.service` (role a + b, docs/42 §42.8).
+# Keduanya wajib: satu instance tidak cukup untuk XOR dua server.
+PIR_UNITS=(nyx-pir@a nyx-pir@b)
 # Unit yang dipensiunkan 2026-10-28. Dibiarkan di daftar ini supaya mesin yang
 # masih menjalankannya ikut dibersihkan sekali jalan; aman bila sudah tidak ada.
 RETIRED_UNITS=(nyx-kt-query nyx-kt-auditor)
@@ -65,12 +68,12 @@ pkill -f "${SELFHOST_DIR}/prometheus/bin/prometheus" 2>/dev/null || true
 pkill -f "${SELFHOST_DIR}/grafana/bin/grafana" 2>/dev/null || true
 for e in node postgres redis; do pkill -f "${SELFHOST_DIR}/$e-exporter/bin/prometheus-$e-exporter" 2>/dev/null || true; done
 for _ in $(seq 1 30); do
-  if ! ss -tln 2>/dev/null | grep -qE ':(3000|4000|4100|9470|8087|8088|8089|9100|9121|9187)\b' && ! ss -uln 2>/dev/null | grep -q ':33333\b'; then
+  if ! ss -tln 2>/dev/null | grep -qE ':(3000|4000|4100|9470|9471|8087|8088|8089|9100|9121|9187)\b' && ! ss -uln 2>/dev/null | grep -q ':33333\b'; then
     break
   fi
   sleep 0.5
 done
-echo "   sisa socket: $(ss -tuln 2>/dev/null | grep -cE ':(3000|4000|4100|9470|33333|8087|8088|8089)\b')"
+echo "   sisa socket: $(ss -tuln 2>/dev/null | grep -cE ':(3000|4000|4100|9470|9471|33333|8087|8088|8089)\b')"
 
 echo "== 2/5  Pensiunkan unit KT v1 (docs/38) =="
 for u in "${RETIRED_UNITS[@]}"; do
@@ -89,7 +92,7 @@ install -m 644 "${SRC}/systemd/user/nyx-api.service" \
                "${SRC}/systemd/user/nyx-kt-auditor-v2.service" \
                "${SRC}/systemd/user/nyx-sidecar.service" \
                "${SRC}/systemd/user/nyx-ohttp-relay.service" \
-               "${SRC}/systemd/user/nyx-pir-sidecar.service" \
+               "${SRC}/systemd/user/nyx-pir@.service" \
                "${SRC}/systemd/user/nyx-prometheus.service" \
                "${SRC}/systemd/user/nyx-grafana.service" \
                "${SRC}/systemd/user/nyx-alertmanager.service" \
@@ -108,8 +111,8 @@ if [[ "$(loginctl show-user "$USER" -p Linger --value)" != "yes" ]]; then
 fi
 loginctl show-user "$USER" -p Linger
 
-echo "== 5/5  enable --now ${UNITS[*]} =="
-systemctl --user enable --now "${UNITS[@]}"
+echo "== 5/5  enable --now ${UNITS[*]} ${PIR_UNITS[*]} =="
+systemctl --user enable --now "${UNITS[@]}" "${PIR_UNITS[@]}"
 systemctl --user enable nyx.target
 if [[ -f "$HOME/.config/nyx-backup/age.pub" ]]; then
   systemctl --user enable --now nyx-backup.timer
@@ -117,7 +120,7 @@ else
   echo "   nyx-backup.timer belum diaktifkan: buat ~/.config/nyx-backup/age.pub dulu"
 fi
 sleep 4
-systemctl --user --no-pager --full --lines=0 status "${UNITS[@]}" || true
+systemctl --user --no-pager --full --lines=0 status "${UNITS[@]}" "${PIR_UNITS[@]}" || true
 
 echo
 echo "Verifikasi:"
@@ -126,7 +129,8 @@ echo "  journalctl --user -u nyx-api -n 40 --no-pager"
 echo "  curl -s http://127.0.0.1:4000/health"
 echo "  curl -s http://127.0.0.1:8089/healthz       # log Key Transparency v2"
 echo "  curl -s http://127.0.0.1:4100/healthz       # relay OHTTP (butuh OHTTP_ENABLED=1)"
-echo "  curl -s http://127.0.0.1:9470/health        # sidecar PIR (butuh snapshot)"
+echo "  curl -s http://127.0.0.1:9470/health        # sidecar PIR role a"
+echo "  curl -s http://127.0.0.1:9471/health        # sidecar PIR role b"
 echo "  journalctl --user -u nyx-kt-auditor-v2 -n 20 --no-pager   # 'tree head DIKIRIM'"
 echo "  curl -s https://api.nyx-app.my.id/health"
 echo "  curl -s http://127.0.0.1:9090/-/ready                    # Prometheus"
@@ -143,7 +147,7 @@ echo "Catatan relay OHTTP: butuh ohttp/relay.env (OHTTP_GATEWAY_TARGET loopback)
 echo "OHTTP_RELAY_EXTERNAL=1 di server/.env; tanpa OHTTP_ENABLED=1 relay hanya menjawab 502."
 echo "  OHTTP_TRUSTED_PROXIES DIKOSONGKAN di selfhost (nginx→relay lewat loopback);"
 echo "  nilai CIDR (mis. 172.16.0.0/12) hanya untuk profil Docker."
-echo "Catatan PIR: butuh DUA instance sidecar (PIR_ROLE=a dan b) dengan pir-a/pir.env dan"
+echo "Catatan PIR: butuh DUA instance sidecar (template nyx-pir@a/nyx-pir@b) dengan pir-a/pir.env dan"
 echo "pir-b/pir.env (PIR_BIND loopback berbeda, PIR_ADMIN_TOKEN sama dengan server/.env,"
 echo "PIR_SHARD_DIR masing-masing) + shard dari builder docs/42 WP2. Tanpa shard,"
 echo "/manifest dan /query menjawab 404."

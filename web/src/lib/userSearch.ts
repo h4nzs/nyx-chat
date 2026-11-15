@@ -19,8 +19,7 @@
 import type { MinimalProfile } from '@nyx/shared';
 import { api } from './api';
 import { isRawIdentifierHash, oprfSearchEnabled, oprfSearchIndex } from './searchOprfClient';
-import { pirEnabled, pirSearch } from './pirClient';
-import { PirError } from './pirParams';
+import { PirError, pirEnabled, pirSearch } from './pirClient';
 
 export interface UserSearchHit {
   id: string;

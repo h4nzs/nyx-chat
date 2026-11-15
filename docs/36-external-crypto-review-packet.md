@@ -31,7 +31,7 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 | Ratchet v2 | braid SPQR (ML-KEM), state ter-seal, negosiasi `ackV:2` | `web/src/lib/spqr*.ts`, `packages/spqr-wasm`, `vendor/signal/spqr` |
 | KT v2 | Log ML-DSA-65 + indeks SHA-256, verifier WASM, monitor/gossip | `packages/keytrans-v2`, `server/kt-query`, `web/src/lib/ktMonitoring.ts`, `ktGossip.ts` |
 | Metadata | OHTTP (RFC 9458, P-256 HPKE), cover traffic 1:1 | `packages/shared/src/ohttp.ts`, `server/src/ohttp/*`, `web/src/lib/coverTraffic.ts` |
-| PIR direktori | ChalametPIR keyword PIR (LWE), record 2 KB, epoch + hint; klien WASM → worker → OHTTP POST biner | `server/pir-sidecar/*`, `server/src/pir/*`, `server/src/routes/pir.ts`, `packages/pir-wasm`, `web/src/lib/pir*.ts`, `web/src/workers/pir.worker.ts` |
+| PIR direktori | XOR-PIR dua server + sharding (`xor-pir-v1`), record ber-`ix`+checksum, manifest bertanda ML-DSA-65; klien query dua share lewat dua relay OHTTP | `packages/shared/src/pir.ts`, `server/pir-sidecar/*`, `server/src/pir/*`, `server/src/routes/pir.ts`, `web/src/lib/pirManifest.ts`, `web/src/lib/pirClient.ts` |
 | At-rest | XChaCha20-Poly1305 + `ENC1:`, Argon2id, domain-separated seed | `web/src/lib/keychainDb.ts`, worker `storePrivateKeys` |
 
 **Tidak termasuk (out of scope, sengaja):**
@@ -39,9 +39,9 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 - **Tier B** yang memang masih classical/hybrid: TLS/QUIC, WebRTC DTLS-SRTP,
   WebAuthn, Web Push VAPID, sertifikat WebTransport. Ini exception yang
   didokumentasikan, bukan bug yang perlu "dipost-quantum-kan" di review ini.
-- **PIR audit eksternal (4d)** — harness benchmark sudah ada (`bench:pir`),
-  service 4b (ChalametPIR sidecar + proxy) dan klien 4c (Rust→WASM/worker,
-  OHTTP POST/binary, hint cache, epoch retry) sudah ada tetapi default mati;
+- **PIR audit eksternal (4d)** — jalur `chalametpir-v1` diganti `xor-pir-v1`
+  dua server (`docs/42`); service, proxy, dan klien sudah ada tetapi default
+  mati;
   angka host produksi dan audit belum.
 - **Anonymous group credentials** — blind RSA dan anonymous issuance dihapus
   2026-10-23; tidak ada endpoint atau kode klien yang tersisa. Kredensial PQ
@@ -93,9 +93,8 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
 | KT (log v2 — satu-satunya log sejak `docs/38`) | `cd server/kt-query && bash build.sh test` + `web/src/lib/__tests__/keyTransparencyV2.test.ts`, `ktBundleProofV2.test.ts`, `ktMonitoring.test.ts`, `ktGossip.test.ts` | Proof/read, auditor, snapshot, fail-closed monitor, split-view |
 | E2E browser | `cd web && pnpm exec playwright test --project=chromium` | X3DH v2, grup `sigV:2`, burner PQ-only, recovery ML-DSA, device linking, credential grup, OHTTP |
 | Benchmark | `pnpm --filter nyx-web run bench:pq` dan `bench:pq:throttle` | Desktop + proxy CPU throttling 6x |
-| PIR service | `cd server/pir-sidecar && cargo test && cargo clippy --all-targets -- -D warnings`; `cd server && npx tsx --test tests/pir.test.ts tests/pirSnapshot.test.ts tests/pirSnapshotJob.test.ts` | Snapshot/epoch, query opaque, proxy auth/rate-limit, end-to-end ChalametPIR |
-| PIR client | `cd web && pnpm exec vitest run src/lib/__tests__/pirParams.test.ts src/lib/__tests__/pirClient.test.ts src/lib/__tests__/userSearch.test.ts`; `bash scripts/wasm-repro-build.sh --verify` | Hint/params cache, epoch retry, `PIR_RECORD_MISS`, fail-closed OHTTP, artefak WASM reprodusibel |
-| PIR benchmark | `pnpm --filter nyx-server run bench:pir` | Sidecar asli + WASM klien: snapshot/startup/RSS/hint/params, setup/query/respond/process; N=1k/10k (100k opt-in) |
+| PIR service | `cd server/pir-sidecar && cargo test && cargo clippy --all-targets -- -D warnings`; `cd server && npx tsx --test tests/pir.test.ts tests/pirShards.test.ts tests/pirSnapshotJob.test.ts` | Snapshot/epoch, sharding + `dbRoot`, query opaque, proxy auth/rate-limit |
+| PIR client | `cd web && pnpm exec vitest run src/lib/__tests__/pirClient.test.ts src/lib/__tests__/pirContract.test.ts src/lib/__tests__/userSearch.test.ts` | XOR dua server, kandidat slot, tanda tangan manifest, `PIR_DESYNC`/`PIR_TAMPERED`/`PIR_ROLLBACK`, fail-closed OHTTP |
 | Guard klasik | `node scripts/check-pq-only.mjs` | 0 simbol Tier A baru; 13 exception legacy terdaftar dengan `removalGate` |
 
 Angka saat paket ini ditulis: server suite 561+ test (0 gagal), KAT 11 test,
@@ -123,10 +122,10 @@ Ini bukan "catatan kaki" — semuanya membatasi klaim keamanan:
   sekarang token-first. Kredensial PQ (BRaccoon/blind UOV) belum ada dan belum
   diaudit.
 - **X-Wing bukan ML-KEM murni**; ia hedge dengan X25519.
-- **PIR 4b + 4c + 4d harness sudah ada tetapi default mati.** `/api/pir/*`
-  hanya proxy ke sidecar ChalametPIR loopback; klien WASM/worker dan OHTTP
-  POST sudah ada, benchmark harness `bench:pir` juga, tetapi angka produksi
-  dan audit belum. Jalur `/search` terautentikasi masih
+- **PIR dua server sudah ada di kode tetapi default mati.** `/api/pir/*`
+  hanya proxy ke sidecar shard loopback (satu proses per role/per shard);
+  klien mengirim dua share lewat dua relay OHTTP dan fail-closed bila satu
+  server mati. Angka produksi dan audit belum. Jalur `/search` terautentikasi masih
   mengembalikan profil + public key (dibatasi rate limit per akun/IP), jadi
   enumerasi terautentikasi belum tertutup oleh PIR.
 - **Legacy v1 tetap terbaca** (pesan/sesi/credential lama). Denylist baru boleh

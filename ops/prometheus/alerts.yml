@@ -827,3 +827,64 @@ groups:
         annotations:
           summary: "Konsumsi arsip riwayat perangkat hasil link gagal"
           description: "Endpoint POST /api/auth/link/history/consume mengembalikan error (bukan penolakan 4xx). Objek arsip sudah diimpor tetapi belum dihapus dari R2; periksa kredensial/bucket R2 dan Redis (state ter-seal) lewat log nyx-api. Arsip yatim dihapus lifecycle rule link-history/, tetapi pengguna yang gagal di sini tidak mendapat konfirmasi 'sekali pakai'."
+
+  # ==========================================================================
+  # [docs/42 WP7] PIR dua server (xor-pir-v1)
+  # ==========================================================================
+  #
+  # Semua seri berasal dari exporter `nyx-api` (proxy + job rebuild), bukan dari
+  # sidecar: satu port loopback lebih sedikit dan tidak ada proses baru yang
+  # harus diekspos. Id server (`a`/`b`) tidak pernah jadi label — nilainya dari
+  # konfigurasi, bukan enum kode.
+  - name: nyx-pir
+    rules:
+      # Manifest yang tidak lolos verifikasi proxy berarti dua hal yang sama-sama
+      # penting: upaya memalsukan manifest, ATAU kunci/artefak A-B tidak lagi
+      # sinkron. Satu kejadian pun layak diperiksa — itu sebabnya `> 0`, bukan
+      # rasio.
+      - alert: NyxPirTampered
+        expr: increase(nyx_pir_manifest_mismatch_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: high
+        annotations:
+          summary: "Manifest PIR ditolak proxy (tanda tangan/bentuk/shard)"
+          description: "Proxy /api/pir menerima manifest yang tidak cocok dengan kunci ter-pin, bukan manifest v2, atau shard-nya salah. Periksa PIR_MANIFEST_KEYS/PIR_SIGNING_KEYS di server dan shard yang dimuat sidecar; kenaikan berulang dengan konfigurasi yang benar berarti ada upaya pemalsuan (docs/10 §10.19)."
+
+      # dbRoot A dan B berbeda = builder memetakan record ke slot berbeda. Build
+      # dibatalkan sebelum dikirim, jadi tidak ada data salah yang dilayani —
+      # tetapi PIR berhenti menyegarkan, dan user baru tidak akan bisa dicari
+      # sampai penyebabnya diperbaiki.
+      - alert: NyxPirDesync
+        expr: increase(nyx_pir_rebuild_total{result="mismatch"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: high
+        annotations:
+          summary: "Build shard PIR A dan B tidak sinkron (dbRoot berbeda)"
+          description: "Rebuild PIR dibatalkan karena dbRoot antar-server berbeda; shard lama tetap melayani tetapi tidak ada user baru yang masuk. Periksa PIR_SIGNING_KEYS, PIR_RECORD_BYTES, dan versi builder di semua worker pm2 (docs/10 §10.19)."
+
+      # Sidecar PIR mati/timeout terlihat dari proxy sebagai `unavailable`.
+      # Ambang laju (bukan satu kejadian) supaya restart 5 detik tidak memicu
+      # alarm; `sum` karena tiap worker pm2 punya seri sendiri.
+      - alert: NyxPirSidecarDown
+        expr: sum by (result) (rate(nyx_pir_query_total{result="unavailable"}[5m])) > 0
+        for: 10m
+        labels:
+          severity: high
+        annotations:
+          summary: "Query PIR gagal karena sidecar tidak menjawab"
+          description: "Proxy /api/pir/:server/query menerima 5xx/timeout dari sidecar selama 10 menit. Cek `systemctl --user status nyx-pir@a nyx-pir@b` dan `curl -fsS http://127.0.0.1:9470/health`; tanpa sidecar, pencarian PIR mati (klien tidak punya fallback ke blind-index)."
+
+      # Guard `> 0` penting: gauge mulai dari 0 di proses baru, dan tanpa guard
+      # setiap restart nyx-api akan tampak seperti shard basi selama 30 menit.
+      - alert: NyxPirRebuildStale
+        expr: |
+          nyx_pir_last_rebuild_timestamp_seconds > 0
+          and time() - nyx_pir_last_rebuild_timestamp_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Shard PIR tidak dibangun ulang lebih dari 30 menit"
+          description: "Rebuild harian 04:15 dan rebuild perubahan tiap 3 menit sama-sama tidak berhasil. Periksa log `[PIR]` (kunci job, Redis penanda, PIR_ADMIN_TOKEN) dan jalankan `pnpm --filter nyx-server run pir:snapshot` secara manual. Selama basi, akun baru tidak muncul di pencarian PIR."

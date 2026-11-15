@@ -1,210 +1,185 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
+
+/**
+ * [docs/42 WP6] Klien XOR-PIR dua server.
+ *
+ * Alur satu pencarian:
+ *   1. ringkasan manifest A dan B → `shardCount` harus sama;
+ *   2. `shard = pirShardFor(oprfIndex, shardCount)`;
+ *   3. manifest shard dari A dan B → verifikasi tanda tangan + harus identik
+ *      selain `operator` (`PIR_DESYNC`), epoch tidak boleh turun
+ *      (`PIR_ROLLBACK`);
+ *   4. tiga slot kandidat; tiap slot dikirim sebagai dua share ke dua server
+ *      lewat dua relay OHTTP; jawabannya di-XOR;
+ *   5. record dibaca dengan `decodePirRecord`: `ix` cocok = hit, slot milik
+ *      kunci lain dilewati, checksum/versi salah = `PIR_TAMPERED`.
+ *
+ * Tidak ada WASM dan tidak ada fallback ke `/api/users/search`: satu server
+ * yang gagal membuat seluruh pencarian gagal, karena jawaban satu server tidak
+ * berarti apa pun sendiri.
+ */
+
+import {
+  decodePirRecord,
+  pirManifestsAgree,
+  pirRecordCandidates,
+  pirShardFor,
+  pirShareLen,
+  pirShareToggle,
+  pirXor,
+  type PirManifest,
+} from '@nyx/shared';
+import { ohttpEnabled, ohttpFetch, type OhttpHttpResult } from './ohttpClient';
+import {
+  PirError,
+  checkPirEpoch,
+  fetchPirManifest,
+  fetchPirSummary,
+  pirClientConfig,
+  type PirClientServer,
+} from './pirManifest';
 import type { UserSearchHit } from './userSearch';
-import { getPirParams, PirError } from './pirParams';
 
-const WORKER_TIMEOUT_MS = 30_000;
-const PIR_QUERY_PATH = '/api/pir/query';
+export { PirError };
 
-interface PirWorkerLike {
-  postMessage(message: unknown): void;
-  terminate(): void;
-  onmessage: ((event: MessageEvent) => void) | null;
-  onerror: ((event: ErrorEvent) => void) | null;
-  onmessageerror: ((event: MessageEvent) => void) | null;
-}
+const INDEX_HEX = /^[0-9a-f]{64}$/;
 
-type PirWorkerFactory = () => PirWorkerLike;
-type OhttpFetch = (
-  input: string,
-  init?: { method?: string; headers?: [string, string][]; body?: Uint8Array; withToken?: boolean },
-) => Promise<{ status: number; body: Uint8Array }>;
-
-interface PendingCall {
-  resolve: (value: Uint8Array) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-const defaultWorkerFactory: PirWorkerFactory = () => {
-  if (typeof Worker === 'undefined') throw new PirError('PIR_WORKER_UNAVAILABLE');
-  return new Worker(new URL('../workers/pir.worker.ts', import.meta.url), {
-    type: 'module',
-  }) as unknown as PirWorkerLike;
-};
-
-let workerFactory: PirWorkerFactory = defaultWorkerFactory;
-let worker: PirWorkerLike | null = null;
-let workerEpoch: number | null = null;
-let nextId = 1;
-const pending = new Map<number, PendingCall>();
-
+/** PIR hidup hanya bila build menyalakannya DAN OHTTP tersedia (fail-closed). */
 export function pirEnabled(): boolean {
-  const value = (import.meta.env.VITE_PIR_ENABLED ?? '').trim().toLowerCase();
-  return value === '1' || value === 'true';
+  return import.meta.env.VITE_PIR_ENABLED === '1' && ohttpEnabled();
 }
 
-function failAll(error: Error): void {
-  for (const call of pending.values()) {
-    clearTimeout(call.timer);
-    call.reject(error);
+function toIndex(oprfIndexHex: string): Uint8Array {
+  if (!INDEX_HEX.test(oprfIndexHex)) {
+    throw new PirError('PIR_INDEX_INVALID', 'oprfIndex harus 32 byte hex huruf kecil');
   }
-  pending.clear();
-}
-
-function resetWorker(): void {
-  failAll(new PirError('PIR_WORKER_TERMINATED'));
-  if (worker) {
-    worker.onmessage = null;
-    worker.onerror = null;
-    worker.onmessageerror = null;
-    worker.terminate();
+  const bytes = new Uint8Array(32);
+  for (let offset = 0; offset < 32; offset += 1) {
+    bytes[offset] = Number.parseInt(oprfIndexHex.slice(offset * 2, offset * 2 + 2), 16);
   }
-  worker = null;
-  workerEpoch = null;
+  return bytes;
 }
 
-function handleMessage(event: MessageEvent): void {
-  const message = event.data as
-    | { id: number; ok: true; result?: Uint8Array | ArrayBuffer }
-    | { id: number; ok: false; error?: string };
-  const call = pending.get(message.id);
-  if (!call) return;
-  pending.delete(message.id);
-  clearTimeout(call.timer);
-  if (message.ok) {
-    const result = message.result;
-    if (ArrayBuffer.isView(result)) {
-      const view = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
-      call.resolve(view.slice());
-    } else if (result instanceof ArrayBuffer) {
-      call.resolve(new Uint8Array(result));
-    } else {
-      call.resolve(new Uint8Array(0));
-    }
-    return;
-  }
-  call.reject(new PirError('PIR_WORKER', message.error ?? 'PIR_WORKER'));
+function randomShare(slotCount: number): Uint8Array {
+  const share = new Uint8Array(pirShareLen(slotCount));
+  globalThis.crypto.getRandomValues(share);
+  return share;
 }
 
-function ensureWorker(): PirWorkerLike {
-  if (worker) return worker;
-  const created = workerFactory();
-  created.onmessage = handleMessage;
-  created.onerror = () => failAll(new PirError('PIR_WORKER', 'PIR_WORKER_ERROR'));
-  created.onmessageerror = () => failAll(new PirError('PIR_WORKER', 'PIR_WORKER_MESSAGE'));
-  worker = created;
-  return created;
-}
-
-function callWorker(type: 'setup' | 'query' | 'process' | 'reset', payload: Record<string, unknown>): Promise<Uint8Array> {
-  return new Promise<Uint8Array>((resolve, reject) => {
-    const id = nextId;
-    nextId += 1;
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new PirError('PIR_WORKER_TIMEOUT'));
-    }, WORKER_TIMEOUT_MS);
-    pending.set(id, { resolve, reject, timer });
-    try {
-      ensureWorker().postMessage({ id, type, ...payload });
-    } catch (error) {
-      pending.delete(id);
-      clearTimeout(timer);
-      reject(error instanceof Error ? error : new PirError('PIR_WORKER'));
-    }
-  });
-}
-
-async function setupWorker(epoch: number, seed: Uint8Array, hint: Uint8Array, filter: Uint8Array): Promise<void> {
-  if (workerEpoch === epoch) return;
-  try {
-    await callWorker('setup', { epoch, seed, hint, filter });
-    workerEpoch = epoch;
-  } catch (error) {
-    workerEpoch = null;
-    resetWorker();
-    throw error;
-  }
-}
-
-function hexToKey(value: string): Uint8Array {
-  if (!/^[0-9a-fA-F]{64}$/.test(value)) throw new PirError('PIR_INDEX_INVALID');
-  const key = new Uint8Array(32);
-  for (let i = 0; i < key.length; i += 1) key[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
-  return key;
-}
-
-function recordFromBytes(bytes: Uint8Array): UserSearchHit {
-  const text = new TextDecoder().decode(bytes).trimEnd();
-  if (!text) throw new PirError('PIR_RECORD_MISS');
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new PirError('PIR_RECORD_MISS');
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PirError('PIR_RECORD_MISS');
-  const record = value as Record<string, unknown>;
-  if (typeof record.id !== 'string' || record.id.length === 0) throw new PirError('PIR_RECORD_MISS');
-  return record as unknown as UserSearchHit;
-}
-
-async function searchOnce(
-  params: Awaited<ReturnType<typeof getPirParams>>,
-  key: Uint8Array,
-  ohttpFetch: OhttpFetch,
-): Promise<UserSearchHit | null> {
-  await setupWorker(params.epoch, params.seed, params.hint, params.filter);
-  const query = await callWorker('query', { epoch: params.epoch, oprf: key });
-  const response = await ohttpFetch(PIR_QUERY_PATH, {
-    method: 'POST',
-    headers: [['content-type', 'application/octet-stream']],
-    body: query,
-  });
-  if (response.status === 409) throw new PirError('PIR_EPOCH_STALE');
-  if (response.status !== 200) throw new PirError('PIR_QUERY_HTTP', `PIR query HTTP ${response.status}`);
-
-  let value: Uint8Array;
-  try {
-    value = await callWorker('process', { epoch: params.epoch, oprf: key, response: response.body });
-  } catch (error) {
-    if (error instanceof PirError && error.code === 'PIR_WORKER' && error.message.startsWith('PIR_PROCESS:')) {
-      throw new PirError('PIR_RECORD_MISS', error.message);
-    }
-    throw error;
-  }
-  return recordFromBytes(value);
-}
-
-export async function pirSearch(oprfIndexHex: string): Promise<UserSearchHit | null> {
-  const key = hexToKey(oprfIndexHex);
-  const { ohttpEnabled, ohttpFetch } = await import('./ohttpClient');
+async function postShare(
+  server: PirClientServer,
+  shard: number,
+  share: Uint8Array,
+): Promise<Uint8Array> {
   if (!ohttpEnabled()) throw new PirError('PIR_REQUIRES_OHTTP');
-
-  const params = await getPirParams();
+  let response: OhttpHttpResult;
   try {
-    return await searchOnce(params, key, ohttpFetch);
+    response = await ohttpFetch(`/api/pir/${server.id}/query?shard=${shard}`, {
+      method: 'POST',
+      headers: [
+        ['content-type', 'application/octet-stream'],
+        ['accept', 'application/octet-stream'],
+      ],
+      body: share,
+      ...(server.relayUrl ? { relayUrl: server.relayUrl } : {}),
+    });
   } catch (error) {
-    if (!(error instanceof PirError) || (error.code !== 'PIR_RECORD_MISS' && error.code !== 'PIR_EPOCH_STALE')) {
-      throw error;
-    }
-    const fresh = await getPirParams({ force: true });
-    if (error.code === 'PIR_RECORD_MISS' && fresh.epoch === params.epoch) return null;
-    try {
-      return await searchOnce(fresh, key, ohttpFetch);
-    } catch (retryError) {
-      if (retryError instanceof PirError && retryError.code === 'PIR_RECORD_MISS') return null;
-      throw retryError;
-    }
+    if (error instanceof PirError) throw error;
+    throw new PirError('PIR_UNAVAILABLE', `query ${server.id} gagal`);
   }
+  if (response.status < 200 || response.status >= 300) {
+    throw new PirError('PIR_UNAVAILABLE', `query ${server.id} HTTP ${response.status}`);
+  }
+  return response.body;
 }
 
-export function _setPirWorkerFactoryForTests(factory: PirWorkerFactory | null): void {
-  resetWorker();
-  workerFactory = factory ?? defaultWorkerFactory;
+function toHit(body: Uint8Array): UserSearchHit {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
+  } catch {
+    throw new PirError('PIR_TAMPERED', 'record bukan JSON');
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new PirError('PIR_TAMPERED', 'record bukan objek');
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.id !== 'string' || record.id === '') {
+    throw new PirError('PIR_TAMPERED', 'record tanpa id');
+  }
+  const hit: UserSearchHit = { id: record.id };
+  if (typeof record.encryptedProfile === 'string' || record.encryptedProfile === null) {
+    hit.encryptedProfile = record.encryptedProfile;
+  }
+  if (typeof record.isVerified === 'boolean') hit.isVerified = record.isVerified;
+  if (typeof record.publicKey === 'string') hit.publicKey = record.publicKey;
+  return hit;
 }
 
-export function _resetPirClientForTests(): void {
-  resetWorker();
-  workerFactory = defaultWorkerFactory;
-  nextId = 1;
+async function pairedManifests(
+  shardCount: number,
+  index: Uint8Array,
+): Promise<PirManifest> {
+  const config = pirClientConfig();
+  const [first, second] = config.servers;
+  const shard = pirShardFor(index, shardCount);
+  const [a, b] = await Promise.all([
+    fetchPirManifest(first, shard),
+    fetchPirManifest(second, shard),
+  ]);
+  // Rebuild bisa terjadi di antara ringkasan dan manifest; shard yang dihitung
+  // dari ringkasan lama lalu tidak sah. Gagal tertutup, jangan menebak.
+  if (a.manifest.shardCount !== shardCount || b.manifest.shardCount !== shardCount) {
+    throw new PirError('PIR_DESYNC', 'shardCount berubah antar-request');
+  }
+  if (!pirManifestsAgree(a.manifest, b.manifest)) {
+    throw new PirError('PIR_DESYNC', `manifest shard ${shard} berbeda antar-server`);
+  }
+  checkPirEpoch(a.manifest);
+  return a.manifest;
+}
+
+/**
+ * Cari satu `oprfIndex`; `null` = tidak ada (ketiga slot kosong/milik kunci
+ * lain). Kegagalan integritas melempar `PirError`, tidak pernah `null`.
+ */
+export async function pirSearch(oprfIndexHex: string): Promise<UserSearchHit | null> {
+  if (!pirEnabled()) throw new PirError('PIR_DISABLED');
+  const index = toIndex(oprfIndexHex);
+  const config = pirClientConfig();
+  const [first, second] = config.servers;
+
+  const [summaryA, summaryB] = await Promise.all([
+    fetchPirSummary(first),
+    fetchPirSummary(second),
+  ]);
+  if (summaryA.shardCount !== summaryB.shardCount || summaryA.epoch !== summaryB.epoch) {
+    throw new PirError('PIR_DESYNC', 'ringkasan manifest berbeda antar-server');
+  }
+
+  const manifest = await pairedManifests(summaryA.shardCount, index);
+  const candidates = pirRecordCandidates(index, manifest.slotCount);
+
+  for (const slot of candidates) {
+    const q1 = randomShare(manifest.slotCount);
+    const q2 = q1.slice();
+    pirShareToggle(q2, slot);
+    const [a1, a2] = await Promise.all([
+      postShare(first, manifest.shard, q1),
+      postShare(second, manifest.shard, q2),
+    ]);
+    if (a1.length !== manifest.recordBytes || a2.length !== manifest.recordBytes) {
+      throw new PirError('PIR_TAMPERED', 'panjang jawaban tidak sesuai manifest');
+    }
+    let decoded;
+    try {
+      decoded = decodePirRecord(pirXor(a1, a2), index);
+    } catch {
+      throw new PirError('PIR_TAMPERED', 'record gagal diverifikasi');
+    }
+    if (decoded.status === 'ok') return toHit(decoded.body);
+  }
+  return null;
 }

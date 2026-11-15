@@ -665,6 +665,81 @@ export const OHTTP_CLIENT_TAG = defineCounter(
 );
 
 /**
+ * [docs/42 WP7] PIR dua server (`xor-pir-v1`).
+ *
+ * Semua angka diukur di proses API, bukan sidecar: proxy dan job rebuild memang
+ * ada di sini, jadi satu exporter (`nyx-api`) sudah cukup dan tidak ada port
+ * loopback baru. Label hanya enum pendek — id server (`a`/`b`) sengaja TIDAK
+ * dipakai sebagai label karena nilainya berasal dari konfigurasi, bukan kode.
+ *
+ * `result` query: `ok|invalid|shard_unknown|unavailable`. `invalid` = body/
+ * shard tidak sah dari klien; `unavailable` = sidecar mati/timeout/5xx.
+ */
+export const PIR_QUERY = defineCounter(
+  'nyx_pir_query_total',
+  'Proxy query share PIR ke sidecar, per hasil',
+  ['result']
+);
+
+/** Latensi proxy satu query share (termasuk hop loopback ke sidecar). */
+export const PIR_QUERY_SECONDS = defineHistogram(
+  'nyx_pir_query_seconds',
+  'Durasi proxy query share PIR (detik)',
+  [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+);
+
+/**
+ * Rebuild + pengiriman shard, per hasil. `mismatch` khusus: A dan B menghasilkan
+ * `dbRoot` berbeda, build dibatalkan sebelum dikirim (desync builder) — ini
+ * kondisi yang harus terlihat, bukan sekadar `error` biasa.
+ */
+export const PIR_REBUILD = defineCounter(
+  'nyx_pir_rebuild_total',
+  'Rebuild dan pengiriman shard PIR, per hasil',
+  ['result']
+);
+
+export const PIR_REBUILD_SECONDS = defineHistogram(
+  'nyx_pir_rebuild_seconds',
+  'Durasi rebuild dan pengiriman shard PIR (detik)',
+  [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60]
+);
+
+/**
+ * Unix timestamp rebuild PIR terakhir yang berhasil. Umur (`time() − nilai ini`)
+ * adalah satu-satunya cara membedakan "PIR hidup tapi shard basi" dari "PIR
+ * hidup dan segar": counter rebuild yang datar terlihat sama di kedua keadaan.
+ * Nilai 0 = belum pernah rebuild; alert memakai guard `> 0` supaya boot pertama
+ * tidak langsung dianggap basi.
+ */
+export const PIR_LAST_REBUILD = defineGauge(
+  'nyx_pir_last_rebuild_timestamp_seconds',
+  'Unix timestamp rebuild shard PIR terakhir yang berhasil'
+);
+
+/** Jumlah user ber-`oprfIndex` yang masuk snapshot terakhir. */
+export const PIR_ENTRIES = defineGauge(
+  'nyx_pir_entries',
+  'Jumlah user ber-oprfIndex pada rebuild shard PIR terakhir'
+);
+
+/** Jumlah shard yang dikirim pada rebuild terakhir (menunjukkan efek sharding). */
+export const PIR_SHARDS = defineGauge(
+  'nyx_pir_shards',
+  'Jumlah shard PIR yang dikirim pada rebuild terakhir'
+);
+
+/**
+ * Manifest yang ditolak proxy: tanda tangan tidak cocok, bentuk v2 tidak sah,
+ * shard tidak sesuai, atau ringkasan tidak valid. Kenaikan apa pun berarti ada
+ * yang tidak sinkron atau ada upaya memalsukan manifest.
+ */
+export const PIR_MANIFEST_MISMATCH = defineCounter(
+  'nyx_pir_manifest_mismatch_total',
+  'Manifest PIR yang ditolak proxy (tanda tangan/bentuk/shard tidak cocok)'
+);
+
+/**
  * [docs/35 Fase 8 residual] Jalur legacy v1 yang masih benar-benar dipakai.
  *
  * Denylist baru boleh menjadi literal 0 setelah tidak ada klien/data v1. Audit

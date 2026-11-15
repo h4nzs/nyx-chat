@@ -1747,3 +1747,136 @@ tests:
       - eval_time: 30m
         alertname: NyxLinkHistoryConsumeFailing
         exp_alerts: []
+
+  # ==========================================================================
+  # [docs/42 WP7] PIR dua server
+  # ==========================================================================
+
+  - name: 'NyxPirTampered: menyala saat proxy menolak manifest'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_manifest_mismatch_total'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxPirTampered
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              alertname: NyxPirTampered
+            exp_annotations:
+              summary: 'Manifest PIR ditolak proxy (tanda tangan/bentuk/shard)'
+              description: "Proxy /api/pir menerima manifest yang tidak cocok dengan kunci ter-pin, bukan manifest v2, atau shard-nya salah. Periksa PIR_MANIFEST_KEYS/PIR_SIGNING_KEYS di server dan shard yang dimuat sidecar; kenaikan berulang dengan konfigurasi yang benar berarti ada upaya pemalsuan (docs/10 §10.19)."
+
+  # Konfigurasi sehat = tidak ada manifest yang ditolak. Tanpa kasus ini, aturan
+  # yang lupa `> 0` (mis. `increase(...) >= 0`) akan menyala selamanya.
+  - name: 'NyxPirTampered: tidak menyala saat semua manifest sah'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_manifest_mismatch_total'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NyxPirTampered
+        exp_alerts: []
+
+  - name: 'NyxPirDesync: menyala saat rebuild dibatalkan karena dbRoot berbeda'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_rebuild_total{result="mismatch"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxPirDesync
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: mismatch
+              alertname: NyxPirDesync
+            exp_annotations:
+              summary: 'Build shard PIR A dan B tidak sinkron (dbRoot berbeda)'
+              description: "Rebuild PIR dibatalkan karena dbRoot antar-server berbeda; shard lama tetap melayani tetapi tidak ada user baru yang masuk. Periksa PIR_SIGNING_KEYS, PIR_RECORD_BYTES, dan versi builder di semua worker pm2 (docs/10 §10.19)."
+
+  # Rebuild sukses berulang + tidak ada mismatch = sehat.
+  - name: 'NyxPirDesync: tidak menyala saat rebuild sukses'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_rebuild_total{result="ok"}'
+        values: '0+2x60'
+      - series: 'nyx_pir_rebuild_total{result="mismatch"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NyxPirDesync
+        exp_alerts: []
+
+  - name: 'NyxPirSidecarDown: menyala saat query unavailable 10 menit'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_query_total{result="unavailable"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NyxPirSidecarDown
+        exp_alerts:
+          - exp_labels:
+              severity: high
+              result: unavailable
+              alertname: NyxPirSidecarDown
+            exp_annotations:
+              summary: 'Query PIR gagal karena sidecar tidak menjawab'
+              description: "Proxy /api/pir/:server/query menerima 5xx/timeout dari sidecar selama 10 menit. Cek `systemctl --user status nyx-pir@a nyx-pir@b` dan `curl -fsS http://127.0.0.1:9470/health`; tanpa sidecar, pencarian PIR mati (klien tidak punya fallback ke blind-index)."
+
+  # `invalid`/`shard_unknown` adalah kesalahan klien, bukan sidecar mati — aturan
+  # harus DIAM supaya klien usang tidak memicu alarm operasional.
+  - name: 'NyxPirSidecarDown: tidak menyala saat query ok atau invalid'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_query_total{result="ok"}'
+        values: '0+2x60'
+      - series: 'nyx_pir_query_total{result="shard_unknown"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NyxPirSidecarDown
+        exp_alerts: []
+
+  # time() di promtool mulai dari 0; evaluasi di 40m = 2400 s. Timestamp 1 s
+  # berarti umurnya 2399 s > 1800 s.
+  - name: 'NyxPirRebuildStale: menyala saat shard lebih tua dari 30 menit'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_last_rebuild_timestamp_seconds'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxPirRebuildStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              alertname: NyxPirRebuildStale
+            exp_annotations:
+              summary: 'Shard PIR tidak dibangun ulang lebih dari 30 menit'
+              description: "Rebuild harian 04:15 dan rebuild perubahan tiap 3 menit sama-sama tidak berhasil. Periksa log `[PIR]` (kunci job, Redis penanda, PIR_ADMIN_TOKEN) dan jalankan `pnpm --filter nyx-server run pir:snapshot` secara manual. Selama basi, akun baru tidak muncul di pencarian PIR."
+
+  # Nilai 0 = belum pernah rebuild (proses baru). Guard `> 0` membuat aturan
+  # DIAM, bukan menyala selama 30 menit setiap restart.
+  - name: 'NyxPirRebuildStale: tidak menyala saat belum pernah rebuild'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_last_rebuild_timestamp_seconds'
+        values: '0x90'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxPirRebuildStale
+        exp_alerts: []
+
+  - name: 'NyxPirRebuildStale: tidak menyala saat shard baru dibangun'
+    interval: 30s
+    input_series:
+      - series: 'nyx_pir_last_rebuild_timestamp_seconds'
+        values: '2350x90'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NyxPirRebuildStale
+        exp_alerts: []

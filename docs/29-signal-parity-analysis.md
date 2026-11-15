@@ -37,7 +37,7 @@
    (`docs/36` adalah paketnya, bukan hasilnya).
 4. **NYX unggul pada privasi identitas & data-at-rest.** Tanpa PII (Signal
    berakar pada nomor telepon), blind index Argon2id 64 MB client-side, pencarian
-   privat **OPRF + PIR (ChalametPIR) + OHTTP** (default mati di repo, hidup di
+   privat **OPRF + PIR dua server (XOR) + OHTTP** (default mati di repo, hidup di
    selfhost), hardening dump DB yang tidak dimiliki messenger lain
    (senderId/sessionId/device key ter-seal, bucketing waktu, `identityTag` Redis,
    token-only membership), panic password, burner room, dan cover traffic yang
@@ -71,14 +71,14 @@
 | | **NYX** | **Signal** |
 |---|---|---|
 | Bentuk | Web-only (React 19 + Vite 8), monorepo pnpm (`web`, `server`, `marketing`, `packages/*`) | Native Android/iOS/Desktop (Electron) + server Java |
-| Bahasa | TypeScript di semua app; **Rust** (sidecar WebTransport, sidecar PIR), **Go** (`server/kt-query`), **WASM** (`spqr-wasm`, `keytrans-wasm(-v2)`, `pir-wasm`) | Rust (libsignal, SPQR, extensions), Java (server, CDS, registration), TS (Desktop), Go (key transparency) |
+| Bahasa | TypeScript di semua app; **Rust** (sidecar WebTransport, sidecar PIR), **Go** (`server/kt-query`), **WASM** (`spqr-wasm`, `keytrans-wasm(-v2)`) | Rust (libsignal, SPQR, extensions), Java (server, CDS, registration), TS (Desktop), Go (key transparency) |
 | Server | Express 5 + Prisma 7 + PostgreSQL + Redis (pub/sub), 1 VPS 4c/8GB; pm2 untuk API/sidecar + systemd untuk KT log/auditor, PIR, OHTTP relay | Java + FoundationDB/DynamoDB/ScyllaDB + Redis, gRPC, fleet besar |
 | Transport | WebTransport/QUIC (sidecar Rust) + **fallback WSS socket.io**, opcode biner, negosiasi kapabilitas di kedua jalur | WebSocket/gRPC + REST protobuf |
 | Kripto inti | PQX3DH (X25519 + ML-KEM-768 X-Wing), DR hybrid, **braid SPQR**, sender key v2, burner PQ-DR, XChaCha20-Poly1305, BLAKE2b, Argon2id, Ed25519 + **ML-DSA-65** | X3DH/PQXDH, Double Ratchet, Sender Keys, **SPQR** (ML-KEM Braid), AES-GCM (RustCrypto), zkgroup (pairing/BBS) |
 | Identitas | Tanpa PII: `usernameHash` Argon2id 64 MB client-side + index OPRF hibrida + `shareId` publik + recovery phrase (BIP39) + attestation WebAuthn | Nomor telepon (ACI/PNI) + opsional username; PIN + Secure Value Recovery |
 | Storage lokal | IndexedDB (Dexie) — **struktur & konten sensitif ter-seal `ENC1:`**, urutan dua lapis; OPFS hanya blob terenkripsi | SQLCipher (seluruh DB) + FTS5 terenkripsi |
 | Verifikasi kunci | **KT** (log Merkle, monitor, auditor, gossip) + pin + safety number manual + gate kirim saat `mismatch` | Key transparency (log Merkle + monitor/auditor), tanpa safety number wajib |
-| Pencarian user | hash identifier (Argon2id) → OPRF → PIR (ChalametPIR) via OHTTP; tanpa social graph | SGX/Icelake PSI atas nomor telepon; username links |
+| Pencarian user | hash identifier (Argon2id) → OPRF → PIR dua server (XOR) via OHTTP; tanpa social graph | SGX/Icelake PSI atas nomor telepon; username links |
 | Lisensi | AGPL-3.0 | AGPL-3.0(-only) — termasuk SPQR & key-transparency-server |
 
 Skala NYX (terukur 2026-10-28): **1.664 commit**, 2 kontributor manusia (+1 bot),
@@ -487,7 +487,7 @@ rebuild tidak hilang" dan "Redis mati = lewati, bukan rebuild buta").
 | 1 | **Review kripto eksternal** (`docs/36`) | Satu-satunya cara menutup "tidak ada audit pihak ketiga"; paketnya sudah disusun |
 | 2 | **KT: interop `cmd/kt-client`** | Cutover baca v2 selesai di kode (`KT_QUERY_URL` → v2, `docs/38`); yang tersisa hanya interop upstream |
 | 3 | **KT: dua auditor berdampingan + auditor di host terpisah** | Auditor yang tinggal semeja dengan log tidak membuktikan banyak |
-| 4 | **PIR skala**: sharding / epoch inkremental | Setup ChalametPIR superlinear (10k user ≈ 18 menit); NYX hanya menutup staleness, bukan skalanya |
+| 4 | **PIR skala**: sharding / epoch inkremental | Jalur `chalametpir-v1` dihapus dan diganti `xor-pir-v1` ber-shard (`docs/42`); biaya rebuild kini per shard |
 | 5 | **Ukur false-positive ASN/NAT** | Heuristik per-ASN sudah ada, angka lapangan belum |
 | 6 | **Bawa bukti formal SPQR** (hax/F*/ProVerif) ke CI atau dokumen jaminan | Crate sudah vendored; yang belum adalah jaminannya |
 | 7 | **Klien native** (wrapper push/background iOS/Android) | Tanpa ini, reliabilitas notifikasi selalu kalah |

@@ -27,6 +27,7 @@ import {
   encodePirRecord,
   pirDbRoot,
   pirRecordCandidates,
+  pirShardFor,
   type PirManifest,
 } from '@nyx/shared';
 import { signPirManifest, type PirSigningKey } from './manifest.js';
@@ -80,12 +81,6 @@ function nextPowerOfTwo(value: number): number {
 
 function digestIndex(oprfIndex: Uint8Array): string {
   return Buffer.from(oprfIndex).toString('hex');
-}
-
-/** Samakan dengan `pirRecordCandidates`: shard = potongan hash pertama mod N. */
-function shardOf(oprfIndex: Uint8Array, shardCount: number): number {
-  const digest = createHash('sha256').update(oprfIndex).digest();
-  return digest.readUInt32BE(0) % shardCount;
 }
 
 function capacity(slotCount: number): number {
@@ -227,7 +222,7 @@ export function buildPirShards(
   const plan = planPirShards(entries.length, options.slotTarget ?? PIR_SLOT_TARGET_DEFAULT);
   const buckets: (typeof entries)[] = Array.from({ length: plan.shardCount }, () => []);
   for (const entry of entries) {
-    buckets[shardOf(entry.index, plan.shardCount)]!.push(entry);
+    buckets[pirShardFor(entry.index, plan.shardCount)]!.push(entry);
   }
 
   return buckets.map((bucket, shard) => {

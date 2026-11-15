@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { registerUserViaBiometric as registerUser } from './helpers/registration';
+import { dismissOnboardingTour, registerUserViaBiometric as registerUser } from './helpers/registration';
 
 
 test.describe('Settings & Emergency Eject', () => {
@@ -10,7 +10,13 @@ test.describe('Settings & Emergency Eject', () => {
     // selalu mati di tengah (`Target page, context or browser has been closed`)
     // dan TIDAK pernah benar-benar memverifikasi eject — hanya tampak seperti
     // kegagalan produk saat `page.goto('/chat')` belum sempat dialihkan ulang.
-    test.setTimeout(180000);
+    // 600 dtk: di WebKit registrasi sendiri ~115 dtk, lalu uplink (socket)
+    // baru selesai ~80 dtk kemudian, dan Quick Tour baru terbuka setelah itu.
+    // Pada 180 dtk tur tak pernah sempat ditutup (klik eject ditolak overlay);
+    // pada 360 dtk anggaran habis di tengah rantai tunggu sebelum tombol eject
+    // sempat diklik (run lokal #14: `page.goto: Target page … closed`).
+    // Bukan pelonggaran assertion: semua langkah tetap punya batas sendiri.
+    test.setTimeout(600000);
     const username = `logout_${Date.now()}`;
     await registerUser(page, 'Logout User', username);
 
@@ -18,6 +24,28 @@ test.describe('Settings & Emergency Eject', () => {
     const settingsLink = page.locator('a[href="/settings"]').first();
     await settingsLink.click();
     await expect(page).toHaveURL(/\/settings/, { timeout: 15000 });
+
+    // [BUG 2026-11-12] Quick Tour baru terbuka SETELAH sesi/uplink selesai —
+    // di WebKit banner `ESTABLISHING_UPLINK` masih tampil ~80 dtk setelah
+    // halaman /chat, jadi helper registrasi (yang menunggu tour 45 dtk) selalu
+    // menyerah lebih dulu dan overlay tour kemudian menutupi halaman /settings
+    // sehingga klik eject ditolak sampai tes mati (trace `/tmp/opencode/wktrace4`).
+    // Jadi: tunggu uplink beres dulu, baru tutup tour-nya.
+    await expect(page.getByText(/ESTABLISHING_UPLINK/i)).toBeHidden({ timeout: 150000 });
+    await dismissOnboardingTour(page);
+
+    // Menutup tour menjalankan `handleFinish` → `POST /users/me/complete-onboarding`
+    // → `setUser(hasCompletedOnboarding: true)`, dan itu memindahkan halaman
+    // kembali ke /chat. Di WebKit run 13 tombol eject sama sekali tidak ada
+    // (`Received: undefined`) karena spec masih mencarinya di halaman yang sudah
+    // bukan /settings. Jadi kembali ke /settings SETELAH tour hilang — lewat
+    // tautan sidebar (navigasi sisi klien), BUKAN `page.goto`: reload paksa
+    // memulai ulang pemulihan kunci dan sempat memantulkan /settings → /login →
+    // /chat (run lokal 16), karena ProtectedRoute belum melihat `hasRestoredKeys`.
+    if (new URL(page.url()).pathname !== '/settings') {
+      await settingsLink.click();
+    }
+    await expect(page).toHaveURL(/\/settings/, { timeout: 30000 });
 
     // 2. Click Logout / Eject button
     const logoutBtn = page.locator('button', { hasText: /eject|logout|sign out|disconnect/i }).first();

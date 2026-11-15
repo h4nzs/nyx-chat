@@ -1,0 +1,53 @@
+# NYX — sidecar PIR dua server (`xor-pir-v1`), unit **user** (self-host `~/nyx-selfhost`).
+#
+# Template: `%i` adalah role server (`a` atau `b`). Dua instance WAJIB berjalan —
+# klien menolak jalan tanpa dua server, dan XOR atas dua share hanya bermakna bila
+# keduanya menjawab query yang sama dengan indeks berbeda. Unit sistem setara ada
+# di docs/35 Fase 4b; mesin selfhost memakai systemd tingkat user
+# (`systemctl --user`), tanpa root.
+#
+# Kenapa proses terpisah: shard PIR menyimpan seluruh direktori dan menjawab
+# share biner; ia harus terpisah dari API yang memegang sesi. API hanya
+# mem-proxy byte opaque ke loopback (lihat `server/src/routes/pir.ts`).
+#
+# Pasang (dua role, host/port loopback berbeda):
+#   cd ~/nyx-chat/server/pir-sidecar && cargo build --release --locked
+#   install -d -m 0750 ~/nyx-selfhost/pir
+#   install -m 0600 /path/pir-a.env ~/nyx-selfhost/pir/pir-a.env
+#   install -m 0600 /path/pir-b.env ~/nyx-selfhost/pir/pir-b.env
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now nyx-pir@a nyx-pir@b
+#   curl -fsS http://127.0.0.1:9470/health   # role a
+#   curl -fsS http://127.0.0.1:9471/health   # role b
+#
+# `pir-<role>.env` wajib memuat PIR_BIND (loopback, 9470/9471), PIR_ADMIN_TOKEN
+# (sama dengan `PIR_ADMIN_TOKEN` di server/.env), dan PIR_SHARD_DIR (direktori
+# berisi `shard-<n>.bin` + `shard-<n>.json`). PIR_ROLE diisi unit dari `%i` —
+# env yang salah pasang tidak bisa membuat instance `a` menjawab sebagai `b`.
+# Shard ditulis builder WP2/`pir:snapshot`; sidecar memuatnya saat boot dan
+# menerima penggantian per shard lewat `/admin/rebuild`.
+#
+# Metrik PIR tidak diekspos di sini: proxy + job rebuild ada di nyx-api, dan
+# exporter-nya sudah ada (docs/10 §10.19). Tidak ada port loopback tambahan.
+
+[Unit]
+Description=NYX PIR sidecar role %i (two-server XOR-PIR, loopback)
+Documentation=file://@NYX_REPO@/deploy/selfhost/README.md
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@NYX_REPO@/server
+# Env terpisah per role: sidecar tidak butuh DATABASE_URL/Redis/JWT_SECRET, dan
+# tidak boleh mewarisinya dari server/.env.
+Environment=PIR_ROLE=%i
+EnvironmentFile=-@NYX_STATE@/pir/pir-%i.env
+ExecStart=@NYX_REPO@/server/pir-sidecar/target/release/pir-service
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

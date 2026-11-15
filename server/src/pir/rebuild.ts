@@ -19,6 +19,16 @@ import path from 'node:path';
 import type { PirConfig, PirServer } from './config.js';
 import { loadPirSigningKey, type PirSigningKey } from './manifest.js';
 import type { PirRecordSource } from './snapshot.js';
+import {
+  incCounter,
+  observeHistogram,
+  setGauge,
+  PIR_ENTRIES,
+  PIR_LAST_REBUILD,
+  PIR_REBUILD,
+  PIR_REBUILD_SECONDS,
+  PIR_SHARDS,
+} from '../utils/metrics.js';
 import { buildPirShards, serializePirShard, type PirShardArtifact } from './shards.js';
 
 const REBUILD_TIMEOUT_MS = 60 * 60_000;
@@ -103,49 +113,64 @@ export async function rebuildPirShards(
   config: PirConfig,
   deps: PirRebuildDeps,
 ): Promise<PirRebuildResult> {
-  if (!config.adminToken) {
-    throw new Error('PIR: PIR_ADMIN_TOKEN kosong; rebuild tidak bisa dikirim ke sidecar');
-  }
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const keys = deps.signingKeys ?? (await loadSigningKeys(config));
-  const sources = await deps.collect();
-  const epoch = (deps.now ?? Date.now)();
-
-  let reference: string[] | null = null;
-  let shards = 0;
-  for (const server of config.servers) {
-    const signingKey = keys.get(server.id);
-    if (!signingKey) {
-      throw new Error(`PIR: kunci penanda tangan server ${server.id} tidak tersedia`);
+  const startedAt = Date.now();
+  /** `true` hanya untuk dbRoot antar-server berbeda — alert desync terpisah. */
+  let mismatch = false;
+  try {
+    if (!config.adminToken) {
+      throw new Error('PIR: PIR_ADMIN_TOKEN kosong; rebuild tidak bisa dikirim ke sidecar');
     }
-    const artifacts = buildPirShards(sources, {
-      recordBytes: config.recordBytes,
+    const fetchImpl = deps.fetchImpl ?? fetch;
+    const keys = deps.signingKeys ?? (await loadSigningKeys(config));
+    const sources = await deps.collect();
+    const epoch = (deps.now ?? Date.now)();
+
+    let reference: string[] | null = null;
+    let shards = 0;
+    for (const server of config.servers) {
+      const signingKey = keys.get(server.id);
+      if (!signingKey) {
+        throw new Error(`PIR: kunci penanda tangan server ${server.id} tidak tersedia`);
+      }
+      const artifacts = buildPirShards(sources, {
+        recordBytes: config.recordBytes,
+        epoch,
+        operator: server.id,
+        signingKey,
+      });
+      const roots = artifacts.map((artifact) => artifact.manifest.dbRoot);
+      const expectedRoots = reference;
+      if (expectedRoots === null) {
+        reference = roots;
+      } else if (
+        roots.length !== expectedRoots.length ||
+        roots.some((root, index) => root !== expectedRoots[index])
+      ) {
+        mismatch = true;
+        throw new Error('PIR: dbRoot antar-server berbeda; build dibatalkan sebelum dikirim');
+      }
+      shards = artifacts.length;
+
+      if (config.shardDir) {
+        await writeShardFiles(path.join(path.resolve(config.shardDir), server.id), artifacts);
+      }
+      await pushShards(server, artifacts, config.adminToken, fetchImpl);
+    }
+
+    setGauge(PIR_LAST_REBUILD, Math.floor(epoch / 1000));
+    setGauge(PIR_ENTRIES, sources.length);
+    setGauge(PIR_SHARDS, shards);
+    incCounter(PIR_REBUILD, { result: 'ok' });
+    return {
       epoch,
-      operator: server.id,
-      signingKey,
-    });
-    const roots = artifacts.map((artifact) => artifact.manifest.dbRoot);
-    const expectedRoots = reference;
-    if (expectedRoots === null) {
-      reference = roots;
-    } else if (
-      roots.length !== expectedRoots.length ||
-      roots.some((root, index) => root !== expectedRoots[index])
-    ) {
-      throw new Error('PIR: dbRoot antar-server berbeda; build dibatalkan sebelum dikirim');
-    }
-    shards = artifacts.length;
-
-    if (config.shardDir) {
-      await writeShardFiles(path.join(path.resolve(config.shardDir), server.id), artifacts);
-    }
-    await pushShards(server, artifacts, config.adminToken, fetchImpl);
+      entries: sources.length,
+      shards,
+      persisted: Boolean(config.shardDir),
+    };
+  } catch (error) {
+    incCounter(PIR_REBUILD, { result: mismatch ? 'mismatch' : 'error' });
+    throw error;
+  } finally {
+    observeHistogram(PIR_REBUILD_SECONDS, (Date.now() - startedAt) / 1000);
   }
-
-  return {
-    epoch,
-    entries: sources.length,
-    shards,
-    persisted: Boolean(config.shardDir),
-  };
 }

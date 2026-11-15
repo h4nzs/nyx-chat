@@ -233,9 +233,19 @@ test('PIR manifest: tanda tangan salah atau server tak dikenal ditolak', async (
   assert.equal(unknown.status, 404);
   assert.deepEqual(await unknown.json(), { error: 'PIR_SERVER_UNKNOWN' });
 
-  const noShard = await fetch(`${app.base}/a/manifest`);
-  assert.equal(noShard.status, 400);
-  assert.deepEqual(await noShard.json(), { error: 'PIR_SHARD_INVALID' });
+  // Tanpa `shard` = ringkasan (shardCount/epoch), bukan manifest bertanda tangan.
+  const summaryApp = await startRouter(
+    baseConfig(),
+    async () =>
+      new Response(JSON.stringify({ shardCount: 2, epoch: 1, suite: 'xor-pir-v1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+  );
+  t.after(summaryApp.close);
+  const summary = await fetch(`${summaryApp.base}/a/manifest`);
+  assert.equal(summary.status, 200);
+  assert.deepEqual(await summary.json(), { shardCount: 2, epoch: 1, suite: 'xor-pir-v1' });
 });
 
 test('PIR manifest: sidecar 404/500 dan fetch gagal dipetakan tanpa bocor detail', async (t) => {

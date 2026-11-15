@@ -176,7 +176,14 @@ function ohttpTokenMode(): 'on' | 'off' {
  */
 export async function ohttpFetch(
   input: string,
-  init: { method?: string; headers?: [string, string][]; body?: Uint8Array; withToken?: boolean } = {},
+  init: {
+    method?: string;
+    headers?: [string, string][];
+    body?: Uint8Array;
+    withToken?: boolean;
+    /** Relay khusus untuk request ini (PIR memakai dua relay berbeda). */
+    relayUrl?: string;
+  } = {},
 ): Promise<OhttpHttpResult> {
   if (!ohttpEnabled()) throw new Error('OHTTP_DISABLED');
   const url = new URL(input, window.location.origin);
@@ -210,7 +217,7 @@ export async function ohttpFetch(
     id,
     configB64: config.configB64,
     keyId: config.keyId,
-    relayUrl: relayUrl(),
+    relayUrl: init.relayUrl ?? relayUrl(),
     method,
     url: url.toString(),
     headers,

@@ -388,7 +388,11 @@ export interface OhttpAllowRule {
 export const OHTTP_DEFAULT_ALLOWLIST: readonly OhttpAllowRule[] = [
   { method: 'GET', path: /^\/api\/users\/search$/ },
   { method: 'GET', path: /^\/api\/keys\/prekey-bundle\/[A-Za-z0-9_-]{1,64}$/ },
-  { method: 'POST', path: /^\/api\/pir\/query$/ },
+  // [docs/42] Dua server PIR: satu request hanya menyentuh satu server, jadi
+  // id server ikut di path. Manifest dan query dipisah supaya body query tetap
+  // share opaque dan manifest bisa di-cache terpisah.
+  { method: 'GET', path: /^\/api\/pir\/[a-z0-9_-]{1,16}\/manifest$/ },
+  { method: 'POST', path: /^\/api\/pir\/[a-z0-9_-]{1,16}\/query$/ },
   // [docs/37 §37.4 P3] Sync grup anonim: token di body, tanpa cookie/JWT — satu-
   // satunya jalur tulis yang memang tidak membawa identitas, jadi aman lewat
   // gateway. Posting/pull mailbox sengaja BELUM di sini (jalur terpisah).
