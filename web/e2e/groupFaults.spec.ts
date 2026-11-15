@@ -11,9 +11,12 @@
 //      rotasi harus gagal dengan pesan jelas, dan grup harus tetap bisa
 //      dipakai setelah jaringan kembali;
 //   2. halaman di-reload saat rotasi berjalan — grup tidak boleh berakhir
-//      setengah berputar (tak bisa kirim/baca lagi).
+//      setengah berputar (tak bisa kirim/baca lagi);
+//   3. mailbox anggota ditahan saat distribusi era baru (`POST
+//      /mailbox/pull` digantung) — pesan era baru tetap terbaca lewat jalur
+//      cadangan, dan mailbox yang dilepas tidak boleh menggandakan pesan.
 //
-// Kedua skenario memakai satu grup yang sama supaya biaya registrasi + kripto
+// Ketiga skenario memakai satu grup yang sama supaya biaya registrasi + kripto
 // hanya dibayar sekali (suite chromium sudah mendekati batas job 40 menit).
 //
 // Jalankan terhadap stack dev hidup:
@@ -61,7 +64,7 @@ async function waitForComposer(page: import('@playwright/test').Page) {
 test.describe('Group era (fault injection)', () => {
   test.setTimeout(900000);
 
-  test('rotasi gagal saat jaringan putus, dan reload di tengah rotasi tidak merusak grup', async ({ browser }: { browser: Browser }) => {
+  test('rotasi gagal saat jaringan putus, reload di tengah rotasi, dan mailbox ditahan', async ({ browser }: { browser: Browser }) => {
     const run = Date.now();
     const adminUsername = `fault_admin_${run}`;
     const memberUsername = `fault_member_${run}`;
@@ -69,6 +72,7 @@ test.describe('Group era (fault injection)', () => {
     const era1 = `fault-era1-${run}`;
     const afterOffline = `fault-offline-${run}`;
     const afterReload = `fault-reload-${run}`;
+    const afterKeyDelay = `fault-keydelay-${run}`;
 
     const adminCtx = await browser.newContext();
     const memberCtx = await browser.newContext();
@@ -143,6 +147,44 @@ test.describe('Group era (fault injection)', () => {
       await waitForComposer(admin);
       await sendChatMessage(admin, afterReload);
       await expect(member.locator(`text=${afterReload}`).first()).toBeVisible({ timeout: 180000 });
+
+      // --- Skenario 3: mailbox ditahan saat distribusi era baru. ------------
+      // Rotasi mengirim envelope era baru lewat mailbox (`postGroupKeyEnvelopes`
+      // di `rotateGroupKey`), tetapi target yang mailbox-nya belum terkonfirmasi
+      // juga dilayani jalur cadangan `group:fulfilled_key`→`session:new_key`.
+      // Di grup ini anggota memang dapat jalur cadangan itu: menahan
+      // `mailbox/pull` TIDAK membuat pesan hilang (run 10 membuktikannya —
+      // pesan tetap terbaca), dan itu perilaku yang benar: distribusi kunci
+      // redundan, mailbox bukan satu-satunya jalur. Yang diuji di sini karena
+      // itu: (a) lever-nya hidup (pull benar-benar tertahan), (b) pesan era
+      // baru tetap terbaca tanpa reload, (c) mailbox yang dilepas tidak
+      // menggandakan pesan (replay era yang sama harus idempoten).
+      let heldPulls = 0;
+      let releasePull!: () => void;
+      const pullGate = new Promise<void>((resolve) => { releasePull = resolve; });
+      await member.route('**/api/groups/*/mailbox/pull', async (route) => {
+        heldPulls += 1;
+        await pullGate;
+        await route.continue();
+      });
+
+      const rotateDelay = await openRotateButton(admin, groupName);
+      await rotateDelay.click();
+      await expect(admin.locator(`text=${ROTATED_TOAST}`).first()).toBeVisible({ timeout: 180000 });
+      await admin.keyboard.press('Escape');
+      await expect(rotateDelay).toBeHidden({ timeout: 30000 });
+      await waitForComposer(admin);
+      await sendChatMessage(admin, afterKeyDelay);
+
+      // Bukti lever-nya hidup: anggota memang mencoba pull dan tertahan.
+      await expect.poll(() => heldPulls, { timeout: 60000 }).toBeGreaterThan(0);
+      // Kunci tetap sampai lewat jalur cadangan, jadi pesan harus terbaca.
+      await expect(member.locator('main').getByText(afterKeyDelay).first()).toBeVisible({ timeout: 120000 });
+      releasePull();
+      // Mailbox yang dilepas tidak boleh menggandakan pesan (era yang sama).
+      await member.waitForTimeout(5000);
+      await expect(member.locator('main').getByText(afterKeyDelay)).toHaveCount(1);
+      await member.unroute('**/api/groups/*/mailbox/pull');
 
       // --- Pemulihan: rotasi berikutnya (jaringan sehat) harus berhasil. ----
       // Kalau reload meninggalkan state setengah berputar, klik ini gagal dan

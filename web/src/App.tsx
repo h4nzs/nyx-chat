@@ -465,8 +465,14 @@ const AppContent = () => {
     let stop: (() => void) | undefined;
     void (async () => {
       try {
-        const { startGroupEpochLoop } = await import('@lib/groupEpochRotation');
+        const { startGroupEpochLoop, resumePendingGroupRotations } = await import('@lib/groupEpochRotation');
         if (cancelled) return;
+        // Rotasi yang terputus (reload saat metadata belum ditulis) diselesaikan
+        // lebih dulu: selama metadata memakai token lama, mailbox pull ditolak
+        // 403 dan grup tak bisa dipakai sampai tick 2 menit pertama.
+        void resumePendingGroupRotations().catch((error) => {
+          console.warn('[Epoch] Rotasi tertunda tidak bisa diselesaikan:', error);
+        });
         stop = startGroupEpochLoop();
       } catch (error) {
         console.warn('[Epoch] Loop rotasi era grup tidak bisa dimulai:', error);
