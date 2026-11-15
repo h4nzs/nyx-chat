@@ -23,7 +23,7 @@ Prinsip yang tidak berubah:
 | §6.1 coverage web | ✅ selesai | `web/vite.config.ts` (`test.coverage`), `pnpm --filter nyx-web run test:coverage` |
 | §6.2 coverage server | ✅ selesai | `server/scripts/test-coverage.mjs` |
 | §6.3 changed-lines | ✅ selesai (web; non-blocking) | `scripts/check-changed-lines.mjs`, step di job `unit` |
-| §6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` | ✅ (kontrak HTTP + era kripto) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). `web/e2e/groupEra.spec.ts` menutup batas itu: dua akun sungguhan, grup dibuat lewat modal UI, pesan era awal, rotasi epoch dari panel info (`POST /:id/epoch` → `rotateGroupKey` → mailbox), lalu era lama **dan** era baru tetap terbaca setelah reload; **lulus 4,6 menit**. Belum: keempat skenario fault injection |
+| §6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` + `groupFaults.spec.ts` | ✅ (kontrak HTTP + era kripto + 4/4 skenario) | `web/e2e/groupLifecycle.spec.ts`: 3 konteks browser, buat grup, tambah anggota, gate token, rotasi admin, kick merotasi era token, purge 409/204; **lulus 4,1 menit**. Menemukan bug: DELETE tanpa body → `req.body` undefined → kick sah 500 (diperbaiki di `routes/conversations.ts`). `web/e2e/groupEra.spec.ts` menutup batas itu: dua akun sungguhan, grup dibuat lewat modal UI, pesan era awal, rotasi epoch dari panel info (`POST /:id/epoch` → `rotateGroupKey` → mailbox), lalu era lama **dan** era baru tetap terbaca setelah reload; **lulus 4,6 menit**. `web/e2e/groupFaults.spec.ts`: socket putus saat rotasi dan reload di tengah rotasi; **lulus 2,8 menit** — tiga skenario: socket putus saat rotasi, reload di tengah rotasi, dan mailbox anggota ditahan saat distribusi era baru; menemukan dua bug produk, keduanya sudah diperbaiki (`App.tsx` menggantungkan koneksi socket pada `accessToken` JS sehingga sesi cookie tersangkut `connecting` setelah reload; rotasi terputus meninggalkan `pendingToken` yang tak pernah diselesaikan). Skenario keempat (`group:fulfilled_key` sebelum `metadata:updated`) dibuktikan di level unit (`groupMailbox.test.ts`). |
 | §6.5 required-tests gate | ✅ selesai | `web/e2e/required-tests.json`, `web/e2e/verify-required-tests.mjs`, 2 step di `ci.yml` |
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
 | §6.7 PIR dua server | ✅ WP1–WP9 | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, proxy dua-server (`PIR_SERVERS`), dan klien XOR (dua relay OHTTP + verifikasi manifest) sudah ada; jalur lama sudah dihapus. Unit template + metrik/alert ops juga sudah (WP7). E2E dua server + vektor lintas-impl sudah (WP8, drill CI `pir-e2e`); WP9 = pembersihan sisa jalur lama + `STATUS.md` (selesai). Performa diukur manual via `scripts/bench/pir-query.mjs` (2026-11-11: p95 3,8 ms; 2.560 B/query; RSS 1,61× pada shard 8 MiB, 1,16× pada 32 MiB — target gate di `docs/42`). |
@@ -53,8 +53,8 @@ mengukurnya kembali.
 | Tes Go KT | 58 | `cd server/kt-query && ./build.sh test` |
 | Aturan alert | 44 | `grep -c '^\s*- alert:' ops/prometheus/alerts.yml` |
 | Required contexts `main` | 14 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
-| Manifest E2E | chromium 10 / chrome 13 `mustPass`, `minTotal` 24 | `web/e2e/required-tests.json` |
-| Durasi job E2E | ≈20–22 menit | halaman run Actions |
+| Manifest E2E | chromium 12 / chrome 15 `mustPass`, `minTotal` 26 | `web/e2e/required-tests.json` |
+| Durasi job E2E | 19,5 m (`chromium`) / 17,2 m (`chrome`) pada run `43692225973`, batas 40/45 m | halaman run Actions |
 | Alert Dependabot terbuka | 11 (2 high / 5 medium / 4 low) — per cek terakhir | `gh api .../dependabot/alerts?state=open` |
 
 ## 41.3 Phase 0 — hijaukan main (terbukti hijau di CI)
@@ -115,7 +115,7 @@ mengubah repo. Di CI jalan di job `unit` pada PR dengan `continue-on-error`
 sampai angka global stabil 10 run. Server belum mungkin: reporter native Node
 tidak mengeluarkan lcov.
 
-### 6.4 `groupLifecycle.spec.ts` — kontrak HTTP + era kripto selesai; fault injection belum
+### 6.4 `groupLifecycle.spec.ts` + `groupEra.spec.ts` + `groupFaults.spec.ts` — kontrak HTTP, era kripto, keempat skenario tercakup
 
 Tiga context browser, memakai endpoint yang sudah ada (`POST /api/conversations`,
 `/participants`, `/leave`, `/group`, `/key-rotation`, `POST /api/groups/:id/epoch`,
@@ -146,9 +146,68 @@ tidak pernah resolve menggantung sampai anggaran tes habis (spec memakai
 navigasi percakapan apa pun, karena klik `New Group` saat navigasi masih
 berjalan membuat modal ter-unmount 200 ms kemudian.
 
-**Belum**: keempat skenario fault injection di atas (tunda `metadata:updated`,
-`group:fulfilled_key` sebelum metadata, socket putus saat rotasi, reload saat
-rotasi).
+**Status 15 November 2026 — keempat skenario tercakup:**
+`web/e2e/groupFaults.spec.ts` (satu grup dipakai bersama, **lulus 2,8 menit** di
+chromium) menjalankan tiga skenario yang bisa dipicu dari klien tanpa mengubah
+server:
+
+1. **Socket putus saat rotasi** — `context.setOffline(true)` sebelum klik
+   "Rotate Encryption Keys Now": tombol rotasi harus gagal dengan toast
+   `Key rotation failed`, grup tetap di era lama, dan setelah jaringan kembali
+   pesan berikutnya masih terkirim dan terbaca anggota.
+2. **Reload di tengah rotasi** — klik rotasi lalu `page.reload()` segera:
+   arsip era lama harus tetap terbaca, composer harus hidup lagi, pesan baru
+   terkirim, dan rotasi berikutnya (jaringan sehat) berhasil — bukti tidak ada
+   grup setengah berputar.
+
+Spec ini menemukan **dua bug produk**, keduanya bukan masalah tes:
+
+- **Sudah diperbaiki (`web/src/App.tsx`)**: effect "Manage Socket Connection"
+  dijaga oleh `if (token)` pada `accessToken` di memori. Pada sesi berbasis
+  cookie HttpOnly, `silentRefresh()` cukup memvalidasi lewat probe
+  `GET /api/users/me` lalu mengembalikan `true` **tanpa** menerbitkan token JS,
+  jadi setelah reload gerbang itu selalu false → `connectSocket()` tak pernah
+  dipanggil → status tersangkut `connecting`, banner `ESTABLISHING_UPLINK`
+  abadi, composer mati, padahal REST 200 (cookie sah). Socket mengautentikasi
+  lewat cookie (WSS `withCredentials`) atau tiket `/api/auth/transport-ticket`
+  (WebTransport), jadi token kosong sah; gerbang dihapus.
+- **Sudah diperbaiki (`web/src/lib/groupEpochRotation.ts` + `web/src/App.tsx`)**:
+  rotasi yang terputus meninggalkan `pendingToken` di `nyx_group_epoch_state`
+  dan tidak ada yang menyelesaikannya setelah reload, sehingga klien mem-poll
+  `POST /api/groups/:id/mailbox/pull` dengan token grup lama → 403 tiap
+  ~10 detik (12+ kali per 120 detik) dan distribusi kunci macet sampai admin
+  merotasi manual. Dua perubahan: (a) `maybeRotateGroupEpoch` melewati cek
+  kebijakan bila `pendingToken` ada (`mustFinish`) — itu pekerjaan yang harus
+  diselesaikan, bukan rotasi baru, dan token yang sama dipakai ulang sesuai
+  docs/37 §37.3.6; (b) `resumePendingGroupRotations()` dipanggil sekali saat
+  app shell siap (sebelum `startGroupEpochLoop`) untuk menyelesaikan rotasi
+  tertunda milik grup mana pun. Dikunci 9 tes di
+  `web/src/lib/__tests__/groupEpochRotation.test.ts` (termasuk “rotasi tertunda
+  diselesaikan walau kebijakan bilang skipped” dan “hanya menyentuh grup yang
+  punya `pendingToken`”).
+
+**Skenario ketiga — mailbox ditahan.** `POST /api/groups/*/mailbox/pull`
+digantung di halaman anggota lewat `page.route`. Temuan run 10: pesan era baru
+**tetap terbaca** walau mailbox ditahan, karena target yang belum terkonfirmasi
+juga dilayani jalur cadangan `group:fulfilled_key` → `session:new_key`. Jadi
+asersi “pesan harus menunggu kunci” tidak benar dan sudah diganti: yang diuji
+adalah (a) lever-nya hidup (`heldPulls > 0`), (b) pesan era baru terbaca tanpa
+reload, (c) mailbox yang dilepas tidak menggandakan pesan (hitungan tetap 1).
+Klaim “distribusi benar-benar tertahan” karena itu tidak bisa dibuat dari
+`page.route` selama jalur cadangan socket-level hidup.
+
+**Skenario keempat — `group:fulfilled_key` sebelum `metadata:updated`.** Kedua
+event itu socket-level (`transportClient.ts`, `realtimeHandlers.ts`), jadi tidak
+bisa disuntik lewat `page.route`. Dibuktikan di level unit:
+`web/src/lib/__tests__/groupMailbox.test.ts` → *“kunci era baru diterima walau
+metadata era itu belum ada (key-before-metadata)”* — halaman mailbox yang hanya
+berisi satu `KEY_ENVELOPE` (tanpa META) tetap diteruskan ke
+`storeReceivedSessionKey`; kunci disimpan per `conversationId` dan dekripsi
+ulang dijadwalkan setelah metadata terdekripsi.
+
+Spec masuk `mustPass` untuk `chromium` dan `chrome` (`minTotal` 25 → 26), dan
+terbukti hijau di CI: run `43700149030` (head `5e470d43`) 12/12 job sukses,
+`E2E (Playwright, Chromium)` 20,9 menit dan `E2E (Chrome penuh)` 19,7 menit.
 
 ### 6.5 Required-tests gate — selesai
 
@@ -351,6 +410,17 @@ tetap merah dengan pesan yang jujur. Detail: `docs/25` §25.5.
 - `timeout-minutes`: build 15, wasm 20, unit 20, pir-sidecar 20, sidecar 20,
   lint 5, alerts 5, dr-oracle 15, kt-recovery-v2 20, audit 5, e2e 40,
   e2e-chrome 45.
+- **Anggaran 40 menit `e2e` nyaris jebol (15 November 2026)** karena
+  `dismissOnboardingTour` menunggu Quick Tour 45 dtk di setiap registrasi,
+  padahal tour itu **tidak pernah** dirender tepat setelah registrasi:
+  `hasCompletedOnboarding` hanya datang dari `GET /api/users/me`, sedangkan
+  respons register/login tidak memuatnya (`Chat.tsx` merender tour hanya saat
+  flag bernilai `false` dari store). Suite inti memakan 33,5 m, job dibatalkan
+  di 40 m 15 s dan langkah OHTTP tidak pernah jalan. Perbaikan (`3b9351c4`):
+  `page.addLocatorHandler` menutup tour tepat sebelum aksi berikutnya, jadi
+  tidak ada tunggu buta — dan tour yang muncul terlambat (chunk lazy lambat di
+  CI) tetap tertutup. Hasil terukur di run `43692225973`: `E2E (Playwright,
+  Chromium)` **19,5 m**, `E2E (Chrome penuh)` **17,2 m**, keduanya hijau.
 - Artifact `web/test-results/` + `web/playwright-report/` di-upload saat gagal.
 
 ### 9.3/9.5 Audit + definition of done

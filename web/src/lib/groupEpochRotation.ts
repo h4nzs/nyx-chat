@@ -119,7 +119,13 @@ export async function maybeRotateGroupEpoch (
   }
 
   const local = await readState(conversationId);
-  if (!options.force) {
+  // [BUG 2026-11-15] `pendingToken` berarti rotasi sebelumnya sudah meminta
+  // token baru ke server tapi belum sempat menulis metadata (reload/mati di
+  // tengah). Itu pekerjaan yang HARUS diselesaikan, bukan rotasi baru: token
+  // lama sudah ditolak server (mailbox pull 403 tiap ~10 dtk) sampai metadata
+  // memakai token yang sama. Karena itu cek kebijakan dilewati.
+  const mustFinish = !!local?.pendingToken;
+  if (!options.force && !mustFinish) {
     const decision = decideEpochRotation({
       now: options.now ?? Date.now(),
       server: {
@@ -175,6 +181,38 @@ export async function rotateGroupEpochNow (conversationId: string): Promise<Epoc
   return maybeRotateGroupEpoch(conversationId, { force: true });
 }
 
+async function defaultListGroups (): Promise<string[]> {
+  const { useConversationStore } = await import('@store/conversation');
+  return useConversationStore
+    .getState()
+    .conversations
+    .filter((conversation) => conversation.isGroup)
+    .map((conversation) => conversation.id);
+}
+
+/**
+ * [BUG 2026-11-15] Selesaikan rotasi yang terputus (reload/mati setelah token
+ * baru diminta tapi sebelum metadata ditulis). Dipanggil sekali saat app shell
+ * siap: tanpa ini grup menunggu tick terjadwal (jeda awal 2 menit, lalu tiap
+ * 15 menit) sementara mailbox pull ditolak 403 terus-menerus.
+ *
+ * Hanya grup dengan `pendingToken` yang disentuh — tidak ada rotasi baru, dan
+ * hanya admin yang bisa menyelesaikannya (dicek di `maybeRotateGroupEpoch`).
+ */
+export async function resumePendingGroupRotations (
+  listGroups: () => string[] | Promise<string[]> = defaultListGroups,
+): Promise<void> {
+  for (const conversationId of await listGroups()) {
+    const local = await readState(conversationId);
+    if (!local?.pendingToken) continue;
+    try {
+      await maybeRotateGroupEpoch(conversationId);
+    } catch (error) {
+      console.warn(`[Epoch] Penyelesaian rotasi tertunda gagal untuk ${conversationId}:`, error);
+    }
+  }
+}
+
 export interface GroupEpochLoopOptions {
   intervalMs?: number;
   initialDelayMs?: number;
@@ -191,14 +229,7 @@ export function startGroupEpochLoop (options: GroupEpochLoopOptions = {}): () =>
   const intervalMs = Math.max(60_000, options.intervalMs ?? GROUP_EPOCH_ROTATION_INTERVAL_MS);
   const initialDelayMs = Math.max(0, options.initialDelayMs ?? GROUP_EPOCH_ROTATION_INITIAL_DELAY_MS);
   const rotate = options.rotate ?? maybeRotateGroupEpoch;
-  const listGroups = options.listGroups ?? (async () => {
-    const { useConversationStore } = await import('@store/conversation');
-    return useConversationStore
-      .getState()
-      .conversations
-      .filter((conversation) => conversation.isGroup)
-      .map((conversation) => conversation.id);
-  });
+  const listGroups = options.listGroups ?? defaultListGroups;
 
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
