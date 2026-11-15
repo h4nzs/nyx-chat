@@ -53,8 +53,8 @@ mengukurnya kembali.
 | Tes Go KT | 58 | `cd server/kt-query && ./build.sh test` |
 | Aturan alert | 44 | `grep -c '^\s*- alert:' ops/prometheus/alerts.yml` |
 | Required contexts `main` | 14 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
-| Manifest E2E | chromium 10 / chrome 13 `mustPass`, `minTotal` 24 | `web/e2e/required-tests.json` |
-| Durasi job E2E | ≈20–22 menit | halaman run Actions |
+| Manifest E2E | chromium 12 / chrome 15 `mustPass`, `minTotal` 26 | `web/e2e/required-tests.json` |
+| Durasi job E2E | 19,5 m (`chromium`) / 17,2 m (`chrome`) pada run `43692225973`, batas 40/45 m | halaman run Actions |
 | Alert Dependabot terbuka | 11 (2 high / 5 medium / 4 low) — per cek terakhir | `gh api .../dependabot/alerts?state=open` |
 
 ## 41.3 Phase 0 — hijaukan main (terbukti hijau di CI)
@@ -390,6 +390,17 @@ tetap merah dengan pesan yang jujur. Detail: `docs/25` §25.5.
 - `timeout-minutes`: build 15, wasm 20, unit 20, pir-sidecar 20, sidecar 20,
   lint 5, alerts 5, dr-oracle 15, kt-recovery-v2 20, audit 5, e2e 40,
   e2e-chrome 45.
+- **Anggaran 40 menit `e2e` nyaris jebol (15 November 2026)** karena
+  `dismissOnboardingTour` menunggu Quick Tour 45 dtk di setiap registrasi,
+  padahal tour itu **tidak pernah** dirender tepat setelah registrasi:
+  `hasCompletedOnboarding` hanya datang dari `GET /api/users/me`, sedangkan
+  respons register/login tidak memuatnya (`Chat.tsx` merender tour hanya saat
+  flag bernilai `false` dari store). Suite inti memakan 33,5 m, job dibatalkan
+  di 40 m 15 s dan langkah OHTTP tidak pernah jalan. Perbaikan (`3b9351c4`):
+  `page.addLocatorHandler` menutup tour tepat sebelum aksi berikutnya, jadi
+  tidak ada tunggu buta — dan tour yang muncul terlambat (chunk lazy lambat di
+  CI) tetap tertutup. Hasil terukur di run `43692225973`: `E2E (Playwright,
+  Chromium)` **19,5 m**, `E2E (Chrome penuh)` **17,2 m**, keduanya hijau.
 - Artifact `web/test-results/` + `web/playwright-report/` di-upload saat gagal.
 
 ### 9.3/9.5 Audit + definition of done
