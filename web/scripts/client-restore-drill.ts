@@ -501,14 +501,23 @@ async function main(): Promise<void> {
 
   // `identityKeys.key` sebenarnya base64 kunci publik (keychainDb.ts:749) —
   // di sini dibandingkan langsung dengan kolom `Device.publicKey` dari dump.
+  //
+  // `identityKeys` di-key oleh `userId` (satu identitas lokal per user), jadi
+  // dua perangkat milik user yang sama saling menimpa — persis seperti
+  // `bulkPut` di langkah 1 dan seperti `keychainDb` di produksi. Seed drill CI
+  // memang punya perangkat lama + baru untuk satu user; asersi lama menuntut
+  // KEDUA kunci sehingga gagal di run 42600684253 meski round-trip-nya utuh.
+  // Yang benar: bandingkan dengan kunci yang bertahan setelah dedupe userId.
   const restoredKeys = (restored.identityKeys ?? []).map(
     (row) => (row as Record<string, unknown>).key as string
   );
-  const dumpKeys = dump.devices.map((device) => device.publicKeyB64);
+  const lastDeviceKeyPerUser = [
+    ...new Map(dump.devices.map((device) => [device.userId, device.publicKeyB64])).values(),
+  ];
   check(
-    dumpKeys.every((key) => restoredKeys.includes(key)),
-    `kunci publik perangkat dari dump identik (${dumpKeys.length} baris \`key\`)`,
-    'kunci publik perangkat tidak identik dengan dump'
+    lastDeviceKeyPerUser.every((key) => restoredKeys.includes(key)),
+    `kunci publik perangkat aktif dari dump identik (${lastDeviceKeyPerUser.length} user)`,
+    'kunci publik perangkat aktif tidak identik dengan dump'
   );
 
   // ── 5. Keterkaitan dengan dump: id dan ciphertext ─────────────────────────

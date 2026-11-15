@@ -124,6 +124,16 @@ export default defineConfig({
         OHTTP_ENABLED: '1',
         OHTTP_TOKEN_MODE: 'off',
         OHTTP_RELAY_EXTERNAL: '0',
+        // `OHTTP_TOKEN_MODE=off` mewajibkan token internal yang sama di semua
+        // worker; nilai ini dulu hanya datang dari `server/.env` lokal sehingga
+        // job CI gagal saat boot ("butuh OHTTP_INTERNAL_TOKEN atau JWT_SECRET",
+        // run drills 42590613244). Tetapkan eksplisit supaya harness mandiri.
+        // Minimal 32 karakter (ditegakkan `resolveInternalToken`); nilai lebih
+        // pendek mengganti error boot "butuh token" dengan error panjang token.
+        OHTTP_INTERNAL_TOKEN: 'pir-e2e-ohttp-internal-token-1234',
+        // API tetap butuh rahasia sesi walau tes ini tidak menguji auth cookie.
+        JWT_SECRET: 'pir-e2e-jwt-secret-not-a-real-secret',
+        CSRF_SECRET: 'pir-e2e-csrf-secret-not-a-real-secret',
         // Tanpa sepasang kunci HPKE gateway tidak dipasang, `/api/ohttp/config`
         // 404, dan setiap `pirFetch` gagal sebelum menyentuh server PIR.
         OHTTP_PRIVATE_KEY: ohttpKeys.privateKey,

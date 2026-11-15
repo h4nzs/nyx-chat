@@ -140,6 +140,25 @@ for (const flag of PRIVACY_SWITCHES) {
   }
 }
 
+// 5. Suite + rute PIR ----------------------------------------------------------
+// STATUS.md bagian "## PIR" hanya boleh menyebut suite dan rute yang benar-benar
+// ada: suite dibaca dari kontrak `@nyx/shared`, rute dari router PIR.
+const pirBullets = bullets('PIR');
+const pirSuite = read('packages/shared/src/pir.ts').match(/PIR_SUITE\s*=\s*'([^']+)'/)?.[1];
+const documentedSuite = pirBullets
+  .map((line) => line.match(/^suite:\s*`([^`]+)`$/)?.[1])
+  .find(Boolean);
+if (!pirSuite || documentedSuite !== pirSuite) {
+  problems.push(`STATUS.md: suite PIR ${documentedSuite ?? '(tidak dicatat)'} ≠ kode ${pirSuite ?? '(PIR_SUITE tidak terbaca)'}`);
+}
+const pirRouter = read('server/src/routes/pir.ts');
+for (const route of pirBullets.filter((line) => line.startsWith('rute:')).join(' ').matchAll(/`((?:GET|POST) [^`]+)`/g)) {
+  const smell = route[1].split(' ')[1];
+  if (!pirRouter.includes(`'${smell}'`)) {
+    problems.push(`STATUS.md: rute PIR "${route[1]}" tidak ada di server/src/routes/pir.ts`);
+  }
+}
+
 // Hasil ----------------------------------------------------------------------
 if (problems.length > 0) {
   console.error('❌ STATUS.md tidak cocok dengan kode:');

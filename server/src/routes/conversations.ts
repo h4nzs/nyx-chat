@@ -423,8 +423,16 @@ router.delete('/:id/leave', async (req, res, next) => {
     await emitEventToUsers(leaveRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
   // [T3b] Leave = revoke own delivery token.
-  deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId })
-    .catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
+  // [BUG 2026-11-10] Dulu fire-and-forget: 204 dikirim sebelum baris keanggotaan
+  // benar-benar terhapus. Pemanggil (klien, dan E2E groupLifecycle) langsung
+  // memanggil purge, yang menghitung baris `userHiddenConversation` — masih ada
+  // → 409 MEMBERS_REMAIN padahal semua anggota sudah keluar (run 42784148182).
+  // 204 sekarang berarti baris sudah benar-benar hilang.
+  try {
+    await deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId });
+  } catch (e: unknown) {
+    console.warn('[T3b] Failed to revoke delivery token:', e);
+  }
   res.status(204).end();
 });
 
