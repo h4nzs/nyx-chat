@@ -20,8 +20,12 @@ import { purgeSealedUserRows } from "./utils/routingIdentity.js";
 import { authorizeAdminCleanup } from "./utils/adminCleanupAuth.js";
 import { runCleanup } from "./jobs/cleanup.js";
 import { ADMIN_CLEANUP, incCounter } from "./utils/metrics.js";
+import { authCookieOptions } from "./utils/sessionUtils.js";
 
 import authRouter from "./routes/auth.js";
+// [docs/40] Arsip riwayat perangkat hasil link — dimount SEBELUM `/api/auth`
+// supaya `/api/auth/link/history/*` tidak jatuh ke router auth yang umum.
+import linkHistoryRouter from "./routes/linkHistory.js";
 import usersRouter from "./routes/users.js";
 import conversationsRouter from "./routes/conversations.js";
 // [docs/37 §37.3.3] Sync/token grup anonim — sengaja TANPA cookie/JWT.
@@ -40,7 +44,8 @@ import callTokensRouter from "./routes/callTokens.js";
 // [docs/35 Fase 3] OHTTP — router hanya dipasang bila OHTTP_ENABLED=1.
 import createOhttpRouter from "./routes/ohttp.js";
 import { loadOhttpConfig } from "./ohttp/config.js";
-// [docs/35 Fase 4b] PIR — proxy ke sidecar ChalametPIR, hanya bila PIR_ENABLED=1.
+import { setOhttpInternalToken } from "./ohttp/clientTag.js";
+// [docs/42 WP5] PIR dua server — proxy ke sidecar role A/B, hanya bila PIR_ENABLED=1.
 import createPirRouter from "./routes/pir.js";
 import { loadPirConfig } from "./pir/config.js";
 import { requireAuth } from "./middleware/auth.js";
@@ -98,14 +103,19 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
+      // [AUDIT F-10 residual, ditutup] unsafe-inline DIHAPUS dari script-src.
+      // index.html tidak punya <script> inline sama sekali (satu-satunya skrip
+      // adalah modul eksternal `/assets/…` / `/src/main.tsx`), dan registerSW
+      // PWA memakai `registerSW.js` eksternal (`injectRegister: 'script-defer'`).
+      // style-src tetap memakai unsafe-inline untuk blok <style> loader.
       scriptSrc: [
         "'self'",
-        "'unsafe-inline'", // Diperlukan karena index.html pakai inline script
         "'wasm-unsafe-eval'", // Diperlukan untuk modul crypto WASM
+        // [AUDIT F-10] Wildcard Cloudflare dibuang: host yang benar-benar
+        // dipakai (Turnstile + Web Analytics) sudah disebut eksplisit.
         "https://challenges.cloudflare.com",
         "https://static.cloudflareinsights.com",
         "https://cloudflareinsights.com",
-        "https://*.cloudflare.com",
         isProd ? "" : "'unsafe-eval'" // Dev mode kadang butuh eval
       ].filter(Boolean),
       styleSrc: [
@@ -223,9 +233,9 @@ const corsMiddleware = cors({
     // permukaan preflight tanpa ada klien yang mengirimnya.
     "x-delete-token"
   ],
-  // `/api/pir/params` mengirim ETag; tanpa expose, browser tidak bisa
-  // membacanya dan cache ETag klien tidak pernah terisi.
-  exposedHeaders: ["ETag"],
+  // Tidak ada header respons non-sederhana yang perlu dibaca klien: manifest
+  // PIR kini `no-store` (docs/42 WP5), jadi ETag tidak diekspos lagi.
+  exposedHeaders: [],
 });
 
 app.use(corsMiddleware);
@@ -377,17 +387,13 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
     return `ip:${cfAwareClientIp(req)}`;
   },
   cookieName: "x-csrf-token",
-  cookieOptions: {
-    httpOnly: true,
-    sameSite: "none", 
-    secure: true, 
-    path: "/",
-    // [OPS 2026-10-25] Dulu `isProd ? ".nyx-app.my.id" : undefined` — domain
-    // tetap hilang di produksi karena proses pm2 di VPS tidak pernah diberi
-    // NODE_ENV=production (lihat deploy.yml). Sekarang eksplisit: ikut
-    // COOKIE_DOMAIN, sama dengan cookie sesi (`authCookieOptions`).
-    domain: env.cookieDomain,
-  },
+  // [BUG 2026-11-07] Atribut cookie CSRF dulu hard-coded `secure: true` +
+  // `sameSite: "none"`, berbeda dari cookie sesi. Di stack uji (`NODE_ENV=test`,
+  // http://localhost:5173) WebKit MENOLAK menyimpan cookie Secure sehingga
+  // double-submit tidak pernah mengirim cookie → `403 Invalid CSRF token` dan
+  // semua smoke WebKit merah (run 42362200951). Satu sumber dengan sesi:
+  // produksi tetap `secure` + `SameSite=None`, dev/test jadi non-Secure + Lax.
+  cookieOptions: authCookieOptions(),
   size: 64,
   ignoredMethods: ["GET", "HEAD", "OPTIONS"],
   getCsrfTokenFromRequest: (req) => String(req.headers['csrf-token'] ?? ''),
@@ -399,6 +405,9 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
 // scoped dicetak server dan gateway memvalidasi header internal relay. Tanpa
 // OHTTP_ENABLED=1, router tidak dipasang sama sekali (jalur 404, bukan 403).
 const ohttpConfig = loadOhttpConfig();
+// [audit N9-01] Token internal relay dipakai `utils/clientIp.ts` untuk memastikan
+// tag klien memang berasal dari relay (bukan dikarang lewat gateway langsung).
+setOhttpInternalToken(ohttpConfig?.internalToken);
 const pirConfig = loadPirConfig();
 if (ohttpConfig) {
   app.use(
@@ -426,12 +435,17 @@ app.use((req, res, next) => {
   if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
     return next();
   }
-  // [docs/35 Fase 4b] Query PIR lewat OHTTP tidak membawa cookie: relay membuang
-  // header klien dan identitasnya adalah token OHTTP ber-scope DI DALAM amplop
-  // (`requireAuth` menolak token itu di luar allowlist OHTTP). CSRF adalah
-  // proteksi terhadap ambient authority cookie, jadi dilewati HANYA bila tidak
-  // ada cookie sesi sama sekali — kalau ada, jalur cookie tetap wajib CSRF.
-  if (req.path === '/api/pir/query' && !hasSessionCookie(req)) {
+  // [docs/42] Query PIR & search KT lewat OHTTP tidak membawa cookie:
+  // relay membuang header klien dan identitasnya adalah token OHTTP ber-scope
+  // DI DALAM amplop (`requireAuth` menolak token itu di luar allowlist OHTTP).
+  // CSRF adalah proteksi terhadap ambient authority cookie, jadi dilewati HANYA
+  // bila tidak ada cookie sesi sama sekali — kalau ada, jalur cookie tetap
+  // wajib CSRF.
+  if (
+    (/^\/api\/pir\/[a-z0-9_-]+\/(manifest|query)$/.test(req.path) ||
+      req.path === '/api/keys/kt/search') &&
+    !hasSessionCookie(req)
+  ) {
     return next();
   }
   doubleCsrfProtection(req, res, next);
@@ -490,6 +504,12 @@ app.use("/api", (req, res, next) => {
 });
 
 // === ROUTES ===
+// [docs/40] Kill switch: tanpa LINK_HISTORY_ENABLED, kelima endpoint arsip
+// riwayat tidak ada (404) — bukan 403 — sehingga klien memperlakukan fitur
+// sebagai tidak tersedia (`history: none`).
+if (env.linkHistoryEnabled) {
+  app.use("/api/auth/link/history", linkHistoryRouter);
+}
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/conversations", conversationsRouter);

@@ -128,6 +128,21 @@ func (t *Tree) GetTransparencyTreeHead() *db.TransparencyTreeHead {
 func (t *Tree) GetLogTree() *log.Tree                   { return t.logTree }
 func (t *Tree) GetCacheControl() *db.PrefixCacheControl { return t.cacheControl }
 
+// AuditorHeads mengembalikan head auditor yang tersimpan, sebagai salinan.
+//
+// Dipakai pembuat snapshot untuk mencatat apakah arsip ini memuat head auditor.
+// Arsip yang dibuat saat auditor mati tetap SAH (log-nya utuh), tetapi instance
+// hasil pulih tidak bisa menyajikan bukti mode 3 sampai auditor menandatangani
+// head lagi — fakta yang ditemukan drill 2026-10-29 (`docs/39` §39.5d). Tanpa
+// pencatatan ini, satu-satunya cara mengetahuinya adalah mencoba memulihkan.
+func (t *Tree) AuditorHeads() map[string]*db.AuditorTreeHead {
+	heads := make(map[string]*db.AuditorTreeHead, len(t.auditors))
+	for name, head := range t.auditors {
+		heads[name] = head.Clone()
+	}
+	return heads
+}
+
 func (t *Tree) fullTreeHead(req *pb.Consistency) (*pb.FullTreeHead, error) {
 	// Get consistency proof between last tree head and this one, if requested.
 	var (

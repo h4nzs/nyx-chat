@@ -12,10 +12,20 @@ on:
 permissions:
   contents: read
 
+# [plan §9.4] Run basi di PR dibatalkan supaya runner tidak terbakar ~25 menit
+# untuk commit yang sudah tergantikan. Push ke `main` TIDAK dibatalkan:
+# riwayat main lebih berguna utuh daripada cepat.
+concurrency:
+  group: ci-${{ github.ref }}
+  # Ekspresi GitHub hanya menerima string literal berkutip tunggal; kutip ganda
+  # membuat file workflow ditolak sebelum job pertama dibuat (run 42347177239).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     name: Build (shared + web + server + marketing)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       # Gagal cepat bila artefak WASM (spqr/keytrans) tidak ikut ter-commit atau
@@ -39,14 +49,14 @@ jobs:
         run: |
           go build ./...
           go vet ./...
-          go test ./...
+          go test ./... -v
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Prisma generate
@@ -72,6 +82,7 @@ jobs:
   wasm:
     name: WASM reproducible (rebuild dari vendor + bandingkan hash)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       # Toolchain dipin `packages/*/rust-toolchain.toml` (1.95.0); tindakan ini
@@ -90,6 +101,9 @@ jobs:
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest
+    # Web coverage (~8m) + server coverage (~3m) + MinIO smoke (~1m) + setup.
+    # Batas lama 15m terlalu dekat; kehabisan waktu terlihat seperti tes gagal.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -98,7 +112,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Build shared package
@@ -108,17 +122,93 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
         run: pnpm exec prisma generate
-      - name: Run unit tests
-        run: pnpm run test
+      # [docs/41 §6.1] Web dijalankan DENGAN coverage, bukan `pnpm run test`
+      # terpisah: v8 hanya menambah sedikit overhead dibanding durasi tesnya,
+      # sedangkan dua kali menjalankan suite 8 menit tidak sepadan.
+      - name: Unit tests web (+ coverage)
+        run: pnpm --filter nyx-web run test:coverage
+      # [docs/41 §6.2] Server: flag coverage Node diteruskan lewat runner
+      # (`server/scripts/test-coverage.mjs`) yang membaca daftar tes eksplisit
+      # dari package.json — tidak ada daftar kedua yang bisa menyimpang. Runner
+      # juga memegang threshold (lines/branches/functions).
+      - name: Unit tests server (+ coverage)
+        run: pnpm --filter nyx-server run test:coverage
         env:
           JWT_SECRET: ci-jwt-secret-not-for-prod
           # Modul server mengimpor src/lib/prisma.ts saat load; tanpa URL ini
           # PrismaClient melempar sebelum test sempat memakai fake DB.
           DATABASE_URL: ${{ secrets.CI_DATABASE_URL || 'postgresql://ci:ci@localhost:5432/ci_db' }}
+      # [docs/41 §6.6] Jalur sukses presign→PUT→HEAD→GET tidak bisa dibuktikan
+      # tanpa S3 nyata. Job ini sudah punya Node + dependency, jadi MinIO
+      # ephemeral lebih murah daripada job baru (dan tidak mengubah daftar
+      # required check). Bucket dibuat oleh tes (`NYX_R2_SMOKE_CREATE_BUCKET=1`),
+      # sesuatu yang tidak dilakukan terhadap akun R2 sungguhan.
+      # MinIO berhenti mendistribusikan image/binary-nya (docker `minio/minio`
+      # ditolak, `dl.min.io` menjawab 410), jadi jalur S3 nyata diuji dengan
+      # `rclone serve s3` — server S3-compatible yang tetap memvalidasi SigV4
+      # penuh, termasuk presigned PUT/GET. Versi dipin; arsipnya ~30 MB.
+      - name: S3 smoke (rclone serve s3) — presign PUT/GET
+        env:
+          JWT_SECRET: ci-s3-smoke
+          R2_ENDPOINT: http://127.0.0.1:9000
+          R2_BUCKET_NAME: nyx-smoke
+          R2_ACCESS_KEY_ID: nyxminio
+          R2_SECRET_ACCESS_KEY: nyxminio123
+          NYX_R2_SMOKE: '1'
+          NYX_R2_SMOKE_CREATE_BUCKET: '1'
+          # Jangan pakai nama RCLONE_*: rclone memperlakukan setiap env RCLONE_x
+          # sebagai flag `--x`, jadi RCLONE_VERSION dianggap `--version` (bool) dan
+          # server gagal start ("strconv.ParseBool: parsing \"v1.75.2\""), yang
+          # tampak seperti curl exit 7. Run 42349470629 membuktikannya.
+          NYX_RCLONE_VERSION: v1.75.2
+        run: |
+          curl -fsSL "https://downloads.rclone.org/${NYX_RCLONE_VERSION}/rclone-${NYX_RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
+          unzip -q /tmp/rclone.zip -d /tmp
+          mkdir -p /tmp/s3-root/nyx-smoke
+          "/tmp/rclone-${NYX_RCLONE_VERSION}-linux-amd64/rclone" serve s3 :local:/tmp/s3-root \
+            --addr 127.0.0.1:9000 --auth-key nyxminio,nyxminio123 &
+          RCLONE_PID=$!
+          trap 'kill $RCLONE_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            # Respons apa pun (termasuk 404) berarti server sudah mendengarkan.
+            curl -s -o /dev/null http://127.0.0.1:9000/ && break
+            sleep 1
+          done
+          curl -s -o /dev/null http://127.0.0.1:9000/
+          pnpm --filter nyx-server exec node --import tsx --test tests/r2Endpoint.test.ts
+      # [docs/41 §6.3] "Coverage global naik" bisa berarti "baris baru tak
+      # diuji". Gate ini mengukur khusus baris yang diubah PR (lcov dari step
+      # web di atas + diff git). Dua titik (`<base> HEAD`) dan fetch satu commit
+      # dasar supaya tetap bekerja pada clone dangkal checkout default.
+      - name: Fetch commit dasar (changed-lines)
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
+      # Belum memblokir merge (plan §6.3): angkanya dilaporkan dulu, dijadikan
+      # gate setelah angka global stabil 10 run. Skripnya murni Node — tidak ada
+      # `diff-cover`/pip yang perlu dipin.
+      - name: Changed-lines coverage web (PR saja)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: >-
+          node scripts/check-changed-lines.mjs
+          --lcov web/coverage/lcov.info
+          --base ${{ github.event.pull_request.base.sha }}
+          --threshold 70
+      # Coverage adalah alat diagnosis: artifact disimpan walau job hijau, supaya
+      # tren bisa dilihat tanpa menjalankan ulang suite.
+      - name: Upload artifact coverage web
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web
+          path: web/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
 
   pir-sidecar:
     name: PIR sidecar (Rust)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
@@ -133,7 +223,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         working-directory: server/pir-sidecar
-        run: cargo test --locked
+        run: cargo test --locked -- --nocapture
 
   sidecar:
     # [audit F-12 2026-10-26] Clippy akhirnya dijalankan di CI. Sebelum ini
@@ -148,6 +238,7 @@ jobs:
     # otomatis kembali kacau dan diff review jadi bising.
     name: Transport sidecar (Rust — fmt + clippy + test)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8' # ratchet:dtolnay/rust-toolchain@master (2026-10-26)
@@ -162,7 +253,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test (protokol murni + fuzz deterministik)
         working-directory: server/transport-sidecar
-        run: cargo test
+        run: cargo test -- --nocapture
 
   lint:
     # [2026-10-11, diperbarui 2026-10-14] Lint BLOCKING lewat oxlint (Rust; tidak
@@ -174,6 +265,7 @@ jobs:
     # ke error sebelum angkanya 0, atau CI jadi merah terus dan diabaikan.
     name: Lint (oxlint — rule error blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -182,7 +274,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Lint
@@ -206,6 +298,7 @@ jobs:
     # Postgres + Redis + API hidup.
     name: Alerts (drill promtool)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Drill alert (promtool diunduh skrip sendiri, dipin 3.15.0)
@@ -220,6 +313,7 @@ jobs:
     #   3. menjalankan test NYX vs vektor + test interop dua arah (NYX→oracle).
     name: DR oracle (vektor + interop)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -232,7 +326,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Oracle — build, vet, unit
@@ -240,7 +334,7 @@ jobs:
         run: |
           go build ./...
           go vet ./...
-          go test ./...
+          go test ./... -v
       - name: Gate drift vektor (oracle vs berkas ter-commit)
         working-directory: tools/dr-oracle
         run: go run . -check
@@ -262,6 +356,7 @@ jobs:
     # pernah menimpa binary layanan hidup).
     name: KT v2 recovery drill
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -274,7 +369,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       # `@nyx/shared` dikonsumsi dari dist/; writer drill memakainya lewat
@@ -287,6 +382,7 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6
@@ -295,7 +391,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Audit production dependencies
@@ -311,6 +407,7 @@ jobs:
   e2e:
     name: E2E (Playwright, Chromium)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:18
@@ -342,7 +439,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Prisma generate + db push (DB CI)
@@ -364,7 +461,23 @@ jobs:
           # menjalankan sidecar Rust. Paksa fallback WSS agar suite menguji
           # logika aplikasi, bukan menunggu QUIC yang tidak punya uplink.
           VITE_FORCE_WSS: '1'
+          # [DEBUG 2026-11-04] Log webserver Playwright (startup Vite/API) dan
+          # navigasi browser dicetak ke log job; tanpa ini kegagalan "aplikasi
+          # tidak render" tidak punya jejak sama sekali. (`pw:api` sengaja tidak
+          # dipakai: volumenya bisa puluhan MB per suite.)
+          DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chromium
+      # [docs/41 §6.5] Suite hijau bisa berarti "tesnya tidak jalan":
+      # exit code Playwright tidak membedakan 4 skip yang sah dari suite yang
+      # seluruh tesnya ter-skip. Gate ini membaca report JSON (jumlah tes tidak
+      # menyusut, tes wajib benar-benar dijalankan, setiap skip beralasan dan
+      # alasannya sudah diizinkan manifest). `--self-test` membuktikan gate-nya
+      # sendiri bisa gagal, bukan selalu hijau.
+      - name: Gate tes wajib E2E (plan §6.5, chromium)
+        working-directory: web
+        run: |
+          node e2e/verify-required-tests.mjs --self-test
+          node e2e/verify-required-tests.mjs --project chromium
       # [docs/35 §35.9] Build ini PQ-only: `VITE_PQ_V2` sudah tidak berpengaruh
       # dan tidak ada fallback v1. Step terpisah ini tetap ada supaya jalur X3DH
       # v2 / grup `sigV:2` / burner PQ-only punya bukti otomatis; suite utama
@@ -376,6 +489,7 @@ jobs:
           # utama. Tes burner PQ-only butuh WebTransport nyata dan dijalankan
           # di job `e2e-chrome` (sidecar hidup), bukan di sini.
           VITE_FORCE_WSS: '1'
+          DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chromium e2e/pqV2.spec.ts
       # [docs/35 Fase 8] Gateway OHTTP hanya dipasang saat OHTTP_ENABLED=1, jadi
       # suite utama men-skip spec ini. Step ini menyalakan stack terpisah (API
@@ -385,6 +499,7 @@ jobs:
         working-directory: web
         env:
           VITE_FORCE_WSS: '1'
+          DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --config playwright.ohttp.config.ts --project=chromium
       # [docs/30 WS-G(2)] Lapis "scrape nyata" dari drill alert: exporter hidup di
       # 127.0.0.1:9464 milik proses ini sendiri (Postgres/Redis sudah siap di job
@@ -400,10 +515,32 @@ jobs:
           done
           curl -fsS http://127.0.0.1:9464/metrics >/dev/null
           cd .. && PROMTOOL_VERSION=3.15.0 bash scripts/drill-alerts.sh
+      # [DEBUG 2026-11-04] Log proses API yang dinyalakan step di atas — tanpa
+      # ini kegagalan drill/scrape hanya terlihat sebagai "curl gagal".
+      - name: Dump log API saat gagal
+        if: failure()
+        run: |
+          echo '--- /tmp/nyx-api.live.log ---'
+          tail -n 200 /tmp/nyx-api.live.log 2>/dev/null || echo '(tidak ada log API)'
+          echo '--- port TCP yang listen ---'
+          ss -ltnp 2>/dev/null || true
+      # Kegagalan E2E tanpa artifact memaksa orang menebak dari log 25 menit
+      # (dulu: apakah relay menolak, UI kosong, atau selector berubah?).
+      - name: Upload artifact Playwright saat gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-chromium-artifacts
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   e2e-chrome:
     name: E2E (Chrome penuh — WebTransport/QUIC aktif)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18
@@ -440,7 +577,7 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - name: Install dependencies (lockfile enforced)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --reporter=append-only
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Build shared package
@@ -465,10 +602,10 @@ jobs:
           toolchain: stable
       - name: Test sidecar (protokol murni + fuzz deterministik)
         working-directory: server/transport-sidecar
-        run: cargo test
+        run: cargo test -- --nocapture
       - name: Build sidecar
         working-directory: server/transport-sidecar
-        run: cargo build --release
+        run: cargo build --release --verbose
       # [docs/30 §30.9 WS-E gate (1)] gate menerima "E2E call 1:1 di CI chrome
       # dengan coturn", jadi coturn harus benar-benar berjalan di runner ini:
       # peer di loopback → `allow-loopback-peers` wajib (produksi memakai IP
@@ -518,8 +655,47 @@ jobs:
           cat /tmp/sidecar.log
       - name: Run E2E full (chat + transport + call specs aktif)
         working-directory: web
+        env:
+          # [DEBUG 2026-11-04] Lihat catatan di job `e2e`.
+          DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chrome
+      # [docs/41 §6.5] Di job inilah skip senyap paling berbahaya: transport
+      # dan chat WAJIB jalan (lihat `mustPass` project `chrome`), jadi sidecar
+      # yang tidak benar-benar terpakai tidak bisa lagi lolos sebagai hijau.
+      - name: Gate tes wajib E2E (plan §6.5, chrome)
+        working-directory: web
+        run: |
+          node e2e/verify-required-tests.mjs --self-test
+          node e2e/verify-required-tests.mjs --project chrome
 
       - name: Run E2E PQ v2 burner (WebTransport nyata)
         working-directory: web
+        env:
+          DEBUG: 'pw:webserver,pw:browser'
         run: pnpm exec playwright test --project=chrome e2e/pqV2.spec.ts -g "burner init PQ-only"
+
+      # [DEBUG 2026-11-04] Kegagalan di job ini paling sering berbentuk "tes
+      # timeout" tanpa sebab: sidecar tidak listen, cert hash salah, atau coturn
+      # menolak kredensial. Log ketiga layanan dicetak di sini supaya penyebabnya
+      # terbaca di log job, bukan hanya di artifact.
+      - name: Dump log layanan & port saat gagal
+        if: failure()
+        run: |
+          echo '--- /tmp/sidecar.log ---'
+          tail -n 200 /tmp/sidecar.log 2>/dev/null || echo '(tidak ada log sidecar)'
+          echo '--- coturn (docker logs) ---'
+          docker logs --tail 100 nyx-coturn 2>&1 || echo '(coturn tidak berjalan)'
+          echo '--- port TCP/UDP yang listen ---'
+          ss -ltnp 2>/dev/null || true
+          ss -lun 2>/dev/null || true
+      - name: Upload artifact Playwright saat gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-chrome-artifacts
+          path: |
+            web/test-results/
+            web/playwright-report/
+            /tmp/sidecar.log
+          if-no-files-found: ignore
+          retention-days: 7

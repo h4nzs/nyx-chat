@@ -8,21 +8,19 @@
  * Redis persisten (AOF) adalah artefak yang setara dengan dump DB: apa pun yang
  * kita tulis ke sana bisa bocor. Sebelum ini Redis memuat **userId asli** di
  * banyak tempat — `online_users` (SET seluruh roster), `active_device:<userId>`,
- * `is_migrating:<userId>`, `cache:keys:*:<userId>`, `rate_limit:*:<userId>`,
- * nilai `linking_token:<t>` = `{userId, deviceId}`, dan member
- * `burner:room:*` / `migration:room:*`.
+ * `cache:keys:*:<userId>`, `rate_limit:*:<userId>`, nilai
+ * `linking_token:<t>` = `{userId, deviceId}`, dan member `burner:room:*`.
  *
  * Dua primitif, sesuai apakah nilainya perlu dibaca kembali:
  *
  *  1. `identityTag()` — HMAC(pepper, "redis:"+userId). Satu arah; dipakai untuk
  *     **keanggotaan SET** yang hanya perlu dibandingkan (`online_users`) dan
- *     untuk **sufiks key** (`active_device:*`, `cache:keys:*`, `rate_limit:*`,
- *     `is_migrating:*`). Key jadi tidak bisa dipetakan ke user dari dump.
+ *     untuk **sufiks key** (`active_device:*`, `cache:keys:*`, `rate_limit:*`).
+ *     Key jadi tidak bisa dipetakan ke user dari dump.
  *
  *  2. `sealIdentity()` / `openIdentity()` — AEAD deterministik (`sealAtRest`).
- *     Dipakai saat nilai HARUS bisa dipulihkan (member `burner:room:*` /
- *     `migration:room:*` dipakai sebagai target kirim; `migration_owner:*`
- *     dibandingkan dengan pemilik). Deterministik → perbandingan & `sRem`
+ *     Dipakai saat nilai HARUS bisa dipulihkan (member `burner:room:*` dipakai
+ *     sebagai target kirim). Deterministik → perbandingan & `sRem`
  *     tetap bekerja, tapi dump hanya melihat ciphertext.
  *
  * [2026-10 legacy purge] Toleransi nilai plaintext dibuang — semua member/key

@@ -49,7 +49,7 @@ To resist "Harvest Now, Decrypt Later" attacks, NYX operates in a **Mandatory Po
 * **Key Exchange (PQX3DH):** classical X25519 combined with **ML-KEM-768 via the X-Wing construct** for asynchronous key agreement.
 * **1:1 Ratchet:** a hybrid Double Ratchet with PQ forward secrecy from the KEM step. A parallel **ratchet v2 built on Signal's SPQR (ML-KEM Braid)** adds **post-compromise security** on top; it is only used **after the peer proves it can read it**, and the v1 path stays frozen and readable. A kill switch stops sending v2 without ever breaking reading of v2 messages.
 * **Groups:** client-side fan-out **Sender Key** ratchet (XChaCha20-Poly1305). Sender keys are distributed over per-device PQ-sealed channels (`pq_box_seal`), group metadata is kept out of the chain, and group senders appear under **pseudonyms**. The server only routes opaque blobs.
-* **Key Transparency (KT):** public keys are published to a Signal-style KT log. The client verifies **inclusion/consistency proofs in WebAssembly** before pinning a peer's key bundle, runs a **monitor loop** against its own entries, and shares tree heads through **gossip** to detect split-view attacks. An auditor service runs as a separate process (independent *process*, not independent organization — see [docs/34](docs/34-key-transparency-verifier.md)). An ML-DSA-65 log v2 runs alongside as **dual-write**; verification and reads still use v1.
+* **Key Transparency (KT):** public keys are published to a Signal-style KT log. The client verifies **inclusion/consistency proofs in WebAssembly** before pinning a peer's key bundle, runs a **monitor loop** against its own entries, and shares tree heads through **gossip** to detect split-view attacks. An auditor service runs as a separate process (independent *process*, not independent organization — see [docs/34](docs/34-key-transparency-verifier.md)). An ML-DSA-65 log v2 is the **only** log now: the v1 writer, v1 service and ABI-1 verifier were retired on 2026-10-28 (`docs/38`), and the client accepts ABI 2 only.
 * **Hardware-Bound Local Vault:** master seed and recovery phrase are encrypted locally with **WebAuthn PRF (biometric binding)** stretched through Argon2id (128 MB memory cost). Keys at rest use a versioned `ENC1:` envelope.
 * **Traffic cover:** every message is padded to 8 KB, and idle WebTransport connections emit random chaff datagrams.
 
@@ -89,7 +89,7 @@ Registration is additionally guarded by tiered counters per source, installation
 * **State:** Zustand v5
 * **Styling:** Tailwind CSS v4
 * **Real-time:** native **WebTransport** in a dedicated Web Worker, with a Socket.IO WebSocket gateway as the second relay path
-* **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm-v2`, `pir-wasm`) loaded lazily
+* **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm-v2`) loaded lazily
 * **Storage:** IndexedDB via `dexie` ("Unified Shadow Vault"), OPFS for encrypted attachment cache
 * **PWA & i18n:** service worker (precache only), four languages (`en`, `es`, `id`, `pt-BR`)
 
@@ -122,7 +122,7 @@ nyx-chat/
 │   ├── transport-sidecar/   # Rust WebTransport sidecar
 │   ├── kt-query/        # Go Key Transparency v2 log + auditor
 │   └── prisma/          # schema
-├── packages/            # shared, spqr-wasm, keytrans-wasm-v2, pir-wasm
+├── packages/            # shared, spqr-wasm, keytrans-wasm-v2
 ├── vendor/signal/       # vendored Signal sources (unmodified)
 ├── tools/  scripts/  ops/  docs/  marketing/
 ```
@@ -218,11 +218,10 @@ Upgrading from 2.x? 3.0.0 contains breaking changes (legacy data purge, new DB c
 
 Because history isn't synced to the cloud, YOU own your data. For maximum security, **NYX supports only one active device per account at a time** — a deliberate security property, not a limitation to be "fixed".
 
-1. **Vault Export:** export an encrypted `.nyxvault` file containing your keys and metadata.
-2. **Encrypted Backup (`.nyxbak`):** a framed, padded, tamper-evident archive (per-frame AEAD, size-hiding padding, key derived from your recovery phrase) that can be saved manually or, optionally, stored in R2 as an opaque object. It is the restore path for a **replacement device**. Format: [Backup Format](docs/31-backup-format.md).
-3. **Single-Device Policy:** an account may have several device records (so a known or new device can be recognised), but only one device can be logged in and active.
-4. **Secure Migration:** moving to a new device uses your vault and post-quantum protocols; the server acts only as a blind relay.
-5. **Panic & wipe:** a panic password (or account deletion) revokes all sessions server-side first, then wipes IndexedDB, OPFS, caches, cookies, and service workers.
+1. **Encrypted Backup (`.nyxbak`) — the only backup format:** a framed, padded, tamper-evident archive (per-frame AEAD, size-hiding padding, key derived from your recovery phrase) that can be saved manually or, optionally, stored in R2 as an opaque object. It is the restore path for a **replacement device**. The old plaintext JSON "vault" (`.nyxvault`) was removed on 2026-10-29 — it dumped session keys in the clear. Format: [Backup Format](docs/31-backup-format.md).
+2. **Single-Device Policy:** an account may have several device records (so a known or new device can be recognised), but only one device can be logged in and active.
+3. **Secure Migration:** moving to a new device uses your `.nyxbak` backup (file or R2 copy) plus post-quantum protocols. Linking a new device starts a fresh identity, but its history (contacts, conversation list and messages) follows through a one-time, device-addressed archive that the old device seals to the new device's post-quantum key — the server only stores an opaque blob. The server acts only as a blind relay.
+4. **Panic & wipe:** a panic password (or account deletion) revokes all sessions server-side first, then wipes IndexedDB, OPFS, caches, cookies, and service workers.
 
 ---
 
@@ -233,7 +232,7 @@ NYX documents what it does **not** hide. Highlights (full list in [Security Mode
 * Message **timing** is not hidden from a network-level observer; chaffing covers idle periods only.
 * The KT auditor is a separate *process* run by the project, not an independent organization.
 * Biometric unlock keeps the recovery phrase in `localStorage` under a WebAuthn-PRF-derived key (convenience vs blast radius, accepted by the maintainer).
-* The CSP keeps `'wasm-unsafe-eval'` (libsodium/WASM) and `'unsafe-inline'`; `'unsafe-eval'` is removed.
+* The CSP keeps `'wasm-unsafe-eval'` (libsodium/WASM); `'unsafe-inline'` is present only in `style-src` (loader `<style>`), never in `script-src`; `'unsafe-eval'` is removed.
 * Multi-device is **not planned**; MLS and native push clients are deferred.
 
 ---

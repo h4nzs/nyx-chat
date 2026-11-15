@@ -104,7 +104,7 @@ const toneClasses: Record<string, string> = {
                 </li>
                 <li>
                   <span class="font-bold text-text-primary">{t('help:move_account.backup_label')}</span>{' '}
-                  <span set:html={t('help:move_account.backup_text') !== 'help:move_account.backup_text' ? t('help:move_account.backup_text') : 'Go to <span class="font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary">Settings &gt; Export Vault</span>. Save the <code>.nyxvault</code> file and import it on your new device login screen.'} />
+                  <span set:html={t('help:move_account.backup_text') !== 'help:move_account.backup_text' ? t('help:move_account.backup_text') : 'Go to <span class="font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary">Settings &gt; Encrypted Backup (.nyxbak)</span>. Save the <code>.nyxbak</code> file — it is encrypted with your Recovery Phrase — and restore it on your new device (Settings → Data, or the recovery options on the login screen).'} />
                 </li>
               </ul>
             </div>

@@ -151,17 +151,47 @@ export function clearLocalActiveDeviceCache(): void {
 }
 
 export async function isActiveDeviceAllowed(userId: string, deviceId: string): Promise<boolean> {
+  return isActiveDeviceAllowedWith(
+    (key) => redisClient.get(key),
+    userId,
+    deviceId
+  );
+}
+
+/**
+ * [AUDIT 2026-10-31 — F-04] Inti pengecekan perangkat aktif, dipisah dari klien
+ * Redis supaya jalur gagal-baca bisa diuji tanpa Postgres/Redis.
+ *
+ * Sebelumnya GET yang gagal di-`catch(() => null)` lalu dibaca sebagai "tidak
+ * ada perangkat aktif" → `true` (fail-open), DAN hasil `null` itu disimpan di
+ * cache 60 detik sehingga perangkat yang sudah di-kick tetap lolos setelah
+ * Redis pulih. Ini kontrol keamanan (`docs/03` §3.3), bukan sekadar anti-abuse
+ * seperti rate limit, jadi kegagalan baca = tolak dan JANGAN cache.
+ * "Tidak ada perangkat aktif" (nilai `null` yang benar-benar dibaca) tetap
+ * diloloskan — akun yang belum pernah login tidak punya baris untuk dilanggar.
+ */
+export async function isActiveDeviceAllowedWith(
+  readActiveDevice: (key: string) => Promise<string | null>,
+  userId: string,
+  deviceId: string
+): Promise<boolean> {
   const now = Date.now();
   const cached = activeDeviceCache.get(userId);
   if (cached && cached.expiresAt > now) {
     return cached.deviceId === '' || cached.deviceId === deviceId;
   }
-  const isMigrating = await redisClient.exists(identityKey('is_migrating', userId)).catch(() => 0);
-  if (isMigrating) {
-    activeDeviceCache.set(userId, { deviceId: '', expiresAt: now + 30000 });
-    return true;
+
+  let active: string | null;
+  try {
+    active = await readActiveDevice(identityKey('active_device', userId));
+  } catch (e) {
+    console.warn(
+      '[Security] Active-device lookup gagal — menolak perangkat (fail-closed, tanpa cache):',
+      sanitizeForLog(userId)
+    );
+    return false;
   }
-  const active = await redisClient.get(identityKey('active_device', userId)).catch(() => null);
+
   activeDeviceCache.set(userId, { deviceId: active ?? '', expiresAt: now + 60000 });
   return !active || active === deviceId;
 }
@@ -257,10 +287,11 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
         }
 
         // 🛡️ LAPIS 1: SINGLE ACTIVE DEVICE CHECK
+        // [2026-10-29] Tanpa bypass `is_migrating`: alur transfer QR yang dulu
+        // membuka jendela dua-device sudah dihapus.
         const activeDeviceId = await redisClient.get(identityKey('active_device', userId));
-        const isMigrating = await redisClient.exists(identityKey('is_migrating', userId));
 
-        if (activeDeviceId && activeDeviceId !== deviceId && !isMigrating) {
+        if (activeDeviceId && activeDeviceId !== deviceId) {
           incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'session_revoked' });
           console.warn(`[Security-L1] Revoked device ${deviceId} (User ${userId}) tried to connect. Kicking...`);
           const kickPayload = Buffer.from(JSON.stringify({
@@ -341,7 +372,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     console.warn('[Presence] Gagal mengirim sinyal leave ke watcher:', e);
   }
 
-  // Best-effort cleanup for burner/migration rooms
+  // Best-effort cleanup for burner rooms
   try {
     // [AUDIT 2026-10-24] Dulu dua `SCAN` seluruh keyspace dijalankan pada SETIAP
     // disconnect — biayanya linear terhadap jumlah room dan muncul tepat saat

@@ -9,15 +9,37 @@ const e2eDatabaseEnv = process.env.NYX_E2E_DATABASE_URL
 
 export default defineConfig({
   testDir: './e2e',
+  // [docs/41 §8] a11y punya config sendiri (`playwright.a11y.config.ts`) karena
+  // tidak butuh — dan tidak boleh — menjalankan global reset DB. Tanpa baris
+  // ini spec-nya ikut terhitung di suite utama (24 tes, bukan 22) sehingga
+  // `minTotal` di required-tests.json tidak lagi menjaga jumlah yang benar.
+  // `pir.spec.ts` butuh dua sidecar XOR-PIR + OHTTP (lihat
+  // `playwright.pir.config.ts` / `test:e2e:pir`). Di stack E2E default PIR mati,
+  // jadi spec itu dijalankan job drills `pir-e2e`, bukan di sini.
+  testIgnore: [/a11y\.spec\.ts/, /pir\.spec\.ts/],
   fullyParallel: true,
   // workers: 1 (serial) — suite berbagi 1 server dev + Postgres/Redis lokal;
   // spec profile/settings flaky bila >1 browser berjalan bersamaan (timing event
   // `user:updated` & profil REST). Serial = deterministik untuk CI.
   workers: 1,
   globalSetup: './e2e/global.setup.ts',
+  // [DEBUG 2026-11-04] Reporternya eksplisit dan bukti kegagalan selalu disimpan.
+  // Sebelumnya `trace: 'on-first-retry'` TIDAK PERNAH menghasilkan trace: `retries`
+  // tidak diset (= 0 di CI), jadi syarat "first retry" tidak pernah terpenuhi dan
+  // artefak kegagalan hanya berisi `error-context.md` tanpa snapshot halaman.
+  // Kegagalan `e2e/auth.spec.ts` di run 41820476193 harus ditebak karena itu.
+  // [docs/41 §6.5] Report JSON dipakai `e2e/verify-required-tests.mjs`:
+  // gate itu membuktikan tes wajib benar-benar DIJALANKAN, sesuatu yang tidak
+  // bisa dibaca dari exit code (suite tetap hijau walau seluruh tes ter-skip).
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
+    ['json', { outputFile: 'playwright-report/results.json' }],
+  ],
   use: {
     baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   projects: [
     {
@@ -29,6 +51,17 @@ export default defineConfig({
       // WebTransport/QUIC di CI. Dipakai oleh job `e2e-chrome`.
       name: 'chrome',
       use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    },
+    {
+      // [docs/41 §7.1] Engine non-Chromium: smoke nightly dulu, naik ke PR
+      // setelah 7 hari hijau. WebTransport memang tidak tersedia di sini, jadi
+      // spec transport/chat tetap skip dengan alasan tertulis.
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
     },
   ],
   webServer: [
@@ -44,6 +77,21 @@ export default defineConfig({
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
+      // [E2E PIR MATI] Stack ini TIDAK menjalankan sidecar XOR-PIR, jadi klien
+      // wajib mati juga. `web/.env` lokal boleh menyalakan `VITE_PIR_ENABLED=1`
+      // (untuk kerja PIR manual); tanpa baris ini setiap `searchUsers` melempar
+      // `PirError: VITE_PIR_MANIFEST_KEYS kosong` dan hasil pencarian kosong —
+      // itulah yang dulu menggagalkan `groupFaults.spec.ts` di modal grup
+      // ("user anggota tidak muncul"), padahal alur UI-nya benar. Stack PIR
+      // sungguhan tetap di `playwright.pir.config.ts`.
+      // [E2E ISOLASI] `web/.env` lokal boleh berisi `VITE_API_URL` ABSOLUT yang
+      // menunjuk API produksi. Tanpa paksaan ini seluruh suite menulis ke sana
+      // (registrasi akun uji, pesan, unggahan) sementara spec-nya mengira sedang
+      // menguji stack lokal — dan endpoint baru selalu 404 di sana. Env proses
+      // menang atas berkas `.env` di Vite, jadi API dipaksa relatif: request
+      // lewat proxy dev server, yaitu stack lokal (`NYX_E2E_API_PROXY_TARGET`
+      // bila diset, default 4000).
+      env: { VITE_API_URL: '/api', VITE_PIR_ENABLED: '0' },
     }
   ],
 });

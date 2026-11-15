@@ -92,9 +92,56 @@ NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing
 - Angka referensi (dev, Linux, Node 26 / rustc 1.95): web 5 target × 100k iterasi
   = 500k input dalam ~50 s (0 temuan); sidecar 160,9 juta iterasi dalam 300 s
   (536k iterasi/detik, 0 temuan) → gate 1 jam ≈ 1,9 miliar input.
-- Yang **belum** di-fuzz: verifier proof key-transparency (belum ada kodenya —
-  WS-A) dan parser framing bidi sisi sidecar yang membaca dari soket (hanya
-  keputusan murninya yang diuji).
+- Yang **belum** di-fuzz: verifier proof key-transparency (kodenya sudah ada dan
+  dikunci 86 test KT, tetapi belum punya target fuzz sendiri) dan parser framing
+  bidi sisi sidecar yang membaca dari soket (hanya keputusan murninya yang diuji).
+
+## 11.1d Coverage — lantai per modul, bukan target global
+
+Coverage di repo ini **alat diagnosis**. Angka global (web: 30% lines) tidak
+pernah dipakai sebagai gerbang: itu bisa naik-turun karena berkas yang sudah
+teruji dan justru menutupi modul kritis yang tak diuji. Yang mengikat adalah
+lantai per-glob.
+
+```bash
+pnpm --filter nyx-web run test:coverage       # v8, laporan di web/coverage/
+pnpm --filter nyx-server run test:coverage    # Node native + daftar tes dari package.json
+node scripts/check-changed-lines.mjs --lcov web/coverage/lcov.info --base origin/main
+```
+
+- **Web** (`web/vite.config.ts` → `test.coverage`): reporter `text`, `json-summary`,
+  `html`, `lcov`; `reportOnFailure: true` supaya run merah tetap menghasilkan
+  angka (itu justru saat paling dibutuhkan). Lantai 4 Nov 2026 (baseline satu run
+  penuh, 137 berkas lulus, margin beberapa poin di bawah angka terukur):
+
+  | Glob | Lantai (lines/branches) | Terukur (agregat / berkas terlemah) |
+  |---|---|---|
+  | `src/lib/spqr*.ts` | 90 / 66 | 95,8 / 83,6 — 91,8 / 68,2 |
+  | `src/lib/kt*.ts` | 58 / 46 | 77,2 / 68,9 — 61,0 / 48,8 |
+  | `src/lib/group*.ts` | 45 / 41 | 76,8 / 67,8 — 47,7 / 43,7 |
+  | `src/lib/privacy*.ts` | 52 / 56 | 85,3 / 68,3 — 54,5 / 58,8 |
+  | `src/lib/keychainDb.ts` | 30 / 21 | 32,5 / 23,1 |
+  | `src/lib/messagePipeline.ts` | 2 / 3 | 2,1 / 3,3 |
+
+  Threshold glob di Vitest berlaku **per berkas**, jadi angka di kolom "lantai"
+  diturunkan dari berkas terlemah pada glob itu, bukan dari agregatnya. Naikkan
+  setiap kali tes ditambah; jangan turunkan tanpa alasan yang dicatat di sini.
+- **Celah yang diakui, bukan diklaim tertutup:** `src/utils/crypto.ts` (3.744
+  baris) hanya 1,2% lines di unit test — hampir seluruh permukaannya berjalan di
+  crypto worker dan diuji lewat E2E; `keychainDb.ts` 32% dan
+  `messagePipeline.ts` 2% karena jalurnya menuntut browser/Dexie sungguhan.
+  Karena itu ketiganya TIDAK diberi lantai 80%: lantai palsu hanya akan memaksa
+  orang menaikkan angka dengan tes yang tidak membuktikan apa pun.
+- **Server** (`server/scripts/test-coverage.mjs`): membaca script `test` (satu-
+  satunya daftar berkas tes) lalu menjalankannya dengan flag Node, jadi tidak ada
+  daftar kedua yang bisa menyimpang. Baseline 3 Nov 2026 **lines 77,3% · branches
+  84,7% · functions 79,4%** → gate 72/78/74. Node native hanya mengeluarkan
+  laporan teks (tidak ada lcov), jadi changed-lines server belum mungkin.
+- **Changed-lines** (`scripts/check-changed-lines.mjs`): membandingkan baris yang
+  diubah terhadap `lcov.info`, tanpa dependensi Python. Di CI jalan di PR saja
+  pada job `unit` dan **belum memblokir** (`continue-on-error`) sampai angka
+  global stabil 10 run. Uji manual dengan fixture: `--diff-file <patch>`
+  menggantikan `git diff`, sehingga skrip ini bisa diuji tanpa repo berubah.
 
 ## 11.2 E2E (Playwright)
 
@@ -138,6 +185,15 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 - `workers: 1` (serial) — the suite is flaky in parallel against one local server.
 - **`pnpm --filter nyx-web run test:e2e:ohttp`** (`playwright.ohttp.config.ts`) menyalakan API di **:4100** dan Vite di **:5273**. Di selfhost yang relay OHTTP-nya sudah hidup (`nyx-ohttp-relay` juga memakai :4100), stack uji itu gagal `EADDRINUSE` — hentikan relay dulu (`systemctl --user stop nyx-ohttp-relay`) atau jalankan suite di checkout/mesin terpisah. Port itu hardcoded di config (CI tidak punya relay di host yang sama).
 - `e2e/global.setup.ts` wipes the local DB + Redis (`server/scripts/reset-test-env.ts`). Never run against a valuable database. **Failure mode worth knowing (2026-10-17):** if `server/.env` has `NODE_ENV=production`, the reset script refuses (exit 1, `DANGER: Attempted to wipe database in non-local/production environment!`) and Playwright aborts before the first spec — every E2E run on such a machine is impossible, and the message looks like a setup bug. Run E2E with a test env (`NODE_ENV` not `production`), don't edit `.env` around the guard.
+- **Selfhost `.env` membuat suite mustahil tanpa override (terukur 2026-11-05, 2 run @37 menit).** Tiga nilai produksi menghalangi, dan gejalanya menyesatkan:
+  1. `ABUSE_REGISTRATION_GUARD=on` membatasi 20 registrasi/jam/IP; suite membuat 20+ akun, jadi sisanya berhenti di layar registrasi dengan `REGISTRATION_BURST_LIMIT` (bukan error E2E).
+  2. `VITE_PIR_ENABLED=1` + `PIR_ENABLED=0` → klien memanggil `/api/pir/params` yang menjawab 404 (`PirError: params HTTP 404`) dan pencarian menampilkan "No users found" — tidak ada fallback diam-diam, sesuai desain. Bila PIR justru hidup, akun baru belum masuk snapshot sampai 3 menit.
+  3. Skema DB selfhost bisa tertinggal dari `prisma/schema.prisma`; `global.setup` hanya menghapus baris, bukan `db push`. Contoh nyata: kolom `SessionKey.issuedByServer` belum ada → `POST /api/conversations` 500 (`P2022`).
+  Jalankan API uji dan web dengan override (env proses menang atas `.env`), setelah `cd server && PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=yes pnpm exec prisma db push`:
+  `ABUSE_REGISTRATION_GUARD=off PIR_ENABLED=0 NODE_ENV=development pnpm --filter nyx-server dev`
+  `VITE_PIR_ENABLED=0 VITE_OHTTP_ENABLED=0 npx playwright test --project=chromium`
+  Vite yang sudah berjalan dari run sebelumnya **memoize env lama** (`reuseExistingServer`); hentikan :5173 dulu bila mengubah `VITE_*`, atau override tidak berpengaruh dan hasilnya menyesatkan.
+- **Suite E2E selalu memakai API lokal, bukan `VITE_API_URL` di `web/.env`.** Bila berkas itu berisi URL absolut (mis. `https://api.<domain>`), tanpa paksaan seluruh suite menulis ke **API produksi**: registrasi akun uji, pesan, dan unggahan sungguhan masuk ke sana — sementara spec-nya mengira sedang menguji stack lokal, dan endpoint baru selalu `404` di sana (gejalanya "fitur belum ada", bukan "salah target"). `playwright.config.ts` karena itu memaksa `VITE_API_URL=/api` untuk dev server web (env proses menang atas berkas `.env` di Vite), sehingga request lewat proxy dev server → API lokal (`NYX_E2E_API_PROXY_TARGET`, default `http://localhost:4000`). Kalau butuh stack terisolasi, jalankan API di port lain (mis. `PORT=4001 pnpm --filter nyx-server dev`) lalu set `NYX_E2E_API_PROXY_TARGET=http://localhost:4001`.
 - Registration helpers walk the full onboarding modal chain (Proof of Trust → Recovery → Secure Phrase → Verify Sequence ×2 close → System Init). They live in `e2e/helpers/registration.ts` (WS-G(7)) — import `registerUser` (or `registerUserViaBiometric` for the Settings spec); do not copy them back into specs.
 - **Quick Tour hanya ter-mount SETELAH bootstrap selesai** (`Chat.tsx` mensyaratkan `!isBootstrapping && user.hasCompletedOnboarding === false`), dan setelah registrasi `isBootstrapping` masih `true` sampai ada reload halaman. Artinya `dismissOnboardingTour(page)` di `registerUser` tidak menemukan apa pun untuk spec yang tidak pernah reload — dan sebaliknya spec yang **melakukan reload** (`page.goto`, `page.reload`) melihat tour muncul lalu: overlay `fixed inset-0`-nya menolak klik berikutnya (`subtree intercepts pointer events`). Jadi: panggil `dismissOnboardingTour(page)` SETELAH setiap navigasi penuh, bukan hanya sekali setelah registrasi. Klik `×` menandai onboarding selesai di server, jadi tour tidak kembali setelah reload berikutnya.
 - **State burner host hidup HANYA di RAM** (`useBurnerStore.activeSessions`). `page.goto('/chat/<roomId>')` me-reload halaman → DR host hilang → komposer host terkunci di "Waiting for guest to establish secure connection..." (lampiran tak bisa dikirim), dan baris conversation-nya bisa belum terbaca lagi karena persistensi ke IndexedDB bersifat fire-and-forget. Buka room burner lewat **baris sidebar (navigasi in-app)**, tunggu preview pesan guest muncul (bukti `burner:receive` sudah menginisialisasi DR host), baru berinteraksi — lihat `e2e/regression.spec.ts` (`openBurnerChatOnHost`).
@@ -152,20 +208,84 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 - Tombol tutup `×` modal onboarding **jangan** diklik lewat `locator(...).first().click()`: saat berpindah langkah, modal lama masih ber-animasi keluar sehingga Playwright menunggu "stabil" sampai timeout. Pakai `dismissModalCloseButton` dari `helpers/registration.ts` (resolve ulang + `force`).
 - Kalau registrasi "berhasil" (201) tapi onboarding tak lanjut, cek apakah muncul `PasswordPromptModal`: jalur at-rest tidak boleh memanggil `getMasterSeed()` (yang memunculkan prompt) — pakai `getMasterSeedIfUnlocked()` (lihat `CHANGELOG` 2026-10-13).
 
+### 11.2b Manifest tes wajib (docs/41 §6.5)
+
+Exit code Playwright tidak membedakan "4 skip yang sah" dari "suite tidak menguji
+apa pun": tes yang ter-skip tetap menghasilkan baris hijau (dengan reporter dot
+bahkan tanpa nama). Karena itu tes wajib didaftarkan di
+`web/e2e/required-tests.json` dan diperiksa dari **report JSON**, bukan output
+teks.
+
+```bash
+cd web
+pnpm exec playwright test --project=chromium   # menulis playwright-report/results.json
+node e2e/verify-required-tests.mjs --project chromium
+node e2e/verify-required-tests.mjs --self-test  # buktikan gate ini bisa gagal
+```
+
+Tiga pemeriksaan per project:
+
+- `minTotal` — jumlah tes yang terkumpul tidak menyusut (spec hilang, `testIgnore`
+  baru, atau config yang mempersempit suite).
+- `mustPass` — tes wajib **ada** dan benar-benar dijalankan; skip pada tes ini
+  selalu pelanggaran, sekalipun alasannya masuk akal.
+- `allowedSkipReasons` — setiap skip wajib punya alasan tertulis **dan** alasannya
+  cocok dengan daftar. Skip tanpa alasan atau dengan alasan baru = pelanggaran,
+  jadi menambah skip harus lewat PR yang mengubah manifest: terlihat saat review,
+  bukan hilang di log.
+
+Job `e2e` memeriksa project `chromium` (spec WebTransport/coturn/R2 boleh skip
+dengan alasan tertulis); job `e2e-chrome` memeriksa `chrome` dan **mewajibkan**
+transport + chat benar-benar jalan — di situlah skip senyap pernah membuat suite
+tampak hijau (`docs/11` §11.5: probe `WebTransport` di `about:blank`).
+
+Kedua project mewajibkan alur inti akun untuk selalu dijalankan: auth (login,
+registrasi, login gagal), profile, security (sesi aktif), settings (emergency
+eject), recovery v2 (frasa pemulihan + tanda tangan ML-DSA), dan deviceLinking
+(tautan QR). Spec-spec itu tidak butuh WebTransport/coturn/R2, jadi skip di
+salah satunya berarti lingkungannya rusak — bukan alasan yang sah.
+
+`--self-test` menjalankan 12 skenario sintetis (8 gate: lulus; skip beralasan;
+tes wajib di-skip; skip tanpa alasan; alasan belum diizinkan; tes hilang; jumlah
+menyusut — plus 4 karantina: entri sah; kedaluwarsa; tes tidak ada; tes masih
+dijalankan) dan ikut jalan di CI. Tanpa itu, gate hijau tidak membedakan gate
+yang bekerja dari gate yang tidak memeriksa apa pun.
+
+Menambah spec baru tidak menuntut perubahan manifest (`minTotal` hanya menjaga
+suite tidak menyusut); masukkan ke `mustPass` bila spec itu tidak boleh pernah
+skip di project tersebut.
+
 ## 11.3 CI matrix
 
 | Job | Browser | Transport |
 |---|---|---|
-| `e2e` | Playwright chromium (headless shell) | transport specs skipped; diakhiri **drill alert terhadap exporter nyata** (`scripts/drill-alerts.sh`, metrik dari API yang baru dinyalakan) |
+| `e2e` | Playwright chromium (headless shell) | transport specs skipped; diakhiri **drill alert terhadap exporter nyata** (`scripts/drill-alerts.sh`, metrik dari API yang baru dinyalakan); report JSON diperiksa `e2e/verify-required-tests.mjs` (manifest `docs/41` §6.5) |
+| `unit` | — | `pnpm run test` lalu `test:coverage` di web (v8) dan server (Node native); lantai per-glob di §11.1d. Pada PR: `scripts/check-changed-lines.mjs` melaporkan baris baru yang belum teruji (non-blocking) |
 | `e2e-chrome` | Google Chrome via apt (`channel: 'chrome'`) | `cargo test` (protokol murni + fuzz 20k) → **sidecar built + running**, cert hash parsed from its banner → transport + chat specs run fully; **coturn diinstal + dijalankan** (`TURN_URLS`/`TURN_STATIC_AUTH_SECRET` di env job) → `call.spec` run fully |
-| `alerts` | — | `promtool check config`/`check rules`/`test rules` atas 14 aturan (`SKIP_LIVE=1`) |
+| `alerts` | — | `promtool check config`/`check rules`/`test rules` atas 44 aturan (`SKIP_LIVE=1`) |
+| `drills` (**terjadwal**, `.github/workflows/drills.yml`) | — | Senin 04:00 UTC + `workflow_dispatch`: ketiga drill dalam satu tempat — promtool (`SKIP_LIVE=1`), pemulihan KT v2 11 langkah, dan **restore klien** (`.nyxbak` di atas dump Postgres nyata: seed → `pg_dump` → klaster `initdb` sementara → `pg_restore` → Dexie/IndexedDB). Alasan dijadwalkan: kemampuan memulihkan bergantung pada skrip/kunci/konfigurasi yang berubah tanpa PR yang menyebutnya, dan `client-restore` tidak pernah jalan per-PR |
+| `nightly` (**terjadwal**, `.github/workflows/nightly.yml`) | Firefox + WebKit (smoke), Chromium (a11y) | 02:00 UTC harian: fuzz web 1 jam (`fuzz:parsers:hour`), fuzz framing sidecar 1 jam (`NYX_FUZZ_SECONDS=3600`), k6 100 VU di stack ephemeral (Postgres+Redis service; **menulis pesan**), smoke `auth`+`settings` di Firefox/WebKit, `a11y.spec.ts`, dan contract test HTTP (`httpContract.test.ts`) |
 | `dr-oracle` | — | oracle Go: `build`/`vet`/`test` + gate drift vektor (`go run . -check`) + `x3dhOracleVectors.test.ts` + `x3dhOracleInterop.test.ts` |
 
-Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR: keduanya dijalankan
-nightly / sebelum rilis besar (`docs/30` §30.20 sisa WS-G). Terakhir dijalankan
+Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR dan **belum** punya workflow
+terjadwal — keduanya masih manual, dijalankan sebelum rilis besar (`docs/30`
+§30.20 sisa WS-G). Satu-satunya yang terjadwal sekarang adalah drill
+(`.github/workflows/drills.yml`, Senin 04:00 UTC). Terakhir dijalankan
 (2026-10-14): fuzz sidecar 160,9 juta iterasi/300 s (0 temuan) dan k6 beban penuh
 (`scripts/load/run-relay-load.sh`, 500 VU — send p95 74,4 ms / fetch p95 68,8 ms,
 0% error). Drill alert + vektor oracle **sudah** jalan per-PR (tabel di atas).
+
+**Branch protection — 14 required check (2026-11-05).** `main` sekarang meminta
+status check berikut sebelum PR bisa merge: 12 job `ci.yml` (Build, WASM
+reproducible, Unit Tests, PIR sidecar, Transport sidecar, Lint, Alerts, DR
+oracle, KT v2 recovery drill, Dependency Audit, E2E Chromium, E2E Chrome) plus
+kedua job CodeQL (`Analyze (actions)`, `Analyze (javascript-typescript)`).
+Namanya harus **persis** nama check-run (bukan id job di YAML) — ganti nama job
+berarti proteksi berhenti mencocokkan, jadi periksa ulang dengan
+`gh api repos/h4nzs/nyx-chat/commits/main/check-runs --jq '.check_runs[].name'`
+setiap kali nama job diubah. Kebijakan yang **tidak** dinyalakan: wajib-PR,
+review wajib, dan `enforce_admins` — bypass admin masih mungkin, jadi proteksi
+ini menahan merge biasa, bukan penyalahgunaan akses admin (`docs/30` §9.1).
 
 **Test internal crate `spqr` (gate `docs/30` §30.8 poin 1) — manual, bukan per-PR:**
 butuh toolchain nightly + dev-dependency besar (proptest, criterion, libcrux).
@@ -199,7 +319,8 @@ yang masih unstable (`error[E0658]`).
 - Key Transparency: penulis log **diverifikasi** (11 test di
   `server/tests/keyTransparency.test.ts` + **8 test** di
   `server/tests/ktIdentityLog.test.ts` untuk jalur rotasi, plus satu penulisan
-  nyata ke binary Go `key-transparency-server`). Yang **belum** ada test perilaku
+  nyata ke layanan log v2 (`KT_V2_SERVER_URL` → `nyx-kt-query-v2`; log v1
+  pensiun, `docs/38`). Yang **belum** ada test perilaku
   end-to-end: handler route rotasi (`/keys/prekey-bundle`, `/users/me/keys`,
   `/login`) tidak dijalankan dengan Prisma/Redis — yang diuji adalah modul penulis
   + guard sumber bahwa ketiga jalur memanggilnya (`docs/32` §32.7 poin 2), dan
@@ -208,6 +329,11 @@ yang masih unstable (`error[E0658]`).
 - No test for the biometric (WebAuthn) login path (needs a real authenticator).
 - Payment webhooks are only unit-tested indirectly (HMAC compare helper).
 - Crypto worker internals are exercised through E2E flows, not unit tests (worker is monolithic by design).
+- **Status pekerjaan gap dilacak di `docs/41` §41.4–41.5**, bukan di sini:
+group lifecycle E2E, PIR/KT live E2E, backup/restore E2E,
+WebKit/Firefox, contract test HTTP, nightly fuzz/k6, karantina flake, a11y.
+Bagian ini menjawab *mengapa* sebuah jalur belum diuji; `docs/41` menjawab
+*sudah dikerjakan atau belum*. Jangan menduplikasi status di kedua tempat.
 
 ## 11.5 Writing new E2E specs
 

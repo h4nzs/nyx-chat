@@ -164,6 +164,12 @@ Yang menyajikan adalah `server/kt-query`, dan server NYX meneruskannya lewat
 `/api/keys/kt/{search,distinguished,monitor,config}` (byte protobuf base64url
 apa adanya; parser-nya ada di WASM, bukan di JS).
 
+Sejak audit N7-01, klien mengambil bukti lewat **`POST /api/keys/kt/search`**
+dengan body JSON `{hash,last,distinguished}` — hash username dan ukuran pohon
+tidak lagi muncul di URL. Bila OHTTP aktif jalur ini masuk amplop OHTTP dengan
+token ber-scope (allowlist `packages/shared/src/ohttp.ts`); GET `/search` tetap
+ada hanya untuk kompatibilitas klien lama.
+
 Fixture `web/src/lib/__tests__/fixtures/kt/query-*.pb` dihasilkan
 `server/scripts/kt-query-fixtures.ts` melalui jalur itu, dan test ke-13–18
 memverifikasinya dengan WASM sungguhan:
@@ -262,6 +268,13 @@ berhenti saat gagal, pelaporan `changed`, dan tanpa state → tidak memanggil
 jaringan). Loop ini tidak mengubah kunci yang dipercaya: hasilnya state baru +
 notifikasi; keputusan blokir tetap di jalur pin (§34.6a). Setiap langkah juga
 menyegarkan jangkar gossip lewat `GET /api/keys/kt/head` (§34.6c).
+
+Sejak audit N7-02, primary key `ktMonitoring` bukan search key mentah: nilainya
+HMAC-SHA-256(searchKey, subkey masterSeed), dan search key asli hanya disimpan
+di dalam nilai ter-seal `ENC1:`. Baris lama dimigrasikan malas saat vault
+terbuka; dump IndexedDB tanpa masterSeed tidak lagi bisa dipakai untuk
+menebak kontak yang dimonitor. Logout biasa juga menghapus state monitor dan pin
+config KT (N7-04).
 
 ## 34.6 Sisa pekerjaan
 
@@ -362,3 +375,89 @@ Verifier tidak menambah data yang dikirim ke server: ia hanya memverifikasi byte
 yang sudah ada. Search key tetap `0x75 || usernameHash(32)` (memory-hard), tanpa
 userId/IP di nilai log maupun di permintaan verifikasi (audit `privacy-dump-audit.ts`
 tidak terpengaruh).
+
+**Catatan audit pass 8 (2026-11-02).** Tiga batas yang sebelumnya tidak tertulis:
+
+1. **KDF indeks monitoring.** PK tabel `ktMonitoring` = HMAC(searchKey) dengan
+   subkey `crypto_kdf_derive_from_key(32, 1, 'nyx-kt01', masterSeed)`
+   (`keychainDb.ts`). Bentuk panggilan JS berbeda dari API C: ia **mengembalikan**
+   subkey, bukan menulis ke argumen pertama. Kesalahan bentuk itu pernah membuat
+   seluruh penulisan state KT gagal (N8-01); sekarang dikunci tes yang memakai
+   libsodium asli, bukan mock.
+2. **Pin konfigurasi per akun.** Baris `ktConfig` ber-PK `kt-config:<userId>`.
+   Logout **tidak** menghapusnya (kontinuitas TOFU lintas sesi), dan akun lain di
+   perangkat yang sama tidak pernah membacanya. `clearKtConfigPin()` hanya untuk
+   rotasi kunci yang disengaja/wipe dan menghapus semua baris.
+3. **Fallback OHTTP.** Jalur langsung hanya dipakai untuk gangguan transport atau
+   5xx. 4xx adalah jawaban sah layanan (`404 KT_NOT_FOUND`), dan mengirim ulang
+   lewat cookie berarti hash kontak sampai ke server justru saat kontak belum
+   terdaftar — jadi 4xx **fail-closed** + log `kt.ohttp-degraded`.
+
+Rate limit lintas klien OHTTP: gateway memanggil API lewat loopback, jadi tag
+limiter memakai subjek token OHTTP (per akun) alih-alih `127.0.0.1` bersama
+(audit N8-02, `server/src/utils/clientIp.ts`).
+
+**Bukti KT tanpa akun (N7-01, ditutup).** `POST /api/keys/kt/search` tidak lagi
+mensyaratkan autentikasi, dan klien mengambilnya **tanpa cookie**
+(`fetchKtProofAnonymously`, `credentials: 'omit'`) — juga tanpa token di dalam
+amplop OHTTP (`withToken: false`). Alasannya: bukti log KT adalah data publik,
+sedangkan yang dilindungi adalah keterkaitan "akun ini memeriksa hash itu";
+selama route masih membaca sesi, memindahkan hash ke body hanya memindahkan
+kebocoran dari log URL ke pasangan akun→hash di server. Konsekuensi yang
+disengaja: klien tidak lagi menerima "tidak ada di log" sebagai `unavailable`
+karena 401, dan endpoint itu dapat dipanggil siapa pun.
+
+Batas yang tetap ada, dinyatakan jujur: (1) tanpa OHTTP, server masih melihat
+**IP** yang meminta hash tertentu — anonimitas akun, bukan anonimitas jaringan;
+(2) route lain (`/monitor`, `/config`, `/head`, `/distinguished`) tetap
+terautentikasi karena bukan pencarian kontak. Anonimitas **penuh** (server tidak
+tahu IP) tetap butuh OHTTP menyala atau PIR.
+
+**Bucket limiter jalur anonim (N9-01, ditutup).** Semua request anonim lewat
+OHTTP tiba dari `127.0.0.1`, jadi `ktProofLimiter` (240/menit, store
+`rl:ktproof:` terpisah) dulu berbagi **satu** counter untuk seluruh pengguna —
+dua klien wajar sudah cukup menghabiskannya, dan karena kegagalan itu dipetakan
+ke `unavailable` + backoff, verifikasi kontak berhenti untuk semua orang
+(penyerang tidak perlu akun). Sekarang relay — satu-satunya pihak yang melihat
+alamat klien — mengirim `HMAC(secret, alamat)` di header internal, gateway
+membuang klaim header itu dari dalam amplop dan memasang nilai relay, dan API
+memakai tag itu setelah di-pepper lagi (`server/src/utils/clientIp.ts`,
+`server/src/ohttp/clientTag.ts`). Tag tanpa token internal yang sah **tidak**
+dipercaya, jadi ia tidak bisa dikarang lewat gateway langsung. Batas yang
+tersisa: tag adalah identitas per alamat, bukan per akun (beberapa akun di satu
+IP berbagi bucket), dan operasi tanpa `OHTTP_INTERNAL_TOKEN` di kedua proses
+kembali ke bucket bersama — dinyatakan lewat peringatan start relay, bukan
+diam-diam.
+
+**Limiter lain di jalur yang sama (N10-02, ditutup).** N9-01 hanya menutup
+`ktProofLimiter`; dua limiter 120/menit lain di jalur OHTTP masih memakai
+`req.ip`: `ohttpLimiter` gateway (dipanggil relay lewat loopback → `127.0.0.1`
+untuk semua orang) dan limiter relay (dipanggil nginx tanpa XFF → alamat nginx
+untuk semua orang). Probe pass 10 dengan router asli: 140 request dari dua tag
+sah tetap kena 429 di #121. Keduanya sekarang memakai identitas klien — gateway
+`clientRateLimitTag(req)` (tag relay → subjek token → IP), relay
+`HMAC(OHTTP_INTERNAL_TOKEN, alamat klien)` sehingga key di memori relay pun
+bukan alamat mentah. Kontrolnya tetap: satu tag/klien yang sama masih dibatasi
+120/menit.
+
+**Header identitas relay (N10-03, ditutup).** `CF-Connecting-IP` dulu dipercaya
+tanpa syarat, padahal nginx hanya menyetel `Host` untuk blok relay — header
+klien lain diteruskan apa adanya, sehingga klien yang menjangkau origin langsung
+bisa memilih tag sendiri. Sekarang header itu hanya dipakai bila hop **langsung**
+ada di `OHTTP_TRUSTED_PROXIES` (default loopback; CIDR IPv4/IPv6 didukung,
+entri cacat fail-closed), selain
+itu alamat soket. nginx juga menimpa header dengan `$remote_addr` (hasil
+restorasi `real_ip`) di blok relay maupun `/api`.
+
+**Urutan monitor (N10-01, regresi N9-02).** Karena pin fail-closed, tick monitor
+melempar saat akun belum terhidrasi — sebelum jalur cepat `{checked:0}` sempat
+diperiksa. `monitorKeyTransparency` sekarang merencanakan lebih dulu
+(`planKtMonitor`); tanpa state siap ia langsung mengembalikan `{checked:0}`
+tanpa membaca config. Fail-closed pada jalur yang benar-benar memverifikasi
+tidak berubah.
+
+**Pin saat akun belum diketahui (N9-02, ditutup).** `resolveKtConfigPin`
+membedakan `pin`, `empty` (TOFU), `unknown-account`, dan `unreadable`. Dua yang
+terakhir **fail-closed**: `resolveConfig` melempar, jalur pemanggil melaporkan
+`unavailable` dan mencoba lagi, bukan menerima config apa adanya. Jendela
+logout/hidrasi tidak lagi mematikan TOFU untuk satu sesi verifikasi.

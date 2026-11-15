@@ -144,11 +144,6 @@ type TransportEvents = {
   'burner:receive': [payload: { roomId?: string, ciphertext: string }];
   'burner:terminated': [payload: { roomId: string }];
 
-  // Migration
-  'migration:start': [payload: { roomId: string; totalChunks: number; sealedKey: string; }];
-  'migration:chunk': [payload: { chunkIndex: number; chunk: string; }];
-  'migration:ack': [payload: { roomId: string, success: boolean }];
-
   // Allow arbitrary events for backward compatibility
   [event: string]: unknown[];
 };
@@ -768,7 +763,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
    *   'force_logout'    -> force_logout  (passthrough json.data)
    *   <json.event>      -> passthrough   (message:updated, conversation:*,
    *                                       user:updated, session:*, group:*,
-   *                                       burner:*, migration:*, dll.)
+   *                                       burner:*, dll.)
    */
   private handleIncomingWss(eventName: string, data: unknown): void {
     if (eventName === 'message:new') {
@@ -1043,8 +1038,11 @@ export function emitGroupKeyFulfillment(payload: { requesterId: string; conversa
 // [T2 FIX #10 2026-09-29] senderPseudonym opsional — dipersist server sebagai
 // senderId pesan SYSTEM METADATA_UPDATED. Tanpa ini server menyimpan userId
 // asli (25-char) di baris pesan SYSTEM — terlihat di audit DB lokal.
-export function emitMetadataUpdated(conversationId: string, encryptedMetadata: string, targetRecipients: string[], senderPseudonym?: string): void {
-  transportClient.sendEvent('metadata:updated', { conversationId, encryptedMetadata, targetRecipients, senderPseudonym });
+export function emitMetadataUpdated(conversationId: string, encryptedMetadata: string, targetRecipients: string[], senderPseudonym?: string, adminCapabilityToken?: string): void {
+  // [AUDIT F-02] Admin capability token ikut dikirim: server menolak baris SYSTEM
+  // dari non-anggota, dan pembuat grup belum punya baris keanggotaan saat
+  // distribusi pertama. Token hanya capability (bukan identitas).
+  transportClient.sendEvent('metadata:updated', { conversationId, encryptedMetadata, targetRecipients, senderPseudonym, adminCapabilityToken });
 }
 
 export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {

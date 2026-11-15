@@ -13,7 +13,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
+  FiDatabase, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar,
   FiPackage
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
@@ -23,7 +23,7 @@ import BackupRestoreModal from '../components/BackupRestoreModal';
 import BackupExportModal from '../components/BackupExportModal';
 import { api } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
-import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
+import { saveProfileKey } from '@lib/keychainDb';
 import { executeLocalWipe } from '@lib/nukeProtocol';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
@@ -167,7 +167,6 @@ export default function SettingsPage() {
   const [avatarCropTarget, setAvatarCropTarget] = useState<{ url: string, file: File } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const vaultInputRef = useRef<HTMLInputElement>(null);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   // [docs/31 §31.6b] Ekspor arsip ber-frame ber-kunci recovery phrase — jalur
   // manual yang dulu tidak punya pintu masuk UI (hanya ada fungsi transport-nya).
@@ -427,78 +426,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleExportVault = async () => {
-    try {
-      const json = await exportDatabaseToJson();
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nyx_vault_backup_${new Date().toISOString().slice(0, 10)}.nyxvault`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(t('settings:messages.export_success'));
-    } catch (error) {
-      console.error("Export failed:", sanitizeErrorLog(error));
-      toast.error(t('settings:messages.export_failed'));
-    }
-  };
-
-  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const json = String(event.target?.result);
-      try {
-         const parsed = JSON.parse(json);
-         if (parsed.encrypted) {
-             useModalStore.getState().showPasswordPrompt(async (password) => {
-                 if (!password) return;
-                 try {
-                     await importDatabaseFromJson(json, password);
-
-                     // ✅ OPSI A: FORCE NEW IDENTITY FOR THIS HARDWARE
-                     // After importing a vault (which may come from another device),
-                     // we reset the local device ID and identity keys.
-                     localStorage.removeItem('deviceId');
-                     const { db } = await import('@lib/db');
-                     await db.identityKeys.clear();
-
-                     toast.success(t('settings:messages.import_success'));
-                     setTimeout(() => window.location.reload(), 1500);
-                 } catch (error) {
-                     console.error("Import failed:", sanitizeErrorLog(error));
-                     toast.error(t('settings:messages.import_failed'));
-                 }
-                 });
-                 } else {
-                 await importDatabaseFromJson(json);
-
-                 // ✅ OPSI A: FORCE NEW IDENTITY
-                 localStorage.removeItem('deviceId');
-                 const { db } = await import('@lib/db');
-                 await db.identityKeys.clear();
-
-                 toast.success(t('settings:messages.import_success'));
-                 setTimeout(() => window.location.reload(), 1500);
-                 }
-      } catch (error) {
-         console.error("Import parsing failed:", sanitizeErrorLog(error));
-         toast.error(t('settings:messages.import_failed'));
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
-  const triggerImport = () => {
-    vaultInputRef.current?.click();
-  };
-
   const handleLogout = async () => {
     // Memanggil teks peringatan dari JSON agar dinamis terjemahannya
     showConfirm(
@@ -605,10 +532,14 @@ export default function SettingsPage() {
                            <FiShield size={10} /> {t('settings:identity.verified')}
                          </span>
                        ) : (
+                         /* [a11y 2026-11-13] `text-yellow-500` di atas tint 10% cuma ~1,4:1 pada
+                            tema terang; axe (nightly `Smoke Firefox + WebKit`) menandainya
+                            `color-contrast` serious. yellow-800 / dark:yellow-300 lolos 4,5:1
+                            di kedua tema tanpa mengubah tata letak. */
                          <button 
                            type="button"
                            onClick={() => setShowUpgradeModal(true)}
-                           className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
+                           className="text-[10px] bg-yellow-500/10 text-yellow-800 dark:text-yellow-300 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
                          >
                            <FiLock size={10} /> {t('settings:identity.sandboxed')}
                          </button>
@@ -629,6 +560,7 @@ export default function SettingsPage() {
                     <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.display_name')}</label>
                     <input
                       type="text"
+                      aria-label={t('settings:identity.display_name')}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="
@@ -642,6 +574,7 @@ export default function SettingsPage() {
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.bio')}</label>
                     <textarea
+                      aria-label={t('settings:identity.bio')}
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       rows={2}
@@ -663,7 +596,7 @@ export default function SettingsPage() {
                   disabled={isLoading}
                   className="
                     px-8 py-3 rounded-xl font-bold uppercase tracking-wider text-sm
-                    text-accent bg-bg-main
+                    text-text-primary bg-bg-main
                     shadow-neu-flat-light dark:shadow-neu-flat-dark
                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
                     hover:text-white hover:bg-accent transition-all
@@ -738,7 +671,7 @@ export default function SettingsPage() {
               </div>
               <div className="mt-6 flex items-center justify-between">
                 <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary/50">Status</span>
-                <div className={`px-3 py-1 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${user?.subscriptionTier === 'SUBSCRIBER' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-black/5 dark:bg-white/5 text-text-secondary'}`}>
+                <div className={`px-3 py-1 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${user?.subscriptionTier === 'SUBSCRIBER' ? 'bg-yellow-500/10 text-yellow-800 dark:text-yellow-300' : 'bg-black/5 dark:bg-white/5 text-text-secondary'}`}>
                   {user?.subscriptionTier === 'SUBSCRIBER' ? 'Active PRO' : 'Free Tier'}
                 </div>
               </div>
@@ -764,7 +697,10 @@ export default function SettingsPage() {
                   {ACCENT_COLORS.map((color) => (
                     <button
                       key={color}
+                      type="button"
                       onClick={() => setAccent(color)}
+                      aria-label={`${t('settings:visual.accent_emitter', 'Accent colour')} ${color}`}
+                      aria-pressed={accent === color}
                       style={{ backgroundColor: colorMap[color] }}
                       className={`
                         h-10 w-full rounded-lg transition-all duration-300 relative
@@ -788,6 +724,7 @@ export default function SettingsPage() {
                 </span>
                 <div className="relative">
                   <select
+                    aria-label={t('settings:visual.language', 'Language')}
                     value={i18n.language.split('-')[0] === 'pt' ? 'pt-BR' : i18n.language.split('-')[0]}
                     onChange={(e) => i18n.changeLanguage(e.target.value)}
                     className="
@@ -937,6 +874,7 @@ export default function SettingsPage() {
              </div>
              <div className="flex gap-2 items-center">
                 <select
+                  aria-label={t('settings:privacy.dead_man', "Dead Man's Switch")}
                   value={user?.autoDestructDays || ''}
                   onChange={async (e) => {
                     const val = e.target.value;                     
@@ -986,46 +924,8 @@ export default function SettingsPage() {
               {/* VAULT ACTIONS */}
               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
                  <button 
-                   onClick={handleExportVault}
-                   className="
-                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
-                     bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
-                     shadow-neu-flat-light dark:shadow-neu-flat-dark
-                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                     hover:brightness-110 transition-all
-                   "
-                 >
-                   <FiDownload size={18} />
-                   {t('settings:data.export_vault')}
-                 </button>
-                 <button 
-                   onClick={triggerImport}
-                   className="
-                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
-                     bg-bg-main text-blue-500 font-bold text-xs uppercase tracking-wider
-                     shadow-neu-flat-light dark:shadow-neu-flat-dark
-                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                     hover:brightness-110 transition-all
-                   "
-                 >
-                   <FiUpload size={18} />
-                   {t('settings:data.import_vault')}
-                 </button>
-                 <button 
-                   onClick={() => navigate('/settings/migrate-send')}
-                   className="
-                     col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
-                     bg-bg-main text-accent font-bold text-xs uppercase tracking-wider
-                     shadow-neu-flat-light dark:shadow-neu-flat-dark
-                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
-                     hover:brightness-110 transition-all
-                   "
-                 >
-                   <FiSend size={18} />
-                   {t('settings:data.transfer')}
-                 </button>
-                 <button 
                    onClick={() => setShowRestoreModal(true)}
+                   data-testid="settings-restore-backup"
                    className="
                      col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
                      bg-bg-main text-purple-500 font-bold text-xs uppercase tracking-wider
@@ -1039,6 +939,7 @@ export default function SettingsPage() {
                  </button>
                  <button 
                    onClick={() => setShowExportModal(true)}
+                   data-testid="settings-export-backup"
                    className="
                      col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
                      bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
@@ -1050,13 +951,6 @@ export default function SettingsPage() {
                    <FiPackage size={18} />
                    {t('settings:data.export_backup')}
                  </button>
-                 <input 
-                    type="file" 
-                    ref={vaultInputRef} 
-                    onChange={handleImportVault} 
-                    accept=".nyxvault,.json" 
-                    className="hidden" 
-                 />
               </div>
             </div>
           </ControlModule>

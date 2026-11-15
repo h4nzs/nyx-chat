@@ -3,90 +3,56 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/35 Fase 4d] Segarkan snapshot PIR secara berkala.
+ * [docs/42 WP5] Segarkan shard PIR secara berkala.
  *
- * Snapshot dibangun offline; tanpa penyegaran, user yang mendaftar setelah
- * snapshot terakhir tidak akan pernah muncul di pencarian PIR. Job ini
- * membangun ulang snapshot dari DB lalu meminta sidecar mengganti index aktif
- * lewat `/admin/rebuild` (hot-swap; index lama tetap melayani sampai selesai).
+ * Snapshot dibangun dari DB, ditandatangani per server, lalu dikirim ke setiap
+ * sidecar lewat `/admin/rebuild` (hot-swap per shard; shard lama tetap melayani
+ * sampai penggantinya tiba). Tanpa penyegaran, user yang mendaftar setelah
+ * build terakhir tidak akan muncul di pencarian.
  *
  * Dua jadwal, satu kunci job:
  *   - `PIR_REFRESH_CRON` (04:15) — rebuild penuh harian, jaring pengaman.
  *   - `PIR_DIRTY_REFRESH_CRON` (tiap 3 menit) — rebuild hanya bila penanda
- *     generasi (`pir/dirty.ts`) menunjukkan ada penulisan baru (registrasi,
- *     login yang mengubah kunci/index, profil, verifikasi, onboarding,
- *     perangkat). Tanpa ini user baru tidak ketemu hingga ~24 jam.
+ *     generasi (`pir/dirty.ts`) menunjukkan ada penulisan baru.
  *
  * Batas yang disengaja:
- *   - Hanya jalan bila PIR aktif, URL sidecar valid, dan `PIR_ADMIN_TOKEN` ada.
- *   - `PIR_SNAPSHOT_PATH` ditulis atomik agar restart sidecar memuat snapshot
- *     terbaru; tanpa path, refresh hanya hidup di memori sidecar.
+ *   - Hanya jalan bila PIR aktif, konfigurasi dua server lengkap, dan
+ *     `PIR_ADMIN_TOKEN` ada.
  *   - Satu putaran pada satu waktu; kegagalan dicatat, tidak pernah mematikan
  *     cron.
  */
 
 import cron from 'node-cron';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { prisma } from '../lib/prisma.js';
 import { redisClient } from '../lib/redis.js';
-import { loadPirConfig } from '../pir/config.js';
+import { isPirEnabled, loadPirConfig, type PirConfig } from '../pir/config.js';
 import {
   markPirSnapshotBuilt,
   pirSnapshotBuiltGeneration,
   pirSnapshotGeneration,
   type PirDirtyRedis,
 } from '../pir/dirty.js';
+import { rebuildPirShards, type PirRebuildResult } from '../pir/rebuild.js';
 import { runWithJobLock } from '../utils/jobLock.js';
-import {
-  buildPirSnapshot,
-  parsePirRecordBytes,
-  type PirRecordSource,
-} from '../pir/snapshot.js';
 
 /** Jam refresh harian; jaring pengaman bila penanda generasi hilang. */
 export const PIR_REFRESH_CRON = '15 4 * * *';
 /**
  * [staleness user baru] Interval rebuild untuk perubahan yang ditandai.
  * 3 menit: cukup cepat agar pendaftar langsung bisa dicari, cukup jarang agar
- * rebuild (O(N) + setup ChalametPIR) tidak berjalan terus-menerus saat ramai.
+ * rebuild O(N) tidak berjalan terus-menerus saat ramai.
  */
 export const PIR_DIRTY_REFRESH_CRON = '*/3 * * * *';
-const REFRESH_TIMEOUT_MS = 60 * 60_000;
-
-export interface PirRefreshConfig {
-  serviceUrl: string;
-  adminToken: string;
-  recordBytes: number;
-  snapshotPath: string | null;
-}
-
-export interface PirRefreshResult {
-  epoch: number;
-  entries: number;
-  persisted: boolean;
-}
 
 export interface PirRefreshDeps {
-  collect?: () => Promise<PirRecordSource[]>;
+  collect?: () => Promise<import('../pir/snapshot.js').PirRecordSource[]>;
   fetchImpl?: typeof fetch;
   now?: () => number;
   redis?: PirDirtyRedis;
+  signingKeys?: Map<string, import('../pir/manifest.js').PirSigningKey>;
 }
 
-export function loadPirRefreshConfig(env: NodeJS.ProcessEnv = process.env): PirRefreshConfig | null {
-  const config = loadPirConfig(env);
-  const adminToken = env.PIR_ADMIN_TOKEN?.trim();
-  if (!config || !adminToken) return null;
-  return {
-    serviceUrl: config.serviceUrl,
-    adminToken,
-    recordBytes: parsePirRecordBytes(env.PIR_RECORD_BYTES),
-    snapshotPath: env.PIR_SNAPSHOT_PATH?.trim() || null,
-  };
-}
-
-async function collectSources(): Promise<PirRecordSource[]> {
+async function collectSources(): Promise<import('../pir/snapshot.js').PirRecordSource[]> {
   const users = await prisma.user.findMany({
     where: { oprfIndex: { not: null } },
     select: {
@@ -112,44 +78,32 @@ async function collectSources(): Promise<PirRecordSource[]> {
   }));
 }
 
+/**
+ * Konfigurasi job. `null` = job mati. Konfigurasi PIR yang aktif tetapi tidak
+ * punya `PIR_ADMIN_TOKEN` tetap melempar saat boot daripada diam-diam tidak
+ * pernah menyegarkan shard.
+ */
+export function loadPirRefreshConfig(env: NodeJS.ProcessEnv = process.env): PirConfig | null {
+  if (!isPirEnabled(env)) return null;
+  // Token diperiksa SEBELUM parse penuh: tanpa token tidak ada yang bisa
+  // dikirim, jadi konfigurasi setengah jadi tidak menggagalkan boot.
+  if (!env.PIR_ADMIN_TOKEN?.trim()) {
+    console.warn('[PIR] PIR_ADMIN_TOKEN kosong: refresh shard tidak akan dikirim ke sidecar');
+    return null;
+  }
+  return loadPirConfig(env);
+}
+
 export async function refreshPirSnapshot(
-  config: PirRefreshConfig,
+  config: PirConfig,
   deps: PirRefreshDeps = {},
-): Promise<PirRefreshResult> {
-  const collect = deps.collect ?? collectSources;
-  const fetchImpl = deps.fetchImpl ?? fetch;
-  const now = deps.now ?? Date.now;
-
-  const snapshot = buildPirSnapshot(await collect(), config.recordBytes, now());
-  const body = JSON.stringify(snapshot);
-
-  if (config.snapshotPath) {
-    const output = path.resolve(config.snapshotPath);
-    await mkdir(path.dirname(output), { recursive: true });
-    const temp = `${output}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temp, body, { mode: 0o600 });
-    await rename(temp, output);
-  }
-
-  const response = await fetchImpl(`${config.serviceUrl}/admin/rebuild`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-nyx-pir-internal': config.adminToken,
-    },
-    body,
-    signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
+): Promise<PirRebuildResult> {
+  return rebuildPirShards(config, {
+    collect: deps.collect ?? collectSources,
+    signingKeys: deps.signingKeys,
+    fetchImpl: deps.fetchImpl,
+    now: deps.now,
   });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`PIR refresh HTTP ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
-  }
-
-  return {
-    epoch: snapshot.epoch,
-    entries: snapshot.entries.length,
-    persisted: Boolean(config.snapshotPath),
-  };
 }
 
 export type PirDirtyOutcome = 'rebuilt' | 'clean' | 'unknown';
@@ -162,7 +116,7 @@ export type PirDirtyOutcome = 'rebuilt' | 'clean' | 'unknown';
  * membangun lagi (tidak ada perubahan yang hilang).
  */
 export async function refreshPirSnapshotIfDirty(
-  config: PirRefreshConfig,
+  config: PirConfig,
   deps: PirRefreshDeps = {},
 ): Promise<{ status: PirDirtyOutcome; epoch?: number; entries?: number }> {
   const redis = deps.redis ?? (redisClient as unknown as PirDirtyRedis);
@@ -203,9 +157,9 @@ export function startPirSnapshotRefresher(
     console.log('[PIR] snapshot refresher nonaktif (PIR_ENABLED/PIR_ADMIN_TOKEN belum diatur)');
     return false;
   }
-  if (!config.snapshotPath) {
+  if (!config.shardDir) {
     console.warn(
-      '[PIR] PIR_SNAPSHOT_PATH kosong: refresh hanya di memori sidecar dan hilang saat restart',
+      '[PIR] PIR_SHARD_DIR kosong: sidecar yang restart harus menerima rebuild ulang',
     );
   }
 
@@ -213,8 +167,7 @@ export function startPirSnapshotRefresher(
   /** Satu putaran pada satu waktu; kunci Redis menjaga N worker pm2. */
   const schedule = (cronExpr: string, run: () => Promise<void>) => {
     // [audit F-07] `running` hanya menjaga proses ini; kunci Redis menjaga N
-    // worker pm2. TTL 2 jam > REFRESH_TIMEOUT_MS (60 menit) supaya kunci tidak
-    // kedaluwarsa di tengah rebuild yang lambat.
+    // worker pm2. TTL 2 jam supaya kunci tidak kedaluwarsa di tengah rebuild.
     cron.schedule(cronExpr, () => runWithJobLock('pir-snapshot', 7200, async () => {
       if (running) {
         console.warn('[PIR] refresh dilewati: putaran sebelumnya masih berjalan');
@@ -234,7 +187,7 @@ export function startPirSnapshotRefresher(
   schedule(PIR_REFRESH_CRON, async () => {
     const result = await refreshPirSnapshot(config, deps);
     console.log(
-      `[PIR] snapshot diperbarui: epoch=${result.epoch} entries=${result.entries} persisted=${result.persisted}`,
+      `[PIR] shard diperbarui: epoch=${result.epoch} entries=${result.entries} shards=${result.shards} persisted=${result.persisted}`,
     );
   });
 
@@ -242,13 +195,13 @@ export function startPirSnapshotRefresher(
     const result = await refreshPirSnapshotIfDirty(config, deps);
     if (result.status === 'rebuilt') {
       console.log(
-        `[PIR] snapshot diperbarui (perubahan baru): epoch=${result.epoch} entries=${result.entries}`,
+        `[PIR] shard diperbarui (perubahan baru): epoch=${result.epoch} entries=${result.entries}`,
       );
     }
   });
 
   console.log(
-    `[PIR] snapshot refresher aktif (harian ${PIR_REFRESH_CRON}, perubahan ${PIR_DIRTY_REFRESH_CRON})`,
+    `[PIR] shard refresher aktif (harian ${PIR_REFRESH_CRON}, perubahan ${PIR_DIRTY_REFRESH_CRON})`,
   );
   return true;
 }

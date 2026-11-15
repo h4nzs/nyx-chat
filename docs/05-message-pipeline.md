@@ -115,7 +115,7 @@ Node publishes to `nyx:downstream` in the same shape; the sidecar frames and for
 
 - **Auth/keys/upload/sync/admin** are REST (`web/src/lib/api.ts` — single client: `api`, `authFetch`, `apiUpload`).
 - Message history sync on reconnect: `GET /api/messages/:conversationId?limit=250` + `GET /api/conversations/sync`.
-- REST message send exists (`POST /api/messages`) but the client uses WebTransport when connected.
+- `POST /api/messages` exists server-side but the client **never** calls it: the app sends through WebTransport (or the WSS gateway) only, and an offline send waits in the IndexedDB `offlineQueueDb` queue until reconnect. There is no HTTP fallback for sending, including while the transport is down. The route is kept for parity and now stores `deleteSecret`/`repliedToId`/`senderPseudonym` the same way the realtime path does (audit F-03), so it is no longer broken if it is ever enabled.
 - Reconnect: exponential backoff 1s→30s with jitter, skipped entirely when logged out.
 
 ## 5.5 Ordering & dedup guarantees

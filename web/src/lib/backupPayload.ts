@@ -73,7 +73,8 @@ export const BACKUP_CHUNK_BYTES = 256 * 1024;
 /**
  * Tabel yang ikut backup, dipetakan ke tipe frame. Urutan array = urutan
  * deterministik pembuatan frame (sebelum scramble). Sumber daftar: `db.ts`
- * (`NyxUnifiedDB` versi 8) + tabel yang sudah dipakai `exportDatabaseToJson`.
+ * (`NyxUnifiedDB` versi 8). Sejak 2026-10-29 daftar ini adalah **satu-satunya**
+ * jalur backup — export JSON lama (`.nyxvault`) sudah dihapus (docs/31 §31.6).
  */
 export const BACKUP_TABLE_FRAME_TYPE: Readonly<Record<string, BackupFrameType>> = {
   // Account — identitas & sesi kripto perangkat.
@@ -251,6 +252,13 @@ function recordSortKey(table: string, record: unknown): string {
 export interface BackupChunk {
   table: string;
   records: unknown[];
+  /**
+   * Penanda JENIS arsip, ikut terautentikasi AEAD (bukan byte header yang
+   * tidak di-AAD). `undefined` = `.nyxbak` (baris Dexie). `'history'` = arsip
+   * riwayat perangkat (docs/40) yang payload-nya objek domain, bukan baris —
+   * jalur restore `.nyxbak` menolaknya, bukan menulis baris rusak.
+   */
+  k?: string;
 }
 
 export interface BuildBackupFramesOptions {
@@ -263,6 +271,12 @@ export interface BuildBackupFramesOptions {
   key?: Uint8Array;
   /** Acak deterministik urutan frame (anti-pola struktur sosial). Default `false`. */
   scramble?: boolean;
+  /**
+   * Penanda jenis arsip yang ditulis ke SETIAP chunk (`k`). Dipakai arsip
+   * riwayat perangkat (`'history'`, docs/40) supaya tidak pernah bisa direstore
+   * sebagai `.nyxbak`. Default: tidak ada penanda.
+   */
+  marker?: string;
 }
 
 /**
@@ -305,7 +319,11 @@ export function buildBackupFrames(opts: BuildBackupFramesOptions): BackupFrameIn
     let chunkSize = 0;
     const flush = () => {
       if (chunk.length === 0) return;
-      const payload: BackupChunk = { table, records: chunk };
+      const payload: BackupChunk = {
+        table,
+        records: chunk,
+        ...(opts.marker ? { k: opts.marker } : {}),
+      };
       frames.push({ type, payload: utf8Encode(JSON.stringify(payload)) });
       chunk = [];
       chunkSize = 0;
@@ -399,11 +417,21 @@ export function readBackupChunk(frame: BackupFrameOutput, codec: BackupValueCode
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new BackupFormatError('Payload frame bukan objek chunk');
   }
-  const chunk = parsed as { table?: unknown; records?: unknown };
+  const chunk = parsed as { table?: unknown; records?: unknown; k?: unknown };
   if (typeof chunk.table !== 'string' || !(chunk.table in BACKUP_TABLE_FRAME_TYPE)) {
     throw new BackupFormatError(`Chunk menunjuk tabel tidak dikenal: ${String(chunk.table)}`);
   }
   if (!Array.isArray(chunk.records)) throw new BackupFormatError('Chunk tanpa daftar records');
+  // Penanda jenis arsip: sah hanya string pendek tak kosong. Nilai lain = arsip
+  // rusak/dipalsukan, bukan "abaikan saja" (pemanggil memakainya untuk memilih
+  // jalur tulis yang sama sekali berbeda).
+  let marker: string | undefined;
+  if (chunk.k !== undefined) {
+    if (typeof chunk.k !== 'string' || chunk.k.length === 0 || chunk.k.length > 32) {
+      throw new BackupFormatError('Penanda jenis arsip tidak sah');
+    }
+    marker = chunk.k;
+  }
   const expectedType = BACKUP_TABLE_FRAME_TYPE[chunk.table]!;
   if (frame.type !== expectedType) {
     throw new BackupFormatError(`Tipe frame tidak cocok dengan tabel '${chunk.table}'`);
@@ -411,6 +439,7 @@ export function readBackupChunk(frame: BackupFrameOutput, codec: BackupValueCode
   return {
     table: chunk.table,
     records: chunk.records.map((record) => decodeBackupValue(record, codec)),
+    ...(marker ? { k: marker } : {}),
   };
 }
 

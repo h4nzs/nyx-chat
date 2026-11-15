@@ -392,6 +392,23 @@ export const BACKUP_OPS = defineCounter(
 );
 
 /**
+ * [docs/40 §40.6] Operasi arsip riwayat perangkat hasil link, per op dan hasil.
+ *
+ * `result="error"` pada `op="consume"` adalah yang paling penting: konsumen
+ * gagal berarti riwayat pengguna tidak pernah terhapus dari R2 dan bisa terunduh
+ * ulang — kegagalan yang tidak terlihat dari mana pun kecuali dari sini (klien
+ * hanya menulis `console.warn`, dan impor tetap dilaporkan sukses).
+ *
+ * Tanpa label identitas (aturan WS-G): `op`/`result` adalah enum pendek tetap,
+ * dan `deviceId` sengaja tidak pernah ikut (ia bentuk UUID → ditolak penjaga).
+ */
+export const LINK_HISTORY_OPS = defineCounter(
+  'nyx_link_history_ops_total',
+  'Operasi arsip riwayat perangkat hasil link, per op dan hasil',
+  ['op', 'result']
+);
+
+/**
  * [docs/37 §37.4 P8] Jitter rilis pesan grup (`GROUP_RELEASE_JITTER_MS`).
  *
  * Satu-satunya cara membuktikan fitur ini benar-benar bekerja (dan tidak
@@ -623,6 +640,103 @@ export const OHTTP_OPS = defineCounter(
   'nyx_ohttp_ops_total',
   'Operasi OHTTP (config/relay/gateway/token), per jalur dan hasil',
   ['route', 'result']
+);
+
+/**
+ * [audit N9-01] Status tag klien relay pada request gateway OHTTP.
+ *
+ * Kenapa perlu: tanpa tag, jalur OHTTP **tanpa akun** (bukti KT) kembali berbagi
+ * satu bucket `127.0.0.1`, dan kegagalan itu hanya terlihat sebagai `unavailable`
+ * + backoff di klien — persis kondisi yang dulu mematikan verifikasi untuk semua
+ * orang. Relay tidak mencatat apa pun (itu tujuannya), jadi status tag harus
+ * terlihat di metrik: `no-token` = `OHTTP_INTERNAL_TOKEN` kosong di proses API
+ * (atau relay), `untagged` = relay hidup tetapi tidak menandatangani,
+ * `untrusted` = header tag ada tetapi tokennya tidak cocok (salah konfigurasi
+ * atau dikarang lewat gateway langsung).
+ *
+ * Label = enum pendek (`tagged|untagged|untrusted|no-token`). Tidak ada alamat,
+ * nilai tag, atau id akun: tag relay sendiri sudah opaque dan tetap tidak
+ * dicatat.
+ */
+export const OHTTP_CLIENT_TAG = defineCounter(
+  'nyx_ohttp_client_tag_total',
+  'Request gateway OHTTP menurut status tag klien relay',
+  ['status']
+);
+
+/**
+ * [docs/42 WP7] PIR dua server (`xor-pir-v1`).
+ *
+ * Semua angka diukur di proses API, bukan sidecar: proxy dan job rebuild memang
+ * ada di sini, jadi satu exporter (`nyx-api`) sudah cukup dan tidak ada port
+ * loopback baru. Label hanya enum pendek — id server (`a`/`b`) sengaja TIDAK
+ * dipakai sebagai label karena nilainya berasal dari konfigurasi, bukan kode.
+ *
+ * `result` query: `ok|invalid|shard_unknown|unavailable`. `invalid` = body/
+ * shard tidak sah dari klien; `unavailable` = sidecar mati/timeout/5xx.
+ */
+export const PIR_QUERY = defineCounter(
+  'nyx_pir_query_total',
+  'Proxy query share PIR ke sidecar, per hasil',
+  ['result']
+);
+
+/** Latensi proxy satu query share (termasuk hop loopback ke sidecar). */
+export const PIR_QUERY_SECONDS = defineHistogram(
+  'nyx_pir_query_seconds',
+  'Durasi proxy query share PIR (detik)',
+  [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+);
+
+/**
+ * Rebuild + pengiriman shard, per hasil. `mismatch` khusus: A dan B menghasilkan
+ * `dbRoot` berbeda, build dibatalkan sebelum dikirim (desync builder) — ini
+ * kondisi yang harus terlihat, bukan sekadar `error` biasa.
+ */
+export const PIR_REBUILD = defineCounter(
+  'nyx_pir_rebuild_total',
+  'Rebuild dan pengiriman shard PIR, per hasil',
+  ['result']
+);
+
+export const PIR_REBUILD_SECONDS = defineHistogram(
+  'nyx_pir_rebuild_seconds',
+  'Durasi rebuild dan pengiriman shard PIR (detik)',
+  [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60]
+);
+
+/**
+ * Unix timestamp rebuild PIR terakhir yang berhasil. Umur (`time() − nilai ini`)
+ * adalah satu-satunya cara membedakan "PIR hidup tapi shard basi" dari "PIR
+ * hidup dan segar": counter rebuild yang datar terlihat sama di kedua keadaan.
+ * Nilai 0 = belum pernah rebuild; alert memakai guard `> 0` supaya boot pertama
+ * tidak langsung dianggap basi.
+ */
+export const PIR_LAST_REBUILD = defineGauge(
+  'nyx_pir_last_rebuild_timestamp_seconds',
+  'Unix timestamp rebuild shard PIR terakhir yang berhasil'
+);
+
+/** Jumlah user ber-`oprfIndex` yang masuk snapshot terakhir. */
+export const PIR_ENTRIES = defineGauge(
+  'nyx_pir_entries',
+  'Jumlah user ber-oprfIndex pada rebuild shard PIR terakhir'
+);
+
+/** Jumlah shard yang dikirim pada rebuild terakhir (menunjukkan efek sharding). */
+export const PIR_SHARDS = defineGauge(
+  'nyx_pir_shards',
+  'Jumlah shard PIR yang dikirim pada rebuild terakhir'
+);
+
+/**
+ * Manifest yang ditolak proxy: tanda tangan tidak cocok, bentuk v2 tidak sah,
+ * shard tidak sesuai, atau ringkasan tidak valid. Kenaikan apa pun berarti ada
+ * yang tidak sinkron atau ada upaya memalsukan manifest.
+ */
+export const PIR_MANIFEST_MISMATCH = defineCounter(
+  'nyx_pir_manifest_mismatch_total',
+  'Manifest PIR yang ditolak proxy (tanda tangan/bentuk/shard tidak cocok)'
 );
 
 /**

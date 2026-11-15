@@ -3,7 +3,7 @@ import { env } from '../config.js'
 import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
 import { Request, Response, NextFunction } from 'express';
-import { clientIpTag } from '../utils/clientIp.js'
+import { clientRateLimitTag } from '../utils/clientIp.js'
 import { searchRateKey } from '../utils/searchRateKey.js'
 import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 
@@ -17,7 +17,11 @@ import { ADMIN_CLEANUP, incCounter } from '../utils/metrics.js'
 // pepper** dari alamat itu (`clientIpTag`): `RedisStore` menulis
 // `rl:general:<key>` ke Redis, jadi IP mentah di sini = daftar alamat klien di
 // snapshot Redis (melanggar kriteria audit "tidak ada IP di DB/Redis").
-const secureKeyGenerator = (req: Request): string => clientIpTag(req);
+// [audit N8-02] Trafik OHTTP tiba lewat loopback sehingga IP-nya sama untuk
+// semua klien; `clientRateLimitTag` memakai subjek token OHTTP (per akun) untuk
+// jalur itu dan tetap IP untuk trafik biasa. Tanpa ini, satu klien yang
+// memverifikasi banyak kontak menghabiskan bucket bersama 300/15 menit.
+const secureKeyGenerator = (req: Request): string => clientRateLimitTag(req);
 
 // Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)
 const skipRules = (req: Request) => {
@@ -25,10 +29,19 @@ const skipRules = (req: Request) => {
 };
 
 // 1. General Limiter: Untuk semua route API umum
-// Batas: 300 request per 15 menit per IP
+// Batas: 300 request per 15 menit per IP (default produksi).
+//
+// [nightly 42362200951] Load test k6 menjalankan 100 VU dari SATU IP runner,
+// sehingga bucket 300/15 menit habis dalam ~1 menit dan 92% request dijawab 429
+// — gate relay lalu mengukur limiter, bukan relay. `GENERAL_RATE_LIMIT_MAX`
+// hanya dinaikkan di stack ephemeral nightly (bukan default, bukan dimatikan),
+// karena beban nyata datang dari banyak IP klien, bukan satu host.
+const generalMax = Number(process.env.GENERAL_RATE_LIMIT_MAX || 300);
+
+/** Batas umum per IP; nilai env harus positif (salah ketik tidak boleh mematikan limiter). */
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 menit
-  max: 300,
+  max: Number.isFinite(generalMax) && generalMax > 0 ? generalMax : 300,
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skip: skipRules,
@@ -138,6 +151,32 @@ export const searchLimiter = rateLimit({
 })
 
 /**
+ * [docs/42 WP5] Batas query PIR PER AKUN: 120/menit.
+ *
+ * Satu pencarian PIR = 3 slot × 2 server = **6** request query, jadi batas
+ * 30/menit milik `searchLimiter` hanya memberi 5 pencarian/menit. Limiter ini
+ * menghitung 20 pencarian/menit pada beban yang sama.
+ *
+ * Sengaja TIDAK memakai `searchIpLimiter`: seluruh trafik PIR lewat gateway
+ * OHTTP, sehingga semua klien tampak berasal dari satu IP dan batas per-IP akan
+ * memblokir semua orang sekaligus.
+ */
+export const pirQueryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: searchRateKey,
+  validate: { trustProxy: false },
+  message: { error: 'SEARCH_RATE_LIMITED: Too many private searches. Please wait a minute.' },
+  store: new RedisStore({
+    prefix: 'rl:pir-query:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
+/**
  * Batas per IP: 90/menit. Bukan pengganti batas akun, melainkan penahan
  * pembuatan banyak akun untuk mengakali batas akun di satu host.
  */
@@ -152,6 +191,31 @@ export const searchIpLimiter = rateLimit({
   message: { error: 'SEARCH_RATE_LIMITED: Too many searches from this network.' },
   store: new RedisStore({
     prefix: 'rl:search-ip:',
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args)
+  })
+})
+
+/**
+ * [audit N7-01] Batas pengambilan bukti KT: 240/menit per IP.
+ *
+ * Route `POST /api/keys/kt/search` sengaja **tanpa akun** (bukti log KT adalah
+ * data publik; yang ingin disembunyikan adalah "akun mana tertarik pada hash
+ * siapa"). Karena itu ia tidak bisa memakai `generalLimiter` bersama: satu
+ * klien yang memverifikasi ratusan kontak akan menghabiskan bucket group sync
+ * dan PIR. Store terpisah + batas lebih longgar membuat ledakan permintaan bukti
+ * tidak menyeret route lain; relay OHTTP tetap membatasi tiap klien 120/menit.
+ */
+export const ktProofLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 240,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipRules,
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
+  message: { error: 'KT_PROOF_RATE_LIMITED: Too many proof requests. Please wait a minute.' },
+  store: new RedisStore({
+    prefix: 'rl:ktproof:',
     sendCommand: (...args: string[]) => redisClient.sendCommand(args)
   })
 })

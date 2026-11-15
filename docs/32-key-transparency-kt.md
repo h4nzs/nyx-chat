@@ -1,19 +1,25 @@
 # 32 — Key Transparency (KT): penulis log NYX
 
-> **Status: sisi tulis + sisi baca landed (2026-10-13); integrasi klien belum.**
+> **Status (2026-11-05): log v1 sudah dipensiunkan (`docs/38`); satu-satunya log adalah
+> v2 (ML-DSA-65).** Bagian di bawah adalah **catatan desain era v1** — jalur tulis,
+> verifier, dan nama yang disebut di sini (`key-transparency-server`,
+> `packages/keytrans-wasm`, `web/src/lib/keyTransparency.ts`, 18 test) sudah tidak
+> ada di repo; padanan v2 ada di `docs/34` §34.6 dan `docs/36`.
+>
+> **Status historis (2026-10-13): sisi tulis + sisi baca landed; integrasi klien belum.**
 > Sisi **penulis** (server → log) berjalan dan terverifikasi terhadap binary Go
 > `key-transparency-server` yang sesungguhnya
 > (`server/tests/keyTransparency.test.ts`). Sisi **baca** ada di
 > `server/kt-query` (§32.8) — pemilik tunggal basis data, penyaji bukti untuk
 > search/monitor/distinguished — dan **proxy-nya** di `/api/keys/kt/*`. Sisi
-> **verifier klien** ada di `packages/keytrans-wasm` + `web/src/lib/keyTransparency.ts`
-> dan sudah memverifikasi bukti dari jalur produksi ini (`docs/34`).
+> **verifier klien** (kini `keytrans-wasm-v2` + `keyTransparencyV2.ts`; jalur v1
+> dihapus, `docs/38`) dan sudah memverifikasi bukti dari jalur produksi ini (`docs/34`).
 > Pemanggilan verifier di jalur bundle, loop monitor otomatis, auditor, dan
 > gossip **semuanya landed** — lihat `docs/34` §34.6a–§34.6c. Auditor/
 > `SetAuditorHead` dioperasikan sejak 2026-10-16
 > (`server/kt-query/cmd/nyx-kt-auditor`, mode 3) — lihat §32.4 poin 4. Log v1
-> tetap **frozen**; log v2 ML-DSA-65 (Scope B) berjalan sebagai **dual-write**
-> dan pembacaan masih v1 (`docs/35` §35.7 Fase 7).
+> sudah **dipensiunkan** (`docs/38`); log v2 ML-DSA-65 (Scope B) adalah
+> satu-satunya log dan pembacaan sudah cutover ke v2.
 
 Pin referensi (§30.2): `key-transparency-server` commit `30b7a2a40604`,
 `libsignal/rust/keytrans` `e8cc2dddd578`.
@@ -164,7 +170,8 @@ dalam 1 jam). Keduanya tidak menyala pada instance sepi.
 
 1. ~~**Verifier klien belum ada.**~~ **Sudah ada (2026-10-13)**: Spike-1 berhasil
    (`libsignal/rust/keytrans` → WASM, nol import) dan verifier klien + **18 test**
-   berbasis bukti nyata dari kt-server ada di `docs/34`. Pemanggilan verifier di
+   berbasis bukti nyata dari kt-server (era v1) ada di `docs/34`; jalur v2 kini **86 test**
+   di sembilan berkas KT. Pemanggilan verifier di
    jalur bundle (`processPreKeyBundle`) dan **loop monitor** otomatis
    (`verify_monitor` + `monitorStep` + endpoint server) juga **sudah landed**
    (`docs/34` §34.6a–§34.6b). Temuan penting di `docs/34` §34.5 tetap berlaku:
@@ -322,8 +329,8 @@ Keputusan desain yang penting untuk pembaca berikutnya:
 
 | Bukti | Cara |
 |---|---|
-| 18 test Go hijau (termasuk `VerifySearch`/`VerifyMonitor` upstream atas nilai NYX 1286 byte) | `server/kt-query/build.sh test` |
-| Jalur hidup: penulis TS → adapter → HTTP → verifier libsignal | `server/scripts/kt-query-fixtures.ts` + `web/src/lib/__tests__/keyTransparency.test.ts` (**18 test**, termasuk rotasi kunci dengan anchor dan `monitor_build`) |
+| 58 test Go hijau (termasuk `VerifySearch`/`VerifyMonitor` upstream atas nilai NYX 1286 byte) | `server/kt-query/build.sh test` |
+| Jalur hidup v2: penulis TS → adapter → HTTP → verifier WASM v2 | `web/src/lib/__tests__/keyTransparencyV2.test.ts` + `ktBundleProofV2.test.ts` (bagian dari **86 test** KT) |
 | Proxy server NYX + metrik + degradasi terlihat | `server/tests/ktQuery.test.ts` (13 test) |
 
 ### Sisa yang jujur

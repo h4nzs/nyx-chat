@@ -46,10 +46,13 @@
  */
 
 import { api } from './api';
+import { clientVersionHeaders } from './clientVersion';
+import { ohttpEnabled, ohttpFetch } from './ohttpClient';
 import {
   hexToBytes,
   ktSearchKeyHex,
   loadKtStates,
+  planKtMonitor,
   runKtMonitorOnce,
   saveKtState,
   type KtMonitorOutcome,
@@ -59,7 +62,7 @@ import {
 import { getLocalAnchor, storeAnchor, type KtHeadAnchor } from './ktGossip';
 import {
   ktConfigPinMatches,
-  loadKtConfigPin,
+  resolveKtConfigPin,
   parseKtConfigPin,
   saveKtConfigPin,
   type KtConfigPin,
@@ -348,13 +351,81 @@ async function defaultFetchConfig(): Promise<KtRemoteConfig> {
   return await api<KtRemoteConfig>('/api/keys/kt/config');
 }
 
+/**
+ * [audit N7-01] Jalur langsung bukti KT: **tanpa cookie/kredensial**.
+ *
+ * `api()` selalu mengirim cookie sesi, sehingga server bisa mencatat "akun X
+ * meminta hash Y" walau hash sudah pindah ke body. Route-nya kini menerima
+ * bukti tanpa akun (data publik), jadi permintaan ini sengaja `credentials:
+ * 'omit'`: tidak ada Authorization, tidak ada cookie, tidak ada CSRF token.
+ * Identitas jaringan tetap bisa terlihat tanpa OHTTP — itu lapisan yang dijaga
+ * relay, bukan route ini.
+ */
+async function fetchKtProofAnonymously(body: string): Promise<{ fullTreeHead: string; condensed: string }> {
+  const response = await fetch('/api/keys/kt/search', {
+    method: 'POST',
+    credentials: 'omit',
+    headers: { 'content-type': 'application/json', ...clientVersionHeaders() },
+    body,
+  });
+  if (!response.ok) {
+    throw new Error(`kt: search dijawab HTTP ${response.status}`);
+  }
+  return (await response.json()) as { fullTreeHead: string; condensed: string };
+}
+
 async function defaultFetchProof(query: KtProofQuery): Promise<KtProof> {
-  const params = new URLSearchParams({ hash: bytesToBase64Url(query.searchKey.subarray(1)) });
-  if (query.last !== undefined) params.set('last', String(query.last));
-  if (query.distinguished !== undefined) params.set('distinguished', String(query.distinguished));
-  const response = await api<{ fullTreeHead: string; condensed: string }>(
-    `/api/keys/kt/search?${params.toString()}`
-  );
+  // [audit N7-01] Username hash + tree size adalah metadata sosial. Kirim lewat
+  // body (dan OHTTP bila aktif), jangan pernah taruh di URL yang dicatat edge.
+  const body = JSON.stringify({
+    hash: bytesToBase64Url(query.searchKey.subarray(1)),
+    ...(query.last !== undefined ? { last: String(query.last) } : {}),
+    ...(query.distinguished !== undefined ? { distinguished: String(query.distinguished) } : {}),
+  });
+  type ProofResponse = { fullTreeHead: string; condensed: string };
+  let response: ProofResponse | undefined;
+
+  if (ohttpEnabled()) {
+    let result: Awaited<ReturnType<typeof ohttpFetch>> | undefined;
+    try {
+      result = await ohttpFetch('/api/keys/kt/search', {
+        method: 'POST',
+        headers: [['content-type', 'application/json']],
+        body: new TextEncoder().encode(body),
+        // [audit N7-01] Tanpa token: amplop tidak membawa akun, jadi gateway
+        // tidak bisa dikaitkan ke akun mana pun. Route-nya memang anonim.
+        withToken: false,
+      });
+    } catch (error) {
+      // [audit N8-04] Kegagalan transport (relay mati, koneksi putus) memang
+      // alasan sah untuk jatuh ke jalur langsung — tetapi harus terlihat, bukan
+      // `console.warn` yang hilang di produksi.
+      defaultLog('kt.ohttp-degraded', {
+        reason: error instanceof Error ? error.message : String(error),
+        action: 'direct-fallback',
+      });
+    }
+
+    if (result) {
+      if (result.status >= 200 && result.status < 300) {
+        response = JSON.parse(new TextDecoder().decode(result.body)) as ProofResponse;
+      } else if (result.status >= 500) {
+        // Kegagalan layanan: request ulang lewat cookie tidak menambah kebocoran
+        // baru dibanding yang sudah terjadi, dan KT tetap harus bisa dipakai.
+        defaultLog('kt.ohttp-degraded', { status: result.status, action: 'direct-fallback' });
+      } else {
+        // 4xx adalah jawaban SAH dari layanan (404 KT_NOT_FOUND, 400 argumen,
+        // 401/403 token/misconfig). Dulu semuanya dikirim ULANG lewat cookie,
+        // sehingga hash kontak sampai ke server justru pada kontak yang belum
+        // terdaftar — persis yang ingin dicegah OHTTP. Fail-closed: jangan
+        // fallback, laporkan degradasi, biarkan pemanggil memberi `unavailable`.
+        defaultLog('kt.ohttp-degraded', { status: result.status, action: 'no-fallback' });
+        throw new Error(`kt: search dijawab HTTP ${result.status} lewat OHTTP`);
+      }
+    }
+  }
+
+  response ??= await fetchKtProofAnonymously(body);
   return {
     fullTreeHead: base64UrlToBytes(response.fullTreeHead),
     condensed: base64UrlToBytes(response.condensed),
@@ -460,7 +531,20 @@ async function resolveConfig(
   // Pin dibaca lebih dulu: config non-v2 saat pin sudah ABI 2 bukan gangguan
   // layanan biasa, melainkan perubahan skema verifikasi (potensi downgrade) —
   // dan itu harus berstatus `unverifiable`, bukan `unavailable`.
-  const pin = await loadKtConfigPin();
+  //
+  // [audit N9-02] Fail-closed bila pin TIDAK BISA dibaca (akun belum terhidrasi,
+  // verifikasi setelah logout, atau baris tidak bisa dibuka): menerimanya sebagai
+  // "belum di-pin" berarti satu jendela verifikasi tanpa jangkar, tepat saat
+  // `signatureKey` yang ditukar server tidak akan terdeteksi. Error polos → jalur
+  // pemanggil melaporkan `unavailable` dan mencoba lagi nanti (bukan `mismatch`,
+  // karena tidak ada bukti penyerangan).
+  const pinState = await resolveKtConfigPin();
+  if (pinState.status !== 'pin' && pinState.status !== 'empty') {
+    throw new Error(
+      `kt: pin konfigurasi tidak bisa dibaca (${pinState.status}) — verifikasi ditunda`
+    );
+  }
+  const pin = pinState.status === 'pin' ? pinState.pin : undefined;
   assertV2Config(remote, pin?.abiVersion === 2);
 
   const observed = parseKtConfigPin({
@@ -768,13 +852,28 @@ export interface KtMonitorDeps {
  * cara menampilkannya). Kesalahan diteruskan ke pemanggil (penjadwal menangkap).
  */
 export async function monitorKeyTransparency(deps: KtMonitorDeps = {}): Promise<KtMonitorOutcome> {
+  // [audit N10-01] Tentukan dulu apakah ADA pekerjaan, baru baca config.
+  //
+  // `resolveConfig` fail-closed untuk pin yang tidak bisa dibaca (N9-02), dan
+  // pin itu `unknown-account` selama akun belum terhidrasi (boot, sesudah
+  // logout, verifikasi yang berjalan di jendela logout). Dulu urutannya
+  // terbalik: tick monitor melempar sebelum sempat tahu bahwa tidak ada state
+  // yang perlu diperiksa — jalur cepat `{checked:0}` tidak pernah tercapai dan
+  // tes penjaganya merah.
+  //
+  // Fail-closed tetap utuh: perencanaan hanya memeriksa data lokal, dan config
+  // tetap diresolusi (termasuk melempar untuk pin tak terbaca) sebelum satu pun
+  // byte dikirim ke layanan KT.
+  const states = deps.states ?? (await loadKtStates());
+  if (planKtMonitor(states) === null) return { checked: 0, changed: [] };
+
   const resolved = await resolveConfig(deps.fetchConfig ?? defaultFetchConfig);
   const verifier = deps.verifier ?? (await loadKtVerifier());
   const outcome = await runKtMonitorOnce({
     verifier,
     config: resolved.config,
     fetchMonitor: deps.fetchMonitor ?? defaultFetchMonitor,
-    states: deps.states,
+    states,
     now: deps.now,
   });
   // Bukti monitor diterima → pin config boleh ditulis (termasuk upgrade v1 → v2).

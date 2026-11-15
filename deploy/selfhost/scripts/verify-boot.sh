@@ -14,13 +14,13 @@ set -uo pipefail
 # tidak selalu ada bila skrip dijalankan dari konteks non-interaktif).
 TARGET_USER="$(id -un)"
 
-USER_UNITS="nyx-api nyx-sidecar nyx-nginx nyx-kt-query-v2 nyx-kt-auditor-v2 nyx-prometheus nyx-grafana nyx-alertmanager nyx-ntfy-relay nyx-node-exporter nyx-postgres-exporter nyx-redis-exporter nyx-ohttp-relay nyx-pir-sidecar"
+USER_UNITS="nyx-api nyx-sidecar nyx-nginx nyx-kt-query-v2 nyx-kt-auditor-v2 nyx-prometheus nyx-grafana nyx-alertmanager nyx-ntfy-relay nyx-node-exporter nyx-postgres-exporter nyx-redis-exporter nyx-ohttp-relay nyx-pir@a nyx-pir@b"
 SYSTEM_UNITS="postgresql valkey cloudflared"
 # KT v1 (`nyx-kt-query`, `nyx-kt-auditor`, port 8081/8082/8085 + exporter
 # 9466/9467) pensiun 2026-10-28 (docs/38): daftar ini hanya memuat v2.
 # 9465 = exporter sidecar, 9468 = log KT v2, 9469 = auditor v2; 4100 = relay
 # OHTTP, 9470 = sidecar PIR; 8087/8088/8089 = KT v2 auditor/tulis/baca.
-TCP_PORTS="3000 4000 4100 9470 8087 8088 8089 9090 9093 9464 9465 9468 9469 3001 9100 9121 9187"
+TCP_PORTS="3000 4000 4100 9470 9471 8087 8088 8089 9090 9093 9464 9465 9468 9469 3001 9100 9121 9187"
 FAILED=0
 
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
@@ -85,7 +85,8 @@ check_http() { # $1=nama $2=url
 check_http "nyx-api /health"        "http://127.0.0.1:4000/health"
 check_http "nginx :3000 (frontend)" "http://127.0.0.1:3000/"
 check_http "ohttp-relay /healthz"   "http://127.0.0.1:4100/healthz"
-check_http "pir-sidecar /health"    "http://127.0.0.1:9470/health"
+check_http "pir-sidecar a /health"  "http://127.0.0.1:9470/health"
+check_http "pir-sidecar b /health"  "http://127.0.0.1:9471/health"
 check_http "prometheus /-/ready"    "http://127.0.0.1:9090/-/ready"
 check_http "grafana /api/health"    "http://127.0.0.1:3001/api/health"
 
@@ -112,6 +113,48 @@ rounds=$(curl -s --max-time 5 http://127.0.0.1:9469/metrics 2>/dev/null | awk -F
 tree=$(ss -ltn 2>/dev/null | grep -q ':8089 ' && echo ya || echo tidak)
 [ "$rounds" -gt 0 ] && ok "auditor v2: $rounds putaran sejak nyala" || bad "auditor v2 belum menyelesaikan putaran"
 [ "$tree" = "ya" ] && ok "log KT v2 (baca :8089) siap" || bad "log KT v2 (:8089) tidak mendengarkan"
+
+hdr "9. Trust proxy relay OHTTP (audit N10-03)"
+# Selfhost: nginx dan relay sama-sama di host ini, nginx menyambung ke
+# 127.0.0.1:4100. Nilai yang benar karena itu KOSONG (default loopback); CIDR
+# jaringan container hanya untuk profil Docker. Nilai yang salah membuat relay
+# memakai alamat nginx untuk semua klien → satu bucket rate-limit bersama.
+# CIDR IPv4 maupun IPv6 sama-sama tidak sah di sini: keduanya ditandai `bad`,
+# sehingga salah-setel tidak berubah menjadi satu bucket tanpa gejala (N11-05).
+SELFHOST_STATE_DIR="${SELFHOST_DIR:-$HOME/nyx-selfhost}"
+RELAY_ENV="$SELFHOST_STATE_DIR/ohttp/relay.env"
+if [ ! -f "$RELAY_ENV" ]; then
+  ok "relay env belum ada ($RELAY_ENV) — OHTTP belum diaktifkan di mesin ini"
+else
+  trust_raw=$(grep -E '^[[:space:]]*OHTTP_TRUSTED_PROXIES=' "$RELAY_ENV" 2>/dev/null \
+    | tail -1 | sed 's/^[^=]*=//; s/[[:space:]"'"'"']//g' || true)
+  if [ -z "$trust_raw" ]; then
+    ok "OHTTP_TRUSTED_PROXIES kosong (benar untuk selfhost: hop relay = loopback)"
+  elif printf '%s' "$trust_raw" | tr ',' '\n' \
+      | grep -vqE '^(127\.0\.0\.1|::1|127\.0\.0\.0/8)$'; then
+    bad "OHTTP_TRUSTED_PROXIES=$trust_raw — selfhost tidak punya jaringan container; kosongkan (lihat deploy/selfhost/README.md)"
+  else
+    ok "OHTTP_TRUSTED_PROXIES=$trust_raw (loopback-only)"
+  fi
+fi
+
+SITE_CONF="$SELFHOST_STATE_DIR/nginx/nyx.conf"
+if [ ! -f "$SITE_CONF" ]; then
+  bad "site config tidak ada: $SITE_CONF (jalankan scripts/sync-selfhost.sh --apply)"
+else
+  # Baris ini yang mencegah klien memilih tag/bucket lewat header sendiri.
+  cf_lines=$(grep -c 'proxy_set_header CF-Connecting-IP \$remote_addr;' "$SITE_CONF" 2>/dev/null || true)
+  if [ "${cf_lines:-0}" -ge 4 ]; then
+    ok "nginx menimpa CF-Connecting-IP dengan \$remote_addr ($cf_lines blok)"
+  else
+    bad "nginx belum menimpa CF-Connecting-IP ($cf_lines/4 blok) — sync ulang config, tag klien bisa dikarang"
+  fi
+  if grep -qE '^[[:space:]]*set_real_ip_from 127\.0\.0\.1;' "$SITE_CONF"; then
+    ok "real_ip mempercayai cloudflared loopback (\$remote_addr = klien asli)"
+  else
+    bad "set_real_ip_from 127.0.0.1 hilang — di belakang cloudflared \$remote_addr tetap loopback"
+  fi
+fi
 
 printf '\n%s\n' "------------------------------------------------------------------"
 if [ "$FAILED" -eq 0 ]; then

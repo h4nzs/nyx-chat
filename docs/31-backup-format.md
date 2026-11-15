@@ -7,8 +7,8 @@
 > `web/src/lib/backupTransport.ts` dan `/api/backup/*` (10 + 11 test), plus
 > tombol Buat/Ambil di Settings (`BackupExportModal`) dan penghapusan objek awan
 > saat wipe — §31.6b.
-> Orkestrasi restore perangkat pengganti lewat `migration:*`:
-> `web/src/lib/backupRestore.ts` (10 test) — §31.6c. Harness benchmark 10k
+> Orkestrasi restore di perangkat pengganti (arsip dibuka dengan recovery
+> phrase): `web/src/lib/backupRestore.ts` (10 test) — §31.6c. Harness benchmark 10k
 > pesan: `web/src/lib/backupBench.ts` — §31.6d (angka terukur, bukan asumsi).
 >
 > Konteks: `docs/29` §5.3 (celah backup), `docs/30` §30.7 (WS-C) dan §30.6/§30.18
@@ -209,9 +209,10 @@ dikenal, tipe nilai tak didukung, dan arsip tanpa catatan.
 ditolak lebih awal.
 
 **Pintu masuk UI (2026-10-16).** Sebelum ini fungsi-fungsi tersebut punya **nol
-pemanggil**: arsip hanya lahir dari alur QR (`MigrationSendPage`, kunci acak yang
-di-seal ke penerima), sehingga jalur berkas ber-kunci-phrase tidak punya sumber
-berkas sama sekali. Sekarang dua tombol di modul Data → Settings menutupnya:
+pemanggil** untuk jalur berkas: arsip saat itu hanya lahir dari alur QR
+(`MigrationSendPage`, kunci acak yang di-seal ke penerima — dihapus 2026-10-29),
+sehingga jalur berkas ber-kunci-phrase tidak punya sumber berkas sama sekali.
+Sekarang dua tombol di modul Data → Settings menutupnya:
 
 | Komponen | Peran |
 |---|---|
@@ -284,7 +285,7 @@ PUT byte identik, presign gagal → PUT tidak jalan, 404 → `ApiError(404)`).
 
 ---
 
-## 31.6c Fase 4 — restore perangkat pengganti via `migration:*` (selesai)
+## 31.6c Fase 4 — restore perangkat pengganti (selesai)
 
 `web/src/lib/backupRestore.ts` menyambungkan tiga lapisan tanpa menduplikasi
 logika mana pun:
@@ -298,23 +299,23 @@ logika mana pun:
 | `openFramedBackupWithPhrase` | Jalur berkas manual: salt dari header → `deriveBackupKey(phrase)` → restore |
 | `formatBackupSize` / `averageFrameBytes` | Laporan ukuran untuk UI |
 
-**Dua jalur kunci, bentuk byte identik.** Arsip ber-frame tidak menentukan asal
-kunci — itu keputusan pemanggil:
+**Satu jalur kunci, bentuk byte tetap generik.** Arsip ber-frame tidak menentukan
+asal kunci, tetapi pemanggil produksi hanya punya satu jalur:
 
 | Jalur | Kunci | Butuh phrase di perangkat lama? |
 |---|---|---|
-| `migration:*` (transfer langsung) | acak 32 byte, diseal `pq_box_seal_v2` (X-Wing, magic `NYS2`) ke kunci publik penerima (QR); QR v1 tanpa `pqPubKey` ditolak | tidak |
-| berkas `.nyxbak` | `deriveBackupKey(recoveryPhrase, salt)` | ya (di perangkat pengganti saat restore) |
+| berkas `.nyxbak` (termasuk salinan R2) | `deriveBackupKey(recoveryPhrase, salt)` | tidak (phrase diketik di perangkat pengganti) |
 
-**Wiring UI.** `MigrationSendPage` membangun arsip pada tahap prefetch (socket
-sudah dibekukan agar state ratchet tidak bergerak), mengirim `migration:start`
-dengan `sealedKey`, lalu `migration:chunk` per 500 KB **sebagai base64**.
-Perbaikan penting: transport men-serialize payload dengan `JSON.stringify`, jadi
-`ArrayBuffer` yang dikirim apa adanya menjadi `{}` — chunk penerima yang
-mengharapkan base64 tidak akan pernah cocok. Sekarang chunk dikodekan
-`sodium.to_base64` sebelum dikirim. `MigrationReceivePage` merakit ulang chunk,
-membuka `sealedKey` dengan private key perangkat, lalu memanggil
-`restoreFramedBackup` dengan progres 0–100 % **per frame**.
+Jalur kedua, transfer langsung `migration:*` (kunci acak diseal ke kunci publik
+penerima lewat QR), **dihapus 2026-10-29**: ia menuntut sesi login di perangkat
+baru lebih dulu, tidak punya e2e test, dan meninggalkan perangkat hasil impor
+tanpa `Device` row. API `createFramedBackup`/`restoreFramedBackup` tetap menerima
+kunci dari luar karena test dan harness bench memakainya.
+
+**Wiring UI.** `BackupRestoreModal` membaca berkas pilihan pengguna (atau
+`downloadCloudBackup()`) → `openFramedBackupWithPhrase` → `restoreFramedBackup`
+dengan progres 0–100 % **per frame**. Validasi header terjadi sebelum kunci
+diturunkan, jadi berkas asing/terpotong ditolak lebih awal.
 
 **Validasi yang diuji** (`web/src/lib/__tests__/backupRestore.test.ts`, 10 test,
 kripto sungguhan): roundtrip biner/`Date`/nilai `ENC1:` apa adanya; progres per
@@ -361,9 +362,51 @@ transaksi); format ukuran.
 4. ~~**Fase 5 — pengukuran:** harness benchmark export/import 10k pesan (waktu +
    puncak memori) sebagai gate `docs/30` §30.7.~~ **SELESAI** — lihat §31.6d.
 
-Jalur `migration:*` ber-frame sudah aktif untuk perangkat pengganti, tetapi
-export JSON lama (`exportDatabaseToJson`) juga masih tersedia di Settings sebagai
-jalur cadangan.
+Sejak **2026-10-29** `.nyxbak` adalah **satu-satunya** jalur backup: alur QR
+`migration:*` dihapus pada tanggal yang sama.
+
+> **Desain terkait (sudah ada kodenya, 2026-10-29):** `docs/40` merancang
+> **arsip riwayat** untuk perangkat hasil `/link` — kontainer `NYXB` v1 yang sama tetapi dengan
+> **kunci acak 32 byte** (diseal ke X-Wing perangkat baru) dan payload berupa
+> objek domain, bukan baris Dexie. Itu **bukan** backup dan tidak boleh
+> direstore lewat jalur di dokumen ini; pembedaannya dijaga penanda `k:"history"`
+> di dalam payload AEAD tiap chunk.
+
+**Yang dihapus (2026-10-29):** export/import JSON lama
+(`exportDatabaseToJson`/`importDatabaseFromJson`, berkas `.nyxvault`) dibuang
+dari `keychainDb.ts`, dari Settings (`Ekspor/Impor Brankas`), dari modal
+recovery di `/login`, dan dari `ChatInfoModal` (teks bantuan). Alasannya bukan
+sekadar duplikasi:
+
+- **Ekspornya plaintext.** Tidak ada satu pun kode yang membuat envelope
+  `{encrypted, salt, data}` yang dibaca `importDatabaseFromJson` (grep
+  `encrypted: true` = 0), jadi tombol "Ekspor Brankas" selalu menulis JSON
+  terbaca. Di dalamnya `sessionKeys.key` dan `groupKeys.key` ditulis mentah
+  (`keychainDb.ts`), bukan `ENC1:` — artinya kunci sesi/grup ikut keluar apa
+  adanya.
+- **Cakupan lebih kecil:** 16 tabel (tanpa `conversations`, `contacts`,
+  `profileCache`, `groupCachedParticipants`) dan `Date` hilang jadi string,
+  sedangkan `.nyxbak` memuat 20 tabel dengan penanda `__type`.
+- **Import-nya tidak menjalankan `normalizeOrderIndex()`**, jadi pesan dari
+  vault pra-v9 bisa tersimpan tapi tak pernah muncul di query berpaginasi, dan
+  ia menghapus `identityKeys` (bukan hanya `deviceId`).
+
+Konsekuensi yang diterima: pengguna yang masih memegang berkas `.nyxvault`
+tidak bisa memulihkannya lagi. Penggantinya sudah ada sebelum penghapusan
+(berkas `.nyxbak` dan salinan awan R2), dan file itu sendiri
+tidak pernah menjadi satu-satunya cadangan yang aman karena isinya terbuka.
+
+**Audit `7544c18` (2026-10-30):** tidak ada simbol `exportDatabaseToJson` /
+`importDatabaseFromJson` yang tersisa (grep = 0 di luar komentar penjelasan),
+`web tsc` bersih, dan jalur login/restore tetap utuh — modal recovery `/login`
+membuka `BackupRestoreModal` (`.nyxbak` + recovery phrase), Settings memakai
+jalur yang sama, dan suite `backupFormat`/`backupPayload`/`backupRestore`/
+`backupTransport`/`keychainDbPersistence` lulus. **Tidak ada migrasi** untuk
+berkas `.nyxvault` lama, dan itu memang disengaja: isinya JSON terbuka (kunci
+sesi/grup mentah), jadi berkas tersebut sebaiknya **dihapus**, bukan diimpor.
+Tidak ada UI yang mengimpor atau mendeteksinya; pengguna yang mencoba membuka
+berkas itu di modal restore akan ditolak sebagai arsip tak dikenal (bukan
+setengah-tertulis).
 
 ---
 

@@ -143,8 +143,8 @@ let downstreamSubRef: typeof redisClient | null = null;
 /**
  * Daftar otoritatif event KEY_SYNC yang diteruskan gateway WSS ke
  * handleKeySync. [PARITY] `handleKeySync` (realtimeHandlers.ts) menangani
- * superset dari daftar ini (mis. event batch `messages:mark_*`, `message:deleted`,
- * `migration:chunk/ack/start` yang datang dari jalur WT) — gap yang sengaja
+ * superset dari daftar ini (mis. event batch `messages:mark_*`, `message:deleted`
+ * yang datang dari jalur WT) — gap yang sengaja
  * didokumentasikan di gatewayParity.test.ts. Client WSS mengirim event-event itu
  * melalui jalur tetap lain (ACK di atas), jadi daftar ini adalah "event tambahan
  * yang hilang di WSS" SEBELUM parity fix — uji regresinya agar tidak menyusut.
@@ -173,12 +173,6 @@ export const WSS_KEYS_SYNC_EVENTS = [
   'burner:send',
   'burner:reply',
   'burner:destroy',
-  'migration:prepare',
-  'migration:cancel',
-  'migration:join',
-  'migration:start',
-  'migration:chunk',
-  'migration:ack',
 ] as const;
 
 /**
@@ -467,7 +461,7 @@ export function attachWssGateway(httpServer: HttpServer): void {
     // WSS setara dengan jalur WebTransport (redisBridge.ts mengirim SEMUA payload
     // KEY_SYNC ke handleKeySync). Sebelumnya hanya 5 event yang didaftarkan —
     // mark_as_read, unsend, view_once_opened, metadata:updated, push:*, burner:*,
-    // migration:*, dan session:request_missing jatuh ke pintu kosong di mode WSS.
+    // dan session:request_missing jatuh ke pintu kosong di mode WSS.
     //
     // msgId (arg ke-2, opsional) dipakai untuk korelasi ACK pendingAcks di client
     // (paritas dengan jalur WT, di mana msgId ada di dalam payload KEY_SYNC).

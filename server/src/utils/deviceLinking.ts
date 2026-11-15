@@ -202,6 +202,22 @@ export async function readPendingLink(
   return parsePending(await sealer.open(sealed));
 }
 
+/**
+ * [docs/40] deviceId hasil approve, dibaca dari state `approved:<deviceId>`.
+ *
+ * Dipakai `GET /link/status/:id` untuk melaporkan status arsip riwayat tanpa
+ * membakar state (perangkat baru masih mem-polling di titik ini).
+ */
+export async function getApprovedDeviceId(
+  store: LinkingStore,
+  pendingId: string
+): Promise<string | null> {
+  const state = await store.get(linkStateKey(pendingId));
+  if (!state || !state.startsWith(STATE_APPROVED_PREFIX)) return null;
+  const deviceId = state.slice(STATE_APPROVED_PREFIX.length);
+  return deviceId.length > 0 ? deviceId : null;
+}
+
 export async function getLinkState(store: LinkingStore, pendingId: string): Promise<LinkState> {
   const state = await store.get(linkStateKey(pendingId));
   if (!state) return 'expired';

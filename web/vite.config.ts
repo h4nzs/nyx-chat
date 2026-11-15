@@ -20,6 +20,16 @@ export default defineConfig(({ mode }) => {
   // nginx (`location = /api/ohttp/relay`), path ini HARUS di atas '/api' agar
   // tidak tertelan proxy API — kalau tertelan, jawabannya 404 OHTTP_RELAY_EXTERNAL.
   const ohttpRelayTarget = process.env.NYX_OHTTP_RELAY_PROXY_TARGET || 'http://127.0.0.1:4100';
+  // [E2E OHTTP] Relay proses terpisah melayani `POST /relay` (nginx membuang
+  // prefix `/api/ohttp`). Tetapi `OHTTP_TOKEN_MODE=off` MEWAJIBKAN relay hidup di
+  // proses API — hanya di sana ia bisa mencetak token sesi — sehingga route-nya
+  // `/api/ohttp/relay`. Stack uji menyalakan `NYX_OHTTP_RELAY_PROXY_KEEP_PATH=1`
+  // supaya proxy tidak membuang prefix itu; tanpa ini request mendarat di
+  // `POST /relay` milik API dan dijawab 404 `Cannot POST /relay`.
+  const ohttpRelayRewrite =
+    process.env.NYX_OHTTP_RELAY_PROXY_KEEP_PATH === '1'
+      ? undefined
+      : (proxyPath: string) => proxyPath.replace(/^\/api\/ohttp\/relay/, '/relay');
 
   return {
   plugins: [
@@ -134,7 +144,7 @@ export default defineConfig(({ mode }) => {
         target: ohttpRelayTarget,
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api\/ohttp\/relay/, '/relay'),
+        rewrite: ohttpRelayRewrite,
       },
       '/api': {
         target: apiProxyTarget,
@@ -165,7 +175,7 @@ export default defineConfig(({ mode }) => {
         target: ohttpRelayTarget,
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api\/ohttp\/relay/, '/relay'),
+        rewrite: ohttpRelayRewrite,
       },
       '/api': {
         target: 'http://localhost:4000',
@@ -241,6 +251,57 @@ export default defineConfig(({ mode }) => {
     environment: 'jsdom',
     setupFiles: './src/SetupTests.ts',
     exclude: ['**/node_modules/**', '**/dist/**', '**/e2e/**'],
+    // [docs/41 §6.1] Coverage = alat diagnosis, bukan target kosong.
+    // Angka global dibiarkan 0 sampai baseline stabil; modul berisiko dikunci
+    // per-glob supaya "global naik" tidak menutupi modul kritis yang tak diuji.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      // Default Vitest: laporan TIDAK ditulis bila ada tes gagal. Untuk alat
+      // diagnosis itu justru kebalikan dari yang dibutuhkan — run merah butuh
+      // angka "sebelum vs sesudah" lebih dari run hijau.
+      reportOnFailure: true,
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/**/__tests__/**',
+        'src/**/*.test.*',
+        'src/**/generated/**',
+        'src/**/dist/**',
+      ],
+      // [docs/41 §6.1] Ini LANTAI, bukan target: angka diambil dari run
+      // penuh 4 Nov 2026 (137 berkas lulus) lalu diturunkan beberapa poin supaya
+      // mesin CI yang lebih lambat tidak menggagalkan run, sementara penurunan
+      // nyata tetap tertangkap. Global dibiarkan 0 karena angka global (30%
+      // lines) bisa naik-turun karena berkas yang sudah teruji dan justru
+      // menutupi modul kritis yang tak diuji — itu yang dikunci per-glob.
+      // Naikkan bertahap setiap kali tes ditambah; jangan turunkan tanpa catatan
+      // di `docs/11` §11.1d (angka acuan tiap modul ada di sana).
+      thresholds: {
+        lines: 0,
+        functions: 0,
+        branches: 0,
+        statements: 0,
+        // Protokol ratchet v2 + parsing header/frame: paling berisiko, paling
+        // teruji (5 dari 6 berkas >90% lines).
+        'src/lib/spqr*.ts': { lines: 90, branches: 66 },
+        // Verifier/state key transparency (pin, gossip, monitor, bundel bukti).
+        'src/lib/kt*.ts': { lines: 58, branches: 46 },
+        // Siklus hidup grup: era, rotasi epoch, mailbox, pseudonim.
+        'src/lib/group*.ts': { lines: 45, branches: 41 },
+        'src/lib/privacy*.ts': { lines: 52, branches: 56 },
+        // Penyimpanan kunci lokal: 32% karena banyak jalur hanya dijalankan di
+        // browser sungguhan (E2E), bukan di jsdom.
+        'src/lib/keychainDb.ts': { lines: 30, branches: 21 },
+        // Pipeline pesan nyaris tak tersentuh unit test (2%) — jalurnya diuji
+        // E2E. Angka ini mencegahnya jadi 0 tanpa suara, bukan mengklaim aman.
+        'src/lib/messagePipeline.ts': { lines: 2, branches: 3 },
+        // `src/utils/crypto.ts` (3.744 baris) sengaja TIDAK dikunci: 1,2% lines
+        // karena hampir semua permukaannya berjalan di crypto worker/E2E. Lantai
+        // 0% hanya akan jadi hiasan; celahnya dicatat di docs/11 §11.1d.
+      },
+    },
   }
 };
 });

@@ -7,11 +7,15 @@
 // log v1 (`docs/38` §38.2 baris 5).
 //
 // Kenapa alat ini ada: drill pemulihan (`scripts/kt-v2-restore-drill.sh`) harus
-// membuktikan bahwa bukti yang disajikan instance hasil pulih **lolos verifier
-// yang sama** dengan yang dipakai klien, bukan sekadar "layanan menjawab 200".
-// Verifikasi di sini memakai `transparency.VerifySearch`, fungsi yang sama yang
-// dikompilasi menjadi `verify_search` di WASM klien (`packages/keytrans-wasm-v2`,
-// `docs/34` §34.2) — bukan pemeriksaan buatan drill.
+// membuktikan bahwa bukti yang disajikan instance hasil pulih **lolos verifikasi
+// kriptografis**, bukan sekadar "layanan menjawab 200".
+//
+// Verifikasi di sini memakai `transparency.VerifySearch` — implementasi Go yang
+// independen. Yang diverifikasi adalah bukti yang SAMA dengan yang diperiksa
+// verifier klien (Rust → WASM, `packages/keytrans-wasm-v2`, `docs/34` §34.2):
+// format proof v2, AAD, dan root pohon. Kedua implementasi diperiksa terpisah;
+// cross-check byte-per-byte terhadap WASM klien belum dijalankan oleh drill ini,
+// jadi klaim "identik dengan verifier klien" tidak boleh dibuat.
 //
 // Alat ini juga menyimpan **anchor** klien (tree size + root terakhir yang
 // dipercaya) di satu berkas JSON. Anchor itulah yang membuat langkah

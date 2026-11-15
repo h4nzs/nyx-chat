@@ -9,6 +9,8 @@ import { useTranslation } from 'react-i18next';
 import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 // [LINK 2026-10-18] Pairing perangkat baru lewat QR (token + persetujuan).
 import LinkDeviceModal from '@components/LinkDeviceModal';
+// [docs/40 §40.8] Percobaan ulang impor arsip riwayat setelah link.
+import { hasPendingHistoryImport, retryLinkedHistory } from '@lib/linkHistoryRetry';
 
 type Session = {
   deviceId?: string;
@@ -96,6 +98,21 @@ export default function SessionManagerPage() {
   const [loading, setLoading] = useState(true);
   // [LINK 2026-10-18] Modal QR pairing — dirender on-demand (bukan di App).
   const [showLinkDevice, setShowLinkDevice] = useState(false);
+  // [docs/40 §40.8] Arsip riwayat yang impornya gagal masih ada di server
+  // sampai TTL 30 menit — tawarkan percobaan ulang hanya bila penandanya ada.
+  const [pendingHistory, setPendingHistory] = useState(false);
+  const [retryingHistory, setRetryingHistory] = useState(false);
+  const [retryMessages, setRetryMessages] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    void hasPendingHistoryImport().then((pending) => {
+      if (alive) setPendingHistory(pending);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -127,6 +144,30 @@ export default function SessionManagerPage() {
     };
     fetchSessions();
   }, [t]);
+
+  const handleRetryHistory = async () => {
+    setRetryingHistory(true);
+    setRetryMessages(0);
+    try {
+      const outcome = await retryLinkedHistory({
+        onProgress: (progress) => setRetryMessages(progress.messages),
+      });
+      if (outcome.status === 'imported') {
+        toast.success(t('settings:sessions_page.history_retry_done', { count: outcome.records }));
+        setPendingHistory(false);
+      } else if (outcome.status === 'expired') {
+        // TTL habis / sudah dikonsumsi: tidak ada lagi yang bisa diulang.
+        toast(t('settings:sessions_page.history_retry_expired'), { icon: 'ℹ️' });
+        setPendingHistory(false);
+      } else if (outcome.status === 'failed') {
+        toast.error(t('settings:sessions_page.history_retry_failed'));
+      } else {
+        setPendingHistory(false);
+      }
+    } finally {
+      setRetryingHistory(false);
+    }
+  };
 
   const handleLogoutSession = async (jti: string) => {
     const toastId = toast.loading(t('settings:messages.ejecting'));
@@ -174,6 +215,26 @@ export default function SessionManagerPage() {
         <p className="mt-2 text-center text-[10px] font-mono uppercase tracking-widest text-text-secondary/70">
           {t('settings:sessions_page.link_button_hint')}
         </p>
+
+        {pendingHistory && (
+          <div className="mt-4 rounded-xl border border-accent/30 bg-accent/5 p-4">
+            <p className="text-sm font-bold text-text-primary">
+              {t('settings:sessions_page.history_retry_title')}
+            </p>
+            <p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+              {t('settings:sessions_page.history_retry_desc')}
+            </p>
+            <button
+              onClick={handleRetryHistory}
+              disabled={retryingHistory}
+              className="mt-3 w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {retryingHistory
+                ? t('settings:sessions_page.history_retry_running', { messages: retryMessages })
+                : t('settings:sessions_page.history_retry_button')}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="w-full max-w-3xl flex-1">

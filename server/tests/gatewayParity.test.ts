@@ -117,12 +117,11 @@ test('setiap case handleKeySync bisa dicapai dari WSS ATAU di-dokumentasikan seb
   //  - message:ack_delivered  → jalur fixed ACK (gateway socket.on terpisah).
   //  - message:deleted        → WT-only; unsend di WSS lewat message:unsend.
   //
-  // `migration:chunk/start/ack` DULU ada di daftar ini ("WSS fallback belum"),
-  // tetapi gateway sekarang meneruskannya (`WSS_KEYS_SYNC_EVENTS` memuatnya) dan
-  // transfer perangkat lewat WSS sudah punya jalurnya. Entri lama dihapus supaya
-  // daftar ini tetap berarti: apa pun yang tercantum = BENAR-BENAR belum ada
-  // rutenya. Kalau salah satu event migration dicebut dari gateway tanpa sengaja,
-  // test pertama di file ini gagal (`missing` tidak kosong) — bukan test ini.
+  // `migration:*` dulu tercatat di sini, lalu diteruskan gateway; sejak alur
+  // transfer QR dihapus (2026-10-29) event-nya tidak ada lagi di kedua sisi.
+  // Daftar ini tetap berarti: apa pun yang tercantum = BENAR-BENAR belum ada
+  // rutenya. Event yang tercantum tapi sudah hilang dari handler memerahkan
+  // test terakhir di blok ini.
   const KNOWN_WT_ONLY = new Set([
     'message:ack_delivered',
     'message:deleted',

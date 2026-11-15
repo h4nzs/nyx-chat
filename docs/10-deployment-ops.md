@@ -30,8 +30,8 @@ On PR and push to `main`:
 | Job | Content |
 |---|---|
 | `build` | gate cepat `scripts/check-wasm-artifacts.sh` + `scripts/check-vendor.sh` → Go build/vet/test `server/kt-query` **dari vendor** → frozen-lockfile install → prisma generate → `pnpm run build` |
-| `wasm` | [R1] bangun ULANG `packages/spqr-wasm`, `packages/keytrans-wasm-v2` (fork lokal), dan `packages/pir-wasm` lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
-| `unit` | `pnpm run test` — seluruh test server (`node:test` + `tsx`) dan web (vitest). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
+| `wasm` | [R1] bangun ULANG `packages/spqr-wasm` dan `packages/keytrans-wasm-v2` (fork lokal) lalu bandingkan hash dengan `packages/wasm-artifacts.json` (`scripts/wasm-repro-build.sh --verify`) — biner yang dikirim ke browser harus bisa dibuktikan asalnya |
+| `unit` | `pnpm run test` + `test:coverage` — seluruh test server (`node:test` + `tsx`) dan web (vitest), dengan lantai coverage per-glob (`docs/11` §11.1d); pada PR, `scripts/check-changed-lines.mjs` melaporkan baris baru yang belum teruji (non-blocking). Sengaja tanpa angka di dokumen ini: hitungannya berubah tiap penambahan test, dan angka basi di sini pernah menyesatkan |
 | `lint` | **BLOCKING** — `pnpm run lint` = `oxlint src` per paket (ESLint dihapus 2026-10-15). Nol temuan untuk rule level `error` + kategori `correctness`; `no-unused-vars` sengaja `warn` |
 | `alerts` | `SKIP_LIVE=1 scripts/drill-alerts.sh` — drill aturan Prometheus 4 lapis (§10.12); aturan yang merujuk metrik tak terdeklarasi ditolak di sini |
 | `dr-oracle` | [WS-G(6)] `tools/dr-oracle` (Go, implementasi kedua tanpa libsodium): vet/test + gate drift vektor ter-commit + test NYX↔oracle & interop dua arah |
@@ -39,9 +39,11 @@ On PR and push to `main`:
 | `e2e` | Postgres+Redis services, `prisma db push` (consent env), Playwright chromium — transport specs auto-skip; setelah suite, `nyx-api` dinyalakan dan drill alert dijalankan terhadap exporter nyata (`METRICS_URL`) |
 | `e2e-chrome` | Full Chrome via apt + Rust sidecar built & started; cert hash parsed into `VITE_TRANSPORT_CERT_HASH`; **coturn installed & started** (loopback relay, `allow-loopback-peers` only in CI) with `TURN_URLS`/`TURN_STATIC_AUTH_SECRET` in the job env; runs `--project=chrome` (WebTransport + real TURN relay active) |
 
+Pemulihan tidak hanya per-PR: **`drills.yml`** berjalan terjadwal (Senin 04:00 UTC) + `workflow_dispatch` dan menjalankan tiga drill sekaligus — alert promtool (`SKIP_LIVE=1`), pemulihan KT v2 11 langkah, dan restore klien (`.nyxbak` di atas dump Postgres sementara). Ini satu-satunya jalur otomatis untuk `client-restore`; rincian prosedur di `docs/39` §39.4b/§39.5.
+
 ## 10.3 Deploy pipeline (`deploy.yml`)
 
-Push to `main` triggers:
+`deploy.yml` bersifat **manual** (`workflow_dispatch`) — push ke `main` hanya menjalankan `ci.yml`, tidak men-deploy apa pun. Saat dijalankan, ia menjalankan:
 
 - **Guards (gagal cepat, sebelum install):** `scripts/check-wasm-artifacts.sh` (artefak WASM ter-commit + cocok hash manifest `packages/wasm-artifacts.json`) dan `scripts/check-vendor.sh` (sumber Signal ter-vendor cocok pin `NOTICE`) — tanpa keduanya, clone bersih tidak bisa dibangun ulang.
 1. Install (frozen lockfile) → assert secrets (`VITE_TURNSTILE_SITE_KEY` — satu-satunya yang di-assert hari ini) → build shared → web → marketing → server (incl. `prisma generate`) → Rust sidecar (`cargo build --release`) → binary layanan log KT (`bash server/kt-query/build.sh`, dari vendor; §10.15).
@@ -128,7 +130,7 @@ ls /var/lib/nyx/kt-v2-snapshots/         # arsip snapshot KT terverifikasi (§10
 | `GROUP_RELEASE_JITTER_MS` | [docs/37 P8] Jitter rilis pesan grup (ms, default kosong = mati, clip 2000). Menambah latensi ACK? Tidak — ACK dikirim dulu; hanya relay yang ditunda. Metrik `nyx_group_release_delay_ms` |
 | `OHTTP_RELAY_EXTERNAL` | [docs/37 P7] `1` = relay OHTTP dijalankan proses terpisah; API tidak memasang `/api/ohttp/relay`. Butuh `nyx-ohttp-relay`; klien memakai default same-origin `/api/ohttp/relay` (nginx → `:4100`), `VITE_OHTTP_RELAY_URL` hanya bila relay berada di origin lain (§10.18) |
 | `OHTTP_TOKEN_MODE` | `on` (default) \| `off`. `off` = relay mencetak token sendiri (butuh sesi/CSRF, hanya loopback) — wajib `OHTTP_INTERNAL_TOKEN` atau `JWT_SECRET` yang sama di semua worker (§10.18) |
-| `OHTTP_INTERNAL_TOKEN` | [audit F-06] Rahasia relay → gateway saat `OHTTP_TOKEN_MODE=off` (≥32 karakter). Kosong = HMAC(`JWT_SECRET`) deterministik; tanpa keduanya boot gagal. Isi eksplisit bila relay adalah proses/systemd sendiri (§10.18) |
+| `OHTTP_INTERNAL_TOKEN` | [audit F-06/N9-01] Rahasia relay → gateway **dan** kunci HMAC tag klien relay (≥32 karakter). Saat `OHTTP_TOKEN_MODE=off` kosong = HMAC(`JWT_SECRET`) deterministik (tanpa keduanya boot gagal); pada mode `on` kosong = tanpa tag klien. Isi eksplisit **juga pada mode `on`** bila relay adalah proses/systemd sendiri, dengan nilai sama di API dan relay (§10.18) |
 | `OHTTP_GATEWAY_TARGET` / `OHTTP_GATEWAY_TRUSTED_HOSTS` | [docs/37 P7] Tujuan gateway untuk relay proses terpisah (wajib loopback kecuali host disebut di CSV `TRUSTED_HOSTS`) — §10.18 |
 | `CREDENTIAL_SUITE_ALLOWLIST` | [Fase 5–6 dihapus] CSV suite verifier untuk `POST /api/groups/:id/credential/present`. **Kosong = tolak semua** (fail-closed) dan tidak ada suite di build ini |
 | `PP_ISSUER_PRIVATE_JWK` | [docs/37 §37.3.3] JWK privat issuer Privacy Pass (RSA-2048, RSABSSA-SHA384-PSS-Deterministic). **Wajib di production**: `utils/privacyPass.ts` melempar bila kosong saat kunci diminta, karena kunci ephemeral membatalkan semua token klien setiap restart. Generate/rotasi: `pnpm --filter nyx-server run pp-key:generate` (cetak) atau `-- --write` (tulis `server/.env`, mode 0600). Nilai yang sama harus dipakai **semua worker** |
@@ -848,6 +850,12 @@ burst kedaluwarsa > 10k/menit — naikkan batas, jangan mengandalkan run berikut
    disalin, salinan **dibuka ulang** dan tree head + root-nya dibandingkan dengan
    pohon hidup. Beda → arsip dibuang, langkah dilaporkan gagal, `latest.json`
    tidak ditulis. Snapshot yang belum terverifikasi tidak pernah diunggah.
+   Manifes juga mencatat **auditor head** yang ikut tersimpan
+   (`auditorName`/`auditorTreeSize`/`auditorTimestamp`). Kosong = auditor belum
+   menandatangani head saat arsip dibuat, sehingga instance hasil pulih butuh
+   auditor berjalan lebih dulu (`docs/39` §39.5d). Proses log menulis peringatan
+   saat itu terjadi; snapshot tetap dibuat (menghentikannya justru menghapus
+   jalur pemulihan tepat saat risikonya naik).
 2. Arsip `kt-snapshot-<waktu>Z.tar.gz` + `latest.json`; arsip lokal dipangkas ke
    `NYX_KT_V2_SNAPSHOT_KEEP` (default 7).
 3. Proses server NYX (`KT_SNAPSHOT_DIR` di `.env`) mengunggah arsip terbaru ke R2
@@ -975,7 +983,10 @@ nyx-kt-query-v2 \
 Flag/env lengkap (`-config`/`KT_V2_CONFIG_FILE`, `-read-addr`/`NYX_KT_V2_QUERY_ADDR`,
 `-write-addr`/`NYX_KT_V2_WRITE_ADDR`, `-auditor-addr`/`NYX_KT_V2_AUDITOR_ADDR`,
 `-snapshot-dir`/`NYX_KT_V2_SNAPSHOT_DIR`, `NYX_KT_V2_SNAPSHOT_INTERVAL`,
-`NYX_KT_V2_SNAPSHOT_KEEP`, `-metrics-addr`/`NYX_KT_V2_METRICS_ADDR`, `-check`)
+`NYX_KT_V2_SNAPSHOT_KEEP`, `-metrics-addr`/`NYX_KT_V2_METRICS_ADDR`, `-check`,
+`-expect-size`/`-expect-root` — pasangan terakhir hanya berlaku bersama `-check`:
+head hasil ekstrak dibandingkan dengan manifes arsip, karena `-check` exit 0
+sendiri tidak membuktikan integritas (`docs/39` §39.5d))
 ada di `server/kt-query/README.md`; sisi server NYX memakai `KT_V2_SERVER_URL`
 (tulis, `:8088`) dan `KT_QUERY_URL` (baca, `:8089`).
 
@@ -1285,6 +1296,69 @@ Tanpa keduanya **boot gagal** (bukan token acak). Header ini bukan rahasia
 klien: ia hanya membedakan "dipanggil relay" dari "dipanggil langsung", dan
 klien tidak pernah memegang `JWT_SECRET`.
 
+**[audit N9-01] Tag klien relay.** Alamat klien hanya terlihat oleh relay, jadi
+relay menghitung `HMAC(OHTTP_INTERNAL_TOKEN, alamat)` dan mengirimnya sebagai
+`x-nyx-ohttp-client-tag` bersama `x-nyx-ohttp-internal`. Gateway **membuang**
+klaim kedua header itu dari dalam amplop lalu memasang nilai dari relay, dan API
+(`utils/clientIp.ts`) memakai tag itu setelah di-pepper lagi — yang masuk Redis
+tetap opaque (bukan IP, bukan id akun). Tanpa tag, jalur OHTTP **tanpa akun**
+(bukti KT, N7-01) berbagi satu bucket `127.0.0.1` sebesar 240/menit; dua klien
+wajar sudah cukup menghabiskannya. Konsekuensi operasional:
+`OHTTP_INTERNAL_TOKEN` harus diset (≥32 karakter, sama persis) di **kedua**
+proses meski `OHTTP_TOKEN_MODE=on`. Bila kosong, relay menulis peringatan saat
+start dan limiter kembali ke perilaku lama — bukan jalur yang lebih longgar,
+karena tag tanpa token yang sah tidak pernah dipercaya.
+
+Status tag terekspos sebagai `nyx_ohttp_client_tag_total{status}` (dihitung per
+request gateway): `tagged`, `untagged`, `untrusted`, dan `no-token`. Labelnya
+enum saja — tidak ada alamat, nilai tag, atau id akun.
+
+**[audit N10-02/N10-03] Dua limiter lain dan trust proxy.** `ohttpLimiter`
+gateway dan limiter relay dulu memakai `req.ip` (loopback/alamat nginx) sehingga
+140 klien berbeda kena 429 di request #121; keduanya kini memakai identitas
+klien seperti tag di atas. `CF-Connecting-IP` hanya dipercaya bila hop langsung
+ada di `OHTTP_TRUSTED_PROXIES` (CSV alamat atau CIDR IPv4/IPv6; kosong = hanya
+loopback). **Deployment dengan nginx di jaringan container wajib menyetelnya**
+(mis. `172.16.0.0/12`), kalau tidak semua klien kembali berbagi tag alamat
+nginx. Deployment selfhost (nginx + relay sama-sama di host, `127.0.0.1:4100`)
+**tidak** boleh mengisinya — default loopback sudah benar; `verify-boot.sh`
+bagian 9 memeriksa nilai itu dan baris `CF-Connecting-IP $remote_addr` di site
+config (`deploy/selfhost/README.md`). nginx menimpa header itu dengan `$remote_addr` (hasil `real_ip` dari
+rentang Cloudflare) di blok relay dan `/api`, jadi nilai yang diteruskan bukan
+header kiriman klien. Sejak audit N11-04 relay mencetak saran hanya bila target
+gateway bukan loopback; untuk selfhost baris log-nya justru menegaskan bahwa
+nilai kosong memang benar, sehingga tidak menuntun operator ke nilai yang
+ditolak `verify-boot.sh`. Entri `OHTTP_TRUSTED_PROXIES` yang tidak bisa diparse
+(CIDR IPv6 salah prefix, nama host) dilaporkan per entri saat start dan entri
+itu tidak dipercaya (audit N11-05). Bentuk `10.0.0.0/` (garis miring tanpa
+angka) dan `10.0.0.0/8/8` kini ikut ditolak: dulu `Number('')` membuat yang
+pertama berlaku sebagai `/0`, yaitu "percaya semua hop", sehingga salah-setel
+justru membuka `CF-Connecting-IP` (audit N12-01). Prefix `/0` hanya berlaku bila
+ditulis eksplisit (`0.0.0.0/0`), dan entri cacat tidak pernah mencocokkan apa pun.
+
+```promql
+# Operasi tanpa OHTTP_INTERNAL_TOKEN (kondisi yang harus ditindak)
+sum(rate(nyx_ohttp_client_tag_total{status="no-token"}[15m])) by (job)
+# Relay hidup tetapi tidak menandatangani / token beda antar proses
+sum(rate(nyx_ohttp_client_tag_total{status=~"untagged|untrusted"}[15m])) by (status)
+```
+
+`no-token` muncul saat proses API tidak punya token (set juga di relay);
+`untagged` saat API punya token tetapi relay tidak mengirim tag; `untrusted`
+saat header tag ada tetapi tokennya tidak cocok (salah konfigurasi atau tag
+dikarang lewat gateway langsung).
+
+Alert `NyxOhttpClientTagMissing` (warning, `for: 10m`) menyala bila lebih dari
+separuh request gateway berstatus `no-token|untagged|untrusted` selama 10
+menit — rasio, bukan satu request, supaya probe/panggilan langsung ke gateway
+tidak membunyikan alarm. Aturannya punya satu kasus **firing** dan dua kasus
+**tidak menyala** (tag dipakai; hanya sebagian kecil untagged) di
+`ops/prometheus/tests.yml`, dijaga `scripts/drill-alerts.sh`. Dashboard
+`nyx-overview` memuat baris **OHTTP (relay & gateway)**: panel rasio tanpa tag
+(ambang sama dengan alert: kuning 10%, merah 50%) dan laju per status, sehingga
+penyebabnya (`no-token` vs `untagged` vs `untrusted`) terlihat sebelum alarm
+10 menit berbunyi.
+
 **Selfhost (`~/nyx-selfhost`, systemd user).** `scripts/sync-selfhost.sh`
 memasang `ops/nginx/nyx.conf` (setelah transformasi path) dan
 `ops/systemd/user/nyx-ohttp-relay.service`; symlink unit ke
@@ -1310,47 +1384,74 @@ korelasi di log/state aplikasi. Pemisahan fisik = jalankan relay di host lain
 dan ubah `OHTTP_GATEWAY_TARGET` (butuh perubahan kode karena validasi loopback
 saat ini sengaja ketat).
 
-## 10.19 PIR sidecar lokal (`nyx-pir-sidecar`) — added 2026-10-25, docs/35 Fase 4b
+## 10.19 PIR dua server (`nyx-pir@a`/`nyx-pir@b`) — ditulis ulang 2026-11-09
 
-Pencarian PIR (ChalametPIR) membutuhkan **index** yang dibangun dari `User.oprfIndex`
-dan sebuah proses yang menjawab `/params` (hint/filter/seed) serta `/query` biner.
-Node tidak memegang kripto PIR: `server/src/routes/pir.ts` hanya mem-proxy byte ke
-loopback, dan router `/api/pir` **tidak dipasang** tanpa `PIR_ENABLED=1` (404).
+> **Kontrak: `xor-pir-v1`, dua server + sharding (docs/42).** Endpoint `/params`
+> dan payload snapshot PIR satu-server **sudah tidak ada**. Satu instance saja tidak
+> cukup: klien menolak berjalan tanpa dua server, dan XOR atas dua share hanya
+> menyembunyikan indeks bila share dikirim lewat dua relay berbeda.
+
+Pencarian memakai **PIR XOR dua server**: klien menyusun `q1` acak dan
+`q2 = q1 ⊕ e_i`, mengirim masing-masing ke server berbeda lewat relay OHTTP
+berbeda, lalu XOR atas kedua jawaban. Tidak ada satu pun server yang melihat
+indeks yang dicari. Shard membatasi biaya per query: `shard = sha256(index)
+mod shardCount`.
 
 **Komponen.**
 
 | Bagian | Berkas | Catatan |
 |---|---|---|
-| Sidecar | `server/pir-sidecar` (`pir-service`) | Rust; index in-memory, snapshot JSON |
-| Unit user (selfhost) | `ops/systemd/user/nyx-pir-sidecar.service` | `systemctl --user`, env terpisah |
-| Proxy API | `server/src/routes/pir.ts` | auth + rate limit pencarian, byte opaque |
-| Snapshot | `pnpm --filter nyx-server run pir:snapshot` | tulis atomik dari `User.oprfIndex` |
-| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, hot-swap `/admin/rebuild` (jaring pengaman) |
-| Refresh perubahan | `server/src/jobs/pirSnapshot.ts` + `server/src/pir/dirty.ts` | cron `*/3 * * * *`, rebuild hanya bila penanda generasi naik |
-| Klien | `web/src/lib/pirClient.ts` + worker WASM | wajib `VITE_OHTTP_ENABLED=1` |
+| Sidecar | `server/pir-sidecar` (`pir-service`) | Rust; shard in-memory, satu proses per role |
+| Unit user (selfhost) | `ops/systemd/user/nyx-pir@.service` | template `%i` = role; `nyx-pir@a` (:9470), `nyx-pir@b` (:9471) |
+| Proxy API | `server/src/routes/pir.ts` | auth + rate limit, verifikasi manifest, byte opaque |
+| Builder | `server/src/pir/rebuild.ts` + `shards.ts` | artefak bertanda tangan per shard, `dbRoot` wajib sama A/B |
+| Snapshot manual | `pnpm --filter nyx-server run pir:snapshot` | tulis `shard-<n>.bin` + `shard-<n>.json`, lalu kirim |
+| Refresh harian | `server/src/jobs/pirSnapshot.ts` | cron `15 4 * * *`, jaring pengaman |
+| Refresh perubahan | `server/src/jobs/pirSnapshot.ts` + `server/src/pir/dirty.ts` | cron `*/3 * * * *`, hanya bila generasi naik |
+| Klien | `web/src/lib/pirManifest.ts`, `pirClient.ts` | OHTTP wajib; tanpa fallback |
 
-**Kesegaran snapshot.** Snapshot adalah artefak build, bukan view DB: user yang
-mendaftar setelah build terakhir tidak terlihat oleh `/api/pir/query` sampai
-rebuild berikutnya — dan klien tidak punya fallback saat miss (`[]`). Karena itu
-setiap penulisan yang bentuknya masuk snapshot menaikkan generasi di Redis
-(`pir:snapshot:gen` via `markPirSnapshotDirty`): registrasi, login yang mengubah
-`oprfIndex`/kunci perangkat, `PUT /api/users/me` (profil), verifikasi (PoW &
-WebAuthn device-bound), `complete-onboarding`, `PUT /api/users/me/keys`, tautan
-perangkat QR, dan `DELETE /api/users/me`. Job interval membaca generasi itu dan
-membangun ulang hanya bila `pir:snapshot:built` masih di belakang — satu rebuild
-per jendela 3 menit, bukan satu per pendaftaran (sidecar hanya punya
-`/admin/rebuild` yang mengganti seluruh index). Penanda **tidak pernah**
-menggagalkan request bila Redis mati; cron 04:15 tetap menutup ketertinggalan.
+**Endpoint sidecar** (loopback, tidak pernah lewat nginx langsung):
 
-**Env yang harus cocok (tiga tempat).**
+| Endpoint | Isi |
+|---|---|
+| `GET /manifest` | ringkasan `{suite, shardCount, epoch}` dari shard yang termuat |
+| `GET /manifest?shard=N` | manifest bertanda tangan (ML-DSA-65, domain `nyx-pir-manifest-v1`) |
+| `POST /query?shard=N` | body = satu share biner; jawaban = share biner |
+| `POST /admin/rebuild` | `{manifest, signature, slots}` + header `x-nyx-pir-internal` |
+| `GET /health` | role + jumlah shard termuat |
 
-- `server/.env`: `PIR_ENABLED=1`, `PIR_SERVICE_URL=http://127.0.0.1:9470`,
-  `PIR_ADMIN_TOKEN`, `PIR_SNAPSHOT_PATH`, `PIR_OPRF_ENABLED=1` (gate OPRF; tanpa ini
-  register/login tidak mengisi `oprfIndex` dan snapshot akan kosong).
-- Env sidecar: `PIR_BIND` (loopback), `PIR_MASTER_SECRET`, `PIR_ADMIN_TOKEN` (**sama**
-  dengan server), `PIR_SNAPSHOT_PATH` (**sama**), `PIR_ARITY`, `PIR_MAX_ENTRIES`,
-  `PIR_RECORD_BYTES`.
-- `web/.env`: `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`, `VITE_OHTTP_ENABLED=1`.
+Proxy meneruskan ke `/api/pir/<id>/manifest` dan `/api/pir/<id>/query?shard=N`;
+router `/api/pir` **tidak dipasang** tanpa `PIR_ENABLED=1` (404). Manifest
+diverifikasi proxy dengan kunci ter-pin sebelum diteruskan (pertahanan
+berlapis); klien tetap memverifikasi sendiri.
+
+**Env yang harus cocok.**
+
+- `server/.env`: `PIR_ENABLED=1`, `PIR_SERVERS` (JSON `[{id,url,relay}, …]`, ≥2
+  saat aktif — kurang dari 2 = gagal boot), `PIR_MANIFEST_KEYS`
+  (`{a,b}` = publik ML-DSA-65 base64url), `PIR_SIGNING_KEYS`
+  (`{a,b}` = path berkas kunci, 0600), `PIR_SHARD_DIR` (artefak lokal per
+  server), `PIR_ADMIN_TOKEN` (**sama** dengan kedua sidecar),
+  `PIR_RECORD_BYTES` (default 512), `PIR_OPRF_ENABLED=1` (tanpa ini register/
+  login tidak mengisi `oprfIndex` dan snapshot kosong).
+- Env sidecar `pir-a.env` / `pir-b.env`: `PIR_BIND` (loopback `:9470`/`:9471`),
+  `PIR_ADMIN_TOKEN`, `PIR_SHARD_DIR` (direktori berisi shard server itu).
+  `PIR_ROLE` diisi unit dari nama instance (`PIR_ROLE=%i`), bukan dari env.
+- `web/.env`: `VITE_PIR_ENABLED=1`, `VITE_PIR_OPRF_ENABLED=1`,
+  `VITE_OHTTP_ENABLED=1`, `VITE_PIR_MANIFEST_KEYS`, `VITE_PIR_RELAYS`
+  (dua relay; satu relay ditolak saat build-mode ketat).
+
+**Kesegaran shard.** Shard adalah artefak build, bukan view DB: user yang
+mendaftar setelah build terakhir tidak terlihat sampai rebuild berikutnya — dan
+klien tidak punya fallback saat miss (`[]`). Setiap penulisan yang bentuknya
+masuk snapshot menaikkan generasi di Redis (`pir:snapshot:gen` via
+`markPirSnapshotDirty`): registrasi, login yang mengubah `oprfIndex`/kunci
+perangkat, `PUT /api/users/me`, verifikasi (PoW & WebAuthn device-bound),
+`complete-onboarding`, `PUT /api/users/me/keys`, tautan perangkat QR, dan
+`DELETE /api/users/me`. Job interval membaca generasi itu dan membangun ulang
+hanya bila `pir:snapshot:built` masih di belakang — satu rebuild per jendela 3
+menit. Penanda **tidak pernah** menggagalkan request bila Redis mati; cron 04:15
+tetap menutup ketertinggalan.
 
 **Menyalakan (selfhost).**
 
@@ -1358,23 +1459,50 @@ menggagalkan request bila Redis mati; cron 04:15 tetap menutup ketertinggalan.
 cd server/pir-sidecar && cargo build --release --locked
 pnpm --filter nyx-server run pir:snapshot          # butuh >=1 user ber-oprfIndex
 install -d -m 0750 ~/nyx-selfhost/pir
-install -m 0600 <env> ~/nyx-selfhost/pir/pir.env
+install -m 0600 <env-a> ~/nyx-selfhost/pir/pir-a.env
+install -m 0600 <env-b> ~/nyx-selfhost/pir/pir-b.env
 systemctl --user daemon-reload
-systemctl --user enable --now nyx-pir-sidecar
+systemctl --user enable --now nyx-pir@a nyx-pir@b
 curl -fsS http://127.0.0.1:9470/health
+curl -fsS http://127.0.0.1:9471/health
 ```
 
-Snapshot hanya dimuat **saat boot**. Setelah user baru mendaftar, index tidak
-berubah sampai cron `04:15` (hot-swap) atau operator menjalankan `pir:snapshot`
-lalu `systemctl --user restart nyx-pir-sidecar`. Tanpa salah satu itu, pencarian
-PIR untuk akun baru mengembalikan "tidak ditemukan"; klien sengaja **tidak**
-punya fallback diam-diam ke `/api/users/search` (lihat `web/src/lib/userSearch.ts`).
+Shard dimuat **saat boot**; penggantian hanya lewat `/admin/rebuild` (hot-swap
+per shard, shard lama tetap melayani sampai shard baru tiba). Karena itu user
+baru tidak perlu restart sidecar: cron `*/3` mengirim shard yang berubah.
 
-**CSRF pada query PIR.** `POST /api/pir/query` lewat OHTTP tidak membawa cookie
-(relay membuang header klien); identitasnya token OHTTP ber-scope di dalam amplop.
-Karena itu lapisan CSRF global melewati jalur ini **hanya** bila request tidak
-membawa cookie sesi sama sekali (`app.ts`); request berbasis cookie tetap wajib
-CSRF. Jangan melonggarkan aturan itu ke path lain tanpa alasan yang sama.
+**Metrik dan alert.** Semua metrik PIR berasal dari exporter **`nyx-api`**
+(`127.0.0.1:9464`, `server/src/utils/metrics.ts`) — proxy dan job rebuild ada di
+proses itu, jadi tidak ada exporter baru dan id server (`a`/`b`) tidak pernah
+jadi label.
+
+| Metrik | Arti |
+|---|---|
+| `nyx_pir_query_total{result}` | `ok|invalid|shard_unknown|unavailable` |
+| `nyx_pir_query_seconds` | histogram latensi proxy satu query share |
+| `nyx_pir_rebuild_total{result}` | `ok|error|mismatch` (`mismatch` = dbRoot A≠B) |
+| `nyx_pir_rebuild_seconds` | histogram durasi rebuild + pengiriman |
+| `nyx_pir_last_rebuild_timestamp_seconds` | umur shard (0 = belum pernah) |
+| `nyx_pir_entries`, `nyx_pir_shards` | isi rebuild terakhir |
+| `nyx_pir_manifest_mismatch_total` | manifest ditolak proxy (tanda tangan/bentuk/shard) |
+
+Alert (`ops/prometheus/alerts.yml`, grup `nyx-pir`, masing-masing punya kasus
+menyala/tidak di `tests.yml`): `NyxPirTampered` (setiap kenaikan),
+`NyxPirDesync` (`result="mismatch"`), `NyxPirSidecarDown` (query unavailable
+10 menit), `NyxPirRebuildStale` (umur > 30 menit, guard `> 0`).
+
+**CSRF pada query PIR.** `POST /api/pir/:server/query` lewat OHTTP tidak membawa
+cookie (relay membuang header klien); identitasnya token OHTTP ber-scope di
+dalam amplop. Karena itu lapisan CSRF global melewati jalur ini **hanya** bila
+request tidak membawa cookie sesi sama sekali (`app.ts`); request berbasis cookie
+tetap wajib CSRF. Jangan melonggarkan aturan itu ke path lain tanpa alasan yang
+sama.
+
+**Kegagalan yang terlihat, bukan diam.** Klien fail-closed dengan verdict
+eksplisit: `PIR_DESYNC` (ringkasan/manifest A-B tidak sepakat), `PIR_TAMPERED`
+(panjang jawaban ≠ manifest), `PIR_MANIFEST_INVALID` (tanda tangan), `PIR_ROLLBACK`
+(epoch mundur), `PIR_UNAVAILABLE` (satu server mati). Tidak ada satu pun yang
+jatuh ke `/api/users/search`.
 
 **Rollback.** Hapus `PIR_ENABLED` (router hilang, 404) dan `PIR_OPRF_ENABLED`
 (search kembali ke `usernameHash` legacy), lalu restart API. Sidecar boleh

@@ -22,7 +22,7 @@
  */
 
 import { openAtRest, sealAtRest, sealedLookupCandidates } from './atRestSecrets.js'
-import { hashGroupToken, memberTokenExpiry } from './groupTokens.js'
+import { evaluateMemberToken, hashGroupToken, memberTokenExpiry } from './groupTokens.js'
 
 /** Nilai kanonik untuk kolom routing (deterministik, kunci seal aktif). */
 export function routingIdentity(userId: string): Promise<string> {
@@ -81,8 +81,8 @@ export interface MembershipLookup {
   userHiddenConversation: {
     findFirst(args: {
       where: Record<string, unknown>;
-      select: { id?: boolean };
-    }): Promise<{ id?: string } | null>;
+      select: { id?: boolean; tokenEpoch?: boolean; expiresAt?: boolean };
+    }): Promise<{ id?: string; tokenEpoch?: number; expiresAt?: Date } | null>;
   };
 }
 
@@ -137,17 +137,85 @@ export async function upsertMembership(
   })
 }
 
-/** Cek kepemilikan baris keanggotaan (leave tanpa group token). */
+/**
+ * [AUDIT 2026-10-31 — F-02] Saring daftar userId ke mereka yang benar-benar
+ * punya baris keanggotaan pada conversation tersebut.
+ *
+ * Dipakai jalur realtime (`group:fulfilled_key` / `metadata:updated`) supaya
+ * target notifikasi tidak bisa ditentukan bebas oleh klien. Satu query untuk
+ * semua kandidat (bukan N query): nilai kolom ter-seal, jadi kandidat dihitung
+ * dulu per user lalu diiris dengan baris yang dikembalikan.
+ */
+export interface ConversationMembershipLookup {
+  userHiddenConversation: {
+    findMany(args: {
+      where: Record<string, unknown>;
+      select: { userId?: boolean };
+    }): Promise<Array<{ userId?: string | null }>>;
+  };
+}
+
+export async function filterConversationMembers(
+  prisma: ConversationMembershipLookup,
+  conversationId: string,
+  userIds: unknown[]
+): Promise<string[]> {
+  const wanted = Array.from(new Set(
+    userIds.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64)
+  ));
+  if (wanted.length === 0) return [];
+
+  const candidateToUser = new Map<string, string>();
+  for (const userId of wanted) {
+    for (const candidate of await routingCandidates(userId)) {
+      candidateToUser.set(candidate, userId);
+    }
+  }
+  if (candidateToUser.size === 0) return [];
+
+  const rows = await prisma.userHiddenConversation.findMany({
+    where: { conversationId, userId: { in: Array.from(candidateToUser.keys()) } },
+    select: { userId: true },
+  });
+
+  const allowed = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.userId !== 'string') continue;
+    const userId = candidateToUser.get(row.userId) ?? await resolveRoutingUser(row.userId);
+    if (userId && wanted.includes(userId)) allowed.add(userId);
+  }
+  return wanted.filter((userId) => allowed.has(userId));
+}
+
+/**
+ * Cek kepemilikan baris keanggotaan (leave tanpa group token).
+ *
+ * [AUDIT PASS 2 — N-03] `requireFresh` menolak baris yang tokennya sudah mati:
+ * epoch tidak cocok (kick/rotasi) atau kedaluwarsa melewati grace — aturan yang
+ * sama dengan `/api/groups/*` (`evaluateMemberToken`). Dipakai gate tulis baris
+ * SYSTEM supaya anggota lama yang barisnya belum di-GC tidak bisa menyisipkan
+ * envelope kunci ke grup. Pembacaan "apakah baris ada" (leave) tetap memakai
+ * mode lama supaya user dengan token basi masih bisa keluar.
+ */
 export async function findMembership(
   prisma: MembershipLookup,
-  input: { userId: string; conversationId: string }
+  input: { userId: string; conversationId: string },
+  options?: { requireFresh?: boolean; groupEpoch?: number }
 ): Promise<boolean> {
   const candidates = await routingCandidates(input.userId)
   const row = await prisma.userHiddenConversation.findFirst({
     where: { userId: { in: candidates }, conversationId: input.conversationId },
-    select: { id: true },
+    select: options?.requireFresh
+      ? { id: true, tokenEpoch: true, expiresAt: true }
+      : { id: true },
   })
-  return row !== null
+  if (row === null) return false
+  if (!options?.requireFresh) return true
+
+  const tokenEpoch = row.tokenEpoch
+  const expiresAt = row.expiresAt
+  if (typeof tokenEpoch !== 'number' || !expiresAt) return false
+  return evaluateMemberToken({ tokenEpoch, expiresAt }, options.groupEpoch ?? 0) !== 'stale'
 }
 
 /**

@@ -3,8 +3,7 @@
 #
 # Kenapa ada: `web/src/workers/crypto.worker.ts` meng-import
 # `packages/spqr-wasm/dist/spqr.wasm?url`, verifier KT v2 memuat
-# `packages/keytrans-wasm-v2/dist/keytrans-v2.wasm`, worker PIR memuat
-# `packages/pir-wasm/dist/pir-client.wasm?url`. Kalau lupa di-commit, build web
+# `packages/keytrans-wasm-v2/dist/keytrans-v2.wasm`. Kalau lupa di-commit, build web
 # gagal jauh di dalam Vite dengan "Could not resolve .../spqr.wasm?url". Script
 # ini gagal CEPAT dengan sebab + cara memperbaikinya.
 #
@@ -31,7 +30,6 @@ cd "$(dirname "$0")/.."
 DEFAULT_ARTIFACTS="
 packages/spqr-wasm/dist/spqr.wasm:100000
 packages/keytrans-wasm-v2/dist/keytrans-v2.wasm:100000
-packages/pir-wasm/dist/pir-client.wasm:100000
 "
 ARTIFACTS="${NYX_WASM_ARTIFACTS:-$DEFAULT_ARTIFACTS}"
 

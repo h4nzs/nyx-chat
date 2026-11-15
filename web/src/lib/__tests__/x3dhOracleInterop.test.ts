@@ -50,6 +50,11 @@ const goAvailable = ((): boolean => {
   }
 })();
 
+// [audit N11-06] `go run .` mengompilasi oracle; pada mesin dengan cache Go
+// dingin kompilasi itu saja bisa melewati batas bawaan 60 dtk, sehingga suite
+// tampak merah tanpa sebab kode (cache hangat ≈ 11 dtk).
+const INTEROP_TIMEOUT_MS = 180_000;
+
 function runOracle(mode: '-recipient' | '-ratchet', request: unknown): OracleReply {
   const stdout = execFileSync('go', ['run', '.', mode], {
     cwd: ORACLE_DIR,
@@ -144,7 +149,7 @@ describe.skipIf(!goAvailable)('interop NYX → oracle (Go: circl + x/crypto)', (
       key: encrypted.mk,
     });
     expect(new TextDecoder().decode(trimPaddedPlaintext(openedByNyx))).toBe(plaintext);
-  }, 60000);
+  }, INTEROP_TIMEOUT_MS);
 
   it('kontrol negatif: message key salah → oracle TIDAK bisa membuka ciphertext NYX', async () => {
     const sessionKey = b64uToBytes((vector.sessionKey as string));
@@ -172,5 +177,5 @@ describe.skipIf(!goAvailable)('interop NYX → oracle (Go: circl + x/crypto)', (
 
     // Bukti bahwa nilai yang diuji benar-benar berbeda (bukan sekadar error lain).
     expect(toHex(wrongKey)).not.toBe(toHex(encrypted.mk));
-  }, 60000);
+  }, INTEROP_TIMEOUT_MS);
 });

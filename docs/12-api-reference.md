@@ -36,9 +36,16 @@ The gate is **off when `MIN_CLIENT_VERSION` is unset**, and a request **without*
 | GET | `/webauthn/register/options` / POST `/webauthn/register/verify` | requireAuth | Passkey registration |
 | GET | `/webauthn/login/options` / POST `/webauthn/login/verify` | public | Passkey login (returns `encryptedPrivateKey` when the device is recognized) |
 | POST | `/link/claim` | public (authLimiter) | Perangkat baru memindai QR: `{token, publicKey, pqPublicKey?, signingKey, encryptedPrivateKey, deviceName?}` + header fingerprint/installation **perangkat baru** → `{pendingId}`. Token sekali pakai; perangkat lama menerima `auth:linking_request` |
-| GET | `/link/status/:pendingId` | public (authLimiter) | `{state: 'pending'\|'approved'\|'expired'}` — perangkat baru melakukan polling |
-| POST | `/link/approve` | requireAuth | `{pendingId}` → `{ok, deviceId}`. Membuat Device row untuk kunci yang didaftarkan saat claim + entri log KT. Hanya akun pemilik pending |
+| GET | `/link/status/:pendingId` | public (authLimiter) | `{state: 'pending'\|'approved'\|'expired', history: 'none'\|'preparing'\|'ready'}` — perangkat baru melakukan polling; `history` hanya berarti saat `approved` |
+| POST | `/link/approve` | requireAuth | `{pendingId, expectHistory?}` → `{ok, deviceId}`. Membuat Device row untuk kunci yang didaftarkan saat claim + entri log KT. Hanya akun pemilik pending. `expectHistory: true` menandai perangkat baru untuk **menunggu** arsip riwayat sebelum `complete` (`docs/40`) |
 | POST | `/link/deny` | requireAuth | `{pendingId}` → `{ok}`; state dihapus |
+| GET | `/link/history/limits` | requireAuth (perangkat lama) | `{maxBytes, verified}` — kuota efektif yang sama dengan penegakan presign; klien memeriksa ukuran arsip sebelum mengunggah |
+| POST | `/link/history/presign` | requireAuth (perangkat lama, ≤30 mnt) | `{deviceId, size}` → `{uploadUrl, size, urlTtl}`. Kuota tier; akun belum terverifikasi dibatasi 25 MB. `404` bila `LINK_HISTORY_ENABLED=off` |
+| POST | `/link/history/ready` | requireAuth (perangkat lama) | `{deviceId, size, digest, sealedKey}` → `{ok}`. `size` wajib sama dengan presign; `sealedKey` = kunci arsip yang diseal ke X-Wing perangkat baru |
+| POST | `/link/history/abort` | requireAuth (perangkat lama) | `{deviceId}` → `{ok}`; bersihkan intent/presign/state + objek R2 |
+| GET | `/link/history` | requireAuth | Perangkat baru: `{state:'none'}` atau `{state:'ready', size, digest}` |
+| POST | `/link/history/download` | requireAuth | Perangkat baru: `{downloadUrl, sealedKey, size, digest, urlTtl}`; tidak membakar state (impor bisa dicoba ulang) |
+| POST | `/link/history/consume` | requireAuth | `{digest}` → `{deleted, existed}`; menghapus objek R2 + state (sekali pakai). Idempoten |
 | POST | `/link/complete` | public (authLimiter) | `{pendingId, password}` → `{deviceId, usernameHash}`. Password diverifikasi **sebelum** state dibakar (salah ketik tidak menghabiskan QR). **Tidak** menerbitkan token: klien melanjutkan `POST /login` (password + kunci lokal) supaya hanya ada satu jalur sesi |
 | GET | `/pow/challenge` | requireAuth | PoW challenge for trust verification |
 | POST | `/pow/verify` | requireAuth | Submit PoW solution → verified tier |
@@ -244,18 +251,18 @@ Router hanya dipasang bila `OHTTP_ENABLED=1` (tanpa itu semuanya 404). Body adal
 | POST | `/relay` | Amplop → gateway. **404 `OHTTP_RELAY_EXTERNAL`** bila relay dijalankan proses terpisah (`OHTTP_RELAY_EXTERNAL=1`, nginx → `:4100/relay`) |
 | POST | `/gateway` | Buka amplop, tolak target di luar allowlist (`403 OHTTP_TARGET_NOT_ALLOWED` di dalam amplop), sanitasi header jaringan, teruskan ke loopback. Key id tak dikenal / amplop rusak → `400 OHTTP_INVALID_REQUEST` |
 
-Rate limit 120/menit per IP. Allowlist default: `GET /api/users/search`, `GET /api/keys/prekey-bundle/:id`, `POST /api/pir/query`, `POST /api/groups/sync` (batas body 64 KB).
+Rate limit 120/menit per IP. Allowlist default: `GET /api/users/search`, `GET /api/keys/prekey-bundle/:id`, `GET /api/pir/:server/manifest`, `POST /api/pir/:server/query`, `POST /api/groups/sync`, `POST /api/keys/kt/search` (batas body 64 KB).
 
-## pir — `/api/pir` (docs/35 Fase 4b, docs/10 §10.19)
+## pir — `/api/pir` (docs/42, docs/10 §10.19)
 
-Router hanya dipasang bila `PIR_ENABLED=1`; server hanya mem-proxy byte ke sidecar ChalametPIR loopback (`PIR_SERVICE_URL`), tidak ada kripto PIR di Node.
+Router hanya dipasang bila `PIR_ENABLED=1`. Server hanya mem-proxy byte ke dua sidecar XOR-PIR loopback (`PIR_SERVERS`, minimal 2 — kurang dari itu boot gagal) dan memverifikasi tanda tangan ML-DSA-65 manifest; tidak ada kripto PIR di Node.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/params` | requireAuth. `{epoch, recordBytes, entryCount, suite, arity, seed, hint, filter}` (~11 MB pada index kecil) + `ETag`; `304` bila `If-None-Match` cocok |
-| POST | `/query` | requireAuth + biner opaque (`application/octet-stream`, 8 MB). Dikirim **lewat OHTTP** dengan token ber-scope di amplop; CSRF dilewati hanya bila request tidak membawa cookie sesi. `503 PIR_UNAVAILABLE` bila sidecar mati |
+| GET | `/:server/manifest` | requireAuth. Tanpa `?shard=` → ringkasan (`shardCount`, `epoch`); dengan `?shard=` → manifest shard + tanda tangan. `404 PIR_SERVER_UNKNOWN`/`PIR_SHARD_UNKNOWN`, `502 PIR_MANIFEST_INVALID`, `503 PIR_UNAVAILABLE` |
+| POST | `/:server/query?shard=` | requireAuth + biner opaque (`application/octet-stream`, sepanjang `pirShareLen`). Dikirim **lewat OHTTP** dengan token ber-scope; CSRF dilewati hanya bila request tidak membawa cookie sesi |
 
-Tidak ada `PIR_SERVICE_URL` valid / sidecar tanpa index = `503`; snapshot kosong tidak bisa dibangun (`pir:snapshot` menolak 0 user ber-`oprfIndex`).
+Suite `xor-pir-v1` (record v2 ber-`ix`, 3 kandidat slot per indeks). Shard dibangun `pir:snapshot` dan di-hot-swap lewat `/admin/rebuild` tanpa restart.
 
 ## Misc
 

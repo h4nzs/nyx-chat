@@ -2,6 +2,676 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧭 PIR dua server: bukti WP8 dan penutupan WP9 (2026-11-10)
+
+**Klaim PIR sekarang punya bukti, bukan janji.** Vektor XOR-PIR dipakai bersama
+oleh Node (`server/tests/pirVectors.test.ts`) dan Rust
+(`cross_impl_vectors_match_fixture`) dari satu fixture, dan `web/e2e/pir.spec.ts`
+menjalankan dua sidecar nyata lewat dua relay OHTTP — hit, miss, dan nol
+permintaan ke `/api/users/search` — di job `pir-e2e` (`drills.yml`). `STATUS.md`
+kini mencatat suite `xor-pir-v1` dan rute `/api/pir/:server/{manifest,query}`,
+dan `scripts/check-status.mjs` memverifikasi keduanya terhadap kode. Dokumen yang
+masih menggambarkan PIR satu-server ditandai superseded; fitur tetap default mati.
+
+## 🔐 KT live, backup/restore, dan a11y ber-sesi terbukti di jalur nyata (2026-11-08)
+
+**Tiga lubang bukti ditutup tanpa melonggarkan gate.** `web/e2e/ktLive.spec.ts`
+menguji jalur KT yang dipakai klien — config ABI 2 + kunci ML-DSA-65, tree head,
+anchor `distinguished`, dan bukti publik `POST /search` — **lulus 1,4 menit**
+terhadap `nyx-kt-query-v2`. `web/e2e/backupRestore.spec.ts` membuat `.nyxbak`
+lewat Settings (magic `NYXB`, unduhan nyata) lalu merestore berkas itu dengan
+recovery phrase yang dibaca dari onboarding — **lulus 2,1 menit** dan masuk
+`mustPass`. `a11y.spec.ts` kini juga memindai Settings ber-sesi; pelanggaran yang
+ditemukan (label select/input, nama tombol swatch, kontras tombol Register dan
+`DefaultAvatar`) diperbaiki di UI, bukan dengan mematikan aturan. Contract test
+HTTP menjadi **8/8** dengan kasus 429. Perbaikan nightly ikut masuk: job contract
+membangun `@nyx/shared/dist`, k6 ephemeral memakai `GENERAL_RATE_LIMIT_MAX`
+(default produksi tetap 300) agar 100 VU satu IP tidak diukur sebagai limiter,
+dan cookie CSRF mengikuti opsi cookie sesi sehingga WebKit di stack http tidak
+lagi menolak double-submit.
+
+## 🛡️ Sinyal CI bisa dipercaya: coverage ber-lantai, gate tes wajib, drill terjadwal, main terproteksi (2026-11-05)
+
+**Nightly dan a11y mengisi celah yang tidak muat di PR.**
+`.github/workflows/nightly.yml` menjalankan fuzz web + framing sidecar 1 jam,
+k6 100 VU di stack ephemeral, smoke Firefox/WebKit, a11y, dan contract test HTTP
+(7 tes: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS) — tes kontrak
+itu opt-in karena butuh Redis/Postgres, jadi suite unit tetap bebas infra.
+`web/e2e/quarantine.json` + `evaluateQuarantine` memberi karantina flake yang
+kedaluwarsa (owner/reason/expiry; self-test 12/12). Pemindaian axe menemukan
+kontras gagal di Login/Register; **warnanya diperbaiki**, bukan aturannya
+dimatikan. Seam `R2_ENDPOINT` menyiapkan jalur sukses object storage untuk MinIO; jalur
+presign → PUT → HEAD → GET → DELETE kini benar-benar dijalankan (opt-in
+`NYX_R2_SMOKE=1`, lulus 5/5 terhadap `rclone serve s3`), dan job `unit` di CI
+menjalankan `rclone serve s3` versi terpin untuk mengulang jalur yang sama di
+setiap PR (image/binary MinIO sudah tidak didistribusikan gratis).
+
+**Coverage akhirnya punya arti.** Web memakai `@vitest/coverage-v8` dengan
+**lantai per-glob** (SPQR 90/66, KT 58/46, grup 45/41, privacy 52/56,
+`keychainDb` 30/21, `messagePipeline` 2/3 lines/branches) dan angka global 0
+supaya kenaikan global tidak menutupi modul kritis; server memakai reporter
+native Node lewat `server/scripts/test-coverage.mjs` (lantai 72/78/74 dari
+baseline 77,34/84,65/79,44). `scripts/check-changed-lines.mjs` melaporkan baris
+baru yang tidak teruji pada PR (web saja — Node tidak mengeluarkan lcov) dan
+sengaja masih `continue-on-error` sampai angka global stabil 10 run.
+
+**Suite E2E tidak bisa lagi hijau karena tesnya tidak jalan.**
+`web/e2e/required-tests.json` + `web/e2e/verify-required-tests.mjs` membaca
+report JSON Playwright: `minTotal` (suite tidak menyusut), `mustPass` (tes yang
+wajib benar-benar jalan di project itu) dan `allowedSkipReasons` (skip hanya sah
+bila alasannya terdaftar). `--self-test` 12 skenario (8 gate + 4 karantina) membuktikan gate bisa gagal.
+Manifest mencakup auth, profile, security, settings, recovery, deviceLinking,
+transport, chat, grup — 9 tes wajib di chromium, 12 di chrome, `minTotal` 22.
+
+**Flake E2E dibereskan di akarnya, bukan dengan retry.** Logout kini
+membuktikan sesi tercabut sebelum login ulang, dan pembersihan state lokal
+pindah ke halaman yang stabil sehingga navigasi keras `window.location.replace`
+tidak lagi membatalkan `goto()` (`Execution context was destroyed`).
+
+**PR Dependabot berhenti mati di lockfile.** `dependabot-lockfile.yml`
+meregenerasi `pnpm-lock.yaml` root (`--lockfile-only`) dan mendorongnya ke branch
+PR lewat GitHub App, karena push `GITHUB_TOKEN` tidak memicu CI ulang; CI tetap
+memakai `--frozen-lockfile`.
+
+**Tiga drill pemulihan dijadwalkan** (`drills.yml`, Senin 04:00 UTC): alert
+promtool, pemulihan KT v2 11 langkah, dan restore klien (`.nyxbak` di atas dump
+Postgres nyata, satu-satunya jalur otomatisnya).
+
+**CI hygiene + `main` terproteksi.** 12 job `ci.yml` punya `timeout-minutes`
+(5–45) dan `concurrency` yang membatalkan run PR yang tersalip (push ke `main`
+tidak pernah dibatalkan). Branch protection aktif dengan **14 required
+contexts** — 12 job `ci.yml` + kedua job CodeQL — `enforce_admins: false`,
+tanpa wajib PR/review, force-push dan penghapusan branch diblokir.
+
+**Audit pass 12:** N12-01/N12-02 tertutup dan F-13 terverifikasi
+(`docs/audit/pass-12/10-delta.md`).
+
+## 🧪 CI hijau: privacyPass deterministik, PIR WASM ter-pin, link-history tanpa R2 (2026-11-03)
+
+**`Unit Tests` — tes privacyPass gagal sesekali (1 dari 1136 di CI).** Mock
+issuer menandatangani blinded representative dengan pasangan kunci LAIN. RFC 9474
+menandatangani representative apa adanya (`rsasp1(sk, m)`), dan representative
+hasil blinding dijamin < modulus *issuer* — belum tentu < modulus kunci lain.
+Bila lebih besar, pustaka melempar `signature representative out of range` dari
+DALAM mock; error itu lolos lewat `api()` (bukan jalur verifikasi klien) sehingga
+tes merah dengan pesan pustaka. Mock kini merusak satu byte tanda tangan jujur:
+sama-sama tidak bisa diverifikasi oleh klien, tanpa bergantung keberuntungan
+modulus.
+
+**`WASM reproducible` — `pir-client.wasm` tidak reprodusibel.**
+`packages/pir-wasm` satu-satunya paket tanpa `rust-toolchain.toml`, jadi
+`build.sh` memakai toolchain AKTIF milik pemanggil. `stable` dan `1.95.0`
+sama-sama melaporkan `rustc 1.95.0` tetapi membawa build std wasm32 yang berbeda
+(hash `b7379440…` vs `f3a3bd7d…`). Pin ditambahkan (paritas dengan `spqr-wasm` dan
+`keytrans-wasm-v2`), artefak + manifest di-build ulang dari resep ter-pin, dan
+`--verify` hijau dari root kanonik.
+
+**`E2E` — deviceLinking gagal karena R2 tidak dikonfigurasi.** Presign tanpa
+kredensial R2 menghasilkan 500 dari SDK ("No value provided for input HTTP
+label: Bucket"), yang terbaca seperti bug klien. `POST /history/presign` kini
+menjawab **503 `LINK_HISTORY_UNAVAILABLE`**, `GET /history/limits` menyertakan
+`available`, klien berhenti **sebelum** mengekspor arsip, dan spec menandai
+asersi arsip sebagai dilewati (dengan alasan tertulis) sementara alur tautan QR
+tetap diuji penuh.
+
+## 🛡️ Sidecar WebTransport: single-active-device atomik (2026-11-03)
+
+**Race lama (dicatat pass 4, tidak pernah ditutup).** `main.rs` mencari sesi
+user dengan `sessions.iter()`, menghapusnya, lalu meng-insert sesi baru sebagai
+tiga langkah terpisah. Dua AUTH yang selesai bersamaan bisa sama-sama tidak
+melihat sesi lawan (belum di-insert) sehingga keduanya lolos — kebijakan
+satu-perangkat-aktif bolong justru pada jalur tercepat.
+
+**Perbaikan.** Registry sesi pindah ke `src/sessions.rs` (`SessionTable`) dengan
+lock per shard user: find+remove+insert menjadi satu blok kritis, jadi AUTH user
+yang sama selalu serial dan sesi terakhir adalah satu-satunya yang hidup.
+Fan-out downstream memakai `matching_prefix()` yang menyalin koneksi lebih dulu,
+sehingga tidak ada kunci DashMap yang dipegang saat mengirim frame. Uji konkuren
+16 AUTH × 50 putaran menuntut tepat satu sesi tersisa dan tepat 15 pemutusan.
+
+## 🛠️ Audit pass 12: validator trust proxy fail-closed, perbaikan 426 di-commit (2026-11-03)
+
+**N12-01 — `OHTTP_TRUSTED_PROXIES` menerima CIDR tanpa prefix sebagai `/0`.**
+`Number('')` adalah `0`, jadi entri seperti `10.0.0.0/` atau `fd00::/` dinyatakan
+sah dan berlaku sebagai "percaya semua hop": `CF-Connecting-IP` kiriman klien
+dipakai untuk alamat apa pun, persis lubang yang ditutup N10-02/N10-03. Validator
+kini menolak prefix kosong dan garis miring ganda (`10.0.0.0/8/8` dulu dieksekusi
+sebagai `/8`), dan `proxyMatches` fail-closed untuk entri yang tidak bisa
+diparse. `/0` hanya berlaku bila ditulis eksplisit (`0.0.0.0/0`). Dua asersi baru
+mengunci alasan penolakan dan alamat soket yang dipakai.
+
+**N12-02 — perbaikan `clientVersion` hanya di working tree.** `getCsrfToken`
+sekarang melaporkan body `426` ke `clientVersionGate` sebelum melempar, sehingga
+klien terlalu tua melihat layar pembaruan meski permintaan token CSRF sendiri
+yang ditolak; tesnya membedakan jalur CSRF dari mutasi. Kedua berkas di-commit
+sehingga CI pada commit (bukan hanya mesin maintainer) hijau.
+
+## 🛠️ Audit pass 11: arsip braid aman-default, CIDR IPv6, pesan relay, timeout oracle (2026-11-02)
+
+**N11-01/N11-02 — suite web merah dan default `advanced` yang salah arah.**
+Dua tes arsip era braid menulis state tanpa penanda, sehingga `expected [] to
+have a length of 1`. Akarnya lebih dalam: default `advanced: false` membuat
+pemanggil baru yang lupa menandai diam-diam membuang era lama (kelas bug N5-01).
+Sekarang state dianggap sudah maju **kecuali** pemanggil menulis
+`advanced: false` eksplisit; hanya state awal era tanpa lalu lintas yang boleh
+memakainya, dan tidak ada penulis produksi seperti itu. Fixture arsip kembali
+hijau tanpa melonggarkan asersi, ditambah kasus era tanpa lalu lintas.
+
+**N11-03 — `docs/33` mengklaim hasil tes yang merah.** Angka dikoreksi: era
+tanpa lalu lintas menghasilkan nol slot (bukan satu); era yang maju menggeser ke
+`[baru, lama]`. Paragraf merujuk berkas dan kasus tes, bukan ringkasan bebas.
+
+**N11-04 — peringatan start relay bertentangan dengan selfhost.** Relay mencetak
+saran menyetel `OHTTP_TRUSTED_PROXIES` setiap boot, padahal profil selfhost wajib
+mengosongkannya. Sekarang selfhost mendapat satu baris informasi bahwa nilai
+kosong benar; saran CIDR hanya untuk target gateway non-loopback (Docker).
+
+**N11-05 — CIDR IPv6 diabaikan diam-diam.** `proxyMatches` hanya mendukung
+IPv4, jadi `OHTTP_TRUSTED_PROXIES=fd00::/8` membuat hop nginx tidak dipercaya dan
+semua klien berbagi satu tag tanpa error. CIDR IPv6 kini didukung (perbandingan
+128-bit), dan entri yang tidak bisa diparse dilaporkan per entri saat start
+relay. `.env.example`, unit env example, dan `docs/10` §10.18 diperbarui;
+`verify-boot.sh` §9 tetap menolak CIDR apa pun untuk selfhost.
+
+**N11-06 — interop oracle timeout saat cache Go dingin.** Dua tes
+`x3dhOracleInterop` memakai batas 180 dtk (dulu bawaan 60 dtk) supaya `go run .`
+yang mengompilasi oracle tidak membuat suite tampak merah di mesin bersih.
+
+## 🛠️ Audit pass 10: limiter OHTTP per klien, trust header relay, penanda era braid, urutan monitor KT (2026-11-02)
+
+**N10-02 — dua limiter OHTTP lain masih satu bucket.** `ohttpLimiter` gateway
+dan limiter relay sama-sama memakai `req.ip` (loopback untuk gateway, alamat
+nginx untuk relay), jadi 140 klien berbeda tetap kena 429 di request #121.
+Keduanya kini memakai identitas klien: gateway `clientRateLimitTag(req)`, relay
+`HMAC(OHTTP_INTERNAL_TOKEN, alamat klien)` — key di memori relay pun bukan
+alamat mentah. Batas 120/menit dan kontrol per klien tetap berlaku.
+
+**N10-03 — `CF-Connecting-IP` dipercaya tanpa syarat.** Relay sekarang memakai
+alamat **soket** lebih dulu dan hanya membaca header itu bila hop langsung ada di
+`OHTTP_TRUSTED_PROXIES` (CSV alamat/CIDR IPv4; default loopback). nginx menimpa
+header dengan `$remote_addr` hasil `real_ip` di blok relay dan `/api`, sehingga
+klien yang menjangkau origin langsung tidak bisa memilih tag/bucket sendiri.
+Deployment nginx-di-container wajib mengisi `OHTTP_TRUSTED_PROXIES`.
+
+**N10-04 — arsip era braid hanya mengenali state byte-identik.** State awal sesi
+X3DH baru selalu berbeda, jadi dua era tanpa pesan tetap memakan dua slot.
+Baris state kini menyimpan penanda `advanced` yang hanya disetel langkah ratchet
+nyata; rotasi mengarsipkan **hanya** era yang pernah maju. Baris lama tanpa
+penanda dianggap pernah maju.
+
+**N10-01 — monitor KT melempar sebelum tahu ada pekerjaan.** Regresi dari pin
+fail-closed N9-02: `monitorKeyTransparency` meresolusi config sebelum memeriksa
+daun state, sehingga tick saat akun belum terhidrasi selalu error. Sekarang
+perencanaan (`planKtMonitor`) dijalankan lebih dulu dan tanpa state siap
+hasilnya `{checked:0}` tanpa membaca config; fail-closed pada jalur verifikasi
+tidak berubah.
+
+**N10-05 — suite server merah.** Tes wiring `ipKey` kembali menegaskan nama
+keyGenerator yang benar (`clientRateLimitTag`), tanpa melonggarkan asersi lain.
+
+## 🚦 Tiga penutupan audit pass 9: bucket OHTTP anonim, pin KT fail-closed, arsip braid (2026-11-02)
+
+**N9-01 — bukti KT anonim berbagi satu bucket.** Jalur `POST /api/keys/kt/search`
+sengaja tanpa token (N7-01), jadi limiter jatuh ke `req.ip` = `127.0.0.1` untuk
+semua pengguna OHTTP: dua klien wajar sudah cukup menghabiskan 240/menit, dan
+efeknya (backoff + `unavailable`) menghentikan verifikasi untuk semua orang.
+Sekarang relay — satu-satunya pihak yang melihat alamat klien — mengirim
+`HMAC(OHTTP_INTERNAL_TOKEN, alamat)` di header internal; gateway membuang klaim
+header itu dari dalam amplop dan memasang nilai relay; API memakai tag itu setelah
+di-pepper lagi. Tag tanpa token internal yang sah tidak dipercaya, jadi tidak bisa
+dikarang. Statusnya terekspos sebagai `nyx_ohttp_client_tag_total{status}`
+(`tagged`/`untagged`/`untrusted`/`no-token`), supaya operasi tanpa
+`OHTTP_INTERNAL_TOKEN` terlihat di Prometheus — bukan hanya sebagai `unavailable`
++ backoff di klien. Alert `NyxOhttpClientTagMissing` menyala bila lebih dari
+separuh request gateway tidak bertag selama 10 menit, dengan kasus firing dan
+dua kasus tidak-menyala di drill `ops/prometheus/tests.yml`. `OHTTP_INTERNAL_TOKEN` kini juga berarti pada
+`OHTTP_TOKEN_MODE=on` (harus sama di API dan relay).
+
+**N9-02 — pin KT "tidak ada" vs "akun tidak diketahui".** `resolveKtConfigPin`
+membedakan `pin`/`empty`/`unknown-account`/`unreadable`; dua yang terakhir
+**fail-closed** (`unavailable`), bukan diterima sebagai TOFU. Jendela
+logout/hidrasi tidak lagi mematikan TOFU untuk satu sesi verifikasi.
+
+**N9-03 — churn arsip era braid.** Rotasi sesi yang tidak menghasilkan pesan v2
+tidak lagi menggeser arsip tiga slot; era yang masih dibutuhkan tidak terbuang
+oleh handshake ulang, sehingga "tiga era terakhir" benar-benar tiga era.
+
+Dokumentasi: `docs/10` §10.18, `docs/33` §33.8, `docs/34` §34.7, ringkasan
+perbaikan di `docs/audit/pass-9/40-fixes.md`.
+
+## 🕵️ Bukti Key Transparency diambil tanpa akun (2026-11-02, audit N7-01)
+
+Pass 7 memindahkan hash kontak dari URL ke body, tetapi server tetap menerima
+pasangan "akun X meminta hash Y" karena route masih membaca sesi cookie. Selama
+itu terjadi, rekonstruksi social graph oleh server tidak bisa diputus dengan
+perubahan transport apa pun.
+
+Sekarang `POST /api/keys/kt/search` **tidak lagi memerlukan autentikasi**, dan
+klien mengambil bukti dengan `credentials: 'omit'` (tanpa cookie, tanpa header
+Authorization, tanpa CSRF) — juga tanpa token di dalam amplop OHTTP
+(`withToken: false`). Bukti log KT adalah data publik; yang dilindungi adalah
+ketertarikan akun terhadap hash tertentu, dan server tidak lagi menerima akun
+itu sama sekali. Route monitor/config/head/distinguished tetap terautentikasi
+karena bukan pencarian kontak, dan GET search lama (hash di URL) tetap untuk
+klien lama.
+
+Penyalahgunaan dibatasi limiter khusus `ktProofLimiter` (240/menit per IP, store
+`rl:ktproof:` terpisah dari bucket group sync/PIR) plus limiter relay. Batas yang
+tetap ada dan didokumentasikan di `docs/34` §34.7: tanpa OHTTP server masih
+melihat IP peminta, dan request anonim lewat OHTTP berbagi satu bucket loopback.
+
+## 🔁 Arsip era braid SPQR: pesan v2 lintas sesi tetap bisa dibuka (2026-11-02, audit N5-01)
+
+Jalur v1 menyelamatkan pesan dari era sesi lama lewat tiga slot arsip; jalur v2
+tidak punya padanannya. `spqrState` hanya menyimpan satu baris per percakapan
+dan baris itu dihapus saat sesi X3DH baru lahir, sehingga pesan v2 yang tertunda
+(peer offline, transport putus) lalu melewati rotasi sesi menjadi tidak terbaca
+permanen.
+
+Sekarang rotasi sesi **mengarsipkan** state braid lebih dulu
+(`rotateSpqrStateForNewSession`): baris aktif digeser ke `#era_0..2` (FIFO tiga
+slot, ter-seal `ENC1:`), baru dihapus. Pembaca mencoba era sekarang dulu, lalu
+setiap era arsip; arsip tidak pernah dipromosikan dan tidak disimpan maju supaya
+braid era sekarang tidak terputar balik. Dua titik sesi baru (pengirim dan
+penerima) memakai rotate, bukan delete. Dikunci `spqrState.test.ts` dan
+`spqrEraArchive.test.ts` dengan modul WASM sungguhan (dua era X3DH, key harus
+cocok, baris aktif tidak berubah). Detail: `docs/33` §33.8.
+
+## 🔑 State KT pulih setelah KDF-nya melempar; OHTTP punya bucket per akun; pin TOFU bertahan lintas sesi (2026-11-02, audit pass 8)
+
+Pass 8 memverifikasi fix pass 7 dengan **menjalankan** panggilan library, bukan
+membaca tipe — dan menemukan bahwa perbaikan keamanan itu justru mematikan
+Key Transparency di klien:
+
+- **N8-01 (High) — `deriveKtSearchIndexKey` selalu melempar.** Ia memanggil
+  `crypto_kdf_derive_from_key` dengan bentuk API C (menulis ke buffer keluaran),
+  padahal binding JS mengembalikan `Uint8Array` dan argumen pertamanya panjang →
+  `TypeError: subkey_len must be an unsigned integer`. Akibatnya `saveKtState`
+  reject sebelum `put`: tidak ada anchor monitoring, tidak ada deteksi rotasi,
+  dan setiap verifikasi kontak menjadi `unavailable`. Tes hijau karena fungsi
+  yang rusak di-mock. Kini memakai bentuk JS yang benar; tes baru memanggil
+  libsodium **asli**.
+- **N8-02 (Medium) — semua trafik OHTTP berbagi satu bucket 300/15 menit.**
+  Gateway meneruskan lewat loopback sehingga `req.ip` = `127.0.0.1` untuk semua
+  pengguna; satu klien yang memverifikasi banyak kontak bisa memblokir pengguna
+  OHTTP lain (termasuk group sync). Limiter umum kini memakai subjek token OHTTP
+  yang sudah bertanda tangan → satu akun satu bucket, sementara trafik non-OHTTP
+  tetap per IP dan tag tetap HMAC pepper (tanpa userId/IP mentah di Redis).
+- **N8-03 (Low) — logout menghapus pin konfigurasi KT.** Perlindungan TOFU turun
+  jadi per-sesi: server bisa menukar `signatureKey` di sela logout→login tanpa
+  terdeteksi. Pin kini ber-PK per akun dan **tidak** dihapus saat logout, jadi
+  isolasi lintas-akun tetap terjaga tanpa kehilangan kontinuitas.
+- **N8-04 (Low) — fallback OHTTP mengirim ulang semua non-2xx.** `404
+  KT_NOT_FOUND` (jawaban sah) diperlakukan sebagai kegagalan, sehingga hash
+  kontak yang belum terdaftar tetap sampai ke server lewat cookie. Fallback kini
+  hanya untuk gangguan transport/5xx; 4xx fail-closed + log struktur
+  `kt.ohttp-degraded`.
+
+N7-01 tetap **PARTIAL**: hash kontak tidak lagi di URL/log, tetapi server masih
+melihat akun→hash di body. Ringkasan: `docs/audit/pass-8/40-fixes.md`.
+
+## 🔐 Logout perangkat kini memutus socket-nya; id guest Burner dilebarkan (2026-11-01, audit pass 6)
+
+Pass 6 membaca penuh `server/src/routes/auth.ts` — satu-satunya berkas auth yang
+lima pass sebelumnya hanya di-grep — dan tidak menemukan celah Critical/High:
+rotasi refresh + klasifikasi replay, recovery ML-DSA dengan nonce sekali pakai,
+linking QR, WebAuthn UV-wajib, dan identitas PoW semuanya ter-gate benar. Dua
+cacat Low diperbaiki:
+
+- **`POST /api/auth/logout` tidak memutus socket.** Ia mencabut refresh family,
+tetapi tidak mengirim `force_logout`/`KICK` seperti `logout-all` dan
+`DELETE /api/sessions/:jti`, sementara relay tidak memeriksa blacklist JTI per
+frame — perangkat yang "logout" tetap menerima pesan sampai socket-nya sendiri
+putus. Kini kick dikirim **device-scoped**; planner
+(`utils/logoutKick.ts`) mengembalikan `null` bila `deviceId` tidak diketahui,
+sehingga id yang hilang tidak pernah berubah menjadi "logout semua perangkat".
+- **Id guest Burner hanya 32 bit** (`randomUUID().substring(0, 8)`). Id itu `sub`
+JWT sekaligus kunci routing relay, dan guest tidak punya baris User/Device
+(tidak ada uniqueness check) — pada ~10.000 guest peluang tabrakan ~1,2%, dan
+dua guest ber-id sama berbagi kanal relay. Sekarang UUID penuh; isi pesan tetap
+E2EE, jadi yang ditutup adalah kebocoran metadata/alamat.
+
+Dicatat sebagai Info, bukan diperbaiki: `isVerified` dinaikkan oleh PoW tanpa
+memandang tier attestation, jadi ia **bukan** bukti perangkat — komentar di
+`/pow/verify` kini menyatakan itu. Regresi dikunci oleh
+`tests/logoutKick.test.ts` dan `tests/guestIdEntropy.test.ts`.
+
+## 🔭 Jalur ratchet v2 diaudit: dokumen dikoreksi, skip senyap ditutup (2026-11-01, audit pass 5)
+
+Pass 5 membaca jalur braid SPQR yang tiga pass sebelumnya lewati. Kriptonya tidak
+ditemukan cacat: transkrip v2 tetap X3DH yang sama, deklarasi versi hanya dibaca
+dari payload yang lolos AEAD (`ackV`), header v2 tidak pernah dibaca sebagai v1,
+parser header fail-closed, dan kill switch hanya menghentikan kirim/iklan tanpa
+pernah menghentikan baca. Yang diperbaiki adalah hal-hal yang menyesatkan
+reviewer dan CI:
+
+- `spqrRatchet.ts` masih menyatakan modul itu "belum dipakai jalur pesan
+  produksi" padahal worker memakainya di setiap pesan v2 — dokumennya dikoreksi
+  beserta tiga gerbang yang mengelilinginya.
+- Suite kripto v2 dulu memakai `describe.skip` saat `packages/spqr-wasm/dist/spqr.wasm`
+  tidak ada, sehingga CI bisa **hijau tanpa menjalankan satu pun tes handshake
+  v2**. Sekarang ketiadaan artefak menjadi tes yang **gagal** (pola yang sama
+  dengan `transport.spec` sebelum pass 1).
+- Komentar perbaikan batas 32 KB di sidecar tidak lagi menjanjikan penolakan
+  yang tidak ada: parser hanya membaca frame pertama, byte sisa diabaikan.
+
+Satu keputusan yang dicatat, bukan ditambal: jalur **v2 tidak punya arsip era
+sesi** seperti v1 (`previous_session_states`). Pesan v2 yang tertunda melewati
+rotasi sesi karena itu gagal dibuka; pesan v1 pada posisi yang sama tetap
+diselamatkan arsip. Perilaku ini sekarang eksplisit di `docs/33` §33.8 — memori
+braid per-`sessionId` akan menjadi perubahan protokol tersendiri (butuh tes dua
+era + E2E), bukan patch.
+
+## 🧱 Anchor bukti peserta divalidasi, sidecar berhenti membaca tanpa batas (2026-11-01, audit pass 4)
+
+Pass 3 menutup pencetakan keanggotaan lewat endpoint ratchet, lalu memperkenalkan
+anchor baru: baris `SessionKey.issuedByServer` yang hanya ditulis server saat
+percakapan dibuat. Pass 4 menemukan jalur penulis anchor itu —
+`POST /api/conversations` — menerima `deviceId` apa pun: tanpa cek pemilik,
+tanpa cap, tanpa validasi base64. Akibatnya siapa pun bisa mendaftarkan
+perangkat nyata milik orang lain ke percakapan yang ia buat tanpa notifikasi, dan
+korban menjadi "peserta terbukti" (muncul di presence, bisa dikirimi `typing`,
+boleh ditulisi baris ratchet). `authorizeInitialSessionKeys` kini menegakkan
+aturan guard ratchet di jalur itu: cap 500, base64 ≤8 KB, dan pemilik setiap
+perangkat harus peserta percakapan.
+
+`buildInitialSessionForConversation` juga ikut menyegel untuk perangkat pembuat
+(`includeSelf`), sehingga pembuat 1:1 punya bukti peserta sendiri — sebelumnya
+hanya penerima yang punya, dan ratchet milik pembuat akan ditolak 403 oleh gate
+buatannya sendiri. Di sidecar, jalur uni berhenti membaca di batas
+`header + 32 KB + 1` dan mem-parse dengan batas yang sama (dulu membaca seluruh
+stream tanpa cap dan meneruskan payload besar ke `nyx:upstream:*`).
+
+## 🔒 Tulisan kunci sesi, akuntansi OTPK, dan gerbang identitas peer (2026-11-01, audit pass 3)
+
+Pass 3 menemukan bahwa `POST /api/session-keys/:conversationId/ratchet` hanya
+memeriksa percakapan **ada**, lalu menulis baris `SessionKey` untuk `deviceId`
+apa pun. Karena pass 2 memakai `SessionKey` sebagai bukti keanggotaan, siapa pun
+yang punya akun bisa mencetak "saya peserta" lalu memakai gate itu untuk
+menghapus view-once 1:1 orang lain, mengirim `typing` ke id sembarang, dan
+menyubscribe presence korban. Endpoint kini **fail-closed**
+(`utils/sessionKeyRelayGuard.ts`): payload divalidasi dan dibatasi 500 kunci,
+pemanggil harus peserta terbukti lewat bukti yang tidak ia tulis sendiri
+(keanggotaan bertoken atau receipt bertag — bukan `SessionKey`), dan setiap
+`deviceId` harus perangkat nyata yang **sudah terdaftar** di percakapan itu, dan
+perangkat orang lain hanya boleh bila pemiliknya peserta terbukti. Sebagai
+lapisan kedua, pesan view-once yang punya daftar penerima hanya bisa dibuka oleh
+orang di daftar itu.
+
+Gate itu tidak mematikan fiturnya: `SessionKey.issuedByServer` menandai baris
+yang ditulis server saat percakapan dibuat, dan itulah bukti peserta untuk
+kontak pertama yang tidak punya roster. `startConversation` kembali mengirim
+`initialSession` (kunci sesi awal disegel ke perangkat peer, best-effort), dan
+`ensureAndRatchetSession` hidup lagi memakai penyegel yang sama — menyimpan kunci
+lokal hanya setelah server menerima, serta meneruskan `status` 403 agar
+"belum punya bukti peserta" tidak tertukar dengan bug lokal. Dua bug laten jalur
+pembuatan ikut diperbaiki: kolom `initiatorCiphertext` yang tidak ada di schema,
+dan kewajiban ciphertext X3DH pada distribusi kunci sesi biasa.
+
+Di klien: jalur regenerate OTPK kini benar-benar menghapus prekey lokal setelah
+derivasi (dulu `return` sebelum `deleteOneTimePreKey`), derivasi `keyId` OTPK
+memakai little-endian eksplisit (tidak lagi bergantung endianness host), dan
+pembentukan sesi **berhenti** saat kunci identitas peer berubah atau bertentangan
+dengan log KT — sebelumnya hanya `console.warn` lalu pesan tetap dienkripsi ke
+kunci yang belum diterima user. Verdict `unavailable` (log mati) tetap tidak
+memblokir, sesuai audit F-09.
+
+## ⏱️ View-once grup dihapus begitu semua penerima membuka (2026-11-01)
+
+`Message` tidak menyimpan daftar penerima, sehingga "semua sudah membuka" tidak
+bisa dihitung dan baris view-once di grup bertahan sampai `expiresAt` (14 hari)
+walau seluruh anggotanya sudah membukanya. Tabel aditif
+`MessageViewOnceRecipient` (kolom `recipientTag` = `conversationScopedTag`, HMAC
+ber-pepper per percakapan — bukan userId) kini diisi saat kirim, hanya dari id
+yang lolos bukti peserta server dan tanpa pengirim. `message:view_once_opened`
+menghapus baris pesan pada pembukaan **terakhir**, sehingga ciphertext tidak lagi
+menganggur setelah dikonsumsi; 1:1 tidak berubah. Daftar penerima bukan
+pengetahuan baru bagi server (ia sudah memakainya untuk relay) dan tidak bisa
+dibalik jadi akun tanpa pepper, jadi model ancaman dump (`docs/28`) hanya
+bertambah retensi metadata, bukan identitas. Penerima yang tidak pernah membuka
+tidak menambah mekanisme tunggu; batas akhirnya tetap `expiresAt`.
+
+## 🔐 Kunci perangkat baru diautentikasi sebelum arsip riwayat diseal (2026-10-30)
+
+Arsip riwayat diseal ke X-Wing public key perangkat baru yang diterima
+perangkat lama **lewat server** (`auth:linking_request`), sedangkan QR hanya
+membawa token milik perangkat lama. Server yang jahat/terkompromi karena itu
+bisa menukar kunci itu dengan miliknya, menerima kunci arsip `K` yang diseal ke
+kunci palsu, lalu membaca seluruh riwayat — tanpa tanda apa pun di perangkat
+lama (impor di perangkat baru memang akan gagal, tetapi data sudah bocor).
+
+Pasangan perangkat sekarang menampilkan **kode verifikasi 6 digit** yang
+diturunkan dari `pqPublicKey` perangkat baru (`web/src/lib/deviceLinkSas.ts`):
+perangkat baru menghitungnya dari kunci yang baru ia buat, perangkat lama dari
+kunci yang dikirim server. Pengguna wajib mencocokkan keduanya; tombol setuju
+di perangkat lama **terkunci** sampai kode dikonfirmasi, dan
+`sendHistoryArchive` menghitung ulang kode dari kunci yang akan dipakai menyegel
+`K` — beda kode berarti berhenti sebelum `presign`/`ready` (tidak ada unggahan,
+tidak ada `abort` yang perlu dikirim). Server yang menukar kunci menghasilkan
+dua kode berbeda; peluang kode kebetulan cocok 1/10^6 per percobaan.
+
+QR tidak bisa membawa hash kunci perangkat baru (QR ditampilkan perangkat lama,
+kunci perangkat baru dibuat setelah token dipindai), jadi dipilih perbandingan
+kode — pola SSP/safety number. Residual yang didokumentasikan di `docs/40`
+§40.10.1: SAS mengikat kunci penerima arsip, bukan jalur password `/login`.
+
+## 🩹 Riwayat chat tidak lagi lenyap sehari setelah dibaca (2026-10-30)
+
+Pada 1:1, `expiresAt` di wire **selalu** terisi: server memakainya untuk retensi
+store-and-forward 14 hari, lalu mempersempitnya ke `now + 24 jam` begitu pesan
+dibaca. Pembaca Shadow Vault memperlakukan deadline itu sebagai expiry UI, jadi
+`getMessagesByConversation` menyaring — dan pembersih latarnya `bulkDelete` —
+setiap pesan biasa lebih dari sehari setelah dibaca: pesan biasa (tanpa
+disappearing message) hilang dari UI **dan** dari IndexedDB, permanen.
+
+Jalur kedua yang menghapus bubble: `messageSweeper` menghapus salinan server
+yang kedaluwarsa (termasuk yang deadline-nya baru dipersempit ke +24 jam setelah
+READ) lalu menyiarkan `message:deleted_batch`; handler klien mem-blank baris
+lokal untuk **setiap** id di batch itu, jadi bubble-nya hilang dari UI meski
+salinan lokal utuh.
+
+Sekarang satu-satunya sumber kebenaran "pesan ini menghapus diri" adalah
+penanda `autoDelete` (ikut AEAD, hanya ditulis bila pengirim memilih timer):
+`isExpiredMessageRow` menyaring/menghapus hanya bila `autoDelete` benar dan
+deadline-nya lewat, `upsertMessages` tidak lagi menyimpan deadline wire untuk
+pesan biasa, dan `message:deleted_batch` hanya menandai id yang memang pesan
+timer. Baris lama yang terlanjur menyimpan deadline server
+diabaikan oleh saringan (tidak perlu migrasi). Arsip riwayat perangkat hasil
+link memakai predikat yang sama, jadi pesan biasa yang sudah dibaca >24 jam
+tetap ikut pindah.
+
+Audit jalur lain (grup, story, lampiran): tidak ada jalur keempat. Galeri media
+dan preview daftar chat membaca lewat pembaca vault yang sama (jadi ikut
+terbaiki); `fileRetention` R2 hanya dikirim untuk pesan timer dan view-once
+(lampiran biasa tidak pernah punya delete-at); story memakai `expiresAt`
+sendiri 24 jam sebagai fiturnya dan tidak pernah menghapus isi lokal. Aturan
+lengkapnya kini tercatat sebagai tabel di `docs/15` §15.5.1, dan dua test baru
+mengunci perilaku grup + lampiran.
+
+Data yang sudah terhapus build lama tidak bisa dipulihkan di perangkat itu;
+server memang sudah membuang salinannya setelah READ.
+
+## 📊 Arsip riwayat link: metrik, alarm, cache partisipan grup, dan angka terukur (2026-10-30)
+
+Operasi arsip riwayat sekarang terukur: `nyx_link_history_ops_total{op,result}`
+(`presign|ready|abort|download|consume` × `ok|denied|missing|error`, tanpa label
+identitas). `denied` = penolakan kebijakan 4xx, `missing` = TTL habis / sudah
+dikonsumsi, `error` = kegagalan infrastruktur. Alarm
+`NyxLinkHistoryConsumeFailing` menyala bila `consume` gagal (arsip sudah diimpor
+tetapi objeknya tertinggal di R2 — klien hanya mencetak `console.warn`), lengkap
+dengan kasus drill menyala **dan** tidak menyala.
+
+Arsip juga membawa `groupCachedParticipants` (id anggota grup, bukan rahasia):
+tanpa itu grup hasil impor tampil tanpa daftar anggota sampai server mengirim
+ulang cache-nya.
+
+Benchmark 10k pesan (fixture identik dengan `backupBench`, harness
+`linkHistoryBench`): arsip **3,46 MB / 17 frame**, ekspor 932 ms, impor 240 ms,
+puncak heap 106 MB. Penyegelan ulang + tulis IndexedDB tidak termasuk (penulis
+di-inject), jadi angka itu batas bawah.
+
+Paginasi `seq` setelah impor dikunci `olderPageCursor` + test yang memaginasi
+arsip nyata: halaman berikutnya menyambung tanpa duplikat dan tanpa lompatan.
+
+Suite E2E kini **memaksa** `VITE_API_URL=/api`: bila `web/.env` berisi URL API
+absolut (mis. produksi), seluruh suite sebelumnya menulis ke sana — registrasi
+akun uji dan pesan sungguhan — sementara spec mengira sedang menguji stack lokal.
+
+## 🔗 Arsip riwayat untuk perangkat hasil link — kontak, percakapan, dan pesan (2026-10-29)
+
+Link perangkat (`/link`) membuat **identitas baru**, jadi menyalin baris Dexie
+apa adanya menghasilkan riwayat kosong: `content`, `senderName`, `fileMeta`
+disegel kunci vault = turunan identity private key yang **lama**. Sekarang
+perangkat lama mengekspor riwayat sebagai **objek domain terdekripsi**, menyegel
+kunci arsip acak 32 byte ke X-Wing public key perangkat baru (`pq_box_seal_v2`,
+envelope `NYS2`), lalu mengunggahnya ke R2; server hanya menyimpan pointer
+(`size`, `digest`, `sealedKey`) dan tidak pernah melihat isi maupun kuncinya.
+
+Kontainer tetap `NYXB` v1 (tanpa perubahan format/versi/AAD), tetapi setiap
+chunk membawa penanda `k:"history"` **di dalam plaintext AEAD** — jadi arsip ini
+ditolak oleh "Restore from .nyxbak" dan sebaliknya. Kunci objek
+`link-history/<HMAC(deviceId)>.nyxhist`; state di Redis (`link_history:<deviceId>`)
+ber-TTL 30 menit dan dihapus setelah impor (`consume`), dengan lifecycle rule
+sebagai jaring.
+
+Ekspor memakai pembaca yang sudah ada (`getAllContacts`,
+`shadowVault.getAllConversations`, dan `decodeMessageRecord` yang diekstrak dari
+`parseRecordsToMessages`); impor memakai penulis yang sudah ada
+(`saveContactRecord`, `saveConversation`, `upsertMessages` dalam batch 250)
+sehingga data disegel ulang dengan identitas baru. Yang tidak ikut (sengaja):
+pesan kedaluwarsa, view-once, `waiting_for_key`, centang baca, dan seluruh state
+kripto (ratchet/sender-key/prekey) yang terikat identitas lama. `seq`
+dipertahankan supaya "muat pesan lama" di perangkat baru tetap punya kursor.
+
+Melengkapi temuan §40.2: setelah impor, `pushContactBundle()` menulis blob kontak
+identitas baru ke server dan `loadConversations()` me-merge percakapan hasil
+impor ke sidebar. `consume` yang gagal (putus jaringan tepat setelah impor)
+tidak menggagalkan impor — objek yatim dihapus TTL/lifecycle.
+
+Sebelum mengunggah, perangkat lama membaca kuota efektifnya dari
+`GET /link/history/limits` (angka yang sama dengan penegakan presign; 25 MB
+untuk akun belum terverifikasi) dan membatalkan ekspor bila arsip melebihi
+kuota — dengan kedua angka di pesan, bukan 400 dari presign setelah puluhan MB
+terkirim. `abort` tetap dipanggil supaya perangkat baru tidak menunggu 60 detik.
+
+Impor yang gagal (jaringan, tab ditutup, kuota browser) tidak membuang arsip:
+penanda boolean `nyx_link_history_pending` di `kvStore` (tanpa timestamp: waktu
+presisi per kejadian adalah metadata aktivitas) membuat app start berikutnya
+mencoba **sekali** lagi (`autoRetryLinkedHistory`, hanya setelah vault terbuka dan
+dijaga single-flight agar file 10 MB tidak diunduh dua kali), dan Settings →
+Active Sessions menampilkan tombol "Ambil riwayat dari perangkat sebelumnya"
+selama arsipnya masih ada. Penanda dibersihkan pada sukses maupun saat server
+menjawab `{state:'none'}` (TTL habis) — tidak menggantung selamanya.
+
+Tes: `web/src/lib/__tests__/linkHistoryMessages.test.ts` (proyeksi pesan) +
+kasus batch/progres di `linkHistory.test.ts`, 13 kasus server di
+`server/tests/linkHistory.test.ts`, dan `web/e2e/deviceLinking.spec.ts` yang
+menyemai tiga pesan di perangkat lama lalu membacanya kembali dengan kunci vault
+identitas baru setelah link (dijalankan nyata, lulus). Desain lengkap:
+`docs/40`.
+
+## 🔗 Blob kontak server ditulis ulang setelah link — perangkat baru tidak lagi gagal memulihkan kontak (2026-10-29)
+
+`users.encryptedContactBundle` disegel kunci vault = BLAKE2b-256(identity
+private key) (`shadowVaultDb.getVaultKey`), bukan `masterSeed`. Link perangkat
+membuat **identitas baru**, jadi blob yang diunggah identitas lama tidak bisa
+dibuka lagi oleh perangkat hasil link: setiap `loadConversations` mencetak
+"Bundle korup/tak dikenal", restore kontak berhenti sebagai kegagalan senyap,
+dan ciphertext mati itu tetap tersimpan di server selamanya.
+
+Perbaikan dua bagian. **(1)** `pushContactBundle({ force })` boleh menulis
+daftar kontak **kosong** — perangkat hasil link memang belum punya kontak, dan
+daftar kosong itulah isi yang benar untuk identitas baru; push rutin tetap
+melewati daftar kosong supaya seeding tidak mem-PUT blob kosong berulang.
+`replaceContactBundleWithLocal()` (nama yang menyatakan sebabnya) dipanggil
+`LinkDevicePage.finishLink` setelah `login()` dan **sebelum** navigasi ke
+`/chat`, jadi `loadConversations` di halaman berikutnya sudah membaca blob yang
+bisa dibuka. **(2)** `restoreContactsFromBundle` sengaja **tidak** menimpa blob
+saat dekripsi gagal: `decryptVaultText` mengembalikan `null` baik untuk "kunci
+identitas lain" maupun "vault terkunci / worker gagal", dan menulis daftar
+lokal yang belum terbaca bisa menghapus salinan server yang masih baik. Ia
+hanya memperingatkan dengan sebab yang benar; penggantinya tetap deterministik
+(link atau upsert kontak berikutnya).
+
+Yang belum kembali adalah **isi** kontak lama — itu tugas arsip riwayat
+(`docs/40`), yang mendarat di entri di atas.
+
+Tes: 4 kasus baru di `web/src/lib/__tests__/contactStore.test.ts` (push kosong
+tanpa `force` tidak mengirim; `replace` menulis bundle kosong yang valid;
+`replace` batal bila vault tidak bisa menyegel; blob identitas lain → restore
+gagal-open tanpa PUT) dan `web/e2e/deviceLinking.spec.ts` menyemai blob
+identitas lama sebelum link lalu memastikan `version` berubah (123 → hash
+klien) dan byte lama hilang — dijalankan nyata, lulus.
+
+## 🔗 Transfer vault via QR dihapus — link device jadi satu-satunya jalur perangkat baru (2026-10-29)
+
+Dua fitur di Settings terlihat setara padahal berbeda: **Transfer to New Device
+(QR)** memindahkan seluruh vault (20 tabel) ke perangkat baru, sedangkan **Link a
+Device** hanya membuat identitas perangkat baru tanpa riwayat. Transfer dihapus
+karena tiga hal yang tidak bisa dibela: (1) `MigrationReceivePage` mewajibkan
+perangkat baru **sudah login** — jadi ia bukan jalur untuk perangkat yang belum
+bisa masuk; (2) nol e2e/unit test untuk alurnya, dan setelah impor halaman itu
+menghapus `deviceId` tanpa pernah membuat ulang Device row, sehingga L1 relay
+menolak perangkat tersebut; (3) `migration:prepare` menyalakan `is_migrating`
+ber-TTL 15 menit yang mematikan cek satu-device untuk seluruh akun — jendela dua
+device yang mahal bila app pengirim crash sebelum `migration:cancel`.
+
+Yang dihapus: `MigrationSendPage`/`MigrationReceivePage`, rute
+`/settings/migrate-send` + `/migrate-receive`, tombol Settings, handler
+`migration:prepare|cancel|join|start|chunk|ack` beserta allowlist gateway WSS,
+kind room `migration`, dan gate `is_migrating` di `issueTokens` +
+`isActiveDeviceAllowed`/L1. Sisa Redis lama (`migration:room:*`,
+`is_migrating:*`, `migration_owner:*`) kedaluwarsa sendiri; tidak ada migrasi
+data.
+
+Pengganti: **(a)** modal recovery di `/login` kini menawarkan **Link a Device**
+(`/link`), dan halaman itu menerima tempelan URL/token saat tidak dipindai dari
+QR — sebelumnya entri ini hanya bisa dicapai dengan memindai; **(b)** riwayat
+tetap pindah lewat `.nyxbak` (berkas atau salinan R2) dengan recovery phrase,
+yang sudah mencakup 20/20 tabel. Tes server yang mengunci perilaku `migration:*`
+disesuaikan (`redisIdentity`, `roomMembership`, `gatewayParity`); suite web tidak
+pernah punya tes untuk alur ini.
+
+## 📱 `/bench/pq` juga mengukur jalur nyata: pipeline worker + IndexedDB (2026-10-29)
+
+Harness perangkat hanya mengukur primitif ML-DSA-65/X-Wing di thread utama, jadi
+angka p95-nya tidak menjawab pertanyaan yang sebenarnya saat dipakai di HP:
+berapa biaya satu pesan dan satu tulis IndexedDB. Halaman `/bench/pq` sekarang
+juga menjalankan `web/src/lib/devicePipelineBench.ts`: seal/open
+XChaCha20-Poly1305 lewat crypto worker yang sama dengan aplikasi (4 permintaan
+in-flight; payload 256 B dan 8152 B = plaintext setelah padding traffic-cover
+8 KB), lalu put/get/delete `messageKeys` dan update state ratchet 2 KB di
+database terpisah `nyx-device-bench` yang dihapus setelah pengukuran (`deleted`
+dilaporkan jujur, `null` bila browser tidak punya `indexedDB.databases()`).
+Tidak ada data akun yang dibaca; modul diimpor dinamis supaya build yang
+nonaktif tidak membuat crypto worker. Yang tetap TIDAK diukur ditulis di
+halaman: langkah ratchet/`kdfChain`, serialisasi header, dan RTT jaringan.
+
+## 🔐 Export/import brankas JSON (`.nyxvault`) dihapus (2026-10-29)
+
+Settings punya dua jalur cadangan yang terlihat setara: "Ekspor/Impor Brankas"
+(JSON `.nyxvault`) dan "Backup Terenkripsi (.nyxbak)". Yang pertama ternyata
+berbahaya: `exportDatabaseToJson` menulis **JSON terbaca** berisi seluruh key
+store, termasuk `sessionKeys.key` dan `groupKeys.key` yang disimpan mentah tanpa
+envelope `ENC1:` — mengklik tombol itu sama dengan memindahkan kunci sesi ke
+disk. Envelope `{encrypted, salt, data}` yang dibaca `importDatabaseFromJson`
+tidak pernah dibuat kode mana pun (grep `encrypted: true` = 0 hasil), jadi
+prompt password saat impor hanya berlaku untuk berkas lama. Jalur itu juga lebih
+sempit (16 tabel, tanpa `conversations`/`contacts`/`profileCache`/
+`groupCachedParticipants`), kehilangan `Date` menjadi string, tidak menjalankan
+`normalizeOrderIndex()` (pesan bisa tersimpan tapi tak pernah tampil), dan
+menghapus `identityKeys` — bukan hanya `deviceId`.
+
+Karena itu export **dan** import `.nyxvault` dihapus: dua fungsi di
+`web/src/lib/keychainDb.ts`, tombol di Settings, opsi "Import Vault File" di
+modal pemulihan `/login`, teks bantuan `ChatInfoModal`, serta salinan bantuan
+di situs marketing (4 bahasa). Penggantinya sudah ada dan mencakup 20/20 tabel:
+`.nyxbak` (kunci dari recovery phrase) — dan modal pemulihan di `/login` sekarang
+membuka jalur restore `.nyxbak` itu, sehingga perangkat baru tanpa perangkat lama
+tetap punya pintu masuk berkas. Konsekuensi yang diterima: berkas `.nyxvault`
+yang beredar tidak bisa dipulihkan lagi; formatnya tidak pernah menjadi cadangan
+yang aman.
+
 ## 🧯 Drill pemulihan log KT v2 menggantikan drill v1 (2026-10-29)
 
 Sejak drill v1 dihapus (2026-10-28), tidak ada satu pun uji otomatis yang
@@ -10,9 +680,11 @@ saat dibuat hanya membuktikan masa lalu, bukan pemulihan. Sekarang
 `scripts/kt-v2-restore-drill.sh` menjalankan 11 langkah dengan kode produksi
 sungguhan: menulis lewat `publishKeyTransparencyEntry`, menunggu snapshot
 terverifikasi, menghapus DB, memulihkan **hanya** dari arsip, memverifikasi bukti
-lewat `transparency.VerifySearch` (fungsi yang sama dengan `verify_search` di
-WASM klien, dengan anchor klien yang disimpan di berkas), lalu membuktikan log
-tumbuh tanpa memutus anchor pra-bencana. Empat kontrol negatif (root palsu, nilai
+lewat `transparency.VerifySearch` (implementasi Go independen; bukti yang sama —
+format proof v2, AAD, root — yang diperiksa verifier Rust→WASM klien, dengan
+anchor klien yang disimpan di berkas. Cross-check langsung terhadap WASM belum
+dijalankan, jadi kesepakatan byte-per-byte kedua implementasi belum dibuktikan),
+lalu membuktikan log tumbuh tanpa memutus anchor pra-bencana. Empat kontrol negatif (root palsu, nilai
 palsu, kunci log salah, arsip dirusak satu byte) menjaga agar "lulus" berarti
 sesuatu; skrip yang sengaja dirusak terbukti merah. Berjalan di CI (job
 `kt-recovery-v2`) tanpa layanan eksternal, dan mode `--bundle <file.tar.gz.age>`

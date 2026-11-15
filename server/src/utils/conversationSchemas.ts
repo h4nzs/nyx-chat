@@ -32,11 +32,20 @@ export const conversationSchema = z.object({
 // adalah possession token, bukan join userId (26.8.1 trigger #1 tertutup).
 export const deliveryTokenSchema = z.string().regex(DELIVERY_TOKEN_RE)
 
-/** Sesi awal 1:1 (X3DH) yang dikirim pembuat percakapan. */
+/**
+ * Sesi awal percakapan yang dikirim pembuat (distribusi kunci per perangkat).
+ *
+ * [AUDIT PASS 4 — N4-01] Bentuk di sini hanya lapisan pertama: `z.record` tanpa
+ * batas menerima puluhan ribu entri. Representasi/nilai (base64, ≤8 KB, dan
+ * **pemilik perangkat harus peserta**) divalidasi `authorizeInitialSessionKeys`
+ * di handler, karena butuh query `Device`. Cap entri di sini supaya body besar
+ * ditolak sebelum transaksi.
+ */
 export const initialSessionSchema = z.object({
-  sessionId: z.string(),
-  initialKeysPerDevice: z.record(z.string(), z.string()),
-  initiatorCiphertextsPerDevice: z.record(z.string(), z.string()),
+  sessionId: z.string().min(1).max(128),
+  initialKeysPerDevice: z.record(z.string().min(1).max(128), z.string().min(1).max(8192))
+    .refine((keys) => Object.keys(keys).length <= 500, { message: 'too many initial keys (max 500)' }),
+  initiatorCiphertextsPerDevice: z.record(z.string().min(1).max(128), z.string().min(1).max(8192)),
 })
 
 /**

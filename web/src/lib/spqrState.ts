@@ -61,6 +61,14 @@ export interface SpqrStateRecord {
   state: Uint8Array;
   /** ms; kapan state terakhir benar-benar ditulis. */
   updatedAt: number;
+  /**
+   * [audit N10-04] Apakah era ini pernah **maju** oleh langkah ratchet nyata
+   * (encrypt/decrypt), bukan hanya state awal sesi X3DH. Hanya era yang pernah
+   * maju yang layak diarsipkan: era tanpa lalu lintas v2 tidak memuat pesan
+   * yang perlu dibuka lagi, sehingga menggeser arsip karenanya memendekkan
+   * "tiga era terakhir" tanpa manfaat.
+   */
+  advanced: boolean;
 }
 
 export class SpqrStateError extends Error {
@@ -87,27 +95,67 @@ interface PendingWrite {
   sessionId: string;
   version: RatchetWireVersion;
   state: Uint8Array;
+  advanced: boolean;
   timer: ReturnType<typeof setTimeout> | null;
 }
 
 const pending = new Map<string, PendingWrite>();
 
-/** Tulis satu baris state (tanpa debounce). */
-async function writeState(entry: PendingWrite, now: number): Promise<void> {
-  if (entry.state.length === 0) throw new SpqrStateError('spqr: state kosong');
-  if (entry.state.length > SPQR_MAX_STATE_BYTES) {
+/** Tulis satu baris ter-seal pada kunci tertentu (tanpa debounce). */
+async function writeSealedRow(
+  key: string,
+  input: { version: RatchetWireVersion; state: Uint8Array; now: number; advanced: boolean },
+): Promise<void> {
+  if (input.state.length === 0) throw new SpqrStateError('spqr: state kosong');
+  if (input.state.length > SPQR_MAX_STATE_BYTES) {
     throw new SpqrStateError(
-      `spqr: state terlalu besar (${entry.state.length} > ${SPQR_MAX_STATE_BYTES} byte)`
+      `spqr: state terlalu besar (${input.state.length} > ${SPQR_MAX_STATE_BYTES} byte)`
     );
   }
   await db.kvStore.put({
-    key: stateKey(entry.sessionId),
+    key,
     value: await encryptValueAtRest(JSON.stringify({
-      v: entry.version,
-      s: base64FromBytes(entry.state),
-      t: now,
+      v: input.version,
+      s: base64FromBytes(input.state),
+      t: input.now,
+      a: input.advanced ? 1 : 0,
     })),
   });
+}
+
+/** Tulis baris state aktif sesi (tanpa debounce). */
+async function writeState(entry: PendingWrite, now: number): Promise<void> {
+  await writeSealedRow(stateKey(entry.sessionId), {
+    version: entry.version,
+    state: entry.state,
+    now,
+    advanced: entry.advanced,
+  });
+}
+
+/** Dekode nilai baris ter-seal; `undefined` = rusak (bukan "state kosong"). */
+function decodeStoredRow(
+  plain: string,
+  label: string,
+): { version: RatchetWireVersion; state: Uint8Array; updatedAt: number; advanced: boolean } | undefined {
+  try {
+    const parsed = JSON.parse(plain) as { v?: unknown; s?: unknown; t?: unknown; a?: unknown };
+    if (parsed.v !== 'v1' && parsed.v !== 'v2') throw new Error('versi state tidak dikenal');
+    if (typeof parsed.s !== 'string') throw new Error('state bukan base64');
+    const state = bytesFromBase64(parsed.s);
+    if (state.length === 0) throw new Error('state kosong');
+    return {
+      version: parsed.v,
+      state,
+      updatedAt: typeof parsed.t === 'number' ? parsed.t : 0,
+      // Baris lama (sebelum penanda ada) dianggap PERNAH maju: lebih baik
+      // menyimpan era yang mungkin berisi lalu lintas daripada membuangnya.
+      advanced: parsed.a === undefined ? true : parsed.a === 1,
+    };
+  } catch (error) {
+    console.error('[SPQR] State ratchet rusak:', label, error);
+    return undefined;
+  }
 }
 
 /**
@@ -121,6 +169,16 @@ export async function saveSpqrState(input: {
   state: Uint8Array;
   version: RatchetWireVersion;
   now?: number;
+  /**
+   * State ini sudah membawa lalu lintas ratchet (encrypt/decrypt)?
+   *
+   * [audit N11-02] Default `true` — konservatif: era diarsipkan, bukan dibuang.
+   * Set `false` HANYA untuk state awal era yang belum pernah membawa pesan;
+   * pemanggil baru yang lupa menandai tidak boleh diam-diam menghapus era lama
+   * (kelas bug N5-01). Tidak ada penulis produksi yang menyetel `false`: kedua
+   * jalur di `utils/crypto.ts` menandai `true`.
+   */
+  advanced?: boolean;
 }): Promise<void> {
   assertSessionId(input.sessionId);
   if (input.state.length === 0) throw new SpqrStateError('spqr: state kosong');
@@ -130,7 +188,6 @@ export async function saveSpqrState(input: {
     );
   }
 
-  const now = input.now ?? Date.now();
   const existing = pending.get(input.sessionId);
   if (existing?.timer) clearTimeout(existing.timer);
 
@@ -139,6 +196,10 @@ export async function saveSpqrState(input: {
     version: input.version,
     // Salin: pemanggil (langkah ratchet) boleh saja memakai ulang/memzero buffer.
     state: input.state.slice(),
+    // Menempel: satu langkah yang sudah maju tidak boleh "dibatalkan" oleh
+    // tulis berikutnya di era yang sama (mis. flush setelah decrypt). Hanya
+    // `advanced: false` eksplisit yang menandai era belum maju (N11-02).
+    advanced: input.advanced !== false || existing?.advanced === true,
     timer: null,
   };
   entry.timer = setTimeout(() => {
@@ -198,6 +259,7 @@ export async function loadSpqrState(sessionId: string): Promise<SpqrStateRecord 
       version: pendingEntry.version,
       state: pendingEntry.state.slice(),
       updatedAt: Date.now(),
+      advanced: pendingEntry.advanced,
     };
   }
 
@@ -210,31 +272,118 @@ export async function loadSpqrState(sessionId: string): Promise<SpqrStateRecord 
     return undefined;
   }
 
-  try {
-    const parsed = JSON.parse(plain) as { v?: unknown; s?: unknown; t?: unknown };
-    if (parsed.v !== 'v1' && parsed.v !== 'v2') throw new Error('versi state tidak dikenal');
-    if (typeof parsed.s !== 'string') throw new Error('state bukan base64');
-    const state = bytesFromBase64(parsed.s);
-    if (state.length === 0) throw new Error('state kosong');
-    return {
-      sessionId,
-      version: parsed.v,
-      state,
-      updatedAt: typeof parsed.t === 'number' ? parsed.t : 0,
-    };
-  } catch (error) {
-    console.error('[SPQR] State ratchet rusak:', sessionId, error);
-    return undefined;
-  }
+  const decoded = decodeStoredRow(plain, sessionId);
+  if (!decoded) return undefined;
+  return { sessionId, ...decoded };
 }
 
-/** Hapus state satu sesi (setelah rollback terkonfirmasi/rotasi sesi). */
+/** Hapus state aktif satu sesi (baris era arsip TIDAK ikut dihapus). */
 export async function deleteSpqrState(sessionId: string): Promise<void> {
   assertSessionId(sessionId);
   const entry = pending.get(sessionId);
   if (entry?.timer) clearTimeout(entry.timer);
   pending.delete(sessionId);
   await db.kvStore.delete(stateKey(sessionId));
+}
+
+// ---------------------------------------------------------------------------
+// Arsip era braid (audit N5-01)
+//
+// Jalur v1 punya tiga slot `#archived_0..2` (`keychainDb.ts`, `RATCHET_ARCHIVE_
+// SLOTS`): pesan yang tertunda melewati rotasi sesi tetap bisa dibuka karena
+// state era lama TIDAK ditimpa. Jalur v2 dulu hanya punya SATU baris per
+// percakapan dan baris itu dihapus saat sesi X3DH baru lahir — pesan v2 yang
+// masih di jalan (peer offline, relay lambat) menjadi tidak terbaca permanen.
+//
+// Solusinya sama bentuknya dengan v1: sebelum baris aktif dihapus untuk era
+// baru, isinya digeser ke arsip FIFO `#era_0..2` (slot 0 = era tepat
+// sebelumnya). Arsip dibaca HANYA sebagai fallback dekripsi — ia tidak pernah
+// dipromosikan menjadi state aktif (itu akan memutar ulang braid dan memutus
+// rantai era sekarang).
+// ---------------------------------------------------------------------------
+
+/** Jumlah era braid lama yang disimpan (pola `RATCHET_ARCHIVE_SLOTS` v1). */
+export const SPQR_STATE_ARCHIVE_SLOTS = 3;
+
+const eraStateKey = (sessionId: string, slot: number): string =>
+  `${SPQR_STATE_KEY_PREFIX}${sessionId}#era_${slot}`;
+
+/** Baca satu slot arsip. `undefined` = kosong atau tidak bisa dibuka. */
+async function loadEraState(
+  sessionId: string,
+  slot: number,
+): Promise<SpqrStateRecord | undefined> {
+  const row = await db.kvStore.get(eraStateKey(sessionId, slot));
+  if (typeof row?.value !== 'string') return undefined;
+  const plain = await decryptValueAtRest(row.value);
+  if (!plain) return undefined;
+  const decoded = decodeStoredRow(plain, `${sessionId}#era_${slot}`);
+  if (!decoded) return undefined;
+  return { sessionId, ...decoded };
+}
+
+/**
+ * [audit N5-01] Tutup era braid sekarang dan mulai era baru tanpa membuang
+ * kemampuan membaca pesan era lama.
+ *
+ * Dipanggil tepat sebelum state X3DH baru disimpan (penerima) atau saat sesi
+ * dianggap berganti. Tulis yang masih menunggu debounce di-flush lebih dulu —
+ * kalau tidak, arsip bisa berisi state satu/lebih langkah di belakang.
+ */
+export async function rotateSpqrStateForNewSession(sessionId: string): Promise<void> {
+  assertSessionId(sessionId);
+  await flushSpqrState(sessionId);
+  const current = await loadSpqrState(sessionId);
+
+  if (current) {
+    // [audit N9-03 → N10-04 → N11-02] Jangan menggeser arsip untuk era yang
+    // belum pernah maju. Perbandingan byte (N9-03) hanya mengenali kasus yang
+    // jarang terjadi: state awal sesi X3DH baru SELALU berbeda karena
+    // `authKey`-nya berbeda, sehingga dua era tanpa pesan tetap memakan dua slot
+    // (probe pass 10: 118 B berbeda, arsip terisi 2 slot). Penanda `advanced`
+    // menjawab pertanyaan yang sebenarnya: era ini pernah membawa lalu lintas v2
+    // atau tidak. Sejak N11-02 penanda itu default `true`; hanya pemanggil yang
+    // menulis state awal era secara eksplisit (`advanced: false`) yang dilewati.
+    if (current.advanced) {
+      // Geser FIFO: slot terakhir dibuang, sisanya turun satu posisi.
+      for (let slot = SPQR_STATE_ARCHIVE_SLOTS - 1; slot > 0; slot--) {
+        const older = await loadEraState(sessionId, slot - 1);
+        if (older) {
+          await writeSealedRow(eraStateKey(sessionId, slot), {
+            version: older.version,
+            state: older.state,
+            now: older.updatedAt,
+            advanced: older.advanced,
+          });
+        } else {
+          await db.kvStore.delete(eraStateKey(sessionId, slot));
+        }
+      }
+      await writeSealedRow(eraStateKey(sessionId, 0), {
+        version: current.version,
+        state: current.state,
+        now: current.updatedAt || Date.now(),
+        advanced: current.advanced,
+      });
+    }
+  }
+
+  await deleteSpqrState(sessionId);
+}
+
+/**
+ * Era braid lama untuk satu percakapan, **terbaru dulu** (slot 0 = era tepat
+ * sebelum yang aktif). Dipakai fallback dekripsi saat state aktif menolak
+ * frame pesan lama.
+ */
+export async function loadArchivedSpqrStates(sessionId: string): Promise<SpqrStateRecord[]> {
+  assertSessionId(sessionId);
+  const out: SpqrStateRecord[] = [];
+  for (let slot = 0; slot < SPQR_STATE_ARCHIVE_SLOTS; slot++) {
+    const record = await loadEraState(sessionId, slot);
+    if (record) out.push(record);
+  }
+  return out;
 }
 
 /** Hapus semua state braid (wipe/panic — lihat `nukeProtocol`). */

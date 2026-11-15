@@ -22,6 +22,7 @@ import {
   type OhttpRequest,
   type OhttpResponse,
 } from '@nyx/shared';
+import { OHTTP_CLIENT_TAG_HEADER, OHTTP_INTERNAL_HEADER } from './clientTag.js';
 import type { OhttpConfig } from './config.js';
 
 export type OhttpDispatcher = (request: OhttpRequest) => Promise<OhttpResponse>;
@@ -81,7 +82,14 @@ export async function handleOhttpGateway(
   encapsulatedRequest: Uint8Array,
   dispatch: OhttpDispatcher,
   allowlist?: readonly OhttpAllowRule[],
-  options: { injectedAuthorization?: string } = {},
+  options: {
+    injectedAuthorization?: string;
+    /**
+     * [audit N9-01] Tag klien yang **sudah diverifikasi** berasal dari relay
+     * (token internalnya cocok). Nilainya HMAC atas alamat klien, bukan alamat.
+     */
+    clientTag?: string;
+  } = {},
 ): Promise<Uint8Array> {
   // Rotasi: key id ada di byte pertama amplop, jadi gateway tidak menebak.
   // Kunci yang tidak dikenal = amplop dari klien yang salah konfigurasi /
@@ -110,18 +118,32 @@ export async function handleOhttpGateway(
   // Sanitasi DI SINI, bukan hanya di dispatcher default: gateway adalah batas
   // kepercayaan, jadi dispatcher apa pun (termasuk test/driver lain) menerima
   // request yang sudah bebas header identitas jaringan.
-  const sanitizedHeaders = sanitizeOhttpForwardHeaders(sealed.request.headers).filter(
-    ([name]) => name.toLowerCase() !== 'x-nyx-ohttp-internal',
-  );
-  let forwardHeaders = sanitizedHeaders;
+  // Kedua header kepercayaan dibuang dari isi amplop: isinya dikendalikan
+  // pengirim, jadi tag/ token internal yang "diklaim" di dalam amplop tidak
+  // boleh sampai ke API. Yang diteruskan hanya nilai yang dipasang relay di
+  // lapisan luar (lihat blok di bawah).
+  const sanitizedHeaders = sanitizeOhttpForwardHeaders(sealed.request.headers).filter(([name]) => {
+    const lower = name.toLowerCase();
+    return lower !== OHTTP_INTERNAL_HEADER && lower !== OHTTP_CLIENT_TAG_HEADER;
+  });
+  const forwardHeaders = [...sanitizedHeaders];
   if (options.injectedAuthorization) {
     // Token di-inject oleh relay tepercaya; header auth/cookie dari dalam amplop
     // tidak pernah boleh menang atas identitas yang sudah diverifikasi relay.
-    forwardHeaders = sanitizedHeaders.filter(([name]) => {
-      const lower = name.toLowerCase();
-      return lower !== 'authorization' && lower !== 'cookie';
-    });
+    for (let index = forwardHeaders.length - 1; index >= 0; index--) {
+      const lower = forwardHeaders[index]![0].toLowerCase();
+      if (lower === 'authorization' || lower === 'cookie') forwardHeaders.splice(index, 1);
+    }
     forwardHeaders.push(['authorization', options.injectedAuthorization]);
+  }
+  if (options.clientTag && config.internalToken) {
+    // API memakai pasangan header ini sebagai identitas bucket limiter
+    // (`utils/clientIp.ts`). Tanpa token internal, tag tidak akan dipercaya —
+    // jadi tidak dikirim setengah-setengah.
+    forwardHeaders.push(
+      [OHTTP_INTERNAL_HEADER, config.internalToken],
+      [OHTTP_CLIENT_TAG_HEADER, options.clientTag],
+    );
   }
   const request: OhttpRequest = {
     ...sealed.request,

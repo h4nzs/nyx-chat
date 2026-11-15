@@ -17,6 +17,7 @@
 
 import { createServer } from 'node:http';
 import { createOhttpRelayApp } from './relayApp.js';
+import { invalidTrustedProxyReason } from './clientTag.js';
 
 const DEFAULT_PORT = 4100;
 const LOOPBACK_BINDS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -37,6 +38,18 @@ function main(): void {
       'OHTTP relay: OHTTP_GATEWAY_TARGET wajib diisi (mis. http://127.0.0.1:4000/api/ohttp/gateway)'
     );
   }
+  // [audit N11-04] Peringatan trust proxy hanya relevan bila ada hop jaringan
+  // nyata. Profil selfhost (gateway 127.0.0.1) justru WAJIB mengosongkan
+  // OHTTP_TRUSTED_PROXIES; mencetak "setel ke CIDR nginx" di sana menuntun
+  // operator ke nilai yang ditolak `verify-boot.sh`.
+  const gatewayHost = (() => {
+    try {
+      return new URL(gatewayTarget).hostname.replace(/^\[|\]$/g, '');
+    } catch {
+      return '';
+    }
+  })();
+  const gatewayOnLoopback = LOOPBACK_BINDS.has(gatewayHost);
   // Token mode "off" berarti relay harus mencetak token auth/CSRF — itu butuh
   // sesi & DB, yang tidak dimiliki proses ini. Tolak saat boot, jangan diam-diam
   // meneruskan request tanpa identitas.
@@ -70,9 +83,58 @@ function main(): void {
     .map((host) => host.trim())
     .filter(Boolean);
 
+  // [audit N9-01] Tag klien per relay. Tanpa ini, semua pengguna OHTTP berbagi
+  // satu bucket limiter di API (`127.0.0.1`) untuk jalur tanpa akun seperti
+  // bukti KT. Nilainya HARUS sama dengan `OHTTP_INTERNAL_TOKEN` di proses API.
+  const internalToken = (process.env.OHTTP_INTERNAL_TOKEN ?? '').trim();
+  if (internalToken && internalToken.length < 32) {
+    throw new Error('OHTTP relay: OHTTP_INTERNAL_TOKEN minimal 32 karakter');
+  }
+  if (!internalToken) {
+    console.warn(
+      '[ohttp-relay] OHTTP_INTERNAL_TOKEN kosong: tag klien tidak dikirim, sehingga ' +
+        'rate limit API untuk trafik OHTTP tanpa akun (bukti KT) menjadi satu bucket bersama.'
+    );
+  }
+
+  // [audit N10-03] Hanya hop di daftar ini yang boleh meneruskan
+  // `CF-Connecting-IP`. Default loopback; nginx di jaringan container harus
+  // dicantumkan, kalau tidak semua klien kembali berbagi tag alamat nginx.
+  const trustedProxies = (process.env.OHTTP_TRUSTED_PROXIES ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  // [audit N11-05] Entri yang tidak bisa diparse dulu hilang tanpa gejala →
+  // hop nginx tidak dipercaya dan semua klien berbagi satu bucket. Sekarang
+  // alasan per entri terlihat di log start.
+  for (const entry of trustedProxies) {
+    const reason = invalidTrustedProxyReason(entry);
+    if (reason) {
+      console.warn(
+        `[ohttp-relay] OHTTP_TRUSTED_PROXIES: entri "${entry}" diabaikan (${reason}) — ` +
+          'hop itu TIDAK dipercaya, jadi header klien dari sana diabaikan.'
+      );
+    }
+  }
+  if (trustedProxies.length === 0) {
+    if (gatewayOnLoopback) {
+      console.log(
+        '[ohttp-relay] OHTTP_TRUSTED_PROXIES kosong: benar untuk selfhost (nginx → relay lewat loopback). ' +
+          'Isi hanya bila nginx berada di jaringan container.'
+      );
+    } else {
+      console.warn(
+        '[ohttp-relay] OHTTP_TRUSTED_PROXIES kosong padahal target gateway bukan loopback: ' +
+          'setel alamat/CIDR nginx (IPv4 atau IPv6), kalau tidak semua klien berbagi tag alamat nginx.'
+      );
+    }
+  }
+
   const app = createOhttpRelayApp({
     gatewayTarget,
     trustedGatewayHosts,
+    trustedProxies: trustedProxies.length > 0 ? trustedProxies : undefined,
+    internalToken: internalToken || undefined,
     maxBody: process.env.OHTTP_RELAY_MAX_BODY,
     rateLimitPerMinute: process.env.OHTTP_RELAY_RATE_LIMIT
       ? Number(process.env.OHTTP_RELAY_RATE_LIMIT)

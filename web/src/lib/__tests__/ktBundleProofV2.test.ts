@@ -31,6 +31,13 @@ vi.mock('../ktConfigPin', async (importOriginal) => {
   return {
     ...actual,
     loadKtConfigPin: async () => pinStore.current,
+    // [audit N9-02] `resolveConfig` kini membedakan "belum di-pin" dari "pin
+    // tidak bisa dibaca". Test ini menguji jalur config/verifikasi, bukan state
+    // akun, jadi pin palsu ini selalu berarti `empty` atau `pin`.
+    resolveKtConfigPin: async () =>
+      pinStore.current
+        ? { status: 'pin' as const, pin: pinStore.current }
+        : { status: 'empty' as const },
     saveKtConfigPin: async (pin: unknown) => {
       pinStore.current = pin;
     },

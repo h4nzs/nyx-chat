@@ -158,8 +158,8 @@ if (!import.meta.env.VITE_APP_SECRET) {
     // In production, fail fast
     throw new Error(errorMessage);
   } else {
-    // In development, show a prominent warning
-    alert(errorMessage);
+    // In development, show a prominent warning without blocking UI/Playwright dialogs
+    console.warn(`[Config] ${errorMessage}`);
   }
 }
 

@@ -4,83 +4,235 @@ import { test, expect } from '@playwright/test';
 import { registerUser } from './helpers/registration';
 
 test.describe('Authentication & Onboarding', () => {
-  test.setTimeout(180000); 
+  test.setTimeout(180000);
 
   test('Register with Proof of Work', async ({ page }) => {
+    // Rantai onboarding kini punya anggaran 180 dtk untuk langkah trust saja
+    // (`TRUST_STEP_TIMEOUT_MS`), dan sisa rantainya ~60 dtk terukur di CI
+    // Firefox (nightly 43416725350: tes ini 1,3 m total). Batas 180 dtk milik
+    // describe akan memotong tes sebelum anggaran itu habis, jadi naikkan.
+    test.setTimeout(300000);
+    const username = `testuser_pow_${Date.now()}`;
     await page.route('**/api/auth/pow/challenge', async route => {
       await route.fulfill({ status: 200, json: { challenge: 'mock_challenge', difficulty: 1 } });
     });
     await page.route('**/api/auth/pow/verify', async route => {
       await route.fulfill({
         status: 201,
-        json: { message: 'Registered successfully', user: { id: 'mock_id', username: 'testuser_pow' }, tokens: { access: 'token', refresh: 'token' } }
+        json: { message: 'Registered successfully', user: { id: 'mock_id', username }, tokens: { access: 'token', refresh: 'token' } }
       });
     });
-    await registerUser(page, 'Test User', 'testuser_pow');
+    await registerUser(page, 'Test User', username);
   });
 
+  // [E2E FLAKE 2026-11-04] Tes ini pernah gagal di CI (`e2e-chrome`, run
+  // 41820476193) dengan `locator.fill: Test timeout of 180000ms exceeded` saat
+  // menunggu kolom Username, TANPA petunjuk apa pun di artifact.
+  //
+  // Sebabnya pola, bukan kebetulan: logout dipanggil `.catch(() => {})` di dalam
+  // `page.evaluate`, dan `useAuthStore.logout()` sendiri juga menelan error
+  // `api('/api/auth/logout')` (`.catch(() => {})`). Jadi bila request logout
+  // gagal, cookie refresh HttpOnly (`rt`) tetap hidup, sementara sisi klien sudah
+  // mengosongkan localStorage/IndexedDB. Halaman baru lalu menjalankan bootstrap
+  // sesi dari cookie itu, dan efek di `pages/Login.tsx`
+  // (`if (accessToken && user && hasRestoredKeys) navigate('/chat')`) melempar
+  // `/login` ke `/chat` — form login tidak pernah dirender, tes menggantung
+  // sampai timeout, dan pesan galatnya berbunyi seolah selector yang salah.
+  //
+  // Sekarang: logout dicoba ulang bila perlu, keberhasilannya DIBUKTIKAN dari
+  // cookie context (bukan dari promise yang menelan error), lalu halaman login
+  // harus benar-benar berada di `/login` sebelum selektor apa pun dipakai —
+  // gagal dalam hitungan detik dengan sebab yang tertulis, bukan 180 detik
+  // tanpa bukti.
   test('Login with correct password', async ({ page }) => {
+    // Registrasi di runner CI bisa memakan >90 s dari budget 180 s; beri ruang
+    // agar kegagalan yang tersisa benar-benar soal login, bukan budget habis.
+    test.setTimeout(240000);
+
     const username = `loginuser_${Date.now()}`;
-    
-    // 1. Register User
-    await registerUser(page, 'Test Login User', username);
-    
-    // 2. Clear Session — logout via app API dulu (cookie HttpOnly tidak bisa dihapus
-    //    langsung dari document.cookie), lalu bersihkan storage lokal.
-    await page.evaluate(async () => {
-      try {
-        // @ts-ignore — path absolut Vite dev server (runtime-only)
-        const { useAuthStore } = await import('/src/store/auth.ts');
-        await useAuthStore.getState().logout().catch(() => {});
-      } catch (e) {}
-      localStorage.clear();
-      sessionStorage.clear();
-      document.cookie.split(';').forEach(c => {
-        const name = c.split('=')[0]?.trim();
-        if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/;`;
-      });
-      const dbs = await indexedDB.databases();
-      for (const db of dbs) { 
-        if (db.name) indexedDB.deleteDatabase(db.name); 
+    const hasRefreshCookie = async () =>
+      (await page.context().cookies()).some((c) => c.name === 'rt');
+
+    // Halaman login dibuat di awal supaya listener konsol/`pageerror`-nya sudah
+    // terpasang sebelum navigasi pertama (kalau dibuat di dalam step, error yang
+    // terjadi saat bootstrap halaman tidak tercatat).
+    const loginPage = await page.context().newPage();
+    loginPage.on('console', (msg) => {
+      if (msg.type() === 'error') console.log(`[auth.spec][login page console] ${msg.text()}`);
+    });
+    loginPage.on('pageerror', (err) => console.log(`[auth.spec][login page pageerror] ${err.message}`));
+
+    // [BUG 2026-11-11] Halaman utama juga perlu listener: tanda `[logout] …`
+    // dari store (DEV) hanya berguna kalau sampai ke log CI. Tanpa ini, "tidak
+    // ada tanda apa pun" tidak bisa dibedakan dari "main thread beku".
+    page.on('console', (msg) => {
+      const text = msg.text();
+      if (text.includes('[logout]') || msg.type() === 'error') {
+        console.log(`[auth.spec][page console] ${text}`);
       }
     });
+    page.on('pageerror', (err) => console.log(`[auth.spec][page pageerror] ${err.message}`));
 
-    // 3. FORCE PAGE RELOAD
-    // Wipes out Zustand/React state in memory so SPA knows the user is truly logged out
-    await page.reload();
+    await test.step('registrasi akun uji', async () => {
+      await registerUser(page, 'Test Login User', username);
+    });
 
-    // 4. Login
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: /Username/i }).fill(username);
-    await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
-    await page.getByRole('button', { name: /Login/i }).click();
+    await test.step('logout benar-benar memutus sesi server', async () => {
+      const attempts: Array<{ attempt: number; ok: boolean; error?: string }> = [];
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        // [E2E FLAKE 2026-11-04, run 41830562296] `logout()` memicu navigasi keras
+        // (halaman lama ditinggalkan), dan `page.evaluate` yang sedang berjalan di
+        // halaman itu bisa ditolak Playwright dengan "Execution context was
+        // destroyed", bukan oleh skripnya sendiri. Itu bukan bukti logout gagal —
+        // buktinya tetap cookie `rt` di bawah — jadi penolakan dicatat, bukan
+        // dilempar sebagai kegagalan tes.
+        let result: { ok: boolean; error?: string };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const evalTimeoutMs = 30_000;
+        try {
+          result = await Promise.race([
+            page.evaluate(async () => {
+              try {
+                // @ts-ignore — path absolut Vite dev server (runtime-only)
+                const { useAuthStore } = await import('/src/store/auth.ts');
+                await useAuthStore.getState().logout();
+                return { ok: true };
+              } catch (e) {
+                return { ok: false, error: String(e) };
+              }
+            }),
+            // [BUG 2026-11-11] WebKit dulu menggantung di sini tanpa pernah
+            // menyelesaikan `evaluate`; tes lalu mati di timeout 240 dtk dan
+            // menyamar sebagai "context closed". Batas ini membuat penyebabnya
+            // tertulis di `attempts`, bukan hilang bersama timeout tes.
+            new Promise<{ ok: boolean; error?: string }>((resolve) => {
+              timer = setTimeout(
+                () => resolve({ ok: false, error: `logout() tidak selesai dalam ${evalTimeoutMs / 1000} dtk` }),
+                evalTimeoutMs,
+              );
+            }),
+          ]);
+        } catch (e) {
+          result = { ok: false, error: String(e) };
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+        attempts.push({ attempt, ...result });
+
+        // Bukti yang dipakai adalah cookie, bukan hasil promise: `logout()`
+        // menelan kegagalan `api()` di dalamnya, jadi `ok: true` tidak berarti
+        // sesi benar-benar dicabut di server.
+        const stillLoggedIn = await hasRefreshCookie();
+        console.log(
+          `[auth.spec] logout percobaan ${attempt}: ${stillLoggedIn ? 'cookie rt MASIH ADA' : 'cookie rt hilang'}` +
+            (result.ok ? '' : ` (store melempar: ${result.error})`)
+        );
+        if (!stillLoggedIn) break;
+        // [BUG 2026-11-11] Jeda ini dulu `page.waitForTimeout(1000)`. Playwright
+        // menyerialkan panggilan level-halaman: bila `page.evaluate(logout())`
+        // masih menggantung (WebKit), `waitForTimeout` ikut mengantre dan tes
+        // mati di timeout 240 dtk tanpa bukti tambahan. Jeda di sisi Node tidak
+        // pernah mengantre di belakang halaman.
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
+      const refreshCookie = (await page.context().cookies()).find((c) => c.name === 'rt');
+      expect(
+        refreshCookie,
+        'logout tidak memutus sesi di server (cookie refresh HttpOnly `rt` masih ada setelah 2 percobaan). ' +
+          'Halaman /login akan langsung dialihkan ke /chat dan form login tidak pernah dirender. ' +
+          `Percobaan: ${JSON.stringify(attempts)}`
+      ).toBeUndefined();
+    });
+
+    // Dibersihkan dari `loginPage` (halaman yang tidak sedang ditinggalkan
+    // navigasi logout), bukan dari `page`: `page.evaluate` di halaman yang sedang
+    // dinavigasi ditolak dengan "Execution context was destroyed", dan itulah
+    // yang menggagalkan langkah ini di CI (run 41830562296). Origin-nya sama,
+    // jadi localStorage/IndexedDB yang dibersihkan tetap milik context yang sama.
+    await test.step('kosongkan state lokal (localStorage/sessionStorage/IndexedDB)', async () => {
+      await loginPage.goto('/login');
+      const localState = await loginPage.evaluate(async () => {
+        localStorage.clear();
+        sessionStorage.clear();
+        document.cookie.split(';').forEach((c) => {
+          const name = c.split('=')[0]?.trim();
+          if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/;`;
+        });
+        const dbs = await indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name) indexedDB.deleteDatabase(db.name);
+        }
+        return {
+          localStorageKeys: localStorage.length,
+          sessionStorageKeys: sessionStorage.length,
+          databases: dbs.map((d) => d.name ?? '(tanpa nama)'),
+        };
+      });
+      console.log(`[auth.spec] state lokal dibersihkan: ${JSON.stringify(localState)}`);
+      expect(localState.localStorageKeys, 'localStorage harus kosong sebelum login ulang').toBe(0);
+      expect(localState.sessionStorageKeys, 'sessionStorage harus kosong sebelum login ulang').toBe(0);
+    });
+
+    // 3. Halaman BARU di context yang sama — bukan `page.reload()`.
+    // Logout memicu navigasi keras; reload yang berbarengan dengannya bisa
+    // dijawab `net::ERR_ABORTED`. Halaman baru tetap berbagi IndexedDB dan
+    // localStorage yang sudah dibersihkan, jadi bukti "state lokal hilang"
+    // tidak berubah, tanpa berebut dengan navigasi yang sedang berjalan.
+    await test.step('halaman /login merender form (gagal cepat bila sesi masih hidup)', async () => {
+      await loginPage.goto('/login');
+
+      // Pemeriksaan URL lebih dulu: bila sesi ternyata masih hidup, `/login`
+      // dialihkan ke `/chat` dan menunggu selector hanya menghasilkan timeout
+      // tanpa sebab. Ini yang membuat kegagalan berikutnya bisa didiagnosis
+      // dari satu baris pesan.
+      await expect(
+        loginPage,
+        '/login tidak mempertahankan URL-nya — kemungkinan besar sesi belum benar-benar logout sehingga dialihkan ke /chat'
+      ).toHaveURL(/\/login(\?|$)/, { timeout: 20000 });
+      await expect(loginPage.getByRole('textbox', { name: /Username/i })).toBeVisible({ timeout: 20000 });
+    });
+
+    await test.step('login dengan password yang benar', async () => {
+      await loginPage.getByRole('textbox', { name: /Username/i }).fill(username);
+      await loginPage.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
+      await loginPage.getByRole('button', { name: /Login/i }).click();
+    });
 
     // 5. Asersi Login berhasil: modal "New Device Detected" muncul (bukti sesi aktif
     //    tapi kunci lokal terhapus — recovery flow), modal bisa ditutup dan TIDAK reopen.
-    await expect(page.getByRole('heading', { name: /New Device Detected/i })).toBeVisible({ timeout: 30000 });
-    const closeNewDeviceBtn = page.getByRole('button', { name: /Close modal/i });
-    await closeNewDeviceBtn.click();
-    await expect(page.getByRole('heading', { name: /New Device Detected/i })).toBeHidden({ timeout: 10000 });
-    // Tidak boleh ada error server di form
-    await expect(page.getByText('Internal server error')).toBeHidden();
+    await test.step('modal New Device Detected muncul dan bisa ditutup', async () => {
+      await expect(loginPage.getByRole('heading', { name: /New Device Detected/i })).toBeVisible({ timeout: 30000 });
+      const closeNewDeviceBtn = loginPage.getByRole('button', { name: /Close modal/i });
+      await closeNewDeviceBtn.click();
+      await expect(loginPage.getByRole('heading', { name: /New Device Detected/i })).toBeHidden({ timeout: 10000 });
+      // Tidak boleh ada error server di form
+      await expect(loginPage.getByText('Internal server error')).toBeHidden();
+    });
 
-    // Bypass modals lainnya (System Init / Quick Tour)
-    const skipSystemInitBtn = page.getByRole('button', { name: /Skip for now/i });
-    try {
-      await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 5000 });
-      await skipSystemInitBtn.click();
-    } catch (e) {}
+    await test.step('lewati modal System Init / Quick Tour', async () => {
+      const skipSystemInitBtn = loginPage.getByRole('button', { name: /Skip for now/i });
+      try {
+        await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 5000 });
+        await skipSystemInitBtn.click();
+      } catch (e) {
+        console.log('[auth.spec] modal System Init tidak muncul (boleh dilewati)');
+      }
 
-    const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-    try {
-      await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-      await closeTourBtn.click();
-    } catch (e) {}
+      const closeTourBtn = loginPage.getByRole('button', { name: /Close modal/i });
+      try {
+        await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
+        await closeTourBtn.click();
+      } catch (e) {
+        console.log('[auth.spec] modal Quick Tour tidak muncul (boleh dilewati)');
+      }
+    });
   });
 
   test('Fail login with incorrect password', async ({ page }) => {
     await page.goto('/login');
-    
+
     await page.getByRole('textbox', { name: /Username/i }).fill('nonexistent_user');
     await page.getByRole('textbox', { name: /Password/i }).fill('WrongPassword123!');
     await page.getByRole('button', { name: /Login/i }).click();

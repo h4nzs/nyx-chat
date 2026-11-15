@@ -47,6 +47,84 @@ test.describe('Tautan perangkat (QR)', () => {
     await registerUser(page, 'Link Owner', username);
     await waitForTransport(page);
 
+    // [OPS 2026-11-03] Arsip riwayat butuh kredensial R2. Tanpa itu presign
+    // dijawab 503 `LINK_HISTORY_UNAVAILABLE` dan tidak ada byte yang dikirim —
+    // jadi asersi arsip TIDAK bisa diverifikasi di lingkungan ini (CI tidak
+    // punya R2). Alur tautan itu sendiri (QR → SAS → approve → login) tetap
+    // diuji penuh; bagian arsip ditandai sebagai dilewati, bukan gagal palsu.
+    const historyAvailable = await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { authFetch } = await import('/src/lib/api.ts');
+      const limits = (await authFetch('/api/auth/link/history/limits').catch(() => null)) as
+        | { available?: boolean }
+        | null;
+      return limits?.available !== false;
+    });
+    test.info().annotations.push({
+      type: historyAvailable ? 'arsip-riwayat' : 'arsip-riwayat-dilewati',
+      description: historyAvailable
+        ? 'R2 tersedia: arsip riwayat diverifikasi penuh.'
+        : 'R2 tidak dikonfigurasi (LINK_HISTORY_UNAVAILABLE): asersi arsip riwayat dilewati, alur tautan tetap diuji.',
+    });
+
+    // [LINK 2026-10-29] Simulasi blob kontak yang disegel identitas LAMA (byte
+    // apa pun yang bukan milik perangkat baru). Setelah link, perangkat baru
+    // WAJIB menggantinya dengan blob identitasnya sendiri — kalau tidak,
+    // restore kontak di perangkat baru selalu gagal dengan "Bundle korup".
+    const OLD_IDENTITY_BLOB = 'SEALED-WITH-OLD-IDENTITY';
+    // [docs/40] Satu kontak nyata di perangkat lama supaya opsi "sertakan
+    // riwayat" aktif dan pipeline ekspor→R2→impor benar-benar berjalan.
+    const HISTORY_PEER = 'peer-history-e2e';
+    const HISTORY_CONV = 'conv-history-e2e';
+    await page.evaluate(async ({ peerId, conversationId }) => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { upsertContact } = await import('/src/lib/contactStore.ts');
+      await upsertContact({ userId: peerId, conversationId });
+
+      // [docs/40 §40.7] Tiga pesan nyata di vault perangkat lama (disegel kunci
+      // identitas LAMA). Arsip harus membawanya sebagai objek terdekripsi dan
+      // menyegel ulang dengan kunci identitas BARU di perangkat baru.
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { shadowVault } = await import('/src/lib/shadowVaultDb.ts');
+      await shadowVault.saveConversation({
+        id: conversationId,
+        isGroup: false,
+        participants: [{ id: peerId }],
+        lastMessageAt: null,
+        unreadCount: 0,
+        encryptionMode: 'SENDER_KEY',
+        lastMessage: null,
+      });
+      const now = Date.now();
+      await shadowVault.upsertMessages(
+        ['halo lama 1', 'halo lama 2', 'halo lama 3'].map((content, index) => ({
+          id: `${conversationId}-msg-${index}`,
+          conversationId,
+          content,
+          senderId: peerId,
+          sender: { id: peerId, name: 'Peer History' },
+          createdAt: new Date(now - (3 - index) * 60_000).toISOString(),
+          status: 'SENT',
+          seq: 900 + index,
+        }))
+      );
+    }, { peerId: HISTORY_PEER, conversationId: HISTORY_CONV });
+
+    const seeded = await page.evaluate(async (blob) => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { authFetch } = await import('/src/lib/api.ts');
+      await authFetch('/api/users/me/contact-bundle', {
+        method: 'PUT',
+        body: JSON.stringify({ encryptedBundle: blob, version: 123 }),
+      });
+      // Tanpa type-arg: import dinamis tidak bertipe (TS2347).
+      const back = (await authFetch('/api/users/me/contact-bundle')) as {
+        encryptedBundle: string | null;
+      };
+      return back?.encryptedBundle ?? null;
+    }, OLD_IDENTITY_BLOB);
+    expect(seeded).toBe(OLD_IDENTITY_BLOB);
+
     await openSettingsSection(page, /Active Sessions/i);
     await expect(page).toHaveURL(/\/settings\/sessions$/, { timeout: 20000 });
     await page.getByRole('button', { name: /Link a device/i }).first().click();
@@ -64,9 +142,22 @@ test.describe('Tautan perangkat (QR)', () => {
     await newDevice.locator('#link-password-confirm').fill(PASSWORD);
     await newDevice.getByRole('button', { name: /^Link device$/i }).click();
 
-    // Perangkat lama menerima `auth:linking_request` → tombol approve muncul.
+    // [SEC 2026-10-30] Kode verifikasi harus SAMA di dua layar; berbeda berarti
+    // server menukar kunci perangkat baru dan tautan wajib ditolak.
+    const newDeviceSas = newDevice.getByTestId('new-device-sas');
+    await expect(newDeviceSas).toBeVisible({ timeout: 60000 });
+    const newDeviceCode = (await newDeviceSas.innerText()).trim();
+
+    // Perangkat lama menerima `auth:linking_request` → kode + tombol approve muncul.
+    const oldDeviceSas = page.getByTestId('link-sas-code');
+    await expect(oldDeviceSas).toBeVisible({ timeout: 90000 });
+    expect((await oldDeviceSas.innerText()).trim()).toBe(newDeviceCode);
+
+    // Approve terkunci sampai pengguna mengonfirmasi kode di perangkat ini.
     const approveButton = page.getByRole('button', { name: /Approve device/i }).first();
-    await expect(approveButton).toBeVisible({ timeout: 90000 });
+    await expect(approveButton).toBeDisabled();
+    await page.getByTestId('link-sas-confirm').check();
+    await expect(approveButton).toBeEnabled();
     await approveButton.click();
 
     // Perangkat baru menyelesaikan tautan lalu login (polling status 2 dtk).
@@ -74,6 +165,63 @@ test.describe('Tautan perangkat (QR)', () => {
     await expect(
       newDevice.getByRole('textbox', { name: /search/i }).first()
     ).toBeVisible({ timeout: 30000 });
+
+    // Blob identitas lama sudah diganti oleh push identitas BARU. `version`
+    // 123 sengaja dipakai sebagai nilai yang mustahil dihasilkan klien (ia hash
+    // 31-bit isi bundle), jadi berubahnya version = benar-benar PUT baru.
+    const afterLink = await newDevice.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { authFetch } = await import('/src/lib/api.ts');
+      return (await authFetch('/api/users/me/contact-bundle')) as {
+        encryptedBundle: string | null;
+        version: number | null;
+      };
+    });
+    expect(afterLink?.encryptedBundle).toBeTruthy();
+    expect(afterLink?.encryptedBundle).not.toBe(OLD_IDENTITY_BLOB);
+    expect(afterLink?.version).not.toBe(123);
+    // Envelope `encryptVaultText` = base64url(nonce‖ct), bukan teks biasa.
+    expect(afterLink?.encryptedBundle).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+
+    // [docs/40] Arsip riwayat benar-benar sampai: kontak yang diekspor perangkat
+    // lama terbaca di perangkat baru (berarti sudah disegel ulang dengan kunci
+    // vault identitas baru), dan state server sudah dikonsumsi (sekali pakai).
+    const historyAfterLink = await newDevice.evaluate(async ({ peerId, conversationId }) => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { getAllContacts } = await import('/src/lib/contactStore.ts');
+      // @ts-ignore
+      const { authFetch } = await import('/src/lib/api.ts');
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { shadowVault } = await import('/src/lib/shadowVaultDb.ts');
+      const contacts = (await getAllContacts()) as Array<{ userId: string }>;
+      const status = (await authFetch('/api/auth/link/history')) as { state: string };
+      // Dibaca lewat pembaca chat yang sama: kalau penyegelan ulang salah,
+      // `content` kembali `null` (dekripsi gagal senyap) dan assertion di bawah
+      // menangkapnya.
+      const messages = (await shadowVault.getMessagesByConversation(conversationId, 10)) as Array<{
+        content: string | null;
+        seq?: number;
+      }>;
+      const conversations = (await shadowVault.getAllConversations()) as Array<{ id: string }>;
+      return {
+        hasPeer: contacts.some((c) => c.userId === peerId),
+        historyState: status?.state,
+        contents: messages.map((m) => m.content).filter(Boolean).sort(),
+        hasConversation: conversations.some((c) => c.id === conversationId),
+      };
+    }, { peerId: HISTORY_PEER, conversationId: HISTORY_CONV });
+    if (historyAvailable) {
+      expect(historyAfterLink.hasPeer).toBe(true);
+      expect(historyAfterLink.historyState).toBe('none');
+      expect(historyAfterLink.hasConversation).toBe(true);
+      expect(historyAfterLink.contents).toEqual(['halo lama 1', 'halo lama 2', 'halo lama 3']);
+    } else {
+      // Kebalikannya yang dibuktikan: tanpa R2 tidak ada arsip yang menyeberang.
+      console.warn('[deviceLinking] arsip riwayat dilewati: R2 tidak dikonfigurasi');
+      expect(historyAfterLink.hasPeer).toBe(false);
+      expect(historyAfterLink.hasConversation).toBe(false);
+      expect(historyAfterLink.contents).toEqual([]);
+    }
 
     await newDeviceContext.close();
   });

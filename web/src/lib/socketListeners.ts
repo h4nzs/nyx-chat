@@ -293,13 +293,28 @@ export function initSocketListeners() {
     useMessageStore.getState().updateMessage(data.conversationId, data.messageId, { isDeletedLocal: true, content: null });
   });
 
+  // [BUGFIX 2026-10-30] `message:deleted_batch` = messageSweeper menghapus salinan
+  // SERVER (expiresAt lewat ATAU baris >14 hari). Pada 1:1 `expiresAt` selalu
+  // terisi dan dipersempit ke +24 jam begitu pesan dibaca, jadi event ini datang
+  // untuk pesan BIASA juga — dulu handler ini mem-blank baris lokalnya
+  // (`isDeletedLocal`, content null) sehingga riwayat chat lenyap sehari setelah
+  // dibaca meski salinan lokal masih utuh. Server tidak lagi memegang riwayat;
+  // satu-satunya sumber kebenaran "pesan ini menghapus diri" adalah `autoDelete`
+  // dari ciphertext (aturan yang sama dengan `isExpiredMessageRow` di vault).
+  // Pesan biasa yang salinannya hilang di server dibiarkan apa adanya di sini:
+  // baris lokal tetap utuh dan bubble tetap tampil.
   transportClient.on('message:deleted_batch', (data: { conversationId: string; messageIds: string[] }) => {
     if (!data?.conversationId || !Array.isArray(data.messageIds)) return;
     const store = useMessageStore.getState();
+    const loaded = new Map<string, { autoDelete?: boolean }>(
+      (store.messages[data.conversationId] ?? []).map((m) => [String(m.id), m])
+    );
     for (const messageId of data.messageIds) {
-      if (typeof messageId === 'string') {
-        store.updateMessage(data.conversationId, messageId, { isDeletedLocal: true, content: null });
-      }
+      if (typeof messageId !== 'string') continue;
+      // Tidak ada di state = tidak ada yang perlu diubah di UI; pesan timer yang
+      // sudah lewat deadline disembunyikan pembaca vault saat percakapan dibuka.
+      if (loaded.get(messageId)?.autoDelete !== true) continue;
+      store.updateMessage(data.conversationId, messageId, { isDeletedLocal: true, content: null });
     }
   });
 

@@ -183,7 +183,7 @@ SFU calls (until 1:1 call blinding ships).
 | 3 Privacy tiers | relaunch promise | tier-by-tier with per-tier tests (26.5) |
 | 4 Calls | privacy parity with 1:1 messages | coturn self-hosted; signaling blinded |
 | 5 Media | UX polish | R2 lifecycle verified; SSRF tests |
-| 6 Observability | ops maturity | alerts firing in a game-day drill (✅ 2026-10-14: `scripts/drill-alerts.sh`, 14 aturan dengan kasus menyala/tidak-menyala, jalan per-PR) |
+| 6 Observability | ops maturity | alerts firing in a game-day drill (✅ 2026-10-14: `scripts/drill-alerts.sh`, kini 44 aturan dengan kasus menyala/tidak-menyala, jalan per-PR) |
 
 Reopen the service to users only after Phase 1–3 acceptance. The relaunch story
 writes itself: same NYX, now with group metadata at Signal-V2-or-better posture,

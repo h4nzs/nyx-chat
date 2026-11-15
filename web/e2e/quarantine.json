@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "Karantina flake E2E (docs/41 §7.4). Setiap entri WAJIB punya owner, reason, dan expires (YYYY-MM-DD). Tes yang dikarantina harus di-skip di spec dengan alasan 'karantina: <owner> — <reason>'. Entri kedaluwarsa atau menunjuk tes yang tidak ada/ masih dijalankan menggagalkan gate verify-required-tests.mjs. Jangan menambah entri tanpa issue/perbaikan yang jelas.",
+  "entries": []
+}

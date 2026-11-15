@@ -27,6 +27,13 @@ import type { Conversation } from '@nyx/shared'
 // hasil parse, dan skema lokal (non-passthrough) di sini dulu membuang
 // `adminSecretHash` sebelum handler membacanya → SETIAP pembuatan grup 400.
 import { createConversationBodySchema } from '../utils/conversationSchemas.js'
+// [AUDIT PASS 4 — N4-01] Jalur pembuatan satu-satunya penulis anchor
+// `issuedByServer`, jadi `initialSession` divalidasi dengan aturan guard ratchet
+// (cap, base64, dan pemilik perangkat harus peserta).
+import {
+  authorizeInitialSessionKeys,
+  type SessionKeyRelayGuardDb,
+} from '../utils/sessionKeyRelayGuard.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -35,6 +42,27 @@ router.use(requireAuth)
 // dipindah ke `utils/groupAccess.ts` — tes perilakunya di
 // `tests/groupAccess.test.ts` mengunci urutan gate & kode status, bukan teks.
 const groupDb = prisma as unknown as GroupAccessDb
+
+// [AUDIT F-09] Batas jumlah id pada `GET /sync?ids=`.
+// Tanpa cap, satu request bisa memaksa `IN` berisi puluhan ribu id; bentuk id
+// juga divalidasi supaya nilai sampah tidak ikut ke query. Nilai di atas cap
+// diabaikan (bukan error) — klien yang sah mengirim puluhan id, bukan ribuan.
+export const MAX_SYNC_CONVERSATION_IDS = 200;
+const CONVERSATION_ID_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Parse + validasi + cap daftar id `?ids=a,b,c`. Pure, dipakaiunit test. */
+export function parseSyncConversationIds(raw: unknown): string[] {
+  const value = typeof raw === 'string' ? raw : '';
+  if (!value) return [];
+  const seen = new Set<string>();
+  for (const part of value.split(',')) {
+    const id = part.trim();
+    if (!CONVERSATION_ID_SHAPE.test(id)) continue;
+    seen.add(id);
+    if (seen.size >= MAX_SYNC_CONVERSATION_IDS) break;
+  }
+  return Array.from(seen);
+}
 
 // GET conversations by IDs (Inbox sync for Opaque Mailbox)
 // For new users with no local IDs, discovers conversations from UserHiddenConversation
@@ -47,8 +75,8 @@ router.get('/sync', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     
-    const ids = String(req.query.ids ?? '');
-    const conversationIds: string[] = ids ? ids.split(',') : [];
+    // [AUDIT F-09] cap + validasi bentuk id (lihat `parseSyncConversationIds`).
+    const conversationIds = parseSyncConversationIds(req.query.ids);
 
     // [T3b TOKEN-FIRST] userId join DIHAPUS — membership tidak didiscovery
     // dari identitas akun. Backfill SessionKey (per-device, client-derived)
@@ -83,6 +111,8 @@ router.get('/sync', async (req, res, next) => {
       where: {
         id: { in: allIds }
       },
+      // [AUDIT F-09] `take` eksplisit — jangan biarkan IN besar tanpa batas hasil.
+      take: MAX_SYNC_CONVERSATION_IDS,
       // [docs/28 Tier 2 — B3] `lastMessageAt` kini di-bucket (15 menit) → tie-break
       // deterministik supaya urutan daftar chat tidak flip saat seri bucket.
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }]
@@ -173,23 +203,41 @@ return current
         });
 
         if (initialSession) {
+          // [AUDIT PASS 3 — N3-01] Baris ini ditulis SERVER di transaksi
+          // pembuatan, dan ditandai `issuedByServer: true`: itulah bukti peserta
+          // yang sah untuk ratchet client-driven.
+          //
+          // [AUDIT PASS 4 — N4-01] Karena itu jalur ini TIDAK boleh menerima
+          // `deviceId` mentah dari klien: tanpa validasi, siapa pun bisa
+          // mendaftarkan perangkat nyata milik orang lain ke percakapan yang ia
+          // buat (tanpa notifikasi) dan menjadikannya "peserta terbukti".
+          // Validator-nya sama dengan guard ratchet: cap 500, base64 ≤8 KB,
+          // duplikat digabung, dan pemilik setiap perangkat harus ada di
+          // `allUserIds` (userIds ∪ pembuat).
           const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession;
-          const keyRecords = [];
-          for (const deviceId in initialKeysPerDevice) {
-            const encryptedKey = initialKeysPerDevice[deviceId];
-            const initiatorCiphertext = initiatorCiphertextsPerDevice[deviceId];
-            if (typeof encryptedKey !== 'string' || typeof initiatorCiphertext !== 'string') continue;
-            keyRecords.push({
+          const authorized = await authorizeInitialSessionKeys(
+            tx as unknown as SessionKeyRelayGuardDb,
+            {
+              allowedUserIds: allUserIds,
+              initialKeysPerDevice,
+              initiatorCiphertextsPerDevice,
+            },
+          )
+          if (!authorized.ok) {
+            throw new ApiError(authorized.status, authorized.error)
+          }
+          await tx.sessionKey.createMany({
+            data: authorized.entries.map((entry) => ({
               conversationId: convo.id,
-              deviceId,
+              deviceId: entry.deviceId,
               sessionId,
-              encryptedKey: Buffer.from(encryptedKey, 'base64'),
-              initiatorCiphertext: Buffer.from(initiatorCiphertext, 'base64')
-            });
-          }
-          if (keyRecords.length > 0) {
-            await tx.sessionKey.createMany({ data: keyRecords });
-          }
+              encryptedKey: Buffer.from(entry.encryptedKey, 'base64'),
+              initiatorCiphertexts: entry.initiatorCiphertexts
+                ? Buffer.from(entry.initiatorCiphertexts, 'base64')
+                : null,
+              issuedByServer: true,
+            })),
+          });
         }
         return convo;
       });
@@ -261,7 +309,7 @@ router.put('/:id/details', async (req, res, next) => {
     const sanitizedMetadata = sanitizeGroupMetadataBlob(encryptedMetadata)
     const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata: sanitizedMetadata } })
     // Opaque Mailbox: notify explicit targetRecipients passed from client
-    const targetRecipients = req.body.targetRecipients as string[] | undefined;
+    const targetRecipients = req.body?.targetRecipients as string[] | undefined;
     if (Array.isArray(targetRecipients) && targetRecipients.length > 0) {
       await emitEventToUsers(targetRecipients, 'conversation:updated', { id: asConversationId(id), encryptedMetadata: updatedConversation.encryptedMetadata ?? undefined });
     }
@@ -311,7 +359,7 @@ router.post('/:id/participants', async (req, res, next) => {
   }
   
   // Opaque Mailbox: notify explicit targetRecipients passed from client
-  const addRecipients = req.body.targetRecipients as string[] | undefined;
+  const addRecipients = req.body?.targetRecipients as string[] | undefined;
   if (Array.isArray(addRecipients) && addRecipients.length > 0) {
     await emitEventToUsers(addRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
@@ -328,7 +376,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
   if (!kickGate.ok) return res.status(kickGate.status).json({ error: kickGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
-  const removeRecipients = req.body.targetRecipients as string[] | undefined;
+  // [E2E groupLifecycle 2026-11-05] DELETE tanpa body membuat `req.body`
+  // undefined; akses properti langsung = TypeError → 500 pada kick yang sah.
+  const removeRecipients = req.body?.targetRecipients as string[] | undefined;
   if (Array.isArray(removeRecipients) && removeRecipients.length > 0) {
     await emitEventToUsers(removeRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(removeRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
@@ -367,14 +417,22 @@ router.delete('/:id/leave', async (req, res, next) => {
   if (!leaveGate.ok) return res.status(leaveGate.status).json({ error: leaveGate.error });
 
   // Opaque Mailbox: notify explicit targetRecipients passed from client
-  const leaveRecipients = req.body.targetRecipients as string[] | undefined;
+  const leaveRecipients = req.body?.targetRecipients as string[] | undefined;
   if (Array.isArray(leaveRecipients) && leaveRecipients.length > 0) {
     await emitEventToUsers(leaveRecipients, 'conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) });
     await emitEventToUsers(leaveRecipients, 'group:participants_changed', { conversationId: asConversationId(conversationId) });
   }
   // [T3b] Leave = revoke own delivery token.
-  deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId })
-    .catch((e: unknown) => console.warn('[T3b] Failed to revoke delivery token:', e));
+  // [BUG 2026-11-10] Dulu fire-and-forget: 204 dikirim sebelum baris keanggotaan
+  // benar-benar terhapus. Pemanggil (klien, dan E2E groupLifecycle) langsung
+  // memanggil purge, yang menghitung baris `userHiddenConversation` — masih ada
+  // → 409 MEMBERS_REMAIN padahal semua anggota sudah keluar (run 42784148182).
+  // 204 sekarang berarti baris sudah benar-benar hilang.
+  try {
+    await deleteMembership(prisma as unknown as MembershipPrisma, { userId, conversationId });
+  } catch (e: unknown) {
+    console.warn('[T3b] Failed to revoke delivery token:', e);
+  }
   res.status(204).end();
 });
 

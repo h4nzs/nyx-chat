@@ -13,3 +13,4 @@ export * from './pqSeal.js';
 export * from './groupEnvelope.js';
 export * from './ohttp.js';
 export * from './searchOprf.js';
+export * from './pir.js';

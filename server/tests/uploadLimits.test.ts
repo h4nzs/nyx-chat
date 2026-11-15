@@ -15,6 +15,12 @@ import assert from 'node:assert/strict';
 
 import {
   ENCRYPTION_OVERHEAD_BYTES,
+  UPLOAD_RETENTION_MAX_SECONDS,
+  UPLOAD_URL_TTL_MAX_SECONDS,
+  UPLOAD_URL_TTL_MIN_SECONDS,
+  clampFileRetentionSeconds,
+  clampUploadUrlTtl,
+  isOwnedObjectKey,
   resolveUploadPolicy,
   validateUploadSize,
 } from '../src/utils/uploadLimits.js';
@@ -90,4 +96,52 @@ test('batas burner 50 MB dilaporkan untuk pesan error', () => {
   const verdict = validateUploadSize(60 * MB, policy);
   assert.equal(verdict.ok, false);
   assert.equal(verdict.ok === false && verdict.maxMB, 50);
+});
+
+// ============================================================================
+// [AUDIT 2026-10-31 — F-06] TTL URL & retensi objek di-clamp.
+// ============================================================================
+
+test('urlTtl di-clamp ke [60 s, 15 mnt]', () => {
+  assert.equal(clampUploadUrlTtl(1), UPLOAD_URL_TTL_MIN_SECONDS);
+  assert.equal(clampUploadUrlTtl(31_536_000), UPLOAD_URL_TTL_MAX_SECONDS);
+  assert.equal(clampUploadUrlTtl('120'), 120);
+  assert.equal(clampUploadUrlTtl(undefined), 300, 'default tetap 5 menit');
+  assert.equal(clampUploadUrlTtl('abc'), 300);
+  assert.equal(clampUploadUrlTtl(Number.NaN), 300);
+});
+
+test('fileRetention dibatasi 30 hari dan nilai tak masuk akal jadi 0', () => {
+  assert.equal(clampFileRetentionSeconds(60), 60);
+  assert.equal(clampFileRetentionSeconds(365 * 24 * 60 * 60), UPLOAD_RETENTION_MAX_SECONDS);
+  assert.equal(clampFileRetentionSeconds(0), 0);
+  assert.equal(clampFileRetentionSeconds(-5), 0);
+  assert.equal(clampFileRetentionSeconds('nope'), 0);
+  assert.equal(clampFileRetentionSeconds(undefined), 0);
+});
+
+// ============================================================================
+// [AUDIT 2026-10-31 — F-08] Key objek R2 harus utuh & milik pemanggil.
+// ============================================================================
+
+const USER = '11111111-2222-4333-8444-555555555555';
+
+test('key milik user pada folder yang dikenal diterima', () => {
+  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-V1StGXR8_Z5jdHi6B-myT.bin`), true);
+  assert.equal(isOwnedObjectKey(USER, `avatars/${USER}-abc.jpg`), true);
+  assert.equal(isOwnedObjectKey(USER, `misc/${USER}-X.png`), true);
+});
+
+test('key user lain, folder tak dikenal, traversal, dan segmen liar ditolak', () => {
+  const other = '99999999-2222-4333-8444-555555555555';
+  assert.equal(isOwnedObjectKey(USER, `attachments/${other}-abc.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, `burner/abc.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, `secrets/${USER}-abc.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, `attachments/../${USER}-abc.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, `attachments/x/${USER}-abc.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-abc.bin/../../evil.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-abc.BIN`), false);
+  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-abc`), false, 'ekstensi wajib');
+  assert.equal(isOwnedObjectKey(undefined, `attachments/${USER}-abc.bin`), false);
+  assert.equal(isOwnedObjectKey(USER, 42), false);
 });

@@ -124,33 +124,6 @@
     "error_processing": "Kesalahan memproses tautan koneksi.",
     "decrypting_profile": "MENDEKRIPSI PROFIL..."
   },
-  "migration": {
-    "receiving_data": "Koneksi terjalin. Menerima data...",
-    "decrypting_vault": "Data diterima. Mendekripsi brankas...",
-    "complete": "Migrasi Selesai! Selamat datang kembali.",
-    "decryption_failed": "Dekripsi gagal. Data mungkin rusak.",
-    "receive_title": "Migrasi Perangkat",
-    "receive_desc": "Pindai QR ini dari perangkat lama Anda",
-    "read_vault_failed": "Gagal membaca brankas lokal.",
-    "camera_denied": "Akses kamera ditolak atau tidak tersedia.",
-    "encrypting_vault": "Mengenkripsi data brankas...",
-    "tunneling": "Mengirim data ke perangkat baru...",
-    "waiting_receiver": "Menunggu penerima memproses...",
-    "transfer_complete": "Transfer Selesai!",
-    "receiver_failed": "Penerima gagal mendekripsi atau waktu habis",
-    "failed_generic": "Migrasi gagal. QR tidak valid, kesalahan jaringan, atau waktu habis.",
-    "send_title": "Transfer Brankas",
-    "send_desc": "Kirim data ke perangkat baru Anda",
-    "preparing": "MENYIAPKAN BRANKAS...",
-    "archive_summary": "{{frames}} frame · {{size}}",
-    "restoring_data": "Memulihkan basis data...",
-    "restore_summary": "Dipulihkan {{records}} catatan · {{size}}",
-    "restore_failed": "Restore gagal: data mungkin rusak atau kunci salah.",
-    "status_tunneling": "MENGIRIM...",
-    "identity_regen_notice": "Setelah transfer selesai, perangkat ini akan menghasilkan identitas unik baru untuk menjamin keamanan maksimal.",
-    "syncing_hardware": "Menyelaraskan Hardware...",
-    "important_note": "Penting"
-  },
   "not_found": {
     "title": "Halaman Tidak Ditemukan",
     "desc": "Jalur terenkripsi yang Anda coba akses tidak ada atau telah dihapus dari sistem.",
@@ -235,6 +208,7 @@
   "contact_trust_stranger": "Tidak dikenal",
   "device_revoked_successfully": "Perangkat berhasil dicabut",
   "history_sync_payload_broadcasted_success": "Sinkronisasi riwayat berhasil disiarkan.",
+  "link_history_restored": "Riwayat dari perangkat sebelumnya dipulihkan ({{count}} item).",
   "preparing_history_sync_for_your_linked_d": "Menyiapkan sinkronisasi riwayat untuk perangkat terhubungmu...",
   "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat lainmu..."
 }

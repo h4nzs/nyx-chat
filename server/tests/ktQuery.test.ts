@@ -276,8 +276,22 @@ test('ktQuery: hasil terhitung di metrik, termasuk saat nonaktif', async (t) => 
 });
 
 test('ktQuery: proxy mengikat auth + limiter dan memetakan kode error yang terlihat', () => {
-  assert.match(routerSource, /requireAuth/, 'endpoint KT wajib terautentikasi');
+  // [audit N7-01] Search bukti sengaja ANONIM: server tidak boleh menerima
+  // pasangan akun→hash. Route lain (monitor/config/head/distinguished, dan GET
+  // search lama) tetap terautentikasi.
+  assert.match(
+    routerSource,
+    /router\.post\('\/search', ktProofLimiter, async/,
+    'POST search harus anonim dan memakai limiter khusus'
+  );
+  assert.doesNotMatch(
+    routerSource,
+    /router\.post\('\/search',[^\n]*requireAuth/,
+    'POST search tidak boleh mewajibkan auth (kembalikan N7-01)'
+  );
+  assert.match(routerSource, /requireAuth/, 'route KT lain tetap terautentikasi');
   assert.match(routerSource, /generalLimiter/, 'endpoint KT dibatasi lajunya');
+  assert.match(routerSource, /ktProofLimiter/, 'search memakai limiter terpisah');
   assert.match(routerSource, /KT_QUERY_DISABLED/, 'tanpa KT_QUERY_URL = 503 terlihat');
   assert.match(routerSource, /KT_NOT_FOUND/, 'tidak ada di log = 404 terpisah dari kegagalan layanan');
   assert.match(routerSource, /KT_UNAVAILABLE/, 'kegagalan layanan = error yang terlihat');

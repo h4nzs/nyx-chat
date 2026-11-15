@@ -65,16 +65,17 @@ test('intersectOnline: hanya peer yang sedang online', () => {
   assert.deepEqual(intersectOnline([], new Set(['a'])), []);
 });
 
-test('collectPresencePeers: dua query, dedupe, hanya nilai ter-seal yang dikenali', async () => {
+test('collectPresencePeers: membership + session key, dedupe, hanya nilai ter-seal yang dikenali', async () => {
   await withPepper('p-presence', async () => {
     const sealedBob = await sealAtRest('u-bob');
     const sealedCarol = await sealAtRest('u-carol');
-    const calls: Array<Record<string, unknown>> = [];
+    const membershipCalls: Array<Record<string, unknown>> = [];
+    const sessionCalls: Array<Record<string, unknown>> = [];
     const fake: PresenceMembershipClient = {
       userHiddenConversation: {
         findMany: async (args) => {
-          calls.push(args as Record<string, unknown>);
-          if (calls.length === 1) {
+          membershipCalls.push(args as Record<string, unknown>);
+          if (membershipCalls.length === 1) {
             return [{ conversationId: 'c1' }, { conversationId: 'c2' }];
           }
           return [
@@ -86,39 +87,66 @@ test('collectPresencePeers: dua query, dedupe, hanya nilai ter-seal yang dikenal
           ];
         },
       },
+      sessionKey: {
+        findMany: async (args) => {
+          sessionCalls.push(args as Record<string, unknown>);
+          if (sessionCalls.length === 1) {
+            // [PASS-2 residual] 1:1 / grup buatan sendiri: percakapan milik saya
+            // datang dari session key, bukan baris keanggotaan.
+            return [{ conversationId: 'c3' }];
+          }
+          return [
+            { device: { userId: 'u-dave' } },
+            { device: { userId: 'u-bob' } }, // duplikat dengan sumber membership
+            { device: { userId: null } }, // device terhapus / rusak
+          ];
+        },
+      },
     };
 
     const peers = await collectPresencePeers(fake, 'me');
-    assert.deepEqual(peers.sort(), ['u-bob', 'u-carol'], 'identitas ter-seal dibuka; plaintext lama diabaikan');
-    assert.equal(calls.length, 2, 'dua query (conversation saya → anggota lain), bukan N+1');
-    assert.deepEqual(calls[0].select, { conversationId: true });
-    assert.deepEqual(calls[1].distinct, ['userId'], 'dedupe userId di DB');
+    assert.deepEqual(peers.sort(), ['u-bob', 'u-carol', 'u-dave'], 'identitas ter-seal dibuka; plaintext lama diabaikan');
+    assert.equal(membershipCalls.length, 2, 'dua query membership, bukan N+1');
+    assert.equal(sessionCalls.length, 2, 'dua query session key (milik saya → peserta lain)');
 
     // [docs/28 Tier 1.2] kolom userId kini routing identity TER-SEAL → lookup
     // memakai nilai kanonik (tunggal) dan nilai baris dibuka kembali sebelum
     // dipakai sebagai target broadcast.
-    const mineWhere = calls[0].where as { userId: { in: string[] } };
-    const peerWhere = calls[1].where as { conversationId: unknown; userId: { not: null; notIn: string[] } };
+    const mineWhere = membershipCalls[0].where as { userId: { in: string[] } };
+    const peerWhere = membershipCalls[1].where as { conversationId: { in: string[] }; userId: { not: null; notIn: string[] } };
     assert.deepEqual(mineWhere.userId.in, [await sealAtRest('me')], 'kandidat = bentuk sealed tunggal');
     assert.notEqual(mineWhere.userId.in[0], 'me', 'nilai tersimpan bukan userId asli (D2)');
-    assert.deepEqual(peerWhere.conversationId, { in: ['c1', 'c2'] });
+    assert.deepEqual(peerWhere.conversationId.in.sort(), ['c1', 'c2', 'c3'], 'conversation dari kedua sumber');
     assert.deepEqual(peerWhere.userId.notIn, mineWhere.userId.in, 'peer tidak termasuk diri sendiri');
     assert.equal(peerWhere.userId.not, null);
+
+    const sessionMine = sessionCalls[0].where as { device: { userId: string } };
+    const sessionPeers = sessionCalls[1].where as { conversationId: { in: string[] }; NOT: { device: { userId: string } } };
+    assert.deepEqual(sessionMine, { device: { userId: 'me' } }, 'session key milik perangkat saya');
+    assert.deepEqual(sessionPeers.NOT, { device: { userId: 'me' } }, 'peserta lain, bukan perangkat sendiri');
   });
 });
 
-test('collectPresencePeers: tanpa conversation → berhenti sebelum query kedua', async () => {
-  let calls = 0;
+test('collectPresencePeers: tanpa conversation di kedua sumber → berhenti sebelum query anggota', async () => {
+  let membershipCalls = 0;
+  let sessionCalls = 0;
   const fake: PresenceMembershipClient = {
     userHiddenConversation: {
       findMany: async () => {
-        calls += 1;
+        membershipCalls += 1;
+        return [];
+      },
+    },
+    sessionKey: {
+      findMany: async () => {
+        sessionCalls += 1;
         return [];
       },
     },
   };
   assert.deepEqual(await collectPresencePeers(fake, 'me'), []);
-  assert.equal(calls, 1, 'tidak ada query anggota kalau user belum punya conversation');
+  assert.equal(membershipCalls, 1, 'tidak ada query anggota kalau user belum punya conversation');
+  assert.equal(sessionCalls, 1);
 });
 
 test('D14 wiring: roster global tidak lagi dikirim ke klien / di-broadcast', () => {

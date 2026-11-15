@@ -1,16 +1,45 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommandInput } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommandInput } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
+/**
+ * [docs/41 §6.6] Endpoint efektif object storage.
+ *
+ * Produksi memakai R2 (`https://<account>.r2.cloudflarestorage.com`), tetapi
+ * jalur sukses (presign → PUT → GET → HEAD) hanya bisa diuji tanpa akun R2 bila
+ * endpoint bisa diarahkan ke MinIO. `R2_ENDPOINT` adalah seam itu; kosong =
+ * perilaku lama persis. Trailing slash dibuang supaya SDK tidak menghasilkan
+ * `//bucket` saat `forcePathStyle` aktif.
+ */
+export function resolveR2Endpoint(input: { r2Endpoint?: string; r2AccountId?: string }): string {
+  const explicit = (input.r2Endpoint || '').trim().replace(/\/+$/, '')
+  if (explicit) return explicit
+  return `https://${input.r2AccountId || ''}.r2.cloudflarestorage.com`
+}
+
 export const s3Client = new S3Client({
-  region: 'auto',
-  endpoint: `https://${env.r2AccountId}.r2.cloudflarestorage.com`,
+  // MinIO menandatangani dengan region nyata (`us-east-1` bawaan) dan menolak
+  // SigV4 ber-region `auto`; R2 justru memakai `auto`. Region ikut endpoint:
+  // seam uji tidak boleh mengubah perilaku produksi.
+  region: env.r2Endpoint ? 'us-east-1' : 'auto',
+  endpoint: resolveR2Endpoint(env),
   credentials: {
     accessKeyId: env.r2AccessKeyId,
     secretAccessKey: env.r2SecretAccessKey
   },
   forcePathStyle: true
 })
+
+/**
+ * Kredensial R2 lengkap? Presign tanpa nilai ini hanya menghasilkan 500 dari
+ * SDK ("No value provided for input HTTP label: Bucket") — di e2e/CI itu
+ * tampak seperti bug klien. Semua rute yang mem-presign WAJIB memeriksa ini
+ * lebih dulu dan menjawab 503 dengan kode yang bisa dibaca.
+ */
+export const r2Configured = (): boolean =>
+  // `R2_ENDPOINT` eksplisit menggantikan account id: MinIO tidak punya account
+  // id, jadi tanpa ini seam uji selalu dijawab 503 oleh rute yang mem-presign.
+  Boolean((env.r2AccountId || env.r2Endpoint) && env.r2AccessKeyId && env.r2SecretAccessKey && env.r2BucketName)
 
 // Generate URL upload yang valid selama 5 menit (default)
 // urlTtl: Berapa lama LINK upload valid (detik)
@@ -104,6 +133,33 @@ export const listR2Objects = async (prefix: string): Promise<Array<{ key: string
   } while (continuationToken)
 
   return out
+}
+
+/**
+ * [docs/40 §40.6] HEAD objek — keberadaan + ukuran tanpa mengunduh isinya.
+ *
+ * Dipakai `POST /link/history/ready`: presigned PUT hanya mengikat ukuran di
+ * tanda tangan, jadi tanpa pemeriksaan ini klien (atau perantara) bisa
+ * mendaftarkan pointer `{size, digest, sealedKey}` untuk objek yang tidak pernah
+ * ada / berukuran lain, dan perangkat baru baru tahu setelah mengunduh.
+ *
+ * `null` = objek tidak ada (404/NotFound). Error lain (kredensial, jaringan)
+ * dilempar: menganggapnya "tidak ada" akan menyalahkan klien atas kegagalan
+ * infrastruktur.
+ */
+export const headR2Object = async (key: string): Promise<{ contentLength: number } | null> => {
+  try {
+    const head = await s3Client.send(new HeadObjectCommand({
+      Bucket: env.r2BucketName,
+      Key: key
+    }))
+    return { contentLength: typeof head.ContentLength === 'number' ? head.ContentLength : 0 }
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+    const name = (error as { name?: string }).name
+    if (status === 404 || name === 'NotFound' || name === 'NoSuchKey') return null
+    throw error
+  }
 }
 
 // Hapus file

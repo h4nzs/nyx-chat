@@ -59,6 +59,7 @@
   "client_version_continue": "Lanjutkan tanpa mengirim",
   "client_version_pwa_hint": "Bila muat ulang tidak mengubah apa pun, tutup semua tab NYX — dan bila ini aplikasi terpasang, pasang ulang dari situs NYX.",
   "api_rate_limited": "Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.",
+  "api_csrf_unavailable": "Tidak bisa menghubungi server untuk menyiapkan permintaan ini. Periksa koneksimu lalu coba lagi — belum ada yang terkirim.",
   "api_group_access_expired": "Akses kamu ke grup ini sudah tidak berlaku. Masuk lagi lewat undangan baru, atau minta admin menambahkanmu kembali.",
   "api_admin_required": "Hanya admin grup yang bisa melakukan ini. Kapabilitas adminmu mungkin sudah berputar — buka ulang grup lalu coba lagi.",
   "api_blind_auth_required": "Tindakan ini butuh rahasia yang diterbitkan saat dibuat, dan perangkat ini tidak memilikinya.",

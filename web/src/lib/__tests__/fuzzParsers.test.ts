@@ -28,6 +28,10 @@ function envInt(name: string): number | undefined {
 
 const ITERATIONS = envInt('NYX_FUZZ_ITERS') ?? 3000;
 const SECONDS = envInt('NYX_FUZZ_SECONDS') ?? 0;
+// Batas tes harus mengikuti durasi kampanye: nightly menjalankan 3600 detik,
+// sedangkan batas hard-coded 900 detik dulu membuat kampanye yang SUDAH selesai
+// (0 temuan) tetap dilaporkan gagal (`Test timed out in 900000ms`, run 42356420274).
+const CAMPAIGN_TIMEOUT_MS = SECONDS > 0 ? SECONDS * 1000 + 60_000 : 900_000;
 
 describe('fuzz parser input tak terpercaya (WS-G(5))', () => {
   it('tidak menemukan crash pada kampanye pendek', () => {
@@ -38,7 +42,7 @@ describe('fuzz parser input tak terpercaya (WS-G(5))', () => {
     for (const target of report.targets) {
       expect(target.iterations, `${target.name} harus benar-benar dijalankan`).toBeGreaterThan(0);
     }
-  }, 900_000);
+  }, CAMPAIGN_TIMEOUT_MS);
 
   it('deterministik: seed sama → hasil identik (temuan bisa direproduksi)', () => {
     const first = runParserFuzz({ seed: 0x1234abcd, iterations: 300 });

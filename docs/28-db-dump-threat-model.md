@@ -77,6 +77,8 @@ Catatan: `Message.senderId` **bukan** FK (pseudonym untuk grup v2, `NULL` untuk
 | `Conversation` | `isGroup`, `encryptedMetadata`, `authSecret` (SHA-256 token), `groupTokenExpiresAt`, `adminSecretHash`, `lastMessageAt`, `metadata` (JSON tenant) | Hash/timestamp saja; token asli tidak |
 | `Message` | `content` (ciphertext E2EE), `deleteSecret` (plaintext), `senderId` (pseudonym/NULL), `sessionId`, `repliedToId`, `isViewOnce/isViewed`, `createdAt`, `expiresAt` | Ciphertext tidak; secret & metadata ya |
 | `MessageStatus` | `userId` (asli untuk 1:1), `status`, `updatedAt` | Ya — pembaca + waktu baca |
+| `MessageViewOnceOpen` | `openerTag` (**HMAC per percakapan**, bukan userId), `openedAt` (15 mnt) | Tidak — dump hanya melihat "pesan X dibuka oleh tag anonim"; tanpa pepper tag tidak bisa ditautkan ke akun |
+| `MessageViewOnceRecipient` | `recipientTag` (**HMAC per percakapan**, bukan userId), `createdAt` | Tidak bisa ditautkan ke akun tanpa pepper, tetapi **dump melihat jumlah tujuan per pesan** (metadata yang sama sudah dimiliki server saat relay; yang berubah hanya retensinya) |
 | `UserHiddenConversation` | `userId` (ter-seal, routing-only), `tokenHash`, `tokenEpoch`, `expiresAt` | Ya — keanggotaan grup (token asli tidak) |
 | `GroupCredential` (historis; model dihapus 2026-10-23) | `serial` (64-hex), `conversationId`, `keyVersion` | Ya — tanpa identitas |
 | `CredentialIssuerKey` (historis; model dihapus 2026-10-23) | `publicKeyJwk`, **`privateKeyPkcs8` (PLAINTEXT)** | Ya — **akar kepercayaan** |
@@ -330,12 +332,13 @@ hanya graph "device X punya sesi di conversation C" — layak dicatat, bukan pri
 **STATUS: SELESAI (Tier 0.7 + 1.5).** Dua perubahan terpisah:
 1. **Redis tidak lagi memuat userId asli** (`server/src/utils/redisIdentity.ts`):
    `identityTag(userId) = HMAC(pepper, "redis:v1:"+userId)` untuk keanggotaan SET
-   (`online_users`) & sufiks key (`active_device:*`, `is_migrating:*`,
-   `cache:keys:*`, `rate_limit:*`); `sealIdentity(userId)` = `sealAtRest`
+   (`online_users`) & sufiks key (`active_device:*`, `cache:keys:*`,
+   `rate_limit:*`); `sealIdentity(userId)` = `sealAtRest`
    (deterministik, bisa dipulihkan) untuk member SET yang dipakai sebagai target
-   kirim (`burner:room:*`, `migration:room:*`, `migration_owner:*`) dan nilai
-   `linking_token:*`. Pembaca memakai bentuk ter-seal saja (toleransi plaintext
-   dihapus 2026-10).
+   kirim (`burner:room:*`) dan nilai `linking_token:*`. Pembaca memakai bentuk
+   ter-seal saja (toleransi plaintext dihapus 2026-10). `is_migrating:*`,
+   `migration_owner:*`, dan `migration:room:*` ikut hilang bersama alur transfer
+   QR perangkat (2026-10-29).
 2. **Presence jadi lazy/opt-in** (`server/src/utils/presenceSubscriptions.ts`):
    tidak ada lagi snapshot `type:'bulk'` otomatis maupun fan-out join/leave ke
    semua peer online. Klien meminta `presence:subscribe` untuk kontak yang SEDANG

@@ -1,10 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { transportClient, } from '@lib/transportClient';
+import { isPushSupported } from '@lib/pushSupport';
 import { urlBase64ToUint8Array } from '@utils/url';
 import toast from 'react-hot-toast';
 import i18n from '../i18n';
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+async function getReadyServiceWorker(timeoutMs = 1500): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
 
 export function usePushNotifications() {
   const [permission, setPermission] = useState<NotificationPermission>(Notification.permission);
@@ -55,10 +64,14 @@ export function usePushNotifications() {
     }
   }, []);
 
-  // 1. Cek status subscription saat pertama kali load
+  // 1. Cek status subscription saat pertama kali load.
+  //    Gerbangnya `isPushSupported()`: di build dev `sw.js` tidak ada dan
+  //    `navigator.serviceWorker.ready` MEMBEKUKAN main thread WebKit — halaman
+  //    /settings lalu mati total (trace WebKit run lokal `/tmp/opencode/wktrace6`).
   useEffect(() => {
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-      navigator.serviceWorker.ready.then(registration => {
+    if (isPushSupported()) {
+      getReadyServiceWorker(1500).then(registration => {
+        if (!registration) return;
         registration.pushManager.getSubscription().then(subscription => {
           if (!mountedRef.current) return;
           const hasSub = !!subscription;
@@ -78,7 +91,7 @@ export function usePushNotifications() {
 
   // 2. Fungsi Subscribe (Dipanggil saat tombol diklik)
   const subscribeToPush = useCallback(async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    if (!isPushSupported()) {
       toast.error(i18n.t('errors:push_notifications_not_supported', 'Push notifications not supported'));
       return;
     }
@@ -90,7 +103,12 @@ export function usePushNotifications() {
 
     setLoading(true);
     try {
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await getReadyServiceWorker(2000);
+      if (!registration) {
+        toast.error(i18n.t('errors:push_notifications_not_supported', 'Push notifications not supported'));
+        setLoading(false);
+        return;
+      }
       const perm = await Notification.requestPermission();
       setPermission(perm);
 
@@ -132,8 +150,8 @@ export function usePushNotifications() {
     if (!mountedRef.current) return;
     setLoading(true);
     try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
+      const registration = await getReadyServiceWorker(2000);
+      const subscription = registration ? await registration.pushManager.getSubscription() : null;
 
       if (subscription) {
         await subscription.unsubscribe();

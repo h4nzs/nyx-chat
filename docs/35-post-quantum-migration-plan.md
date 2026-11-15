@@ -4,7 +4,7 @@
 > Fase 0–8 selesai di kode (Fase 4a OPRF landed dan ter-wire hibrida ke
 > `oprfIndex` register/login/search; **PIR 4b service+proxy + 4c client landed,
 > 4d benchmark harness landed 2026-10-24, audit + angka produksi belum**; Fase 7
-> = log KT ML-DSA + dual-write + backfill login opt-in, **belum cutover baca**). Fase 8 mendaratkan KAT resmi **ML-DSA-65
+> = log KT ML-DSA + backfill login opt-in, **cutover tulis+baca selesai di kode** (`docs/38`)). Fase 8 mendaratkan KAT resmi **ML-DSA-65
 > ACVP** + **X-Wing draft-06**, KAT lintas-implementasi X3DH v2/group v4/KT v2,
 > `bench:pq`, audit residual v1, dan E2E recovery/device-linking/OHTTP.
 >
@@ -40,8 +40,14 @@
 | 4 | Discovery (tutup R5, OHTTP search, PIR) | **landed sebagian** — R5 penuh, OHTTP + padded query, rate limit per akun/IP, baca bundle tanpa OTPK. **4a OPRF landed 2026-10-23** (`ristretto255-SHA512`, endpoint default mati); kolom `oprfIndex` diisi register/login dan dipakai search saat gate aktif, `usernameHash` legacy tetap. **4b PIR landed di kode** (ChalametPIR sidecar + proxy, snapshot 2 KB, default mati) dan **4c client landed** (WASM/worker, hint cache, epoch retry, OHTTP POST biner); **4d benchmark harness landed 2026-10-24** (`bench:pir`, N=1k/10k), audit + angka produksi belum | §35.7 Fase 4 |
 | 5 | Credential PQ (suite abstraction, BRaccoon) | **dihapus 2026-10-23** — cutover PQ-only menghapus suite credential blind RSA, endpoint, persist Dexie, dan tesnya. Tidak ada pengganti PQ; BRaccoon/blind UOV tetap riset | §35.2.3, §35.6.6 |
 | 6 | Anonymous issuance | **dihapus 2026-10-23** — bank token/redeem/commit ikut dihapus bersama credential; tidak ada endpoint `/api/credentials/*` | §35.6.7 |
-| 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, dual-write server + pemilihan ABI klien. Belum di-deploy | §35.7 Fase 7 |
+| 7 | KT Scope B (log crypto PQ) | **landed di kode** 2026-10-21 — fork `tree/transparency` + ABI WASM v2 (ML-DSA-65, SHA-256 index), service/DB/port/systemd/metrik/snapshot v2, auditor v2, cutover tulis+baca server + pemilihan ABI klien. Log v1 dipensiunkan 2026-10-28 (`docs/38`) | §35.7 Fase 7 |
 | 8 | Removal, audit, dokumentasi | **selesai di kode** 2026-10-23 — KAT resmi ML-DSA ACVP + X-Wing draft-06, X3DH v2 oracle, `bench:pq` desktop + throttle, audit residual v1, E2E recovery/device-linking/OHTTP; denylist baru 0, sisa 2 exception `hybrid-v2-identity` + 2 `tier-b` (Privacy Pass) | §35.8, §35.10 |
+
+> **PIR (2026-11-09):** baris fasa 4 di atas menggambarkan jalur lama. PIR satu-server
+> sudah dihapus dan diganti `xor-pir-v1` dua server + sharding (`docs/42`,
+> `docs/10` §10.19): `packages/pir-wasm`, `pir.worker.ts`, `/params`, hint, dan
+> `PIR_ARITY`/`PIR_MASTER_SECRET` tidak ada lagi; rute kini
+> `/api/pir/:server/{manifest,query}`.
 
 **PQ-only:** `resolvePqV2Enabled()` selalu `true`; `VITE_PQ_V2` tidak lagi
 mengubah perilaku dan `VITE_ANON_CREDENTIALS` sudah tidak dipakai. Tidak ada
@@ -113,8 +119,7 @@ Akar sesi SPQR berasal dari X3DH; karena itu X3DH v2 adalah prasyarat.
 | `web/src/workers/crypto.worker.ts` | 965, 976, 1336, 2212, 2244, 2327 | verifikasi/sign Ed25519 |
 | `web/src/store/auth.ts` | 84-85, 540, 562, 948, 963 | prekey signature + X25519 keygen |
 | `web/src/utils/crypto.ts` | 213, 269 | group metadata Ed25519 (jalur v1; v4 ML-DSA saat gerbang aktif) |
-| `web/src/pages/MigrationSendPage.tsx` | 140 | ~~`crypto_box_seal` hanya untuk QR lama~~ → **dihapus di cutover PQ-only 2026-10-23**: hanya `sealForDevice` (X-Wing v2), QR v1 ditolak (`MigrationSendPage.tsx:140-146`) |
-| `web/src/pages/MigrationReceivePage.tsx` | 103 | ~~`crypto_box_seal_open` untuk QR lama~~ → **dihapus**: `openSealedForDevice` menolak apa pun tanpa magic v2 |
+| ~~`web/src/pages/MigrationSendPage.tsx`, `web/src/pages/MigrationReceivePage.tsx`~~ | — | **Dihapus 2026-10-29** bersama seluruh alur QR transfer perangkat (lihat CHANGELOG). Tidak ada lagi call site seal/open di jalur migrasi vault; sisa jalur klien adalah `sealForDevice`/`openSealedForDevice` yang sudah X-Wing v2 |
 | `web/src/store/message.ts` | 1015, 1136 | ~~`crypto_box_seal` untuk device tanpa `pqPublicKey`~~ → **dihapus**: device tanpa kunci PQ tidak mendapat push payload (`message.ts:1155-1165`) |
 | `server/src/routes/auth.ts` | 939 | verifikasi recovery Ed25519 (v1); ML-DSA-65 (`PQ_V2_DOMAINS.RECOVERY`) bila `signatureV2` |
 | `server/src/lib/groupCredentials.ts` | seluruh suite | RSA-PSS blind signature |
@@ -163,7 +168,7 @@ gate alih-alih menumpang di daftar ini.
   requester → target.
 - OHTTP **sudah dipakai alur aplikasi** untuk `GET /api/users/search` bila
   diaktifkan (token scoped 120 s dengan mode `on`/`off`; §35.7 Fase 3).
-  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati), **4b ChalametPIR sidecar + proxy `/api/pir/*` landed tetapi default mati; klien WASM/worker (4c) landed; 4d benchmark harness landed (`bench:pir`), audit + angka produksi belum** (§35.11 #3).
+  Default mati di kedua sisi. PIR dilanjutkan 2026-10-23; 4a OPRF landed dan ter-wire hibrida (`oprfIndex`, default mati), **4b ChalametPIR sidecar + proxy `/api/pir/*` landed tetapi default mati; klien WASM/worker (4c) landed; 4d benchmark harness landed (`bench:pir`), audit + angka produksi belum** (§35.11 #3). Sudah diganti `xor-pir-v1` dua server (docs/42).
 - Cover traffic (`web/src/lib/coverTraffic.ts`):
   - λ = 0.5 pesan cover/menit/conversation,
   - grup opt-in, burner, dan **1:1 opt-in setelah ada pesan nyata**
@@ -584,7 +589,6 @@ Berkas utama:
 - `web/src/lib/keychainDb.ts`
 - `web/src/lib/groupCredentials.ts` (nanti)
 - `web/src/lib/peerIdentityTrust.ts`
-- `web/src/pages/MigrationSendPage.tsx`, `MigrationReceivePage.tsx`
 - `web/src/store/message.ts`
 - `server/src/routes/auth.ts`, `keys.ts`
 - `server/src/utils/keyTransparency.ts`
@@ -626,9 +630,10 @@ Status (2026-10-20; gerbang `VITE_PQ_V2` dihapus 2026-10-23): **seluruh langkah 
     yang beredar tetap bisa dibuka). Semua call site lama `worker_pq_box_seal`/`worker_pq_box_seal_open`
     dialihkan: ratchet session-key, distribusi sender key grup, pembukaan distribusi, admin token
     (seal+open), fulfillment key, dan self round-trip.
-  - Migrasi vault (`MigrationSend/ReceivePage`) ikut pindah: QR penerima kini membawa
-    `pqPubKey` (X-Wing) bersama `pubKey`; pengirim menyegel lewat `sealForDevice` (v1 klasik
-    untuk QR lama tanpa `pqPubKey`), penerima membuka lewat `openSealedForDevice` (deteksi magic).
+  - Migrasi vault lewat QR (`MigrationSend/ReceivePage`) dulu ikut pindah — QR penerima
+    membawa `pqPubKey` (X-Wing), pengirim menyegel lewat `sealForDevice`, penerima membuka
+    lewat `openSealedForDevice`. **Alur itu dihapus 2026-10-29**; tidak ada call site
+    seal/open tersisa di jalur migrasi vault.
   - Push payload menyusul di langkah 9: kini `store/message.ts` membaca `pqPublicKey` per device
     (fallback `user.pqPublicKey`) dan memakai `sealForDevice` saat gerbang v2 aktif; jalur
     `crypto_box_seal` hanya tersisa sebagai fallback perangkat tanpa kunci PQ. SW memang tidak
@@ -963,8 +968,9 @@ Pekerjaan:
   tidak bisa menurunkan index dari `usernameHash` ter-pepper. **`usernameHash` ter-pepper tetap
   disimpan** karena KT butuh identifier Argon2id mentah; ini bukan cutover penuh.
 - 🟡 **4b PIR service (landed di kode 2026-10-23, belum deploy):** crate
-  `server/pir-sidecar` memakai **ChalametPIR 0.8.0** (keyword PIR, record
-  ~2 KB per OPRF index, arity 3 default). Snapshot epoch offline + `/params`
+  `server/pir-sidecar` dulu memakai **ChalametPIR 0.8.0** (keyword PIR, record
+  ~2 KB per OPRF index, arity 3 default) — **sudah diganti `xor-pir-v1` dua
+  server + sharding, 2026-11-09 (docs/42)**. Snapshot epoch offline + `/params`
   (hint/filter/seed) + `/query` opaque + `/admin/rebuild` loopback; proxy
   Node `/api/pir/*` hanya meneruskan byte setelah auth + rate limit, tanpa
   kripto PIR di JS. Default **mati** (`PIR_ENABLED=1`). **Di selfhost sudah
@@ -1135,6 +1141,49 @@ Status (2026-10-22): **selesai di kode, dengan residual non-kode**. Yang sudah l
   Halaman nonaktif pada build default; aktif lewat dev server `--host` atau
   `pnpm --filter nyx-web run build:pq-bench`. Level baterai adalah proxy kasar
   konsumsi energi, bukan pengukuran mWh — angka p95 tetap skor utamanya.
+  **(2026-10-29) Jalur nyata ikut diukur** di halaman yang sama lewat
+  `web/src/lib/devicePipelineBench.ts`: pipeline worker seal/open
+  XChaCha20-Poly1305 lewat crypto worker yang sama dengan aplikasi (4
+  permintaan in-flight; payload 256 B dan 8152 B = plaintext setelah padding
+  traffic-cover 8 KB), lalu put/get/delete `messageKeys` dan update state
+  ratchet 2 KB di database terpisah `nyx-device-bench` yang dihapus setelah run
+  (`deleted` `true`/`false`/`null` bila `indexedDB.databases()` tidak ada).
+  Langkah ratchet/`kdfChain`, serialisasi header, dan RTT jaringan tetap TIDAK
+  diukur; state ratchet IndexedDB adalah buffer sintetis, bukan sesi nyata.
+  **Hasil perangkat nyata (2026-10-29)** — dua perangkat: Oppo A57 (Android 10,
+  Chrome 149, 8 core, `deviceMemory` 4 GB) dan laptop dev (Firefox 152,
+  x86_64, 8 core). 50 iterasi, p95:
+
+  | Operasi | Oppo A57 | Laptop |
+  |---|---|---|
+  | ML-DSA-65 keygen | 14,5 ms | 16 ms |
+  | ML-DSA-65 sign | 65,8 ms | 147 ms |
+  | ML-DSA-65 verify | 11,5 ms | 20 ms |
+  | X-Wing keypair / encaps / decaps | 0,7 / 1,5 / 2,1 ms | 2 / 2 / 3 ms |
+  | seal / open 256 B | 13,2 / 10,2 ms | 52 / 6 ms |
+  | seal / open 8152 B (padding 8 KB) | 15,4 / 4,2 ms | 13 / 16 ms |
+  | IDB put / get `messageKeys` | 10,9 / 3,4 ms | 6 / 5 ms |
+  | IDB put state ratchet 2 KB | 9,3 ms | 7 ms |
+  | throughput pipeline | 604 op/dtk | 468 op/dtk |
+
+  Kedua perangkat memenuhi `PQ_BENCH_BUDGET` desktop. Envelope 8 KB keluar
+  sebagai 10.923 karakter base64url (~10,7 KiB di kabel) — itu yang dihitung
+  budget trafik, bukan 8 KB. Yang paling lambat di ponsel justru lapisan
+  penyimpanan: satu `put` `messageKeys` p95 10,9 ms (24,2 ms pada run 20
+  iterasi, yang masih memuat pembukaan/upgrade database) ditambah state ratchet
+  9,3 ms per langkah — puluhan milidetik per pesan terkirim, karena Dexie
+  berjalan di main thread. Catatan metodologi:
+  run 5 iterasi masih memuat cold-start worker/libsodium (seal 256 B 20,7 ms
+  lebih lambat daripada seal 8 KB 11,0 ms), jadi laporkan angka dari ≥20
+  iterasi; p95 laptop untuk seal 256 B (52 ms vs mean 13,8) berisik karena
+  mesin dev berbeban. Ulangan 50 iterasi di HP yang sama tanpa charger
+  mereproduksi angka ini dalam ±10% (sign p95 73,4 ms, seal/open 8 KB
+  12,6/9,2 ms, put `messageKeys` 10,9 ms, 619 op/dtk), jadi angkanya stabil —
+  tidak ada penurunan performa saat berjalan di baterai. **Baterai tetap bukan
+  pengukuran energi**: run dengan charger (33% → 34%) maupun tanpa charger
+  (35% → 35%, 4,6 dtk) sama-sama tidak bergerak melebihi resolusi 1%, jadi satu
+  run halaman ini tidak bisa dipakai untuk klaim konsumsi daya; perlu beban
+  sustained bermenit-menit atau meter daya eksternal.
 - **Registry exception**: `scripts/pq-only-exceptions.json` menyimpan **2
   berkas `hybrid-v2-identity`** dan **2 berkas `tier-b`** dengan `tier`,
   `rationale`, dan `removalGate`. Guard `scripts/check-pq-only.mjs` menolak
@@ -1240,7 +1289,9 @@ Test yang sudah ada (Fase 0–7):
   menjalankannya di **step terpisah** pada job `e2e`.
 
 Belum ada (fase lanjut):
-- Benchmark perangkat rendah dan baterai (desktop + throttle proxy sudah ada).
+- Benchmark baterai (energi) dan perangkat kelas bawah. Desktop + proxy throttle
+  + satu HP nyata (Oppo A57, 2026-10-29, §35.11) sudah terukur; konsumsi energi
+  dalam mWh dan HP kelas bawah sungguhan masih terbuka.
 - BRaccoon/blind UOV + dual verify/kill switch untuk credential PQ. Fitur
   credential v1 **sudah dihapus**; suite baru harus dibangun dari nol. Spike
   BRaccoon sudah dijalankan dan **ditutup tanpa implementasi** (`docs/37`
@@ -1288,7 +1339,7 @@ yang tidak membutuhkan arsip v1.
 | PIR kompleks | discovery privacy tertunda | 4a OPRF + `oprfIndex` hybrid; **4b ChalametPIR sidecar+proxy + 4c klien/WASM landed, default mati**; 4d harness landed, audit + angka produksi belum; setup superlinear → sharding/epoch inkremental untuk direktori besar; OHTTP/rate limit tetap aktif |
 | OHTTP/HPKE classical | metadata layer bukan pure PQ | Tier B exception; dokumentasikan |
 | Deploy `prisma db push || true` | schema gagal diam-diam | verifikasi manual pasca-deploy |
-| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi, benchmark baterai/perangkat nyata masih terbuka |
+| Noble ML-DSA JS | timing/perf | **dipakai** (keputusan §35.11); signing worker-only; `bench:pq` desktop 2026-10-22: keygen p95 11,33 ms, sign 82,79 ms, verify 18,17 ms; proxy throttle 6x 2026-10-23: 79,1 / 186,5 / 71,3 ms — budget desktop tetap terpenuhi; HP mid-range (Oppo A57) 2026-10-29: keygen p95 14,5 ms, sign 65,8 ms, verify 11,5 ms, pipeline seal/open 8 KB 15,4/4,2 ms — energi/baterai dan HP kelas bawah masih terbuka |
 | v1/v2 state bercampur | arsip v1 lama tidak terbaca | arsipkan sebelum deploy; rollback = build lama; jangan hapus kolom/schema |
 
 Residual yang harus ditulis jujur:
@@ -1318,7 +1369,8 @@ Residual yang harus ditulis jujur:
    menggantikan keputusan tunda 2026-10-21. 4a OPRF sudah landed dan ter-wire
    hibrida (`oprfIndex`, default mati). **4b landed di kode 2026-10-23, belum
    deploy:** library **ChalametPIR 0.8.0** (core MPL-2.0; client/server BSD-3)
-   dipilih setelah benchmark lokal — bukan menulis kripto PIR sendiri. Crate
+   dipilih setelah benchmark lokal — bukan menulis kripto PIR sendiri. **Jalur ini
+   sudah diganti `xor-pir-v1` dua server (docs/42).** Crate
    Rust `server/pir-sidecar` menyimpan record ~2 KB per OPRF index, dengan
    snapshot epoch + hint (`/params`) dan `/query` opaque; proxy Node
    `/api/pir/*` hanya meneruskan byte dengan auth + rate limit. Snapshot
@@ -1360,11 +1412,9 @@ Residual yang harus ditulis jujur:
    dua peran (`/api/ohttp/relay` + `/api/ohttp/gateway`, default mati).
    Yang masih terbuka: apakah relay dipindah ke host/operator lain (hanya
    mengganti `OHTTP_RELAY_TARGET`), dan kapan carriage token diaktifkan.
-5. Kapan cutover **baca** KT ke v2 (`KT_QUERY_URL` diarahkan ke `:8089`)
-   setelah populasi log v2 cukup. Scope B sudah dimulai dan berjalan sebagai
-   **dual-write** (`KT_V2_SERVER_URL`); akun lama dapat di-backfill opt-in saat
-   login (`KT_V2_BACKFILL_ON_LOGIN=1`, hanya perangkat ber-`signingKeyV2`),
-   tetapi pembacaan masih v1. Rollback baca setelah klien mem-pin ABI 2
+5. Cutover **baca** KT ke v2 **sudah selesai di kode** (`KT_QUERY_URL` diarahkan
+   ke `:8089`, `docs/38`); akun lama di-backfill opt-in saat login
+   (`KT_V2_BACKFILL_ON_LOGIN=1`, hanya perangkat ber-`signingKeyV2`). Rollback baca setelah klien mem-pin ABI 2
    bersifat satu arah sampai ada jalur reset pin.
 
 ## 35.12 Referensi

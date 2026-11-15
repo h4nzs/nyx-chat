@@ -69,12 +69,6 @@ packages/keytrans-wasm-v2/Cargo.toml
 !packages/keytrans-wasm-v2/dist/
 !packages/keytrans-wasm-v2/dist/keytrans-v2.wasm
 
-# PIR client WASM (docs/35 Fase 4c): crate crates.io chalametpir-client,
-# Cargo.toml di-generate build.sh; artefak dist tetap DI-commit dan diverifikasi manifest.
-packages/pir-wasm/target/
-packages/pir-wasm/Cargo.toml
-!packages/pir-wasm/dist/
-!packages/pir-wasm/dist/pir-client.wasm
 
 # PIR sidecar (docs/35 Fase 4b): target Cargo dan snapshot direktori lokal
 # mengandung record pengguna; keduanya artefak, bukan sumber.
@@ -87,6 +81,7 @@ server/pir-snapshot.json
 server/kt-query/nyx-kt-query-v2
 server/kt-query/nyx-kt-auditor-v2
 server/kt-query/nyx-kt-v2-init
+server/kt-query/nyx-kt-v2-check
 
 # Oracle DR lintas-implementasi (`tools/dr-oracle`, docs/30 WS-G(6)): sumber Go
 # di-commit, binernya tidak (`go build`/`go build ./...` meninggalkannya di sini).
@@ -95,6 +90,10 @@ tools/dr-oracle/nyx-dr-oracle
 # [docs/30 WS-G(2)] Binari alat drill yang diunduh skrip (`promtool`,
 # scripts/drill-alerts.sh) — jangan di-commit: ~110MB dan terikat platform.
 .cache/
+
+# pnpm store lokal (dibuat oleh `pnpm install` dengan store-dir di repo).
+# Tanpa entri ini `git add -A` ikut memasukkan ribuan berkas store.
+.pnpm-store/
 
 # [deepwork] state sesi lokal, bukan deliverable
 .slim/deepwork/
@@ -113,3 +112,10 @@ deploy/selfhost/**/*.age
 deploy/selfhost/**/*.tar.gz
 deploy/selfhost/**/*.pem
 !deploy/selfhost/attestation/roots.pem
+
+# [DEBUG 2026-11-04] Reporter HTML Playwright kini selalu aktif (bukti kegagalan);
+# laporan dihasilkan tiap run dan tidak boleh masuk repo.
+playwright-report/
+
+# [docs/41] Output graphify lokal (bisa puluhan MB) — bukan artefak repo.
+graphify-out/

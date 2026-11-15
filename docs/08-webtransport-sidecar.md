@@ -22,7 +22,7 @@ Optional env: `PROD_CERT_PATH` / `PROD_KEY_PATH` (CA-signed cert in prod; self-s
 
 1. Client opens the connection, then the **first bidirectional stream** carries the AUTH frame: `[0x00][len u32 BE][JSON {token, identity:{fingerprint, installationId}}]`.
 2. The sidecar validates the JWT (HS256, exp) and verifies device identity fields.
-3. Sessions are stored in a `DashMap` keyed `"userId:deviceId:uuid"`. **One user = one device**: opening a new session for the same user kicks the previous session (`SESSION_REVOKED` KICK).
+3. Sessions are stored in `src/sessions.rs` (`SessionTable`, a `DashMap` keyed `"userId:deviceId:uuid"`). **One user = one device**: opening a new session for the same user kicks the previous session (`SESSION_REVOKED` KICK). Find+remove+insert runs under a per-user shard lock, so two AUTH that finish simultaneously cannot both survive — the old iterate→remove→insert sequence could leave two devices active. `sessions.rs` ships a concurrent test (16 AUTH × 50 rounds must leave exactly one session).
 4. Per-message device revalidation (against Redis `active_device:`) is done on the **Node side** (`redisBridge.isActiveDeviceAllowed`) — the sidecar checks only at session start.
 5. The Node relay does **not** re-verify the token: by the time a frame arrives on `nyx:upstream:*`, `userId`/`deviceId` are already the verified values from step 2. The AUTH payload is read there only for `identity` (Layer-2 hardware binding in `redisBridge.ts`); the `token` field is intentionally ignored — do not turn that block into a second verifier.
 
@@ -72,7 +72,7 @@ The sidecar hardcodes magic numbers for CHAFF/AUTH (`0x00`), ACK (`0x06`), KICK 
 
 ```bash
 cd server/transport-sidecar
-cargo test                                        # 17 tests incl. 20k-iteration campaign
+cargo test                                        # protokol + registry sesi (uji konkuren) + kampanye 20k iterasi
 NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing   # gate ≥1 jam
 ```
 

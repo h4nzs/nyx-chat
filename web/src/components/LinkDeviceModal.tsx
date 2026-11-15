@@ -8,6 +8,13 @@ import { apiErrorTranslator, formatApiErrorOr } from '@lib/apiErrorText';
 import ModalBase from './ui/ModalBase';
 import { transportClient } from '@lib/transportClient';
 import { approveDeviceLink, buildDeviceLinkUrl, denyDeviceLink } from '@lib/deviceLinking';
+import { deriveLinkSas, formatLinkSas } from '@lib/deviceLinkSas';
+import {
+  countHistoryRecords,
+  parseHistoryTooLarge,
+  readHistoryTables,
+  sendHistoryArchive,
+} from '@lib/linkHistoryExport';
 
 const QRCode = (
   (QRCodeRaw as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
@@ -33,6 +40,19 @@ interface Props {
 interface PendingLink {
   pendingId: string;
   deviceName: string;
+  /**
+   * [docs/40] X-Wing public key perangkat baru (dari `auth:linking_request`).
+   * Arsip riwayat diseal ke kunci ini — tanpa field ini arsip tidak bisa
+   * dialamatkan dan opsi riwayat harus disembunyikan, bukan gagal diam-diam.
+   */
+  pqPublicKey?: string;
+  /**
+   * [SEC 2026-10-30] Kode verifikasi yang diturunkan dari `pqPublicKey` di atas.
+   * Perangkat baru menampilkan kode yang sama dari kuncinya SENDIRI; pengguna
+   * wajib mencocokkan keduanya sebelum approve. Server yang menukar kunci
+   * menghasilkan kode berbeda (lihat `deviceLinkSas.ts`).
+   */
+  sas?: string;
 }
 
 const QR_REQUEST_TIMEOUT_MS = 8000;
@@ -42,6 +62,15 @@ export default function LinkDeviceModal({ onClose }: Props) {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingLink[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // [docs/40] Opsi "sertakan riwayat": hanya ditawarkan bila memang ada yang
+  // bisa dipindah. `readHistoryTables` memakai pembaca yang mendekripsi, jadi
+  // jumlahnya nyata (bukan tebakan dari baris Dexie).
+  const [includeHistory, setIncludeHistory] = useState(true);
+  const [historyCount, setHistoryCount] = useState<number | null>(null);
+  const [historyPhase, setHistoryPhase] = useState<'exporting' | 'uploading' | null>(null);
+  // [SEC 2026-10-30] Konfirmasi manusia atas kode verifikasi, per pendingId.
+  // Tanpa ini approve tidak boleh ditekan saat perangkat baru punya X-Wing key.
+  const [sasConfirmed, setSasConfirmed] = useState<Record<string, boolean>>({});
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearRequestTimer = () => {
@@ -50,6 +79,20 @@ export default function LinkDeviceModal({ onClose }: Props) {
       requestTimer.current = null;
     }
   };
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const tables = await readHistoryTables();
+        if (alive) setHistoryCount(countHistoryRecords(tables));
+      } catch (e) {
+        console.warn('[Link] Gagal menghitung riwayat yang bisa dipindah:', e);
+        if (alive) setHistoryCount(0);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const requestQr = useCallback(() => {
     setLinkingToken(null);
@@ -82,17 +125,30 @@ export default function LinkDeviceModal({ onClose }: Props) {
     };
 
     const onLinkRequest = (raw: unknown) => {
-      const data = (raw ?? {}) as { pendingId?: unknown; deviceName?: unknown };
+      const data = (raw ?? {}) as { pendingId?: unknown; deviceName?: unknown; pqPublicKey?: unknown };
       if (typeof data.pendingId !== 'string' || !data.pendingId) return;
       const pendingId = data.pendingId;
       const deviceName = typeof data.deviceName === 'string' && data.deviceName
         ? data.deviceName
         : t('settings:sessions_page.link_unknown_device');
-      setPending((prev) => [
-        ...prev.filter((item) => item.pendingId !== pendingId),
-        { pendingId, deviceName },
-      ]);
+      const pqPublicKey = typeof data.pqPublicKey === 'string' && data.pqPublicKey
+        ? data.pqPublicKey
+        : undefined;
       toast(t('settings:sessions_page.link_incoming', { device: deviceName }), { icon: '🔗' });
+      void (async () => {
+        // Kode bisa gagal diturunkan (kunci rusak) → item tetap tampil, tetapi
+        // tombol approve terkunci karena `sas` tidak ada (fail-closed).
+        const sas = pqPublicKey
+          ? await deriveLinkSas(pqPublicKey).catch((e) => {
+              console.error('[Link] Gagal menurunkan kode verifikasi:', e);
+              return null;
+            })
+          : null;
+        setPending((prev) => [
+          ...prev.filter((item) => item.pendingId !== pendingId),
+          { pendingId, deviceName, ...(pqPublicKey ? { pqPublicKey } : {}), ...(sas ? { sas } : {}) },
+        ]);
+      })();
     };
 
     transportClient.on('auth:linking_qr_ready', onQrReady);
@@ -107,10 +163,62 @@ export default function LinkDeviceModal({ onClose }: Props) {
   }, [requestQr, t]);
 
   const handleApprove = async (item: PendingLink) => {
+    // [docs/40 §40.4] `expectHistory` memberi tahu perangkat baru untuk menunggu
+    // arsip sebelum `complete` — kalau tidak, login-nya mencabut sesi perangkat
+    // ini di tengah unggahan. Hanya diklaim bila arsipnya memang mungkin dibuat.
+    // [SEC 2026-10-30] Perangkat baru yang punya X-Wing key WAJIB lolos
+    // pencocokan kode. Tanpa `sas` (kunci rusak/klien terlalu tua) arsip tidak
+    // pernah dikirim.
+    const sasOk = typeof item.sas === 'string' && sasConfirmed[item.pendingId] === true;
+    const wantsHistory =
+      includeHistory &&
+      sasOk &&
+      (historyCount ?? 0) > 0 &&
+      typeof item.pqPublicKey === 'string' &&
+      item.pqPublicKey.length > 0;
+
     setBusyId(item.pendingId);
     try {
-      await approveDeviceLink(item.pendingId);
+      const { deviceId } = await approveDeviceLink(item.pendingId, { expectHistory: wantsHistory });
       setPending((prev) => prev.filter((entry) => entry.pendingId !== item.pendingId));
+      setSasConfirmed((prev) => { const next = { ...prev }; delete next[item.pendingId]; return next; });
+
+      if (wantsHistory) {
+        try {
+          const result = await sendHistoryArchive({
+            deviceId,
+            pqPublicKeyB64: item.pqPublicKey!,
+            // Kode yang DIKONFIRMASI pengguna untuk kunci ini — exporter
+            // menghitung ulang dan menolak bila berbeda (tidak ada presign).
+            confirmedSas: item.sas!,
+            onProgress: (label) => setHistoryPhase(label === 'ready' ? null : label),
+          });
+          if (result.records > 0) {
+            toast.success(t('settings:sessions_page.link_history_uploaded'));
+          }
+        } catch (e) {
+          // Arsip gagal TIDAK membatalkan tautan: perangkat baru sudah disetujui
+          // dan akan lanjut tanpa riwayat (intent dibersihkan oleh exporter).
+          console.error('[Link] Arsip riwayat gagal dikirim:', e);
+          const tooLarge = parseHistoryTooLarge(e);
+          if (tooLarge) {
+            // [docs/40 §40.7 langkah 8] Kelebihan kuota dilaporkan dengan angka
+            // nyata; tanpa ini pesannya hanya "gagal mengirim arsip".
+            const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+            toast.error(
+              t('settings:sessions_page.link_history_too_large', {
+                size: mb(tooLarge.size),
+                limit: mb(tooLarge.limit),
+              })
+            );
+          } else {
+            toast.error(t('settings:sessions_page.link_history_failed'));
+          }
+        } finally {
+          setHistoryPhase(null);
+        }
+      }
+
       toast.success(t('settings:sessions_page.link_approved', { device: item.deviceName }));
     } catch (e) {
       toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('settings:sessions_page.link_action_failed')));
@@ -124,6 +232,7 @@ export default function LinkDeviceModal({ onClose }: Props) {
     try {
       await denyDeviceLink(item.pendingId);
       setPending((prev) => prev.filter((entry) => entry.pendingId !== item.pendingId));
+      setSasConfirmed((prev) => { const next = { ...prev }; delete next[item.pendingId]; return next; });
       toast.success(t('settings:sessions_page.link_denied', { device: item.deviceName }));
     } catch (e) {
       toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('settings:sessions_page.link_action_failed')));
@@ -183,6 +292,33 @@ export default function LinkDeviceModal({ onClose }: Props) {
           </div>
         )}
 
+        <div className="rounded-xl bg-bg-main border border-text-secondary/10 p-3 space-y-1">
+          <label className="flex items-start gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              className="mt-1 accent-accent"
+              checked={includeHistory}
+              disabled={!historyCount || historyPhase !== null}
+              onChange={(e) => setIncludeHistory(e.target.checked)}
+            />
+            <span>
+              {t('settings:sessions_page.link_include_history', { count: historyCount ?? 0 })}
+              <span className="block text-[11px] leading-relaxed text-text-secondary/80 mt-1">
+                {!historyCount
+                  ? t('settings:sessions_page.link_history_empty')
+                  : t('settings:sessions_page.link_history_hint')}
+              </span>
+            </span>
+          </label>
+          {historyPhase && (
+            <p className="text-[11px] text-accent">
+              {historyPhase === 'exporting'
+                ? t('settings:sessions_page.link_history_exporting')
+                : t('settings:sessions_page.link_history_uploading')}
+            </p>
+          )}
+        </div>
+
         <div className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary flex items-center gap-2">
             <FiSmartphone size={14} />
@@ -193,35 +329,75 @@ export default function LinkDeviceModal({ onClose }: Props) {
               {t('settings:sessions_page.link_pending_empty')}
             </p>
           ) : (
-            pending.map((item) => (
+            pending.map((item) => {
+              // [SEC 2026-10-30] Kode wajib dicocokkan bila perangkat baru punya
+              // X-Wing key (satu-satunya jalur yang bisa mengirim riwayat).
+              const needsSas = Boolean(item.pqPublicKey);
+              const sasOk = !needsSas || (typeof item.sas === 'string' && sasConfirmed[item.pendingId] === true);
+              return (
               <div
                 key={item.pendingId}
-                className="flex items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/5 p-3"
+                className="space-y-3 rounded-xl border border-accent/30 bg-accent/5 p-3"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <FiShield className="text-accent shrink-0" size={16} />
-                  <span className="text-sm font-semibold truncate">{item.deviceName}</span>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FiShield className="text-accent shrink-0" size={16} />
+                    <span className="text-sm font-semibold truncate">{item.deviceName}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleDeny(item)}
+                      disabled={busyId === item.pendingId}
+                      className="p-2 rounded-lg bg-bg-main text-text-secondary hover:text-red-500 transition-colors disabled:opacity-40"
+                      aria-label={t('settings:sessions_page.link_deny')}
+                    >
+                      <FiX size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleApprove(item)}
+                      disabled={busyId === item.pendingId || !sasOk}
+                      className="p-2 rounded-lg bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40"
+                      aria-label={t('settings:sessions_page.link_approve')}
+                    >
+                      <FiCheck size={16} />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => handleDeny(item)}
-                    disabled={busyId === item.pendingId}
-                    className="p-2 rounded-lg bg-bg-main text-text-secondary hover:text-red-500 transition-colors disabled:opacity-40"
-                    aria-label={t('settings:sessions_page.link_deny')}
-                  >
-                    <FiX size={16} />
-                  </button>
-                  <button
-                    onClick={() => handleApprove(item)}
-                    disabled={busyId === item.pendingId}
-                    className="p-2 rounded-lg bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40"
-                    aria-label={t('settings:sessions_page.link_approve')}
-                  >
-                    <FiCheck size={16} />
-                  </button>
-                </div>
+
+                {needsSas && (
+                  <div className="rounded-lg bg-bg-main border border-text-secondary/10 p-3 space-y-2">
+                    <p className="text-[10px] uppercase tracking-widest text-text-secondary">
+                      {t('settings:sessions_page.link_sas_label')}
+                    </p>
+                    <p
+                      data-testid="link-sas-code"
+                      className="font-mono text-2xl tracking-[0.2em] text-text-primary select-all"
+                    >
+                      {item.sas ? formatLinkSas(item.sas) : '—— ——'}
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-text-secondary/80">
+                      {item.sas
+                        ? t('settings:sessions_page.link_sas_hint')
+                        : t('settings:sessions_page.link_sas_unavailable')}
+                    </p>
+                    <label className="flex items-start gap-2 text-xs text-text-primary">
+                      <input
+                        type="checkbox"
+                        data-testid="link-sas-confirm"
+                        className="mt-0.5 accent-accent"
+                        checked={sasConfirmed[item.pendingId] === true}
+                        disabled={busyId === item.pendingId || !item.sas}
+                        onChange={(e) =>
+                          setSasConfirmed((prev) => ({ ...prev, [item.pendingId]: e.target.checked }))
+                        }
+                      />
+                      <span>{t('settings:sessions_page.link_sas_confirm')}</span>
+                    </label>
+                  </div>
+                )}
               </div>
-            ))
+              );
+            })
           )}
         </div>
 

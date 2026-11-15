@@ -7,7 +7,9 @@ package main
 import (
 	"context"
 	"crypto/mldsa"
+	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -69,6 +71,19 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	return parsed
 }
 
+// verifyCheckExpectations membandingkan head hasil `-check` dengan yang
+// tersimpan di manifes snapshot. Dipisah supaya bisa diuji tanpa menjalankan
+// layanan (lihat service_test.go).
+func verifyCheckExpectations(treeSize uint64, rootHex string, wantSize uint64, wantRoot string) error {
+	if wantSize != 0 && treeSize != wantSize {
+		return fmt.Errorf("tree size hasil ekstrak %d, manifes %d", treeSize, wantSize)
+	}
+	if wantRoot != "" && !strings.EqualFold(rootHex, wantRoot) {
+		return fmt.Errorf("root hasil ekstrak %s, manifes %s", rootHex, wantRoot)
+	}
+	return nil
+}
+
 func main() {
 	configPath := flag.String("config", envOr("KT_V2_CONFIG_FILE", "kt-v2-config.yaml"),
 		"lokasi config YAML kt-server (dipakai bersama penulis log NYX)")
@@ -90,6 +105,13 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", envOr("NYX_KT_V2_METRICS_ADDR", "127.0.0.1:9468"),
 		"alamat exporter /metrics (loopback WAJIB; \"0\" = matikan)")
 	checkOnly := flag.Bool("check", false, "buka database + bangun pohon, lalu keluar (health check deploy)")
+	// Verifikasi arsip, bukan sekadar "bisa dibuka". LevelDB bisa MEMULIHKAN diri
+	// dari salinan sebagian (arsip yang dirusak satu byte), jadi `-check` exit 0
+	// tidak membuktikan arsip itu berisi log yang diharapkan. Dengan flag ini
+	// satu perintah bisa membandingkan head hasil ekstrak dengan `latest.json`
+	// (`docs/39` §39.5d temuan 2, §39.5b langkah 4).
+	checkExpectSize := flag.Uint64("expect-size", 0, "dengan -check: gagal bila tree size hasil ekstrak berbeda")
+	checkExpectRoot := flag.String("expect-root", "", "dengan -check: gagal bila root (hex) hasil ekstrak berbeda")
 	flag.Parse()
 
 	config, fileConfig, err := loadConfig(*configPath)
@@ -127,7 +149,22 @@ func main() {
 		*configPath, file, config.Mode, head.TreeSize, interval)
 
 	if *checkOnly {
+		if *checkExpectSize == 0 && *checkExpectRoot == "" {
+			return
+		}
+		root, err := tree.GetLogTree().GetRoot(head.TreeSize)
+		if err != nil {
+			log.Fatalf("[kt-query-v2] -check: ambil root: %v", err)
+		}
+		rootHex := hex.EncodeToString(root)
+		if err := verifyCheckExpectations(head.TreeSize, rootHex, *checkExpectSize, *checkExpectRoot); err != nil {
+			log.Fatalf("[kt-query-v2] -check GAGAL: %v", err)
+		}
+		log.Printf("[kt-query-v2] -check cocok: treeSize=%d root=%s", head.TreeSize, rootHex)
 		return
+	} else if *checkExpectSize != 0 || *checkExpectRoot != "" {
+		// Menolak kombinasi yang membuang flag keamanan diam-diam.
+		log.Fatalf("[kt-query-v2] -expect-size/-expect-root hanya berlaku bersama -check")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

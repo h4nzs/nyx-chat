@@ -102,8 +102,15 @@ function publicConfigFor(keyId: number, publicKey: Uint8Array): OhttpKeyConfig {
  * hanya pembeda "dipanggil relay internal" vs "dipanggil langsung"; ia bisa
  * dihitung siapa pun yang memegang `JWT_SECRET` (yaitu proses server sendiri).
  * Klien TIDAK pernah memegang `JWT_SECRET`, dan header ini dibuang OHTTP.
+ *
+ * [audit N9-01] Token yang sama juga mengautentikasi **tag klien relay**
+ * (`x-nyx-ohttp-client-tag`), jadi pada mode `on` ia tetap boleh disetel —
+ * hanya saja eksplisit: relay proses terpisah tidak memegang `JWT_SECRET`, jadi
+ * turunan otomatis tidak bisa dipakai bersama dan tidak dicoba diam-diam.
+ * Tanpa token, tag tidak dipercaya dan limiter kembali ke perilaku lama
+ * (bukan jalur yang lebih longgar).
  */
-function resolveInternalToken (env: NodeJS.ProcessEnv): string {
+function resolveInternalToken (env: NodeJS.ProcessEnv, required: boolean): string | undefined {
   const explicit = (env.OHTTP_INTERNAL_TOKEN ?? '').trim();
   if (explicit) {
     if (explicit.length < 32) {
@@ -111,6 +118,7 @@ function resolveInternalToken (env: NodeJS.ProcessEnv): string {
     }
     return explicit;
   }
+  if (!required) return undefined;
   const secret = (env.JWT_SECRET ?? '').trim();
   if (!secret) {
     throw new Error(
@@ -168,6 +176,6 @@ export function loadOhttpConfig(env: NodeJS.ProcessEnv = process.env): OhttpConf
     publicConfigs,
     relayTarget,
     tokenMode,
-    internalToken: tokenMode === 'off' ? resolveInternalToken(env) : undefined,
+    internalToken: resolveInternalToken(env, tokenMode === 'off'),
   };
 }

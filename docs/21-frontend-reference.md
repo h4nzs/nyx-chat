@@ -50,7 +50,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 **Crypto / storage**
 - `crypto-worker-proxy.ts` — main↔worker proxy: `deriveKeyFromPassword`, `registerAndGenerateKeys`, `generateNewKeys`, `retrievePrivateKeys`, `restoreFromPhrase`, `recoverAccountWithSignature`, `getRecoveryPhrase`, `encryptProfile`/`decryptProfile`/`generateProfileKey`, `hashUsername`, `minePoW`, `generateSafetyNumber`, `worker_crypto_secretbox_xchacha20poly1305_*`, `worker_pq_box_seal_v2(_open)`, `workerXChaChaSeal/Open`, `worker_x3dh_v2_*`, `worker_file_encrypt/decrypt`, `reEncryptBundleFromMasterKey`.
 - `keyStorage.ts` — `save/getEncryptedKeys`, `clearKeys`, `hasStoredKeys`, `save/getDeviceAutoUnlockKey`, `set/getDeviceAutoUnlockReady`, `setPanicPassword`/`checkPanicPassword`.
-- `keychainDb.ts` — at-rest `ENC1:` encrypt/decrypt; group sender/receiver state; skipped keys; OTPK; session keys; `exportDatabaseToJson`/`importDatabaseFromJson`; profile key; cached group participants.
+- `keychainDb.ts` — at-rest `ENC1:` encrypt/decrypt; group sender/receiver state; skipped keys; OTPK; session keys; profile key; cached group participants. (The plaintext JSON export/import pair was deleted 2026-10-29; `.nyxbak` in `backupRestore.ts` is the only backup path — `docs/31` §31.6.)
 - `backupFormat.ts` / `backupPayload.ts` / `backupTransport.ts` / `backupRestore.ts` — framed `.nyxbak` backup: byte layout + AEAD, table↔frame mapping, manual/R2 transport, and replacement-device restore (`createFramedBackup`, `restoreFramedBackup`, `openFramedBackupWithPhrase`, Dexie adapters) — `docs/31`.
 - `shadowVaultDb.ts` — `shadowVault` proxy: conversation + message + PQ-DR session + story key persistence; `encryptVaultText`/`decryptVaultText`.
 - `db.ts` — Dexie `NyxUnifiedDB` schema (all tables + indexes).
@@ -85,7 +85,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 ## 21.4 Pages (`pages/`, 20)
 
-`Login`, `Register`, `Restore`, `Chat`, `SettingsPage`, `KeyManagementPage`, `SessionManagerPage`, `ProfilePage`, `AdminDashboard`, `BurnerChat` (`/drop`), `ConnectPage`, `EmbedChatPage`, `MigrationReceivePage`, `MigrationSendPage`, `MaintenancePage`, `NotFoundPage`, `LinkDevicePage` (QR perangkat baru), `UsernameLinkPage`, `ServerDownPage`, `PqDeviceBenchPage`. (See the page table in `06-frontend.md` §6.8 and feature docs.)
+`Login`, `Register`, `Restore`, `Chat`, `SettingsPage`, `KeyManagementPage`, `SessionManagerPage`, `ProfilePage`, `AdminDashboard`, `BurnerChat` (`/drop`), `ConnectPage`, `EmbedChatPage`, `MaintenancePage`, `NotFoundPage`, `LinkDevicePage` (QR perangkat baru, `/link`; juga bisa dibuka dari modal recovery di `/login`), `UsernameLinkPage`, `ServerDownPage`, `PqDeviceBenchPage`. (See the page table in `06-frontend.md` §6.8 and feature docs.)
 
 ## 21.5 Components (`components/`, 67 + 5 `ui/`)
 
@@ -98,7 +98,6 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 ## 21.6 Workers (`workers/`)
 
 - `ohttp.worker.ts` (120 L) — bungkus/buka amplop OHTTP (HPKE + Binary HTTP) di worker supaya kunci sesi tidak menyentuh main thread.
-- `pir.worker.ts` (138 L) — ABI WASM ChalametPIR (`setup`/`query`/`process`), memuat `pir-client.wasm` dari asset URL (bukan bundle utama).
 - `crypto.worker.ts` (2498 L) — 45+ operations: identity keys, XChaCha primitives, Argon2id KDF, PoW, profiles, PQX3DH, Double Ratchet, group sender-key, burner PQ-DR, file secretstream, safety number. Protocol `{id,type,payload}` → `{id,success,result,error}`.
 - `transport.worker.ts` (472 L) — WebTransport QUIC: CONNECT/DISCONNECT/SEND_STREAM/SEND_DATAGRAM/START_HANDSHAKE; chaffing loop; frame parsing.
 

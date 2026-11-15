@@ -10,10 +10,11 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `src/config.ts` | `env` object (port, cors, secrets, R2, VAPID, CF TURN…); CSRF_SECRET trim; prod JWT guard |
 | `src/app.ts` | Express app: CORS, helmet/CSP, compression, CSRF (`csrf-csrf` keyed per `x-nyx-installation-id`), rate limiters, `/api/csrf-token`, `/health`, error handler |
 
-## 22.2 Route modules (`routes/`, 23)
+## 22.2 Route modules (`routes/`, 24)
 
 | Module | Mount | Notable endpoints |
 |---|---|---|
+| `linkHistory.ts` | `/api/auth/link/history` | arsip riwayat sekali-pakai untuk perangkat hasil `/link`: unggah/unduh + `limits` (docs/40) |
 | `auth.ts` | `/api/auth` | `transport-ticket`, `register`, `login`, `burner`, `refresh`, `recover`(+challenge), `logout`/`logout-all`, `pow/challenge`+`verify`, `webauthn/register/*`, `webauthn/login/*` |
 | `users.ts` | `/api/users` | `me`, `me/devices`, `me/blocked`, `:id/block`, `me/keys`, `me/complete-onboarding`, `me` (DELETE account), `search`, `:id` |
 | `conversations.ts` | `/api/conversations` | `sync`, create, `:id`, `:id/details`, `:id/participants`, `:id/leave`, `:id/group` (DELETE — admin purge), `:id` (DELETE), `:id/pin`, `:id/key-rotation` |
@@ -21,6 +22,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `keys.ts` | `/api/keys` | `prekey-bundle`, `upload-otpk`, `count-otpk`, `otpk` (DELETE), `prekey-bundle/:userId`, `public-keys`, `prekey-bundles`, `initial-session/...`, `turn` |
 | `sessionKeys.ts` | `/api/session-keys` | `:conversationId/devices/:deviceId`, `:conversationId/ratchet` |
 | `sessions.ts` | `/api/sessions` | list, `:jti` (DELETE revoke) |
+| `burner.ts` | `/api/burner` | `:roomId/status` (room RAM-only, tanpa akun) |
 | `stories.ts` | `/api/stories` | create, `user/:userId`, `:id`, `:id` (DELETE) |
 | `uploads.ts` | `/api/uploads` | `presigned`, `burner-presigned`, `groups/:id/avatar` |
 | `previews.ts` | `/api/previews` | `POST /` (link preview), `GET /image` (proxy) |
@@ -35,27 +37,28 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `ktQuery.ts` | `/api/keys/kt` | proxy bukti KT (protobuf base64url, tanpa parsing di Node) |
 | `backup.ts` | `/api/backup` | arsip terenkripsi klien (header + chunk), R2 |
 | `ohttp.ts` | `/api/ohttp` | `GET /config` (`application/ohttp-keys`), `POST /relay` (404 bila `OHTTP_RELAY_EXTERNAL=1`), `POST /gateway` — docs/10 §10.18 |
-| `pir.ts` | `/api/pir` | `GET /params`, `POST /query` — proxy byte opaque ke sidecar ChalametPIR; tidak dipasang tanpa `PIR_ENABLED=1` (docs/10 §10.19) |
+| `pir.ts` | `/api/pir` | `GET /:server/manifest`, `POST /:server/query` — proxy byte opaque ke dua sidecar XOR-PIR (`PIR_SERVERS` ≥ 2); tidak dipasang tanpa `PIR_ENABLED=1` (docs/42, docs/10 §10.19) |
 
-## 22.3 Middleware (`middleware/`, 3)
+## 22.3 Middleware (`middleware/`, 4)
 
 | File | Middleware |
 |---|---|
 | `auth.ts` | `requireAuth` (cookie `at`, fallback `embed_at` for embed pages, / Bearer; JTI blacklist; ban cache; sets `req.user`/`req.deviceId`). Token ber-`scope=ohttp` (120 dtk) hanya diterima untuk target allowlist OHTTP (`utils/ohttpToken.ts`), jadi token dari amplop tidak bisa dipakai memutasi/mengirim apa pun. `requireAdmin`, `verifyAuth` |
 | `rateLimiter.ts` | `generalLimiter` (300/15m), `authLimiter` (20/h), `uploadLimiter` (20/h) — RedisStore, key = `clientIpTag(req)` (HMAC pepper atas alamat klien, **bukan** IP mentah — `docs/30` §30.12 WS-H) |
 | `tenantAuth.ts` | `requireTenantAuth` (validates `x-nyx-engine-key`) |
+| `clientVersion.ts` | `clientVersionGate` — baca header `x-nyx-client-version`, tolak dengan 426 `CLIENT_TOO_OLD`/`CLIENT_VERSION_REQUIRED` |
 
-## 22.4 Network bridge (`network/redisBridge.ts`, 803 L)
+## 22.4 Network bridge (`network/redisBridge.ts`, 400 L)
 
 - Subscribes `nyx:upstream:*`, publishes `nyx:downstream`.
 - Senders: `sendToUser`, `sendJsonToUser`, `emitEventToUser` (wraps named events as `KEY_SYNC {event,data}`), `emitEventToUsers`, `broadcastToUsers`.
 - Opcode handlers: `CHAT_MESSAGE` (`handleChatMessage`), `KEY_SYNC` (`handleKeySync` — big event switch), `WEBRTC_SIGNAL`/`WEBRTC_ICE` (`handleWebRtcRelay`), `PRESENCE`, `AUTH` (single-device + hardware binding), `99` disconnect.
-- `handleKeySync` events: `session:request_key`, `session:fulfill_response`, `messages:distribute_keys` (explicit ACK error — legacy path removed), `group:request_key`, `group:fulfilled_key`, `metadata:updated`, `auth:request_linking_qr` (dipakai `LinkDeviceModal` → `auth:linking_qr_ready`; persetujuan lewat REST `/api/auth/link/*`, lihat docs/14 §14.10), `message:unsend`, `message:view_once_opened`, `push:subscribe`/`unsubscribe`, `burner:*`, `migration:*`, `message:*` status events. (`session:request_missing` was removed: no sender, no listener.)
+- `handleKeySync` events: `session:request_key`, `session:fulfill_response`, `messages:distribute_keys` (explicit ACK error — legacy path removed), `group:request_key`, `group:fulfilled_key`, `metadata:updated`, `auth:request_linking_qr` (dipakai `LinkDeviceModal` → `auth:linking_qr_ready`; persetujuan lewat REST `/api/auth/link/*`, lihat docs/14 §14.10), `message:unsend`, `message:view_once_opened`, `push:subscribe`/`unsubscribe`, `burner:*`, `message:*` status events. (`migration:*` was removed 2026-10-29 with the QR vault transfer.) (`session:request_missing` was removed: no sender, no listener.)
 - `checkRateLimit` (atomic Lua), `isActiveDeviceAllowed` (60 s cache), `sendAck`. Data buckets live in the handlers (`CHAT_RATE_LIMIT`/`ACK_RATE_LIMIT`/`PRESENCE_RATE_LIMIT`), so the WSS gateway and the WT path share one counter each — see `realtime/gateway.ts` (no local buckets) and `tests/gatewayParity.test.ts`.
 
-## 22.5 Utilities (`utils/`, 72) & lib (`lib/`, 3)
+## 22.5 Utilities (`utils/`, 80) & lib (`lib/`, 3)
 
-Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/utils` adalah daftar lengkap (72 berkas, termasuk `privacyPass`, `groupMailbox`/`groupSync`/`groupTokens`, `keyCustody`, `atRestSecrets`, `syncProofs`, `searchOprf`, `ohttpToken`, `allowedOrigin`, `uploadLimits`, `releaseJitter`, `transportCapability`).
+Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/utils` adalah daftar lengkap (80 berkas, termasuk `privacyPass`, `groupMailbox`/`groupSync`/`groupTokens`, `keyCustody`, `atRestSecrets`, `syncProofs`, `searchOprf`, `ohttpToken`, `allowedOrigin`, `uploadLimits`, `releaseJitter`, `transportCapability`).
 
 | File | Purpose |
 |---|---|
@@ -94,7 +97,7 @@ Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/util
 | `r2.ts` | `s3Client`, `getPresignedUploadUrl`, `deleteR2File(s)` |
 | `secureLinkPreview.ts` | SSRF-safe link preview |
 | `sendPushNotification.ts` | VAPID per-device encrypted push |
-| `sessionKeys.ts` | `relaySessionKeys` (blind relay) |
+| `sessionKeys.ts` | `relaySessionKeys` (blind relay); gerbangnya `sessionKeyRelayGuard.ts` — pemanggil harus peserta terbukti (keanggotaan/receipt, atau perangkatnya punya baris `SessionKey` `issuedByServer` dari pembuatan percakapan), tiap `deviceId` harus perangkat nyata yang **sudah terdaftar** di percakapan itu, dan perangkat orang lain hanya bila pemiliknya peserta terbukti (audit pass 3 N3-01) |
 | `sessionUtils.ts` | `clearAuthCookies`, `revokeFamily` |
 | `lib/prisma.ts` | PrismaClient + `@prisma/adapter-pg`; sslmode only for non-local hosts |
 | `lib/redis.ts` | `redisClient`, `connectRedis` |
@@ -116,7 +119,6 @@ Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/util
 |---|---|---|
 | `nyx:upstream:<op>` / `nyx:downstream` | sidecar↔Node bridge | — |
 | `active_device:<userId>` | single-active-device | 30d |
-| `is_migrating:<userId>` | migration mode | transient |
 | `revoked_jti:<jti>` | refresh blacklist | token expiry |
 | `ban_status:<userId>` | ban cache | 15m |
 | `cache:keys:bundle:<userId>` / `cache:keys:public:<userId>` | prekey cache | 1h |
@@ -137,8 +139,10 @@ Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/util
 
 ## 22.9 Tests & scripts
 
-- `tests/` (node:test, no Postgres/Redis): `password`, `validate`, `jwt`, `mappers` (TD-13 regression), `sessionKeys`.
+- `tests/` (node:test lewat `tsx`; **daftar berkas eksplisit di `server/package.json`**): unit test memakai fake Prisma dan **tidak** butuh Postgres/Redis (mis. `password`, `validate`, `jwt`, `mappers`, `sessionKeys`, `groupAccess`, `atRestSecrets`).
+- Tes **opt-in** yang justru butuh layanan nyata: `NYX_HTTP_CONTRACT=1` → `tests/httpContract.test.ts` (Redis + Postgres, `fetch` + `app.listen(0)`), `NYX_R2_SMOKE=1` → `tests/r2Endpoint.test.ts`, dan jalur KT live (`KT_SERVER_URL`).
 - `scripts/reset-test-env.ts`: wipes DB + Redis for E2E; refuses in production.
+- Daftar lengkap bisa dibaca dari satu sumber itu (`pnpm --filter nyx-server test`) — jangan menyalinnya ke sini.
 
 ## 22.10 Type declarations (`types/`, 3)
 

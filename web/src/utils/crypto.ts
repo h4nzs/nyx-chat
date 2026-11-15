@@ -73,7 +73,9 @@ import {
 import {
   deleteSpqrState,
   flushSpqrState,
+  loadArchivedSpqrStates,
   loadSpqrState,
+  rotateSpqrStateForNewSession,
   saveSpqrState,
 } from '@lib/spqrState';
 // [docs/30 §30.5 tahap C] Gossip tree head KT: field `ktG` di dalam payload
@@ -469,6 +471,8 @@ async function encryptSpqrMessage(input: {
       sessionId: input.conversationId,
       state: result.state,
       version: 'v2',
+      // Langkah ratchet nyata → era ini layak diarsipkan (audit N10-04).
+      advanced: true,
     });
 
     return { state: input.state, header, ciphertext: result.ciphertext, mk: result.mk };
@@ -525,31 +529,68 @@ async function decryptSpqrMessage(input: {
 
   const frames = decodeSpqrFrames(input.header);
   const combined = sodium.from_base64(input.actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const result = await worker_spqr_ratchet_decrypt({
-    serializedState: spqrState,
-    frames,
-    ciphertext: combined,
-  });
+  const decryptWith = (serializedState: Uint8Array) =>
+    worker_spqr_ratchet_decrypt({
+      serializedState,
+      frames,
+      ciphertext: combined,
+    });
+
+  let result: Awaited<ReturnType<typeof decryptWith>>;
+  let fromArchivedEra = false;
+  try {
+    result = await decryptWith(spqrState);
+  } catch (currentEraError) {
+    // [audit N5-01] Pesan v2 yang tertunda melewati rotasi sesi membawa frame
+    // era X3DH LAMA, jadi state era sekarang menolaknya. Arsip era
+    // (`rotateSpqrStateForNewSession`) memberi state yang cocok — pola yang
+    // sama dengan tiga slot arsip DR v1. State arsip TIDAK dipromosikan dan
+    // TIDAK disimpan maju: era sekarang tetap milik baris aktif, dan pesan
+    // lama yang sama tetap bisa dicoba ulang dari arsip yang sama.
+    let archivedError: unknown;
+    for (const era of await loadArchivedSpqrStates(input.conversationId)) {
+      try {
+        result = await decryptWith(era.state);
+        fromArchivedEra = true;
+        break;
+      } catch (error) {
+        archivedError = error;
+      }
+    }
+    if (!fromArchivedEra) {
+      // Tidak ada era yang cocok: laporkan kegagalan era sekarang (penyebab
+      // yang paling mungkin), bukan error arsip terakhir yang menyesatkan.
+      void archivedError;
+      throw currentEraError;
+    }
+  }
+  const decodeResult = result!;
 
   // State braid disimpan lebih dulu: rangkaian frame peer sudah dikonsumsi, dan
   // membuang state yang sudah maju akan memutus rantai untuk pesan berikutnya.
-  await saveSpqrState({
-    sessionId: input.conversationId,
-    state: result.state,
-    version: 'v2',
-  });
+  // Era arsip dikecualikan: menulis state maju era lama ke baris aktif akan
+  // memutar balik braid era sekarang.
+  if (!fromArchivedEra) {
+    await saveSpqrState({
+      sessionId: input.conversationId,
+      state: decodeResult.state,
+      version: 'v2',
+      // Frame peer sudah dikonsumsi: state maju (audit N10-04).
+      advanced: true,
+    });
+  }
 
-  if (!result.plaintext || !result.mk) {
+  if (!decodeResult.plaintext || !decodeResult.mk) {
     // Rangkaian frame tanpa message key = peer hanya mengirim braid (belum ada
     // konten). State sudah maju; pesan ini menunggu pesan berikutnya.
     return { status: 'pending', reason: 'waiting_for_key' };
   }
 
   if (input.messageId) {
-    await storeMessageKeySecurely(input.messageId, result.mk);
+    await storeMessageKeySecurely(input.messageId, decodeResult.mk);
   }
 
-  const plaintext = sodium.to_string(result.plaintext);
+  const plaintext = sodium.to_string(decodeResult.plaintext);
   const peerVersion = extractVersionDeclaration(plaintext);
   // [docs/30 §30.5 tahap C] Sama seperti jalur v1: head gossip peer dicatat dari
   // plaintext yang sudah lolos AEAD braid. Fail-open (lihat ktGossip).
@@ -942,63 +983,147 @@ export async function getMyEncryptionKeyPair(): Promise<{ publicKey: Uint8Array;
 
 // --- Session Ratcheting and Key Retrieval ---
 
-export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
-  try {
-    const sodium = await getSodiumLib();
-    const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
-    const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    
-    // 1. Generate local session key and ID
-    const sessionId = sodium.to_hex(sodium.randombytes_buf(16));
-    const sessionKey = sodium.randombytes_buf(32);
-    
-    const conversationStore = useConversationStore.getState();
-    const conversation = conversationStore.conversations.find(c => c.id === conversationId);
-    if (!conversation) throw new Error("Conversation not found for ratcheting");
+/**
+ * [AUDIT PASS 3 — N3-01] Satu kunci sesi baru, disegel ke SEMUA perangkat
+ * peserta yang bundle-nya tersedia. Dipakai dua jalur:
+ *
+ *  - **pembuatan percakapan** (`initialSession` pada `POST /api/conversations`) —
+ *    server menulis baris `SessionKey` dengan `issuedByServer: true`, dan itulah
+ *    bukti peserta yang sah untuk ratchet berikutnya;
+ *  - **ratchet client-driven** (`POST /api/session-keys/:id/ratchet`) — hanya
+ *    boleh untuk perangkat yang sudah terdaftar di percakapan itu (server
+ *    menolak 403 `SESSION_KEY_NOT_ENROLLED` untuk perangkat asing).
+ */
+async function sealSessionKeyForParticipants(
+  userIds: string[],
+  options: { includeSelf?: boolean } = {},
+): Promise<{
+  sessionId: string;
+  sessionKey: Uint8Array;
+  keys: Array<{ deviceId: string; encryptedKey: string; encryptedKeyBase64: string; isInitiator: boolean }>;
+}> {
+  const sodium = await getSodiumLib();
+  const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+  const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const myId = useAuthStore.getState().user?.id;
 
-    // 2. Fetch all participant bundles
-    const userIds = conversation.participants.map(p => p.id);
-    const bundlesMap = await fetchPreKeyBundles(userIds);
-    
-    const keysPayload: Record<string, unknown>[] = [];
-    const myId = useAuthStore.getState().user?.id;
+  const sessionId = sodium.to_hex(sodium.randombytes_buf(16));
+  const sessionKey = sodium.randombytes_buf(32);
+  const keys: Array<{ deviceId: string; encryptedKey: string; encryptedKeyBase64: string; isInitiator: boolean }> = [];
 
-    // 3. Encrypt for all devices of all participants
-    for (const uId of userIds) {
-      const bundles = bundlesMap[uId] || [];
-      for (const bundle of bundles) {
-        // Skip current device
-        if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
+  const bundlesMap = await fetchPreKeyBundles(userIds);
+  for (const uId of userIds) {
+    for (const bundle of bundlesMap[uId] || []) {
+      // Lewati perangkat ini sendiri untuk ROTASI (kunci disimpan lokal, tidak
+      // perlu baris server). Pembuatan percakapan memakai `includeSelf: true`:
+      // baris `issuedByServer` untuk perangkat pembuat adalah bukti peserta yang
+      // dibutuhkan ratchet berikutnya (audit pass 4 N4-02).
+      if (!options.includeSelf && uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
 
-        const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
-
-        if (!theirPqPublicKey) {
-          console.warn(`Skipping device ${bundle.deviceId} for user ${uId}: Missing PQ key`);
-          continue;
-        }
-
-        const encryptedKey = await sealForDevice(sessionKey, theirPqPublicKey, theirPublicKey);
-        
-        keysPayload.push({
-          deviceId: bundle.deviceId,
-          encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-          isInitiator: uId === myId
-        });
+      const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const theirPqPublicKey = bundle.pqIdentityKey
+        ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+        : null;
+      if (!theirPqPublicKey) {
+        console.warn(`Skipping device ${bundle.deviceId} for user ${uId}: Missing PQ key`);
+        continue;
       }
-    }
 
-    // 4. Relay to server
-    await authFetch(`/api/session-keys/${conversationId}/ratchet`, {
-      method: 'POST',
-      body: JSON.stringify({ sessionId, keys: keysPayload })
+      const encryptedKey = await sealForDevice(sessionKey, theirPqPublicKey, theirPublicKey);
+      keys.push({
+        deviceId: bundle.deviceId,
+        encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+        // Server jalur pembuatan mendekode dengan `Buffer.from(x, 'base64')`
+        // (standar), jadi sertakan encoding itu juga agar `-`/`_` tidak hilang.
+        encryptedKeyBase64: sodium.to_base64(encryptedKey, sodium.base64_variants.ORIGINAL),
+        isInitiator: uId === myId,
+      });
+    }
+  }
+
+  return { sessionId, sessionKey, keys };
+}
+
+/**
+ * Bangun payload `initialSession` untuk `POST /api/conversations`.
+ *
+ * [AUDIT PASS 3 — N3-01] Percakapan 1:1 tidak punya roster di server, jadi
+ * satu-satunya bukti peserta yang bisa dibuat saat kontak pertama adalah baris
+ * `SessionKey` yang ditulis SERVER pada transaksi pembuatan. Klien mengirim
+ * kunci yang sudah disegel per perangkat di sini; pemanggil menyimpan
+ * `sessionKey` secara lokal (`storeSessionKeySecurely`) setelah percakapan ada.
+ */
+export async function buildInitialSessionForConversation(userIds: string[]): Promise<{
+  sessionId: string;
+  sessionKey: Uint8Array;
+  initialKeysPerDevice: Record<string, string>;
+  initiatorCiphertextsPerDevice: Record<string, string>;
+}> {
+  // [AUDIT PASS 4 — N4-02] Ikutkan perangkat pembuat sendiri: tanpa baris
+  // `issuedByServer` miliknya, pembuat 1:1 tidak punya bukti peserta apa pun
+  // (1:1 tidak punya baris keanggotaan, dan receipt baru ada setelah peer
+  // membaca pesan) sehingga ratchet-nya sendiri akan ditolak 403.
+  const myId = useAuthStore.getState().user?.id;
+  const participants = Array.from(new Set([...userIds, ...(myId ? [myId] : [])]));
+  const sealed = await sealSessionKeyForParticipants(participants, { includeSelf: true });
+  const initialKeysPerDevice: Record<string, string> = {};
+  for (const key of sealed.keys) {
+    initialKeysPerDevice[key.deviceId] = key.encryptedKeyBase64;
+  }
+  return {
+    sessionId: sealed.sessionId,
+    sessionKey: sealed.sessionKey,
+    initialKeysPerDevice,
+    // Distribusi kunci sesi biasa tidak membawa ciphertext X3DH inisiator;
+    // kolomnya tetap kosong (server menerima objek kosong).
+    initiatorCiphertextsPerDevice: {},
+  };
+}
+
+/**
+ * Rotasi kunci sesi percakapan (client-driven ratchet): segel kunci baru ke
+ * semua perangkat peserta, relay lewat `POST /api/session-keys/:id/ratchet`,
+ * lalu simpan salinan lokal.
+ *
+ * Gerbang server (N3-01): pemanggil harus peserta terbukti — keanggotaan
+ * bertoken, receipt bertag, atau perangkat yang punya baris `SessionKey`
+ * `issuedByServer` dari pembuatan percakapan — dan setiap perangkat tujuan
+ * harus sudah terdaftar di percakapan itu. Percakapan yang dibuat sebelum
+ * pembuatan mengirim `initialSession` baru punya bukti setelah pesan pertama
+ * dibaca (receipt); sampai itu terjadi server menjawab 403.
+ */
+export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) throw new Error("Conversation not found for ratcheting");
+
+  try {
+    const userIds = conversation.participants.map(p => {
+      const withUserId = p as { userId?: string };
+      return withUserId.userId || p.id;
     });
 
-    // 5. Store locally
-    await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
+    const sealed = await sealSessionKeyForParticipants(userIds);
+    if (sealed.keys.length === 0) {
+      throw new Error('Tidak ada perangkat peserta yang bisa menerima kunci sesi baru');
+    }
+
+    await authFetch(`/api/session-keys/${conversationId}/ratchet`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId: sealed.sessionId, keys: sealed.keys.map(({ deviceId, encryptedKey, isInitiator }) => ({ deviceId, encryptedKey, isInitiator })) })
+    });
+
+    // Simpan lokal HANYA setelah server menerima: kunci yang gagal di-relay
+    // tidak boleh dipakai (peer tidak akan bisa mendekripsi).
+    await storeSessionKeySecurely(conversationId, sealed.sessionId, sealed.sessionKey);
   } catch (error) {
     console.error('Failed to ratchet session for:', conversationId, error);
-    throw new Error('Could not establish a secure session locally.');
+    // Pertahankan status/kode server (mis. 403 `SESSION_KEY_NOT_PARTICIPANT`)
+    // supaya pemanggil bisa membedakan "belum punya bukti peserta" dari bug lokal.
+    const status = (error as { status?: number }).status;
+    const wrapped = new Error('Could not establish a secure session locally.');
+    (wrapped as Error & { status?: number; cause?: unknown }).status = status;
+    (wrapped as Error & { cause?: unknown }).cause = error;
+    throw wrapped;
   }
 }
 
@@ -1434,6 +1559,10 @@ export async function sendGroupKeyDistributionPairwise(
         // GROUP_KEY pertama (terlihat di audit DB lokal: 1 SYSTEM GROUP_KEY
         // senderId 25-char saat grup dibuat).
         senderPseudonym: (dk as { senderId?: string }).senderId ?? myId,
+        // [AUDIT F-02] Capability admin untuk server: pembuat grup belum punya
+        // baris keanggotaan saat distribusi kunci pertama. Anggota biasa lolos
+        // lewat baris keanggotaan, jadi field ini boleh kosong untuk mereka.
+        adminCapabilityToken: getMyAdminToken(conversationId),
       });
       result.pairwise++;
     } catch (e) {
@@ -1840,7 +1969,9 @@ export async function rotateGroupKey(
           conversationId,
           newEncrypted,
           participantIds.filter(uid => uid !== useAuthStore.getState().user?.id),
-          myPseudoForMeta ?? useAuthStore.getState().user?.id
+          myPseudoForMeta ?? useAuthStore.getState().user?.id,
+          // [AUDIT F-02] capability admin agar server menerima baris SYSTEM.
+          getMyAdminToken(conversationId)
         );
       }
     } catch (e) {
@@ -2091,7 +2222,10 @@ async function doEncryptMessage(
           // yang sama di kedua sisi. State braid sendiri lahir malas saat v2
           // pertama benar-benar dipakai (modul WASM 506 KiB tidak dibayar oleh
           // percakapan yang tetap di v1); yang disimpan di sini hanya akarnya.
-          await deleteSpqrState(conversationId);
+          // [audit N5-01] Era lama DIARSIPKAN, bukan dibuang: pesan v2 yang
+          // masih di jalan membawa frame era X3DH lama dan hanya bisa dibuka
+          // dengan state era itu (pola arsip DR v1).
+          await rotateSpqrStateForNewSession(conversationId);
           state = attachClientProtocolFields(state, {}, {
               spqrAuthKey: sodium.to_base64(sessionKey, sodium.base64_variants.URLSAFE_NO_PADDING),
               spqrDirection: 'A2B',
@@ -2311,7 +2445,9 @@ async function doEncryptMessage(
                                conversation.participants
                                    .map(getParticipantUserId)
                                    .filter(uid => uid !== useAuthStore.getState().user?.id),
-                               myPseudoForMeta ?? useAuthStore.getState().user?.id
+                               myPseudoForMeta ?? useAuthStore.getState().user?.id,
+                               // [AUDIT F-02] capability admin untuk gate server.
+                               getMyAdminToken(conversationId)
                            );
                        })
                        .catch(e => console.warn('[T1] Background pseudonym-map rotation failed:', e));
@@ -3081,6 +3217,7 @@ export async function distributeAdminToken(
         targetDeviceId: bundle.deviceId,
         senderDeviceKey: myIdentityKeyB64,
         adminToken: true,
+        adminCapabilityToken: token,
       });
     } catch (e) {
       console.warn(`[RBAC] Failed to seal admin token for device ${bundle.deviceId}:`, e);
@@ -3141,7 +3278,16 @@ export async function establishSessionFromPreKeyBundle(
   });
   const identityChanged = observation.status === 'changed';
   if (identityChanged) {
+      // [AUDIT PASS 3 — N3-04] Dulu hanya `console.warn` lalu handshake tetap
+      // jalan: pada kontak PERTAMA server yang jahat bisa menyajikan bundle
+      // pengganti, log KT menandainya `mismatch`, dan pesan tetap dienkripsi ke
+      // kunci itu. Sekarang perubahan kunci yang belum diterima user (TOFU
+      // change ATAU pertentangan log) menghentikan pembentukan sesi; user harus
+      // menerima kunci baru lewat `acceptPendingPeerIdentity` lebih dulu.
+      // Verdict `unavailable` TIDAK memblokir (log mati ≠ serangan) — itu tetap
+      // ditandai banner sesuai audit F-09.
       console.warn(`[Security] Identity key changed for user ${peerUserId}. Pinned: ${observation.trustedKey.substring(0, 10)}... New: ${observation.pendingKey.substring(0, 10)}...`);
+      throw new Error('IDENTITY_CHANGED: kunci identitas peer berubah dan belum diterima user');
   }
   
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -3225,9 +3371,15 @@ export async function deriveSessionKeyAsRecipient(
 
     if (otpkId !== undefined) {
       const masterSeed = await getMasterSeedOrThrow();
+      // [AUDIT PASS 3 — N3-02] Jalur regenerate dulu `return` sebelum
+      // `deleteOneTimePreKey`, jadi OTPK yang SUDAH dikonsumsi server (DELETE …
+      // RETURNING) tetap tersimpan lokal — berbeda dari jalur normal tepat di
+      // bawah. Sekarang OTPK dihapus begitu derivasi regenerate berhasil; kalau
+      // regenerate gagal kita biarkan barisnya (fallback di bawah memang akan
+      // menolak blob ber-OTPK, dan handshake hanya diulang dari pesan baru).
       try {
         const { worker_x3dh_v2_recipient_regenerate } = await getWorkerProxy();
-        return await worker_x3dh_v2_recipient_regenerate({
+        const regenerated = await worker_x3dh_v2_recipient_regenerate({
           keyId: otpkId,
           masterSeed,
           myIdentityKey: myIdentityPublicKey,
@@ -3236,6 +3388,8 @@ export async function deriveSessionKeyAsRecipient(
           theirSigningKeyV2,
           initiatorCiphertexts,
         });
+        await deleteOneTimePreKey(otpkId);
+        return regenerated;
       } catch (e) {
         console.error('[X3DH v2] Gagal regenerate OTPK:', otpkId, e);
       }

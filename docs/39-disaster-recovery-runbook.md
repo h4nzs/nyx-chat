@@ -4,9 +4,11 @@
 > — `scripts/kt-v2-restore-drill.sh` (11 langkah, CI job `kt-recovery-v2`), dan
 > sudah dijalankan penuh di mesin self-host ini (§39.6). Drill v1 tetap dihapus
 > bersama log v1 (`docs/38`); yang baru adalah penggantinya, bukan kebangkitannya.
-> Dua hal **masih** belum pernah dijalankan dan jangan dianggap tertutup: drill
-> pemulihan **Postgres** (§39.4) dan mode `--bundle` pada bundle `.age` nyata
-> (§39.5c — menuntut kunci age yang hanya dipegang operator).
+> Drill pemulihan **Postgres** juga sudah dijalankan 2026-10-29 (§39.4, klaster
+> `initdb` sendiri), dan sejak 2026-10-29 **pemulihan klien** (`.nyxbak`) diuji
+> di atas dump yang benar-benar direstore (§39.4b). Yang **masih** belum pernah:
+> pemulihan dari bundle `.age` nyata — baik Postgres maupun KT (§39.4 akhir,
+> §39.5c) — karena keduanya menuntut `age-identity` yang hanya dipegang operator.
 >
 > Dokumen ini sengaja pendek dan berisi perintah, bukan narasi. Yang tidak bisa
 > diverifikasi (siapa memegang akses apa) ditandai `TODO(operator)`.
@@ -47,46 +49,187 @@ Aturan: tidak ada satu pun item di atas yang boleh hanya ada di host yang
 sama dengan datanya. Minimal: satu salinan terenkripsi (age/GPG) di penyimpanan
 operator, di luar VPS dan di luar akun Cloudflare yang sama.
 
-## 39.4 Drill A — Postgres (belum pernah dijalankan)
+## 39.4 Drill A — Postgres
 
-Prasyarat: dump terbaru, Postgres hidup, ruang disk ≥ 2× ukuran DB.
+**Sudah dijalankan 2026-10-29** (bentuk *throwaway cluster*, tanpa sudo, tanpa
+menyentuh database produksi) — bukti di §39.6. Resep di bawah adalah yang dipakai.
+
+Kenapa klaster sendiri, bukan `createdb` di klaster produksi: di mesin self-host
+role aplikasi (`nyx_user`) tidak punya `CREATEDB` dan `sudo -u postgres` butuh
+kata sandi, sedangkan `initdb`/`pg_ctl` tersedia sebagai user biasa. Efeknya
+lebih baik: nol kemungkinan menyentuh `nyx_app`, dan `pg_restore` berjalan sebagai
+superuser klaster drill sehingga `--no-owner` tidak menabrak role yang tidak ada.
 
 ```bash
-# 0. Identitas dump yang akan diuji
-ls -lh /root/backups/ | tail -3
-LATEST=$(ls -t /root/backups/*.dump /root/backups/*.sql.gz 2>/dev/null | head -1)
-echo "$LATEST"
+DRILL=/tmp/nyx-pg-drill
+rm -rf "$DRILL" && mkdir -p "$DRILL"
+initdb -D "$DRILL/data" -U drill --auth=trust --no-instructions
+pg_ctl -D "$DRILL/data" -l "$DRILL/pg.log" \
+  -o "-p 15432 -k $DRILL -c listen_addresses=127.0.0.1" start
 
-# 1. Database scratch — JANGAN menyentuh nyx_app
-sudo -u postgres createdb nyx_restore_drill
-# bila dump berupa custom-format (-Fc):
-sudo -u postgres pg_restore --no-owner --no-privileges -d nyx_restore_drill "$LATEST"
-# bila dump berupa .sql.gz:
-# zcat "$LATEST" | sudo -u postgres psql -d nyx_restore_drill
+# 1. Dump dengan cara yang SAMA dengan backup harian (`pg_dump -Fc`)
+cd ~/nyx-chat/server && set -a && . ./.env && set +a
+pg_dump "${DATABASE_URL%%\?*}" -Fc -f "$DRILL/prod.dump"
 
-# 2. Verifikasi isi — bukan sekadar "restore exit 0"
-sudo -u postgres psql -d nyx_restore_drill -c "\dt" | wc -l
-sudo -u postgres psql -d nyx_restore_drill -c \
-  "SELECT (SELECT count(*) FROM \"User\") AS users,
-          (SELECT count(*) FROM \"Message\") AS messages,
-          (SELECT max(\"createdAt\") FROM \"Message\") AS last_message;"
+# 2. Restore ke database baru di klaster drill
+createdb -h 127.0.0.1 -p 15432 -U drill nyx_restore_drill
+pg_restore --no-owner --no-privileges -h 127.0.0.1 -p 15432 -U drill \
+  -d nyx_restore_drill "$DRILL/prod.dump"
 
-# 3. Bandingkan dengan produksi (selisih wajar = aktivitas sejak dump)
-sudo -u postgres psql -d nyx_app -c \
-  "SELECT (SELECT count(*) FROM \"User\") AS users,
-          (SELECT count(*) FROM \"Message\") AS messages;"
+# 3. Verifikasi isi — bukan sekadar "restore exit 0"
+DRILL_URL="postgres://drill@127.0.0.1:15432/nyx_restore_drill"
+psql "$DRILL_URL" -c 'SELECT count(*) FROM information_schema.tables WHERE table_schema = $$public$$;'
+psql "$DRILL_URL" -c 'SELECT (SELECT count(*) FROM "User") users, (SELECT count(*) FROM "Device") devices,
+                             (SELECT count(*) FROM "Message") messages, (SELECT max("createdAt") FROM "Message") last_message;'
 
-# 4. Buktikan aplikasi bisa memakainya, bukan hanya psql
-DATABASE_URL="postgres://nyx:<pass>@127.0.0.1:5432/nyx_restore_drill" \
-  pnpm --filter nyx-server exec npx prisma db pull --print >/dev/null && echo "schema OK"
+# 4. Buktikan APLIKASI bisa memakainya, bukan hanya psql: klien Prisma yang
+#    sama dengan yang dipakai server (adapter-pg), dibaca langsung.
+DATABASE_URL="$DRILL_URL" server/node_modules/.bin/tsx -e \
+  "import {prisma} from './server/src/lib/prisma.js'; console.log(await prisma.user.count());"
 
-# 5. Bersihkan
-sudo -u postgres dropdb nyx_restore_drill
+# 5. Bersihkan (klaster berisi data produksi — jangan ditinggal)
+pg_ctl -D "$DRILL/data" -m fast stop && rm -rf "$DRILL"
 ```
 
-Kriteria lulus: jumlah tabel > 0, `User`/`Message` masuk akal terhadap produksi,
-`max(createdAt)` pesan tidak lebih tua dari 24 jam sebelum waktu dump, dan
-Prisma bisa membaca skema hasil restore.
+Kriteria lulus: jumlah tabel sama dengan produksi, `User`/`Device`/`Message`
+sama (selisih hanya aktivitas sejak dump), `max(createdAt)` masuk akal, dan klien
+Prisma aplikasi membaca barisnya — bukan hanya `psql`.
+
+**Yang belum dicakup:** dump yang diuji adalah `pg_dump` **segar**, bukan arsip
+`nyx-backup-*.tar.gz.age` di R2. Membuka arsip itu butuh `age-identity` operator,
+jadi bagian "bundle terenkripsi bisa dibuka dan isinya bisa dipulihkan" tetap
+belum dibuktikan (sama seperti `--bundle` di §39.5c).
+
+## 39.4b Drill klien — `.nyxbak` di atas dump nyata
+
+Langkah terakhir urutan §39.1: setelah DB pulih, apakah **klien** juga bisa
+pulih? Sampai 2026-10-29 jawabannya tidak pernah diuji — `backupRestore.test.ts`
+memakai store dan backend kripto palsu, jadi yang terbukti hanya logika pemetaan.
+
+```bash
+bash scripts/client-restore-drill.sh          # ~20 dtk, tidak menyentuh DB hidup
+gh workflow run drills.yml                    # jalur otomatis: job `client-restore`
+                                              # (mingguan, Senin 04:00 UTC)
+```
+
+Yang dijalankan (semua langkah ❌ menggagalkan skrip):
+
+| # | Langkah | Bukti yang dicetak |
+|---|---|---|
+| 0 | **Penjaga cakupan**: daftar tabel drill harus sama dengan `BACKUP_TABLE_ORDER`, dan setiap tabel punya minimal satu baris | `cakupan tabel lengkap: 20/20` |
+| 1 | Perkakas + `server/.env` sumber | `semua perkakas tersedia` |
+| 2 | `pg_dump -Fc` dari database sumber (cara yang sama dengan backup harian) | ukuran + durasi + `users\|conversations\|messages\|devices` |
+| 3 | Klaster `initdb` sendiri (port 15433), **bukan** database hidup | versi Postgres + alamat |
+| 4 | `pg_restore --no-owner --no-privileges` ke DB baru | durasi, exit 0 |
+| 5 | Isi: jumlah tabel + jumlah baris = sumber | `tabel: 17 (sumber 17)` |
+| 6 | Fixture klien diekspor dari hasil restore (id, ciphertext, kunci publik perangkat) | ukuran fixture |
+| 7 | Perangkat lama → arsip → perangkat pengganti (Dexie + IndexedDB nyata, KDF argon2id, XChaCha20-Poly1305) | `header NYXB v1, N frame, M byte` |
+| 8 | Isi **20 tabel** identik byte-per-byte (`Uint8Array`, `Date`, objek bersarang) + semua nilai `ENC1:` utuh + kunci publik sama dengan dump | satu baris `OK` per tabel |
+| 9 | Silang-cek dengan dump: semua id pesan/percakapan ada, ciphertext sama persis | `semua N id pesan dump ada di klien` |
+| 10 | Ekspor ulang dari perangkat pengganti: urutan + payload frame identik | `ekspor ulang: N frame, urutan + payload identik` |
+| 11 | Kontrol negatif: phrase salah dan arsip dirusak 1 byte **ditolak**, 0 baris tertulis | dua `GAGAL` yang tidak muncul = lulus |
+
+Baris klien **tidak dikarang**: bentuk tiap tabel disalin dari penulisnya di
+kode — `keychainDb.ts` (identitas, state grup, kunci DR terlewat, pending
+header, kunci story), `shadowVaultDb.ts` (`pqDrSessionsV2`, `messageKeys`),
+`offlineQueueDb.ts`, `store/profile.ts` (`profileCache`), `lib/contactStore.ts`.
+Termasuk yang halus: `identityKeys.key` adalah base64 kunci publik (bukan
+`Uint8Array`), `groupSkippedKeys` berkunci string `key`, `pendingHeaders.header`
+objek bersarang, `offlineQueue.tempId` angka.
+
+Workspace di `NYX_CLIENT_DRILL_DIR` (default `/tmp/nyx-client-restore-drill`),
+port `NYX_CLIENT_DRILL_PORT` (default 15433), dihapus oleh `trap` termasuk saat
+gagal — klaster memuat data hasil dump.
+
+**Membuktikan harness-nya tidak buta** (wajib dilakukan saat mengubah skrip):
+jalankan dengan salinan TS yang sengaja dirusak, dan drill harus merah.
+
+```bash
+# Salinan sabotase harus tinggal di `web/scripts/`: file TS di /tmp tidak bisa
+# me-resolve impor relatif `../src/lib/...` milik skrip drill.
+d=web/scripts/.drill-blast.ts
+sed 's|content: message.content,|content: (message.content ?? "") + "x",|' \
+  web/scripts/client-restore-drill.ts > "$d"
+NYX_CLIENT_DRILL_TS="$PWD/$d" bash scripts/client-restore-drill.sh; echo "exit=$?"
+# → GAGAL ciphertext pesan berbeda dari dump ; exit=1
+rm -f "$d"
+
+# Penjaga cakupan juga harus bisa merah: buang satu tabel dari SCHEMA.
+d=web/scripts/.drill-cakupan.ts
+sed "/  storyKeys: 'storyId',/d" web/scripts/client-restore-drill.ts > "$d"
+NYX_CLIENT_DRILL_TS="$PWD/$d" bash scripts/client-restore-drill.sh; echo "exit=$?"
+# → GAGAL cakupan tabel TIDAK lengkap — drill 19 vs backup 20: kurang storyKeys ; exit=1
+rm -f "$d"
+```
+
+Catatan dari kontrol itu: perbandingan baris-per-baris **tidak** menangkap
+pergeseran sistematis (kedua sisi ikut bergeser), hanya silang-cek dengan dump
+yang menangkapnya. Karena itu langkah 9 ada, dan jangan dihapus demi kecepatan.
+
+**Yang tidak dibuktikan:** arsipnya **tidak** diekspor dari profil browser
+sungguhan (tidak ada profil pengguna di mesin drill). Baris lokal dibentuk dari
+dump dengan bentuk yang dipakai klien, jadi yang terbukti adalah round-trip
+untuk ke-20 tabel + keterkaitan id/ciphertext dengan dump — bukan klik "Ekspor"
+di UI. Dua hal yang secara struktural tidak bisa dibuktikan drill ini: tabel
+state grup diisi pada satu percakapan yang di dump sebenarnya 1:1 (drill menguji
+pemetaan frame + round-trip, bukan semantik grup), dan kunci privat tiruan di
+drill bukan kunci yang benar-benar bisa mendekripsi ciphertext dari akun nyata.
+Tombol UI tetap perlu dicoba sekali secara manual di browser sebelum menghitung
+pemulihan klien "teruji penuh".
+
+## 39.4c Temuan drill klien (run 2026-10-29)
+
+1. **`server/.env` tidak boleh di-`source` mentah di skrip drill.** Berkas itu
+   mendefinisikan `PORT=4000` (API yang sedang hidup); variabel drill bernama
+   `PORT` tertimpa dan klaster Postgres mencoba mengikat port API →
+   `could not create listen socket for "127.0.0.1"`. Sekarang skrip memakai
+   `DRILL_PORT` dan membaca `DATABASE_URL` di **subshell** (`63` variabel `.env`
+   tidak bocor ke proses drill). Pola yang sama berlaku untuk skrip drill lain.
+2. **`createFramedBackup` default-nya mengekspor SELURUH 20 tabel.** Store yang
+   tidak punya semuanya (drill, alat CLI) mati dengan
+   `InvalidTableError: Table ratchetSessions does not exist`. Bukan bug produksi
+   (Dexie aplikasi punya 20 tabel), tetapi jebakan API: pemanggil non-aplikasi
+   **wajib** mengoper `tables`.
+3. **"Ekspor ulang byte-identik" bukan properti yang sah.** Tiap frame memakai
+   nonce acak, jadi dua ekspor dari data yang sama tidak pernah sama byte-nya.
+   Determinisme yang benar diuji pada **urutan frame + payload** (langkah 10).
+   Jangan "perbaiki" test dengan menuntut kesamaan byte.
+4. **Perbandingan baris-per-baris tidak cukup.** Saat harness dirusak dengan
+   menggeser ciphertext di sumber, kedua sisi ikut bergeser dan langkah 8 tetap
+   hijau — yang merah hanya silang-cek dengan dump (langkah 9). Karena itu
+   langkah itu wajib ada, bukan hiasan.
+5. **Bentuk baris harus disalin dari penulisnya, bukan ditebak.** Versi pertama
+   drill menulis `identityKeys.publicKey` sebagai `Uint8Array`; yang sebenarnya
+   ditulis `keychainDb.ts:749` adalah `{ userId, key: <base64> }`. Drill tetap
+   "lulus" karena arsip hanya memindahkan byte opaque — jadi drill dengan bentuk
+   salah membuktikan round-trip untuk data yang tidak pernah ada di klien. Saat
+   cakupan dinaikkan ke 20 tabel, tiap bentuk diambil dari pemanggil `.put()`
+   yang nyata (`keychainDb.ts`, `shadowVaultDb.ts`, `offlineQueueDb.ts`,
+   `store/profile.ts`, `lib/contactStore.ts`).
+
+## 39.4d Run ulang 2026-10-30 — drill menolak database kosong
+
+Drill yang sama dijalankan lagi di mesin dev. Yang perlu dicatat justru
+hasil pertamanya: DB dev kosong (`0|0|0|0`), jadi setelah `pg_restore` fixture-nya
+kosong dan drill berhenti dengan **`GAGAL fixture kosong — tidak ada yang bisa
+dibuktikan`** (exit 1). Ini penjaga yang bekerja: "lulus" dengan nol baris akan
+menjadi bukti palsu.
+
+Untuk benar-benar menguji pipeline, DB sumber diisi sementara (1 user, 1
+device `cryptoVersion 2`, 2 percakapan, 60 pesan `ENC1:`), lalu drill diulang:
+
+- `pg_dump` 172 KB → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore`
+  410 ms, **17/17 tabel**, jumlah baris identik dengan sumber;
+- fixture dari hasil restore = 2 percakapan + 60 pesan + 1 perangkat →
+  **20/20 tabel** identik byte-per-byte, **387 nilai `ENC1:` utuh**, kunci publik
+  perangkat identik, seluruh id pesan/percakapan + ciphertext cocok dengan dump;
+- ekspor ulang **20 frame, urutan + payload identik (54 260 byte)**;
+- kontrol negatif tetap merah: phrase salah dan 1 byte rusak **ditolak, 0 baris**;
+- exit 0. Baris seed dihapus setelahnya, DB dev kembali `0|0|0|0`.
+
+Catatan operator: menjalankan drill pada DB kosong **selalu** berakhir merah —
+itu disengaja, bukan regresi. Untuk drill yang bermakna, arahkan
+`DATABASE_URL` di `server/.env` ke salinan dump (atau isi fixture seperti di atas).
 
 ## 39.5 Drill B — Log KT v2
 
@@ -95,6 +238,7 @@ Prisma bisa membaca skema hasil restore.
 ```bash
 bash scripts/kt-v2-restore-drill.sh                  # ~2 menit, tanpa layanan produksi
 timeout 600 bash scripts/kt-v2-restore-drill.sh      # dipakai CI (job kt-recovery-v2)
+gh workflow run drills.yml                           # terjadwal mingguan (Senin 04:00 UTC)
 ```
 
 Workspace sendiri (`NYX_KT_DRILL_DIR`, default `/tmp/nyx-kt-v2-restore-drill`),
@@ -108,10 +252,10 @@ Yang dibuktikan, berurutan (setiap langkah ❌ menggagalkan skrip):
 | # | Langkah | Bukti yang dicetak |
 |---|---|---|
 | 1 | Tulis entri lewat **jalur penulis produksi** (`server/scripts/kt-v2-drill-entries.ts` → `publishKeyTransparencyEntry` → gRPC `Update`) | `DRILL_ENTRY … treeSize=` |
-| 2 | Snapshot terverifikasi; `latest.json.treeSize` **dan** `root` = pohon hidup | nama arsip + size/root |
+| 2 | Snapshot terverifikasi; `latest.json.treeSize` **dan** `root` = pohon hidup, dan manifes **jujur** soal auditor head (sebelum auditor menandatangani: `auditorTreeSize` kosong) | nama arsip + size/root |
 | 3 | Bukti pra-bencana lolos `transparency.VerifySearch` (Go) + auditor head tersedia (mode 3), `/config` `abiVersion=2`, `TreeSize`/`Audit` menjawab | `OK verify-search treeSize=… anchor=…` |
 | 4 | Bencana: proses drill dimatikan, DB hidup **dihapus**, arsip lain dipangkas | — |
-| 5 | Pulih **hanya** dari `tar.gz` + `config.yaml`; `-check` lulus; head identik | `OK head treeSize=… root=…` |
+| 5 | Pulih **hanya** dari `tar.gz` + `config.yaml`; `-check -expect-size -expect-root` cocok dengan manifes; head identik | `OK head treeSize=… root=…` |
 | 6 | Instance pulih menyajikan bukti yang lolos verifier untuk entri lama | `OK verify-search …` |
 | 7 | Tumbuh 1 entri lalu verifikasi entri lama terhadap anchor `last=<pra-bencana>` (tidak bercabang) | size lama → size baru |
 | 8 | Auditor v2 menyelesaikan satu putaran — **termasuk** auditor yang kehilangan `auditor-state.json` | `OK kt-auditor once …` |
@@ -147,9 +291,11 @@ urutan lain gagal):
 1. `systemctl stop nyx-kt-query-v2 nyx-kt-auditor-v2` (LevelDB `flock`: satu proses).
 2. Pindahkan direktori DB hidup **utuh** ke `<db>.pra-restore-<detik>` (jangan dihapus).
 3. Ekstrak `kt-snapshot-<waktu>Z.tar.gz` terbaru ke direktori kosong baru.
-4. `nyx-kt-query-v2 -check -config <config> -db <hasil-ekstrak>` → bandingkan
-   `treeSize`/`root` dengan `latest.json` arsip itu. **`-check` exit 0 saja bukan
-   bukti** (temuan #2): angkanya yang harus sama.
+4. `nyx-kt-query-v2 -check -config <config> -db <hasil-ekstrak> \
+   -expect-size <treeSize> -expect-root <root>` (angka dari `latest.json`). Ini
+   exit ≠ 0 bila head tidak cocok. **`-check` tanpa harapan head bukan bukti**
+   (temuan #2): exit 0 hanya berarti LevelDB bisa dibuka — dan LevelDB pulih
+   sendiri dari salinan sebagian.
 5. `systemctl start nyx-kt-query-v2`, lalu `curl 127.0.0.1:8089/healthz` harus
    melaporkan angka yang sama.
 6. **Jalankan auditor** (`systemctl start nyx-kt-auditor-v2`, atau
@@ -188,6 +334,12 @@ dijalankan** terhadap bundle sungguhan.
    pemulihan = DB → layanan → **auditor** → verifikasi klien, dan snapshot
    produksi (harian) hampir selalu sudah memuat head auditor (menandatangani tiap
    jam) — tetapi jangan mengandalkannya: jalankan auditor setelah restore.
+
+   Sifat itu sekarang **terlihat sebelum bencana**: manifes `latest.json`
+   mencatat `auditorName`/`auditorTreeSize`/`auditorTimestamp`, dan proses log
+   menulis peringatan saat snapshot dibuat tanpa auditor head (mode 3).
+   `deploy/selfhost/scripts/restore.sh` juga sudah menjalankan auditor setelah
+   log siap, jadi langkah 6 di §39.5b bukan lagi tugas manual yang bisa terlupa.
 2. **`-check` bukan gerbang integritas arsip.** Arsip yang dirusak 1 byte gagal
    diekstrak (`tar` exit ≠ 0), tetapi LevelDB **memulihkan diri** dari sisa
    berkasnya dan `-check` exit 0 dengan `treeSize` lebih kecil. Yang mendeteksi
@@ -229,6 +381,35 @@ dijalankan** terhadap bundle sungguhan.
   skrip bash butuh loader tersendiri. Kesepakatan dua implementasi tetap diuji di
   CI lewat fixture statis (`cmd/kt-v2-fixtures` → test Rust/WASM di job `build`).
 
+### 39.5f Anchor tree size/root di bundle self-host (2026-10-30)
+
+Sebelum ini `backup.sh` hanya mencatat metadata host, dan `restore.sh` menyatakan
+sukses setelah `verify-boot.sh` — padahal LevelDB yang rusak sebagian bisa
+memulihkan diri dengan tree **lebih kecil** dan tetap exit 0 (§39.5d temuan 2).
+Bundle kini membawa anchor log KT v2:
+
+- **`backup.sh`** membaca `GET /head` layanan baca KT v2 (`NYX_KT_V2_READ_URL`,
+default `http://127.0.0.1:8089`) **sebelum** layanan dihentikan, lalu menulis
+  `ktV2TreeSize=<n>` dan `ktV2Root=<hex>` ke `meta.txt`. Kalau head tidak
+  terbaca, backup tetap jalan (Postgres lebih penting) dan bundle menandai diri
+  `ktV2HeadUnavailable=1` plus peringatan di stderr.
+- **`restore.sh`** membaca kedua nilai itu sebelum dry-run, menampilkannya, dan
+  **memperingatkan secara eksplisit** bila bundle lama tidak memuatnya (restore
+  tetap jalan, tetapi klaim "log pulih = log yang dibackup" tidak dibuat).
+  Setelah `verify-boot.sh`, head hasil pulih dibandingkan lewat
+  `nyx-kt-v2-check head -expect-size … -expect-root …`;
+  bila binernya tidak ada, perbandingan curl tetap dilakukan dan kegagalan
+  membaca `/head` dilaporkan sebagai peringatan (bukan lolos diam-diam).
+  Mismatch = `exit 1` + `systemctl --user stop nyx.target`: jangan buka layanan
+  dengan tree yang berbeda dari arsip.
+- Kontraknya dijaga `server/tests/selfhostScripts.test.ts` (meta keys, flag
+  `-expect-size`/`-expect-root`, peringatan bundle lama, `exit 1` pada mismatch,
+  dan `bash -n` kedua skrip).
+
+**Yang belum dibuktikan:** jalur ini belum dijalankan terhadap bundle `.age`
+sungguhan di host sungguhan (butuh `age-identity` + Postgres lokal). Yang lulus
+adalah kontrak statis + sintaks bash, bukan restore end-to-end.
+
 ## 39.6 Status drill
 
 | Drill | Terakhir dijalankan | Bukti | Catatan |
@@ -237,8 +418,13 @@ dijalankan** terhadap bundle sungguhan.
 | Uji skrip drill itu sendiri | 2026-10-29 | salinan skrip dengan `-expect-root` dipalsukan: `❌ root=0e2dbf10…, ingin 0000…` → berhenti di langkah 5 (exit 1) | bukti "lulus" tidak berasal dari harness buta |
 | Drill menemukan bug di dirinya sendiri | 2026-10-29 | run ke-4 gagal di langkah 9: `cp: cannot stat …kt-snapshot-…` karena `-snapshot-keep 3` memangkas arsip pra-bencana | diperbaiki `ee1de40b` (arsip disalin keluar direktori snapshot) |
 | KT restore v2 dari bundle `.age` (§39.5c) | **belum pernah** | — | butuh `age-identity` operator |
-| Postgres restore | **belum pernah** | — | §39.4 |
-| Restore klien dari `.nyxvault` | **belum pernah** diuji terhadap dump nyata | — | uji setelah Drill A |
+| **Postgres restore (otomatis-panduan, §39.4)** | 2026-10-29 | klaster `initdb` di `/tmp` (Postgres 18.6, port 15432), `pg_dump -Fc` 393 KB dari DB 12 MB → `pg_restore` 0,44 s tanpa error; **17/17 tabel**, `User` 4/4, `Device` 4/4, `Message` 1/1, `max(createdAt)` identik `2026-10-28T09:15:00Z`, kolom `Device.signingKeyV2` ada, klien Prisma **aplikasi** membaca `users=4 devices=4 signingKeyV2=null:1` | klaster dihapus setelah drill; arsip `.age` belum diuji |
+| Postgres restore **dari bundle `.age`** | **belum pernah** | — | butuh `age-identity` operator (§39.4 akhir) |
+| **Restore klien dari `.nyxbak` (§39.4b)** | 2026-10-29 | `pg_dump` 396 KB dari DB sumber `4\|1\|1\|4` → klaster `initdb` (Postgres 18.6, :15433) → `pg_restore` 442 ms, **17/17 tabel** + jumlah baris identik; fixture dari hasil restore = 1 percakapan + 1 pesan + 4 perangkat → **51 baris di 20/20 tabel** → arsip **20 frame / 51 188 byte** → restore **51 catatan di 20 tabel**, `progress 20/20`; setiap tabel identik byte-per-byte, **45 nilai `ENC1:` utuh**, kunci publik perangkat identik, semua id pesan/percakapan + ciphertext cocok dengan dump, ekspor ulang **20 frame urutan + payload identik**; kontrol negatif phrase salah & 1 byte rusak **ditolak, 0 baris**; total **39 pemeriksaan OK**, exit 0 | belum dari profil browser sungguhan (§39.4b) |
+| **Restore klien + Postgres, run ulang (§39.4d)** | 2026-10-30 | DB dev kosong → drill **merah** `fixture kosong`; setelah seed 1 user/1 device/2 percakapan/60 pesan: `pg_dump` 172 KB → `pg_restore` 410 ms 17/17 tabel → fixture 20/20 tabel identik, **387 nilai `ENC1:` utuh**, ekspor ulang 20 frame/54 260 byte identik, kontrol negatif tetap ditolak, exit 0 | seed dihapus setelah run; DB kembali kosong |
+| Uji harness drill klien itu sendiri | 2026-10-29 | dua sabotase: ciphertext digeser 1 karakter → `GAGAL ciphertext pesan berbeda dari dump`; tabel `storyKeys` dibuang dari `SCHEMA` → `GAGAL cakupan tabel TIDAK lengkap — drill 19 vs backup 20: kurang storyKeys`; keduanya exit 1 | penjaga cakupan ikut terbukti, bukan hanya komentar |
+| Restore klien **dari UI** (tombol Ekspor di profil nyata) | **belum pernah** | — | butuh sesi browser dengan akun nyata |
+| Anchor KT v2 di bundle self-host (§39.5f) | 2026-10-30 | `server/tests/selfhostScripts.test.ts` 3/3: meta `ktV2TreeSize`/`ktV2Root`, `-expect-size`/`-expect-root` dipakai, peringatan bundle lama, mismatch → `exit 1`, `bash -n` OK | **belum** dijalankan terhadap bundle `.age` sungguhan |
 | Rotasi `JWT_SECRET` tanpa kehilangan backup R2 | **belum pernah** | — | §39.3 |
 
 ## 39.7 Jika maintainer hilang
@@ -255,7 +441,13 @@ berapa pun rapi kodenya.
   juga lokal (`bash scripts/kt-v2-restore-drill.sh`) bila menyentuh config/kunci,
   snapshot, atau jalur tulis log — CI memakai config yang dibutuhkan drill sendiri,
   bukan config instance Anda.
-- **Per kuartal**: Drill A + restore klien dari `.nyxvault`, catat hasil di §39.6.
+- **Per kuartal**: Drill A (§39.4) + Drill klien (§39.4b), catat hasil di §39.6.
+  Drill A butuh ~2 menit, drill klien ~20 detik, dan keduanya tidak menyentuh
+  produksi (klaster `initdb` sendiri, dihapus di akhir) — tidak ada alasan
+  melewatinya.
+- **Setiap perubahan format `.nyxbak`** (`backupFormat`/`backupPayload`/
+  `backupRestore`): jalankan §39.4b sebelum merge. Arsip lama harus tetap
+  terbuka — format ini satu-satunya jalan pulih klien tanpa perangkat lama.
 - **Setelah setiap restore nyata** (bencana atau latihan): catat hasilnya di
   §39.6, termasuk kalau langkah 6 (auditor) terlewat — itu yang membuat klien
   melihat `unavailable`, bukan log yang hilang.

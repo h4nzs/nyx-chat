@@ -337,8 +337,8 @@
       "content_1": "Você tem três maneiras de migrar sua conta para um novo dispositivo:",
       "list_1_label": "Migração de Dispositivo (Recomendado):",
       "list_1_text": "Use o recurso \"Transferir para Novo Dispositivo\" nas Configurações. Escaneie o QR code no seu novo dispositivo para transferir de forma segura e direta todo o seu histórico de conversas e chaves.",
-      "list_2_label": "Backup do Cofre:",
-      "list_2_text": "Exporte seu arquivo \"NYX Vault\" (.nyxvault) nas Configurações. Você pode importar este arquivo em qualquer novo dispositivo para restaurar instantaneamente sua conta e seu histórico.",
+      "list_2_label": "Backup cifrado:",
+      "list_2_text": "Crie um backup cifrado (.nyxbak) em Configurações → Dados. Restaure em qualquer dispositivo novo com sua Frase de Recuperação para recuperar seu histórico.",
       "list_3_label": "Recuperação de Emergência:",
       "list_3_text": "Se você perder o dispositivo e os backups, use a função \"Recuperar\" com sua Frase de Recuperação de 24 palavras. Isso redefinirá sua senha e restaurará sua Chave de Identidade, mas <1>o histórico de conversas será perdido</1> sem um backup do Cofre."
     },

@@ -2,12 +2,12 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
-//! [docs/35 Fase 4b] PIR v1 sidecar.
+//! [docs/42] PIR dua server (`xor-pir-v1`).
 //!
-//! Pure library pieces live here so `cargo test` can exercise snapshot
-//! validation and an end-to-end ChalametPIR query without opening a socket.
-//! `main.rs` only handles environment, startup snapshot loading, and serving.
+//! Kripto/protokol murni ada di `pir`/`shard` supaya `cargo test` bisa menguji
+//! penempatan, XOR, dan hot-swap tanpa membuka socket. `main.rs` hanya membaca
+//! env, memuat shard, dan melayani HTTP.
 
 pub mod http;
-pub mod index;
-pub mod snapshot;
+pub mod pir;
+pub mod shard;

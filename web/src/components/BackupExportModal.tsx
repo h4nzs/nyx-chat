@@ -5,11 +5,11 @@
 /**
  * [docs/30 WS-C fase 3 / docs/31 §31.6b] Membuat berkas backup `.nyxbak`.
  *
- * Sampai komponen ini ada, `startBackupFileDownload` tidak punya pemanggil:
- * berkas `.nyxbak` hanya lahir dari alur QR (`MigrationSendPage`, kunci acak
- * yang di-seal ke penerima) sehingga `BackupRestoreModal` — yang membuka arsip
- * dengan kunci turunan recovery phrase — tidak pernah punya sumber berkas. Modul
- * transport fase 3-nya lengkap tetapi tidak terjangkau dari UI.
+ * Komponen ini adalah **satu-satunya** sumber berkas `.nyxbak` sejak alur QR
+ * transfer perangkat dihapus (2026-10-29). Sebelumnya arsip lahir dari
+ * `MigrationSendPage` dengan kunci acak yang di-seal ke penerima, sehingga
+ * `BackupRestoreModal` — yang membuka arsip dengan kunci turunan recovery
+ * phrase — tidak punya sumber berkas sama sekali.
  *
  * Alur di sini menutup lingkaran itu, dan itu sebabnya urutannya penting:
  *   1. Ambil recovery phrase (auto-unlock key, atau prompt password).
@@ -305,7 +305,7 @@ export default function BackupExportModal({ isOpen, onClose }: BackupExportModal
         )}
 
         {result && (
-          <div className="p-4 rounded-xl bg-bg-main shadow-neu-concave space-y-1">
+          <div data-testid="backup-export-result" className="p-4 rounded-xl bg-bg-main shadow-neu-concave space-y-1">
             <p className="font-mono text-[10px] text-text-secondary break-all">{result.fileName}</p>
             <p className="font-mono text-[10px] text-text-secondary">
               {t('modals:backup_export.result_summary', '{{records}} catatan · {{frames}} frame · {{size}}', {
@@ -351,6 +351,7 @@ export default function BackupExportModal({ isOpen, onClose }: BackupExportModal
           <button
             type="submit"
             disabled={isWorking}
+            data-testid="backup-export-create"
             className="
               px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider
               bg-accent text-white shadow-neu-convex active:shadow-neu-pressed

@@ -31,6 +31,24 @@ export interface PresenceMembershipClient {
       distinct?: ('userId' | 'conversationId')[];
     }): Promise<Array<{ conversationId?: string; userId?: string | null }>>;
   };
+  /**
+   * [AUDIT PASS 2 residual — presence 1:1] Bukti peserta KEDUA yang dipegang
+   * server: baris `SessionKey` per (conversation, device). Percakapan 1:1 dan
+   * grup buatan sendiri **tidak punya** baris `UserHiddenConversation`
+   * (token-first, hanya penerima bertoken), sehingga presence 1:1 dulu selalu
+   * kosong. Session key dibuat saat percakapan dibuat (`initialSession`) untuk
+   * SEMUA perangkat peserta, jadi ia adalah daftar kontak yang sudah ada tanpa
+   * menulis baris keanggotaan baru (tidak menambah graf di dump).
+   */
+  sessionKey: {
+    findMany(args: {
+      where: Record<string, unknown>;
+      select: { conversationId?: boolean; device?: { select: { userId?: boolean } } };
+    }): Promise<Array<{
+      conversationId?: string;
+      device?: { userId?: string | null } | null;
+    }>>;
+  };
 }
 
 /**
@@ -74,29 +92,50 @@ export async function collectPresencePeers(
   // sebagai target broadcast.
   const candidates = await routingCandidates(userId)
 
-  const mine = await prisma.userHiddenConversation.findMany({
-    where: { userId: { in: candidates } },
-    select: { conversationId: true },
-  });
+  // Dua sumber "percakapan milik saya": baris keanggotaan (token-first, grup
+  // yang saya diundang) DAN session key perangkat saya (1:1 + grup buatan
+  // sendiri, yang tidak punya baris keanggotaan — residual pass 2).
+  const [mine, mySessions] = await Promise.all([
+    prisma.userHiddenConversation.findMany({
+      where: { userId: { in: candidates } },
+      select: { conversationId: true },
+    }),
+    prisma.sessionKey.findMany({
+      where: { device: { userId } },
+      select: { conversationId: true },
+    }),
+  ]);
 
-  if (mine.length === 0) return [];
-
-  const conversationIds = Array.from(
-    new Set(mine.map((m) => m.conversationId).filter((id): id is string => typeof id === 'string'))
-  );
+  const conversationIds = Array.from(new Set(
+    [...mine, ...mySessions]
+      .map((row) => row.conversationId)
+      .filter((id): id is string => typeof id === 'string')
+  ));
   if (conversationIds.length === 0) return [];
 
-  const peers = await prisma.userHiddenConversation.findMany({
-    where: { conversationId: { in: conversationIds }, userId: { not: null, notIn: candidates } },
-    select: { userId: true },
-    distinct: ['userId'],
-  });
+  const [peers, sessionPeers] = await Promise.all([
+    prisma.userHiddenConversation.findMany({
+      where: { conversationId: { in: conversationIds }, userId: { not: null, notIn: candidates } },
+      select: { userId: true },
+      distinct: ['userId'],
+    }),
+    prisma.sessionKey.findMany({
+      where: { conversationId: { in: conversationIds }, NOT: { device: { userId } } },
+      select: { device: { select: { userId: true } } },
+    }),
+  ]);
 
   const resolved = await Promise.all(peers.map((p) => resolveRoutingUser(p.userId)));
+  const sessionUserIds = sessionPeers
+    .map((row) => row.device?.userId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
 
   return dedupePeers(
     conversationIds.map((conversationId) => ({ conversationId })),
-    resolved.map((peerId) => ({ userId: peerId })),
+    [
+      ...resolved.map((peerId) => ({ userId: peerId })),
+      ...sessionUserIds.map((peerUserId) => ({ userId: peerUserId })),
+    ],
     userId
   );
 }

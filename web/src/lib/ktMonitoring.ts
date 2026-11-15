@@ -26,14 +26,14 @@
  * tanpa anchor yang tersimpan, perubahan `search`/tree head **tidak terdeteksi**
  * — keamanan KT bergantung pada loop ini.
  *
- * Batas yang jujur: modul ini belum dipanggil dari jalur bundle produksi
- * (`docs/34` §34.6 poin 1) sehingga belum ada state yang terisi di lapangan;
- * dan notifikasi ke user saat `keyVersion` berubah diserahkan ke pemanggil
- * (`KtMonitorOutcome.changed`) supaya modul ini tetap bebas UI/toast.
+ * Loop ini sudah dipasang di produksi: `App.tsx` memanggil
+ * `startKtMonitorLoop` setelah 30 detik lalu setiap 6 jam (`docs/34` §34.6
+ * poin 2). Notifikasi ke user saat `keyVersion` berubah tetap diserahkan ke
+ * pemanggil (`KtMonitorOutcome.changed`) supaya modul ini bebas UI/toast.
  */
 
 import { db, type KtMonitoringRecord } from './db';
-import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
+import { decryptValueAtRest, deriveKtSearchIndexKey, encryptValueAtRest } from './keychainDb';
 import type {
   KeyTransparencyVerifier,
   KtConfig,
@@ -105,8 +105,19 @@ const base64UrlToBytes = (value: string): Uint8Array => {
   return out;
 };
 
-/** Kunci baris = hex search key (bukan base64: mudah dipakai sebagai PK Dexie). */
+/** Kunci baris = hex search key mentah; hanya untuk pencocokan di memori. */
 export const ktSearchKeyHex = (searchKey: Uint8Array): string => bytesToHex(searchKey);
+
+/**
+ * [audit N7-02] Primary key baris = HMAC(masterSeed, searchKey), bukan search
+ * key mentah. Deterministik (lookup O(1)), tetapi tidak bisa dipakai untuk
+ * mengenumerasi kontak dari dump IndexedDB tanpa vault yang terbuka.
+ */
+export async function ktSearchKeyRowId(searchKey: Uint8Array): Promise<string> {
+  const key = await deriveKtSearchIndexKey();
+  const sodium = await import('@lib/sodiumInitializer').then((m) => m.getSodium());
+  return bytesToHex(sodium.crypto_generichash(32, searchKey, key));
+}
 
 async function sealBytes(bytes: Uint8Array | undefined | null): Promise<string | null> {
   if (!bytes || bytes.length === 0) return null;
@@ -134,11 +145,17 @@ async function openBytes(sealed: string | null | undefined): Promise<Uint8Array 
  * ulang tree head distinguished.
  */
 export async function saveKtState(update: KtStateUpdate): Promise<void> {
-  const searchKeyHex = ktSearchKeyHex(update.searchKey);
-  const existing = await db.ktMonitoring.get(searchKeyHex);
+  const searchKeyHex = await ktSearchKeyRowId(update.searchKey);
+  const legacyKeyHex = ktSearchKeyHex(update.searchKey);
+  // Baris lama memakai search key mentah sebagai PK; ambil isinya sekali agar
+  // pembaruan parsial tidak menghapus bukti yang sudah ada saat migrasi.
+  const legacyRow =
+    legacyKeyHex === searchKeyHex ? undefined : await db.ktMonitoring.get(legacyKeyHex);
+  const existing = (await db.ktMonitoring.get(searchKeyHex)) ?? legacyRow;
 
   const record: KtMonitoringRecord = {
     searchKeyHex,
+    searchKey: existing?.searchKey ?? (await sealBytes(update.searchKey)) ?? null,
     treeHead: (await sealBytes(update.treeHead)) ?? existing?.treeHead ?? null,
     monitoringData: (await sealBytes(update.monitoringData)) ?? existing?.monitoringData ?? null,
     distinguishedTreeHead:
@@ -155,6 +172,7 @@ export async function saveKtState(update: KtStateUpdate): Promise<void> {
   };
 
   await db.ktMonitoring.put(record);
+  if (legacyRow) await db.ktMonitoring.delete(legacyKeyHex);
 }
 
 /** Baca semua state; nilai yang tidak bisa dibuka (vault terkunci) dilewati. */
@@ -162,12 +180,41 @@ export async function loadKtStates(): Promise<KtStoredState[]> {
   const records = await db.ktMonitoring.toArray();
   const out: KtStoredState[] = [];
   for (const record of records) {
-    let searchKey: Uint8Array;
-    try {
-      searchKey = hexToBytes(record.searchKeyHex);
-    } catch {
-      continue;
+    let searchKey: Uint8Array | undefined;
+
+    if (record.searchKey) {
+      searchKey = await openBytes(record.searchKey);
+      // Baris baru: tanpa vault terbuka search key tidak bisa dipulihkan —
+      // jangan menebak dari PK (itu HMAC, bukan search key).
+      if (!searchKey) continue;
+    } else {
+      // [audit N7-02] Baris legacy: PK masih search key mentah. Baca sekali,
+      // lalu pindahkan ke PK HMAC + search key ter-seal bila vault tersedia.
+      try {
+        searchKey = hexToBytes(record.searchKeyHex);
+      } catch {
+        continue;
+      }
+      try {
+        const rowId = await ktSearchKeyRowId(searchKey);
+        if (rowId !== record.searchKeyHex) {
+          const existing = await db.ktMonitoring.get(rowId);
+          if (existing) {
+            await db.ktMonitoring.delete(record.searchKeyHex);
+          } else {
+            await db.ktMonitoring.put({
+              ...record,
+              searchKeyHex: rowId,
+              searchKey: (await sealBytes(searchKey)) ?? null,
+            });
+            await db.ktMonitoring.delete(record.searchKeyHex);
+          }
+        }
+      } catch {
+        // Vault terkunci: biarkan baris legacy apa adanya sampai unlock.
+      }
     }
+
     const rawVersion = record.keyVersion ? await decryptValueAtRest(record.keyVersion) : null;
     const keyVersion = rawVersion === null ? undefined : Number.parseInt(rawVersion, 10);
     const rawTreeSize = record.treeSize ? await decryptValueAtRest(record.treeSize) : null;

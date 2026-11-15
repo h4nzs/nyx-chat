@@ -44,17 +44,22 @@ import {
   consumeLinkToken,
   createPendingLink,
   denyPendingLink,
+  getApprovedDeviceId,
   getLinkState,
   readPendingLink,
   takeApprovedLink,
   type LinkingSealer,
   type LinkingStore,
 } from '../utils/deviceLinking.js'
+// [docs/40] Arsip riwayat: intent → preparing → ready (state ter-seal di Redis).
+import { hasHistoryIntent, markHistoryIntent, readHistoryState } from '../utils/linkHistory.js'
 // [docs/28 Tier 1.5 / D14] key Redis memakai tag, bukan userId asli (Redis = artefak setara dump).
 // [docs/28 Tier 4] identitas at-rest: key Redis tidak menyematkan userId asli.
 import { identityKey, identityTag } from '../utils/redisIdentity.js'
 // [docs/30 §30.12 WS-H] Guard burst registrasi (per sumber IP-hash & instalasi).
 import { enforceRegistrationBurst, mayWaiveAttestation } from '../utils/registrationGuard.js'
+// [AUDIT PASS 6 — N6-01] Rencana KICK device-scoped untuk `/logout`.
+import { planDeviceLogoutKick } from '../utils/logoutKick.js'
 // [docs/30 §30.12 WS-H] Attestation yang DITOLAK harus terlihat tanpa membaca log:
 // `root_not_trusted` = bundle root operator ketinggalan, `rejected`/`accepted` =
 // laju penolakan (ops/prometheus/alerts.yml grup `nyx-attestation`).
@@ -176,19 +181,15 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   // Sama untuk deviceId kosong (recovery flow: login tanpa kunci lokal) — refresh token
   // tidak dipersist karena tidak ada device yang valid (FK RefreshToken_deviceId_fkey).
   if (user.role !== 'GUEST' && deviceId) {
-    // Check if user is in Migration Mode
-    const isMigrating = await redisClient.exists(identityKey('is_migrating', user.id));
-
-    if (!isMigrating) {
-        // Enforce "One User, One Active Device": Revoke all existing sessions for this user
-        await prisma.refreshToken.deleteMany({
-            where: {
-                device: { userId: user.id }
-            }
-        });
-    } else {
-        console.log(`[Migration] Bypassing session revocation for user ${user.id} due to active migration flag.`);
-    }
+    // Enforce "One User, One Active Device": Revoke all existing sessions for this user.
+    // [2026-10-29] Dulu ada bypass 15 menit (`is_migrating`) untuk transfer vault
+    // lewat QR; alur itu dihapus, jadi tidak boleh ada lagi jalur yang membuat
+    // dua device sah bersamaan.
+    await prisma.refreshToken.deleteMany({
+        where: {
+            device: { userId: user.id }
+        }
+    });
 
     // Generate familyId for token rotation tracking (reuse detection)
     const tokenFamilyId = familyId || crypto.randomUUID();
@@ -787,8 +788,16 @@ router.post('/login', authLimiter, zodValidate({
 // pembuatannya harus dibatasi per IP (lihat `burnerLimiter`).
 router.post('/burner', burnerLimiter, async (req, res, next) => {
   try {
-    const guestId = `guest_${crypto.randomUUID().substring(0, 8)}`;
-    const guestDeviceId = `burner_${crypto.randomUUID().substring(0, 8)}`;
+    // [AUDIT PASS 6 — N6-02] Id guest = `sub` JWT sekaligus kunci routing relay,
+    // dan guest sengaja tidak punya baris User/Device (tidak ada uniqueness check
+    // di DB). Dulu hanya 8 karakter hex (32 bit): pada ~10.000 guest peluang
+    // tabrakan sudah ~1,2% (50% di ~77.000), dan dua guest ber-id sama berbagi
+    // kanal relay (isi tetap E2EE, tetapi metadata/alamat bocor). Pakai UUID
+    // penuh — `burnerLimiter` sudah membatasi pembuatan, jadi panjang bukan biaya.
+    const guestId = `guest_${crypto.randomUUID()}`;
+    // [AUDIT PASS 6 — N6-02] id perangkat guest: UUID penuh, alasan sama dengan
+    // `guestId` di atas (id ini juga dipakai sebagai `device_id` relay).
+    const guestDeviceId = `burner_${crypto.randomUUID()}`;
     
     // Kita berikan token dengan role GUEST
     const tokens = await issueTokens({ id: guestId, role: 'GUEST' }, guestDeviceId, req);
@@ -1186,6 +1195,11 @@ router.post('/link/claim', authLimiter, zodValidate({
           pendingId,
           deviceName: deviceName || 'Perangkat baru',
           publicKey,
+          // [docs/40] Kunci X-Wing perangkat baru WAJIB sampai ke perangkat lama:
+          // arsip riwayat diseal ke kunci ini (`pq_box_seal_v2`). Tanpa field
+          // ini, perangkat lama tidak punya tujuan untuk kunci arsip dan fitur
+          // riwayat tidak mungkin jalan. Kunci publik, bukan rahasia.
+          ...(pqPublicKey ? { pqPublicKey } : {}),
           signingKey,
           ...(signingKeyV2 ? { signingKeyV2 } : {}),
         },
@@ -1198,20 +1212,42 @@ router.post('/link/claim', authLimiter, zodValidate({
   } catch (e) { next(e) }
 });
 
+// [docs/40 §40.4] Status juga membawa kesiapan arsip riwayat. Perangkat baru
+// WAJIB menunggu `history !== 'preparing'` sebelum `complete`: login-nya
+// mencabut sesi perangkat lama, dan unggahan yang masih berjalan akan terpotong
+// di tengah jalan.
 router.get('/link/status/:pendingId', authLimiter, async (req, res, next) => {
   try {
     const pendingId = req.params.pendingId;
     if (typeof pendingId !== 'string' || pendingId.length < 8) throw new ApiError(400, 'pendingId is required.');
-    res.json({ state: await getLinkState(linkStore, pendingId) });
+    const state = await getLinkState(linkStore, pendingId);
+    if (state !== 'approved') return res.json({ state, history: 'none' });
+
+    const deviceId = await getApprovedDeviceId(linkStore, pendingId);
+    let history: 'none' | 'preparing' | 'ready' = 'none';
+    if (deviceId) {
+      if (await readHistoryState(linkStore, linkSealer, deviceId)) {
+        history = 'ready';
+      } else if (await hasHistoryIntent(linkStore, deviceId)) {
+        // Perangkat lama sudah berkomitmen mengunggah tetapi belum `ready`.
+        history = 'preparing';
+      }
+    }
+    res.json({ state, history });
   } catch (e) { next(e) }
 });
 
 router.post('/link/approve', requireAuth, zodValidate({
-  body: z.object({ pendingId: z.string().min(8) })
+  body: z.object({
+    pendingId: z.string().min(8),
+    // [docs/40] Perangkat lama berkomitmen mengirim arsip riwayat sesudah
+    // approve. Tanpa flag ini perangkat baru langsung `complete` (perilaku lama).
+    expectHistory: z.boolean().optional(),
+  })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Unauthorized');
-    const { pendingId } = req.body;
+    const { pendingId, expectHistory } = req.body as { pendingId: string; expectHistory?: boolean };
 
     const pending = await readPendingLink(linkStore, linkSealer, pendingId);
     if (!pending) throw new ApiError(404, 'Link request not found or expired.');
@@ -1247,6 +1283,13 @@ router.post('/link/approve', requireAuth, zodValidate({
       // Race: approve lain menang lebih dulu → jangan tinggalkan device yatim.
       await prisma.device.delete({ where: { id: device.id } }).catch(() => {});
       throw new ApiError(409, 'Link request has already been handled.');
+    }
+
+    if (expectHistory) {
+      // [docs/40 §40.4] Sinyal ke perangkat baru: `status.history` menjadi
+      // `preparing` sampai `ready`. Perangkat baru menunggu (maks 60 dtk) supaya
+      // unggahan tidak terpotong oleh login yang mencabut sesi perangkat ini.
+      await markHistoryIntent(linkStore, device.id);
     }
 
     // Perangkat tertaut bisa menjadi device terakhir di record PIR user ini.
@@ -1418,6 +1461,9 @@ router.post('/logout', async (req, res) => {
   }
   try {
     const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string; sub?: string };
+    // [AUDIT PASS 6 — N6-01] Diisi hanya bila token refresh ada di DB; dipakai
+    // untuk mengarahkan kick ke perangkat ini saja (lihat planner-nya).
+    let loggedOutDeviceId: string | null = null;
     if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
       // Find the token to get its familyId
       const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } });
@@ -1425,6 +1471,7 @@ router.post('/logout', async (req, res) => {
       if (stored) {
         // Revoke ALL tokens in this family + Redis blacklist (paralel)
         await revokeFamily(stored.familyId);
+        loggedOutDeviceId = stored.deviceId;
       } else {
         // Fallback: revoke just this JTI
         await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } });
@@ -1437,6 +1484,27 @@ router.post('/logout', async (req, res) => {
           await redisClient.del(identityKey('active_device', payload.sub));
           await invalidateActiveDeviceCache(payload.sub, redisClient);
         } catch (_re) {}
+      }
+
+      // [AUDIT PASS 6 — N6-01] Revokasi token saja TIDAK memutus socket yang
+      // sedang hidup: relay tidak memeriksa daftar blacklist per frame, jadi
+      // socket yang sudah terbuka terus mengirim & menerima pesan setelah
+      // "logged out". Samakan dengan `DELETE /api/sessions/:jti`, tetapi HANYA
+      // untuk perangkat ini — planner mengembalikan `null` bila `deviceId`
+      // tidak diketahui, sebab kick tanpa `deviceId` = logout semua perangkat.
+      const kick = planDeviceLogoutKick({
+        userId: payload.sub,
+        deviceId: loggedOutDeviceId,
+        reason: 'logout',
+      });
+      if (kick) {
+        try {
+          const { emitEventToUser, sendJsonToUser } = await import('../network/redisBridge.js');
+          await emitEventToUser(kick.userId, 'force_logout', { reason: kick.reason, deviceId: kick.deviceId }, kick.deviceId);
+          await sendJsonToUser(kick.userId, TransportOpCode.KICK, { reason: 'LOGOUT', deviceId: kick.deviceId }, false, kick.deviceId);
+        } catch (err) {
+          console.error('[Auth] Failed to send KICK/force_logout for logout:', err);
+        }
       }
     }
   } catch (_e) {}
@@ -1549,6 +1617,10 @@ return current
 
       if (hash.startsWith(targetPrefix)) {
           await redisClient.del(`pow:challenge:${userId}`);
+          // [AUDIT PASS 6 — N6-03] PoW hanya menaikkan tier kepercayaan; JANGAN
+          // membaca `isVerified` sebagai "perangkat terverifikasi" (register/
+          // WebAuthn memakai arti itu untuk kolom yang sama). Bila keduanya
+          // perlu dibedakan, tambah kolom terpisah.
           await prisma.user.update({
               where: { id: userId },
               data: { isVerified: true }

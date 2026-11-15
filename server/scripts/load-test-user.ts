@@ -36,6 +36,7 @@ import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { hashPassword } from '../src/utils/password.js';
+import { pepperedIdentifier } from '../src/utils/atRestSecrets.js';
 import { randomBytes } from 'node:crypto';
 
 const connectionString = process.env.DATABASE_URL;
@@ -84,12 +85,17 @@ async function clientUsernameHash(username: string): Promise<string> {
 
 async function main() {
   const usernameHash = await clientUsernameHash(USERNAME);
+  // Kolom `User.usernameHash` menyimpan bentuk TER-PEPPER, bukan hash klien
+  // mentah: registrasi menulis `pepperedIdentifier(hashKlien)` dan login
+  // mencari kandidat yang sama (R5, docs/28). Menyimpan hash mentah membuat
+  // akun tidak pernah ditemukan → 401 "Invalid credentials" (run 42356420274).
+  const storedUsernameHash = pepperedIdentifier(usernameHash);
   const passwordHash = await hashPassword(PASSWORD);
 
   const user = await prisma.user.upsert({
-    where: { usernameHash },
+    where: { usernameHash: storedUsernameHash },
     update: { passwordHash },
-    create: { usernameHash, passwordHash, hasCompletedOnboarding: true },
+    create: { usernameHash: storedUsernameHash, passwordHash, hasCompletedOnboarding: true },
     select: { id: true },
   });
 
@@ -102,7 +108,10 @@ async function main() {
   // Id-nya TETAP supaya k6 bisa mengirim `deviceId` di body login.
   const loadDevice = await prisma.device.upsert({
     where: { id: LOAD_DEVICE_ID },
-    update: { lastActiveAt: new Date() },
+    // `userId` ikut diperbarui: bila hash user berubah (mis. perbaikan pepper
+    // di run 42356420274 membuat baris user baru), device lama tetap menunjuk
+    // user lama dan login menjawab 404 "Specified device not found".
+    update: { lastActiveAt: new Date(), userId: user.id },
     create: {
       id: LOAD_DEVICE_ID,
       userId: user.id,
@@ -117,10 +126,11 @@ async function main() {
   // Peer opsional: memberi percakapan dua sisi supaya jalur relay/pengiriman
   // ke penerima (bila `targetRecipients` dipakai) punya tujuan nyata.
   const peerHash = await clientUsernameHash(PEER);
+  const storedPeerHash = pepperedIdentifier(peerHash);
   const peer = await prisma.user.upsert({
-    where: { usernameHash: peerHash },
+    where: { usernameHash: storedPeerHash },
     update: {},
-    create: { usernameHash: peerHash, passwordHash, hasCompletedOnboarding: true },
+    create: { usernameHash: storedPeerHash, passwordHash, hasCompletedOnboarding: true },
     select: { id: true },
   });
 

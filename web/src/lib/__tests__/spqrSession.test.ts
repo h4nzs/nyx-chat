@@ -60,7 +60,19 @@ function freshPair(seed = 0x5eed): { alice: SpqrRatchet; bob: SpqrRatchet; a: Ui
   };
 }
 
+// [AUDIT PASS 5 — N5-03] Artefak WASM yang hilang TIDAK boleh membuat suite ini
+// hijau tanpa berjalan. `describe.skip` tetap dipakai supaya mesin tanpa
+// artefak bisa menjalankan sisa suite, tetapi ketiadaannya kini menjadi tes yang
+// GAGAL — dulu seluruh tes kripto v2 dilewati diam-diam (pola "hijau palsu" yang
+// sama dengan `transport.spec` sebelum pass 1).
 const withSkip = HAS_WASM ? describe : describe.skip;
+if (!HAS_WASM) {
+  describe('artefak spqr.wasm', () => {
+    it('packages/spqr-wasm/dist/spqr.wasm wajib ada — suite kripto v2 tidak boleh di-skip diam-diam', () => {
+      expect(HAS_WASM).toBe(true);
+    });
+  });
+}
 
 withSkip('initSpqrSession', () => {
   it('state awal deterministik: akar sama + peran sama → state sama', () => {

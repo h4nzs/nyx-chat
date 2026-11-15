@@ -90,7 +90,7 @@
     "badge": "09 / VAULT LOKAL",
     "title": "Riwayat Anda hidup di perangkat Anda.",
     "p1": "Obrolan, state ratchet, dan kunci disimpan di <strong>Shadow Vault</strong> IndexedDB, dienkripsi at-rest dengan envelope <strong>ENC1:</strong> yang diturunkan dari master seed Anda.",
-    "p2": "Tidak ada yang disinkronkan ke cloud dalam bentuk plaintext — satu perangkat aktif per akun, dan migrasi dilakukan lewat ekspor <strong>.nyxvault</strong> terenkripsi.",
+    "p2": "Tidak ada yang disinkronkan ke cloud dalam bentuk plaintext — satu perangkat aktif per akun, dan pindah perangkat lewat backup <strong>.nyxbak</strong> yang dienkripsi dengan Recovery Phrase (atau transfer QR langsung).",
     "visual_vault": "Vault IndexedDB",
     "visual_cloud": "DB Cloud",
     "visual_encrypted": "ENC1: terenkripsi at-rest"

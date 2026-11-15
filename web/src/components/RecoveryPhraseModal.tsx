@@ -119,7 +119,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
           {words.map((word, index) => (
             <div key={index} className="flex items-center gap-2 p-2 rounded bg-black/5 dark:bg-white/5 border border-text-secondary/10">
                <span className="text-[10px] text-text-secondary font-mono w-4 select-none">{index + 1}.</span>
-               <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tracking-wide select-all">{word}</span>
+               <span data-testid="recovery-phrase-word" className="text-sm font-bold text-gray-900 dark:text-gray-100 tracking-wide select-all">{word}</span>
             </div>
           ))}
         </div>
@@ -130,6 +130,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
             <FiShield size={48} className="text-text-secondary/20 mb-4" />
             <button 
               onClick={() => setShowPhrase(true)}
+              data-testid="recovery-reveal"
               className="
                 flex items-center gap-2 px-6 py-3 rounded-full 
                 bg-bg-surface text-text-primary font-bold text-sm

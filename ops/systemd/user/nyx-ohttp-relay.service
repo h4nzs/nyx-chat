@@ -18,6 +18,11 @@
 #
 # Setelah relay hidup: set OHTTP_RELAY_EXTERNAL=1 di server/.env, restart
 # nyx-api, dan pastikan nginx meneruskan `/api/ohttp/relay` ke :4100.
+#
+# OHTTP_TRUSTED_PROXIES: KOSONGKAN di selfhost — nginx menyambung dari loopback,
+# yang sudah menjadi default. Isi hanya bila nginx berada di jaringan container
+# (profil Docker, mis. 172.16.0.0/12); nilai yang salah membuat semua klien
+# berbagi tag alamat nginx (docs/10 §10.18).
 # JANGAN enable unit ini selama OHTTP_ENABLED belum diset — relay tanpa gateway
 # aktif hanya menambah proses yang menjawab 502.
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense, lazy } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from "../store/auth";
@@ -13,8 +13,6 @@ import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDevice
 import { unlockWithBiometric, removeBioVaultEntry } from "@lib/biometricUnlock";
 import { executeLocalWipe } from "@lib/nukeProtocol";
 import { loginNoticeFromSearch } from "@lib/loginNotice";
-import { importDatabaseFromJson } from '@lib/keychainDb';
-import { sanitizeErrorLog } from '../utils/sanitize';
 import toast from "react-hot-toast";
 import { FiLock, FiKey, FiShield, FiSmartphone, FiUpload, FiCpu } from "react-icons/fi";
 import SEO from '../components/SEO';
@@ -22,12 +20,20 @@ import LanguageSwitcher from '../components/LanguageSwitcher';
 import ModalBase from '../components/ui/ModalBase';
 
 import i18n from '../i18n';
+
+// [docs/31 §31.6c] Jalur restore berkas `.nyxbak` untuk perangkat pengganti.
+// Modal ini dulu hanya ada di Settings (butuh sesi + kunci terpulihkan), jadi
+// perangkat baru tanpa perangkat lama tidak punya pintu masuk berkas — celah
+// yang terbuka setelah import JSON `.nyxvault` dihapus (docs/31 §31.6).
+// Lazy: halaman login tidak perlu memuat modul kripto backup saat idle.
+const BackupRestoreModal = lazy(() => import('../components/BackupRestoreModal'));
+
 export default function Login() {
   const { t } = useTranslation(['auth', 'common', 'settings']);
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const [showRecoveryOptions, setShowRecoveryOptions] = useState(false);
-  const vaultInputRef = useRef<HTMLInputElement>(null);
+  const [showBackupRestore, setShowBackupRestore] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -77,50 +83,6 @@ export default function Login() {
       setIsBiometricsAvailable(available);
     });
   }, []);
-
-  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const json = String(event.target?.result);
-      try {
-          const parsed = JSON.parse(json);
-          const performImport = async (password?: string) => {
-              try {
-                  await importDatabaseFromJson(json, password);
-                  
-                  // ✅ OPSI A: FORCE NEW IDENTITY
-                  localStorage.removeItem('deviceId');
-
-                  toast.success(t('settings:messages.import_success'));
-                  setShowRecoveryOptions(false);
-                  setTimeout(() => window.location.reload(), 1500);
-              } catch (error) {
-                  console.error("Import failed:", sanitizeErrorLog(error));
-                  toast.error(t('settings:messages.import_failed'));
-              }
-          };
-
-          if (parsed.encrypted) {
-              useModalStore.getState().showPasswordPrompt(async (password) => {
-                  // [BIOMETRIC RAM-UNLOCK] null = vault terbuka via biometric;
-                  // tidak relevan untuk import vault (butuh password nyata).
-                  if (!password) return;
-                  await performImport(password);
-              });
-          } else {
-              await performImport();
-          }
-      } catch (error) {
-          console.error("Import parsing failed:", sanitizeErrorLog(error));
-          toast.error(t('settings:messages.import_failed'));
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
 
   const handleLogin = async (data: { a: string; b?: string }) => {
     if (!data.a || !data.b) {
@@ -381,15 +343,6 @@ export default function Login() {
       <LanguageSwitcher />
       <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       
-      {/* Hidden file input for vault import */}
-      <input
-        type="file"
-        ref={vaultInputRef}
-        onChange={handleImportVault}
-        accept=".nyxvault,.json"
-        className="hidden"
-      />
-
       {/* Identity Recovery Modal */}
       <ModalBase
         isOpen={showRecoveryOptions}
@@ -419,9 +372,11 @@ export default function Login() {
                 <FiLock size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
              </button>
 
-             {/* Option 2: QR Transfer */}
+             {/* Option 2: Link this device — identitas baru, tanpa riwayat.
+                 Satu-satunya jalur "perangkat baru tanpa frasa"; riwayat tetap
+                 lewat berkas `.nyxbak` (opsi 3). */}
              <button
-                onClick={() => navigate("/migrate-receive")}
+                onClick={() => navigate("/link")}
                 className="w-full flex items-center justify-between p-4 rounded-xl bg-bg-main border border-text-secondary/10 shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent transition-all group"
              >
                 <div className="flex items-center gap-4">
@@ -429,25 +384,29 @@ export default function Login() {
                         <FiSmartphone size={20} />
                     </div>
                     <div className="text-left">
-                        <p className="font-bold text-sm">{t('auth:buttons.transfer_qr')}</p>
-                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.device_to_device')}</p>
+                        <p className="font-bold text-sm">{t('auth:link.entry_title')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:link.entry_desc')}</p>
                     </div>
                 </div>
                 <FiCpu size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
              </button>
 
-             {/* Option 3: Manual Import */}
+             {/* Option 3: Encrypted backup file (.nyxbak) */}
              <button
-                onClick={() => vaultInputRef.current?.click()}
+                onClick={() => {
+                    setShowRecoveryOptions(false);
+                    setShowBackupRestore(true);
+                }}
                 className="w-full flex items-center justify-between p-4 rounded-xl bg-bg-main border border-text-secondary/10 shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent transition-all group"
+                data-testid="login-restore-backup"
              >
                 <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
                         <FiUpload size={20} />
                     </div>
                     <div className="text-left">
-                        <p className="font-bold text-sm">{t('auth:buttons.restore_vault')}</p>
-                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.from_vault_file')}</p>
+                        <p className="font-bold text-sm">{t('settings:data.restore_backup')}</p>
+                        <p className="text-[10px] text-text-secondary uppercase tracking-tight opacity-60">{t('auth:recovery_options.from_backup_file')}</p>
                     </div>
                 </div>
                 <FiShield size={16} className="text-text-secondary opacity-20 group-hover:opacity-100" />
@@ -463,6 +422,16 @@ export default function Login() {
         </div>
       </ModalBase>
 
+      {/* Restore dari berkas `.nyxbak` (jalur perangkat pengganti tanpa QR). */}
+      {showBackupRestore && (
+        <Suspense fallback={null}>
+          <BackupRestoreModal
+            isOpen={showBackupRestore}
+            onClose={() => setShowBackupRestore(false)}
+          />
+        </Suspense>
+      )}
+
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-bg-surface p-8 flex flex-col justify-center shadow-2xl z-10">
         <div className="max-w-md w-full mx-auto">
@@ -474,7 +443,10 @@ export default function Login() {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.access_terminal')}</h2>
+            {/* [docs/41 §8] Kontras: `text-accent` di atas `bg-bg-surface` gagal
+                ambang WCAG AA (axe color-contrast, serious). Judul memakai warna
+                teks utama; aksen tetap hadir lewat elemen dekoratif di sekitarnya. */}
+            <h2 className="text-2xl font-bold text-text-primary mb-2">{t('auth:titles.access_terminal')}</h2>
             <p className="text-text-secondary">{t('auth:subtitles.login_desc')}</p>
           </div>
 
@@ -512,10 +484,10 @@ export default function Login() {
 
           <div className="text-center mt-8 pt-6 border-t border-text-secondary/10 dark:border-white/5">
             <p className="text-text-secondary text-sm mb-4">
-              {t('auth:links.no_account')} <Link to="/register" className="font-bold text-accent hover:underline">{t('auth:links.sign_up')}</Link>
+              {t('auth:links.no_account')} <Link to="/register" className="font-bold text-text-primary underline decoration-accent decoration-2 underline-offset-4 hover:text-accent">{t('auth:links.sign_up')}</Link>
             </p>
             <div className="flex justify-center">
-              <Link to="/restore" className="text-sm text-accent hover:underline">{t('auth:links.restore')}</Link>
+              <Link to="/restore" className="text-sm text-text-primary underline decoration-accent decoration-2 underline-offset-4 hover:text-accent">{t('auth:links.restore')}</Link>
             </div>
             <div className="mt-4 pt-4 border-t border-text-secondary/10 dark:border-white/5">
               <a href="https://nyx-app.my.id/privacy" target="_blank" rel="noopener noreferrer" className="text-xs text-text-secondary hover:text-accent transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</a>

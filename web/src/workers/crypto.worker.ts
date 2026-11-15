@@ -982,7 +982,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const pqSeedInput = new Uint8Array(masterSeedBytes.length + 7 + 4);
         pqSeedInput.set(masterSeedBytes);
         pqSeedInput.set(new TextEncoder().encode('pq-otpk'), masterSeedBytes.length);
-        pqSeedInput.set(new Uint8Array(new Uint32Array([keyId]).buffer), masterSeedBytes.length + 7);
+        // [AUDIT PASS 3 — N3-03] little-endian eksplisit: `new
+        // Uint32Array([keyId]).buffer` mengikuti endianness host, sehingga vault
+        // yang dibuat di platform big-endian tidak bisa meregenerasi OTPK yang
+        // sama (handshake gagal tanpa pesan jelas). Di host little-endian
+        // (semua target praktis) byte-nya identik dengan perilaku lama.
+        const regenIdBytes = new Uint8Array(4);
+        new DataView(regenIdBytes.buffer).setUint32(0, keyId, true);
+        pqSeedInput.set(regenIdBytes, masterSeedBytes.length + 7);
         const pqKeySeed = sodium.crypto_generichash(32, pqSeedInput, null);
         const pqOtpkKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqKeySeed);
 
@@ -1536,7 +1543,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4);
           seedInput.set(masterSeedBytes);
           seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
-          const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer); 
+          // [AUDIT PASS 3 — N3-03] little-endian eksplisit (lihat catatan di
+          // `x3dh_v2_recipient_regenerate`): derivasi OTPK tidak boleh bergantung
+          // pada endianness host, karena pembuatan dan regenerasi harus identik
+          // di platform mana pun.
+          const idBytes = new Uint8Array(4);
+          new DataView(idBytes.buffer).setUint32(0, keyId, true);
           seedInput.set(idBytes, masterSeedBytes.length + 4);
 
           const keySeed = sodium.crypto_generichash(32, seedInput, null);

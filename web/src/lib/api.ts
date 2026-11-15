@@ -155,7 +155,21 @@ export async function getCsrfToken(): Promise<string> {
         headers: { 'x-nyx-installation-id': await getClientInstallationId() },
         signal,
       });
-      if (!res.ok) throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+      if (!res.ok) {
+        // [R2] 426 di jalur ini juga penolakan gerbang versi. Tanpa ini klien
+        // yang terlalu tua tidak pernah melihat layar "perbarui NYX":
+        // `getCsrfToken` mengembalikan "" dan pemanggil hanya mendapat
+        // `CSRF_UNAVAILABLE` (status 0), padahal server sudah menyebut versi
+        // minimum dan semua request memang ditolak.
+        if (res.status === 426) {
+          try {
+            reportClientVersionRejection(await res.json());
+          } catch {
+            // Body bukan JSON: biarkan kegagalan biasa di bawah yang dilaporkan.
+          }
+        }
+        throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+      }
 
       const data = await res.json();
       csrfTokenCache = data.csrfToken;
@@ -202,9 +216,22 @@ export async function api<T = unknown>(
         headers['Content-Type'] = 'application/json';
     }
     if (!anonymous) {
-      // Coba ambil token, kalau gagal lanjut aja (mungkin endpoint public)
-      const token = await getCsrfToken().catch(() => "");
-      if (token) headers['CSRF-Token'] = token;
+      // [AUDIT U-01] Mutasi TIDAK dikirim tanpa token CSRF. Dulu kegagalan
+      // `GET /api/csrf-token` (offline sesaat / 5xx) ditelan dan request tetap
+      // dikirim tanpa header → server menjawab `403 Invalid CSRF token`, pesan
+      // yang tidak memberi tahu pengguna bahwa masalahnya sementara dan
+      // tindakannya tidak pernah sampai. Sekarang satu percobaan ulang
+      // (single-flight sudah dilepas setelah selesai), lalu berhenti lebih awal
+      // dengan kode yang bisa ditindaklanjuti (`api_csrf_unavailable`).
+      let token = await getCsrfToken().catch(() => "");
+      if (!token) token = await getCsrfToken().catch(() => "");
+      if (!token) {
+        throw Object.assign(
+          new Error('CSRF_UNAVAILABLE: token CSRF tidak bisa diambil; request tidak dikirim'),
+          { status: 0 },
+        );
+      }
+      headers['CSRF-Token'] = token;
     }
   }
 
@@ -239,7 +266,7 @@ export async function api<T = unknown>(
         details = JSON.parse(text);
         if (details.error) errorMessage = details.error;
         if (details.message) errorMessage = details.message;
-      } catch (e) {
+      } catch {
         errorMessage = text || `Request failed with status ${res.status}`;
         details = { raw: text };
       }

@@ -7,8 +7,8 @@
     "desc": "Como o NYX armazena suas chaves e histórico localmente para máxima privacidade, você não pode simplesmente fazer login para ver mensagens antigas. Você tem duas maneiras seguras de se mudar:",
     "migration_label": "Migração de Dispositivo (Recomendado):",
     "migration_text": "Vá em <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Configurações &gt; Transferir para Novo Dispositivo</span>. Isso cria um túnel seguro e direto para o seu novo telefone via código QR.",
-    "backup_label": "Backup do Cofre:",
-    "backup_text": "Vá em <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Configurações &gt; Exportar Cofre</span>. Salve o arquivo <code>.nyxvault</code> e importe-o na tela de login do seu novo dispositivo."
+    "backup_label": "Backup cifrado:",
+    "backup_text": "Vá em <span class=\"font-mono bg-bg-main px-1.5 py-0.5 rounded-md text-text-primary\">Configurações &gt; Backup cifrado (.nyxbak)</span>. Salve o arquivo <code>.nyxbak</code> — cifrado com sua Frase de Recuperação — e restaure no novo dispositivo (Configurações → Dados, ou as opções de recuperação na tela de login)."
   },
   "burner": {
     "title": "O que é uma Sessão de Chat Burner?",

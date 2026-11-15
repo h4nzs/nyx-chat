@@ -87,3 +87,30 @@ describe('getCsrfToken single-flight', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('[AUDIT U-01] mutasi tidak dikirim tanpa token CSRF', () => {
+  it('berhenti lebih awal dengan CSRF_UNAVAILABLE dan tidak menyentuh endpoint tujuan', async () => {
+    const { api } = await loadApi();
+    // Endpoint CSRF gagal terus (offline); tidak boleh ada `fetch` ke /api/messages.
+    fetchMock.mockRejectedValue(new Error('offline'));
+
+    const err: unknown = await api('/api/messages', { method: 'POST', body: '{}' }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain('CSRF_UNAVAILABLE');
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.every((u) => u.includes('/api/csrf-token'))).toBe(true);
+    // Satu percobaan + satu retry, bukan lebih dan bukan tanpa batas.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('pemanggil anonim (token di body) tidak terkena gate CSRF', async () => {
+    const { api } = await loadApi();
+    fetchMock.mockResolvedValue(okResponse({ ok: true }));
+
+    await api('/api/groups/sync', { method: 'POST', body: '{}', anonymous: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('/api/groups/sync');
+  });
+});

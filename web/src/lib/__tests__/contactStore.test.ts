@@ -87,6 +87,7 @@ import {
     noteDirectMessageContact,
     buildPeerParticipantsFromContacts,
     pushContactBundle,
+    replaceContactBundleWithLocal,
     restoreContactsFromBundle,
     wipeContactBackup,
 } from '../contactStore';
@@ -472,6 +473,22 @@ describe('pushContactBundle / restore', () => {
         const added = await restoreContactsFromBundle();
         expect(added).toBe(0);
         expect(await getContact('peer-keep')).not.toBeNull();
+        // [LINK 2026-10-29] Restore TIDAK menimpa bundle: `null` dari
+        // decryptVaultText juga berarti "vault terkunci", dan menulis daftar
+        // lokal yang belum terbaca bisa menghapus salinan server yang masih baik.
+        // Hanya satu panggilan = GET; tidak ada PUT.
+        expect(authFetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('bundle tak terbuka (disegel identitas lain) → restore gagal-open tanpa PUT', async () => {
+        authFetchMock.mockImplementation(async () => ({
+            // Tanpa prefix ENC1: → stub decryptVaultText mengembalikan null,
+            // persis seperti blob yang disegel identity lama sebelum link.
+            encryptedBundle: 'SEALED-BY-ANOTHER-IDENTITY',
+        }));
+        const added = await restoreContactsFromBundle();
+        expect(added).toBe(0);
+        expect(authFetchMock).toHaveBeenCalledTimes(1);
     });
 
     it('push gagal (server error) TIDAK melempar — backup best-effort', async () => {
@@ -479,6 +496,49 @@ describe('pushContactBundle / restore', () => {
         await upsertContact({ userId: 'peer1', conversationId: null });
         await flushPush();
         expect(await getContact('peer1')).not.toBeNull(); // lokal tetap utuh
+    });
+
+    it('push rutin dengan daftar kosong tidak mengirim apa pun', async () => {
+        expect(rows.size).toBe(0);
+        await pushContactBundle();
+        expect(authFetchMock).not.toHaveBeenCalled();
+    });
+
+    it('replaceContactBundleWithLocal menulis bundle KOSONG (jalur link)', async () => {
+        // Perangkat hasil link belum punya kontak; daftar kosong itulah isi yang
+        // benar untuk identitas baru, jadi harus benar-benar di-PUT — kalau
+        // dilewati, blob identitas lama tetap tersimpan dan restore terus gagal.
+        await replaceContactBundleWithLocal();
+
+        expect(authFetchMock).toHaveBeenCalledTimes(1);
+        const [url, init] = authFetchMock.mock.calls[0] as unknown as [string, { method: string; body: string }];
+        expect(url).toBe('/api/users/me/contact-bundle');
+        expect(init.method).toBe('PUT');
+        const body = JSON.parse(init.body) as { encryptedBundle: string; version: number };
+        expect(body.encryptedBundle.startsWith('ENC1:')).toBe(true);
+        const plain = Buffer.from(body.encryptedBundle.slice(5), 'base64').toString('utf8');
+        expect(JSON.parse(plain)).toEqual({ v: 1, contacts: [], userIds: [] });
+        expect(Number.isSafeInteger(body.version)).toBe(true);
+    });
+
+    it('replace dibatalkan — bukan menimpa dengan tebakan — bila vault tidak bisa menyegel', async () => {
+        // Baris kontak ditulis langsung (tanpa upsertContact) supaya kegagalan
+        // segel yang diuji benar-benar terjadi di jalur PUSH, bukan di penulisan
+        // baris. Isi non-kosong juga memastikan version berbeda dari push kosong
+        // sebelumnya, jadi guard version-hash tidak memotong lebih awal.
+        const record = { userId: 'peer-vault', conversationId: null, firstSeenAt: 1, lastSeenAt: 2 };
+        rows.set('peer-vault', {
+            userId: 'peer-vault',
+            data: 'ENC1:' + Buffer.from(JSON.stringify(record), 'utf8').toString('base64'),
+            updatedAt: 0,
+        });
+        const { encryptVaultText } = await import('../shadowVaultDb');
+        vi.mocked(encryptVaultText).mockRejectedValueOnce(new Error('Vault locked'));
+
+        await replaceContactBundleWithLocal();
+
+        expect(authFetchMock).not.toHaveBeenCalled();
+        expect(rows.has('peer-vault')).toBe(true); // lokal tidak disentuh
     });
 
     it('wipe menghapus lokal + server', async () => {

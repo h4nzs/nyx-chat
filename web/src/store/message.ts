@@ -52,7 +52,7 @@ export { decryptMessageObject } from '../lib/messagePipeline';
 
 import { isReactionPayload, isEditPayload, isSilentPayload, isStoryReplyPayload, isSystemMessagePayload, isFileMetadata, isPlainObject } from '@utils/typeGuards';
 import { generateTempId as generateTempIdSafe } from '@utils/tempId';
-import { compareMessagesByOrder } from '@utils/messageOrder';
+import { compareMessagesByOrder, olderPageCursor } from '@utils/messageOrder';
 import { coverTargetAllowed } from '@lib/coverTraffic';
 import { isEphemeralReceipts, scheduleEphemeralReceipt, RECEIPT_JITTER_MAX_MS, getDeliveryTokenMap } from '@lib/groupPseudonyms';
 import type { SilentPayload } from '@utils/typeGuards';import i18n from '../i18n';
@@ -2228,11 +2228,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // device — pesan lebih lama ada di server tapi belum pernah tersimpan
       // lokal. Tanpa fallback ini, scroll-to-top macet selamanya.
       if (localMessages.length === 0 && get().serverHasMore[conversationId]) {
-        // [docs/28 Tier 2 — B1] kursor = seq bila tersedia; fallback createdAt
-        // (baris legacy) supaya klien lama tetap kompatibel.
-        const before = (oldestMessage.seq && oldestMessage.seq > 0)
-          ? String(oldestMessage.seq)
-          : oldestMessage.createdAt;
+        // [docs/28 Tier 2 — B1 / docs/40 §40.13 poin 2] Kursor = `seq` pesan
+        // TERTUA yang sudah dimiliki (fallback createdAt untuk baris legacy).
+        // Pesan hasil impor arsip riwayat ikut membawa `seq`, jadi halaman
+        // berikutnya menyambung tepat di bawah riwayat itu — tidak ada duplikat
+        // dan tidak ada lompatan.
+        // Tidak ada kursor sah = tidak ada request; `finally` tetap mereset flag.
+        const before = olderPageCursor(oldestMessage);
+        if (!before) return;
         const res = await api<{ items: Message[]; hasMore?: boolean; nextCursor?: string | null }>(
           `/api/messages/${conversationId}?limit=50&before=${encodeURIComponent(before)}`
         );

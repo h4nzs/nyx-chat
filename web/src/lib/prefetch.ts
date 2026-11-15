@@ -14,8 +14,6 @@ const PAGES = [
   () => import('../pages/SessionManagerPage'),
   () => import('../pages/ConnectPage'),
   () => import('../pages/AdminDashboard'),
-  () => import('../pages/MigrationReceivePage'),
-  () => import('../pages/MigrationSendPage'),
   () => import('../pages/BurnerChat'),
 ];
 

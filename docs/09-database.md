@@ -6,7 +6,7 @@
 - **Migration flow: `prisma db push`** (no `migrate deploy`). `prisma.config.ts` resolves `DIRECT_URL || DATABASE_URL` (dotenv).
 - `server/prisma/migrations/0_init/` is a baseline SQL snapshot for history; deployments apply schema via `prisma db push` in CI and on the VPS.
 
-## 9.2 Schema (15 tables)
+## 9.2 Schema (18 tables)
 
 ```mermaid
 erDiagram
@@ -41,7 +41,10 @@ erDiagram
 | `Conversation` | isGroup, encryptedMetadata blob, `authSecret` (blind auth for group ops), `adminSecretHash` (SHA-256 hex of the admin capability token; nullable in schema, but group creation rejects a missing hash and a NULL value is fail-closed — no admin op possible) |
 | `Message` | store-and-forward ciphertext (≤14 days), `deleteSecret`, view-once flags |
 | `MessageStatus` | delivery/read receipts |
+| `MessageViewOnceOpen` | per-recipient view-once opens (`openerTag` = HMAC per conversation, no raw userId) |
+| `MessageViewOnceRecipient` | daftar penerima view-once per pesan (`recipientTag` per penerima, bukan userId) |
 | `UserHiddenConversation` | per-user conversation visibility (Opaque Mailbox discovery) |
+| `GroupMailboxItem` | mailbox envelope kunci grup (`kind` KEY_REQUEST/KEY_ENVELOPE/META/COVER, `tag` = HMAC token penerima, TTL 7 hari; docs/37 §37.3.2) |
 | `Story` | encrypted story blobs with expiry |
 | `User.encryptedContactBundle` | satu blob opaque per user — backup daftar kenalan terenkripsi klien (server tidak bisa membaca); versi = hash isi untuk fetch kondisional |
 | `Authenticator` | WebAuthn credentials |

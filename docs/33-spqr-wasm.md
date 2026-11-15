@@ -398,6 +398,69 @@ menghapus state braid.
 
 ## 33.8 Rollback
 
+**[AUDIT PASS 8 — N5-01 TERTUTUP] Arsip era braid, pola yang sama dengan v1.**
+Pass 5 mencatat batas yang jujur: jalur v1 menyelamatkan pesan era sesi lama
+lewat tiga slot arsip, jalur v2 tidak — `spqrState` hanya punya satu baris per
+percakapan dan baris itu dihapus saat sesi X3DH baru lahir, sehingga pesan v2
+yang tertunda (peer offline, transport putus) menjadi tidak terbaca permanen.
+
+Sekarang setiap rotasi sesi **mengarsipkan** state braid lebih dulu
+(`rotateSpqrStateForNewSession`): baris aktif digeser ke
+`nyx_spqr_state_v1:<conversationId>#era_0..2` (FIFO, tiga slot, terbaru di slot
+0, ter-seal `ENC1:`), baru kemudian baris aktif dihapus. Pembaca mencoba state
+era sekarang; bila frame ditolak, ia mencoba slot arsip secara berurutan
+(`loadArchivedSpqrStates`). Arsip **tidak pernah dipromosikan** dan tidak
+disimpan maju — menulis state era lama ke baris aktif akan memutar balik braid
+era sekarang — jadi era aktif tetap satu-satunya pemilik baris aktif, persis
+seperti `previous_session_states` di v1.
+
+Yang dibuktikan: `spqrState.test.ts` (rotate mem-flush tulis tertunda, FIFO,
+ter-seal, `clearSpqrStates` ikut membersihkan arsip) dan
+`spqrEraArchive.test.ts` dengan modul WASM sungguhan — state era 2 **menolak**
+frame era 1, state era 1 dari arsip menghasilkan message key yang sama dengan
+pengirim, dan dekripsi dari arsip tidak mengubah baris aktif. Batas yang tetap
+ada: rotasi sesi menghapus kunci era lama dari state DR, jadi isi pesan era lama
+yang **baru** diterima setelah arsipnya terbuang (lebih dari tiga rotasi)tetap tidak bisa dibuka; arsip memperpanjang jendela, bukan menggantikan pengiriman
+ulang.
+
+**[AUDIT PASS 9 — N9-03] Rotasi tanpa kemajuan tidak menggeser arsip.** Sesi
+X3DH baru bisa lahir berulang tanpa satu pun pesan v2 di antaranya (retry
+handshake, kedua sisi mendirikan sesi berdekatan). Dulu setiap rotasi menulis
+ulang state yang nyaris identik ke slot 0 dan menggeser era yang masih
+dibutuhkan, sehingga jendela "tiga era" bisa habis jauh lebih cepat daripada
+yang dijanjikan. Sekarang `rotateSpqrStateForNewSession` membandingkan state
+aktif dengan slot 0 lebih dulu: bila versi dan byte-nya sama (era belum pernah
+maju), arsip **tidak** digeser dan baris aktif tetap dihapus seperti biasa.
+Dikunci dua tes di `spqrState.test.ts` — rotasi yang tidak maju tidak menambah
+slot, dan rotasi setelah state maju tetap menggeser ke `[baru, lama]`.
+
+**[AUDIT PASS 10 — N10-04] Penanda kemajuan, bukan perbandingan byte.** Guard
+di atas hanya mengenali state yang **byte-identik** dengan slot 0. State awal
+sesi X3DH baru selalu berbeda karena `authKey`-nya berbeda, jadi dua era tanpa
+satu pun pesan v2 tetap memakan dua slot — probe pass 10 dengan `spqr.wasm`
+hasil build menunjukkan dua state awal 118 byte yang tidak sama dan arsip
+terisi 2 slot. Sekarang baris state membawa penanda `advanced` (field `a` pada
+JSON ter-seal): `saveSpqrState({ advanced: true })` dipakai **hanya** oleh
+langkah ratchet nyata (`encryptSpqrMessage` dan jalur decrypt di
+`utils/crypto.ts`), sedangkan state awal era tidak menyetelnya. `rotate…`
+mengarsipkan **hanya** era yang pernah maju; era tanpa lalu lintas v2 dihapus
+tanpa menggeser FIFO. Baris lama yang belum punya penanda dianggap pernah maju
+(lebih baik menyimpan era yang mungkin berisi lalu lintas daripada membuangnya).
+**[AUDIT PASS 11 — N11-01/N11-02/N11-03] Default dibalik, angka tes dikoreksi.**
+Penanda yang default `false` membuat pemanggil baru yang lupa menandai
+**diam-diam** membuang era lama — kelas bug N5-01 kembali tanpa suara. Sekarang
+`saveSpqrState` memperlakukan state sebagai sudah maju **kecuali** pemanggil
+menulis `advanced: false` secara eksplisit; hanya state awal era yang belum
+membawa pesan yang boleh memakai nilai itu, dan saat ini tidak ada penulis
+produksi seperti itu (kedua jalur di `utils/crypto.ts` menandai `true`). Angka
+yang benar: dua era tanpa lalu lintas yang **ditandai** `advanced: false` →
+arsip **nol** slot (era lama dibuang, era baru dihapus saat rotasi); era yang
+maju menggeser ke `[baru, lama]` dan penandanya ikut terbawa. Dikunci
+`spqrState.test.ts` (“rotate era baru tanpa lalu lintas tidak menggeser arsip”,
+“simpan tanpa penanda dianggap maju: era lama tetap diarsipkan”) dan
+`spqrEraArchive.test.ts` (frame era lama tetap terbuka dari arsip setelah
+rotasi, termasuk kasus era baru tanpa lalu lintas).
+
 Dua jalur, keduanya **tidak menghapus** state apa pun:
 
 1. **Peer berhenti menyatakan v2** (`ackV` hilang) → pengiriman kembali ke v1.

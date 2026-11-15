@@ -74,9 +74,9 @@ test('clientIpTag: alamat tidak sah tetap satu tag yang stabil (tanpa lempar)', 
   assert.equal(clientIpTag(weird), clientIpTag(weird));
 });
 
-test('wiring limiter: keyGenerator memakai clientIpTag, bukan IP mentah', () => {
+test('wiring limiter: keyGenerator memakai clientRateLimitTag, bukan IP mentah', () => {
   const limiter = read('../src/middleware/rateLimiter.ts');
-  assert.match(limiter, /const secureKeyGenerator = \(req: Request\): string => clientIpTag\(req\)/);
+  assert.match(limiter, /const secureKeyGenerator = \(req: Request\): string => clientRateLimitTag\(req\)/);
   assert.doesNotMatch(limiter, /ipKeyGenerator\(cfAwareClientIp/);
 
   const app = read('../src/app.ts');

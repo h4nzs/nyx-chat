@@ -1,0 +1,719 @@
+# 40 — Arsip Riwayat Sekali-Pakai untuk Perangkat Hasil Link
+
+> **Status: FASE 0–2 LANDED (2026-10-29).** Yang sudah berjalan di kode: kirim
+> `pqPublicKey` di `auth:linking_request`, gerbang `history` di status/approve,
+> `/abort`, `limits`, dan lima endpoint arsip lainnya, ekspor **kontak + daftar percakapan + pesan**,
+> impor bertahap (batch 250, progres UI), `pushContactBundle` setelah impor, dan
+> e2e nyata yang membaca ulang pesan dengan kunci vault identitas baru. File:
+> `server/src/utils/linkHistory.ts`, `server/src/utils/linkHistoryObject.ts`,
+> `server/src/routes/linkHistory.ts`, `web/src/lib/linkHistory{Client,Export,Import}.ts`.
+> Termasuk percobaan ulang: kegagalan impor ditandai di `kvStore`
+> (`nyx_link_history_pending`, boolean tanpa timestamp), satu percobaan otomatis saat app start, dan
+> tombol "Ambil riwayat dari perangkat sebelumnya" di Settings → Active Sessions
+> (`web/src/lib/linkHistoryRetry.ts`).
+>
+> **Fase 3 sebagian LANDED (2026-10-30):** metrik `nyx_link_history_ops_total`
+> beserta alarm `NyxLinkHistoryConsumeFailing` + drill, `groupCachedParticipants`
+> ikut arsip, benchmark 10k pesan **terukur** (§40.7), dan test paginasi `seq`
+> setelah impor (§40.13 poin 2). **Belum:** e2e pesan grup setelah link (§40.13
+> poin 1) — belum terverifikasi, bukan diklaim bekerja.
+>
+> Tidak ada format beku yang berubah: arsip memakai kontainer `NYXB` v1 apa
+> adanya dengan **kunci acak** (bukan turunan recovery phrase), dan tidak ada
+> tabel DB baru.
+>
+> Konteks: `docs/14` §14.10 (alur `/link`), `docs/31` (format `.nyxbak`),
+> `docs/28` (ancaman dump DB). Pengganti konsep "transfer vault lewat QR"
+> (`migration:*`) yang **dihapus 2026-10-29**.
+
+---
+
+## 40.1 Masalah
+
+Link perangkat (`/link`, 2026-10-18) membuat **identitas baru**: perangkat baru
+memanggil `registerAndGenerateKeys(password)` sendiri (`web/src/pages/LinkDevicePage.tsx`),
+lalu `POST /api/auth/link/claim` mengirim **kunci publik** perangkat itu ke
+perangkat lama. Server membuat `Device` row baru dan menerbitkan entri KT.
+
+Akibatnya, setelah link berhasil:
+
+| Yang diharapkan pengguna | Kenyataan hari ini |
+|---|---|
+| Riwayat chat ikut | Kosong. `docs/14` §14.10 menyebutnya eksplisit: "starts with a fresh identity and **no** history" |
+| Kontak ikut | Kosong **dan** bundle kontak di server (`User.encryptedContactBundle`) tidak bisa dibuka lagi (lihat §40.2 temuan 2) |
+| Lampiran lama bisa dibuka | Tidak, karena baris pesan (termasuk `fileKey`) tidak ada |
+
+Tujuan desain: satu arsip riwayat yang **ditujukan ke satu perangkat** (hasil
+link), **sekali pakai**, **tidak bisa dibaca server**, dengan jendela waktu
+terbatas. Bukan multi-device: NYX tetap satu akun satu sesi aktif.
+
+---
+
+## 40.2 Tiga temuan kode yang menentukan desain
+
+### Temuan 1 — isi pesan disegel dengan kunci vault turunan *private key identitas*, bukan `masterSeed`
+
+`web/src/lib/shadowVaultDb.ts` menurunkan kunci vault:
+
+```ts
+const getVaultKey = async () => {
+  const { privateKey } = await getMyEncryptionKeyPair();
+  const key = sodium.crypto_generichash(32, privateKey, null); // BLAKE2b-256
+  ...
+};
+```
+
+`content`, `repliedTo`, `senderName/Username/AvatarUrl`, `fileMeta`, `participants`,
+`decryptedMetadata` — semuanya `encryptVaultText` (kunci vault). `ENC1:`
+(`masterSeed`) hanya untuk kolom struktur (`seq`, `expiresAt`, `autoDelete`,
+`reactions`, `statuses`, dan state ratchet/grup).
+
+Konsekuensi: perangkat hasil link punya **private key identitas baru**, jadi
+menyalin baris `messages`/`conversations` apa adanya menghasilkan riwayat yang
+tampil **kosong** (dekripsi gagal per baris), tanpa error yang jelas.
+
+Itulah bedanya dengan `.nyxbak`: restore berhasil karena recovery phrase
+mereproduksi `masterSeed` **dan** private key yang sama (`restoreFromPhrase`).
+Di link, tidak ada phrase yang diketik — perangkat baru membuat identitas baru.
+
+### Temuan 2 — kontak juga vault-keyed, termasuk salinan di server
+
+`web/src/lib/contactStore.ts` menyegel seluruh record kontak dengan
+`encryptVaultText` dan mengunggah `encryptedBundle` ke
+`PUT /api/users/me/contact-bundle` dengan kunci yang sama. Setelah identitas
+berganti, bundle lama di server **tidak bisa dibuka** perangkat baru
+(`restoreContactsFromBundle` → "Bundle korup/tak dikenal", gagal senyap).
+
+Celah ini **sudah ada** hari ini, bukan sesuatu yang diperkenalkan desain ini.
+
+**Status 2026-10-29 (sudah diperbaiki sebagian):** alur link kini memanggil
+`replaceContactBundleWithLocal()` setelah `login()` dan sebelum navigasi, jadi
+blob mati itu tidak lagi tersimpan — perangkat hasil link menulis ulang bundle
+dari identitasnya sendiri (biasanya daftar kosong) dan restore berikutnya tidak
+mencetak "Bundle korup". Yang tetap belum kembali adalah **isi** kontak lama;
+itu bagian arsip ini (§40.8 langkah 6).
+
+### Temuan 3 — kontainer arsip sudah menerima kunci acak
+
+`CreateBackupOptions.key` di `web/src/lib/backupRestore.ts` didokumentasikan
+sebagai *"Kunci backup 32 byte (acak untuk transfer, atau `deriveBackupKey`
+untuk berkas)"*. Jadi arsip berkunci-acak tidak menuntut perubahan format,
+versi, atau AAD. Yang berubah hanya **asal kunci** dan **bentuk payload**.
+
+Kesimpulan desain: **ekspor lewat pembaca yang mendekripsi, impor lewat penulis
+yang menyegel ulang.** Tidak ada peta kolom baru yang harus dijaga manual, dan
+tidak ada kunci privat/kunci sesi yang menyeberang.
+
+---
+
+## 40.3 Properti yang dijanjikan
+
+| Properti | Bagaimana |
+|---|---|
+| Ditujukan ke satu perangkat | Kunci arsip `K` (32 B acak) diseal ke **X-Wing public key** perangkat baru (`pq_box_seal_v2`, envelope `NYS2`) |
+| Tidak bisa dibaca server | Server hanya menyimpan pointer: `sealedKey` (ciphertext), `size`, `digest`. Isi arsip AEAD dengan `K` |
+| Sekali pakai | Objek R2 dihapus saat `consume` (setelah impor sukses); state Redis TTL 30 menit; lifecycle rule `link-history/` sebagai jaring |
+| Hanya perangkat itu yang bisa mengunduh | Endpoint unduh memakai sesi; `req.deviceId` sendiri yang jadi nama state (tanpa parameter id yang bisa ditebak) |
+| Jendela sempit | Objek hanya boleh diunggah perangkat yang baru dibuat (≤30 menit), dan hanya bisa diambil ≤30 menit setelah `ready` |
+| Riwayat tetap bisa dibaca | Isi diarsipkan sebagai **objek domain** (`Message`, `Conversation`, kontak) yang sudah didekripsi, lalu disegel ulang dengan kunci perangkat baru saat impor |
+| Tidak menduplikasi logika kripto | Ekspor memakai pembaca yang ada; impor memakai penulis yang ada (`upsertMessages`, `saveConversation`, `encryptRecord`) |
+
+Yang **tidak** dijanjikan: kerahasiaan dari server tentang *ukuran* arsip dan
+*waktu* transfer (bocor lewat `size` dan timing), dan kerahasiaan dari perangkat
+lama (dialah sumbernya).
+
+---
+
+## 40.4 Alur
+
+```mermaid
+sequenceDiagram
+    participant O as Perangkat lama
+    participant S as Server (REST + Redis)
+    participant R as R2
+    participant N as Perangkat baru
+
+    N->>S: POST /link/claim {token, kunci publik baru}
+    S-->>O: auth:linking_request {pendingId, deviceName, publicKey, pqPublicKey}
+    Note over O: pengguna mencentang "Sertakan riwayat (N pesan)"
+    O->>S: POST /link/approve {pendingId, expectHistory: true}
+    S-->>O: {ok, deviceId}
+    O->>O: ekspor (reader) → K acak → NYXB(K)
+    O->>S: POST /link/history/presign {deviceId, size}
+    S-->>O: {uploadUrl}
+    O->>R: PUT arsip (application/octet-stream)
+    O->>S: POST /link/history/ready {deviceId, size, digest, sealedKey(K→pqKey_new)}
+    N->>S: GET /link/status/:pendingId → {state: approved, history: ready}
+    N->>S: POST /link/complete {pendingId, password}
+    N->>S: POST /login (jalur sesi yang sudah ada)
+    N->>S: POST /link/history/download
+    S-->>N: {downloadUrl, sealedKey, size, digest}
+    N->>R: GET arsip
+    N->>N: verifikasi size+digest → buka K → parse → impor (writer)
+    N->>S: POST /link/history/consume {digest}
+    S->>R: DELETE objek
+```
+
+### Gerbang `history` (penting)
+
+Perangkat lama ter-logout **begitu** perangkat baru login (satu device aktif).
+Kalau perangkat baru langsung memanggil `complete` setelah `approve`, unggahan
+yang lambat akan terpotong oleh pencabutan sesi.
+
+Karena itu `approve` menerima `expectHistory: true`, dan
+`GET /link/status/:id` mengembalikan tambahan:
+
+```json
+{ "state": "approved", "history": "preparing" | "ready" | "none" }
+```
+
+`LinkDevicePage.waitForApproval` menunggu `history !== "preparing"` sebelum
+memanggil `complete`, dengan batas 60 detik (lalu lanjut tanpa riwayat; objek
+yang telat menjadi yatim dan dihapus lifecycle rule). Tanpa centang, `history`
+langsung `none` dan tidak ada penundaan.
+
+---
+
+## 40.5 Format & kripto
+
+| Elemen | Nilai |
+|---|---|
+| Kontainer | `NYXB` v1, header 32 B, frame AEAD, AAD `nyxb:v1:<type>:<index>:<count>` — **tidak berubah** |
+| Kunci isi `K` | 32 byte acak (`random_bytes`), hanya hidup di memori perangkat lama |
+| Panjang frame | Padding 1024 B yang sudah ada (ukuran total menyembunyikan panjang per pesan) |
+| Salt header | 16 byte acak (tidak dipakai jalur `K`; ditulis tetap agar header valid) |
+| `scramble` | `true` — frame bertipe sama tidak tersusun menurut struktur sosial |
+| `digest` | BLAKE2b-256 atas byte arsip final, hex 64 |
+| Pembungkus kunci | `pq_box_seal_v2(JSON{v:1, k:b64, n:<jumlah pesan>, d:<ISO>}, pqPublicKey_new)` → envelope `NYS2` |
+| Tanda "ini bukan .nyxbak" | Setiap chunk membawa `k: "history"` **di dalam plaintext AEAD** (lihat bawah) |
+
+### Mengapa penanda di dalam frame, bukan magic baru
+
+`readBackupChunk` memvalidasi bentuk chunk (`{table, records}`) dan tipe frame.
+Menambah field `k` di objek chunk:
+
+- **terautentikasi** (ikut AEAD, bukan byte header yang tidak di-AAD),
+- tidak mengubah tata letak, versi, atau AAD,
+- memberi dua penolakan eksplisit yang mudah diuji:
+  - `BackupRestoreModal` menolak arsip riwayat: *"arsip ini arsip riwayat perangkat, bukan backup — buka dari alur link"*,
+  - impor riwayat menolak `.nyxbak` biasa.
+
+Alternatif yang ditolak: magic baru (`NYXH`) — memaksa jalur parse kedua untuk
+manfaat yang sama, dan `docs/31` sengaja menjaga satu implementasi.
+
+**Konsekuensi penting:** payload arsip riwayat adalah **objek domain**, bukan
+baris Dexie (`.nyxbak` = baris). Karena itu arsip ini **tidak boleh** pernah
+masuk `writeTablesToDexie` — penanda `k` adalah pagar runtime untuk itu.
+
+---
+
+## 40.6 Kontrak server
+
+### Endpoint
+
+| Metode | Path | Auth | Body / hasil |
+|---|---|---|---|
+| `GET` | `/api/auth/link/history/limits` | sesi perangkat lama | → `{maxBytes, verified}` (angka yang sama dengan penegakan presign) |
+| `POST` | `/api/auth/link/history/presign` | sesi **perangkat lama** | `{deviceId, size}` → `{uploadUrl, size, urlTtl}` |
+| `POST` | `/api/auth/link/history/ready` | sesi perangkat lama | `{deviceId, size, digest, sealedKey}` → `{ok:true}` |
+| `POST` | `/api/auth/link/history/abort` | sesi perangkat lama | `{deviceId}` → `{ok:true}` (bersihkan intent/presign/state + objek) |
+| `GET` | `/api/auth/link/history` | sesi **perangkat baru** | → `{state:'none'\|'ready', size?, digest?}` |
+| `POST` | `/api/auth/link/history/download` | sesi perangkat baru | → `{downloadUrl, sealedKey, size, digest, urlTtl}` |
+| `POST` | `/api/auth/link/history/consume` | sesi perangkat baru | `{digest}` → `{deleted:true}` |
+
+`download` dan `consume` tidak menerima `deviceId`: state dibaca dari
+`req.deviceId` (`requireAuth` sudah mengisinya dari klaim JWT), jadi tidak ada
+id yang bisa dienumerasi dan tidak ada cek "apakah id ini milik saya" yang bisa
+salah tulis.
+
+### Otorisasi unggah
+
+`presign`/`ready`/`abort` (perangkat lama) memeriksa:
+
+1. `Device.userId === req.user.id`,
+2. `Device.createdAt` ≤ 30 menit lalu → di luar itu `409 DEVICE_LINK_WINDOW_CLOSED`
+   (arsip riwayat tidak boleh menjadi penyimpanan umum).
+
+Akun **belum terverifikasi (sandbox) TIDAK ditolak** — beda dengan
+`/api/backup/presign`. Alasannya: arsip ini sekali pakai, hidup ≤30 menit,
+terhapus setelah diimpor, dan hanya bisa dibuat perangkat yang sudah login lewat
+token QR + approve. Menolaknya membuat mayoritas pengguna baru kehilangan kontak
+saat ganti HP. Batas ukurannya yang dipotong: **25 MB** sampai akun terverifikasi
+(`LINK_HISTORY_SANDBOX_MAX_BYTES`), lalu naik ke kuota tier.
+
+> Catatan implementasi: `LINK_HISTORY_ENABLED` adalah satu-satunya env baru.
+> TTL (30 menit pointer, 10 menit presign/intent) sengaja konstanta di kode
+> supaya tidak ada dua sumber kebenaran; jadikan env bila operator benar-benar
+> butuh menalanya.
+
+### State (Redis, ter-seal `sealAtRest` seperti `deviceLinking.ts`)
+
+| Kunci | Isi | TTL |
+|---|---|---|
+| `link_history_presign:<deviceId>` | `{size, at}` | 10 menit |
+| `link_history:<deviceId>` | `{size, digest, sealedKey, at}` | 30 menit |
+
+`ready` hanya sah bila ada presign dengan `size` yang **sama** (menangkap bug
+klien: presign 4 MB lalu PUT 40 MB), `digest` cocok `^[0-9a-f]{64}$`, dan
+`sealedKey` base64url ≤ 4096 karakter (X-Wing ct + payload kecil).
+
+Sejak 2026-10-30 `ready` juga melakukan **HEAD objek R2** (`headR2Object`) dan
+menolak `409 HISTORY_OBJECT_MISSING` / `409 HISTORY_OBJECT_SIZE_MISMATCH` bila
+objek tidak ada atau ukurannya berbeda dari yang disetujui presign. Presigned
+PUT hanya mengikat ukuran body yang dikirim lewat URL itu; tanpa HEAD, pointer
+`{size, digest, sealedKey}` bisa menunjuk objek yang tidak pernah dibuat, dan
+perangkat baru baru menyadarinya **setelah** login mencabut sesi perangkat lama.
+Keputusan murninya ada di `checkHistoryObject()` supaya bisa diuji tanpa R2.
+Semua `deviceId` di presign/ready/abort kini dibatasi `min(8).max(64)` di zod
+(CUID/UUID muat; nilai ini masuk HMAC nama objek dan query DB).
+
+### Kunci objek
+
+`linkHistoryObjectKey(secret, deviceId)` =
+`link-history/<hex HMAC-SHA256(secret, "nyx:link-history:" + deviceId)>.nyxhist`
+
+Ekstensinya `.nyxhist`, **bukan** `.nyxbak`: isinya bukan backup (payload =
+objek domain), dan operator yang menemukan objek yatim di bucket tidak boleh
+mencoba me-restore-nya sebagai backup.
+
+Pola yang sama dengan `backupObject.ts`: deterministik, tanpa `userId`/
+`deviceId` di nama objek, dan tanpa rahasia server tidak bisa diturunkan.
+
+### Kuota & rate limit
+
+- Batas ukuran = kuota tier yang sudah ada (`backupSizeLimit`: 100 MB FREE /
+  500 MB SUBSCRIBER), dipotong ke **25 MB** untuk akun belum terverifikasi
+  (`LINK_HISTORY_SANDBOX_MAX_BYTES`).
+- `uploadLimiter` (20/jam) untuk presign; `generalLimiter` untuk sisanya.
+- Content-Type dikunci `application/octet-stream`; `urlTtl` dijepit 30–900 detik.
+
+### Konfigurasi
+
+| Env | Default | Catatan |
+|---|---|---|
+| `LINK_HISTORY_ENABLED` | `on` | `off`/`0`/`false` → semua endpoint `/link/history/*` tidak dipasang (404), bukan 403 |
+
+TTL dan batas ukuran sengaja **konstanta di kode** (satu sumber kebenaran):
+`LINK_HISTORY_TTL_SECONDS` 1800, `LINK_HISTORY_PRESIGN_TTL_SECONDS` dan
+`LINK_HISTORY_INTENT_TTL_SECONDS` 600, batas sandbox 25 MB. Env
+`LINK_HISTORY_TTL_SECONDS`/`LINK_HISTORY_MAX_BYTES` yang sempat direncanakan
+**tidak** ada di build ini — jangan menyalakannya di `.env` dan mengira
+berpengaruh.
+
+`BACKUP_KEY_SECRET` dipakai ulang sebagai rahasia HMAC (sudah jadi pola; rotasi
+membuat arsip lama tak bisa ditemukan — sama seperti backup).
+
+### Metrik — LANDED 2026-10-30
+
+`nyx_link_history_ops_total{op,result}` (`server/src/utils/metrics.ts` →
+`LINK_HISTORY_OPS`), tanpa label identitas (aturan WS-G; `deviceId` bentuk UUID
+sehingga penjaga metrik menolaknya):
+
+- `op ∈ presign|ready|abort|download|consume`,
+- `result ∈ ok|denied|missing|error`.
+
+`denied` = penolakan kebijakan yang disengaja (4xx: perangkat bukan milik akun,
+jendela link tutup, urutan protokol/ukuran salah, `NO_HISTORY`), `missing` =
+kondisi yang hilang karena TTL terpakai / sudah dikonsumsi (bukan kesalahan
+klien: `GET /` → `none`, `download` → 404, `consume` idempoten), `error` =
+kegagalan infrastruktur (R2/Redis/DB) — hanya yang terakhir yang layak jadi
+alarm. `GET /limits` dan `GET /` (status) sengaja tidak dihitung: keduanya murah
+dan dipanggil berulang saat klien memantau.
+
+Alarm `NyxLinkHistoryConsumeFailing`: `sum by (result)
+(increase(nyx_link_history_ops_total{op="consume",result="error"}[1h])) > 0`
+selama 10 menit (severity high) — konsumen gagal berarti arsip sudah diimpor
+tetapi objeknya tertinggal di R2, dan klien hanya menulis `console.warn`
+sehingga tanpa alarm ini tidak terlihat dari mana pun. Drill-nya ada di
+`ops/prometheus/tests.yml` (satu firing + satu non-firing yang membuktikan
+konsumsi sah `ok`/`missing` tidak memicunya); `scripts/drill-alerts.sh` lulus
+43 aturan.
+
+---
+
+### 40.6.1 R2 tidak dikonfigurasi: 503, bukan 500 (2026-11-03)
+
+`POST /history/presign` memanggil presign R2 tanpa memeriksa kredensial, jadi
+deployment tanpa `R2_*` menjawab 500 dari SDK Aws ("No value provided for input
+HTTP label: Bucket"). Di e2e/CI itu terbaca seperti bug klien, dan perangkat
+lama tetap mengekspor arsip (bisa puluhan MB) sebelum ditolak. Sekarang:
+
+- `r2Configured()` (`server/src/utils/r2.ts`, satu sumber dengan
+  `/api/uploads`) diperiksa lebih dulu → **503 `LINK_HISTORY_UNAVAILABLE`**.
+- `GET /history/limits` menyertakan `available: boolean`; klien
+  (`getHistoryLimits`) memakainya untuk berhenti **sebelum** mengekspor arsip.
+- `web/e2e/deviceLinking.spec.ts` membaca nilai itu: bila `false`, asersi arsip
+ditandai **dilewati** lewat anotasi tes (alur QR → SAS → approve → login tetap
+diuji penuh), dan yang dibuktikan justru kebalikannya — tidak ada kontak maupun
+percakapan yang menyeberang tanpa R2. Field yang tidak dikirim server lama
+diperlakukan sebagai "belum tahu" (`available !== false`), bukan "tidak
+tersedia".
+
+## 40.7 Ekspor di perangkat lama
+
+Modul baru `web/src/lib/linkHistoryExport.ts`, memakai **pembaca yang sudah
+ada** — bukan query mentah ke Dexie:1. `HISTORY_TABLES = ['contacts','conversations','messages','groupCachedParticipants']`.
+   `groupCachedParticipants` (2026-10-30) ikut karena isinya hanya **id**
+   anggota grup — bukan rahasia, dan tanpanya grup hasil impor tampil tanpa
+   daftar anggota sampai server mengirim ulang cache-nya. Ia ditulis apa adanya
+   (tanpa penyegelan ulang), berbeda dari `profileCache` yang tetap dibuang
+   (blob profilnya disegel kunci lama).
+2. **Kontak**: `getAllContacts()` (sudah mendekripsi `data`), bentuk = record kontak biasa.
+3. **Percakapan**: `shadowVault.getAllConversations()` → objek `Conversation`
+   dengan `participants`/`decryptedMetadata` sudah didekripsi. `unreadCount`
+   dinolkan di salinan (badge 99+ di perangkat baru = kebohongan).
+4. **Pesan**: `shadowVault.getMessagesForExport()` → `db.messages.toArray()`
+   lalu decode dengan **fungsi baris→`Message` yang sama** dipakai
+   `getMessagesByConversation`. Refaktor kecil **di dalam** `shadowVaultDb.ts`
+   (aturan "jangan pecah file crypto" tetap): `decodeMessageRecord(row)`
+   diekstrak dan dipanggil pembaca lama maupun ekspor. Tidak ada peta kolom baru.
+5. **Yang dibuang saat ekspor** (pilihan sadar, bukan lupa):
+   - baris `waiting_for_key` / `error` (tidak ada isi untuk ditampilkan),
+   - pesan yang `expiresAt`-nya sudah lewat,
+   - view-once (metadata media view-once **tidak** ikut; lihat §40.13 poin 4),
+   - `statuses` (centang baca) → kosong, supaya impor tidak mengirim receipt,
+   - `seq` **dipertahankan** (nomor urut server per percakapan masih valid untuk
+     akun yang sama; tanpa itu "muat pesan lama" kehilangan kursor),
+   - `offlineQueue`, `pendingHeaders`, `messageKeys`, `skippedKeys`, seluruh
+     `identityKeys`/`preKeys`/`sessionKeys`/`ratchetSessions`/`pqDrSessionsV2`,
+     state grup, `kvStore`, `storyKeys` — lihat §40.11.
+6. Bangun arsip: `createFramedBackup({ store: historyStore, key: K, salt, tables:
+   HISTORY_TABLES, chunkBytes: 256 KB, scramble: true, marker: 'history' })`
+   (+ opsi `marker` kecil di `buildBackupFrames`). **`historyStore` bukan
+   `liveBackupStore()`**: `readTables`-nya mengembalikan objek domain hasil
+   langkah 2–4, bukan baris Dexie — itu inti pembeda arsip ini dari `.nyxbak`.
+7. `sealedKey = await sealForDevice(JSON.stringify({v:1,k,n,d}), pqPublicKey_new)`.
+8. Sebelum presign, baca `GET /link/history/limits` (kuota efektif akun: tier,
+   dipotong 25 MB bila belum terverifikasi). Bila `size > maxBytes`, batalkan
+   **tanpa mengunggah** dan lempar `HistoryArchiveTooLargeError` yang membawa
+   kedua angka; UI menampilkan "arsip {{size}} MB melebihi kuota {{limit}} MB —
+   hapus sebagian media lalu tautkan perangkat lagi" dan exporter memanggil
+   `abort` supaya perangkat baru tidak menunggu 60 detik. Endpoint `limits`
+   dipakai agar klien tidak menyimpan salinan konstanta kuota; bila endpoint itu
+   tidak terjangkau, presign server tetap penegak terakhir.
+
+### Biaya on-device (diukur 2026-10-30)
+
+`web/src/lib/linkHistoryBench.ts` (`pnpm --filter nyx-web run bench:linkhistory`,
+pola yang sama dengan `backupBench`) pada fixture 10.000 pesan (isi 160 B,
+10% dengan `fileMeta`) + 20 percakapan + 200 kontak + 7 cache partisipan grup:
+
+| Fase | Waktu | Puncak heap | Puncak RSS |
+|---|---|---|---|
+| ekspor (tabel → frame AEAD + digest) | 932 ms | 106 MB | 268 MB |
+| impor (parse + verifikasi + tulis) | 240 ms | 106 MB | 282 MB |
+
+Arsip final **3,46 MB / 17 frame**. Batas gate di kode
+(`LINK_HISTORY_BENCH_BUDGET`): 30 s per fase, 256 MB arsip — sengaja longgar,
+angkanya yang dilaporkan. Run ulang di sesi yang sama (setelah hardening link)
+memberi ekspor **960 ms** / impor **249 ms** dengan arsip tetap 3,46 MB / 17
+frame — variasi antar-run ±5%, gate tidak berubah.
+
+Batasannya jujur: penulis impor di-inject sebagai no-op, jadi **penyegelan ulang
+(crypto worker) dan tulis IndexedDB nyata tidak termasuk**; angka ini batas
+bawah untuk serialisasi + arsip. Angka 3,46 MB juga menunjukkan padding 1 KB
+per frame menyembunyikan panjang per pesan tetapi **bukan** volume total —
+ukuran arsip tetap membocorkan kasar banyaknya riwayat (§40.10).
+
+## 40.8 Impor di perangkat baru
+
+Modul baru `web/src/lib/linkHistoryImport.ts`:
+
+1. `GET /api/auth/link/history` → bila `none`, selesai tanpa UI.
+2. `POST …/download` → unduh (fetch biasa, bukan `api()` karena URL R2 penuh).
+3. Verifikasi `size` **dan** `digest` sebelum menyentuh kunci. Salah → berhenti
+   **tanpa** `consume` (arsip masih bisa diambil ulang sampai TTL).
+4. `openSealedForDevice(sealedKey, pqPrivateKey)` — `pqPrivateKey` dari
+   `useAuthStore.getState().getPqEncryptionKeyPair()` (sudah ada; tidak butuh
+   password lagi karena vault baru saja dibuka oleh `login()`).
+5. `parseBackupArchive(bytes, K)` → per chunk `readBackupChunk` → **wajib**
+   `k === 'history'`; lalu tulis **per batch 250** lewat penulis yang ada:
+   - `messages` → `shadowVault.upsertMessages(batch)` (menyegel ulang `content`
+     dengan kunci vault **baru**, mengisi `orderBucketMs`, dan filter "Shield"
+     membuat pengulangan idempoten),
+   - `conversations` → `shadowVault.saveConversation(conv)`,
+   - `contacts` → penulis kontak (`encryptRecord` + `notifyContactsChanged`),
+   - `groupCachedParticipants` → tulis langsung (bukan rahasia; cache nama).
+6. Setelah sukses: `pushContactBundle()` supaya bundle di server kembali bisa
+   dibuka identitas baru (menutup temuan 2), lalu `POST …/consume`.
+7. `consume` gagal (jaringan) → jangan gagalkan impor: baris sudah aman; server
+   menghapus objek lewat TTL.
+
+Karena impor **merge** (`bulkPut` per id, tanpa `clear()`), impor ulang tidak
+menduplikasi dan tidak menghapus apa pun yang dibuat perangkat baru sendiri.
+Ini alasan `writeTablesToDexie` (yang `clear()` dulu) **tidak** dipakai ulang.
+
+UI: fase baru di `LinkDevicePage` (`'importing'`) dengan jumlah pesan yang sudah
+masuk ke vault; kegagalan → `markHistoryImportPending()` (boolean plaintext di
+`kvStore`, bukan data identitas dan tanpa waktu presisi), toast, dan
+`linkHistoryRetry.ts` yang:
+- menjalankan **satu** percobaan otomatis saat app start berikutnya (effect di
+  `App.tsx`, hanya setelah `user && hasRestoredKeys`; `autoAttempted` menahan
+  StrictMode agar tidak menembak dua kali, dan percobaan bersamaan berbagi satu
+  promise sehingga file 10 MB tidak diunduh dua kali),
+- menampilkan tombol "Ambil riwayat dari perangkat sebelumnya" di Settings →
+  Active Sessions selama penandanya ada,
+- membersihkan penanda pada sukses, pada `{state:'none'}` (TTL habis /
+  sudah dikonsumsi → tidak ada yang bisa diulang), dan pada impor normal yang
+  sukses; kegagalan berikutnya mempertahankan penanda selama arsip masih ada.
+
+---
+
+## 40.9 Matriks kegagalan
+
+| Kejadian | Perilaku |
+|---|---|
+| Perangkat lama tidak pernah mengunggah (crash/tutup tab) | `history: preparing` → timeout 60 s → link lanjut tanpa riwayat; tidak ada state yatim (TTL 10/30 menit) |
+| Unggah selesai, perangkat baru tidak pernah `download` | State + objek kedaluwarsa; lifecycle `link-history/` menghapus objek ≤24 jam |
+| Unduhan terpotong / objek ditukar | `size`/`digest` gagal → impor dibatalkan, state **tidak** dibakar, pengguna bisa coba lagi |
+| `sealedKey` tidak bisa dibuka (perangkat salah / kunci salah) | `openSealedForDevice` melempar → impor batal, state utuh |
+| Impor gagal di tengah (kuota penyimpanan browser, tab ditutup) | Batch sebelumnya sudah tersimpan; impor ulang melanjutkan (idempoten per id) |
+| `consume` gagal | Impor tetap sukses; objek dihapus TTL/lifecycle |
+| `LINK_HISTORY_ENABLED=off` | Semua endpoint `/link/history/*` tidak ada (404). Tautan tetap jalan; perangkat lama menampilkan toast gagal dan perangkat baru lanjut setelah tunggu ≤60 dtk |
+| Arsip riwayat dibuka lewat "Restore from .nyxbak" | Ditolak oleh penanda `k` (§40.5), bukan ditulis sebagai baris rusak |
+| `.nyxbak` diumpankan ke impor riwayat | Ditolak: tidak ada penanda `k` |
+
+---
+
+## 40.10 Privasi & residual
+
+**Yang dilihat server:** ukuran arsip, digest (hash ciphertext), waktu unggah
+dan unduh, `deviceId` yang terlibat. Tidak ada isi, tidak ada daftar kontak,
+tidak ada jumlah pesan (jumlah pesan ada di dalam `sealedKey`, yang juga
+ciphertext).
+
+**Yang dilihat R2:** blob opaque di bawah `link-history/` (jangan disajikan
+domain publik — aturan yang sama dengan `backups/`, `docs/10`).
+
+**Residual yang jujur:**
+
+- Ukuran arsip membocorkan *kasar* banyaknya riwayat (padding 1 KB per frame
+  hanya menyembunyikan panjang per payload).
+- Stempel waktu pesan ikut terbawa; itu memang tujuan fitur, dan perangkat baru
+  menjadi salinan kedua riwayat (dump perangkat baru = riwayat lama).
+- Server bisa **menghilangkan** arsip (DoS) atau menolak `download`. Integritas
+  isi dijamin AEAD, jadi substitusi menghasilkan kegagalan, bukan data palsu.
+### 40.10.1 Keaslian kunci penerima: SAS (2026-10-30)
+
+Sebelum ini perangkat lama menyegel `K` ke `pqPublicKey` yang **diterimanya lewat
+server** (`auth:linking_request`). QR hanya membawa token yang dibuat perangkat
+lama, jadi server yang jahat/terkompromi bisa menukar kunci itu dengan miliknya,
+menyegel `K` ke kunci palsu, lalu membaca seluruh arsip. Impor di perangkat baru
+gagal membuka `sealedKey` (kunci privatnya tidak cocok), tetapi kerahasiaan data
+sudah hilang — dan tidak ada tanda apa pun di perangkat lama.
+
+**Model kepercayaan sekarang:**
+
+- Kedua perangkat menurunkan **kode 6 digit** dari `pqPublicKey` perangkat baru
+  (`web/src/lib/deviceLinkSas.ts`): perangkat baru dari kuncinya sendiri,
+  perangkat lama dari kunci yang dikirim server. Pengguna wajib mencocokkan
+  kedua kode; perangkat lama **mengunci tombol persetujuan** sampai kotak
+  konfirmasi dicentang, dan `sendHistoryArchive` menghitung ulang kode dari kunci
+  yang akan dipakai menyegel `K` — beda kode = berhenti sebelum `presign`
+  (fail-closed, tidak ada unggahan, tidak ada `ready`).
+- Server yang menukar kunci menghasilkan dua kode berbeda; peluang menebak kunci
+  pengganti dengan kode yang sama adalah 1/10^6 **per percobaan**, dan setiap
+  percobaan terlihat sebagai kode tidak cocok. Tidak ada kode/rahasia yang
+  dikirim ke server.
+- QR tidak bisa membawa hash kunci perangkat baru: QR ditampilkan perangkat
+  lama, sedangkan kunci perangkat baru baru dibuat setelah token dipindai, dan
+  yang memindai adalah perangkat baru. Membalik arah (perangkat baru menampilkan
+  QR, perangkat lama memindai) menuntut kamera di desktop — bukan pilihan yang
+  realistis, jadi dipilih perbandingan kode (pola SSP Bluetooth / safety number).
+
+**Residual yang tersisa (jujur):**
+
+- SAS mengikat **kunci penerima arsip**, bukan seluruh sesi. `/login` masih
+  mengirim password ke server untuk memverifikasi akun, jadi server yang jahat
+  tetap bisa mencoba membaca bundel kunci terenkripsi lewat password itu. SAS
+  menutup pencurian arsip, bukan menggantikan asumsi server-jujur-tapi-penasaran
+  pada jalur password.
+- Tidak ada bukti kriptografis "arsip ini dibuat perangkat lama": tanda tangan
+  ML-DSA atas `digest` (diverifikasi terhadap `Device.signingKeyV2` perangkat
+  lama) tetap **tidak** dikerjakan, karena celah nyata ada di keaslian penerima,
+  bukan pembuat. Bila nanti dibutuhkan, ia berdiri di atas SAS ini.
+- Perbandingan kode bergantung pada manusia: pengguna yang mencentang tanpa
+  membandingkan mematikan seluruh proteksi ini. Itulah sebabnya teks UI menulis
+  akibatnya secara eksplisit (tolak bila berbeda).
+- Server tetap bisa menahan `sealedKey`; tanpa `K` blob tidak berguna.
+
+### 40.10.2 Tinjauan adversarial jalur relay & Redis (2026-10-30)
+
+Pertanyaan yang diuji: bila relay realtime (`realtimeHandlers.ts` →
+`socket.io`/sidecar → `redisBridge.ts` pub/sub) atau isi Redis dibaca penyerang,
+apakah arsip riwayat bisa dibaca, dipalsukan, atau diputar ulang?
+
+| Permukaan | Yang lewat | Mengapa tidak membuka arsip |
+|---|---|---|
+| Relay, `auth:request_linking_qr` | token 32 byte acak (hex), TTL 300 s | token hanya untuk perangkat yang menampilkan QR (`emitEventToUser(..., deviceId)` membatasi ke device itu) |
+| Relay, `auth:linking_request` | `pendingId`, nama perangkat, `publicKey`/`pqPublicKey`/`signingKey` | semuanya kunci PUBLIK; tidak ada `K`, tidak ada isi arsip |
+| Redis `linking_token:<token>` | `{userId, deviceId}` | ter-seal `sealAtRest`, dan token kedaluwarsa 5 menit |
+| Redis `link_history*` | pointer ter-seal `{size, digest, sealedKey}` | `sealedKey` = ciphertext X-Wing ke perangkat baru; server bisa membukanya tetapi isinya tetap tidak bisa didekripsi |
+| R2 `link-history/<hmac>.nyxhist` | blob arsip | di-PUT/GET langsung dari klien lewat URL presigned; byte arsip **tidak pernah** melewati relay maupun proses API |
+| HTTP `download` | `sealedKey` + URL GET 300 s | hanya untuk sesi perangkat itu (`req.deviceId`), nama state = `deviceId` sesi, bukan parameter request → tidak ada id yang bisa dienumerasi |
+
+Kesimpulan tinjauan (tidak ada perubahan kode yang diperlukan):
+
+- **Baca:** tidak ada jalur yang membawa `K` ke server. Satu-satunya jalur yang
+  dulu bisa membocorkannya — server menukar `pqPublicKey` — sudah ditutup SAS
+  (§40.10.1), dan `sendHistoryArchive` menghitung ulang kode dari kunci yang
+  benar-benar dipakai menyegel.
+- **Palsukan:** byte arsip diikat AEAD; klien memverifikasi `size` **dan**
+  `digest` sebelum kunci dibuka (`receiveLinkedHistory`), jadi substitusi isi
+  berakhir sebagai kegagalan, bukan data palsu. Server juga tidak bisa
+  mendaftarkan pointer untuk objek yang tidak ada: `ready` melakukan `HEAD`
+  (`checkHistoryObject`) dan object key-nya HMAC, bukan nama yang bisa ditebak.
+- **Enumerasi:** `pendingId` = UUID v4 (122 bit) dan `GET /link/status/:id`
+  publik hanya membuka `pending`/`approved`/`history`, tanpa identitas akun;
+  status arsip sendiri tidak pernah bisa dibaca lewat id perangkat lain.
+- **DoSing/menghilangkan:** server bisa menahan `download`, menghapus objek,
+  atau tidak meneruskan `pqPublicKey` (perangkat lama lalu tidak bisa menurunkan
+  kode → arsip tidak dikirim, dan perangkat baru hanya kehilangan riwayat).
+  Semuanya kehilangan ketersediaan, bukan kerahasiaan — dan semuanya terlihat
+  sebagai kegagalan di klien, bukan impor diam-diam yang berhasil.
+
+**Residual baru yang tercatat di sini (belum ditutup):** server yang jahat dan
+menyimpan salinan `sealedKey` + objek dari tautan **sebelumnya ke perangkat yang
+sama** bisa memutar ulang arsip lama itu (object key deterministik per device,
+`sealedKey` lama juga masih bisa disimpan). Isinya asli — dibuat perangkat lama
+yang sah — jadi yang bisa dicapai hanyalah **rollback riwayat** ke snapshot
+lebih tua, bukan pemalsuan atau pembacaan. Menutupnya butuh nonce per tautan di
+dalam AAD arsip (atau penghitung yang dikomit server) dan itu perubahan format;
+belum dikerjakan.
+
+---
+
+## 40.11 Yang tidak ikut (dan mengapa bukan "seperti Signal")
+
+Signal mentransfer **seluruh database** saat link karena identitasnya dibagi
+antar perangkat (multi-device, identity yang sama, sesi bisa dilanjutkan di
+perangkat mana pun). NYX sengaja berbeda: link = identitas **baru**, satu sesi
+aktif. Menyalin state kripto karena itu bukan hanya tidak perlu, tetapi salah:
+state itu terikat ke private key yang tidak ikut pindah.
+
+| Tidak ikut | Alasan |
+|---|---|
+| `identityKeys`, `preKeys`, `sessionKeys`, `ratchetSessions`, `pqDrSessionsV2` | Terikat identitas baru; menyalinnya membuat state yang tidak bisa dipakai dan membingungkan `PROTOCOL_RESET` |
+| `groupKeys`, `groupSenderStates`, `groupReceiverStates`, `groupSkippedKeys` | Ditujukan ke `deviceKey` lama; pesan grup **baru** datang lewat distribusi ke kunci baru |
+| `messageKeys`, `skippedKeys` | Hanya untuk mendekripsi ciphertext; isi sudah dibawa sebagai plaintext-di-dalam-`K` |
+| `kvStore` | Preferensi lokal perangkat (tema, auto-unlock, state KT/gossip) — bukan riwayat |
+| `storyKeys`/story | Ephemeral (24 jam); memindahkannya menghidupkan konten yang seharusnya mati |
+| `offlineQueue`, `pendingHeaders` | Antrean kirim milik perangkat lama; membawanya = mengirim ulang pesan |
+| `profileCache` | Bisa diambil ulang dari server; ikut membawa blob profil yang disegel kunci lama |
+
+---
+
+## 40.12 Rencana fase, file, dan gate
+
+### Fase 0 — pembuka jalan (tanpa data) — **LANDED**
+- `server/src/routes/auth.ts`: `auth:linking_request` mengirim `pqPublicKey`
+  (tanpa ini kunci arsip tidak bisa diseal ke perangkat baru).
+- `GET /link/status/:id` + `approve {expectHistory}`: field `history`
+  (`none|preparing|ready`).
+- Test: `server/tests/deviceLinking.test.ts` (payload memuat `pqPublicKey`).
+
+### Fase 1 — transport & kunci (payload: kontak + percakapan) — **LANDED**
+- `server/src/utils/linkHistory.ts` (state machine murni di atas
+  `LinkingStore`/`LinkingSealer`) + `linkHistoryObject.ts` (kunci HMAC, kuota,
+  clamp TTL).
+- `server/src/routes/linkHistory.ts` (7 endpoint, termasuk `abort` dan `limits`) dipasang di
+  `app.ts` di belakang `LINK_HISTORY_ENABLED`.
+- `web/src/lib/linkHistoryClient.ts` (REST + seal/open + unggah/unduh),
+  `linkHistoryExport.ts`/`linkHistoryImport.ts` dengan tabel tahap 1.
+- `LinkDeviceModal` (centang + progres unggah) dan fase `importing` di
+  `LinkDevicePage`; kunci i18n di **4 bahasa** (`en/es/id/pt-BR`).
+- Gate: `server/tests/linkHistory.test.ts` (13 kasus) +
+  `web/src/lib/__tests__/linkHistory.test.ts` (6 kasus) + e2e
+  `web/e2e/deviceLinking.spec.ts` (kontak benar-benar sampai ke perangkat baru,
+  state server `none` setelah impor).
+
+Bukti e2e 2026-10-29: perangkat lama menyemai satu kontak → link → arsip
+terunggah → perangkat baru membacanya dengan kunci vault identitas baru →
+`GET /api/auth/link/history` menjadi `none`.
+
+### Fase 2 — pesan & progres — **LANDED**
+- `decodeMessageRecord` diekstrak di `shadowVaultDb.ts`; `getMessagesForExport()`
+  membuang pesan kedaluwarsa, view-once, dan `waiting_for_key`, serta
+  mengosongkan `statuses` (tidak ada receipt palsu saat impor).
+- Impor menulis pesan per batch 250 lewat `upsertMessages` dan melaporkan
+  `{frame, totalFrames, messages}` ke UI (`auth:link.import_progress`, 4 bahasa).
+  Sejak 2026-10-30 **semua** frame divalidasi (penanda `k` + nama tabel) sebelum
+  tulisan pertama, sehingga frame terakhir yang cacat tidak meninggalkan baris
+  parsial; dikunci `linkHistory.test.ts` (batch 1 + frame akhir bermarker salah).
+- `pushContactBundle()` setelah impor + `loadConversations()` supaya percakapan
+  hasil impor langsung muncul di sidebar.
+- Gate: `web/src/lib/__tests__/linkHistoryMessages.test.ts` (proyeksi pesan) +
+  kasus batch/progres di `linkHistory.test.ts`; e2e memperluas
+  `web/e2e/deviceLinking.spec.ts` (3 pesan lama → link → perangkat baru membaca
+  ulang ketiganya lewat `getMessagesByConversation`, kontak muncul,
+  `GET /history` → `none`). Spec terpisah `linkHistory.spec.ts` tidak dibuat:
+  alur QR + approve sudah mahal, dan menambah context kedua di spec yang sama
+  menjaga satu perjalanan pengguna.
+- Percobaan ulang: `web/src/lib/linkHistoryRetry.ts` + tombol di
+  `SessionManagerPage` + effect app start di `App.tsx`; tes
+  `web/src/lib/__tests__/linkHistoryRetry.test.ts` (7 kasus: tanpa penanda tidak
+  menyentuh server, sukses/expired membersihkan penanda, gagal
+  mempertahankannya, dua panggilan bersamaan = satu unduhan, auto attempt sekali
+  per app start).
+- Belum: benchmark 10k pesan.
+
+### Fase 3 — operasional & bukti — **SEBAGIAN LANDED (2026-10-30)**
+- `metrics.ts` (`LINK_HISTORY_OPS`) + kenaikan di 5 op + alarm
+  `NyxLinkHistoryConsumeFailing` + drill `tests.yml` — **LANDED** (§40.6).
+- `LINK_HISTORY_ENABLED` sudah ada di `.env.example` dan dijaga
+  `server/tests/envExample.test.ts` (bagian Fase 1).
+- Benchmark 10k pesan (pola `backupBench`) — **LANDED**: harness
+  `web/src/lib/linkHistoryBench.ts` + runner `linkHistoryBench.test.ts`
+  (`bench:linkhistory`), angka dicatat di §40.7.
+- Paginasi `seq` setelah impor — **LANDED**: `olderPageCursor`
+  (`web/src/utils/messageOrder.ts`) dipakai `loadPreviousMessages`,
+  dikunci `web/src/lib/__tests__/linkHistoryPagination.test.ts`.
+- **BELUM:** e2e pesan grup setelah link (§40.13 poin 1). Bukan karena kode
+  dinyatakan benar, tetapi karena belum ada run yang sah: E2E di mesin ini
+  harus dijalankan terhadap API lokal (`docs/11` §11.2 — `VITE_API_URL` absolut
+  di `web/.env` dulu mengarahkan suite ke API produksi; sekarang dipaksa
+  relatif oleh `playwright.config.ts`).
+
+### Gate kualitas (sama dengan aturan repo)
+- `npx tsc --noEmit` server & web, `pnpm -r --if-present run test`, `pnpm run lint`
+  (oxlint, 0 error), `npx oxlint <file> --report-unused-disable-directives`.
+- Fuzz: penanda `k` menyentuh `readBackupChunk` → jalankan
+  `pnpm --filter nyx-web run fuzz:parsers`.
+
+---
+
+## 40.13 Pertanyaan terbuka (butuh keputusan sebelum Fase 2)
+
+1. **Pesan grup setelah link — BELUM TERVERIFIKASI (masih terbuka).**
+   Distribusi sender-key ditujukan ke `deviceKey`; setelah link kuncinya baru.
+   E2E dua klien (kirim ke grup setelah link, peer lama harus membaca) belum
+   pernah berjalan terhadap stack lokal yang benar, jadi tidak ada klaim
+   "bekerja" di dokumen ini. Yang diketahui dari pembacaan kode: perangkat hasil
+   link bisa mengirim ke grup hanya bila ia punya **metadata grup ter-dekripsi**
+   (pseudonymMap + peta token) — dan satu-satunya sumbernya adalah arsip ini
+   (`conversations.decryptedMetadata` ikut diekspor dan ditulis ulang oleh
+   `saveConversation`). Kalau impor riwayat gagal/dilewati, klien menolak
+   mengirim dengan `Pseudonym pengirim grup tidak tersedia … metadata grup
+   v2/v3 belum ter-dekripsi`; itu perilaku yang benar, tetapi UX-nya perlu
+   dilihat. Saat menjalankan e2e-nya: pastikan API lokal (§11.2), bukan API
+   produksi.
+2. **`seq` impor — TERJAWAB.** Nomor urut server tetap valid untuk akun yang
+   sama. `olderPageCursor` (`web/src/utils/messageOrder.ts`) memilih `seq` pesan
+   **tertua** yang dimiliki (fallback `createdAt` hanya untuk baris legacy) dan
+   `loadPreviousMessages` mengirimnya sebagai `?before=<seq>`; test
+   `web/src/lib/__tests__/linkHistoryPagination.test.ts` mengimpor arsip nyata
+   lalu memaginasi 60 pesan lebih lama: tidak ada duplikat, tidak ada lompatan,
+   berhenti saat `nextCursor` null.
+3. **Kontak.** Apakah `pushContactBundle()` setelah impor cukup, atau bundle di
+   server perlu ditandai "milik identitas X" agar perangkat lain tahu kapan
+   harus mengabaikannya? (Rekomendasi: cukup push; penanda baru jika muncul
+   kasus nyata.)
+4. **View-once.** Diputuskan: **tidak ditransfer sama sekali** (bukan tombstone)
+   — memindahkannya menghidupkan konten yang sudah "terbakar", dan tombstone
+   tanpa konteks hanya membingungkan. Lihat filter di `getMessagesForExport()`.
+5. **Rentang/pilihan.** Ekspor penuh bisa melebihi kuota FREE. Opsi Fase 3:
+   ekspor hanya N bulan terakhir atau percakapan terpilih, dengan pratinjau
+   ukuran sebelum unggah.
+6. **Retensi objek.** 30 menit cukup untuk satu impor, tetapi pengguna dengan
+   jaringan buruk mungkin butuh lebih. Alternatif: 2 jam + lifecycle 6 jam,
+   dengan biaya penyimpanan sementara yang lebih besar.
