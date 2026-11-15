@@ -221,6 +221,44 @@ describe('processGroupMailbox', () => {
     expect(JSON.parse(options.body as string)).toEqual({ token: 'GROUP_TOKEN' });
   });
 
+  it('kunci era baru diterima walau metadata era itu belum ada (key-before-metadata)', async () => {
+    // [docs/41 §6.4 · fault injection 4] Sisi penerima TIDAK boleh menunggu
+    // `metadata:updated`: envelope kunci dan metadata datang lewat jalur
+    // berbeda (mailbox vs socket) dan urutannya tidak dijamin. Di sini mailbox
+    // hanya berisi envelope kunci — tanpa item META, tanpa metadata apa pun —
+    // dan kunci tetap harus masuk store supaya pesan era baru bisa didekripsi
+    // begitu metadatanya tiba (storeReceivedSessionKey menjadwalkan ulang
+    // dekripsi sendiri; lihat socketListeners.ts `session:new_key`).
+    apiMock.mockResolvedValue({
+      epoch: 3,
+      items: [{
+        id: 'item-key-only',
+        kind: 'KEY_ENVELOPE',
+        tag: await deriveMailboxTag('MY_TOKEN'),
+        payload: encodeMailboxPayload({
+          k: 'sealed-era3', t: 'MY_DEVICE_KEY', sp: 'pseudo-admin', sd: 'dev-admin', ss: 'sig',
+        })!,
+        createdAt: '2026-11-15T00:00:00.000Z',
+      }],
+      nextCursor: null,
+      truncated: false,
+    });
+
+    const handled = await processGroupMailbox('conv-1');
+
+    expect(handled).toBe(1);
+    expect(storeReceivedSessionKey).toHaveBeenCalledTimes(1);
+    expect(storeReceivedSessionKey).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      encryptedKey: 'sealed-era3',
+      type: 'GROUP_KEY',
+      senderId: 'pseudo-admin',
+      senderDeviceKey: 'dev-admin',
+      senderSigningKey: 'sig',
+      senderSigningKeyV2: undefined,
+    });
+  });
+
   it('memakai cursor halaman sebelumnya dan tidak memproses ulang item', async () => {
     apiMock.mockResolvedValue({
       epoch: 0,

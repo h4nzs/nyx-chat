@@ -7,6 +7,11 @@ test.describe('Authentication & Onboarding', () => {
   test.setTimeout(180000);
 
   test('Register with Proof of Work', async ({ page }) => {
+    // Rantai onboarding kini punya anggaran 180 dtk untuk langkah trust saja
+    // (`TRUST_STEP_TIMEOUT_MS`), dan sisa rantainya ~60 dtk terukur di CI
+    // Firefox (nightly 43416725350: tes ini 1,3 m total). Batas 180 dtk milik
+    // describe akan memotong tes sebelum anggaran itu habis, jadi naikkan.
+    test.setTimeout(300000);
     const username = `testuser_pow_${Date.now()}`;
     await page.route('**/api/auth/pow/challenge', async route => {
       await route.fulfill({ status: 200, json: { challenge: 'mock_challenge', difficulty: 1 } });
@@ -57,6 +62,17 @@ test.describe('Authentication & Onboarding', () => {
     });
     loginPage.on('pageerror', (err) => console.log(`[auth.spec][login page pageerror] ${err.message}`));
 
+    // [BUG 2026-11-11] Halaman utama juga perlu listener: tanda `[logout] …`
+    // dari store (DEV) hanya berguna kalau sampai ke log CI. Tanpa ini, "tidak
+    // ada tanda apa pun" tidak bisa dibedakan dari "main thread beku".
+    page.on('console', (msg) => {
+      const text = msg.text();
+      if (text.includes('[logout]') || msg.type() === 'error') {
+        console.log(`[auth.spec][page console] ${text}`);
+      }
+    });
+    page.on('pageerror', (err) => console.log(`[auth.spec][page pageerror] ${err.message}`));
+
     await test.step('registrasi akun uji', async () => {
       await registerUser(page, 'Test Login User', username);
     });
@@ -72,19 +88,35 @@ test.describe('Authentication & Onboarding', () => {
         // buktinya tetap cookie `rt` di bawah — jadi penolakan dicatat, bukan
         // dilempar sebagai kegagalan tes.
         let result: { ok: boolean; error?: string };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const evalTimeoutMs = 30_000;
         try {
-          result = await page.evaluate(async () => {
-            try {
-              // @ts-ignore — path absolut Vite dev server (runtime-only)
-              const { useAuthStore } = await import('/src/store/auth.ts');
-              await useAuthStore.getState().logout();
-              return { ok: true };
-            } catch (e) {
-              return { ok: false, error: String(e) };
-            }
-          });
+          result = await Promise.race([
+            page.evaluate(async () => {
+              try {
+                // @ts-ignore — path absolut Vite dev server (runtime-only)
+                const { useAuthStore } = await import('/src/store/auth.ts');
+                await useAuthStore.getState().logout();
+                return { ok: true };
+              } catch (e) {
+                return { ok: false, error: String(e) };
+              }
+            }),
+            // [BUG 2026-11-11] WebKit dulu menggantung di sini tanpa pernah
+            // menyelesaikan `evaluate`; tes lalu mati di timeout 240 dtk dan
+            // menyamar sebagai "context closed". Batas ini membuat penyebabnya
+            // tertulis di `attempts`, bukan hilang bersama timeout tes.
+            new Promise<{ ok: boolean; error?: string }>((resolve) => {
+              timer = setTimeout(
+                () => resolve({ ok: false, error: `logout() tidak selesai dalam ${evalTimeoutMs / 1000} dtk` }),
+                evalTimeoutMs,
+              );
+            }),
+          ]);
         } catch (e) {
           result = { ok: false, error: String(e) };
+        } finally {
+          if (timer) clearTimeout(timer);
         }
         attempts.push({ attempt, ...result });
 
@@ -97,7 +129,12 @@ test.describe('Authentication & Onboarding', () => {
             (result.ok ? '' : ` (store melempar: ${result.error})`)
         );
         if (!stillLoggedIn) break;
-        await page.waitForTimeout(1000);
+        // [BUG 2026-11-11] Jeda ini dulu `page.waitForTimeout(1000)`. Playwright
+        // menyerialkan panggilan level-halaman: bila `page.evaluate(logout())`
+        // masih menggantung (WebKit), `waitForTimeout` ikut mengantre dan tes
+        // mati di timeout 240 dtk tanpa bukti tambahan. Jeda di sisi Node tidak
+        // pernah mengantre di belakang halaman.
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       const refreshCookie = (await page.context().cookies()).find((c) => c.name === 'rt');
