@@ -205,7 +205,9 @@ berisi satu `KEY_ENVELOPE` (tanpa META) tetap diteruskan ke
 `storeReceivedSessionKey`; kunci disimpan per `conversationId` dan dekripsi
 ulang dijadwalkan setelah metadata terdekripsi.
 
-Spec masuk `mustPass` untuk `chromium` dan `chrome` (`minTotal` 25 → 26).
+Spec masuk `mustPass` untuk `chromium` dan `chrome` (`minTotal` 25 → 26), dan
+terbukti hijau di CI: run `43700149030` (head `5e470d43`) 12/12 job sukses,
+`E2E (Playwright, Chromium)` 20,9 menit dan `E2E (Chrome penuh)` 19,7 menit.
 
 ### 6.5 Required-tests gate — selesai
 
