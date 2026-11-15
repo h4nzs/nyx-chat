@@ -8,7 +8,7 @@ nyx-chat/
 │   ├── src/
 │   │   ├── components/       # UI components (77 files)
 │   │   ├── pages/            # Lazy-loaded route pages (Login, Register, Chat, Settings…)
-│   │   ├── store/            # 21 Zustand stores
+│   │   ├── store/            # 22 Zustand stores
 │   │   ├── hooks/            # Reusable React hooks
 │   │   ├── lib/              # Infrastructure: api, transport, storage, crypto proxies
 │   │   ├── utils/            # Pure helpers (crypto.ts is the biggest; kept monolithic by design)
@@ -20,7 +20,7 @@ nyx-chat/
 │   └── e2e/                  # Playwright specs
 ├── server/                   # Express 5 API (ESM TS, run via tsx)
 │   ├── src/
-│   │   ├── routes/           # 21 mounted route modules
+│   │   ├── routes/           # 24 mounted route modules
 │   │   ├── middleware/       # requireAuth, rateLimiter, tenantAuth
 │   │   ├── network/          # redisBridge.ts — Redis pub/sub ↔ Rust sidecar
 │   │   ├── jobs/             # messageSweeper, systemSweeper, cleanup, ktSnapshot, pirSnapshot (node-cron)

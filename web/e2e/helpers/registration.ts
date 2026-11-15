@@ -22,6 +22,36 @@
 import { expect, Page } from '@playwright/test';
 
 /**
+ * Halaman yang sudah dipasangi penangan otomatis Quick Tour. `addLocatorHandler`
+ * menolak pemasangan ganda pada locator yang sama, dan `registerUser` bisa
+ * dipanggil lebih dari sekali pada satu halaman (mis. spec multi-akun).
+ */
+const tourHandlerInstalled = new WeakSet<Page>();
+
+/**
+ * Anggaran menunggu langkah "Skip for now" (trust level) setelah
+ * `Initialize Identity` diklik.
+ *
+ * Langkah itu baru dirender setelah registrasi selesai, dan yang mahal
+ * seluruhnya ada di klien: Argon2id vault 128 MB/4 iterasi + index 64 MB/3
+ * iterasi di crypto worker, lalu pembuatan kunci pasca-kuantum. Di build dev
+ * Vite juga harus mentransformasi modul kripto saat pertama dibuka.
+ *
+ * Riwayat anggaran ini, semuanya terukur:
+ *   - 60 dtk → gagal di mesin dev yang sedang sibuk (rantai 40–70 dtk);
+ *   - 90 dtk → gagal di CI WebKit (`Smoke Firefox + WebKit`, nightly
+ *     43420308481): `Skip for now` tidak muncul dalam 90 dtk, padahal tes
+ *     Firefox di job yang sama menyelesaikan registrasi dalam 1,3 m dan WebKit
+ *     lokal (Docker) hanya 45–60 dtk. Runner CI 2 core + JSC jauh lebih lambat
+ *     untuk Argon2, jadi batas 90 dtk memotong pekerjaan yang sah.
+ *   - 180 dtk (sekarang): ~2,3× nilai WebKit lokal dan di atas angka apa pun
+ *     yang pernah terukur. Ini batas atas untuk pekerjaan nyata — bukan cara
+ *     menyembunyikan hang: `Crypto worker timeout` di proxy tetap 120 dtk dan
+ *     akan melempar galat bila worker benar-benar macet.
+ */
+export const TRUST_STEP_TIMEOUT_MS = 180_000;
+
+/**
  * Tutup modal onboarding yang sedang tampil lewat tombol `×`-nya.
  *
  * `locator(...).first().click()` rapuh di sini: saat berpindah langkah, modal
@@ -71,17 +101,41 @@ export async function dismissModalCloseButton(page: Page, timeoutMs = 20000): Pr
  * jadi tour tidak muncul lagi setelah reload/navigasi berikutnya. Akun lama
  * (flag sudah true) dilewati tanpa error. (URL harus sudah di /chat.)
  */
-export async function dismissOnboardingTour(page: Page, timeoutMs = 20000): Promise<void> {
+// [BUG 2026-11-12] Batas 20 dtk terlalu pendek: tour baru dirender setelah
+// `POST /users/me/complete-onboarding` selesai, dan di WebKit (nightly run
+// 43015446345, repro lokal `/tmp/opencode/wktrace2`) itu terjadi ~32 dtk
+// setelah "System Ready". `waitFor` 20 dtk lalu menyerah, overlay Quick Tour
+// tertinggal, dan klik berikutnya (`settings.spec.ts` tombol eject) ditolak
+// overlay sampai tes mati di timeout 180 dtk.
+// [2026-11-14] Karena itu penanganannya tidak lagi berupa tunggu buta: lihat
+// komentar di dalam fungsi (`addLocatorHandler`).
+export async function dismissOnboardingTour(page: Page, timeoutMs = 45000): Promise<void> {
+  // [2026-11-14] Tour diurus sebagai penangan otomatis, bukan tunggu buta.
+  //
+  // Tour hanya dirender bila `user.hasCompletedOnboarding === false`, dan flag
+  // itu datang dari server. Setelah registrasi (jalur `/api/auth/register`)
+  // respons server TIDAK membawa flag tersebut, sedangkan setelah reload
+  // (`GET /api/users/me`) flag ada — jadi tour bisa muncul kapan saja, termasuk
+  // puluhan detik kemudian saat chunk lazy `OnboardingTour` baru selesai di CI.
+  // Tunggu buta 45 dtk per registrasi karena itu (a) sering membuang waktu saat
+  // tour memang tak akan muncul dan (b) tetap bisa meleset bila tour muncul
+  // lebih lambat. `addLocatorHandler` menutup tour tepat sebelum aksi
+  // berikutnya, berapa pun delay-nya, dan tanpa menahan tes.
   const tour = page.getByRole('dialog').filter({ hasText: /Quick Tour/i }).first();
-  try {
-    await tour.waitFor({ state: 'visible', timeout: timeoutMs });
-  } catch {
-    return; // bukan akun baru / tour sudah ditutup sebelumnya
+  if (!tourHandlerInstalled.has(page)) {
+    tourHandlerInstalled.add(page);
+    await page.addLocatorHandler(tour, async () => {
+      await page.getByRole('button', { name: /Close modal/i }).first().click({ force: true }).catch(() => {});
+      await expect(tour).toBeHidden({ timeout: 15000 }).catch(() => {});
+    }, { noWaitAfter: true });
   }
-  await tour.getByRole('button', { name: /Close modal/i }).first().click({ force: true });
+
+  // Kalau tour sudah tampil sekarang (jalur reload), tutup segera.
+  if (!(await tour.isVisible().catch(() => false))) return;
+  await page.getByRole('button', { name: /Close modal/i }).first().click({ force: true });
   // Modal baru lepas dari DOM setelah POST complete-onboarding selesai — kalau
   // overlay masih terpasang, klik pengguna berikutnya akan ditolak lagi.
-  await expect(tour).toBeHidden({ timeout: 15000 });
+  await expect(tour).toBeHidden({ timeout: timeoutMs });
 }
 
 /**
@@ -145,13 +199,9 @@ async function walkOnboarding(
   await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-  // 1. Trust level verification (muncul setelah registrasi selesai, ~15-20 dtk di
-  //    mesin idle). Di mesin dev ini rantai registrasi terukur 40-70 dtk saat box
-  //    sedang sibuk (Argon2 di worker), dan anggaran 60 dtk membuat spec mana pun
-  //    yang kebetulan berjalan paling lambat gagal di sini — gejalanya "Skip for
-  //    now tidak muncul" yang mudah disalahartikan sebagai bug registrasi. Beri
-  //    ruang untuk rentang yang terukur, bukan untuk hang tanpa batas.
-  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: 90000 });
+  // 1. Trust level verification (muncul setelah registrasi selesai; lihat
+  //    `TRUST_STEP_TIMEOUT_MS` untuk riwayat anggaran dan angka terukurnya).
+  await page.getByRole('button', { name: /Skip for now/i }).waitFor({ state: 'visible', timeout: TRUST_STEP_TIMEOUT_MS });
   await page.getByRole('button', { name: /Skip for now/i }).click();
 
   // 2. Protocol: Recovery
@@ -187,18 +237,13 @@ async function walkOnboarding(
     console.log('System Init modal skipped or not found');
   }
 
-  // 6. Quick Tour (opsional — muncul di /chat, setelah System Ready).
-  const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-  try {
-    await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await closeTourBtn.click();
-  } catch {
-    console.log('Quick Tour modal skipped or not found');
-  }
+  // 6. Quick Tour: tidak perlu di-probe di sini — tour hanya hidup di /chat
+  //    (dirender ChatWindow), dan `modal` apa pun yang dibuka di langkah ini
+  //    sudah ditutup di atas. Penanganan tour ada di `dismissOnboardingTour`.
 
   await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 30000 });
 
-  // 7. Tutup Quick Tour SETELAH mendarat di /chat (di /register tour belum ada).
+  // 7. Pasang penangan Quick Tour untuk sisa umur halaman (lihat komentarnya).
   await dismissOnboardingTour(page);
   return phrase;
 }
@@ -213,19 +258,19 @@ export async function registerUserViaBiometric(page: Page, displayName: string, 
   await fillStable(page.getByRole('textbox', { name: /Password/i }), 'StrongPass123!');
   await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-  // 1. Bypass biometric BILA prompt-nya muncul. WebKit headless tidak selalu
-  //    punya platform authenticator, dan alur registrasi melewati langkah ini
-  //    ketika WebAuthn tidak tersedia — menunggu 30 dtk untuk tombol yang memang
-  //    tidak akan ada adalah kegagalan harness (run 42362200951), bukan produk.
-  const skipBiometricBtn = page.locator('button:has-text("Skip"), button:has-text("Continue")').first();
-  try {
-    await expect(skipBiometricBtn).toBeVisible({ timeout: 8000 });
-    await skipBiometricBtn.click();
-  } catch {
-    console.log('Biometric prompt skipped or not found');
-  }
+  // 1. Langkah verifikasi kepercayaan SELALU muncul setelah registrasi selesai
+  //    (Argon2 + pembuatan kunci di worker). Dulu langkah ini dicari lewat
+  //    locator samar `Skip/Continue` dengan batas 8 dtk dan dianggap opsional:
+  //    di WebKit tombol aslinya ("Skip for now") belum ada dalam 8 dtk, langkah
+  //    itu ditembus, lalu helper macet menunggu `Acknowledge` sampai timeout
+  //    180 dtk milik spec (Smoke Firefox + WebKit). Samakan dengan
+  //    `walkOnboarding`: tombol yang benar, anggaran yang sama.
+  const skipTrustBtn = page.getByRole('button', { name: /Skip for now/i });
+  await skipTrustBtn.waitFor({ state: 'visible', timeout: TRUST_STEP_TIMEOUT_MS });
+  await skipTrustBtn.click();
 
   // 2. Bypass recovery modal (acknowledge + tutup).
+  await page.getByRole('button', { name: /Acknowledge/i }).waitFor({ state: 'visible', timeout: 20000 });
   await page.getByRole('button', { name: /Acknowledge/i }).click();
   const closeRecoveryBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
   await expect(closeRecoveryBtn).toBeVisible({ timeout: 5000 });
@@ -241,18 +286,12 @@ export async function registerUserViaBiometric(page: Page, displayName: string, 
     console.log('System Init modal skipped or not found');
   }
 
-  // 4. Quick Tour (opsional).
-  const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
-  try {
-    await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await closeTourBtn.click();
-  } catch {
-    console.log('Quick Tour modal skipped or not found');
-  }
+  // 4. Quick Tour: tidak perlu di-probe di sini — tour hanya hidup di /chat.
+  //    Penanganan tour ada di `dismissOnboardingTour`.
 
   await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 15000 });
 
-  // 5. Tutup Quick Tour SETELAH mendarat di /chat (di /register tour belum ada).
+  // 5. Pasang penangan Quick Tour untuk sisa umur halaman.
   await dismissOnboardingTour(page);
 }
 

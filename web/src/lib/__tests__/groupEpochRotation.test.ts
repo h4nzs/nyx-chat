@@ -51,7 +51,7 @@ vi.mock('@lib/keychainDb', () => ({
   decryptValueAtRest: async (value: string) => (value.startsWith('ENC1:') ? value.slice(5) : null),
 }));
 
-const { maybeRotateGroupEpoch, rotateGroupEpochNow, resetGroupEpochStateForTests } = await import('@lib/groupEpochRotation');
+const { maybeRotateGroupEpoch, rotateGroupEpochNow, resumePendingGroupRotations, resetGroupEpochStateForTests } = await import('@lib/groupEpochRotation');
 
 function statusRoute (status: Record<string, unknown>) {
   authFetchMock.mockImplementation(async (path: string, options?: Record<string, unknown>) => {
@@ -138,5 +138,35 @@ describe('maybeRotateGroupEpoch', () => {
 
     expect(await maybeRotateGroupEpoch('conv-1', { now: NOW })).toBe('unavailable');
     expect(rotateGroupKeyMock).not.toHaveBeenCalled();
+  });
+
+  // [BUG 2026-11-15] Setelah reload di tengah rotasi, era di server baru saja
+  // berputar sehingga kebijakan berkata `skipped` — padahal metadata kita masih
+  // memakai token lama (mailbox pull 403). Rotasi tertunda wajib diselesaikan.
+  it('rotasi tertunda diselesaikan walau kebijakan bilang skipped', async () => {
+    statusRoute({ epoch: 3, rotatedAt: new Date(NOW - 48 * 3_600_000).toISOString(), createdAt: null, messageSeq: 10 });
+    rotateGroupKeyMock.mockRejectedValueOnce(new Error('reload di tengah rotasi'));
+    expect(await maybeRotateGroupEpoch('conv-1', { now: NOW })).toBe('unavailable');
+
+    statusRoute({ epoch: 4, rotatedAt: new Date(NOW).toISOString(), createdAt: null, messageSeq: 10 });
+    expect(await maybeRotateGroupEpoch('conv-1', { now: NOW })).toBe('rotated');
+    expect(authFetchMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+    expect(rotateGroupKeyMock).toHaveBeenLastCalledWith('conv-1', 'periodic_rotation', true, 'NEW_TOKEN');
+  });
+});
+
+describe('resumePendingGroupRotations', () => {
+  it('hanya menyentuh grup yang punya pendingToken', async () => {
+    statusRoute({ epoch: 3, rotatedAt: new Date(NOW - 48 * 3_600_000).toISOString(), createdAt: null, messageSeq: 10 });
+    rotateGroupKeyMock.mockRejectedValueOnce(new Error('reload di tengah rotasi'));
+    expect(await maybeRotateGroupEpoch('conv-a', { now: NOW })).toBe('unavailable');
+
+    authFetchMock.mockClear();
+    rotateGroupKeyMock.mockClear();
+    await resumePendingGroupRotations(async () => ['conv-a', 'conv-b']);
+
+    expect(rotateGroupKeyMock).toHaveBeenCalledTimes(1);
+    expect(rotateGroupKeyMock).toHaveBeenCalledWith('conv-a', 'periodic_rotation', true, 'NEW_TOKEN');
+    expect(authFetchMock.mock.calls.filter(([path]) => String(path).includes('conv-b'))).toHaveLength(0);
   });
 });

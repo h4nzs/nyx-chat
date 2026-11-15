@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🧭 PIR dua server: bukti WP8 dan penutupan WP9 (2026-11-10)
+
+**Klaim PIR sekarang punya bukti, bukan janji.** Vektor XOR-PIR dipakai bersama
+oleh Node (`server/tests/pirVectors.test.ts`) dan Rust
+(`cross_impl_vectors_match_fixture`) dari satu fixture, dan `web/e2e/pir.spec.ts`
+menjalankan dua sidecar nyata lewat dua relay OHTTP — hit, miss, dan nol
+permintaan ke `/api/users/search` — di job `pir-e2e` (`drills.yml`). `STATUS.md`
+kini mencatat suite `xor-pir-v1` dan rute `/api/pir/:server/{manifest,query}`,
+dan `scripts/check-status.mjs` memverifikasi keduanya terhadap kode. Dokumen yang
+masih menggambarkan PIR satu-server ditandai superseded; fitur tetap default mati.
+
 ## 🔐 KT live, backup/restore, dan a11y ber-sesi terbukti di jalur nyata (2026-11-08)
 
 **Tiga lubang bukti ditutup tanpa melonggarkan gate.** `web/e2e/ktLive.spec.ts`
