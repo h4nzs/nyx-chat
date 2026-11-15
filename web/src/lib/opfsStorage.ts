@@ -78,10 +78,10 @@ export async function clearOldOPFS(): Promise<void> {
     let totalSize = 0;
     const files: { name: string; size: number; lastModified: number }[] = [];
 
-    // Note: TypeScript DOM lib doesn't fully type FileSystemDirectoryHandle async iterators yet,
-    // so we use an 'any' cast or @ts-ignore for the entries() loop.
-    // @ts-ignore
-    for await (const [name, handle] of dir.entries()) {
+    // Entry async-iterator tidak selalu ada di tipe DOM yang dipakai repo ini,
+    // jadi cast eksplisit menggantikan `@ts-ignore` (yang juga menelan error lain).
+    const entries = dir as unknown as AsyncIterable<[string, FileSystemHandle]>;
+    for await (const [name, handle] of entries) {
       if (handle.kind === 'file') {
         const fileHandle = handle as FileSystemFileHandle;
         const file = await fileHandle.getFile();

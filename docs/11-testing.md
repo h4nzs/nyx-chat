@@ -92,9 +92,9 @@ NYX_FUZZ_SECONDS=3600 cargo run --release --bin fuzz-framing
 - Angka referensi (dev, Linux, Node 26 / rustc 1.95): web 5 target × 100k iterasi
   = 500k input dalam ~50 s (0 temuan); sidecar 160,9 juta iterasi dalam 300 s
   (536k iterasi/detik, 0 temuan) → gate 1 jam ≈ 1,9 miliar input.
-- Yang **belum** di-fuzz: verifier proof key-transparency (belum ada kodenya —
-  WS-A) dan parser framing bidi sisi sidecar yang membaca dari soket (hanya
-  keputusan murninya yang diuji).
+- Yang **belum** di-fuzz: verifier proof key-transparency (kodenya sudah ada dan
+  dikunci 86 test KT, tetapi belum punya target fuzz sendiri) dan parser framing
+  bidi sisi sidecar yang membaca dari soket (hanya keputusan murninya yang diuji).
 
 ## 11.1d Coverage — lantai per modul, bukan target global
 
@@ -133,7 +133,7 @@ node scripts/check-changed-lines.mjs --lcov web/coverage/lcov.info --base origin
   Karena itu ketiganya TIDAK diberi lantai 80%: lantai palsu hanya akan memaksa
   orang menaikkan angka dengan tes yang tidak membuktikan apa pun.
 - **Server** (`server/scripts/test-coverage.mjs`): membaca script `test` (satu-
-  satunya daftar 99 berkas) lalu menjalankannya dengan flag Node, jadi tidak ada
+  satunya daftar berkas tes) lalu menjalankannya dengan flag Node, jadi tidak ada
   daftar kedua yang bisa menyimpang. Baseline 3 Nov 2026 **lines 77,3% · branches
   84,7% · functions 79,4%** → gate 72/78/74. Node native hanya mengeluarkan
   laporan teks (tidak ada lcov), jadi changed-lines server belum mungkin.
