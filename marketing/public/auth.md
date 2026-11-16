@@ -67,4 +67,3 @@ Machine-readable OAuth metadata is available at:
 ## Support
 
 For agent integration support: admin@nyx-app.my.id
-API docs: https://nyx-app.my.id/api-docs

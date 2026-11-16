@@ -115,11 +115,9 @@ async function runLive(): Promise<number> {
   const aliceId = randomUUID();
   const bobId = randomUUID();
   const carolId = randomUUID();
-  const tenantId = randomUUID();
   const convId = randomUUID();
   const msgId = randomUUID();
   const deviceId = randomUUID();
-  const externalId = `b2b-customer-${runId}`;
   const deviceName = `Chrome on macOS (${runId})`;
   const installRaw = `install-anchor-${runId}`;
   const pushEndpoint = `https://fcm.googleapis.com/fcm/send/${runId}`;
@@ -130,10 +128,6 @@ async function runLive(): Promise<number> {
 
   try {
     console.log(`\n=== Seed skenario privasi (run ${runId}) ===`);
-    await prisma.tenant.create({
-      data: { id: tenantId, name: `tenant-${runId}`, apiKey: `sealed-key-${runId}`, allowedDomains: [] },
-    });
-
     await prisma.user.createMany({
       data: seededUserIds.map((id) => ({
         id,
@@ -142,12 +136,6 @@ async function runLive(): Promise<number> {
         lastActiveDay: messageTimeBucket(new Date()),
       })),
     });
-    // Identitas B2B ter-seal (jalur engine.ts).
-    await prisma.user.update({
-      where: { id: aliceId },
-      data: { tenantId, externalIdSealed: await sealAtRest(externalId) },
-    });
-
     await prisma.device.create({
       data: {
         id: deviceId,
@@ -176,7 +164,6 @@ async function runLive(): Promise<number> {
         encryptedMetadata: 'opaque-client-blob',
         authSecret: 'a'.repeat(64),
         lastMessageAt: messageTimeBucket(new Date()),
-        tenantId,
       },
     });
     for (const uid of [aliceId, bobId]) {
@@ -269,7 +256,6 @@ async function runLive(): Promise<number> {
       userIds: seededUserIds,
       messageIds,
       deviceNames: [deviceName, installRaw],
-      externalIds: [externalId],
       pushEndpoints: [pushEndpoint],
     };
     const findings = auditDumpForIdentityLeaks(stdout, ctx);
@@ -313,7 +299,6 @@ async function runLive(): Promise<number> {
     await prisma.conversation.deleteMany({ where: { id: convId } }).catch(() => {});
     await prisma.device.deleteMany({ where: { id: deviceId } }).catch(() => {});
     await prisma.user.deleteMany({ where: { id: { in: seededUserIds } } }).catch(() => {});
-    await prisma.tenant.deleteMany({ where: { id: tenantId } }).catch(() => {});
     await prisma.$disconnect().catch(() => {});
     await pool.end().catch(() => {});
   }

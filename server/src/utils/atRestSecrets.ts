@@ -23,7 +23,7 @@
  *
  *  3. `sealAtRest()` / `openAtRest()` — AEAD deterministik (XChaCha20-Poly1305,
  *     nonce = HMAC(kunci seal, plaintext)). Untuk nilai yang server HARUS bisa
- *     baca kembali (mis. routing identity / API key tenant): sama-sama tak
+ *     baca kembali (mis. routing identity): sama-sama tak
  *     terbaca dari dump, tapi tetap reversible untuk lookup & fungsionalitas.
  *
  * [docs/37 §37.4 P6] Envelope seal sekarang **ber-versi**:

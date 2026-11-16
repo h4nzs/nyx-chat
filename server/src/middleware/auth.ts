@@ -11,11 +11,6 @@ import { evaluateTokenGate, type TokenGateDb } from '../utils/authGate.js'
 export async function requireAuth (req: Request, res: Response, next: NextFunction) {
   // Prioritaskan pembacaan token dari cookie
   const token = req.cookies?.at || // access token dari cookie HttpOnly (sesi normal)
-    // [AUDIT 2026-10-24] Fallback halaman embed (`/embed/:id?token=…`): token
-    // dikirim lewat query string, jadi klien menyimpannya sebagai cookie bernama
-    // LAIN (`embed_at`, non-HttpOnly, umur = `exp` token). Dulu klien menulis
-    // nama `at` — bertabrakan dengan cookie sesi HttpOnly.
-    req.cookies?.embed_at ||
     (req.headers.authorization?.startsWith('Bearer ')
       ? req.headers.authorization.split(' ')[1]
       : null)

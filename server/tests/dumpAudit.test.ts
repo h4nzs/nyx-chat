@@ -39,10 +39,11 @@ const CLEAN_DUMP = `--
 -- PostgreSQL database dump
 --
 
-COPY public."User" (id, "externalIdSealed") FROM stdin;
-${ALICE}\t${SEAL_ALICE}
-${BOB}\t\\N
+COPY public."User" (id) FROM stdin;
+${ALICE}
+${BOB}
 \\.
+
 
 COPY public."Device" (id, "userId", name, "nameSealed", "installationTag") FROM stdin;
 dev-1\t${ALICE}\tChrome on macOS\t${SEAL_ALICE}\tdeadbeef
@@ -88,7 +89,6 @@ const CTX = {
   userIds: [ALICE, BOB],
   messageIds: [MSG],
   deviceNames: ['Chrome on macOS'],
-  externalIds: [],
   pushEndpoints: ['https://fcm.googleapis.com/send/abc'],
 };
 
@@ -122,7 +122,7 @@ test('unescapePgValue: NULL sentinel + escape TAB/backslash', () => {
 
 test('columnValues: lewati NULL, ambil nilai kolom yang ada', () => {
   const sections = parseCopySections(CLEAN_DUMP);
-  assert.deepEqual(columnValues(sections, 'User', 'externalIdSealed'), [SEAL_ALICE], 'NULL di-skip');
+  assert.deepEqual(columnValues(sections, 'Device', 'nameSealed'), [SEAL_ALICE], 'kolom terbaca');
   assert.deepEqual(columnValues(sections, 'Nope', 'id'), [], 'tabel tak ada → kosong');
   assert.deepEqual(columnValues(sections, 'User', 'missing'), [], 'kolom tak ada → kosong');
 });
@@ -130,8 +130,8 @@ test('columnValues: lewati NULL, ambil nilai kolom yang ada', () => {
 test('audit dump BERSIH → LULUS (tidak ada false positive)', () => {
   const findings = auditDumpForIdentityLeaks(CLEAN_DUMP, CTX);
   assert.equal(auditPassed(findings), true, formatAuditReport(findings));
-  // 11 kolom identitas + 2 rahasia otoritas.
-  assert.equal(findings.length, 13);
+  // 10 kolom identitas + 2 rahasia otoritas.
+  assert.equal(findings.length, 12);
 });
 
 test('audit dump BOCOR → GAGAL, tepat pada kolom yang bocor', () => {

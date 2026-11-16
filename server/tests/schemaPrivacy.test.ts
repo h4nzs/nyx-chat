@@ -12,13 +12,12 @@
  *   D1  kunci privat issuer grup TIDAK di DB        (server/api/config)
  *   D2  identitas tidak persist di MessageStatus / UserHiddenConversation
  *   D3  authSecret & deleteSecret disimpan sebagai hash
- *   D4  Tenant.apiKey disimpan sealed
  *   D5  tidak ada ipAddress/userAgent per sesi
  *   D6  blind index username ter-pepper
  *   D7  fingerprint perangkat ter-index
  *   D10 endpoint push ter-seal
  *   D11 metadata bebas tenant & PK time-ordered hilang
- *   D4/D9 residual: identitas B2B, label device, anchor instalasi ter-seal
+ *   D9 residual: label device & anchor instalasi ter-seal
  *
  * D14 (Redis tanpa userId asli + presence tanpa broadcast roster global) TIDAK
  * diuji di sini — ia dikunci oleh `tests/redisIdentity.test.ts` &
@@ -87,7 +86,7 @@ test('D2: identitas asli tidak dipersist di MessageStatus maupun UserHiddenConve
   }
 });
 
-test('D3/D4: secret otoritas disimpan sebagai hash (token) atau sealed (nilai yang perlu dibaca)', () => {
+test('D3: secret otoritas disimpan sebagai hash (token)', () => {
   const conversations = read('../src/routes/conversations.ts');
   // [PQ-only 2026-10-23] Perbandingan token grup pindah ke `groupAccess.ts`
   // setelah endpoint credential dihapus.
@@ -99,10 +98,6 @@ test('D3/D4: secret otoritas disimpan sebagai hash (token) atau sealed (nilai ya
   assert.doesNotMatch(conversations, /safeEqualStrings\(conversation\.authSecret/, 'perbandingan token lewat helper dual-mode timing-safe');
   assert.match(groupAccess, /credentialTokenMatches\(conversation\.authSecret/, 'authSecret dibandingkan via credentialTokenMatches');
   assert.doesNotMatch(read('../src/routes/messages.ts'), /safeEqualStrings\(message\.deleteSecret/, 'deleteSecret lewat helper dual-mode');
-
-  const tenantAuth = read('../src/middleware/tenantAuth.ts');
-  assert.match(tenantAuth, /sealedLookupCandidates\(apiKey\)/, 'Tenant.apiKey di-lookup dalam bentuk sealed');
-  assert.match(read('../src/routes/admin.ts'), /apiKey: await sealAtRest\(apiKey\)/, 'Tenant.apiKey disimpan sealed');
 });
 
 test('D5: sesi tidak lagi menyimpan IP atau userAgent', () => {
@@ -115,9 +110,7 @@ test('D5: sesi tidak lagi menyimpan IP atau userAgent', () => {
   assert.doesNotMatch(refreshToken, /^\s*userAgent\s+\S/m, 'kolom userAgent dihapus (sidik jari perangkat/browser)');
   assert.doesNotMatch(refreshToken, /crypto_generichash\(32, Buffer\.from\(rawIp\)/, 'tidak ada lagi hash IP tanpa kunci');
 
-  for (const file of ['../src/routes/auth.ts', '../src/routes/engine.ts']) {
-    assert.doesNotMatch(read(file), /data:\s*\{[^}]*ipAddress/, `${file}: tidak menulis ipAddress ke RefreshToken`);
-  }
+  assert.doesNotMatch(read('../src/routes/auth.ts'), /data:\s*\{[^}]*ipAddress/, 'auth.ts: tidak menulis ipAddress ke RefreshToken');
 });
 
 test('D6/D7: identifier ber-entropi rendah di-index dengan pepper env', () => {
@@ -132,14 +125,8 @@ test('D6/D7: identifier ber-entropi rendah di-index dengan pepper env', () => {
   assert.match(envExample, /NYX_AT_REST_PEPPER=/, 'server/.env.example mendokumentasikan pepper');
 });
 
-test('D4/D9/D10 residual: identitas B2B, label device, anchor instalasi & endpoint push ter-seal', () => {
+test('D9/D10 residual: label device, anchor instalasi & endpoint push ter-seal', () => {
   const schema = read('../prisma/schema.prisma');
-
-  // D4: identitas pelanggan B2B (dari tenant) tidak lagi plaintext.
-  const user = modelBody(schema, 'User');
-  assert.doesNotMatch(user, /^\s*externalId\s+\S/m, 'kolom externalId plaintext dihapus');
-  assert.match(user, /^\s*externalIdSealed\s+String\?/m, 'externalId disimpan ter-seal');
-  assert.match(user, /@@unique\(\[tenantId, externalIdSealed\]\)/, 'uniqueness tetap (tenant, identity)');
 
   // D9 residual: label platform yang di-set klien ("Chrome on macOS").
   const device = modelBody(schema, 'Device');
@@ -161,9 +148,6 @@ test('D4/D9/D10 residual: identitas B2B, label device, anchor instalasi & endpoi
   assert.match(read('../src/network/realtimeHandlers.ts'), /sealedLookupCandidates\(endpoint\)/, 'subscribe mencari endpoint dengan kandidat kunci seal');
   assert.match(read('../src/network/realtimeHandlers.ts'), /endpointSealed: endpointCandidates\[0\]!/, 'baris baru memakai nilai kunci aktif');
   assert.match(read('../src/utils/sendPushNotification.ts'), /openAtRest\(sub\.endpointSealed\)/, 'endpoint dibuka HANYA saat mengirim push');
-
-  // Jalur B2B menulis identitas ter-seal (bukan plaintext).
-  assert.match(read('../src/routes/engine.ts'), /externalIdSealed/, 'engine menyimpan identitas B2B ter-seal');
 });
 
 test('D11 residual: metadata bebas tenant tidak lagi dipersist', () => {
@@ -173,8 +157,6 @@ test('D11 residual: metadata bebas tenant tidak lagi dipersist', () => {
   // `Conversation.metadata` dulu JSON bebas dari tenant (write-only: tak pernah
   // dibaca server) → apa pun yang dititipkan tenant tersimpan apa adanya.
   assert.doesNotMatch(conversation, /^\s*metadata\s+Json/m, 'kolom metadata Json dihapus');
-  const engine = read('../src/routes/engine.ts');
-  assert.doesNotMatch(engine, /metadata:\s*[^,\n]*req\.body/, 'engine tidak lagi menulis metadata tenant ke DB');
 
   // D11: tak ada PK ber-default `cuid()` (time-ordered → membocorkan waktu buat).
   assert.doesNotMatch(schema, /@default\(cuid\(\)\)/, 'semua PK ber-default memakai uuid()');

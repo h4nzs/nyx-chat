@@ -16,7 +16,7 @@
  * hanya jadi pembungkus tipis.
  *
  * Yang diperiksa (adversary A1 = pencuri dump):
- *  - identitas B2B, label device, anchor instalasi, endpoint push,
+ *  - label device, anchor instalasi, endpoint push,
  *  - keanggotaan (`UserHiddenConversation.userId`), penulis story, block,
  *  - sender 1:1 (`Message.senderId` NULL) & receipt (`MessageStatus.userId` tag),
  *  - reply edge (`Message.repliedToId` ter-seal),
@@ -37,8 +37,6 @@ export interface DumpAuditContext {
   messageIds?: string[];
   /** label device yang di-set klien (harus ter-seal). */
   deviceNames?: string[];
-  /** externalId B2B dari tenant (harus ter-seal). */
-  externalIds?: string[];
   /** endpoint FCM/APNs (harus ter-seal). */
   pushEndpoints?: string[];
 }
@@ -62,7 +60,6 @@ const IDENTITY_TARGETS: ReadonlyArray<{
   { table: 'Story', column: 'authorTag', secrets: 'userIds', label: 'penulis story (ter-seal)' },
   { table: 'BlockedUser', column: 'blockerTag', secrets: 'userIds', label: 'block edge (ter-seal)' },
   { table: 'BlockedUser', column: 'blockedTag', secrets: 'userIds', label: 'block edge (ter-seal)' },
-  { table: 'User', column: 'externalIdSealed', secrets: 'externalIds', label: 'identitas B2B (ter-seal)' },
   { table: 'Device', column: 'nameSealed', secrets: 'deviceNames', label: 'label device (ter-seal)' },
   { table: 'Device', column: 'installationTag', secrets: 'deviceNames', label: 'anchor instalasi (tag HMAC)' },
   { table: 'PushSubscription', column: 'endpointSealed', secrets: 'pushEndpoints', label: 'endpoint push (ter-seal)' },

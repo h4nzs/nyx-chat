@@ -50,7 +50,6 @@ import createPirRouter from "./routes/pir.js";
 import { loadPirConfig } from "./pir/config.js";
 import { requireAuth } from "./middleware/auth.js";
 import adminRouter from "./routes/admin.js";
-import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
 import subscriptionsRouter from "./routes/subscriptions.js";
 import webpush from "web-push";
@@ -180,7 +179,6 @@ app.disable('x-powered-by');
 app.use((req, res, next) => {
   res.setHeader('X-Edge-Relay', 'nyx-enigma');
   res.setHeader('X-Sec-Protocol', 'Double-Ratchet-Core');
-  res.setHeader('X-Powered-By', 'NYX-Engine');
   next();
 });
 
@@ -424,7 +422,7 @@ if (ohttpConfig) {
 }
 
 /** Cookie yang bisa mengautentikasi request (lihat `requireAuth`). */
-const SESSION_COOKIES = ['at', 'rt', 'embed_at'] as const;
+const SESSION_COOKIES = ['at', 'rt'] as const;
 
 function hasSessionCookie(req: Request): boolean {
   return SESSION_COOKIES.some((name) => Boolean(req.cookies?.[name]));
@@ -432,7 +430,7 @@ function hasSessionCookie(req: Request): boolean {
 
 app.use((req, res, next) => {
   // [PAYMENTS CRYPTO-ONLY] Exempt Tripay webhook dihapus — hanya NOWPayments.
-  if (req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
+  if (req.path === '/api/subscriptions/nowpayments-webhook') {
     return next();
   }
   // [docs/42] Query PIR & search KT lewat OHTTP tidak membawa cookie:
@@ -523,7 +521,6 @@ app.use("/api/session-keys", sessionKeysRouter);
 app.use("/api/burner", burnerRouter);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRouter);
-app.use("/api/engine", engineRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/stories", storiesRoutes);

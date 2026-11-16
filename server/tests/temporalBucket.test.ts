@@ -114,7 +114,7 @@ test('B5 skema: SEMUA id NON-time-ordered (uuid, tak ada cuid tersisa)', () => {
   assert.match(message, /id\s+String\s+@id\s+@default\(uuid\(\)\)/, 'Message.id uuid');
   // Model yang diminta tuntas: User/Conversation/Device + seluruh model lain.
   // Model dengan PK ber-default (Authenticator punya PK eksplisit).
-  for (const model of ['User', 'Conversation', 'Device', 'Tenant', 'MessageStatus', 'SessionKey', 'RefreshToken', 'PushSubscription', 'OneTimePreKey', 'UserHiddenConversation', 'BlockedUser']) {
+  for (const model of ['User', 'Conversation', 'Device', 'MessageStatus', 'SessionKey', 'RefreshToken', 'PushSubscription', 'OneTimePreKey', 'UserHiddenConversation', 'BlockedUser']) {
     assert.match(modelBody(schema, model), /@default\(uuid\(\)\)/, `${model}.id uuid`);
   }
   assert.doesNotMatch(schema, /@default\(cuid\(\)\)/, 'tidak boleh ada cuid time-ordered tersisa (D11)');

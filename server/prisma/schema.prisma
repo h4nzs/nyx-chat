@@ -64,35 +64,8 @@ model User {
   // (P2003) sehingga baris keanggotaan tidak pernah dibuat.
   authenticators      Authenticator[]
 
-  // --- MULTI-TENANCY (B2B BaaS) ---
-  // [docs/28 Tier 1.5 / D4] `externalId` adalah identitas ASLI pelanggan B2B
-  // (dari tenant) — disimpan TER-SEAL (AEAD deterministik) supaya dump tidak
-  // memuat daftar identitas pelanggan, tetapi lookup `tenantId+externalId` dan
-  // pengembalian nilai ke tenant tetap bekerja (unseal saat read).
-  tenantId         String?
-  tenant           Tenant? @relation(fields: [tenantId], references: [id])
-  externalIdSealed String? @db.Text
-
-  @@unique([tenantId, externalIdSealed])
   @@index([createdAt])
   @@index([autoDestructDays, lastActiveDay])
-}
-
-// ==========================================
-// 🏢 TABEL BARU: TENANT (B2B BaaS)
-// ==========================================
-model Tenant {
-  id             String   @id @default(uuid())
-  name           String
-  apiKey         String   @unique
-  allowedDomains String[]
-  isActive       Boolean  @default(true)
-
-  users         User[]
-  conversations Conversation[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
 
 // ==========================================
@@ -259,14 +232,6 @@ model Conversation {
   // TIDAK lagi bergantung pada jam dinding (`Message.createdAt`), sehingga
   // createdAt boleh dikasar (B3) tanpa merusak urutan/scroll-history.
   messageSeq        Int     @default(0)
-
-  // --- MULTI-TENANCY (B2B BaaS) ---
-  tenantId String?
-  tenant   Tenant? @relation(fields: [tenantId], references: [id])
-  // [docs/28 Tier 1.5 / D4] `metadata Json?` (JSON bebas dari tenant) DIHAPUS:
-  // server tidak pernah membacanya (write-only di engine.ts) tetapi dump bisa
-  // memuat plaintext apa pun yang ditulis tenant. Tidak ada konsumen → kolom
-  // dibuang, bukan di-seal.
 
   lastMessageAt DateTime?                @db.Timestamptz(6)
   createdAt     DateTime                 @default(now())

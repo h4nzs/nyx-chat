@@ -98,7 +98,6 @@ test('D6: echo klien (hash-ID ter-pepper) tetap ketemu, tanpa membuka lookup nil
 test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kandidat', () => {
   const auth = read('../src/routes/auth.ts');
   const users = read('../src/routes/users.ts');
-  const engine = read('../src/routes/engine.ts');
 
   assert.match(auth, /usernameHash: pepperedIdentifier\(usernameHash\)/, 'register menyimpan index ter-pepper');
   assert.match(auth, /oprfIndex: searchOprfIndexForIdentifier\(usernameHash\)/, 'register mengisi index OPRF hibrida');
@@ -128,7 +127,6 @@ test('D6 wiring: register menyimpan ter-pepper, login/recovery/search pakai kand
   assert.match(users, /isSearchableIdentifier\(q\)/, 'search hanya menerima hash identifier');
   assert.match(users, /INVALID_IDENTIFIER_HASH/, 'nilai mentah ditolak sebelum menyentuh DB (R5)');
   assert.doesNotMatch(users, /SANDBOX_SEARCH_RESTRICTION/, 'gerbang sandbox lama digantikan validasi hash yang lebih ketat');
-  assert.match(engine, /const usernameHash = pepperedIdentifier\(/, 'user B2B (engine) ikut ter-pepper');
 });
 
 test('D6 wiring: client tetap mengirim Argon2id (server yang men-pepper) — tanpa perubahan klien', () => {

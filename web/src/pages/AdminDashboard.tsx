@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import BanUserModal from '@components/BanUserModal';
 import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
-import { FiRefreshCw, FiUnlock, FiAlertTriangle, FiCopy } from 'react-icons/fi';
+import { FiRefreshCw, FiUnlock, FiAlertTriangle } from 'react-icons/fi';
 import { useAuthStore } from '@store/auth';
 import { useNavigate } from 'react-router-dom';
 import i18n from '../i18n';
@@ -21,21 +21,10 @@ interface BannedUser {
   banReason: string;
 }
 
-interface Tenant {
-  id: string;
-  name: string;
-  apiKey: string;
-  allowedDomains: string[];
-  isActive: boolean;
-  createdAt: string;
-}
-
 export default function AdminDashboard() {
   const { t } = useTranslation('admin');
   const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tenants'>('dashboard');
-
   const [metrics, setMetrics] = useState<{
     vps: { ramUsage: string; uptime: string };
     db: { totalUsers: string; totalMessages: string };
@@ -44,12 +33,6 @@ export default function AdminDashboard() {
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
   const [isBanModalOpen, setIsBanModalOpen] = useState(false);
   const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
-
-  // B2B Tenants State
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [isFetchingTenants, setIsFetchingTenants] = useState(false);
-  const [newTenantName, setNewTenantName] = useState('');
-  const [newTenantDomains, setNewTenantDomains] = useState('');
 
   // --- Data Loading Functions ---
   const loadMetrics = () => {
@@ -68,26 +51,9 @@ export default function AdminDashboard() {
       .catch((err) => console.error("Failed to load banned users", err));
   };
 
-  const fetchTenants = async () => {
-    setIsFetchingTenants(true);
-    try {
-      const res = await authFetch<Tenant[]>('/api/admin/tenants');
-      setTenants(res);
-    } catch (e) {
-      console.error(e);
-      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('failed_to_load_tenants', 'Failed to load tenants')));
-    } finally {
-      setIsFetchingTenants(false);
-    }
-  };
-
   const loadAllData = () => {
-    if (activeTab === 'dashboard') {
-      loadMetrics();
-      loadBannedUsers();
-    } else {
-      fetchTenants();
-    }
+    loadMetrics();
+    loadBannedUsers();
   };
 
   useEffect(() => {
@@ -97,7 +63,7 @@ export default function AdminDashboard() {
     } else {
       loadAllData();
     }
-  }, [user, navigate, activeTab]);
+  }, [user, navigate]);
 
   const handleUnban = (bannedUser: BannedUser) => {
     showConfirm(
@@ -116,49 +82,6 @@ export default function AdminDashboard() {
         }
       }
     );
-  };
-
-  const createTenant = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTenantName.trim()) {
-      toast.error(t('tenant_name_required', 'Tenant name is required'));
-      return;
-    }
-    
-    try {
-      await authFetch('/api/admin/tenants', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newTenantName,
-          allowedDomains: newTenantDomains
-        })
-      });
-      toast.success(t('tenant_created', 'Tenant created successfully'));
-      setNewTenantName('');
-      setNewTenantDomains('');
-      fetchTenants();
-    } catch (e) {
-      console.error(e);
-      // Server memvalidasi nama/domain (400/409) — tampilkan alasannya; kalau
-      // tidak ada, tetap sebut tindakan yang gagal.
-      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('failed_to_create_tenant', 'Failed to create tenant')));
-    }
-  };
-
-  const toggleTenant = async (id: string) => {
-    try {
-      await authFetch(`/api/admin/tenants/${id}/toggle`, { method: 'PATCH' });
-      toast.success(t('tenant_status_updated', 'Tenant status updated'));
-      fetchTenants();
-    } catch (e) {
-      console.error(e);
-      toast.error(formatApiErrorOr(e, apiErrorTranslator(t), t('failed_to_toggle_tenant', 'Failed to update tenant status')));
-    }
-  };
-
-  const copyApiKey = (apiKey: string) => {
-    navigator.clipboard.writeText(apiKey);
-    toast.success(t('api_key_copied', 'API Key copied to clipboard'));
   };
 
   if (user?.role !== 'ADMIN') return null;
@@ -184,23 +107,7 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      <div className="flex gap-4 mb-8">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`px-4 py-2 rounded-lg font-bold transition-all ${activeTab === 'dashboard' ? 'bg-accent text-white' : 'bg-black/5 dark:bg-white/5 text-text-secondary hover:bg-black/10 dark:hover:bg-black/10 dark:bg-white/10'}`}
-        >
-          {t('system_dashboard', 'SYSTEM DASHBOARD')}
-        </button>
-        <button
-          onClick={() => setActiveTab('tenants')}
-          className={`px-4 py-2 rounded-lg font-bold transition-all ${activeTab === 'tenants' ? 'bg-accent text-white' : 'bg-black/5 dark:bg-white/5 text-text-secondary hover:bg-black/10 dark:hover:bg-black/10 dark:bg-white/10'}`}
-        >
-          {t('b2b_tenants', 'B2B ENGINE / TENANTS')}
-        </button>
-      </div>
-      
-      {activeTab === 'dashboard' ? (
-        <>
+      <>
           {/* Grid Statistik */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-bg-surface p-6 rounded-xl border border-text-secondary/10 shadow-lg">

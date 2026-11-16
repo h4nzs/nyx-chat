@@ -83,7 +83,6 @@ type Target = {
  * menimbulkan error — hanya kegagalan baca setelah pepper lama dibuang.
  */
 const TARGETS: Target[] = [
-  { model: 'tenant', column: 'apiKey' },
   { model: 'device', column: 'nameSealed' },
   { model: 'pushSubscription', column: 'endpointSealed' },
   { model: 'message', column: 'senderId' },

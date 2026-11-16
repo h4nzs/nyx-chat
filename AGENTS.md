@@ -179,3 +179,27 @@ The best code is the code never written. Read the code the change touches and li
 - A deliberate shortcut gets `shortcut: <the limit>, <when to upgrade>`.
 - Never cut: trust-boundary validation, error handling that prevents data loss, security, accessibility, anything the user asked for.
 - End every reply with one or two lines: what was skipped or not checked, and any risk.
+
+## 🚨 ACTIVE OPERATIONAL STATE: PRE-LAUNCH DEVELOPMENT MODE
+
+> **CRITICAL DIRECTIVE:** As long as this section remains in `agents.md`, the project is actively in **Pre-Launch / Maintenance Development Mode**. All rules below override legacy production constraints.
+
+### 1. Current Environment & Service Status
+* **Public Service Status:** Nyx public services are currently **OFFLINE** (verify domain accessibility at `nyx-app.my.id` if network checks are required).
+* **Zero Active User Data:** There is currently **no live user data** in the system.
+* **Development Focus:** Full priority is given to deep architectural refactoring, seamless cross-service integration, system stability, and foundational improvements.
+
+### 2. Codebase & Architecture Rules (No Legacy Constraints)
+* **No Soft Migrations or Backward Compatibility:** Do NOT write soft migrations, legacy data handlers, deprecated API adapters, or unnecessary fallback logic.
+* **Clean & Direct Implementation:** Replace legacy structures cleanly. Avoid bloated codebases caused by defensive fallbacks meant only to preserve non-existent user states.
+* **Documentation & Code Cleanup:** Actively audit, map, and update existing documentation, inline comments, and configurations. Remove or rewrite any instructions referencing live user data preservation, zero-downtime migrations, or legacy workarounds to reflect this current greenfield state.
+
+### 3. Infrastructure & Complexity Tolerance
+* **Unconstrained Server Resources:** Do NOT compromise architecture due to VPS hardware specs or server count limits. Assume full availability of dedicated, isolated servers for separate Nyx microservices where required for maximum security and operational isolation.
+* **Embrace Necessary Complexity:** Do not shy away from complex codebases, advanced cryptographic implementations, or multi-node distributed architectures if they yield a superior result.
+
+### 4. Core Engineering North Star (Non-Negotiable)
+Every architectural decision, protocol design, and code implementation must optimize for the ultimate goal of **Nyx**:
+* **Zero-Knowledge Privacy:** Build the most secure messaging platform possible where Nyx infrastructure knows **nothing** about its users.
+* **Anti-Linkability & Zero Metadata Leakage:** Minimize or eliminate data leakage, traffic correlation, and user linkability across the entire lifecycle—from client transport layers to internal server-to-server routing.
+* **Uncompromised Quality:** Prioritize absolute privacy, cryptographic security, user experience (comfort), and system reliability above implementation speed or simplicity.

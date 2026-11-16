@@ -219,10 +219,13 @@ beralasan, tes wajib di-skip, skip tanpa alasan, alasan tak diizinkan, tes
 hilang, jumlah menyusut; 4 karantina: sah, kedaluwarsa, tes hilang, masih
 berjalan) dan ikut jalan di CI.
 
-Cakupan `mustPass`: auth (register/login/wrong password), profile, security,
-settings, recovery, deviceLinking, group lifecycle, backup/restore — **10 tes di
-chromium** — plus transport (2), chat, profile, security, settings, recovery,
-deviceLinking, group lifecycle, dan backup/restore di chrome (**13 tes**). Skip
+Cakupan `mustPass` (dihitung 16 November 2026 dari manifest): auth
+(register/login/wrong password), profile, security, settings, recovery,
+deviceLinking, group lifecycle, group era, group faults, backup/restore —
+**12 tes di chromium** — plus transport (2), chat, dan seluruh daftar chromium di
+chrome (**15 tes**). Angka di paragraf ini pernah tertinggal (10/13) saat
+`groupEra`/`groupFaults` masuk; §43.10.1 `docs/43` menggantinya dengan generator
+manifest supaya tidak terulang. Skip
 hanya sah bila labelnya cocok dengan `allowedSkipReasons`; alasan baru berarti PR
 yang mengubah manifest. (`call.spec.ts` sengaja **tidak** ada di `mustPass`:
 butuh coturn, dan di luar job `e2e-chrome` ia skip dengan alasan tertulis.)

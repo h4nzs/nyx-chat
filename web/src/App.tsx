@@ -27,7 +27,6 @@ const PqDeviceBenchPage = lazy(() => import('./pages/PqDeviceBenchPage'));
 const UsernameLinkPage = lazy(() => import('./pages/UsernameLinkPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const BurnerChat = lazy(() => import('./pages/BurnerChat'));
-const EmbedChatPage = lazy(() => import('./pages/EmbedChatPage'));
 
 // Components — modal global di-LAZY (hanya diunduh & dimount saat dibutuhkan).
 // Sebelumnya eager import membengkakkan main bundle (CallOverlay, CommandPalette, dll).
@@ -727,9 +726,6 @@ const AppContent = () => {
                 {/* [docs/30 WS-I] link pendek /u/<hashId> → alur connect */}
                 <Route path="/u/:hashId" element={<PageWrapper><UsernameLinkPage /></PageWrapper>} />
               </Route>
-
-              {/* Embed Route (No Layout/Sidebar) */}
-              <Route path="/embed/chat/:id" element={<EmbedChatPage />} />
 
               {/* Fallback */}
               <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />

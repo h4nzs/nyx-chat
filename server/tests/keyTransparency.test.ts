@@ -470,7 +470,7 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
 
   assert.deepEqual(
     writers,
-    ['network/realtimeHandlers.ts', 'routes/auth.ts', 'routes/engine.ts', 'routes/keys.ts', 'routes/users.ts'],
+    ['network/realtimeHandlers.ts', 'routes/auth.ts', 'routes/keys.ts', 'routes/users.ts'],
     'jalur baru yang menimpa kunci identitas: tentukan dulu status log-nya (docs/32 §32.7 poin 2)'
   );
 
@@ -486,16 +486,6 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
   for (const logged of ['routes/auth.ts', 'routes/keys.ts', 'routes/users.ts'] as const) {
     assert.match(readSrc(logged), /publishKeyTransparencyEntry\(|publishIdentityKeyChange\(/, `${logged} menulis log`);
   }
-
-  // Dikecualikan dengan alasan yang tetap berlaku: device dummy iframe B2B
-  // (`routes/engine.ts`) tidak punya identifier Argon2id — akunnya tenant dengan
-  // kunci dummy, jadi tidak ada search key yang bisa ditulis. Bila ini berubah
-  // (kunci nyata untuk tenant), jalur ini WAJIB ditambahkan ke penulis log.
-  assert.doesNotMatch(
-    readSrc('routes/engine.ts'),
-    /publishKeyTransparencyEntry\(|publishIdentityKeyChange\(/,
-    'engine.ts (tenant/dummy) dikecualikan — lihat docs/32 §32.7 poin 2'
-  );
 });
 
 /**

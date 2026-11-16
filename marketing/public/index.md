@@ -23,7 +23,6 @@ NYX Chat is a secure, zero-knowledge communication platform. All messages are en
 
 ## For AI Agents
 
-- [API Documentation](https://nyx-app.my.id/api-docs)
 - [API Catalog](/.well-known/api-catalog)
 - [Authentication Guide](/auth.md)
 - [MCP Server Card](/.well-known/mcp/server-card.json)

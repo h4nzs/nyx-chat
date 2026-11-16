@@ -1,5 +1,4 @@
 import os from 'os';
-import crypto from 'crypto';
 import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { prisma } from '../lib/prisma.js';
@@ -9,7 +8,7 @@ import { env } from '../config.js';
 import { redisClient } from '../lib/redis.js';
 import { emitEventToUser, sendJsonToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
-import { atRestStatus, sealAtRest, openAtRest } from '../utils/atRestSecrets.js';
+import { atRestStatus } from '../utils/atRestSecrets.js';
 
 const router = Router();
 
@@ -131,80 +130,6 @@ router.post('/unban', requireAuth, requireAdmin, async (req, res) => {
     res.json({ message: 'User unbanned successfully' });
   } catch (_e) {
     res.status(500).json({ error: 'Failed to unban user' });
-  }
-});
-
-// 4. Get All Tenants
-router.get('/tenants', requireAuth, requireAdmin, async (req, res) => {
-  try {
-    // [docs/28 Tier 0 — D4] apiKey tersimpan sealed (AEAD deterministik) → dump
-    // DB tidak memberi akses API B2B. Admin tetap melihat key aslinya (di-unseal
-    // di sini, endpoint admin-only).
-    const tenantsRaw = await prisma.tenant.findMany({
-      orderBy: { createdAt: 'desc' }
-    });
-    const tenants = await Promise.all(tenantsRaw.map(async (t) => ({
-      ...t,
-      apiKey: (await openAtRest(t.apiKey)) ?? t.apiKey,
-    })));
-    res.json(tenants);
-  } catch (error) {
-    console.error("Failed to fetch tenants:", error);
-    res.status(500).json({ error: 'Failed to fetch tenants' });
-  }
-});
-
-// 5. Create Tenant
-router.post('/tenants', requireAuth, requireAdmin, async (req, res) => {
-  const { name, allowedDomains } = req.body;
-  
-  if (!name) {
-    return res.status(400).json({ error: 'Tenant name is required' });
-  }
-
-  let domains: string[] = [];
-  if (Array.isArray(allowedDomains)) {
-    domains = allowedDomains;
-  } else if (typeof allowedDomains === 'string') {
-    domains = allowedDomains.split(',').map((d: string) => d.trim()).filter(Boolean);
-  }
-
-  try {
-    const apiKey = crypto.randomBytes(32).toString('hex');
-    const tenant = await prisma.tenant.create({
-      data: {
-        name,
-        apiKey: await sealAtRest(apiKey),
-        allowedDomains: domains
-      }
-    });
-    // Key asli dikembalikan SEKALI ke admin yang membuatnya; DB hanya menyimpan
-    // bentuk sealed-nya (docs/28 Tier 0 — D4).
-    res.json({ ...tenant, apiKey });
-  } catch (error) {
-    console.error("Failed to create tenant:", error);
-    res.status(500).json({ error: 'Failed to create tenant' });
-  }
-});
-
-// 6. Toggle Tenant Status
-router.patch('/tenants/:id/toggle', requireAuth, requireAdmin, async (req, res) => {
-  const id = String(req.params.id);
-  try {
-    const tenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!tenant) {
-      return res.status(404).json({ error: 'Tenant not found' });
-    }
-    
-    const updatedTenant = await prisma.tenant.update({
-      where: { id },
-      data: { isActive: !tenant.isActive }
-    });
-    // [docs/28 Tier 0 — D4] apiKey DB = sealed; unseal untuk respons admin.
-    res.json({ ...updatedTenant, apiKey: (await openAtRest(updatedTenant.apiKey)) ?? updatedTenant.apiKey });
-  } catch (error) {
-    console.error("Failed to toggle tenant:", error);
-    res.status(500).json({ error: 'Failed to toggle tenant status' });
   }
 });
 
