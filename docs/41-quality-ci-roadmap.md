@@ -437,13 +437,21 @@ ditutup dengan alasan tertulis.
 | serialize-javascript | 7.1.2 → 7.1.4 | override `>=7.1.3` (GHSA-m5mm-p8h7-m29v) | `pnpm install` exit 0 |
 | vitest, @vitest/coverage-v8 | 4.1.11 → 4.1.12 | `web/package.json` (GHSA-qxg6-89mg-rqv8, GHSA-xp26-3454-mjgp) | `npx vitest run`: 138 berkas / 1154 tes lulus, exit 0 |
 | rand (PIR sidecar) | 0.9.1 → 0.9.3 | `Cargo.toml` `=0.9.3` + `cargo update -p rand --precise 0.9.3` | `cargo check` bersih |
-| google.golang.org/grpc | 1.82.1 → 1.83.1 | `go.mod` + pohon vendor | `./build.sh test` (58 tes) + `scripts/check-vendor.sh` |
+| google.golang.org/grpc | 1.82.1 → 1.83.2 (+ x/net 0.57.0 → 0.58.0, x/text 0.40.0 → 0.41.0) | `go.mod` + pohon vendor | `./build.sh test` (58 tes) + `scripts/check-vendor.sh` |
 
 **glob.** `glob@11` adalah dependensi runtime `workbox-build@7.4.1` (lewat
 `vite-plugin-pwa@1.3.0`) yang hanya dipakai saat build untuk menyusun manifest
 precache. Override ke 14 juga mengubah `path-scurry` 2.0.2 → 3.0.0 dan membuang
 `jackspeak`/`package-json-from-dist`. Kelayakannya dibuktikan lewat build web
 sungguhan (`sw.js` tetap dihasilkan), bukan lewat asumsi kompatibilitas.
+
+**grpc, dua putaran.** Rentang `GHSA-2v4p-qf9q-27wj` berubah di tengah
+triase: pembacaan pertama hanya memuat `1.82.2` sebagai perbaikan, lalu rescan
+setelah push membuat alert baru (#289) dengan rentang `>= 1.83.0 < 1.83.2`,
+sehingga 1.83.1 belum aman dan harus naik ke **1.83.2** (ikut `x/net` 0.58.0 dan
+`x/text` 0.41.0, empat berkas `http2/hpack`). `go.sum` diperbarui dengan hash
+resmi dari `proxy.golang.org`, dan `./build.sh test` + `scripts/check-vendor.sh`
+dijalankan ulang setelah bump kedua.
 
 **grpc.** `github.com/signalapp/keytransparency` privat, jadi `go mod tidy`
 tidak bisa dijalankan di repo ini. Pohon vendor dibuat dari salinan sementara
