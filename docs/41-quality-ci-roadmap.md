@@ -423,6 +423,48 @@ tetap merah dengan pesan yang jujur. Detail: `docs/25` §25.5.
   Chromium)` **19,5 m**, `E2E (Chrome penuh)` **17,2 m**, keduanya hijau.
 - Artifact `web/test-results/` + `web/playwright-report/` di-upload saat gagal.
 
+### 9.6 Triase advisory Dependabot — 16 November 2026
+
+Sepuluh advisory terbuka (2 high, 5 moderate, 3 low) saat `main` sudah hijau
+12/12 di CI dan `pnpm audit --prod` bersih — jadi seluruhnya ada di jalur
+dev/build, bukan runtime produksi. Sembilan ditutup dengan menaikkan versi, satu
+ditutup dengan alasan tertulis.
+
+| Paket | Dari → ke | Cara | Bukti |
+|---|---|---|---|
+| minimatch | 10.2.6 → 11.0.8 | override `>=11.0.1` (GHSA-g3hv-75wg-m249) | `pnpm install` exit 0, `pnpm audit --prod` bersih |
+| glob | 11.1.0 → 14.0.6 | override `>=14.0.2` (GHSA-3g3m-2fjr-6pw4) | `pnpm --filter nyx-web run build` exit 0 |
+| serialize-javascript | 7.1.2 → 7.1.4 | override `>=7.1.3` (GHSA-m5mm-p8h7-m29v) | `pnpm install` exit 0 |
+| vitest, @vitest/coverage-v8 | 4.1.11 → 4.1.12 | `web/package.json` (GHSA-qxg6-89mg-rqv8, GHSA-xp26-3454-mjgp) | `npx vitest run`: 138 berkas / 1154 tes lulus, exit 0 |
+| rand (PIR sidecar) | 0.9.1 → 0.9.3 | `Cargo.toml` `=0.9.3` + `cargo update -p rand --precise 0.9.3` | `cargo check` bersih |
+| google.golang.org/grpc | 1.82.1 → 1.83.1 | `go.mod` + pohon vendor | `./build.sh test` (58 tes) + `scripts/check-vendor.sh` |
+
+**glob.** `glob@11` adalah dependensi runtime `workbox-build@7.4.1` (lewat
+`vite-plugin-pwa@1.3.0`) yang hanya dipakai saat build untuk menyusun manifest
+precache. Override ke 14 juga mengubah `path-scurry` 2.0.2 → 3.0.0 dan membuang
+`jackspeak`/`package-json-from-dist`. Kelayakannya dibuktikan lewat build web
+sungguhan (`sw.js` tetap dihasilkan), bukan lewat asumsi kompatibilitas.
+
+**grpc.** `github.com/signalapp/keytransparency` privat, jadi `go mod tidy`
+tidak bisa dijalankan di repo ini. Pohon vendor dibuat dari salinan sementara
+subtree keytransparency + `replace` ke direktori lokal, lalu `replace` dibuang
+lagi; yang berubah hanya `vendor/google.golang.org/grpc/**` (64 direktori paket
+tetap sama, dua berkas plan9 baru), `modules.txt`, `go.mod`, `go.sum`.
+`scripts/check-vendor.sh` menegaskan tidak ada `replace` tersisa dan semua
+berkas ter-track. Dua dari tiga advisory grpc memang tidak terjangkau —
+`GHSA-2v4p-qf9q-27wj` (crash xDS saat `:authority`/`Host` hilang) dan
+`GHSA-qc2q-p7wx-3px3` (bypass RBAC xDS) hanya mengenai server
+`xds.NewGRPCServer()`, sedangkan layanan ini memakai `grpc.NewServer()` biasa
+(`cmd/nyx-kt-query-v2/main.go`). Yang benar-benar berlaku adalah
+`GHSA-vp52-pcj8-j9qc` (HTTP/2 DATA-frame fragmentation → OOM) yang mengenai
+server gRPC apa pun, dan itulah yang diperbaiki.
+
+**deepmerge.** `GHSA-gcqx-w48m-w2h4` tidak punya versi perbaikan (rentan
+`>=4.2.0 <=4.3.1`, dan 4.3.1 rilis terbaru). Alert #281 ditutup
+`tolerable_risk` dengan alasan tertulis: hanya dibawa
+`@rollup/plugin-node-resolve@16.0.3` saat bundling, dan objek yang di-merge
+adalah konfigurasi build repo sendiri — bukan input penyerang.
+
 ### 9.3/9.5 Audit + definition of done
 
 Audit pass 12 menutup N12-01/N12-02 dan memverifikasi F-13
