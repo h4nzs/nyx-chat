@@ -535,11 +535,18 @@ export default function SettingsPage() {
                          /* [a11y 2026-11-13] `text-yellow-500` di atas tint 10% cuma ~1,4:1 pada
                             tema terang; axe (nightly `Smoke Firefox + WebKit`) menandainya
                             `color-contrast` serious. yellow-800 / dark:yellow-300 lolos 4,5:1
-                            di kedua tema tanpa mengubah tata letak. */
+                            di kedua tema tanpa mengubah tata letak.
+
+                            [a11y 2026-11-16] Jangan pasang `animate-pulse` pada elemen
+                            ber-teks ini: animasi itu menurunkan `opacity` ke 0,5, sehingga
+                            axe kadang membaca kontras setengahnya dan nightly gagal acak
+                            (run `43694895316` merah, `43433660755` hijau dengan kode yang
+                            sama). Perhatian tetap didapat dari hover; yang diuji adalah
+                            kontras, bukan animasi. */
                          <button 
                            type="button"
                            onClick={() => setShowUpgradeModal(true)}
-                           className="text-[10px] bg-yellow-500/10 text-yellow-800 dark:text-yellow-300 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
+                           className="text-[10px] bg-yellow-500/10 text-yellow-800 dark:text-yellow-300 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors"
                          >
                            <FiLock size={10} /> {t('settings:identity.sandboxed')}
                          </button>
