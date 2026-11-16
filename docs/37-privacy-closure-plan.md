@@ -334,10 +334,13 @@ groupId | expiresAt u64 | sigLen u16 | sig
   pemisahan jaringan relay↔API (masih satu host pada default), dan batching
   pesan yang benar-benar menyembunyikan volume.
 
-## 37.5 Dampak ke format frozen
+## 37.5 Dampak ke format tersimpan
 
 - `ENC1:` **tidak diubah**; `ENC2:` ditambahkan sebagai format baru. Semua
-  pembaca mencoba ENC1 → ENC2. Tidak ada perubahan padding 8 KB, envelope
+  pembaca mencoba ENC1 → ENC2. **Pembaruan 2026-11-16:** kebijakan versi
+  tunggal (`docs/38`, `docs/43` §43.3) menghapus jalur baca format tanpa
+  key-id; setelah fase D hanya ada satu format `ENC2:<keyId>:<payload>` dengan
+  AAD, jadi kalimat 'coba ENC1 → ENC2' tidak berlaku lagi. Tidak ada perubahan padding 8 KB, envelope
   XChaCha, atau skema `tempId`.
 - Group token/member token menggantikan `deliveryToken` **di kolom baru**
   dengan hard cut: tidak ada dual-accept, `deliveryToken` dihapus, dan klien

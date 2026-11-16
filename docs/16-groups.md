@@ -86,7 +86,7 @@ client contract change.
 
 **D4 — credential presentation is a closed door, not a feature (explicit).**
 `POST /:id/credential/present` is still mounted (body binary `NYXC…`, ≤8 KB) so
-the wire format is frozen before any client ships it, but this build has **no
+the wire shape exists before any client ships it, but this build has **no
 issuer and no verifier**: `CREDENTIAL_SUITE_ALLOWLIST` is empty by default and
 empty means *reject everything*, and `verifyCredentialPresentation` answers
 `no_verifier` for every suite. A well-formed presentation therefore always ends

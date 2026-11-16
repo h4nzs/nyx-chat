@@ -531,7 +531,8 @@ load is itself a privacy property; relaxing it amplifies traffic signatures).
 
 ### 26.9.4 Non-negotiables
 
-- Frozen formats stay frozen (8KB padding, `ENC1:`, XChaCha envelope, tempId scheme).
+- Yang dipertahankan adalah **properti**: padding 8 KB, `ENC1:`, envelope XChaCha, skema
+  `tempId` — bukan versi byte tertentu (`docs/38`, `docs/43`).
 - Rate limits and payload validation do **not** loosen with capacity — predictable,
   uniform load is a privacy feature; easing it increases DoS surface and makes
   traffic analysis easier, not harder.

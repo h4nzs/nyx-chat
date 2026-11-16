@@ -1,5 +1,9 @@
 # 40 — Arsip Riwayat Sekali-Pakai untuk Perangkat Hasil Link
 
+> **Arsip (2026-11-16).** Fase 0–2 sudah landed dan dokumen ini **bukan rencana
+> aktif**; fase lanjutan tidak dijadwalkan. Kebijakan versi tunggal ada di
+> `38`/`43`. Format backup yang berlaku: `docs/31`.
+
 > **Status: FASE 0–2 LANDED (2026-10-29).** Yang sudah berjalan di kode: kirim
 > `pqPublicKey` di `auth:linking_request`, gerbang `history` di status/approve,
 > `/abort`, `limits`, dan lima endpoint arsip lainnya, ekspor **kontak + daftar percakapan + pesan**,
@@ -18,7 +22,7 @@
 > setelah impor (§40.13 poin 2). **Belum:** e2e pesan grup setelah link (§40.13
 > poin 1) — belum terverifikasi, bukan diklaim bekerja.
 >
-> Tidak ada format beku yang berubah: arsip memakai kontainer `NYXB` v1 apa
+> Tidak ada format pesan yang berubah: arsip memakai kontainer `NYXB` v1 apa
 > adanya dengan **kunci acak** (bukan turunan recovery phrase), dan tidak ada
 > tabel DB baru.
 >

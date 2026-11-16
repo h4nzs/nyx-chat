@@ -48,18 +48,77 @@ NYX: zero-knowledge post-quantum messenger. pnpm monorepo: `web` (React 19 + Vit
 - Sidecar ignores opcode `0x00` on uni-streams/datagrams (CHAFF); auth also uses `0x00` but over the bidi control stream. Rust hardcodes opcode numbers — sync with `packages/shared/src/transport.ts`.
 - Capability negotiation runs on **both** relays and must stay identical: sidecar bidi HELLO (WT) and the socket.io gateway replying to `handshake.auth.capabilities` (WSS, `server/src/utils/transportCapability.ts`). `SERVER_CAPABILITIES` in `packages/shared` is the single source — removing a capability there disables the feature (e.g. SPQR ratchet v2) on both transports.
 
-## E2EE / crypto constraints (do not break)
+## E2EE / crypto invariants (bukan "jangan diubah")
 
-- **Do not split** `web/src/workers/crypto.worker.ts`, `crypto-worker-proxy.ts`, or other crypto files (explicit maintainer rule); fix them in place only.
-- Frozen formats: at-rest prefix `ENC1:` (keychainDb), XChaCha envelope `base64url(nonce(24)||ct)` (canonical worker ops `xchacha_seal`/`xchacha_open`), `ENCRYPT_DATA` JSON must keep `Array.from(...)` number arrays (JSON.stringify of Uint8Array silently breaks stored bundles), 8KB traffic-cover padding. Never change primitives/padding/protocol.
-- Group chain keys / skipped keys / story keys are encrypted at-rest with masterSeed; migration runs on unlock via `saveDeviceAutoUnlockKey`.
-- **Zod 4 must run jitless** (prod CSP has no `unsafe-eval`). Set it ONLY via direct mutation `globalThis.__zod_globalConfig.jitless = true` — using `zod.config()` gets tree-shaken in prod builds because zod declares `sideEffects: false`. Done in `packages/shared/src/schemas.ts` and `web/src/zodSetup.ts` (first import in main.tsx). Don't remove, and don't add `unsafe-eval` back to nginx CSP.
-- Message pipeline lives in `web/src/lib/messagePipeline.ts` (extracted from the store). Own-message decrypt failures return `waiting_for_key`, never error bubbles.
-- **Group key envelopes go through the group mailbox** (`docs/37` §37.3.2): client `web/src/lib/groupMailbox.ts` posts `KEY_ENVELOPE` items tagged `HMAC(memberToken, "nyx-mailbox-v1")`, poll loop wired in `App.tsx`, receive path = `storeReceivedSessionKey`. `group:fulfilled_key` is now a fallback for when metadata/tokens are not in the store yet (e.g. first distribution during `createGroup`) — don't add new senders on it. Server side: `server/src/utils/groupMailbox.ts` + routes in `server/src/routes/groups.ts` (TTL 7 days, epoch filter, GC in `jobs/cleanup.ts`).
-- **Group epoch rotation (PCS kasar, `docs/37` §37.3.6)**: `web/src/lib/groupEpochRotation.ts` decides via the pure `groupEpochPolicy.ts` (24 h or 500 messages, admin-only, loop in `App.tsx`), then `POST /api/groups/:id/epoch` + `rotateGroupKey(..., 'periodic_rotation', true, newToken)` so membership metadata carries the new group token. The new token is persisted as `pendingToken` before metadata is written — a retry must reuse it, never rotate twice. `GET /api/groups/:id/epoch` (admin capability) exposes `{epoch, rotatedAt, createdAt, messageSeq}`.
-- **Anonymous sync is `POST /api/groups/sync`** (`web/src/lib/groupSync.ts`): token in body, optional Privacy Pass `proofs` (one token = one sync, bound to `conversationId`, `PP_SYNC_REQUIRED=1` to enforce), and OHTTP POST when `VITE_OHTTP_ENABLED=1` (gateway caps that body at 64 KB). Privacy Pass client = `web/src/lib/privacyPass.ts` (Blind RSA, tokens sealed at rest in `kvStore`, 24 h TTL, issuance runs in the background — never block sync on it).
-- **Ratchet v2 (braid SPQR) is live beside the frozen v1 path** (`docs/33` §33.10). Header v2 = `{v:2,b:[frames]}` (`web/src/lib/spqrWire.ts`), step orchestration = `spqrSession.ts`, worker ops = `spqr_ratchet_init/encrypt/decrypt` (WASM `packages/spqr-wasm/dist/spqr.wasm`, loaded lazily from an asset URL — never imported into the main bundle, precached by the SW via `**/*.wasm`), braid state = `spqrState.ts` rows `nyx_spqr_state_v1:*` (`ENC1:`). **v2 is only sent after the peer proves it can read it** (`ackV: 2` inside the sealed payload); v1 header shape, primitives and padding must NOT change. Kill switch `VITE_SPQR_FORCE_V1=1` (plus a DEV-only runtime override `localStorage['nyx_spqr_force_v1']` in `spqrNegotiation.ts`, read per send); a kill switch stops **sending and advertising** v2, never reading it — stranded v2 messages must stay readable. The sidecar must keep `spqr-ratchet` in `SERVER_CAPABILITIES` for the deployment gate.
-- E2E for v2: `web/e2e/spqr.spec.ts` (upgrade to v2 **and** the two-client rollback test). Without a sidecar (no negotiated capability) start the dev server with `VITE_SPQR_FORCE_V2=1` (override honored only in DEV builds); the spec skips with a written reason when v2 is not active in that environment. The rollback test hardcodes the kill-switch key and asserts it equals `spqrNegotiation.SPQR_RUNTIME_KILL_SWITCH_KEY` — keep them in sync.
+Yang dipertahankan adalah **properti**, bukan bentuk byte. Kebijakan versi ada di
+`docs/38`; rencana satu versi + fase penghapusan di `docs/43`. Kalau sebuah
+format lama bisa dihapus tanpa melanggar properti di bawah, hapus — jangan
+menambah jalur pembaca/penulis kedua.
+
+- **Server tidak pernah memegang plaintext maupun identitas.** Pesan, metadata
+  grup, nama, dan token tidak boleh muncul di DB, log, atau metrik dalam bentuk
+  terbaca. Metrik hanya event, label tidak boleh berbentuk identitas.
+- **At-rest selalu tersegel** dengan kunci perangkat (`ENC1:` untuk keychainDb,
+  `ENC2:<keyId>:<payload>` untuk kolom server) dan kunci grup/skipped/story
+  dienkripsi dengan masterSeed, dimigrasikan saat unlock lewat
+  `saveDeviceAutoUnlockKey`. Fase D menggantinya dengan satu format ber-key-id +
+  AAD dan menghapus `sealedLookupCandidates()` serta `scripts/reseal-at-rest.ts`.
+- **Padding seragam** (8 KB traffic cover) dan ukuran pesan tidak boleh
+  membocorkan panjang isi. Jangan mengecilkan padding untuk menghemat byte.
+- **Satu bentuk envelope**: XChaCha `base64url(nonce(24)||ct)` lewat worker op
+  `xchacha_seal`/`xchacha_open`. `ENCRYPT_DATA` JSON wajib memakai
+  `Array.from(...)` (JSON.stringify atas `Uint8Array` merusak bundle tersimpan
+  tanpa error).
+- **Kriptografi wajib hybrid/PQ.** Klasik-saja tidak dipertahankan: KEM memakai
+  X-Wing (X25519+ML-KEM), tanda tangan ML-DSA-65, ratchet braid SPQR, KT
+  ML-DSA-65. Sisa klasik-saja yang masih ada — Blind RSA di
+  `web/src/lib/privacyPass.ts` dan KEM X25519 di OHTTP — sedang diganti
+  (`docs/43` §43.4); jangan menambah primitif klasik baru.
+- **Do not split** `web/src/workers/crypto.worker.ts`, `crypto-worker-proxy.ts`,
+  atau berkas kripto lain (aturan maintainer); perbaiki di tempat.
+- **Zod 4 harus jitless** (CSP prod tanpa `unsafe-eval`). Setel HANYA lewat
+  mutasi langsung `globalThis.__zod_globalConfig.jitless = true` — `zod.config()`
+  ikut ter-tree-shake di build prod karena zod mendeklarasikan `sideEffects:
+  false`. Ada di `packages/shared/src/schemas.ts` dan `web/src/zodSetup.ts`
+  (import pertama `main.tsx`). Jangan hapus, jangan tambahkan `unsafe-eval` ke
+  CSP nginx.
+- **Pipeline pesan** ada di `web/src/lib/messagePipeline.ts`. Kegagalan dekripsi
+  pesan sendiri mengembalikan `waiting_for_key`, tidak pernah bubble error.
+- **Envelope kunci grup lewat mailbox grup** (`docs/37` §37.3.2): klien
+  `web/src/lib/groupMailbox.ts` mengirim item `KEY_ENVELOPE` bertag
+  `HMAC(memberToken, "nyx-mailbox-v1")`, loop poll di `App.tsx`, jalur terima =
+  `storeReceivedSessionKey` (disimpan per `conversationId`, tidak menunggu
+  metadata). `group:fulfilled_key` hanya fallback saat metadata/token belum ada
+  di store (mis. distribusi pertama `createGroup`) — jangan menambah pengirim
+  baru di sana. Sisi server: `server/src/utils/groupMailbox.ts` + rute di
+  `server/src/routes/groups.ts` (TTL 7 hari, filter epoch, GC di
+  `jobs/cleanup.ts`).
+- **Rotasi era grup (PCS kasar, `docs/37` §37.3.6)**:
+  `web/src/lib/groupEpochRotation.ts` memutuskan lewat `groupEpochPolicy.ts`
+  yang murni (24 jam atau 500 pesan, admin saja, loop di `App.tsx`), lalu
+  `POST /api/groups/:id/epoch` + `rotateGroupKey(..., 'periodic_rotation', true,
+  newToken)`. Token baru disimpan sebagai `pendingToken` sebelum metadata
+  ditulis; percobaan ulang WAJIB memakai token itu, dan rotasi yang terputus
+  diselesaikan `resumePendingGroupRotations()` saat shell siap. `GET
+  /api/groups/:id/epoch` (admin capability) mengembalikan `{epoch, rotatedAt,
+  createdAt, messageSeq}`.
+- **Sinkronisasi anonim = `POST /api/groups/sync`** (`web/src/lib/groupSync.ts`):
+  token di body, Privacy Pass opsional (satu token = satu sync, terikat
+  `conversationId`, `PP_SYNC_REQUIRED=1` untuk menegakkan), dan POST OHTTP saat
+  `VITE_OHTTP_ENABLED=1` (gateway membatasi body 64 KB). Issuance berjalan di
+  latar — sinkronisasi tidak boleh menunggu Privacy Pass.
+- **Ratchet v2 (braid SPQR)** (`docs/33` §33.10): header `{v:2,b:[frames]}`
+  (`web/src/lib/spqrWire.ts`), orkestrasi `spqrSession.ts`, worker op
+  `spqr_ratchet_init/encrypt/decrypt` (WASM `packages/spqr-wasm/dist/spqr.wasm`,
+  dimuat lazy lewat asset URL — jangan diimpor ke bundle utama, di-precache SW
+  via `**/*.wasm`), state braid di `spqrState.ts` baris `nyx_spqr_state_v1:*`
+  (`ENC1:`). v2 hanya dikirim setelah peer membuktikan bisa membacanya
+  (`ackV: 2` di dalam payload tersegel). Jalur v1, kill switch
+  `VITE_SPQR_FORCE_V1=1` / `localStorage['nyx_spqr_force_v1']`, dan E2E rollback
+  `web/e2e/spqr.spec.ts` dihapus pada fase C (`docs/38` §38.2) — selama masih
+  ada, kill switch hanya menghentikan pengiriman/iklan v2, tidak pernah
+  pembacaan, dan sidecar wajib tetap punya `spqr-ratchet` di
+  `SERVER_CAPABILITIES`.
 
 ## Server gotchas
 

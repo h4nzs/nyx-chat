@@ -114,8 +114,10 @@ column. Residual: one token used repeatedly lets the server group the items that
 single token read; there is no account link, and post/pull run `anonymous: true`
 (no cookie, CSRF, or installation ID). Details: `docs/37` §37.3.2.
 
-## 3.8 Crypto code rules (frozen)
+## 3.8 Crypto code rules (invariants)
 
 1. Do **not** split `crypto.worker.ts`, `crypto-worker-proxy.ts`, or related crypto files — fix in place.
-2. Never change primitives, padding (8KB), or wire/storage formats (see 04-crypto-protocol.md).
+2. Jangan mengubah **properti**: primitif hybrid/PQ, padding 8 KB, dan satu bentuk envelope
+   (`04-crypto-protocol.md`). Format lama tanpa penulis aktif **dihapus** (`38-legacy-retirement.md`),
+   bukan dipelihara dengan jalur pembaca kedua; fase penghapusan ada di `43-single-version-plan.md`.
 3. Keep key material out of React state, localStorage (except documented biometric vault), and logs — `sanitizeErrorLog` scrubs base64/JSON before logging.

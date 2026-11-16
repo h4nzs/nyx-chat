@@ -1,5 +1,12 @@
 # 29 — Analisis Komparatif NYX vs Signal (dan apa yang bisa kita adopsi)
 
+> **Arsip (2026-11-16).** Dokumen ini **bukan rencana aktif**. Hampir seluruh
+> isinya sudah implemented, dibatalkan sebagai non-goal, atau diserap dokumen
+> hidup; status per butir tidak lagi dipelihara di sini. Kebijakan versi tunggal
+> dan fase penghapusan ada di `38`/`43`. Jangan mengambil keputusan implementasi
+> dari tabel di bawah tanpa memeriksa kode dan dokumen hidup (`04`, `16`, `32`,
+> `33`, `34`, `37`, `42`).
+
 > **Status: ANALISIS + STATUS IMPLEMENTASI.** Dibuat 2026-10-10 dengan membaca
 > source NYX + source Signal; **diperbarui 2026-10-28** terhadap HEAD `1664`
 > commit (v3.0.0). Sejak 2026-10-16 source Signal **di-vendor di repo ini**

@@ -47,8 +47,9 @@ klaim di §36.3 tidak dapat diverifikasi dari bahan ini.
   2026-10-23; tidak ada endpoint atau kode klien yang tersisa. Kredensial PQ
   belum ada; BRaccoon/blind UOV tetap riset.
 - **BRaccoon / blind UOV** — riset, belum ada kode produksi.
-- Format v1/frozen (`docs/04`) — reviewer boleh memeriksa apakah jalur baca v1
-  melemahkan jalur v2, tetapi perubahan format v1 di luar cakupan.
+- Format yang berlaku sekarang (`docs/04`) — format v1 sudah pensiun
+  (`docs/38`); reviewer memeriksa apakah properti (sealing, padding, hybrid/PQ)
+  benar-benar ditegakkan oleh format yang dipakai klien hari ini.
 
 ## 36.3 Klaim yang diminta diverifikasi
 
@@ -177,9 +178,9 @@ Dampak: kerahasiaan/integritas/otentikasi/metadata
 Perbaikan yang disarankan: perubahan minimal, bukan redesign
 ```
 
-Temuan yang memerlukan perubahan format frozen (`docs/04`) harus ditandai
-eksplisit: perubahan itu memutus kompatibilitas v1 dan butuh rencana migrasi,
-bukan sekadar patch.
+Temuan yang memerlukan perubahan format tersimpan (`docs/04`) harus ditandai
+eksplisit: perubahan itu menyentuh properti keamanan, jadi butuh rencana fase
+(`docs/43`) dan review, bukan sekadar patch.
 
 ## 36.8 Yang tidak diklaim dokumen ini
 

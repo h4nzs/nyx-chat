@@ -19,7 +19,7 @@
 
 `deploy.yml` mengurus **web, marketing, `nyx-api`, `nyx-sidecar`, binary + unit systemd log/auditor KT v2, dan unit `nyx-ohttp-relay`** (relay di-restart hanya bila unitnya `enabled`). Yang **tidak pernah** dikirim otomatis (owner ops, sinkron manual): `ops/nginx/nyx.conf` (§10.9), config + kunci log KT (§10.15), coturn, `ops/prometheus` + `ops/grafana` (§10.12), sysctl/PostgreSQL/Redis (§10.11), dan `.env` (hanya disalin lokal di VPS).
 
-VPS: Debian 13, **4 core / 8GB RAM / 4GB swap** (upgraded 2026-10 from 1 core / 1GB RAM), `vm.swappiness=10`, PostgreSQL re-tuned for the larger box (see §10.11). The principle from docs/26 §26.9 still applies: the upgrade buys margin for privacy features, not bloat.
+Host dev/staging saat ini: Debian 13, 4 core / 8GB RAM / 4GB swap. **Spesifikasi host bukan batasan desain**: produksi dipecah satu host per peran (`docs/43` §43.6 — API+Postgres, relay WSS, sidecar WT, OHTTP relay, PIR A/B, log KT, auditor KT, Prometheus), jadi angka di §10.11 adalah default satu-host, bukan plafon. Prinsip `docs/26` §26.9 tetap: kapasitas dipakai untuk fitur privasi, bukan bloat.
 
 > ℹ️ The pre-upgrade sizing notes ("low-memory Postgres", replica caps, `password.ts` Argon2 "sweet spot") were written for the 1 GB box — treat them as historical context, not current constraints.
 
@@ -366,20 +366,25 @@ Node process today can become N replicas later without protocol changes:
 3. **Redis & Postgres stay shared singletons** — they are already the coordination
    layer; nothing else to change.
 4. **Memory budget**: each extra Node replica adds roughly the current RSS of
-   `nyx-api`. On the upgraded 4 core / 8 GB RAM / 4 GB swap VPS, ~4–6 replicas fit
-   comfortably; beyond that, vertical scaling is still the cheapest first step.
+   `nyx-api`. Jumlah replika mengikuti RAM host peran itu — di host 8 GB dengan
+   Postgres/Redis bersama, ~4–6 replika muat; di topologi produksi (`docs/43`
+   §43.6) Postgres dan relay ada di host sendiri, jadi batas itu bukan batas
+   sistem.
 5. The Rust WebTransport sidecar keeps its own session map per replica — if you ever
    run multiple sidecars, device targeting already tolerates unknown device IDs
    (continue-on-nonmatch), but presence fan-out assumes one sidecar; treat multi-sidecar
    as unsupported until it needs to exist.
 
-## 10.11 Post-upgrade tuning (4 core / 8 GB RAM / 4 GB swap)
+## 10.11 Default tuning satu host (bukan batasan)
 
-Recommended settings for the new box (owner ops on the VPS; `deploy.yml` does not manage sysctl/Postgres/Redis config):
+Nilai di bawah adalah default untuk **satu host gabungan** (dev/staging). Di
+produksi tiap peran punya host sendiri (`docs/43` §43.6), jadi persentase RAM di
+sini dihitung ulang per host — bukan angka yang diwarisi seluruh sistem. Owner
+ops di VPS; `deploy.yml` tidak mengelola sysctl/Postgres/Redis.
 
 **Sysctl / kernel**
 
-- Keep `vm.swappiness=10` (RAM is plentiful now, swap stays an emergency buffer).
+- `vm.swappiness=10` — swap sebagai buffer darurat, bukan area kerja.
 - Optional: `vm.vfs_cache_pressure=50` — retains more inode/dentry cache now that RAM is not scarce.
 
 **PostgreSQL (replaces the old low-memory tuning)**
@@ -404,7 +409,7 @@ Restart Postgres after the change and confirm with `SHOW shared_buffers;`.
 
 **PM2 / Node**
 
-- `deploy.yml` starts `nyx-api` with `-i max` (cluster = 1 worker per core) and `--max-old-space-size=1024`. On 4 cores that is a ~4 GB worst case — still fine under 8 GB alongside Postgres (2 GB) + Redis (< 1 GB). Raise `--max-old-space-size` to `1536` only if RSS actually climbs; don't preemptively.
+- `deploy.yml` starts `nyx-api` with `-i max` (cluster = 1 worker per core) and `--max-old-space-size=1024`. Worst case ≈ core × 1 GB; bandingkan dengan RAM host peran itu — di topologi produksi (`docs/43` §43.6) Postgres dan Redis tidak berbagi host dengan API. Naikkan ke `1536` hanya kalau RSS benar-benar naik; jangan preemptive.
 - The Rust sidecar's tokio runtime now gets real parallelism — leave `nyx-sidecar` as a single fork instance; it no longer competes with the API cluster for the one core.
 
 
