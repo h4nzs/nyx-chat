@@ -5,6 +5,9 @@ import { redisClient } from '../lib/redis.js';
 import { storyAuthorTag, tagCandidates, resolveRoutingUser } from '../utils/routingIdentity.js';
 // [docs/28 Tier 4] key Redis rate-limit tidak menyematkan userId asli.
 import { identityTag } from '../utils/redisIdentity.js';
+// [docs/43 §43.16.3] waktu story dibulatkan; `expiresAt` diturunkan dari nilai
+// kasar yang SAMA supaya selisihnya tidak membocorkan createdAt presisi.
+import { messageTimeBucket } from '../utils/temporalBucket.js';
 
 const router = express.Router();
 
@@ -85,13 +88,15 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'encryptedPayload must be a string' });
     }
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
+    const createdAt = messageTimeBucket();
+    const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000); // 24 jam dari waktu kasar
 
     const story = await prisma.story.create({
       data: {
         // [docs/28 D8] penulis disimpan ter-seal, bukan FK userId.
         authorTag: await storyAuthorTag(userId),
         encryptedPayload,
+        createdAt,
         expiresAt,
       },
     });

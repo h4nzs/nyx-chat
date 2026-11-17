@@ -28,7 +28,6 @@ export type StagedFile = {
 
 type State = {
   replyingTo: Message | null;
-  typingLinkPreview: Record<string, unknown> | null;
   expiresIn: number | null;
   isViewOnce: boolean;
   stagedFiles: StagedFile[];
@@ -44,8 +43,6 @@ type State = {
   setIsViewOnce: (value: boolean) => void;
   setIsHD: (value: boolean) => void;
   setIsVoiceAnonymized: (value: boolean) => void;
-  fetchTypingLinkPreview: (text: string) => void;
-  clearTypingLinkPreview: () => void;
   addStagedFiles: (files: File[]) => void;
   updateStagedFile: (id: string, newFile: File) => void;
   removeStagedFile: (id: string) => void;
@@ -102,7 +99,6 @@ const generateTempId = () => generateTempIdSafe();
 
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
-  typingLinkPreview: null,
   expiresIn: null,
   isViewOnce: false,
   stagedFiles: [],
@@ -134,26 +130,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   })),
   removeStagedFile: (id) => set((state) => ({ stagedFiles: state.stagedFiles.filter(sf => sf.id !== id) })),
   clearStagedFiles: () => set({ stagedFiles: [] }),
-
-  fetchTypingLinkPreview: async (text) => {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urls = text.match(urlRegex);
-    if (urls && urls.length > 0) {
-      try {
-        const preview = await api<Record<string, unknown>>("/api/previews", {
-          method: "POST",
-          body: JSON.stringify({ url: urls[0] }),
-        });
-        set({ typingLinkPreview: preview });
-      } catch (_error) {
-        set({ typingLinkPreview: null });
-      }
-    } else {
-      set({ typingLinkPreview: null });
-    }
-  },
-
-  clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
   sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
@@ -248,7 +224,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
       const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
 
-      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>(endpoint, {
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string, keyToken?: string }>(endpoint, {
           method: 'POST',
           body: JSON.stringify({
               fileName: file.name,
@@ -282,6 +258,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           type: 'file',
           url: presignedRes.publicUrl,
           key: rawFileKey, 
+          // [docs/43 T2] bukti kepemilikan objek untuk hapus file di server.
+          keyToken: presignedRes.keyToken,
           name: file.name,
           size: file.size,
           mimeType: file.type,
@@ -388,7 +366,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
       const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
 
-      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>(endpoint, {
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string, keyToken?: string }>(endpoint, {
           method: 'POST',
           body: JSON.stringify({
               fileName: "voice-message.webm",
@@ -420,6 +398,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           type: 'file',
           url: presignedRes.publicUrl,
           key: rawFileKey,
+          // [docs/43 T2] bukti kepemilikan objek untuk hapus file di server.
+          keyToken: presignedRes.keyToken,
           name: "voice-message.webm",
           size: blob.size,
           mimeType: "audio/webm",

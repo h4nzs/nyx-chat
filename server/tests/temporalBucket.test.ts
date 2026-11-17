@@ -131,6 +131,25 @@ test('B3 skema+wiring: MessageStatus.updatedAt coarse (bukan @updatedAt)', () =>
   assert.ok(matches.length >= 4, `updatedAt bucket di kedua upsert (create+update), dapat ${matches.length}`);
 });
 
+test('[43.16.3] Story & MessageViewOnceRecipient: waktu dikasar, bukan @default(now())', () => {
+  const schema = readSchema();
+  const story = modelBody(schema, 'Story');
+  assert.match(story, /^\s*createdAt\s+DateTime\s*$/m, 'Story.createdAt diisi eksplisit');
+  assert.doesNotMatch(story, /createdAt\s+DateTime\s+@default\(now\(\)\)/, 'default presisi dihapus');
+
+  const recipients = modelBody(schema, 'MessageViewOnceRecipient');
+  assert.match(recipients, /^\s*createdAt\s+DateTime\s*$/m, 'penerima diisi eksplisit');
+  assert.doesNotMatch(recipients, /createdAt\s+DateTime\s+@default\(now\(\)\)/, 'default presisi dihapus');
+
+  const stories = readFileSync(path.join(here, '../src/routes/stories.ts'), 'utf8');
+  assert.match(stories, /const createdAt = messageTimeBucket\(\)/, 'Story.createdAt memakai bucket');
+  assert.match(stories, /createdAt\.getTime\(\) \+ 24 \* 60 \* 60 \* 1000/, 'expiresAt diturunkan dari waktu kasar yang sama');
+
+  const viewOnce = readFileSync(path.join(here, '../src/utils/viewOnceRecipients.ts'), 'utf8');
+  assert.match(viewOnce, /const createdAt = messageTimeBucket\(\)/, 'penerima view-once memakai bucket');
+  assert.match(viewOnce, /createdAt,/, 'createdAt ikut ditulis ke baris penerima');
+});
+
 test('B5 wiring: id SYSTEM metadata tidak lagi memakai Date.now()', () => {
   const wt = readFileSync(path.join(here, '../src/network/realtimeHandlers.ts'), 'utf8');
   assert.doesNotMatch(wt, /msg_sys_meta_\$\{Date\.now\(\)\}/, 'id time-ordered lama dihapus');

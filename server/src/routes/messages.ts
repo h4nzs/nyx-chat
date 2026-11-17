@@ -17,8 +17,9 @@ import { sanitizeForLog } from '../utils/logger.js'
 import { conversationScopedTag, credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js'
 // [docs/28 Tier 4] identitas at-rest: senderId/sessionId/device-key ter-seal.
 import { openMessageForClient, senderIdForStorage } from '../utils/senderIdentity.js'
-// [AUDIT F-08] key objek R2 harus valid utuh dan benar-benar milik pemanggil.
-import { isOwnedObjectKey } from '../utils/uploadLimits.js'
+// [AUDIT F-08] key objek R2 valid & kepemilikan dibuktikan token HMAC (T2).
+import { verifyObjectKeyToken } from '../utils/uploadLimits.js'
+import { env } from '../config.js'
 import { upsertMembership, type MembershipPrisma } from '../utils/routingIdentity.js'
 // [docs/28 Tier 2 — B1] seq atomik per-conversation + parser kursor.
 import { reserveMessageSeq, parseMessageCursor, type SeqPrismaClient } from '../utils/messageSequence.js'
@@ -372,6 +373,7 @@ router.delete('/:id', async (req, res, next) => {
     const userId = req.user.id
     const messageId = req.params.id
     const r2Key = req.query.r2Key ? String(req.query.r2Key) : undefined
+    const r2KeyToken = req.query.r2KeyToken ? String(req.query.r2KeyToken) : undefined
     const deleteToken = req.headers['x-delete-token']
 
     // OPAQUE MAILBOX: Blind authorization check
@@ -404,11 +406,9 @@ router.delete('/:id', async (req, res, next) => {
 
     // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
     if (r2Key) {
-       // [AUDIT F-08] Validasi bentuk key SECARA UTUH (bukan hanya segmen
-       // terakhir): folder dikenal, prefix `<userId>-`, tanpa `..`/segmen liar.
-       // Sanitizer lama mempertahankan `/` dan `..`, sementara yang dihapus
-       // adalah key penuh.
-       if (!isOwnedObjectKey(userId, r2Key)) {
+       // [AUDIT F-08 + docs/43 T2] Key acak tidak memuat userId, jadi
+       // kepemilikan dibuktikan token HMAC yang diterbitkan saat presign.
+       if (!verifyObjectKeyToken(userId, r2Key, r2KeyToken, env.jwtSecret)) {
           console.warn('[Security] User', sanitizeForLog(userId), 'attempted to delete unauthorized/invalid file:', sanitizeForLog(String(r2Key).slice(0, 120)));
           return res.status(403).json({ error: 'Unauthorized file deletion' });
        } else {

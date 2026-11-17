@@ -36,6 +36,8 @@ import backupRouter from "./routes/backup.js";
 import keysRouter from "./routes/keys.js";
 import ktQueryRouter from "./routes/ktQuery.js";
 import previewsRouter from "./routes/previews.js";
+// [docs/43 T3] tukar token opaque notifikasi menjadi id percakapan.
+import pushLinksRouter from "./routes/pushLinks.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import burnerRouter from "./routes/burner.js";
 import sessionsRouter from "./routes/sessions.js";
@@ -515,6 +517,7 @@ app.use("/api/messages", messagesRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/backup", backupRouter);
 app.use("/api/previews", previewsRouter);
+app.use("/api/push", pushLinksRouter);
 app.use("/api/session-keys", sessionKeysRouter);
 // [BURNER 2026-10-18] Status room burner — gerbang destroy yang tidak bergantung
 // pada socket (guest offline / reload / membership basi).

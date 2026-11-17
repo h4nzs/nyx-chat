@@ -3,14 +3,39 @@ import { prisma } from '../lib/prisma.js'
 import { env } from '../config.js'
 // [docs/28 Tier 1.5 / D10] endpoint push tersimpan ter-seal.
 import { openAtRest } from './atRestSecrets.js'
+import { redisClient } from '../lib/redis.js'
+import { createPushLinkToken, type PushLinkStore } from './pushLink.js'
 
 export interface PushNotificationPayload {
   type?: string;
+  /** Server-only: dipakai membuat token deep link, TIDAK pernah diserialisasi. */
+  conversationId?: string;
   data?: {
-    conversationId?: string;
-    messageId?: string;
     encryptedPushPayload?: string;
     pushPayloadMap?: Record<string, string>;
+  };
+}
+
+/**
+ * [docs/43 §43.16.2 T3] Payload push TIDAK memuat `conversationId`/`messageId`:
+ * FCM/APNs (dan operatornya) tidak boleh bisa mengorelasikan perangkat,
+ * percakapan, dan irama pesan. Isi pesan tetap opaque di
+ * `encryptedPushPayload`; aplikasi yang membukanya.
+ */
+export function buildPushPayload(
+  payload: PushNotificationPayload,
+  devicePayload: string | undefined,
+  linkToken?: string
+) {
+  const data: { encryptedPushPayload?: string; pushToken?: string } = {};
+  if (devicePayload) data.encryptedPushPayload = devicePayload;
+  // Token opaque per pengiriman per subscription — bukan id percakapan.
+  if (linkToken) data.pushToken = linkToken;
+  return {
+    title: 'New Secure Message',
+    body: 'You received a new encrypted message.',
+    type: devicePayload ? 'ENCRYPTED_MESSAGE' : (payload.type || 'GENERIC_MESSAGE'),
+    data,
   };
 }
 
@@ -38,16 +63,14 @@ export async function sendPushNotification(userId: string, payload: PushNotifica
         devicePayload = undefined;
       }
 
-      const safePayload = {
-        title: "New Secure Message",
-        body: "You received a new encrypted message.",
-        type: devicePayload ? 'ENCRYPTED_MESSAGE' : (payload.type || 'GENERIC_MESSAGE'),
-        data: {
-          conversationId: payload.data?.conversationId,
-          messageId: payload.data?.messageId,
-          encryptedPushPayload: devicePayload
-        }
-      };
+      const linkToken = payload.conversationId
+        ? await createPushLinkToken(redisClient as unknown as PushLinkStore, {
+            userId,
+            subscriptionId: sub.id,
+            conversationId: payload.conversationId,
+          })
+        : null;
+      const safePayload = buildPushPayload(payload, devicePayload, linkToken ?? undefined);
 
       try {
         await webpush.sendNotification(

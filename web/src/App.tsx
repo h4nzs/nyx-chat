@@ -2,7 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { useEffect, useCallback, Suspense, lazy } from 'react';
+import { useEffect, useState, useCallback, Suspense, lazy } from 'react';
 import { Toaster, useToasterStore, toast } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
@@ -41,6 +41,7 @@ import { ServerDownPage } from './pages/ServerDownPage'; // statis (bukan lazy):
 // ia harus tampil justru ketika request API sedang ditolak.
 import { ClientVersionRequiredPage } from './pages/ClientVersionRequiredPage';
 import { reportKtAvailable, reportKtUnavailable } from './lib/ktAvailability';
+import { api } from './lib/api';
 
 const ConfirmModal = lazy(() => import('@components/ConfirmModal'));
 const UserInfoModal = lazy(() => import('@components/UserInfoModal'));
@@ -120,6 +121,37 @@ const LoadingScreen = () => (
     <Spinner size="lg" />
   </div>
 );
+
+// [docs/43 T3] Tujuan notifikasi datang sebagai token opaque di hash
+// (`/chat#push=…`). Tukar dulu ke id percakapan lewat server — hash tidak ikut
+// terkirim sebagai query, jadi token tidak masuk access log. Tanpa token,
+// resolver ini hanya melewatkan children (perilaku lama).
+const PushLinkResolver = ({ children }: { children: React.ReactNode }) => {
+  const { hash } = useLocation();
+  const navigate = useNavigate();
+  const pushToken = new URLSearchParams(hash.replace(/^#/, '')).get('push');
+  // Token yang GAGAL ditukar; token baru tetap menahan render sampai selesai.
+  const [failedToken, setFailedToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pushToken) return;
+    let cancelled = false;
+    api<{ conversationId: string }>('/api/push/link', {
+      method: 'POST',
+      body: JSON.stringify({ token: pushToken }),
+    })
+      .then(({ conversationId }) => {
+        if (!cancelled && conversationId) navigate(`/chat/${conversationId}`, { replace: true });
+      })
+      .catch(() => {
+        if (!cancelled) setFailedToken(pushToken);
+      });
+    return () => { cancelled = true; };
+  }, [pushToken, navigate]);
+
+  if (pushToken && failedToken !== pushToken) return <LoadingScreen />;
+  return <>{children}</>;
+};
 
 const Home = () => {
   const { conversations, loading } = useConversationStore(useShallow(state => ({
@@ -712,7 +744,7 @@ const AppContent = () => {
 
               {/* Protected Routes */}
               <Route element={<ProtectedRoute />}>
-                <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
+                <Route path="/chat" element={<PageWrapper noScroll={true}><PushLinkResolver><Home /></PushLinkResolver></PageWrapper>} />
                 <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
 
                 <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />

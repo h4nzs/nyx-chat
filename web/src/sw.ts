@@ -60,51 +60,31 @@ self.addEventListener('push', (event: PushEvent) => {
       
       let title = data.title || 'New message';
       let body = data.body || 'You have a new message';
-      let conversationId = data.data?.conversationId;
+      // [docs/43 T3] token opaque per pengiriman; dipakai untuk deep link tanpa
+      // membocorkan id percakapan ke provider push. Diletakkan di HASH supaya
+      // tidak ikut terkirim ke server sebagai query/access log.
+      const pushToken = data.data?.pushToken;
 
       // NOTE: E2EE push decryption is handled in the main app when user opens it.
       // Service Worker avoids heavy crypto libraries (libsodium, hash-wasm) to
       // stay within browser SW size limits (~1 MB). Push notifications show
       // generic content; app-side decryption provides the real message.
+      // [docs/43 §43.16.2 T3] Payload server tidak lagi memuat id percakapan,
+      // jadi SW tidak bisa memilih chat — notifikasi hanya sinyal "ada pesan".
       if (data.type === 'ENCRYPTED_MESSAGE') {
         // For encrypted pushes, use generic fallback title
         title = data.title || 'New secure message';
         body = data.body || 'You have a new end-to-end encrypted message';
-        conversationId = data.data?.conversationId || conversationId;
       }
-
-      // --- VISIBILITY CHECK ---
-      // Prevent OS notification if the user is actively viewing this specific chat
-      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      let isFocusedOnChat = false;
-
-      for (const client of clientList) {
-        // Check if the tab is in the foreground
-        if (client.visibilityState === 'visible') {
-          const clientUrl = new URL(client.url);
-          // Check if the user is on this exact conversation page
-          if (conversationId && clientUrl.pathname.includes(`/chat/${conversationId}`)) {
-            isFocusedOnChat = true;
-            break;
-          }
-        }
-      }
-
-      if (isFocusedOnChat) {
-        console.log('[SW] User is active in this chat. Suppressing OS notification.');
-        return; // Abort showing notification
-      }
-      // --- END VISIBILITY CHECK ---
 
       const options: NotificationOptions = {
         body,
         icon: '/nyx.png', 
         badge: '/nyx.png',
         data: {
-          conversationId,
-          url: conversationId ? `/chat/${conversationId}` : '/'
+          url: pushToken ? `/chat#push=${encodeURIComponent(pushToken)}` : '/chat',
         },
-        tag: conversationId || 'general-message',
+        tag: 'nyx-message',
         renotify: true,
         vibrate: [100, 50, 100], 
       } as NotificationOptions;
@@ -119,8 +99,11 @@ self.addEventListener('push', (event: PushEvent) => {
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
 
-  const conversationId = event.notification.data?.conversationId;
-  const targetPath = conversationId ? `/chat/${conversationId}` : '/';
+  // [docs/43 T3] token opaque (bila ada) membawa deep link tanpa id percakapan;
+  // tanpa token, buka daftar chat seperti biasa.
+  const targetPath = typeof event.notification.data?.url === 'string'
+    ? event.notification.data.url
+    : '/chat';
   // Use absolute URL for openWindow to ensure correct behavior across browsers
   const targetUrl = new URL(targetPath, self.location.origin).href;
 

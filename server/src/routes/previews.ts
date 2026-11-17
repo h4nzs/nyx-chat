@@ -1,9 +1,18 @@
 import { Router } from 'express'
 import { getSecureLinkPreview, validateRedirectChain } from '../utils/secureLinkPreview.js'
 import { requireAuth } from '../middleware/auth.js'
-import { sanitizeForLog } from '../utils/logger.js'
 
 const router: Router = Router()
+
+// [docs/43 §43.16.2 T1] Log hanya hostname — URL penuh (path/query) bisa
+// memuat token pencarian atau isi yang belum tentu dikirim.
+function safeHost(raw: unknown): string {
+  try {
+    return new URL(String(raw)).hostname
+  } catch {
+    return 'invalid-url'
+  }
+}
 
 router.post('/', requireAuth, async (req, res, _next) => {
   const { url } = req.body
@@ -18,14 +27,17 @@ router.post('/', requireAuth, async (req, res, _next) => {
     } else {
       res.status(404).json({ error: 'Could not generate a preview for this link.' })
     }
-  } catch (error) {
-    console.warn('[Link Preview] Failed to fetch metadata for:', sanitizeForLog(url), ':', sanitizeForLog((error as Error).message));
+  } catch (_error) {
+    console.warn('[Link Preview] Failed to fetch metadata for host:', safeHost(url));
     res.status(400).json({ error: 'Failed to extract link preview. Target site is protected or unreachable.' });
   }
 })
 
-router.get('/image', requireAuth, async (req, res, _next) => {
-  const targetUrl = String(req.query.url ?? '');
+// [docs/43 §43.16.2 T1] URL target dikirim di body, bukan query string: query
+// tercatat di access log nginx/Cloudflare dan di cache bersama. Respons juga
+// `private, no-store` supaya gambar tidak disimpan di cache perantara.
+router.post('/image', requireAuth, async (req, res, _next) => {
+  const targetUrl = String(req.body?.url ?? '');
   if (!targetUrl) return res.status(400).json({ error: 'URL is required' });
 
   try {
@@ -81,11 +93,11 @@ router.get('/image', requireAuth, async (req, res, _next) => {
     const arrayBuffer = Buffer.concat(chunks);
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache 1 day
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(arrayBuffer);
 
-  } catch (error) {
-     console.error('Image proxy error:', error);
+  } catch (_error) {
+     console.error('[Link Preview] Image proxy failed for host:', safeHost(targetUrl));
      res.status(400).json({ error: 'Could not proxy image' });
   }
 });

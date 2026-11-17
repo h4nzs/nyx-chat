@@ -2,13 +2,14 @@ import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { env } from '../config.js'
-import { nanoid } from 'nanoid'
 import { getPresignedUploadUrl } from '../utils/r2.js' 
 import { uploadLimiter } from '../middleware/rateLimiter.js'
 // [AUDIT 2026-10-24] Batas ukuran ditetapkan server (dan dikunci di presign).
 import {
+  buildObjectKey,
   clampFileRetentionSeconds,
   clampUploadUrlTtl,
+  objectKeyToken,
   resolveUploadPolicy,
   validateUploadSize,
 } from '../utils/uploadLimits.js'
@@ -70,11 +71,6 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       });
     }
 
-    const ext = fileName.split('.').pop()?.toLowerCase()
-    if (!ext) {
-      return res.status(400).json({ error: 'File extension not found in filename' })
-    }
-
     // urlTtl: How long the UPLOAD LINK works (default 5 mins)
     // [AUDIT F-06] di-clamp: klien tidak boleh meminta URL berumur setahun.
     const urlTtl = clampUploadUrlTtl(req.body.urlTtl);
@@ -90,7 +86,10 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       deleteAt.setSeconds(deleteAt.getSeconds() + fileRetention);
     }
 
-    const key = `${targetFolder}/${req.user!.id}-${nanoid()}.${ext}`
+    // [docs/43 §43.16.2 T2] Key acak tanpa userId/ekstensi: kebocoran satu
+    // lampiran tidak mengaitkan seluruh file ke akun, dan jenis media hanya
+    // diketahui klien. Kepemilikan dibuktikan token HMAC (bukan bentuk key).
+    const key = buildObjectKey(targetFolder)
 
     // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
     // We pass both urlTtl (link expiry) and deleteAt (file metadata expiry)
@@ -102,6 +101,7 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     res.json({
       uploadUrl,
       key,
+      keyToken: objectKeyToken(req.user!.id, key, env.jwtSecret),
       publicUrl: `${env.r2PublicDomain}/${key}`
     })
   } catch (error) {
@@ -141,11 +141,6 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
       });
     }
 
-    const ext = fileName.split('.').pop()?.toLowerCase()
-    if (!ext) {
-      return res.status(400).json({ error: 'File extension not found in filename' })
-    }
-
     // [AUDIT F-06] retensi burner juga dibatasi (TTL URL tetap 5 menit).
     let deleteAt: Date | undefined;
     const fileRetention = clampFileRetentionSeconds(req.body.fileRetention);
@@ -154,7 +149,9 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
       deleteAt.setSeconds(deleteAt.getSeconds() + fileRetention);
     }
 
-    const key = `burner/${nanoid()}.${ext}`
+    // [docs/43 §43.16.2 T2] acak tanpa ekstensi; tidak ada penghapusan oleh
+    // klien di jalur burner sehingga tidak butuh token kepemilikan.
+    const key = buildObjectKey('burner')
     const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', clampUploadUrlTtl(300), sizeCheck.size, deleteAt)
 
     res.json({

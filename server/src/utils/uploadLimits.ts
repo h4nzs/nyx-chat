@@ -120,31 +120,50 @@ export function clampFileRetentionSeconds (raw: unknown, fallbackSeconds = 0): n
 }
 
 // ============================================================================
-// [AUDIT 2026-10-31 — F-08] Kepemilikan key objek R2.
+// [AUDIT F-08 + docs/43 §43.16.2 T2] Key objek R2 acak & kepemilikan via HMAC.
 // ============================================================================
 //
-// `DELETE /api/messages/:id?r2Key=` memakai sanitizer yang MEMPERTAHANKAN `/`
-// dan `..`, lalu hanya memeriksa segmen path terakhir. Key yang benar-benar
-// dihapus adalah key penuh, jadi bentuk key-nya harus divalidasi utuh dan harus
-// benar-benar milik pemanggil (`<folder>/<userId>-<id>.<ext>`, seperti yang
-// dibuat `POST /presigned`).
+// Key tidak lagi memuat userId/ekstensi (`<folder>/<uuid>`), jadi bentuk key
+// TIDAK bisa dipakai membuktikan kepemilikan. Server menerbitkan token HMAC saat
+// presign (`objectKeyToken`) yang dipegang klien bersama metadata pesan terenkripsi;
+// `DELETE /api/messages/:id?r2Key=…&r2KeyToken=…` memverifikasinya. Tanpa token,
+// pemegang lampiran yang diterima bisa menghapus file pengguna lain dengan
+// memakai delete-token pesannya sendiri.
 
-const OWNED_OBJECT_KEY_FOLDERS = 'avatars|attachments|groups|misc';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
-function escapeRegExp (value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export type ObjectFolder = 'avatars' | 'attachments' | 'groups' | 'misc' | 'burner';
+
+const OBJECT_KEY_PATTERN =
+  /^(avatars|attachments|groups|misc|burner)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** `<folder>/<uuid>` — acak, tanpa userId dan tanpa ekstensi asli. */
+export function buildObjectKey (folder: ObjectFolder, id: string = randomUUID()): string {
+  return `${folder}/${id}`;
 }
 
-/**
- * `true` hanya bila `key` berbentuk `<folder>/<userId>-<opaque>.<ext>` dengan
- * folder yang dikenal, tanpa `..`, dan tanpa segmen tambahan.
- */
-export function isOwnedObjectKey (userId: unknown, key: unknown): key is string {
+/** Bentuk key yang boleh dihapus (folder dikenal, uuid, tanpa segmen liar). */
+export function isValidObjectKey (key: unknown): key is string {
+  return typeof key === 'string' && key.length <= 255 && OBJECT_KEY_PATTERN.test(key);
+}
+
+export function objectKeyToken (userId: string, key: string, secret: string): string {
+  return createHmac('sha256', secret)
+    .update(`nyx-r2-key-v1\n${userId}\n${key}`)
+    .digest('base64url');
+}
+
+/** `true` hanya bila token cocok dengan pasangan (userId, key) ini. */
+export function verifyObjectKeyToken (
+  userId: unknown,
+  key: unknown,
+  token: unknown,
+  secret: string
+): boolean {
   if (typeof userId !== 'string' || userId.length === 0) return false;
-  if (typeof key !== 'string' || key.length === 0 || key.length > 255) return false;
-  if (key.includes('..')) return false;
-  const pattern = new RegExp(
-    `^(${OWNED_OBJECT_KEY_FOLDERS})/${escapeRegExp(userId)}-[A-Za-z0-9_-]{1,80}[.][a-z0-9]{1,8}$`
-  );
-  return pattern.test(key);
+  if (!isValidObjectKey(key)) return false;
+  if (typeof token !== 'string' || token.length === 0) return false;
+  const expected = Buffer.from(objectKeyToken(userId, key, secret));
+  const given = Buffer.from(token);
+  return expected.length === given.length && timingSafeEqual(expected, given);
 }

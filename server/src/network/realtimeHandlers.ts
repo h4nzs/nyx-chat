@@ -450,7 +450,9 @@ export async function handleChatMessage(
             if (targetId !== userId) {
                 sendPushNotification(targetId, {
                     type: pushPayloads ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
-                    data: { conversationId, messageId: safeMessage.id, pushPayloadMap: pushPayloads || undefined }
+                    // Server-only: menjadi token opaque di payload, tidak ikut dikirim.
+                    conversationId,
+                    data: { pushPayloadMap: pushPayloads || undefined }
                 }).catch((e: unknown) => { console.error("[RedisBridge] Failed to send push notification:", e); });
 
                 // Register this conversation for the target recipient so they can discover it later

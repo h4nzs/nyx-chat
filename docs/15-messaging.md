@@ -135,7 +135,7 @@ prompt (NYX warns automatically, consistent with its opaque/blind-index posture)
 ## 15.8 Ghost sync & link preview
 
 - **Ghost sync** (`fireGhostSync`): sends a `GHOST_SYNC` system message to a group to reconcile membership/key state after a metadata change.
-- **Link preview:** `fetchTypingLinkPreview` in `messageInput.ts` hits `POST /api/previews` (SSRF-safe `secureLinkPreview.ts`); rendered by `LinkPreviewCard`.
+- **Link preview:** no fetch while typing (`docs/43 §43.16.2 T1`); `POST /api/previews` (SSRF-safe `secureLinkPreview.ts`) is opt-in, and the image proxy takes the URL in a POST body with `Cache-Control: private, no-store`. Rendered by `LinkPreviewCard` from `message.linkPreview`.
 
 ## 15.9 Files to know
 

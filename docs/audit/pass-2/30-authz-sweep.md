@@ -12,7 +12,7 @@ Berkas yang di pass 1 belum dibaca penuh: `sessions.ts`, `backup.ts`,
 | `POST /api/backup/presign` | `requireAuth` + `isVerified` + ukuran/URL TTL di-clamp + `deriveBackupObjectKey(secret, userId)` (tanpa userId di kunci) | OK |
 | `POST /api/backup/download-url` | `requireAuth` + kunci diturunkan dari **userId pemanggil** (tidak ada parameter kunci) | OK |
 | `DELETE /api/backup` | idem, hanya objek sendiri | OK |
-| `POST /api/previews` / `GET /api/previews/image` | `requireAuth`; `validateRedirectChain` + `redirect: 'manual'` + cap 5 MB + wajib `image/*` | OK |
+| `POST /api/previews` / `POST /api/previews/image` (dulu GET, lihat docs/43 T1) | `requireAuth`; `validateRedirectChain` + `redirect: 'manual'` + cap 5 MB + wajib `image/*`; URL di body, `Cache-Control: private, no-store` | OK |
 | `POST /api/call-tokens` | `requireAuth`; kredensial TURN di-scope ke user/panggilan | OK |
 | `GET /api/stories/user/:userId` | `requireAuth`; blocklist + rate limit atomik per (requester,target) | OK |
 | `GET /api/stories/:id` | `requireAuth`; blocklist dicek lewat `authorTag`→`resolveRoutingUser` | OK |
@@ -21,7 +21,7 @@ Berkas yang di pass 1 belum dibaca penuh: `sessions.ts`, `backup.ts`,
 
 Detail yang dipuji (bukan temuan): `UserHiddenConversation` tanpa FK dan tanpa
 `userId` plaintext, `blockedUser` berbasis tag ter-seal dengan `tagCandidates()`
-(kandidat kunci lama+baru), dan `isOwnedObjectKey` untuk hapus objek R2
+(kandidat kunci lama+baru), dan `verifyObjectKeyToken` (key acak + HMAC, docs/43 T2) untuk hapus objek R2
 (`server/src/routes/messages.ts:369`) menutup F-08.
 
 ## Temuan baru (rendah)

@@ -371,7 +371,9 @@ model MessageViewOnceRecipient {
   message      Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   messageId    String
   recipientTag String
-  createdAt    DateTime @default(now())
+  // [docs/43 §43.16.3] tanpa @default(now()): waktu presisi lolos ke DB.
+  // Diisi eksplisit dengan `messageTimeBucket()` di utils/viewOnceRecipients.ts.
+  createdAt    DateTime
 
   @@unique([messageId, recipientTag])
   @@index([messageId])
@@ -471,7 +473,9 @@ model Story {
   id               String   @id @default(uuid())
   authorTag        String
   encryptedPayload String   @db.Text
-  createdAt        DateTime @default(now())
+  // [docs/43 §43.16.3] tanpa @default(now()): diisi `messageTimeBucket()`,
+  // dan `expiresAt` = createdAt kasar + 24 jam (selisih tidak membocorkan presisi).
+  createdAt        DateTime
   expiresAt        DateTime
 
   @@index([authorTag])

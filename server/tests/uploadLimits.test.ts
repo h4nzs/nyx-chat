@@ -18,11 +18,14 @@ import {
   UPLOAD_RETENTION_MAX_SECONDS,
   UPLOAD_URL_TTL_MAX_SECONDS,
   UPLOAD_URL_TTL_MIN_SECONDS,
+  buildObjectKey,
   clampFileRetentionSeconds,
   clampUploadUrlTtl,
-  isOwnedObjectKey,
+  isValidObjectKey,
+  objectKeyToken,
   resolveUploadPolicy,
   validateUploadSize,
+  verifyObjectKeyToken,
 } from '../src/utils/uploadLimits.js';
 
 const MB = 1024 * 1024;
@@ -125,23 +128,37 @@ test('fileRetention dibatasi 30 hari dan nilai tak masuk akal jadi 0', () => {
 // ============================================================================
 
 const USER = '11111111-2222-4333-8444-555555555555';
+const OTHER = '99999999-2222-4333-8444-555555555555';
+const KEY = 'attachments/0f8fad5b-d9cb-469f-a165-70867728950e';
+const SECRET = 'test-r2-key-secret';
 
-test('key milik user pada folder yang dikenal diterima', () => {
-  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-V1StGXR8_Z5jdHi6B-myT.bin`), true);
-  assert.equal(isOwnedObjectKey(USER, `avatars/${USER}-abc.jpg`), true);
-  assert.equal(isOwnedObjectKey(USER, `misc/${USER}-X.png`), true);
+test('[T2] key upload acak: tanpa userId dan tanpa ekstensi', () => {
+  const key = buildObjectKey('attachments', USER);
+  assert.equal(key, `attachments/${USER}`);
+  // UUID murni: tidak ada titik (ekstensi) dan tidak ada userId lain selain uuid itu.
+  assert.doesNotMatch(key.split('/')[1]!, /[.]/);
+  const random = buildObjectKey('attachments');
+  assert.match(random, /^attachments\/[0-9a-f-]{36}$/);
+  assert.equal(isValidObjectKey(random), true);
 });
 
-test('key user lain, folder tak dikenal, traversal, dan segmen liar ditolak', () => {
-  const other = '99999999-2222-4333-8444-555555555555';
-  assert.equal(isOwnedObjectKey(USER, `attachments/${other}-abc.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, `burner/abc.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, `secrets/${USER}-abc.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, `attachments/../${USER}-abc.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, `attachments/x/${USER}-abc.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-abc.bin/../../evil.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-abc.BIN`), false);
-  assert.equal(isOwnedObjectKey(USER, `attachments/${USER}-abc`), false, 'ekstensi wajib');
-  assert.equal(isOwnedObjectKey(undefined, `attachments/${USER}-abc.bin`), false);
-  assert.equal(isOwnedObjectKey(USER, 42), false);
+test('bentuk key: folder dikenal + uuid, tanpa traversal/segmen liar/ekstensi', () => {
+  assert.equal(isValidObjectKey(KEY), true);
+  assert.equal(isValidObjectKey('burner/0f8fad5b-d9cb-469f-a165-70867728950e'), true);
+  assert.equal(isValidObjectKey(`avatars/${USER}-abc.jpg`), false, 'format lama ber-ekstensi ditolak');
+  assert.equal(isValidObjectKey('secrets/0f8fad5b-d9cb-469f-a165-70867728950e'), false);
+  assert.equal(isValidObjectKey('attachments/../0f8fad5b-d9cb-469f-a165-70867728950e'), false);
+  assert.equal(isValidObjectKey('attachments/x/0f8fad5b-d9cb-469f-a165-70867728950e'), false);
+  assert.equal(isValidObjectKey('attachments/'), false);
+  assert.equal(isValidObjectKey(42), false);
+});
+
+test('[T2] token HMAC: hanya pasangan (userId, key) penerbitnya yang lolos', () => {
+  const token = objectKeyToken(USER, KEY, SECRET);
+  assert.equal(verifyObjectKeyToken(USER, KEY, token, SECRET), true);
+  assert.equal(verifyObjectKeyToken(OTHER, KEY, token, SECRET), false, 'user lain ditolak');
+  assert.equal(verifyObjectKeyToken(USER, `${KEY}0`, token, SECRET), false, 'key lain ditolak');
+  assert.equal(verifyObjectKeyToken(USER, KEY, undefined, SECRET), false, 'tanpa token ditolak');
+  assert.equal(verifyObjectKeyToken(USER, KEY, 'x'.repeat(token.length), SECRET), false);
+  assert.equal(verifyObjectKeyToken(USER, KEY, token, 'secret-lain'), false);
 });

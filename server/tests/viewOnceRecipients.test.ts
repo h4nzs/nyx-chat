@@ -28,6 +28,7 @@ import {
   recordViewOnceRecipients,
   type ViewOnceRecipientDb,
 } from '../src/utils/viewOnceRecipients.js';
+import { MESSAGE_TIME_BUCKET_MS } from '../src/utils/temporalBucket.js';
 
 process.env.NYX_AT_REST_PEPPER = 'viewonce-test-pepper-'.padEnd(64, 'p');
 clearAtRestSecretCacheForTests();
@@ -53,7 +54,7 @@ async function makeDb (opts: FakeOpts = {}) {
   const receipts = new Set((opts.receipts ?? []).map((u) => conversationScopedTag(CONV, u)));
   const sessionKeys = new Set(opts.sessionKeys ?? []);
 
-  const recipients: Array<{ messageId: string; recipientTag: string }> =
+  const recipients: Array<{ messageId: string; recipientTag: string; createdAt?: Date }> =
     (opts.existingRecipients ?? []).map((recipientTag) => ({ messageId: 'm1', recipientTag }));
   const opens: string[] = [...(opts.openedBy ?? [])];
   const deletes: string[] = [];
@@ -87,7 +88,7 @@ async function makeDb (opts: FakeOpts = {}) {
     },
     messageViewOnceRecipient: {
       async createMany ({ data, skipDuplicates }: {
-        data: Array<{ messageId: string; recipientTag: string }>;
+        data: Array<{ messageId: string; recipientTag: string; createdAt: Date }>;
         skipDuplicates?: boolean;
       }) {
         let count = 0;
@@ -140,6 +141,14 @@ test('penerima view-once: hanya id yang lolos bukti peserta, tanpa pengirim, ber
   });
 
   assert.equal(count, 2, 'hanya peserta sah yang dicatat (duplikat digabung)');
+  for (const row of recipients) {
+    assert.ok(row.createdAt, 'createdAt diisi eksplisit');
+    assert.equal(
+      row.createdAt!.getTime() % MESSAGE_TIME_BUCKET_MS,
+      0,
+      'createdAt dikasar ke bucket 15 menit (docs/43 §43.16.3)'
+    );
+  }
   const tags = recipients.map((r) => r.recipientTag).sort();
   assert.deepEqual(
     tags,

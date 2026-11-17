@@ -37,6 +37,8 @@
  */
 
 import { conversationScopedTag } from './atRestSecrets.js'
+// [docs/43 §43.16.3] createdAt tabel penerima ikut dikasar (15 menit).
+import { messageTimeBucket } from './temporalBucket.js'
 import {
   filterConversationParticipants,
   type ConversationParticipantDb,
@@ -46,7 +48,7 @@ import {
 export interface ViewOnceRecipientDb extends ConversationParticipantDb {
   messageViewOnceRecipient: {
     createMany(args: {
-      data: Array<{ messageId: string; recipientTag: string }>
+      data: Array<{ messageId: string; recipientTag: string; createdAt: Date }>
       skipDuplicates?: boolean
     }): Promise<{ count: number }>
     count(args: { where: Record<string, unknown> }): Promise<number>
@@ -87,9 +89,11 @@ export async function recordViewOnceRecipients(
   )
   if (verified.length === 0) return 0
 
+  const createdAt = messageTimeBucket()
   const data = Array.from(new Set(verified)).map((userId) => ({
     messageId,
     recipientTag: conversationScopedTag(conversationId, userId),
+    createdAt,
   }))
 
   await db.messageViewOnceRecipient.createMany({ data, skipDuplicates: true })

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import { clientVersionHeaders } from '../lib/clientVersion';
+import { getApiBaseUrl, getClientInstallationId, getCsrfToken } from '../lib/api';
 
 interface LinkPreviewProps {
   preview: {
@@ -31,14 +32,23 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
       setIsLoading(true);
       setHasError(false);
       try {
-        const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, "").replace(/\/$/, "");
-        // [R2] Jalur ini tidak lewat `api()`, jadi header versi dikirim eksplisit.
-        const headers: Record<string, string> = { ...clientVersionHeaders() };
+        // [docs/43 §43.16.2 T1] URL target di BODY, bukan query string: query
+        // ikut tercatat di access log nginx/Cloudflare dan cache per-URL.
+        const headers: Record<string, string> = {
+          ...clientVersionHeaders(),
+          'Content-Type': 'application/json',
+          'CSRF-Token': await getCsrfToken(),
+          'x-nyx-installation-id': await getClientInstallationId(),
+        };
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
-        const res = await fetch(`${baseUrl}/api/previews/image?url=${encodeURIComponent(preview.image)}`, {
-          headers
+        const res = await fetch(`${getApiBaseUrl()}/api/previews/image`, {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          headers,
+          body: JSON.stringify({ url: preview.image }),
         });
         
         if (res.ok && isMounted) {

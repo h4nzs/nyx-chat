@@ -23,7 +23,7 @@ hening. Tiga temuan baru semuanya **Low**, dari area yang di pass 1 belum dibaca
 | F-04 | Single-active-device fail-closed saat baca gagal, hasil error **tidak** di-cache | `server/src/network/redisBridge.ts:173-197`; `server/tests/activeDeviceFailClosed.test.ts` | **Tertutup** |
 | F-06 | `urlTtl` dan retensi presign di-clamp; burner mengabaikan `urlTtl` klien | `server/src/utils/uploadLimits.ts`, `server/src/routes/uploads.ts:88,96,152` | **Tertutup** |
 | F-07 | Paginasi memakai kursor `seq` + `limit` di-clamp | `server/src/routes/messages.ts:56-66` | **Tertutup** |
-| F-08 | Hapus objek R2 memvalidasi key utuh (`isOwnedObjectKey`) | `server/src/routes/messages.ts:364-382` | **Tertutup** |
+| F-08 | Hapus objek R2 memvalidasi key utuh (`isOwnedObjectKey`); sejak docs/43 T2 diganti key acak + token HMAC (`verifyObjectKeyToken`) | `server/src/routes/messages.ts:364-382`, `server/src/utils/uploadLimits.ts` | **Tertutup** |
 | F-09 | Cap pada `targetRecipients` (500 zod / `MAX_TYPING_TARGETS`), batch receipt, target metadata | `server/src/routes/messages.ts:191-194`, `server/src/network/realtimeHandlers.ts:1255`, `groupRealtimeAuth.ts:37` | **Tertutup** |
 | F-10 | Wildcard `https://*.cloudflare.com` dibuang dari `scriptSrc` | `server/src/app.ts:100-124` | **Tertutup**; `'unsafe-inline'` tetap (residual dicatat) |
 

@@ -13,7 +13,6 @@ import { useThemeStore } from '@store/theme';
 import { useBurnerStore } from '@store/burner';
 import { useVerificationStore } from '@store/verification';
 import useDynamicIslandStore from '@store/dynamicIsland';
-import LinkPreviewCard from './LinkPreviewCard';
 import { useMessageStore } from '@store/message';
 import { triggerSendFeedback } from '@utils/feedback';
 import { useUserProfile } from '@hooks/useUserProfile';
@@ -32,14 +31,6 @@ interface MessageInputProps {
 }
 
 // --- Helpers ---
-function debounce<Args extends unknown[]>(func: (...args: Args) => void, waitFor: number) {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Args) => {
-    if (timeout !== null) clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), waitFor);
-  };
-}
-
 function throttle<Args extends unknown[]>(func: (...args: Args) => void, limit: number) {
   let inThrottle = false;
   return (...args: Args) => {
@@ -148,14 +139,12 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   };
   
   const { 
-    typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
     expiresIn, setExpiresIn, isViewOnce, setIsViewOnce,
     stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles, updateStagedFile,
     isHD, setIsHD,
     isVoiceAnonymized, setIsVoiceAnonymized,
     editingMessage, setEditingMessage, sendEdit
   } = useMessageInputStore(useShallow(s => ({
-    typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, 
     expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce,
     stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles, updateStagedFile: s.updateStagedFile,
     isHD: s.isHD, setIsHD: s.setIsHD,
@@ -228,11 +217,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     const targetRecipients = conversation.participants?.filter(p => p.id !== meId)?.map(p => p.id) || [];
     transportClient.sendEvent("typing:stop", { conversationId: conversation.id, targetRecipients });
   }, [conversation.id, conversation.participants]);
-
-  const debouncedFetchPreview = useCallback(
-    debounce((inputText: string) => fetchTypingLinkPreview(inputText), 800),
-    [fetchTypingLinkPreview]
-  );
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -313,7 +297,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
         const targetRecipients = conversation.participants?.filter(p => p.id !== meId)?.map(p => p.id) || [];
         transportClient.sendEvent("typing:stop", { conversationId: conversation.id, targetRecipients });
       }
-      debouncedFetchPreview(newText);
     }
   };
 
@@ -405,7 +388,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       setIsVoiceAnonymized(false);
     }
     
-    clearTypingLinkPreview();
     if (isConnected) sendTypingStop();
     setShowEmojiPicker(false);
     setShowPlusMenu(false);
@@ -505,12 +487,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
             <EditPreview />
             <ReplyPreview />
 
-            {typingLinkPreview && (
-            <div className="mb-2">
-                <LinkPreviewCard preview={typingLinkPreview as { url: string; title: string; description: string; image: string; siteName: string }} />
-            </div>
-            )}
-            
             {stagedFiles.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-2 p-3 bg-bg-surface backdrop-blur-md rounded-2xl shadow-neumorphic-convex border border-text-secondary/10 flex gap-3 overflow-x-auto scrollbar-hide">
                     {stagedFiles.map((staged) => {

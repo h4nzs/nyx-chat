@@ -748,6 +748,18 @@ model baru tidak lolos. `lastUsedAt` tetap boleh diurutkan; resolusinya cukup
 
 ### 43.16.5 Urutan perbaikan
 
+> **Status 2026-11-17 — P0 implemented.** T1: preview tidak lagi diambil saat
+> mengetik, image lewat body + `Cache-Control: private, no-store`, log hanya
+> hostname. T2: key `<folder>/<uuid>` tanpa userId/ekstensi, kepemilikan hapus
+> dibuktikan token HMAC dari presign. T3: payload push tanpa
+> `conversationId`/`messageId`; deep link memakai `pushToken` opaque per
+> pengiriman per subscription (Redis `push:link:<token>`, TTL 24 jam, ditukar
+> lewat `POST /api/push/link`; token ditaruh di hash `/chat#push=…` agar tidak
+> masuk access log). Bucket
+> `Story`/`MessageViewOnceRecipient` memakai `messageTimeBucket()`, `@default(now())`
+> dihapus. Tes: `pushPayload.test.ts`, `uploadLimits.test.ts`,
+> `temporalBucket.test.ts`, `viewOnceRecipients.test.ts`.
+
 1. **P0 (satu PR kecil):** T1 preview, T2 key upload, T3 payload push, plus
    bucket `Story.createdAt/expiresAt` + `MessageViewOnceRecipient.createdAt`.
 2. **P1:** T4 header, T5 log, T6 kompresi, T7 TURN, sisa timestamp di §43.16.3,

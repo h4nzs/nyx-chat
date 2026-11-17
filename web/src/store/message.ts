@@ -558,10 +558,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         selectedMessages.forEach(message => {
             let query = '';
             let targetUrl = message.fileUrl;
+            let keyToken: string | undefined;
             try {
                 if (message.content && message.content.startsWith('{')) {
-                    const metadata = JSON.parse(message.content) as { url?: string };
+                    const metadata = JSON.parse(message.content) as { url?: string; keyToken?: string };
                     if (metadata.url) targetUrl = metadata.url;
+                    keyToken = metadata.keyToken;
                 }
             } catch (_e) {}
 
@@ -569,7 +571,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 try {
                     const url = new URL(targetUrl);
                     const key = url.pathname.substring(1);
-                    if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+                    if (key) {
+                        query = `?r2Key=${encodeURIComponent(key)}`;
+                        // [docs/43 T2] kepemilikan key dibuktikan token dari presign.
+                        if (keyToken) query += `&r2KeyToken=${encodeURIComponent(keyToken)}`;
+                    }
                 } catch (_e) {
                     console.error("Failed to parse file URL for deletion:", _e);
                 }

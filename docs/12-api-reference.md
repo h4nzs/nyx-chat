@@ -190,7 +190,13 @@ Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burn
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/` | Link preview metadata |
-| GET | `/image` | Proxied image preview |
+| POST | `/image` | Proxied image preview (URL di body; respons `private, no-store`) |
+
+## push — `/api/push`
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/link` | Tukar token opaque dari notifikasi (`pushToken`) menjadi `{ conversationId }` milik user yang sama. Token acak per pengiriman per subscription, TTL 24 jam di Redis; 404 `PUSH_LINK_INVALID` bila kedaluwarsa/asing. |
 
 ## subscriptions — `/api/subscriptions`
 
