@@ -395,7 +395,10 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
       - name: Audit production dependencies
-        run: pnpm audit --prod
+        # [docs/41 §9.6] Advisory tanpa rilis perbaikan tidak bisa "diperbaiki",
+        # jadi gerbang ini menolak semua temuan kecuali yang terdaftar di
+        # scripts/audit-exceptions.json (alasan + tanggal kedaluwarsa).
+        run: node scripts/audit-prod.mjs
       # [audit F-08] Pin transitif harus di `overrides:` (bukan `resolutions`
       # yang diabaikan pnpm) dan benar-benar muncul di lockfile.
       - name: Overrides pnpm berlaku

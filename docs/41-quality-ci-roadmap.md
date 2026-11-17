@@ -470,7 +470,7 @@ berkas ter-track. Dua dari tiga advisory grpc memang tidak terjangkau —
 `GHSA-vp52-pcj8-j9qc` (HTTP/2 DATA-frame fragmentation → OOM) yang mengenai
 server gRPC apa pun, dan itulah yang diperbaiki.
 
-**picomatch (alert #290, 17 November 2026).** `GHSA-fc5q-39xc-vjpf`
+**picomatch (alert #290, 17 November 2026; gerbang baru 18 November 2026).** `GHSA-fc5q-39xc-vjpf`
 (high, rentan `<= 4.0.7`) juga **tidak punya versi perbaikan**: `4.0.7` adalah
 rilis terakhir di registry. Di lockfile `picomatch@4.0.7` hanya dibawa
 `fdir@6.5.0` (jalur `tinyglobby` → `vite`, build/dev), bukan runtime produksi
@@ -530,3 +530,18 @@ bash scripts/drill-alerts.sh                    # SKIP_LIVE=1 di CI
 gh api repos/h4nzs/nyx-chat/branches/main/protection
 gh workflow run drills.yml                      # atau tunggu Senin 04:00 UTC
 ```
+
+**picomatch kembali pada 18 November 2026 — gerbang audit produksi.** Advisory
+yang sama (`GHSA-fc5q-39xc-vjpf`) membuat job `Dependency Audit` merah karena
+`pnpm audit --prod` menandai pohon produksi `marketing > @astrojs/react >
+vite/tinyglobby > fdir > picomatch`, padahal **versi perbaikan 4.0.8 belum
+terbit** (registry berhenti di 4.0.7 saat diperiksa). Men-dismiss lagi bukan
+tindakan yang benar untuk jalur produksi, jadi job audit sekarang memanggil
+`node scripts/audit-prod.mjs`: gerbang itu tetap menolak setiap kerentanan
+produksi kecuali yang terdaftar di `scripts/audit-exceptions.json`, dan setiap
+entri wajib punya `package`, alasan tertulis, dan tanggal `expires`. Entri
+`picomatch` kedaluwarsa **2026-12-02**; begitu 4.0.8 (atau lebih baru) terbit dan
+terpasang lewat override `>=4.0.4`, entri itu harus dihapus — gate juga menolak
+pengecualian yang tidak lagi diperlukan. Kontrol negatif dijalankan: tanpa entri,
+gerbang gagal (`1 masalah`), jadi pengecualian ini bukan jalan memutar agar
+hijau.
