@@ -264,11 +264,18 @@ describe('satu sumber kebenaran untuk header versi (R2)', () => {
           // boleh disiapkan sebagai variabel sebelum `fetch`, seperti di
           // `LinkPreviewCard`) sampai ±400 karakter sesudahnya (untuk options
           // inline) — tanpa melewati pemanggilan berikutnya.
+          //
+          // Batas bawahnya akhir pernyataan sebelumnya (`});`), bukan jarak
+          // karakter: blok header yang disiapkan sebagai variabel bisa lebih
+          // panjang dari 200 karakter (komentar + beberapa header) dan
+          // pemotongan berbasis jarak membuat pemanggilan yang BENAR dilaporkan
+          // sebagai pelanggaran. Pernyataan sebelumnya juga mencegah header milik
+          // `fetch` lain di fungsi yang sama terbaca sebagai milik pemanggilan ini.
           const start = Math.max(
             source.lastIndexOf('async', match.index),
             source.lastIndexOf('function', match.index),
             source.lastIndexOf('=>', match.index),
-            match.index - 200
+            source.lastIndexOf('});', match.index) + 3
           )
           const callSite = source.slice(start, match.index + 400)
           if (!callSite.includes('clientVersionHeaders')) {
