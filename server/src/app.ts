@@ -77,7 +77,12 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
 
 const app: Express = express();
 
-app.use(compression());
+// [docs/43 T6] Jangan kompres /api: token CSRF di JSON + input yang bisa
+// dipantulkan adalah kelas BREACH. Ciphertext sendiri high-entropy sehingga
+// kompresi tidak menghemat berarti; aset statis tetap dikompres.
+app.use(compression({
+  filter: (req, res) => !req.path.startsWith('/api') && compression.filter(req, res),
+}));
 
 // Trust Proxy: tepat 2 hop — nginx (socket) + Cloudflare edge.
 // JANGAN `true`: XFF di-append di tiap hop sehingga entri paling kiri bisa
@@ -177,12 +182,9 @@ app.use(helmet({
 }));
 
 app.disable('x-powered-by');
-
-app.use((req, res, next) => {
-  res.setHeader('X-Edge-Relay', 'nyx-enigma');
-  res.setHeader('X-Sec-Protocol', 'Double-Ratchet-Core');
-  next();
-});
+// [docs/43 T4] Header fingerprint non-standar (X-Edge-Relay/X-Sec-Protocol/
+// X-Powered-By) dihapus dari Express DAN nginx: tidak ada nilainya untuk
+// klien, tetapi menamai stack internal dan mempermudah fingerprinting.
 
 // [AUDIT 2026-10-24] Allowlist origin hidup di SATU tempat
 // (`utils/allowedOrigin.ts`). Dulu daftar ini disalin identik di gateway

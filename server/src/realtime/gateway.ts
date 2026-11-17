@@ -37,6 +37,8 @@ import { evaluateTokenGate, type TokenGateDb } from '../utils/authGate.js';
 // [AUDIT 2026-10-24] Satu allowlist origin untuk REST dan WSS.
 import { isAllowedOrigin as isOriginAllowed } from '../utils/allowedOrigin.js';
 import { env } from '../config.js';
+// [docs/43 T5] log memakai tag HMAC, bukan userId mentah.
+import { identityTag } from '../utils/redisIdentity.js';
 import { TransportOpCode } from '@nyx/shared';
 import type { AuthPayload } from '../types/auth.js';
 import {
@@ -286,7 +288,7 @@ export function createHandlerFailureReporter (
   userId: string
 ): (event: string, err: unknown, maybeCb: unknown) => void {
   return (event, err, maybeCb) => {
-    console.error(`[WS-Gateway] Handler ${event} gagal untuk user ${userId}:`, err);
+    console.error(`[WS-Gateway] Handler ${event} gagal untuk user ${identityTag(userId)}:`, err);
     if (typeof maybeCb === 'function') {
       try {
         (maybeCb as (payload: unknown) => void)({ ok: false, error: 'INTERNAL_ERROR' });

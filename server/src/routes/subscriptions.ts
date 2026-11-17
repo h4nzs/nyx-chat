@@ -8,6 +8,8 @@ import { sendJsonToUser, emitEventToUser } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
 import { SubscriptionTier } from '@nyx/shared';
 import { safeEqualStrings } from '../utils/validate.js';
+// [docs/43 T5] log tidak memuat userId mentah.
+import { identityTag } from '../utils/redisIdentity.js';
 // [AUDIT 2026-10-24] Kunci idempotensi + awal periode baru: logika murni, diuji.
 import { nextSubscriptionExpiry, resolveWebhookPaymentKey } from '../utils/subscriptionWebhook.js';
 
@@ -190,9 +192,9 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
         console.error('[Redis] Failed to clear sandbox key', e);
       }
 
-      console.log(`[Subscription] User ${userId} upgraded to SUBSCRIBER via NOWPayments`);
+      console.log(`[Subscription] User ${identityTag(userId)} upgraded to SUBSCRIBER via NOWPayments`);
     } else {
-      console.log(`[Subscription] Crypto payment status ${paymentStatus} for user ${userId}`);
+      console.log(`[Subscription] Crypto payment status ${paymentStatus} for user ${identityTag(userId)}`);
     }
 
     res.status(200).json({ message: 'OK' });

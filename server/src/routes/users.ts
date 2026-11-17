@@ -75,7 +75,7 @@ router.get('/me', async (req, res, next) => {
         const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
         if (daysLeft <= 0) {
-            console.log(`[Auth] Subscription expired for user ${userId}. Downgrading to FREE.`);
+            console.log(`[Auth] Subscription expired for user ${identityTag(userId)}. Downgrading to FREE.`);
             user = await prisma.user.update({
                 where: { id: userId },
                 data: { subscriptionTier: 'FREE' },

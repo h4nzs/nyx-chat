@@ -81,9 +81,11 @@ export async function initializeRedisBridge() {
       const data = JSON.parse(message) as { user_id: string; device_id: string; op_code: number; payload: string; msgId?: string };
 
       await handleUpstreamMessage(data.user_id, data.device_id, opCode, data.payload);
-    } catch (error) {
+    } catch {
       incCounter(RELAY_OPS, { op: relayOpLabel(channel), result: 'error' });
-      console.error('❌ Error processing upstream message:', error);
+      // [docs/43 T5] Jangan log objek error dari payload upstream: isinya bisa
+      // memuat identifier/isi. Cukup opcode-nya untuk korelasi metrik.
+      console.error(`[RedisBridge] Upstream message gagal diproses (op ${relayOpLabel(channel)})`);
     }
   });
 }
@@ -187,7 +189,7 @@ export async function isActiveDeviceAllowedWith(
   } catch (e) {
     console.warn(
       '[Security] Active-device lookup gagal — menolak perangkat (fail-closed, tanpa cache):',
-      sanitizeForLog(userId)
+      identityTag(userId)
     );
     return false;
   }
@@ -223,7 +225,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     if (!allowed) {
       incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'device_inactive' });
       incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'blocked' });
-      console.warn(`[Security] Blocked opcode ${opCode} from non-active device ${sanitizeForLog(deviceId)} (user ${sanitizeForLog(userId)})`);
+      console.warn(`[Security] Blocked opcode ${opCode} from non-active device ${sanitizeForLog(deviceId)} (user ${identityTag(userId)})`);
       return;
     }
 
@@ -235,7 +237,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     if ((await isUserBanned({ redis: redisClient, db: prisma as unknown as TokenGateDb }, userId)).banned) {
       incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'banned' });
       incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'blocked' });
-      console.warn(`[Security] Blocked opcode ${opCode} from banned user (user ${sanitizeForLog(userId)})`);
+      console.warn(`[Security] Blocked opcode ${opCode} from banned user (user ${identityTag(userId)})`);
       return;
     }
 
@@ -293,7 +295,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
 
         if (activeDeviceId && activeDeviceId !== deviceId) {
           incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'session_revoked' });
-          console.warn(`[Security-L1] Revoked device ${deviceId} (User ${userId}) tried to connect. Kicking...`);
+          console.warn(`[Security-L1] Revoked device ${deviceId} (User ${identityTag(userId)}) tried to connect. Kicking...`);
           const kickPayload = Buffer.from(JSON.stringify({
             reason: 'SESSION_REVOKED',
             deviceId,
@@ -314,7 +316,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
            // 🛡️ PERBAIKAN: Cegah bypass dengan menghilangkan payload 'identity'
            if (!authData.identity) {
               incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'identity_missing' });
-              console.warn(`[Security-L2] Missing identity payload from device ${deviceId} (User ${userId}). Kicking...`);
+              console.warn(`[Security-L2] Missing identity payload from device ${deviceId} (User ${identityTag(userId)}). Kicking...`);
               const kickPayload = Buffer.from(JSON.stringify({
                 reason: 'HARDWARE_MISMATCH',
                 deviceId,
@@ -335,7 +337,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
 
            if (!isFingerprintMatch && !isAnchorMatch) {
               incCounter(SECURITY_BLOCKS, { op: relayOpLabel(opCode), reason: 'hardware_mismatch' });
-              console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${userId}). Possible session cloning. Kicking...`);
+              console.warn(`[Security-L2] Hardware mismatch for device ${deviceId} (User ${identityTag(userId)}). Possible session cloning. Kicking...`);
               const kickPayload = Buffer.from(JSON.stringify({
                 reason: 'HARDWARE_MISMATCH',
                 deviceId,
@@ -351,7 +353,7 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
       break;
     default:
       incCounter(RELAY_OPS, { op: relayOpLabel(opCode), result: 'unhandled' });
-      console.warn(`⚠️ Unhandled OpCode: 0x${opCode.toString(16)} from user ${userId}`);
+      console.warn(`⚠️ Unhandled OpCode: 0x${opCode.toString(16)} from user ${identityTag(userId)}`);
   }
   }
 
