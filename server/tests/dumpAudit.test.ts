@@ -17,8 +17,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DERIVED_TIME_MODELS,
+  TEMPORAL_BUCKETS,
+} from '../src/lib/temporalBuckets.js';
+import {
+  auditDumpComprehensive,
   auditDumpForIdentityLeaks,
   auditPassed,
+  auditResidualPlaintextEdges,
+  auditTemporalBuckets,
+  parseDumpTimestamp,
   auditRedisArtifacts,
   columnValues,
   formatAuditReport,
@@ -240,4 +248,94 @@ test('auditRedisArtifacts: key & member SET tidak boleh memuat userId', () => {
   );
   assert.equal(auditPassed(leaky), false);
   assert.deepEqual(leaky.filter((f) => !f.ok).map((f) => f.rule), ['redis.key-names', 'redis.set-members']);
+});
+
+// ---------------------------------------------------------------------------
+// [docs/43 §43.16.4 R9] Audit bucket waktu + edge residual.
+//
+// Klaim §43.16.3 ("semua kolom waktu sudah dikasar") sebelumnya hanya bisa
+// dipercaya lewat bacaan manual. Tes ini membuktikan auditnya benar-benar
+// membaca dump: nilai di batas bucket lulus, nilai berpresisi bocor gagal.
+// ---------------------------------------------------------------------------
+
+/** Dump dengan kolom waktu `Device` lengkap, semua di batas bucket 15 menit. */
+function deviceTimestampDump(overrides: Record<string, string> = {}): string {
+  const fields = TEMPORAL_BUCKETS.Device!;
+  const columns = fields.map(({ field }) => `"${field}"`).join(', ');
+  const values = fields.map(({ field }) => overrides[field] ?? '2026-11-17 10:00:00+00').join('\t');
+  return `COPY public."Device" (id, ${columns}) FROM stdin;\ndev-1\t${values}\n\\.\n`;
+}
+
+test('parseDumpTimestamp: format pg_dump, offset zona waktu, dan sampah', () => {
+  const base = Date.UTC(2026, 10, 17, 10, 0, 0);
+  assert.equal(parseDumpTimestamp('2026-11-17 10:00:00+00'), base);
+  assert.equal(parseDumpTimestamp('2026-11-17T10:00:00Z'), base);
+  assert.equal(parseDumpTimestamp('2026-11-17 10:00:00.000'), base, 'tanpa offset = UTC');
+  assert.equal(parseDumpTimestamp('2026-11-17 15:30:00+0530'), base, 'offset +05:30 dihormati');
+  assert.equal(parseDumpTimestamp('2026-11-17 03:00:00-07'), base, 'offset negatif dihormati');
+  assert.equal(parseDumpTimestamp('2026-11-17 10:07:33.123456+00'), base + 7 * 60_000 + 33_123);
+  assert.equal(parseDumpTimestamp('bukan-timestamp'), null);
+});
+
+test('auditTemporalBuckets: nilai di batas bucket LULUS', () => {
+  const findings = auditTemporalBuckets(parseCopySections(deviceTimestampDump()));
+  const failed = findings.filter((f) => !f.ok);
+  assert.deepEqual(failed.map((f) => f.rule), [], `tak boleh ada temuan: ${JSON.stringify(failed)}`);
+  assert.ok(findings.some((f) => f.rule === 'Device.createdAt-bucket'), 'kolom Device benar-benar diperiksa');
+});
+
+test('auditTemporalBuckets: presisi detik yang bocor GAGAL terdeteksi', () => {
+  const field = TEMPORAL_BUCKETS.Device![0]!.field;
+  const findings = auditTemporalBuckets(
+    parseCopySections(deviceTimestampDump({ [field]: '2026-11-17 10:07:33+00' }))
+  );
+  const failed = findings.filter((f) => !f.ok);
+  assert.deepEqual(failed.map((f) => f.rule), [`Device.${field}-bucket`]);
+  assert.match(failed[0]!.detail, /TIDAK di batas bucket/);
+});
+
+test('auditTemporalBuckets: tabel ada tapi kolom waktu hilang → TIDAK BISA diverifikasi', () => {
+  const findings = auditTemporalBuckets(
+    parseCopySections('COPY public."Device" (id) FROM stdin;\ndev-1\n\\.\n')
+  );
+  const failed = findings.filter((f) => !f.ok);
+  assert.ok(failed.length > 0, 'kolom yang tidak ada tidak boleh dianggap aman');
+  assert.match(failed[0]!.detail, /TIDAK BISA diverifikasi/);
+});
+
+test('auditTemporalBuckets: model turunan tidak boleh di-bucket ganda', () => {
+  const findings = auditTemporalBuckets(parseCopySections(deviceTimestampDump()));
+  for (const model of DERIVED_TIME_MODELS) {
+    const finding = findings.find((f) => f.rule === `${model}-derived-time`)!;
+    assert.equal(finding.ok, true, `${model} tidak ada di peta bucket`);
+  }
+});
+
+test('auditResidualPlaintextEdges: userId hanya boleh muncul di edge residual', () => {
+  const allowed = `COPY public."Device" (id, "userId") FROM stdin;\ndev-1\t${ALICE}\n\\.\n`;
+  const ok = auditResidualPlaintextEdges(parseCopySections(allowed), [ALICE]);
+  assert.equal(ok[0]!.ok, true, ok[0]!.detail);
+
+  const leaky = allowed +
+    `COPY public."SessionKey" (id, "userId") FROM stdin;\nsk-1\t${BOB}\n\\.\n`;
+  const bad = auditResidualPlaintextEdges(parseCopySections(leaky), [ALICE, BOB]);
+  assert.equal(bad[0]!.ok, false);
+  assert.match(bad[0]!.detail, /SessionKey\.userId/);
+});
+
+test('auditDumpComprehensive: menjalankan identitas + bucket waktu + edge residual', () => {
+  const findings = auditDumpComprehensive(CLEAN_DUMP + deviceTimestampDump(), CTX);
+  const rules = findings.map((f) => f.rule);
+  assert.ok(rules.includes('Message.senderId'), 'pemeriksaan identitas ikut jalan');
+  assert.ok(rules.some((rule) => rule.startsWith('Device.') && rule.endsWith('-bucket')), 'bucket waktu ikut jalan');
+  assert.ok(rules.includes('residual-edges'), 'edge residual ikut jalan');
+  // `CLEAN_DUMP` sengaja hanya memuat sebagian kolom, jadi pemeriksaan bucket
+  // melaporkan "tidak bisa diverifikasi" — di sini yang dibuktikan adalah
+  // ketiga kelompok pemeriksaan benar-benar berjalan dan tidak ada kebocoran
+  // identitas pada kolom yang ADA di fixture.
+  assert.deepEqual(
+    findings.filter((f) => !f.ok && !f.rule.endsWith('-bucket')).map((f) => f.rule),
+    []
+  );
+  assert.equal(findings.find((f) => f.rule === 'residual-edges')!.ok, true);
 });

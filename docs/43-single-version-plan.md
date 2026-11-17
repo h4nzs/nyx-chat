@@ -739,12 +739,12 @@ model baru tidak lolos. `lastUsedAt` tetap boleh diurutkan; resolusinya cukup
 | R1 | **Edge graph tetap plaintext** | `Device.userId` (FK), `SessionKey.deviceId` + `conversationId`, `Message.conversationId`, `UserHiddenConversation.conversationId`; hanya `userId` keanggotaan yang sealed | Tak terhindarkan untuk routing, tetapi dump tetap bisa menggambar akun→perangkat→percakapan. Dokumentasikan sebagai residual; pertahankan purge `SessionKey` 30 hari; **jangan menambah edge plaintext baru** |
 | R2 | **Volume pesan** | `Conversation.messageSeq` + `Message.seq` | Jumlah/urutan per percakapan terlihat walau isi dan ukuran di-pad. Residual; jangan tambah counter yang tidak perlu |
 | R3 | **`banReason` teks bebas** | `schema.prisma` model `User` | Bisa memuat kutipan laporan/PII. Seal, atau batasi enum + catatan terpisah |
-| R4 | **Fingerprint authenticator** | `Authenticator.credentialID`, `transports`, `credentialDeviceType`, `credentialBackedUp` | Kombinasi ini mencirikan model security key. Risiko rendah; pertimbangkan membuang `transports` bila tidak dipakai |
+| R4 | **Fingerprint authenticator** | `Authenticator.credentialID`, `transports`, `credentialDeviceType`, `credentialBackedUp` | **Diputuskan tetap (2026-11-18):** `transports` bukan metadata hiasan — dipakai `routes/auth.ts:1666/1725/1820` + `utils/webauthnCredentials.ts:50` (daftar `allowCredentials` dan verifikasi assertion). Membuangnya menurunkan UX passkey tanpa menghilangkan fingerprint (credentialID + deviceType + backedUp sudah cukup). Risiko rendah, dicatat sebagai residual |
 | R5 | **Kunci push + deviceId** | `PushSubscription.p256dh`/`auth` plaintext, `deviceId` FK | Bukan identifier sendiri, tetapi terikat perangkat. Endpoint sudah sealed; biarkan |
 | R6 | **Tabel tak terpakai** | `MessageViewOnceRecipient`, `PreKeyBundle`, `GroupMailboxItem` **dipakai** lewat `utils/viewOnceRecipients.ts`, `utils/keyBundle.ts`, `utils/groupMailbox.ts`; satu-satunya tabel mati adalah `Tenant` | Tidak ada tabel yatim selain `Tenant`; hapus lewat §43.17 |
 | R7 | **Identifier deterministik** | `usernameHash`, `oprfIndex` unik | Ber-pepper, jadi dump tanpa env tidak bisa membalik; enumerasi online dibatasi rate limit. Pertahankan |
 | R8 | **Hash rahasia otoritas** | `Conversation.authSecret`, `adminSecretHash`, `Message.deleteSecret` | SHA-256 dari token 256-bit acak — benar, jangan diganti |
-| R9 | **Dump audit belum memeriksa waktu/graph** | `utils/dumpAudit.ts:65` hanya daftar identitas | Tambah pemeriksaan timestamp presisi dan edge yang memang residual, supaya klaim §43.16 tidak bergantung pada bacaan manual |
+| R9 | **Dump audit belum memeriksa waktu/graph** | `utils/dumpAudit.ts` | **Selesai 2026-11-18:** `auditTemporalBuckets()` membaca `TEMPORAL_BUCKETS`/`TEMPORAL_EXCEPTIONS`/`DERIVED_TIME_MODELS` dan gagal bila nilai timestamp tidak jatuh di batas bucket (15 menit / harian); `auditResidualPlaintextEdges()` memindai SELURUH kolom dump dan hanya mengizinkan userId asli di `User.id` + `Device.userId` (R1), sehingga kolom baru yang lupa di-seal langsung tertangkap; `parseDumpTimestamp()` menghormati offset zona. Skrip `scripts/privacy-dump-audit.ts` memakai `auditDumpComprehensive()`; 7 tes di `server/tests/dumpAudit.test.ts` (19 total) mengunci termasuk kontrol negatif (presisi bocor & userId di kolom tak tercatat → GAGAL) |
 
 ### 43.16.5 Urutan perbaikan
 
@@ -765,6 +765,18 @@ model baru tidak lolos. `lastUsedAt` tetap boleh diurutkan; resolusinya cukup
 > (objek error upstream tidak lagi dicetak); kompresi `gzip` dimatikan untuk
 > `/api`; contoh TURN menaruh `turns:` lebih dulu dengan catatan residual
 > coturn. Tes: `transitPrivacy.test.ts`.
+>
+> **Status 2026-11-18 — P2 selesai (R9 + R4/R1).** `utils/dumpAudit.ts` kini
+> membuktikan klaim §43.16 lewat dump, bukan bacaan manual: `auditTemporalBuckets()`
+> memeriksa setiap kolom di `TEMPORAL_BUCKETS` (dan gagal bila kolom hilang, supaya
+> audit tidak hijau karena kolomnya tidak ketemu), `auditResidualPlaintextEdges()`
+> memindai semua kolom dan hanya mengizinkan userId di `User.id` + `Device.userId`
+> (R1), dan `parseDumpTimestamp()` menghormati offset zona waktu. Skrip
+> `scripts/privacy-dump-audit.ts` memanggil `auditDumpComprehensive()`; 7 tes baru
+> (19 total di `server/tests/dumpAudit.test.ts`) mengunci perilaku positif dan
+> negatifnya. R4 diputuskan **tetap**: `transports` dipakai verifikasi WebAuthn
+> (`routes/auth.ts`, `utils/webauthnCredentials.ts`) sehingga membuangnya menurunkan
+> UX passkey tanpa menghapus fingerprint. R1/R2 tetap residual terdokumentasi.
 >
 > **Status 2026-11-17 — sisa P1 selesai (timestamp + `banReason`).**
 > Bucket waktu tidak ditambal per titik tulis (50+ situs mudah terlewat), tapi

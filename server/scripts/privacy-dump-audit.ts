@@ -38,6 +38,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import {
+  auditDumpComprehensive,
   auditDumpForIdentityLeaks,
   auditPassed,
   auditRedisArtifacts,
@@ -89,7 +90,9 @@ async function runOffline(dumpFile: string, secretsFile: string | undefined): Pr
   if (secretsFile) {
     ctx = JSON.parse(await readFile(secretsFile, 'utf8')) as DumpAuditContext;
   }
-  const findings = auditDumpForIdentityLeaks(dump, ctx);
+  // [docs/43 §43.16.4 R9] Versi lengkap: identitas + bucket waktu + edge
+  // residual. `auditDumpForIdentityLeaks` tetap dipakai tes fixture-nya sendiri.
+  const findings = auditDumpComprehensive(dump, ctx);
   console.log(`\n=== Audit dump (${dumpFile}) ===`);
   console.log(formatAuditReport(findings));
   return auditPassed(findings) ? 0 : 1;

@@ -24,6 +24,12 @@
  *  - Redis (key + member SET) tidak memuat userId asli.
  */
 
+import {
+  DERIVED_TIME_MODELS,
+  TEMPORAL_BUCKETS,
+  TEMPORAL_EXCEPTIONS,
+} from '../lib/temporalBuckets.js';
+
 export interface CopySection {
   table: string;
   columns: string[];
@@ -217,6 +223,171 @@ export function auditDumpForIdentityLeaks(dump: string, ctx: DumpAuditContext): 
   }
 
   return findings;
+}
+
+/** Pola timestamp `pg_dump`/PostgreSQL: `2026-11-17 10:00:00+00`, `…-07`, `…Z`. */
+const DUMP_TIMESTAMP_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:([+-])(\d{2})(?::?(\d{2}))?|Z)?$/;
+
+/**
+ * [docs/43 §43.16.4 R9] Ubah nilai kolom timestamp `pg_dump` ke epoch milidetik.
+ *
+ * Offset zona waktu dihormati (`+00`, `+0530`, `Z`) karena bucket 15 menit di
+ * `temporalBuckets.ts` dihitung dari epoch UTC: mengabaikan offset akan membuat
+ * dump dari host non-UTC terlihat "tidak ter-bucket" padahal benar.
+ */
+export function parseDumpTimestamp(value: string): number | null {
+  const trimmed = value.trim();
+  const match = DUMP_TIMESTAMP_RE.exec(trimmed);
+  if (!match) return null;
+  const fraction = (match[7] ?? '0').padEnd(3, '0').slice(0, 3);
+  let epoch = Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6]),
+    Number(fraction)
+  );
+  if (match[8]) {
+    const offsetMs = (Number(match[9]) * 60 + Number(match[10] ?? '0')) * 60_000;
+    epoch -= (match[8] === '-' ? -1 : 1) * offsetMs;
+  }
+  return epoch;
+}
+
+/**
+ * [docs/43 §43.16.4 R9] Buktikan klaim bucket waktu lewat DUMP, bukan bacaan
+ * manual: setiap kolom di `TEMPORAL_BUCKETS` yang muncul di dump harus berisi
+ * nilai yang jatuh tepat di batas bucket-nya.
+ *
+ * Kolom yang TIDAK ada di dump dilaporkan gagal (anti-vakum) — sama seperti
+ * pemeriksaan identitas: audit yang hijau karena kolomnya tidak ketemu lebih
+ * buruk daripada audit yang gagal terang-terangan. Tabel yang tidak ada sama
+ * sekali dilewati, karena `pg_dump --table` memang bisa memilih sebagian tabel.
+ */
+export function auditTemporalBuckets(sections: CopySection[], now: Date = new Date()): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+  const tables = new Set(sections.map((section) => section.table));
+
+  for (const [model, fields] of Object.entries(TEMPORAL_BUCKETS)) {
+    if (!tables.has(model)) continue;
+    const exceptions = TEMPORAL_EXCEPTIONS[model] ?? {};
+    for (const { field, bucketMs } of fields) {
+      const rule = `${model}.${field}`;
+      if (exceptions[field]) {
+        findings.push({ rule: `${rule}-bucket`, ok: true, detail: `pengecualian tercatat: ${exceptions[field]}` });
+        continue;
+      }
+      if (!hasColumn(sections, model, field)) {
+        findings.push({
+          rule: `${rule}-bucket`,
+          ok: false,
+          detail: `kolom ${model}.${field} tidak ada di dump — TIDAK BISA diverifikasi`,
+        });
+        continue;
+      }
+      const values = columnValues(sections, model, field);
+      const unparsed = values.filter((value) => parseDumpTimestamp(value) === null);
+      const misaligned = values.filter((value) => {
+        const epoch = parseDumpTimestamp(value);
+        return epoch !== null && epoch % bucketMs !== 0;
+      });
+      if (unparsed.length > 0) {
+        findings.push({
+          rule: `${rule}-bucket`,
+          ok: false,
+          detail: `${unparsed.length}/${values.length} nilai timestamp tidak terbaca: ${unparsed.slice(0, 2).join(', ')}`,
+        });
+        continue;
+      }
+      findings.push({
+        rule: `${rule}-bucket`,
+        ok: misaligned.length === 0,
+        detail:
+          misaligned.length === 0
+            ? `${values.length} nilai, semua di batas bucket ${bucketMs / 60_000} menit`
+            : `${misaligned.length}/${values.length} nilai TIDAK di batas bucket ${bucketMs / 60_000} menit (presisi waktu bocor)`,
+      });
+    }
+  }
+
+  // Model turunan (`Message`, `Story`) menurunkan `expiresAt` dari waktu yang
+  // sudah dipotong di route; kalau suatu saat model itu masuk peta bucket,
+  // bucket ganda akan memisahkan `createdAt` dari `expiresAt`.
+  for (const model of DERIVED_TIME_MODELS) {
+    findings.push({
+      rule: `${model}-derived-time`,
+      ok: !(model in TEMPORAL_BUCKETS),
+      detail:
+        model in TEMPORAL_BUCKETS
+          ? `model turunan ${model} masuk TEMPORAL_BUCKETS — bucket ganda memisahkan createdAt dari expiresAt`
+          : `waktu ${model} diturunkan di route (tidak di-bucket ganda); diperiksa di ${now.toISOString().slice(0, 10)}`,
+    });
+  }
+
+  return findings;
+}
+
+/**
+ * [docs/43 §43.16.4 R1] Kolom yang MEMANG memuat userId asli menurut desain:
+ *   - `User.id` — baris akun itu sendiri (bukan edge);
+ *   - `Device.userId` — routing perangkat → akun, residual R1 yang tercatat.
+ *
+ * Kolom lain yang memuat userId asli adalah kebocoran yang tidak
+ * didokumentasikan — termasuk kolom baru yang lupa di-seal.
+ */
+export const RESIDUAL_USER_ID_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
+  { table: 'User', column: 'id' },
+  { table: 'Device', column: 'userId' },
+];
+
+/**
+ * [docs/43 §43.16.4 R9] Cari userId asli di SELURUH kolom dump, lalu izinkan
+ * hanya di kolom residual yang tercatat. Ini menangkap kolom baru yang memuat
+ * userId tanpa disadari — pemeriksaan identitas di atas hanya mengenali kolom
+ * yang sudah terdaftar.
+ */
+export function auditResidualPlaintextEdges(sections: CopySection[], userIds: string[]): AuditFinding[] {
+  if (userIds.length === 0) {
+    return [{
+      rule: 'residual-edges',
+      ok: true,
+      detail: 'tidak ada userId acuan yang di-seed — pemeriksaan edge residual dilewati',
+    }];
+  }
+  const allowed = new Set(RESIDUAL_USER_ID_COLUMNS.map(({ table, column }) => `${table}.${column}`));
+  const unexpected: string[] = [];
+  for (const section of sections) {
+    for (const column of section.columns) {
+      if (allowed.has(`${section.table}.${column}`)) continue;
+      const leaks = leakedSecrets(sections, section.table, column, userIds);
+      if (leaks.length > 0) unexpected.push(`${section.table}.${column}`);
+    }
+  }
+  return [{
+    rule: 'residual-edges',
+    ok: unexpected.length === 0,
+    detail:
+      unexpected.length === 0
+        ? `userId asli hanya muncul di edge residual yang tercatat (${[...allowed].join(', ')}); ${sections.length} tabel diperiksa`
+        : `userId asli muncul di kolom yang TIDAK tercatat sebagai residual: ${unexpected.slice(0, 5).join(', ')}`,
+  }];
+}
+
+/**
+ * Satu pintu audit untuk skrip: identitas + bucket waktu + edge residual.
+ * Dipisah dari `auditDumpForIdentityLeaks` supaya fixture lama tetap sah, tetapi
+ * skrip nyata memakai versi lengkap ini.
+ */
+export function auditDumpComprehensive(dump: string, ctx: DumpAuditContext): AuditFinding[] {
+  const sections = parseCopySections(dump);
+  return [
+    ...auditDumpForIdentityLeaks(dump, ctx),
+    ...auditTemporalBuckets(sections),
+    ...auditResidualPlaintextEdges(sections, ctx.userIds ?? []),
+  ];
 }
 
 /** Periksa artefak Redis: key & member SET tidak boleh memuat userId asli. */
