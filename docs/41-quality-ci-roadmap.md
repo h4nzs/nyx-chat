@@ -470,6 +470,14 @@ berkas ter-track. Dua dari tiga advisory grpc memang tidak terjangkau —
 `GHSA-vp52-pcj8-j9qc` (HTTP/2 DATA-frame fragmentation → OOM) yang mengenai
 server gRPC apa pun, dan itulah yang diperbaiki.
 
+**picomatch (alert #290, 17 November 2026).** `GHSA-fc5q-39xc-vjpf`
+(high, rentan `<= 4.0.7`) juga **tidak punya versi perbaikan**: `4.0.7` adalah
+rilis terakhir di registry. Di lockfile `picomatch@4.0.7` hanya dibawa
+`fdir@6.5.0` (jalur `tinyglobby` → `vite`, build/dev), bukan runtime produksi
+server maupun web, jadi alert ditutup `tolerable_risk` dengan alasan tertulis.
+Kalau `picomatch` keluar dengan versi baru, Dependabot akan membuka alert baru
+dan bump itu masuk seperti bump lain di tabel atas.
+
 **deepmerge.** `GHSA-gcqx-w48m-w2h4` tidak punya versi perbaikan (rentan
 `>=4.2.0 <=4.3.1`, dan 4.3.1 rilis terbaru). Alert #281 ditutup
 `tolerable_risk` dengan alasan tertulis: hanya dibawa
