@@ -759,6 +759,28 @@ model baru tidak lolos. `lastUsedAt` tetap boleh diurutkan; resolusinya cukup
 > `Story`/`MessageViewOnceRecipient` memakai `messageTimeBucket()`, `@default(now())`
 > dihapus. Tes: `pushPayload.test.ts`, `uploadLimits.test.ts`,
 > `temporalBucket.test.ts`, `viewOnceRecipients.test.ts`.
+>
+> **Status 2026-11-17 — P1 transit (T4–T7) implemented.** Header sidik jari
+> dihapus dari Express dan nginx; log gateway/redis memakai `identityTag`
+> (objek error upstream tidak lagi dicetak); kompresi `gzip` dimatikan untuk
+> `/api`; contoh TURN menaruh `turns:` lebih dulu dengan catatan residual
+> coturn. Tes: `transitPrivacy.test.ts`.
+>
+> **Status 2026-11-17 — sisa P1 selesai (timestamp + `banReason`).**
+> Bucket waktu tidak ditambal per titik tulis (50+ situs mudah terlewat), tapi
+> lewat satu Prisma client extension: `server/src/lib/temporalBuckets.ts`
+> memetakan model→field, dan `lib/prisma.ts` memanggilnya untuk setiap
+> `create`/`createMany`/`update`/`updateMany`/`upsert`. `User.updatedAt`,
+> `Conversation.updatedAt`, dan `RefreshToken.lastUsedAt` melepas `@updatedAt`
+> (anotasi itu menimpa nilai bucket dengan presisi detik) dan diganti
+> `@default(now())` yang kemudian diisi extension. Kolom `expiresAt` yang harus
+> tepat `createdAt + TTL` didaftar di `TEMPORAL_EXCEPTIONS` dengan alasan, dan
+> `Message`/`Story` tetap menurunkan `expiresAt` di route. `BanReason` kini enum
+> (`TOS_VIOLATION`, `SPAM`, `ABUSE`, `IMPERSONATION`, `SECURITY`, `OTHER`);
+> `POST /api/admin/ban` memetakan kalimat bebas lewat `toBanReason()`, respons
+> 403 dan payload kick membawa kode, bukan kalimat operator. Tes:
+> `temporalSchema.test.ts` (12, termasuk enumerasi field dari `schema.prisma`
+> sehingga kolom waktu baru tidak lolos diam-diam) dan `banReason.test.ts` (4).
 
 1. **P0 (satu PR kecil):** T1 preview, T2 key upload, T3 payload push, plus
    bucket `Story.createdAt/expiresAt` + `MessageViewOnceRecipient.createdAt`.

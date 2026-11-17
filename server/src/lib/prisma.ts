@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { bucketTemporalArgs } from './temporalBuckets.js';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -29,9 +30,30 @@ if (env !== 'development' && env !== 'test' && !isLocalDb) {
 const pool = new Pool({ connectionString: finalUrl });
 const adapter = new PrismaPg(pool);
 
-export const prisma = new PrismaClient({
+const base = new PrismaClient({
   adapter,
   log: env === 'development' ? ['query', 'error', 'warn'] : ['error'],
 });
+
+/**
+ * [docs/43 §43.16.3] Semua kolom temporal yang tidak dibutuhkan untuk urutan
+ * presisi dipotong ke bucket sebelum ditulis (15 menit untuk aktivitas, harian
+ * untuk langganan). Dipasang sebagai extension, bukan di 50+ titik tulis,
+ * supaya model baru ikut aturan ini tanpa perlu diingat.
+ *
+ * Cast ke `PrismaClient` karena tipe hasil `$extends()` adalah tipe dinamis
+ * yang tidak menyatu dengan `PrismaClient` yang dipakai di signature fungsi
+ * (`network/realtimeHandlers.ts`). Runtime tetap klien hasil extension.
+ */
+export const prisma = base.$extends({
+  name: 'temporalBuckets',
+  query: {
+    $allModels: {
+      async $allOperations({ model, operation, args, query }) {
+        return query(bucketTemporalArgs(model, operation, args) as typeof args);
+      },
+    },
+  },
+}) as unknown as PrismaClient;
 
 export default prisma;

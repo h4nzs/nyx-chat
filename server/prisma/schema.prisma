@@ -39,10 +39,15 @@ model User {
   contactBundleVersion   Int?
 
   createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  // [docs/43 §43.16.3] `@updatedAt` dihapus: Prisma menimpanya dengan waktu
+  // presisi penuh sehingga bucket 15 menit tak pernah berlaku. Nilainya kini
+  // diisi lib/temporalBuckets.ts (create + setiap update).
+  updatedAt        DateTime  @default(now())
   role             String    @default("USER")
   bannedAt         DateTime?
-  banReason        String?
+  // [docs/43 §43.16.4 R3] Dulu teks bebas — bisa memuat kutipan laporan/PII
+  // di dump. Sekarang enum: server tidak pernah menyimpan kalimat operator.
+  banReason        BanReason?
   // [docs/28 Tier 2 — B4] Hari aktivitas terakhir (dipotong ke hari, UTC) —
   // dipakai dead man's switch. Presisi detik tak diperlukan & hanya menambah
   // pola temporal pada dump. Lihat utils/temporalBucket.ts.
@@ -159,7 +164,8 @@ model RefreshToken {
   replacedBy    RefreshToken? @relation("TokenReplacement", fields: [replacedById], references: [id])
   replacedToken RefreshToken? @relation("TokenReplacement")
   createdAt     DateTime      @default(now())
-  lastUsedAt    DateTime      @updatedAt
+  // [docs/43 §43.16.3] `@updatedAt` dihapus; diisi lib/temporalBuckets.ts.
+  lastUsedAt    DateTime      @default(now())
   expiresAt     DateTime
 
   @@index([deviceId])
@@ -235,7 +241,8 @@ model Conversation {
 
   lastMessageAt DateTime?                @db.Timestamptz(6)
   createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
+  // [docs/43 §43.16.3] `@updatedAt` dihapus; diisi lib/temporalBuckets.ts.
+  updatedAt     DateTime                 @default(now())
   messages      Message[]
   sessionKeys   SessionKey[]
   hiddenBy      UserHiddenConversation[]
@@ -253,6 +260,17 @@ enum MessageType {
 enum SubscriptionTier {
   FREE
   SUBSCRIBER
+}
+
+// [docs/43 §43.16.4 R3] Alasan ban tidak lagi teks bebas. Kode ini yang
+// disimpan, ditampilkan ke admin, dan dikirim ke akun yang ditolak.
+enum BanReason {
+  TOS_VIOLATION
+  SPAM
+  ABUSE
+  IMPERSONATION
+  SECURITY
+  OTHER
 }
 
 model Message {

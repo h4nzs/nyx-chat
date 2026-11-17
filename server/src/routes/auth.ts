@@ -915,7 +915,8 @@ router.post('/refresh', async (req, res, next) => {
 
     const user = await prisma.user.findUnique({ where: { id: payload.sub } })
     if (!user) throw new ApiError(401, 'User not found')
-    if (user.bannedAt) throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
+    // [docs/43 §43.16.4 R3] Pesan tetap generik; kode alasan dikirim terpisah.
+    if (user.bannedAt) throw new ApiError(403, 'ACCESS DENIED: Your account has been suspended.')
 
     // --- PROPER ROTATION WITH FAMILY CHAIN ---
     // 1. Mark old token as replaced (don't delete — keep for reuse detection)

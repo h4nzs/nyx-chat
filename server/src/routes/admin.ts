@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { prisma } from '../lib/prisma.js';
 import { s3Client } from '../utils/r2.js';
+import { toBanReason } from '../utils/banReason.js';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { env } from '../config.js';
 import { redisClient } from '../lib/redis.js';
@@ -91,11 +92,14 @@ router.get('/banned-users', requireAuth, requireAdmin, async (req, res) => {
 router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
   const { userId, reason } = req.body;
   if (!userId) return res.status(400).json({ error: 'User ID required' });
+  // [docs/43 §43.16.4 R3] Hanya kode enum yang disimpan/dikirim — kalimat bebas
+  // dari dashboard tidak pernah masuk DB maupun payload socket.
+  const banReason = toBanReason(reason);
 
   try {
     await prisma.user.update({
         where: { id: userId },
-        data: { bannedAt: new Date(), banReason: reason || 'Violation of TOS' }
+        data: { bannedAt: new Date(), banReason }
     });
 
     // Invalidate ban cache agar middleware requireAuth segera melihat ban baru
@@ -103,8 +107,8 @@ router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
 
     // KICK USER DARI WEBTRANSPORT
     try {
-      await emitEventToUser(userId, 'auth:banned', { reason });
-      await sendJsonToUser(userId, TransportOpCode.KICK, { reason });
+      await emitEventToUser(userId, 'auth:banned', { reason: banReason });
+      await sendJsonToUser(userId, TransportOpCode.KICK, { reason: banReason });
     } catch (err) {
       console.error("[Admin] Failed to ban/kick user:", err);
     }

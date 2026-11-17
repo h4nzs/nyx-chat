@@ -18,6 +18,7 @@ interface BannedUser {
   username: string;
   email: string;
   bannedAt: string;
+  // [docs/43 §43.16.4 R3] Kode enum dari server, bukan kalimat operator.
   banReason: string;
 }
 
@@ -178,7 +179,7 @@ export default function AdminDashboard() {
                           </div>
                           <div className="text-xs text-text-secondary font-mono mb-1">ID: {bannedUser.id}</div>
                           <div className="text-xs text-text-secondary">
-                            <span className="opacity-60">{t('reason', 'Reason:')}</span> <span className="italic text-text-secondary">&quot;{bannedUser.banReason}&quot;</span>
+                            <span className="opacity-60">{t('reason', 'Reason:')}</span> <span className="font-mono text-text-secondary">{bannedUser.banReason}</span>
                           </div>
                           <div className="text-[10px] text-text-secondary mt-1 opacity-50">
                             {t('banned', 'Banned:')} {new Date(bannedUser.bannedAt).toLocaleString()}
