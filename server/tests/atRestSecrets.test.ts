@@ -153,7 +153,7 @@ test('credentialTokenMatches: hanya nilai tersimpan ber-hash yang diterima', () 
 });
 
 test('sealAtRest: deterministik (lookup by equality) + tidak terbaca tanpa pepper', async () => {
-  const value = 'tenant-api-key-rahasia';
+  const value = 'sample-api-key-rahasia';
 
   await withPepper('p-seal', async () => {
     const sealedA = await sealAtRest(value);
@@ -229,14 +229,14 @@ test('[P6] tanpa key ring: envelope tetap format legacy (rollback aman)', async 
 
 test('[P6] key ring aktif: tulisan ENC2, roundtrip, deterministik', async () => {
   await withPepper('p-rotasi', () => withKeyring(KEYRING_2026_11, async () => {
-    const sealedA = await sealAtRest('tenant-api-key');
-    const sealedB = await sealAtRest('tenant-api-key');
+    const sealedA = await sealAtRest('sample-api-key');
+    const sealedB = await sealAtRest('sample-api-key');
 
     assert.match(sealedA, new RegExp(`^${AT_REST_ENVELOPE_V2}:k2026-11:`), 'prefiks memuat id kunci aktif');
     assert.equal(sealedA, sealedB, 'deterministik per kunci → kolom tetap bisa di-lookup');
     assert.equal(sealedKeyId(sealedA), 'k2026-11');
-    assert.equal(await openAtRest(sealedA), 'tenant-api-key');
-    assert.notEqual(await sealAtRest('tenant-api-key-lain'), sealedA);
+    assert.equal(await openAtRest(sealedA), 'sample-api-key');
+    assert.notEqual(await sealAtRest('sample-api-key-lain'), sealedA);
 
     const status = atRestStatus();
     assert.equal(status.activeKeyId, 'k2026-11');

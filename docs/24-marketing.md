@@ -6,10 +6,10 @@ The public marketing/landing site is a separate Astro app (`marketing/`), styled
 
 - **Astro** (build `format: 'file'`), `@astrojs/react` islands, Tailwind v4 (`@tailwindcss/vite`).
 - **i18n**: Astro built-in — `defaultLocale: 'en'` (no prefix), locales `en, id, es, pt-BR`.
-- Scripts: `dev`, `build` (`astro build` → 32 pages), `preview`.
+- Scripts: `dev`, `build` (`astro build` → 28 pages), `preview`.
 - `astro.config.mjs`: `noExternal: ['react-icons']` (SSR requirement), `__APP_VERSION__` define.
 
-## 24.2 Pages (8 content + 8 `[lang]` wrappers)
+## 24.2 Pages (7 content + 7 `[lang]` wrappers)
 
 | Page | Purpose |
 |---|---|
@@ -20,7 +20,6 @@ The public marketing/landing site is a separate Astro app (`marketing/`), styled
 | `refund.astro` | Crypto-only refund policy (NOWPayments) |
 | `security.astro` | Security architecture: 12 sections with animated visualizations |
 | `hall-of-fame.astro` | Security researchers registry |
-| `api-docs.astro` | B2B integration docs |
 
 Each has a `pages/[lang]/*.astro` wrapper (`getStaticPaths` for `id`/`es`/`pt-BR`) that re-renders the base page with a `lang` prop.
 
@@ -31,7 +30,7 @@ Each has a `pages/[lang]/*.astro` wrapper (`getStaticPaths` for `id`/`es`/`pt-BR
 
 ## 24.4 i18n (52 files)
 
-`src/locales/{en,id,es,pt-BR}/` × 13 namespaces: `api-docs, auth, commercial, common, errors, hall-of-fame, help, landing, modals, privacy, refund, security, settings`.
+`src/locales/{en,id,es,pt-BR}/` × 12 namespaces: `auth, commercial, common, errors, hall-of-fame, help, landing, modals, privacy, refund, security, settings`.
 - `utils/i18n.ts`: `import.meta.glob('../locales/**/*.json', {eager})` → `useTranslations(lang)` returning `t('landing:hero.description')` with `{{var}}` interpolation.
 
 ## 24.5 Design tokens (`src/index.css`)

@@ -1187,7 +1187,7 @@ sungguhan (TPM/SE/Titan) dan rantai vendor nyata — keduanya butuh perangkat fi
 
 Kolom ter-seal (`UserHiddenConversation.userId`, `Story.authorTag`,
 `BlockedUser.*Tag`, `Message.senderId|sessionId|repliedToId`, `Device.nameSealed`,
-`Tenant.apiKey`, `PushSubscription.endpointSealed`, device id di `content` SYSTEM)
+`PushSubscription.endpointSealed`, device id di `content` SYSTEM)
 dulu memakai satu kunci turunan `NYX_AT_REST_PEPPER` dan envelope tanpa versi.
 Sekarang envelope ber-versi dan kuncinya bisa dirotasi **tanpa downtime**.
 
@@ -1224,7 +1224,7 @@ kembali ke legacy. Status aman dilihat di `GET /api/admin/system-status` →
 5. Verifikasi: jalankan dry-run lagi → `0 legacy`, `0 ditulis`. Baru setelah itu
    slot lama boleh dihapus dari key ring.
 6. Cek fungsional: kirim pesan 1:1 & grup, buka daftar perangkat, blokir/unblock,
-   story, logout (hapus push), admin tenants.
+   story, logout (hapus push), admin ban/unban.
 
 **Rollback.** Kembalikan `active` ke slot lama — **jangan** mengosongkan key
 ring setelah ada baris `ENC2`: nilai yang ditulis dengan slot baru hanya bisa

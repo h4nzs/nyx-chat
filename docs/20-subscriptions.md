@@ -1,6 +1,6 @@
-# 20 — Trust Tiers, Subscriptions & B2B (Engine)
+# 20 — Trust Tiers & Subscriptions
 
-Anti-spam trust tiers, the paid subscription flow (fiat + crypto), and the B2B tenant/embed "Engine" — plus the auxiliary AI/reporting/admin surfaces.
+Anti-spam trust tiers and the crypto-only subscription flow — plus the auxiliary AI/reporting/admin surfaces.
 
 ## 20.1 Trust tiers (anti-spam without PII)
 
@@ -28,18 +28,12 @@ flowchart LR
 - The webhook route is exempt from CSRF and uses **constant-time** signature comparison.
 - **Expiry:** `GET /api/users/me` lazily downgrades expired subscribers; `systemSweeper` (daily) also downgrades.
 
-## 20.3 B2B Engine (`/api/engine`)
-
-- Tenants are created by admins (`POST /api/admin/tenants`) with an `apiKey`.
-- `POST /api/engine/rooms` (authenticated by `x-nyx-engine-key` → `requireTenantAuth`): looks up/creates a tenant user (`usernameHash = sha256(tenant:externalId)`), creates a conversation, issues two short-lived iframe tokens, and returns `userAUrl`/`userBUrl` for `EmbedChatPage`.
-- `EmbedChatPage` (`/embed/chat/:id`) renders a bare `ChatWindow` with a token, suitable for an iframe — no sidebar/layout. The page stores the URL token as the `embed_at` cookie (lifetime = token `exp`); `requireAuth` accepts it after `at` (`docs/14` §14.5).
-
-## 20.4 Reports & admin
+## 20.3 Reports & admin
 
 - `POST /api/reports/user` and `POST /api/reports` forward to Discord webhooks ("NYX Watchdog" / "NYX Reporter").
-- **Admin console** (`/admin-console`, `AdminDashboard`): `GET /api/admin/system-status` (VPS/DB/R2 metrics), `banned-users`, `ban`/`unban`, `tenants` CRUD, `tenants/:id/toggle`.
+- **Admin console** (`/admin-console`, `AdminDashboard`): `GET /api/admin/system-status` (VPS/DB/R2 metrics), `banned-users`, `ban`/`unban`.
 
-## 20.6 Files to know
+## 20.4 Files to know
 
 | File | Role |
 |---|---|
@@ -48,8 +42,6 @@ flowchart LR
 | `web/src/pages/AdminDashboard.tsx` | admin console |
 | `server/src/routes/subscriptions.ts` | NOWPayments (crypto-only) |
 | `server/src/routes/auth.ts` | PoW challenge/verify |
-| `server/src/routes/engine.ts` | B2B room factory |
 | `server/src/routes/admin.ts` | admin endpoints |
 | `server/src/routes/reports.ts` | Discord reports |
-| `server/src/middleware/tenantAuth.ts` | tenant API key gate |
 | `packages/shared/src/constants.ts` | LIMITS |

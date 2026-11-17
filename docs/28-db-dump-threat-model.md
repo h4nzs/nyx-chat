@@ -1,5 +1,10 @@
 # 28 — Threat Model: DB Dump (menuju ZK sesungguhnya)
 
+> **Status fitur (2026-11-17):** tenant/B2B/embed sudah dihapus — model `Tenant`,
+> `User.tenantId`/`externalIdSealed`, `Conversation.tenantId`, `/api/engine`, dan
+> halaman embed tidak ada lagi. Bagian D4 serta baris `Tenant` di bawah adalah
+> catatan historis audit, bukan keadaan kode saat ini.
+
 > **Status:** AUDIT **SELESAI** — seluruh rencana (Tier 0–3 + residual) sudah
 > mendarat di kode. Dokumen ini kini berfungsi sebagai catatan ancaman +
 > guardrail, bukan rencana tertunda. Lihat §28.5 (status per item), §28.6
@@ -191,7 +196,7 @@ yang sama seharusnya dipakai untuk `authSecret`/`deleteSecret`
 dan dibandingkan dual-mode (`credentialTokenMatches`) sehingga baris legacy
 plaintext tetap berfungsi. Guard: `tests/schemaPrivacy.test.ts` (D3/D4).
 
-### D4 — TINGGI: `Tenant.apiKey` plaintext + identitas B2B
+### D4 — TINGGI (SUPERSEDED 2026-11-17): `Tenant.apiKey` plaintext + identitas B2B
 `apiKey` plaintext + `Tenant.allowedDomains` + `User.externalId` +
 `Conversation.metadata` (JSON bebas dari tenant, `server/src/routes/engine.ts:99`).
 **Bahaya terburuk:** dump = akses penuh API B2B (mint user, buat room, keluarkan

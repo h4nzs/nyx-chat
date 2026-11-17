@@ -58,7 +58,7 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 - `localOrderKey.ts` (+ leaf `localOrderBucket.ts`) — two-layer message ordering: plaintext `orderBucketMs` (range-scannable) + sealed `createdAtSealed` (precision). Readers must take the boundary bucket WHOLE; see `docs/30` §30.20.
 - `searchIndex.ts` — in-memory search index built from already-decrypted messages while the vault is open (no plaintext FTS on disk); `searchBench.ts` measures index build + memory.
 - `fuzzParsers.ts` — deterministic fuzz campaign for untrusted-input parsers (`parseTransportHello`, backup header/archive/chunk/padding); runner + self-test in `__tests__/fuzzParsers.test.ts` (`docs/11` §11.1c).
-- `tokenStorage.ts` — cookie helpers: `EMBED_ACCESS_COOKIE` (`embed_at`) + `setEmbedAccessCookie` (expiry follows the token's `exp`), `eraseCookie`, `clearAuthCookies`. Never writes the session cookie name `at`.
+- `tokenStorage.ts` — `clearAuthCookies()`; never writes the session cookie names `at`/`rt` from JS.
 - `biometricUnlock.ts` — WebAuthn PRF setup/unlock.
 - `sodiumInitializer.ts` — `getSodium`, `initializeSodium`.
 - `refreshLock.ts` — `runExclusive` cross-tab mutex.

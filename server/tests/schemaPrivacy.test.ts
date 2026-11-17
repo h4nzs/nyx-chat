@@ -16,7 +16,7 @@
  *   D6  blind index username ter-pepper
  *   D7  fingerprint perangkat ter-index
  *   D10 endpoint push ter-seal
- *   D11 metadata bebas tenant & PK time-ordered hilang
+ *   D11 metadata bebas & PK time-ordered hilang
  *   D9 residual: label device & anchor instalasi ter-seal
  *
  * D14 (Redis tanpa userId asli + presence tanpa broadcast roster global) TIDAK
@@ -150,12 +150,12 @@ test('D9/D10 residual: label device, anchor instalasi & endpoint push ter-seal',
   assert.match(read('../src/utils/sendPushNotification.ts'), /openAtRest\(sub\.endpointSealed\)/, 'endpoint dibuka HANYA saat mengirim push');
 });
 
-test('D11 residual: metadata bebas tenant tidak lagi dipersist', () => {
+test('D11 residual: metadata bebas tidak lagi dipersist', () => {
   const schema = read('../prisma/schema.prisma');
   const conversation = modelBody(schema, 'Conversation');
 
-  // `Conversation.metadata` dulu JSON bebas dari tenant (write-only: tak pernah
-  // dibaca server) → apa pun yang dititipkan tenant tersimpan apa adanya.
+  // `Conversation.metadata` dulu JSON bebas (write-only: tak pernah dibaca
+  // server) → apa pun yang dititipkan klien tersimpan apa adanya.
   assert.doesNotMatch(conversation, /^\s*metadata\s+Json/m, 'kolom metadata Json dihapus');
 
   // D11: tak ada PK ber-default `cuid()` (time-ordered → membocorkan waktu buat).

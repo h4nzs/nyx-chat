@@ -23,7 +23,7 @@ CSRF state is keyed **per client** via the `x-nyx-installation-id` header. The c
 Usually a DB connectivity symptom (see above). If it's a query error, check `Message.expiresAt` index exists (`prisma db push` after schema changes).
 
 ### `POST /api/pir/query → 403 Invalid CSRF token` (lewat OHTTP)
-Amplop OHTTP **tidak membawa cookie**: relay membuang header klien, dan identitasnya token ber-scope di dalam amplop. Lapisan CSRF global (`server/src/app.ts`) melewati `/api/pir/query` hanya bila request tidak punya cookie sesi (`at`/`rt`/`embed_at`). Kalau 403 ini muncul, berarti ada cookie sesi yang ikut terkirim di dalam amplop (klien menambahkan `cookie` manual) atau pengecualian di `app.ts` hilang. Jangan melebarkan pengecualiannya ke path lain.
+Amplop OHTTP **tidak membawa cookie**: relay membuang header klien, dan identitasnya token ber-scope di dalam amplop. Lapisan CSRF global (`server/src/app.ts`) melewati `/api/pir/query` hanya bila request tidak punya cookie sesi (`at`/`rt`). Kalau 403 ini muncul, berarti ada cookie sesi yang ikut terkirim di dalam amplop (klien menambahkan `cookie` manual) atau pengecualian di `app.ts` hilang. Jangan melebarkan pengecualiannya ke path lain.
 
 ### `/api/pir/*` → 404 atau `503 PIR_UNAVAILABLE`
 - 404 = `PIR_ENABLED` kosong; router memang tidak dipasang (bukan 403).

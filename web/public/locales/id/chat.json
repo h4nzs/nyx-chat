@@ -204,9 +204,5 @@
     "send_failed": "Pesan gagal dikirim. Coba lagi.",
     "offline": "Tidak bisa terhubung ke server. Periksa koneksi Anda.",
     "session_terminated": "Sesi ini sudah dihancurkan oleh host."
-  },
-  "embed": {
-    "missing_id": "ID percakapan tidak ditemukan",
-    "load_failed": "Gagal memuat chat. Periksa token atau koneksi Anda."
   }
 }

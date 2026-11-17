@@ -26,7 +26,7 @@ Comprehensive documentation for the NYX codebase and application — a zero-know
 | [17-burner.md](17-burner.md) | Burner chats: link, anonymous guest, PQ-DR, file sharing, destroy |
 | [18-realtime-transport.md](18-realtime-transport.md) | WebTransport worker, Rust sidecar, Redis bridge, presence/typing, calls, push, reconnect |
 | [19-media-stories.md](19-media-stories.md) | Attachment encryption/upload/cache, stories, media tools |
-| [20-subscriptions-b2b.md](20-subscriptions-b2b.md) | Trust tiers, crypto-only payments (NOWPayments), B2B engine/embed, reports, admin |
+| [20-subscriptions.md](20-subscriptions.md) | Trust tiers, crypto-only payments (NOWPayments), reports, admin |
 
 ### Reference (module catalog)
 

@@ -14,8 +14,7 @@
 | `requireAuth` | `middleware/auth.ts` | Cookie/Bearer JWT, Redis JTI blacklist, ban check (Redis cache 15m, invalidated on ban/unban) |
 | `requireAdmin` | `middleware/auth.ts` | Role gate |
 | `generalLimiter`/`authLimiter`/`uploadLimiter` | `middleware/rateLimiter.ts` | RedisStore; key = `clientIpTag(req)` — **HMAC pepper** dari alamat klien (CF-Connecting-IP dulu, lalu `ipKeyGenerator`), bukan alamat mentah → key Redis tidak menyimpan IP (`docs/30` §30.12 WS-H) |
-| `tenantAuth` | `middleware/tenantAuth.ts` | B2B tenant API key gate (engine routes) |
-| CSRF | `app.ts` | `csrf-csrf`, state keyed per `x-nyx-installation-id`. `/api/pir/query` dilewati **hanya** bila request tidak membawa cookie sesi (`at`/`rt`/`embed_at`) — jalur OHTTP membawa token ber-scope di amplop, bukan cookie |
+| CSRF | `app.ts` | `csrf-csrf`, state keyed per `x-nyx-installation-id`. `/api/pir/query` dilewati **hanya** bila request tidak membawa cookie sesi (`at`/`rt`) — jalur OHTTP membawa token ber-scope di amplop, bukan cookie |
 
 ## 7.3 Route modules
 
@@ -33,8 +32,7 @@ See [12-api-reference.md](12-api-reference.md) for the complete endpoint catalog
 | `uploads.ts` | Presigned R2 uploads (standard + burner), group avatars |
 | `previews.ts` | Link preview fetch / image proxy |
 | `subscriptions.ts` | NOWPayments webhook (HMAC verified, constant-time) — crypto-only |
-| `engine.ts` | B2B room factory (tenant) |
-| `admin.ts` | Admin console: status, ban/unban, tenants |
+| `admin.ts` | Admin console: status, ban/unban |
 | `reports.ts` | Report user/bug (Discord webhook) |
 | `system.ts` | `/status` (VPS metrics) |
 | `wellKnown.ts` | RFC 9727 API catalog + OAuth/OIDC/MCP discovery docs |

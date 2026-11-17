@@ -1,6 +1,6 @@
 # 12 — API Reference (complete catalog)
 
-Base URL: `https://api.nyx-app.my.id/api`. All request bodies are JSON (limit 1MB; uploads 1MB). Cookies: `at` (access, 15m) and `rt` (refresh, 30d), HttpOnly. `GET /api/engine/rooms` embeds hand the page a token in the URL; the client stores it as `embed_at` — a separate, non-HttpOnly cookie whose lifetime equals the token's `exp` — and `requireAuth` accepts it as a fallback after `at` (`docs/20` §20.3). CSRF: header `CSRF-Token` for non-GET when cookies are used. Most routes require `requireAuth` (cookie or `Authorization: Bearer`).
+Base URL: `https://api.nyx-app.my.id/api`. All request bodies are JSON (limit 1MB; uploads 1MB). Cookies: `at` (access, 15m) and `rt` (refresh, 30d), HttpOnly. CSRF: header `CSRF-Token` for non-GET when cookies are used. Most routes require `requireAuth` (cookie or `Authorization: Bearer`).
 
 Conventions: `:id` = CUID, keys are base64url, ciphertexts are opaque strings. Responses are JSON; errors use `{ "error": "..." }`.
 
@@ -199,12 +199,6 @@ Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burn
 | POST | `/create-crypto-transaction` | NOWPayments transaction (requireAuth) |
 | POST | `/nowpayments-webhook` | NOWPayments IPN (HMAC, constant-time). Idempoten per `payment_id`; 503 `WEBHOOK_NOT_CONFIGURED` bila `NOWPAYMENTS_IPN_SECRET` kosong |
 
-## engine — `/api/engine` (B2B, tenant auth)
-
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/rooms` | Create an embeddable room (`requireTenantAuth`); returns room URL |
-
 ## admin — `/api/admin`
 
 | Method | Path | Notes |
@@ -213,9 +207,6 @@ Event realtime terkait (KEY_SYNC): `burner:join` (ACK `{ok, terminated}`), `burn
 | GET | `/banned-users` | List banned users |
 | POST | `/ban` | Ban user (invalidates ban cache, KICKs) |
 | POST | `/unban` | Unban (invalidates ban cache) |
-| GET | `/tenants` | List tenants |
-| POST | `/tenants` | Create tenant (apiKey) |
-| PATCH | `/tenants/:id/toggle` | Toggle tenant active state |
 
 ## reports — `/api/reports`
 

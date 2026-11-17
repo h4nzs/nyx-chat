@@ -204,9 +204,5 @@
     "send_failed": "Falha ao enviar a mensagem. Tente novamente.",
     "offline": "Não foi possível conectar ao servidor. Verifique sua conexão.",
     "session_terminated": "Esta sessão foi destruída pelo host."
-  },
-  "embed": {
-    "missing_id": "ID da conversa ausente",
-    "load_failed": "Falha ao carregar o chat. Verifique seu token ou conexão."
   }
 }

@@ -16,7 +16,6 @@ erDiagram
     User ||--o{ BlockedUser : blocks
     User ||--o{ UserHiddenConversation : hides
     User ||--o{ MessageStatus : tracks
-    User }o--|| Tenant : belongs
     Device ||--o{ OneTimePreKey : holds
     Device ||--|{ PreKeyBundle : owns
     Device ||--o{ RefreshToken : mints
@@ -24,7 +23,6 @@ erDiagram
     Device ||--o{ SessionKey : stores
     Conversation ||--o{ Message : contains
     Conversation ||--o{ SessionKey : has
-    Conversation }o--|| Tenant : belongs
     Conversation ||--o{ UserHiddenConversation : hidden_by
     Message ||--o{ MessageStatus : has
     Message }o--|| User : sender
@@ -49,7 +47,6 @@ erDiagram
 | `User.encryptedContactBundle` | satu blob opaque per user — backup daftar kenalan terenkripsi klien (server tidak bisa membaca); versi = hash isi untuk fetch kondisional |
 | `Authenticator` | WebAuthn credentials |
 | `BlockedUser` | block lists |
-| `Tenant` | B2B multi-tenancy (apiKey, allowed domains) |
 
 ## 9.3 Indexes
 

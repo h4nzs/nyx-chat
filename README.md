@@ -274,7 +274,7 @@ Full technical documentation lives in [`docs/`](docs/README.md).
 | [Burner Chats](docs/17-burner.md) | Anonymous RAM-only PQ conversations |
 | [Realtime Transport](docs/18-realtime-transport.md) | WebTransport, sidecar, Redis bridge, presence, calls |
 | [Media & Stories](docs/19-media-stories.md) | Attachment encryption, stories |
-| [Subscriptions & B2B](docs/20-subscriptions-b2b.md) | Trust tiers, crypto payments, engine/embed |
+| [Subscriptions](docs/20-subscriptions.md) | Trust tiers, crypto payments, reports, admin |
 
 **Privacy, Signal-parity & advanced crypto**
 

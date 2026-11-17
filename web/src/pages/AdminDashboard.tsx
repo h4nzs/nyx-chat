@@ -86,7 +86,7 @@ export default function AdminDashboard() {
 
   if (user?.role !== 'ADMIN') return null;
 
-  if (!metrics && activeTab === 'dashboard') return (
+  if (!metrics) return (
     <div className="flex items-center justify-center h-screen bg-bg-main text-text-secondary font-mono animate-pulse">
       INITIALIZING SYSTEM LINK...
     </div>
@@ -203,111 +203,7 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-        </>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1">
-            <div className="bg-bg-surface p-8 rounded-xl border border-text-secondary/10 shadow-lg">
-              <h2 className="text-lg text-accent mb-6 font-bold flex items-center gap-2">
-                {t('add_tenant', 'ADD TENANT')}
-              </h2>
-              <form onSubmit={createTenant} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-text-secondary mb-1 uppercase tracking-wider">{t('tenant_name', 'Tenant Name')}</label>
-                  <input
-                    type="text"
-                    value={newTenantName}
-                    onChange={(e) => setNewTenantName(e.target.value)}
-                    className="w-full bg-bg-main border border-border-subtle rounded-lg px-4 py-2 text-text-primary focus:outline-none focus:border-accent"
-                    placeholder={t('tenant_name_placeholder')}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-text-secondary mb-1 uppercase tracking-wider">{t('allowed_domains', 'Allowed Domains (Comma separated)')}</label>
-                  <input
-                    type="text"
-                    value={newTenantDomains}
-                    onChange={(e) => setNewTenantDomains(e.target.value)}
-                    className="w-full bg-bg-main border border-border-subtle rounded-lg px-4 py-2 text-text-primary focus:outline-none focus:border-accent"
-                    placeholder={t('domains_placeholder')}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="w-full bg-accent px-6 py-3 rounded-lg text-white font-bold hover:bg-accent/80 transition-all shadow-lg shadow-accent/20"
-                >
-                  {t('generate_key', 'GENERATE KEY')}
-                </button>
-              </form>
-            </div>
-          </div>
-
-          <div className="lg:col-span-2">
-            <div className="bg-bg-surface rounded-xl border border-text-secondary/10 shadow-lg overflow-hidden flex flex-col h-[500px]">
-              <div className="p-4 border-b border-text-secondary/10 bg-black/5 dark:bg-white/5 flex justify-between items-center">
-                <h3 className="font-bold text-sm tracking-wider">{t('b2b_tenants', 'B2B TENANTS')} ({tenants.length})</h3>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {isFetchingTenants && tenants.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-text-secondary opacity-50 animate-pulse">
-                    LOADING TENANTS...
-                  </div>
-                ) : tenants.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-text-secondary opacity-50">
-                    <p>{t('no_tenants_found', 'No tenants found')}</p>
-                  </div>
-                ) : (
-                  tenants.map(tenant => (
-                    <div key={tenant.id} className="bg-bg-main p-4 rounded-lg border border-text-secondary/10 flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-bold text-lg">{tenant.name}</h4>
-                          <div className="text-xs text-text-secondary font-mono mt-1 opacity-70">ID: {tenant.id}</div>
-                        </div>
-                        <button
-                          onClick={() => toggleTenant(tenant.id)}
-                          className={`px-3 py-1 text-xs font-bold uppercase rounded border transition-colors ${
-                            tenant.isActive 
-                              ? 'bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-white' 
-                              : 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500 hover:text-white'
-                          }`}
-                        >
-                          {tenant.isActive ? t('active', 'ACTIVE') : t('inactive', 'INACTIVE')}
-                        </button>
-                      </div>
-                      
-                      <div className="text-sm">
-                        <span className="text-text-secondary text-xs uppercase tracking-wider block mb-1">{t('allowed_domains', 'Allowed Domains')}:</span>
-                        <div className="flex flex-wrap gap-2">
-                          {tenant.allowedDomains.length > 0 ? tenant.allowedDomains.map(d => (
-                            <span key={d} className="bg-black/5 dark:bg-white/5 px-2 py-1 rounded text-xs">{d}</span>
-                          )) : <span className="text-text-secondary italic text-xs">None</span>}
-                        </div>
-                      </div>
-
-                      <div>
-                        <span className="text-text-secondary text-xs uppercase tracking-wider block mb-1">API KEY:</span>
-                        <div className="flex items-center gap-2">
-                          <code className="bg-black/30 px-3 py-2 rounded text-xs text-accent flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                            ••••••••••••••••••••••••••••••••
-                          </code>
-                          <button
-                            onClick={() => copyApiKey(tenant.apiKey)}
-                            className="bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-black/10 dark:bg-white/10 p-2 rounded transition-colors text-text-secondary hover:text-white"
-                            title={t('copy_api_key')}
-                          >
-                            <FiCopy />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </>
 
       <BanUserModal 
         isOpen={isBanModalOpen} 

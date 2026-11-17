@@ -770,6 +770,10 @@ pelarangan IP/UA, cover traffic, dan pemisahan `ENC1:`/`ENC2:` tetap seperti
 
 ## 43.17 Rencana penghapusan tenant / B2B / embed
 
+> **Status (2026-11-17):** dieksekusi. Kode, skema, rute, UI, i18n, tes, dan
+> halaman marketing B2B dihapus; `Tenant`/`externalIdSealed`/`metadata` tidak
+> lagi ada di skema. Drop kolom fisik mengikuti `prisma db push` saat deploy.
+
 Keputusan: fitur **tenant, B2B Engine, dan halaman embed dihapus seluruhnya**.
 Alasannya bukan hanya "tanpa pemilik" (§43.15.2 #5), tetapi juga privasi:
 `Tenant` mengelompokkan akun di bawah satu organisasi, `tenantId` menjadi edge
@@ -805,7 +809,7 @@ penghapusan pada commit ini.
 | Admin UI | `pages/AdminDashboard.tsx:24-41` (interface), `48-160` (state/fungsi), `195-390` (tab/UI tenant) | Hapus; pertahankan dashboard, banned users, metrik |
 | i18n | `web/public/locales/{en,es,id,pt-BR}/admin.json:23-40` (11 kunci tenant); `chat.json:208-211` (`embed`) | Hapus di keempat bahasa (aturan "semua locale" tetap) |
 | Marketing | `marketing/src/pages/api-docs.astro:72-75`; `marketing/src/locales/*/api-docs.json` (deskripsi B2B + contoh `POST /api/engine/rooms`); `commercial.json` (enterprise/B2B) | Hapus/halaman diganti; build marketing |
-| Docs | `docs/20-subscriptions-b2b.md` §20.3 + judul/ringkasan; `docs/07`, `09`, `10`, `11`, `12`, `13`, `14` §14.5, `21`, `22`, `28` (D4/D11), `30`; `docs/README` indeks | Perbarui; arsip `docs/audit/*` cukup diberi catatan "fitur dihapus" — jangan tulis ulang sejarah audit |
+| Docs | `docs/20-subscriptions.md` §20.3 + judul/ringkasan; `docs/07`, `09`, `10`, `11`, `12`, `13`, `14` §14.5, `21`, `22`, `28` (D4/D11), `30`; `docs/README` indeks | Perbarui; arsip `docs/audit/*` cukup diberi catatan "fitur dihapus" — jangan tulis ulang sejarah audit |
 | Dokumen ini | §43.15.2 #5 | Tandai selesai setelah eksekusi (bukan dihapus) |
 
 ### 43.17.3 Urutan eksekusi

@@ -20,8 +20,8 @@ nyx-chat/
 │   └── e2e/                  # Playwright specs
 ├── server/                   # Express 5 API (ESM TS, run via tsx)
 │   ├── src/
-│   │   ├── routes/           # 24 mounted route modules
-│   │   ├── middleware/       # requireAuth, rateLimiter, tenantAuth
+│   │   ├── routes/           # 23 mounted route modules
+│   │   ├── middleware/       # requireAuth, rateLimiter, clientVersion
 │   │   ├── network/          # redisBridge.ts — Redis pub/sub ↔ Rust sidecar
 │   │   ├── jobs/             # messageSweeper, systemSweeper, cleanup, ktSnapshot, pirSnapshot (node-cron)
 │   │   ├── lib/              # prisma.ts, redis.ts, sodium.ts

@@ -27,8 +27,7 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 | `uploads.ts` | `/api/uploads` | `presigned`, `burner-presigned`, `groups/:id/avatar` |
 | `previews.ts` | `/api/previews` | `POST /` (link preview), `GET /image` (proxy) |
 | `subscriptions.ts` | `/api/subscriptions` | `create-crypto-transaction`, `nowpayments-webhook` (crypto-only) |
-| `engine.ts` | `/api/engine` | `rooms` (B2B) |
-| `admin.ts` | `/api/admin` | `system-status`, `banned-users`, `ban`/`unban`, `tenants` CRUD + toggle |
+| `admin.ts` | `/api/admin` | `system-status`, `banned-users`, `ban`/`unban` |
 | `reports.ts` | `/api/reports` | `user`, `POST /` (bug) |
 | `system.ts` | `/api/system` | `status` |
 | `wellKnown.ts` | `/.well-known` | `api-catalog`, `openid-configuration`, `oauth-*`, `mcp/server-card.json`, `agent-skills/index.json` |
@@ -43,9 +42,8 @@ A complete inventory of `server/src`. Feature-level behavior is in `14`–`20`; 
 
 | File | Middleware |
 |---|---|
-| `auth.ts` | `requireAuth` (cookie `at`, fallback `embed_at` for embed pages, / Bearer; JTI blacklist; ban cache; sets `req.user`/`req.deviceId`). Token ber-`scope=ohttp` (120 dtk) hanya diterima untuk target allowlist OHTTP (`utils/ohttpToken.ts`), jadi token dari amplop tidak bisa dipakai memutasi/mengirim apa pun. `requireAdmin`, `verifyAuth` |
+| `auth.ts` | `requireAuth` (cookie `at` / Bearer; JTI blacklist; ban cache; sets `req.user`/`req.deviceId`). Token ber-`scope=ohttp` (120 dtk) hanya diterima untuk target allowlist OHTTP (`utils/ohttpToken.ts`), jadi token dari amplop tidak bisa dipakai memutasi/mengirim apa pun. `requireAdmin`, `verifyAuth` |
 | `rateLimiter.ts` | `generalLimiter` (300/15m), `authLimiter` (20/h), `uploadLimiter` (20/h) — RedisStore, key = `clientIpTag(req)` (HMAC pepper atas alamat klien, **bukan** IP mentah — `docs/30` §30.12 WS-H) |
-| `tenantAuth.ts` | `requireTenantAuth` (validates `x-nyx-engine-key`) |
 | `clientVersion.ts` | `clientVersionGate` — baca header `x-nyx-client-version`, tolak dengan 426 `CLIENT_TOO_OLD`/`CLIENT_VERSION_REQUIRED` |
 
 ## 22.4 Network bridge (`network/redisBridge.ts`, 400 L)

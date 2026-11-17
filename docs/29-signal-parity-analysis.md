@@ -126,7 +126,7 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 | 21 | Negosiasi kapabilitas | **ada** di kedua relay: `hello-v1`, `spqr-ratchet`, `pq-v2`; klien lama (tanpa daftar) tetap legacy | `DeviceCapability`, `ClientRelease`, gRPC/protobuf ter-skema | **≈** |
 | 22 | Jaminan rekayasa | 137 berkas tes web, 99 berkas tes server, 58 tes Go KT + oracle DR, 2 crate Rust, 14 spec Playwright; fuzz deterministik; oracle DR non-libsodium; 44 aturan alert + drill; oxlint blocking; **tanpa** formal method/audit eksternal | ribuan test, verifikasi formal hax/F*/ProVerif, fuzzing (libFuzzer), audit eksternal, reproducible build | **SIG+** |
 | 23 | Operabilitas/self-host | 1 VPS, pm2 + beberapa unit systemd — siapa pun bisa jalankan | butuh FDB/Dynamo/Scylla — praktis tidak self-hostable | **NYX+** |
-| 24 | Ekosistem produk | web + marketing + tenant B2B/subscription | semua platform, stickers, call links, backup, donations | **SIG+** |
+| 24 | Ekosistem produk | web + marketing + subscription | semua platform, stickers, call links, backup, donations | **SIG+** |
 | 25 | Privasi pencarian | OPRF + PIR + OHTTP; snapshot PIR disegarkan lewat penanda generasi (≤3 menit) | ContactDiscovery (SGX), tanpa PIR | **NYX+** (privasi kueri) / SIG+ (laten si & skala) |
 
 ---

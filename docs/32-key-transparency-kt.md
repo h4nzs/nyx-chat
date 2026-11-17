@@ -205,8 +205,6 @@ dalam 1 jam). Keduanya tidak menyala pada instance sepi.
    - **Klien lama** yang tidak mengirim identifier: dilewati dengan alasan
      `no_identifier` (bukan menulis entri salah) — jadi celah ini tinggal di
      perangkat yang belum diperbarui, dan operasinya melihatnya di metrik.
-   - Jalur yang tetap tidak menulis log: device dummy iframe B2B
-     (`routes/engine.ts`, akun tenant dengan kunci dummy).
    - **Sisa yang disadari:** pembandingnya adalah baris `Device`, bukan entri log.
      Jadi rotasi yang terjadi **sebelum** perbaikan ini (log sudah memuat kunci
      lama, `Device` sudah memuat kunci baru) tidak "sembuh" oleh upload berikutnya
