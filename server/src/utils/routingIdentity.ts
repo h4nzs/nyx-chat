@@ -21,7 +21,7 @@
  * supaya sealing konsisten.
  */
 
-import { openAtRest, sealAtRest, sealedLookupCandidates } from './atRestSecrets.js'
+import { openAtRest, sealAtRest } from './atRestSecrets.js'
 import { evaluateMemberToken, hashGroupToken, memberTokenExpiry } from './groupTokens.js'
 
 /** Nilai kanonik untuk kolom routing (deterministik, kunci seal aktif). */
@@ -30,16 +30,14 @@ export function routingIdentity(userId: string): Promise<string> {
 }
 
 /**
- * Nilai lookup kanonik (selalu ter-seal).
- * [2026-10 legacy purge] Cabang "apa adanya" untuk baris plaintext dibuang.
+ * Nilai lookup kanonik — SATU nilai (kunci aktif), bukan daftar kandidat.
  *
- * [docs/37 §37.4 P6] Setelah key ring aktif, baris lama (`ENC1`-style, kunci id
- * `0`) dan baru (`ENC2:<keyId>:…`) hidup berdampingan sampai job re-seal selesai.
- * Karena itu kandidatnya **dua nilai** (kunci aktif + legacy) selama rotasi;
- * semua pemanggil sudah memakai `where: { kolom: { in: kandidat } }`.
+ * [docs/43 §43.3.3] Sejak format at-rest tunggal, tidak ada lagi baris dengan
+ * kunci lama yang perlu dicari. Array dipertahankan hanya karena pemanggil
+ * memakai bentuk query `{ in: … }`; isinya selalu satu nilai.
  */
 export async function routingCandidates(userId: string): Promise<string[]> {
-  return sealedLookupCandidates(userId)
+  return [await routingIdentity(userId)]
 }
 
 /**
@@ -225,12 +223,10 @@ export async function findMembership(
 export const storyAuthorTag = routingIdentity
 
 /**
- * [docs/37 §37.4 P6] Kandidat tag untuk `Story.authorTag` dan `BlockedUser`.
- * Nilainya sama dengan `routingIdentity`, tetapi lookup harus menerima format
- * lama dan baru selama re-seal — memakai `storyAuthorTag(userId)` tunggal akan
- * kehilangan baris lama tepat setelah rotasi kunci.
+ * [docs/43 §43.3.3] Kandidat tag untuk `Story.authorTag` dan `BlockedUser`:
+ * satu nilai deterministik dengan kunci aktif, sama seperti routing identity.
  */
-export const tagCandidates = sealedLookupCandidates
+export const tagCandidates = routingCandidates
 
 /** [docs/28 D9] Tag identitas untuk kolom `blockerTag`/`blockedTag`. */
 export const blockedUserTag = routingIdentity

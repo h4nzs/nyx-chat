@@ -33,7 +33,6 @@ import {
   openAtRest,
   pepperedIdentifier,
   sealAtRest,
-  sealedLookupCandidates,
 } from '../utils/atRestSecrets.js'
 import { ensureUserShareId } from '../utils/userShareId.js'
 // [LINK 2026-10-18] State machine pairing perangkat lewat QR (token → pending →
@@ -1457,8 +1456,8 @@ router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
   if (endpoint) {
     // [docs/28 Tier 1.5 / D10] endpoint tersimpan TER-SEAL → lookup dengan seal.
-    // [docs/37 P6] `in` = kandidat kunci aktif + legacy (baris pra-rotasi at-rest).
-    try { await prisma.pushSubscription.deleteMany({ where: { endpointSealed: { in: await sealedLookupCandidates(endpoint) } } }) } catch (_e) {}
+    // [docs/43 §43.3.3] Satu format/kunci aktif: nilai deterministik tunggal.
+    try { await prisma.pushSubscription.deleteMany({ where: { endpointSealed: await sealAtRest(endpoint) } }) } catch (_e) {}
   }
   try {
     const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string; sub?: string };

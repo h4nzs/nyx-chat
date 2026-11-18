@@ -142,11 +142,11 @@ test('D9/D10 residual: label device, anchor instalasi & endpoint push ter-seal',
   const push = modelBody(schema, 'PushSubscription');
   assert.doesNotMatch(push, /^\s*endpoint\s+\S/m, 'kolom endpoint plaintext dihapus');
   assert.match(push, /^\s*endpointSealed\s+String\s+@unique/m, 'endpoint ter-seal + tetap unik');
-  // [docs/37 §37.4 P6] Setelah rotasi key ring, endpoint lama dan baru memakai
-  // kunci berbeda → baca/hapus WAJIB lewat kandidat, bukan satu nilai seal.
-  assert.match(read('../src/routes/auth.ts'), /endpointSealed: \{ in: await sealedLookupCandidates\(endpoint\) \}/, 'logout menghapus push via kandidat nilai ter-seal');
-  assert.match(read('../src/network/realtimeHandlers.ts'), /sealedLookupCandidates\(endpoint\)/, 'subscribe mencari endpoint dengan kandidat kunci seal');
-  assert.match(read('../src/network/realtimeHandlers.ts'), /endpointSealed: endpointCandidates\[0\]!/, 'baris baru memakai nilai kunci aktif');
+  // [docs/43 §43.3.3] Satu format ENC2 + kunci aktif → lookup memakai satu
+  // nilai seal deterministik, bukan daftar kandidat era rotasi.
+  assert.match(read('../src/routes/auth.ts'), /endpointSealed: await sealAtRest\(endpoint\)/, 'logout menghapus push via nilai ter-seal');
+  assert.match(read('../src/network/realtimeHandlers.ts'), /const endpointSealed = await sealAtRest\(endpoint\)/, 'subscribe mencari endpoint dengan nilai ter-seal');
+  assert.match(read('../src/network/realtimeHandlers.ts'), /endpointSealed, p256dh: keys\.p256dh/, 'baris baru memakai nilai seal yang sama');
   assert.match(read('../src/utils/sendPushNotification.ts'), /openAtRest\(sub\.endpointSealed\)/, 'endpoint dibuka HANYA saat mengirim push');
 });
 

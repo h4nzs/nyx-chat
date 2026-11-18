@@ -283,7 +283,7 @@ Tabel lengkap: `docs/audit/02-claims.md` (23 klaim). Ringkasan:
 
 1. **CSRF & urutan mount:** `/api/groups` sebelum CSRF dan memang token-only; `/api/keys`, `/api/call-tokens`, `/api/pir` (cookie) di bawah `doubleCsrfProtection`; webhook & engine dikecualikan eksplisit.
 2. **Perbandingan rahasia:** `credentialTokenMatches` = SHA-256 + `timingSafeEqual` dengan cek panjang; `deleteSecret`, `authSecret`, `adminSecretHash` hash-only.
-3. **At-rest ber-versi:** `ENC2:<keyId>:<payload>` + `sealedLookupCandidates()` mencakup seluruh key ring (rotasi tidak menghilangkan baris); `NYX_AT_REST_PEPPER` wajib di production (throw, bukan fallback diam).
+3. **At-rest satu format:** `ENC2:<keyId>:<payload>` + AAD; lookup memakai satu nilai deterministik (rotasi key ring hanya aman sebelum ada baris ter-seal). `NYX_AT_REST_PEPPER` wajib di production (throw, bukan fallback diam).
 4. **Rate limit atomik** (Lua INCR+EXPIRE) di bridge, sandbox newchat, OTPK quota.
 5. **Privasi skema:** tidak ada `ipAddress`/`userAgent`; `senderId` nullable/ter-seal/pseudonym; `MessageStatus.userId` tag per-percakapan; `BlockedUser`/`Story`/`UserHiddenConversation` tanpa FK ke `User`.
 6. **Transport & bind:** `trust proxy 2`, CORS menolak tanpa throw, helmet, body 1 MB, morgan non-produksi, API bind loopback, metrics loopback.

@@ -130,11 +130,21 @@ setiap pencarian user gagal 502 dan UI menampilkan "No users found".
 
 ### 43.3.3 At-rest (Fase D)
 
-`server/src/utils/atRestSecrets.ts` sekarang menerima **dua** format: bare
-base64url (kunci id `0` dari `NYX_AT_REST_PEPPER`) dan `ENC2:<keyId>:<payload>`.
-Fase D menyisakan **satu** format ber-key-id dengan AAD, menghapus
-`sealedLookupCandidates()` beserta seluruh pemanggilnya (11 tempat di 5 berkas),
-dan menghapus `scripts/reseal-at-rest.ts`.
+**Selesai 2026-11-18.** `server/src/utils/atRestSecrets.ts` hanya menulis dan
+membaca `ENC2:<keyId>:<base64url(nonce‖ct)>` dengan AAD
+`NYX_AT_REST_ENV_V2:<keyId>`. Tanpa key ring, kunci `p1` diturunkan dari
+`NYX_AT_REST_PEPPER`; key ring operator (`NYX_AT_REST_KEYRING`/`_FILE`) tetap
+didukung dan `p1` selalu dimuat. Format bare base64url (kunci id `0`) **tidak**
+dibaca lagi. `sealedLookupCandidates()` dan `server/scripts/reseal-at-rest.ts`
+dihapus; lookup memakai satu nilai deterministik (`routingCandidates()`
+mengembalikan satu elemen, endpoint push memakai `sealAtRest()` langsung).
+Konsekuensi yang dicatat: baris di bawah kunci non-aktif tetap bisa dibuka
+selama key id-nya ada di ring, tetapi tidak ditemukan lookup, jadi rotasi key
+ring hanya aman sebelum ada baris ter-seal (pre-launch).
+
+Gerbang: `tsc --noEmit` server 0, 31 tes fokus lulus, seluruh tes server hijau,
+`oxlint` 0 error, `pnpm run check:status`; gate E2E diturunkan ke 25 tes karena
+tes rollback SPQR memang dihapus di Fase C.
 
 ---
 

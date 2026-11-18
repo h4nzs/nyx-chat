@@ -786,22 +786,22 @@ dirusak): setiap tujuan sudah dipisah lewat label HMAC —
 | Tujuan | Derivasi | Catatan |
 |---|---|---|
 | Blind index | `HMAC(pepper, nilai)` | input berentropi rendah → wajib berkunci |
-| Kunci seal | `HMAC(pepper, "NYX_AT_REST_SEAL_V1")` | domain-separated |
-| Nonce deterministik | `HMAC(pepper, "NYX_AT_REST_SEAL_V1:nonce:" ‖ plaintext)` | tidak pernah sama dengan keluaran di atas |
+| Kunci seal | `HMAC(materi, "NYX_AT_REST_SEAL_V2")` | domain-separated; `p1` memakai pepper sebagai materi |
+| Nonce deterministik | `HMAC(materi, "NYX_AT_REST_SEAL_V2:nonce:<keyId>:" ‖ plaintext)` | terikat key id |
+| AAD envelope | `NYX_AT_REST_ENV_V2:<keyId>` | ciphertext tidak bisa dipindah antar key id |
 | Tag receipt/instalasi | `HMAC(pepper, "receipt:…" / "install:…")` | domain-separated, tak bisa dikorelasikan lintas percakapan |
 
 **Status 2026-10-25 — (a) dan (b) untuk kolom seal sudah ditutup, (c) dan rotasi
 blind index tetap terbuka:**
 
-- (a) ✅ Envelope sekarang **ber-versi**: `ENC2:<keyId>:<base64url(nonce‖ct)>`,
-  sedangkan format lama (tanpa prefiks) dibaca sebagai kunci id `0`. Nilai
-  rusak vs format baru jadi bisa dibedakan (`sealedKeyId`, `openAtRest` → null
-  untuk key id tak dikenal). Lihat `server/src/utils/atRestSecrets.ts`.
+- (a) ✅ Format tunggal `ENC2:<keyId>:<base64url(nonce‖ct)>` dengan AAD
+  `NYX_AT_REST_ENV_V2:<keyId>`. Tidak ada lagi jalur baca bare base64url/kunci
+  id `0`; nilai rusak atau key id tak dikenal → `openAtRest` null. Lihat
+  `server/src/utils/atRestSecrets.ts`.
 - (b) ✅ Key ring seal: `NYX_AT_REST_KEYRING` (JSON `{active, keys}`) atau file
-  custody (`NYX_AT_REST_KEYRING_FILE`), plus job idempoten
-  `server/scripts/reseal-at-rest.ts` (dry-run default, `--apply`). Lookup ganda
-  (`sealedLookupCandidates` = kunci aktif + legacy) membuat baris lama tetap
-  ditemukan selama re-seal berjalan.
+  custody (`NYX_AT_REST_KEYRING_FILE`), dengan `p1` turunan pepper selalu
+  dimuat. Tidak ada job re-seal: lookup memakai kunci aktif, jadi rotasi ring
+  hanya aman sebelum ada baris ter-seal (docs/43 §43.3.3).
 - (c) ❌ Blind index (`HMAC(pepper, nilai)`) **tidak bisa dirotasi dari server**:
   HMAC satu arah dan plaintext tidak disimpan. Rotasi kolom itu hanya mungkin
   dari klien (atau reset akun), jadi jangan menjadwalkan rotasi pepper dengan

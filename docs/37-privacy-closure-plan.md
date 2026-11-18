@@ -21,7 +21,7 @@ Termasuk:
 6. Verifikasi presentasi credential (body biner, binding ke
    `groupId+epoch+keyVersion+suite+expiry`, allowlist, fail-closed) — **tanpa
    issuer**, karena tidak ada primitif PQ blind-signature yang sudah diaudit.
-7. Rotasi kunci at-rest: envelope ber-versi (`ENC2:`) + key ring + job re-seal.
+7. At-rest: satu envelope `ENC2:` ber-AAD + key ring; tanpa job re-seal (rotasi pre-launch).
 8. Custody kunci: abstraksi provider + kunci ter-seal (tanpa klaim HSM).
 9. KT v2: cutover **baca** + jalur reset pin + auditor proses terpisah.
 10. OHTTP: relay proses terpisah, allowlist POST untuk sync, carriage token
@@ -52,7 +52,7 @@ Pengecualian eksplisit (tidak dikerjakan di sini):
 | Revocation | ✅ `POST /:id/epoch` (admin capability) + `DELETE /:id/membership`; kick merotasi epoch, leave menghapus baris |
 | Credential | ✅ route verifier biner fail-closed (`POST /:id/credential/present`, tanpa issuer); ❌ spike BRaccoon ditutup tanpa implementasi (§37.9) — signature level 1 11,5 KB sudah melewati batas 8 KiB |
 | PCS kasar | ✅ rotasi terjadwal (24 jam / 500 pesan, admin online) + rotasi manual yang menaikkan epoch (`lib/groupEpochRotation.ts`); ❌ bukan PCS per-pesan — kompromi satu anggota tetap membaca era berjalan sampai rotasi berikutnya |
-| at-rest | ✅ envelope ber-versi `ENC2:<keyId>:…` + key ring (`NYX_AT_REST_KEYRING`/`_FILE`) + re-seal idempoten (`scripts/reseal-at-rest.ts`) + custody env/file (§37.4 P6, `docs/10` §10.17). ❌ blind index (`HMAC(pepper, nilai)`) tetap tidak bisa dirotasi dari server — HMAC satu arah, plaintext tak disimpan |
+| at-rest | ✅ satu format `ENC2:<keyId>:…` + AAD + key ring (`NYX_AT_REST_KEYRING`/`_FILE`) + custody env/file (`docs/43` §43.3.3, `docs/10` §10.17). Tanpa job re-seal: lookup memakai kunci aktif. ❌ blind index (`HMAC(pepper, nilai)`) tetap tidak bisa dirotasi dari server — HMAC satu arah, plaintext tak disimpan |
 | KT baca | ✅ v2 live di selfhost (`nyx-kt-query-v2` :8089 + `nyx-kt-auditor-v2` :8088), `KT_QUERY_URL` menunjuk v2 |
 | OHTTP | ✅ allowlist POST `sync` (+ batas body 64 KB di gateway) dan token scope mengikuti pasangan method+path; ❌ relay masih satu proses dengan API |
 | nginx | ❌ hanya ada di `~/nyx-selfhost/nginx/`, tidak di repo (CF `set_real_ip_from` sudah benar di sana) |
@@ -273,21 +273,19 @@ groupId | expiresAt u64 | sigLen u16 | sig
 
 ### P6 — At-rest v2 + custody — **SELESAI (2026-10-25)**
 
-- ✅ `ENC2:<keyId>:<nonce||ct>`; key ring `NYX_AT_REST_KEYRING` (JSON,
-  `{active,keys}`) atau `NYX_AT_REST_KEYRING_FILE`. Format lama (tanpa prefiks)
-  = kunci id 0 dari `NYX_AT_REST_PEPPER` dan selalu terbaca.
-- ✅ `server/scripts/reseal-at-rest.ts`: batch 500, dry-run default (`--apply`
-  untuk menulis), idempoten, progress per kolom, `unreadable` sebagai exit 2.
-  Runbook: `docs/10` §10.17.
+- ✅ Satu format `ENC2:<keyId>:<nonce||ct>` dengan AAD
+  `NYX_AT_REST_ENV_V2:<keyId>`; key ring `NYX_AT_REST_KEYRING` (JSON,
+  `{active,keys}`) atau `NYX_AT_REST_KEYRING_FILE`, dan `p1` turunan
+  `NYX_AT_REST_PEPPER` selalu dimuat. Format bare base64url (kunci id 0) tidak
+  dibaca lagi (docs/43 §43.3.3).
 - ✅ `utils/keyCustody.ts`: provider `env` / `file` (systemd-creds
   `--with-key=host`), status di `/api/admin/system-status` (`atRest`, tanpa nilai).
-- ✅ `sealedLookupCandidates` mengembalikan kandidat untuk **semua** kunci di
-  ring (bukan hanya aktif + legacy), dipakai di routing, story, block, push
-  subscription (subscribe & logout) — tanpa itu rotasi membuat baris yang
-  disegel kunci lama tak ditemukan dan push berduplikasi.
-- ✅ Tes: `atRestSecrets` (roundtrip legacy→ENC2, key ring dua slot, kandidat
-  semua kunci ring, key id tak dikenal → null, key ring rusak → throw) + `keyCustody`
-  (env menang atas file, file hilang, status tanpa rahasia). Server 638 tes hijau.
+- ✅ Lookup memakai satu nilai deterministik (`routingCandidates` mengembalikan
+  satu elemen) untuk routing, story, block, dan push subscription. Tidak ada
+  job re-seal; rotasi key ring hanya aman sebelum ada baris ter-seal.
+- ✅ Tes: `atRestSecrets` (format ENC2, AAD, key ring dua slot, key id tak
+  dikenal → null, key ring rusak → throw, format lama ditolak) + `keyCustody`
+  (env menang atas file, file hilang, status tanpa rahasia).
 - ❌ **Tidak** ada re-index blind index (identifier HMAC): HMAC satu arah dan
   plaintext tidak disimpan server. Ini batas, bukan pekerjaan yang terlewat —
   jangan jadwalkan rotasi pepper dengan harapan kolom itu berganti.
@@ -339,8 +337,8 @@ groupId | expiresAt u64 | sigLen u16 | sig
 - `ENC1:` **tidak diubah**; `ENC2:` ditambahkan sebagai format baru. Semua
   pembaca mencoba ENC1 → ENC2. **Pembaruan 2026-11-16:** kebijakan versi
   tunggal (`docs/38`, `docs/43` §43.3) menghapus jalur baca format tanpa
-  key-id; setelah fase D hanya ada satu format `ENC2:<keyId>:<payload>` dengan
-  AAD, jadi kalimat 'coba ENC1 → ENC2' tidak berlaku lagi. Tidak ada perubahan padding 8 KB, envelope
+  key-id; sejak fase D hanya ada satu format `ENC2:<keyId>:<payload>` dengan
+  AAD, sehingga tidak ada lagi pembaca "coba ENC1 → ENC2". Tidak ada perubahan padding 8 KB, envelope
   XChaCha, atau skema `tempId`.
 - Group token/member token menggantikan `deliveryToken` **di kolom baru**
   dengan hard cut: tidak ada dual-accept, `deliveryToken` dihapus, dan klien
@@ -371,8 +369,8 @@ Verifikasi per fase: `systemctl --user status`, `curl` loopback untuk sync
 - **Mailbox**: bila klien lama masih memakai `group:request_key`, server
   menolak dengan ACK eksplisit (bukan hening) → klien lama harus di-update
   sebelum server mematikan jalur itu (urutan deploy: web dulu, server kemudian).
-- **ENC2/re-seal**: tidak ada penghapusan key lama sampai job re-seal selesai +
-  verifikasi sampel; key id tertinggal = gagal-baca terlihat, bukan silent.
+- **ENC2/key ring**: tidak ada job re-seal; jangan rotasi ring selama ada baris
+  ter-seal. Key id yang hilang dari ring = gagal-baca terlihat, bukan silent.
 - **KT v2**: cutover hanya setelah backfill; rollback = `KT_READ_MODE=v1` +
   reset pin klien.
 

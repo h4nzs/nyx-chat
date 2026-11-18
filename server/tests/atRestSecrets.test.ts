@@ -3,15 +3,18 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/28 Tier 0] At-rest secrets — kontrak helper.
+ * [docs/28 Tier 0 / docs/43 §43.3.3] At-rest secrets — kontrak helper.
  *
  * Yang dikunci di sini adalah janji privasi terhadap dump DB (adversary A1):
  *  - identifier ber-entropi rendah wajib di-index dengan pepper dari env
  *    (bukan hash tanpa kunci yang bisa dienumerasi),
  *  - token yang dipegang klien hanya boleh tersimpan sebagai hash (pola
  *    adminSecretHash) — tidak ada lagi cabang plaintext,
- *  - nilai yang server harus bisa baca (routing/API key) disimpan sealed
- *    deterministik (AEAD) — tak terbaca dari dump, tetap bisa di-lookup.
+ *  - nilai yang server harus bisa baca (routing/endpoint push) disimpan sealed
+ *    deterministik `ENC2:<keyId>:<body>` dengan AAD yang mengikat id kunci.
+ *
+ * Format lama (bare base64url / kunci id `0`) TIDAK dibaca lagi: era
+ * single-version, bukan migrasi bertahap.
  */
 
 import { test } from 'node:test';
@@ -24,7 +27,7 @@ import path from 'node:path';
 import { env } from '../src/config.js';
 import {
   AT_REST_ENVELOPE_V2,
-  LEGACY_SEAL_KEY_ID,
+  PEPPER_SEAL_KEY_ID,
   atRestStatus,
   clearAtRestSecretCacheForTests,
   credentialTokenMatches,
@@ -40,7 +43,6 @@ import {
   pepperedIdentifier,
   sealAtRest,
   sealedKeyId,
-  sealedLookupCandidates,
 } from '../src/utils/atRestSecrets.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -152,13 +154,15 @@ test('credentialTokenMatches: hanya nilai tersimpan ber-hash yang diterima', () 
   assert.equal(credentialTokenMatches(storedHashed, ''), false, 'presentasi kosong ditolak');
 });
 
-test('sealAtRest: deterministik (lookup by equality) + tidak terbaca tanpa pepper', async () => {
+test('sealAtRest: ENC2 deterministik, AAD mengikat id kunci, format lama ditolak', async () => {
   const value = 'sample-api-key-rahasia';
 
   await withPepper('p-seal', async () => {
     const sealedA = await sealAtRest(value);
     const sealedB = await sealAtRest(value);
     assert.equal(sealedA, sealedB, 'plaintext sama → sealed sama (kolom tetap bisa di-lookup)');
+    assert.match(sealedA, new RegExp(`^${AT_REST_ENVELOPE_V2}:${PEPPER_SEAL_KEY_ID}:`), 'selalu ber-prefiks id kunci');
+    assert.equal(sealedKeyId(sealedA), PEPPER_SEAL_KEY_ID);
 
     const other = await sealAtRest(`${value}-lain`);
     assert.notEqual(sealedA, other, 'plaintext beda → sealed beda');
@@ -168,7 +172,12 @@ test('sealAtRest: deterministik (lookup by equality) + tidak terbaca tanpa peppe
     // Tamper: satu karakter diubah → AEAD menolak (null, bukan throw).
     const tampered = `${sealedA.slice(0, -1)}${sealedA.slice(-1) === 'A' ? 'B' : 'A'}`;
     assert.equal(await openAtRest(tampered), null, 'ciphertext diubah → null');
-    assert.equal(await openAtRest('plaintext-legacy'), null, 'nilai legacy (bukan sealed) → null');
+
+    // Format era kunci tunggal (bare base64url) bukan envelope yang sah.
+    const bare = Buffer.from('baris-lama-tanpa-prefiks').toString('base64url');
+    assert.equal(sealedKeyId(bare), null, 'tanpa prefiks ENC2 = bukan envelope');
+    assert.equal(await openAtRest(bare), null, 'baris lama tidak dibaca diam-diam');
+    assert.equal(await openAtRest('plaintext-legacy'), null, 'plaintext bukan sealed');
     assert.equal(await openAtRest(null), null);
   });
 
@@ -179,20 +188,10 @@ test('sealAtRest: deterministik (lookup by equality) + tidak terbaca tanpa peppe
   });
 });
 
-test('sealedLookupCandidates: hanya bentuk sealed (tanpa kandidat plaintext)', async () => {
-  const key = 'api-key-abc';
-  const candidates = await withPepper('p', () => sealedLookupCandidates(key));
-  assert.equal(candidates.length, 1, 'tidak ada kandidat plaintext (baris legacy sudah tidak ada)');
-  assert.notEqual(candidates[0], key, 'nilai tersimpan ter-seal, bukan API key asli');
-  // Open harus di dalam pepper yang sama (di luar itu = attacker tanpa pepper).
-  const opened = await withPepper('p', () => openAtRest(candidates[0]!));
-  assert.equal(opened, key);
-});
-
 /**
- * [docs/37 §37.4 P6] Jalankan callback dengan key ring tertentu. `undefined` =
- * tanpa key ring (perilaku legacy). Materi kunci sengaja pendek & berbeda per
- * tes supaya salah-kunci terlihat sebagai kegagalan baca, bukan lolos.
+ * Jalankan callback dengan key ring tertentu. `undefined` = tanpa key ring
+ * (hanya kunci `p1`). Materi kunci sengaja pendek & berbeda per tes supaya
+ * salah-kunci terlihat sebagai kegagalan baca, bukan lolos.
  */
 async function withKeyring<T>(keyring: string | undefined, fn: () => T | Promise<T>): Promise<T> {
   const prevKeyring = process.env.NYX_AT_REST_KEYRING;
@@ -217,17 +216,23 @@ const KEYRING_2026_11 = JSON.stringify({
   keys: { 'k2026-11': 'materi-kunci-rotasi-november-2026', 'k2026-10': 'materi-kunci-rotasi-oktober-2026' },
 });
 
-test('[P6] tanpa key ring: envelope tetap format legacy (rollback aman)', async () => {
-  await withPepper('p-legacy', () => withKeyring(undefined, async () => {
-    const sealed = await sealAtRest('nilai-legacy');
-    assert.equal(sealed.startsWith(`${AT_REST_ENVELOPE_V2}:`), false, 'tanpa key ring tidak ada prefiks ENC2');
-    assert.equal(sealedKeyId(sealed), LEGACY_SEAL_KEY_ID, 'format lama = kunci id 0');
-    assert.equal(atRestStatus().activeKeyId, LEGACY_SEAL_KEY_ID);
-    assert.equal(atRestStatus().custody.provider, 'none');
+test('tanpa key ring: kunci p1, selalu ENC2', async () => {
+  await withPepper('p-pepper', () => withKeyring(undefined, async () => {
+    const sealed = await sealAtRest('nilai-tanpa-keyring');
+    assert.match(sealed, new RegExp(`^${AT_REST_ENVELOPE_V2}:${PEPPER_SEAL_KEY_ID}:`));
+    assert.equal(sealedKeyId(sealed), PEPPER_SEAL_KEY_ID);
+    assert.equal(await openAtRest(sealed), 'nilai-tanpa-keyring');
+
+    const status = atRestStatus();
+    assert.equal(status.activeKeyId, PEPPER_SEAL_KEY_ID);
+    assert.equal(status.keyCount, 1);
+    assert.match(status.envelope, /^ENC2:/);
+    assert.equal('legacyReadable' in status, false, 'tidak ada status baca format lama');
+    assert.equal(status.custody.provider, 'none');
   }));
 });
 
-test('[P6] key ring aktif: tulisan ENC2, roundtrip, deterministik', async () => {
+test('key ring aktif: tulisan ENC2 dengan id aktif, roundtrip, status tanpa materi', async () => {
   await withPepper('p-rotasi', () => withKeyring(KEYRING_2026_11, async () => {
     const sealedA = await sealAtRest('sample-api-key');
     const sealedB = await sealAtRest('sample-api-key');
@@ -240,54 +245,46 @@ test('[P6] key ring aktif: tulisan ENC2, roundtrip, deterministik', async () => 
 
     const status = atRestStatus();
     assert.equal(status.activeKeyId, 'k2026-11');
-    assert.equal(status.keyCount, 3, 'dua kunci operator + kunci legacy id 0');
+    assert.equal(status.keyCount, 3, 'dua kunci operator + kunci p1');
     assert.equal(status.custody.provider, 'env');
-    assert.equal(status.legacyReadable, true);
+    assert.equal('legacyReadable' in status, false);
     assert.doesNotMatch(JSON.stringify(status), /materi-kunci/, 'status tidak boleh memuat materi kunci');
   }));
 });
 
-test('[P6] baris legacy tetap terbaca setelah key ring aktif', async () => {
-  const legacySealed = await withPepper('p-migrasi', () => withKeyring(undefined, () => sealAtRest('routing-user-1')));
-
-  await withPepper('p-migrasi', () => withKeyring(KEYRING_2026_11, async () => {
-    assert.equal(await openAtRest(legacySealed), 'routing-user-1', 'kunci id 0 selalu dimuat');
-    assert.equal(atRestStatus().legacyReadable, true);
+test('AAD: memindahkan id kunci pada envelope membuat dekripsi gagal', async () => {
+  await withPepper('p-aad', () => withKeyring(KEYRING_2026_11, async () => {
+    const sealed = await sealAtRest('user-abc');
+    const moved = sealed.replace(':k2026-11:', ':k2026-10:');
+    assert.equal(sealedKeyId(moved), 'k2026-10', 'id tetap valid dan kuncinya ada');
+    assert.equal(await openAtRest(moved), null, 'AAD mengikat ciphertext ke id kunci aslinya');
   }));
 });
 
-test('[P6] sealedLookupCandidates: kandidat semua kunci ring, semuanya membuka nilai sama', async () => {
+test('rotasi key ring: baris kunci lama tetap bisa dibuka, lookup memakai kunci aktif', async () => {
   const KEYRING_2026_10 = JSON.stringify({
     active: 'k2026-10',
     keys: { 'k2026-11': 'materi-kunci-rotasi-november-2026', 'k2026-10': 'materi-kunci-rotasi-oktober-2026' },
   });
-  const sealedByOldKey = await withPepper('p-lookup', () =>
+  const oldSealed = await withPepper('p-putar', () =>
     withKeyring(KEYRING_2026_10, () => sealAtRest('user-abc'))
   );
 
-  await withPepper('p-lookup', () => withKeyring(KEYRING_2026_11, async () => {
-    const candidates = await sealedLookupCandidates('user-abc');
-    assert.equal(candidates.length, 3, 'satu kandidat per kunci ring (2 operator + legacy)');
-    assert.equal(candidates[0], await sealAtRest('user-abc'), 'kandidat pertama = tulisan baru');
-    assert.ok(candidates.includes(sealedByOldKey), 'baris era kunci sebelumnya tetap ditemukan');
-    assert.equal(new Set(candidates).size, candidates.length, 'tidak ada duplikat');
-    assert.deepEqual(
-      await Promise.all(candidates.map((candidate) => openAtRest(candidate))),
-      ['user-abc', 'user-abc', 'user-abc'],
-      'baris lama dan baru sama-sama menemukan user yang sama'
-    );
-  }));
-
-  await withPepper('p-lookup', () => withKeyring(undefined, async () => {
-    const candidates = await sealedLookupCandidates('user-abc');
-    assert.equal(candidates.length, 1, 'tanpa key ring hanya satu kandidat (perilaku lama)');
+  await withPepper('p-putar', () => withKeyring(KEYRING_2026_11, async () => {
+    assert.equal(await openAtRest(oldSealed), 'user-abc', 'kunci lama masih di ring → baris bisa dibaca');
+    const activeSealed = await sealAtRest('user-abc');
+    assert.equal(sealedKeyId(activeSealed), 'k2026-11');
+    assert.notEqual(activeSealed, oldSealed, 'tulisan baru selalu kunci aktif');
+    // Konsekuensi single-version: lookup hanya memakai kunci aktif. Baris yang
+    // masih memakai kunci lama tetap terbaca bila id-nya diketahui, tetapi
+    // tidak ditemukan lewat `sealAtRest()` — tidak ada job re-seal (docs/43).
   }));
 });
 
-test('[P6] fail-closed: key id tak dikenal / key ring rusak', async () => {
+test('fail-closed: key id tak dikenal / key ring rusak', async () => {
   await withPepper('p-fail', () => withKeyring(KEYRING_2026_11, async () => {
     // Envelope dari kunci yang tidak ada di ring (mis. operator menghapus kunci
-    // lama sebelum re-seal) → null, bukan tebakan/plaintext.
+    // lama) → null, bukan tebakan/plaintext.
     const orphan = `${AT_REST_ENVELOPE_V2}:k-hilang:${Buffer.from('x'.repeat(40)).toString('base64url')}`;
     assert.equal(sealedKeyId(orphan), 'k-hilang');
     assert.equal(await openAtRest(orphan), null, 'key id tak dikenal = gagal baca terlihat');
@@ -299,8 +296,8 @@ test('[P6] fail-closed: key id tak dikenal / key ring rusak', async () => {
     JSON.stringify({ active: 'k1' }),
     JSON.stringify({ active: 'k1', keys: {} }),
     JSON.stringify({ active: 'k2', keys: { k1: 'materi-kunci-yang-cukup-panjang' } }),
-    JSON.stringify({ active: '0', keys: { k1: 'materi-kunci-yang-cukup-panjang' } }),
-    JSON.stringify({ active: 'k1', keys: { '0': 'materi-kunci-yang-cukup-panjang' } }),
+    JSON.stringify({ active: PEPPER_SEAL_KEY_ID, keys: { k1: 'materi-kunci-yang-cukup-panjang' } }),
+    JSON.stringify({ active: 'k1', keys: { [PEPPER_SEAL_KEY_ID]: 'materi-kunci-yang-cukup-panjang' } }),
     JSON.stringify({ active: 'k1', keys: { k1: 'pendek' } }),
   ];
   for (const keyring of broken) {
@@ -310,7 +307,7 @@ test('[P6] fail-closed: key id tak dikenal / key ring rusak', async () => {
   }
 });
 
-test('[P6] key ring dari file custody (NYX_AT_REST_KEYRING_FILE)', async () => {
+test('key ring dari file custody (NYX_AT_REST_KEYRING_FILE)', async () => {
   const file = path.join(here, 'tmp-keyring-at-rest.json');
   writeFileSync(file, KEYRING_2026_11, { mode: 0o600 });
   try {
@@ -337,11 +334,13 @@ test('[P6] key ring dari file custody (NYX_AT_REST_KEYRING_FILE)', async () => {
   }
 });
 
-test('contract: pepper produksi wajib env, bukan turunan DB', () => {
+test('contract: satu format ENC2, tanpa pembaca legacy, pepper produksi wajib env', () => {
   const src = read('../src/utils/atRestSecrets.ts');
   assert.match(src, /NYX_AT_REST_PEPPER/, 'nama env pepper terkunci');
   assert.match(src, /env\.nodeEnv === 'production'[\s\S]*throw new Error/, 'production tanpa pepper = fail-closed');
   assert.doesNotMatch(src, /prisma/i, 'helper ini TIDAK boleh menyentuh DB (kalau tidak, pepper bocor lewat dump)');
+  assert.doesNotMatch(src, /LEGACY_SEAL_KEY_ID|sealedLookupCandidates/, 'tidak ada jalur kunci/format lama');
+  assert.match(src, /envelopeAad/, 'AAD mengikat id kunci');
 
   // Provider yang di-assert bergantung mode proses — dan mode itu datang dari
   // `.env` yang di-load `config.ts` (mesin dev self-host bisa memakai

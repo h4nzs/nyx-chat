@@ -38,7 +38,7 @@ import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { sanitizeForLog } from '../utils/logger.js';
 import { safeEqualStrings } from '../utils/validate.js';
 import { getSodium } from '../lib/sodium.js';
-import { credentialTokenMatches, hashCredentialToken, sealAtRest, sealedLookupCandidates } from '../utils/atRestSecrets.js';
+import { credentialTokenMatches, hashCredentialToken, sealAtRest } from '../utils/atRestSecrets.js';
 import { collectPresencePeers, type PresenceMembershipClient } from '../utils/presencePeers.js';
 // [docs/28 Tier 1.5 / D14] presence lazy (langganan in-memory) + identitas Redis
 // yang tidak lagi memuat userId asli.
@@ -1043,12 +1043,12 @@ export async function handleKeySync(
          // [docs/28 Tier 1.5 / D10] endpoint FCM/APNs = identifier perangkat →
          // disimpan TER-SEAL (deterministik) supaya uniqueness & upsert tetap
          // bekerja, tetapi dump tidak memuat endpoint aslinya.
-         // [docs/37 P6] `endpointSealed` unik per kunci seal. Setelah rotasi,
-         // baris lama memakai kunci id 0 — `upsert` by nilai aktif akan gagal
-         // menemukannya dan membuat duplikat push (satu mati setelah re-seal).
-         const endpointCandidates = await sealedLookupCandidates(endpoint);
+         // [docs/43 §43.3.3] Satu format ENC2 dengan kunci aktif: endpoint
+         // deterministik, jadi lookup/upsert memakai satu nilai (bukan daftar
+         // kandidat era rotasi).
+         const endpointSealed = await sealAtRest(endpoint);
          const existingSubscription = await ctx.prisma.pushSubscription.findFirst({
-           where: { endpointSealed: { in: endpointCandidates } },
+           where: { endpointSealed },
            select: { id: true },
          });
          if (existingSubscription) {
@@ -1058,7 +1058,7 @@ export async function handleKeySync(
            });
          } else {
            await ctx.prisma.pushSubscription.create({
-             data: { endpointSealed: endpointCandidates[0]!, p256dh: keys.p256dh, auth: keys.auth, deviceId },
+             data: { endpointSealed, p256dh: keys.p256dh, auth: keys.auth, deviceId },
            });
          }
          break;

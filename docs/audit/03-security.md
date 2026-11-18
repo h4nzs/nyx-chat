@@ -89,7 +89,7 @@ Jika GET gagal, `active` menjadi `null` dan fungsi mengembalikan `true` — pera
 
 - **CSRF & urutan mount:** `/api/groups` sengaja sebelum CSRF dan memang token-only; `/api/keys`, `/api/call-tokens`, `/api/pir` (berbasis cookie) berada **di bawah** `doubleCsrfProtection`; webhook NowPayments & `/api/engine` dikecualikan eksplisit (`app.ts:365-395`).
 - **Perbandingan rahasia:** `credentialTokenMatches` memakai `timingSafeEqual` dengan cek panjang lebih dulu (`atRestSecrets.ts`), dan token disimpan sebagai SHA-256 (`hashCredentialToken`) — `Message.deleteSecret`, `Conversation.authSecret`, `adminSecretHash` semuanya hash-only.
-- **Seal at-rest ber-versi:** `ENC2:<keyId>:<payload>` + `sealedLookupCandidates()` mencakup semua kunci ring, jadi rotasi tidak membuat baris "hilang" dari lookup (`atRestSecrets.ts`). Fail-closed bila `NYX_AT_REST_PEPPER` kosong di production.
+- **Seal at-rest satu format:** `ENC2:<keyId>:<payload>` + AAD; lookup memakai satu nilai deterministik (tidak ada `sealedLookupCandidates`/job re-seal, jadi rotasi key ring hanya aman sebelum ada baris). Fail-closed bila `NYX_AT_REST_PEPPER` kosong di production.
 - **Rate limit atomik:** Lua INCR+EXPIRE (`redisBridge.ts`, `conversations.ts:104-112`, `keys.ts` OTPK quota) — tidak ada pola incr-lalu-expire.
 - **`trust proxy 2`** dan `cors` yang menolak tanpa melempar error (tidak jatuh ke 500), `helmet`, `x-powered-by` dimatikan, body limit 1 MB, morgan hanya non-produksi (menghindari query sensitif di log).
 - **Schema privasi:** tidak ada `ipAddress`/`userAgent` di `RefreshToken`; `Message.senderId` nullable + ter-seal/pseudonym; `MessageStatus.userId` tag per-percakapan; tidak ada FK ke `User` untuk `BlockedUser`/`Story`/`UserHiddenConversation` (mencegah dump merekonstruksi graf).

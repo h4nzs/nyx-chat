@@ -110,8 +110,8 @@ ls /var/lib/nyx/kt-v2-snapshots/         # arsip snapshot KT terverifikasi (§10
 | `CORS_ORIGIN` | Origin yang diizinkan, dipisah koma (default produksi `https://app.nyx-app.my.id`) |
 | `JWT_SECRET` | Token signing (≥32 chars). Produksi menolak boot bila kosong / bernilai `dev-secret` |
 | `CSRF_SECRET` | CSRF state secret. Kosong di produksi → jatuh ke `JWT_SECRET` + peringatan boot (isolasi lebih lemah) |
-| `NYX_AT_REST_PEPPER` | [docs/28 Tier 0] Pepper hash identifier at-rest + kunci seal legacy (id `0`). **Wajib**: `utils/atRestSecrets.ts` melempar error di produksi tanpa ini; bocor = dump DB bisa dibalik |
-| `NYX_AT_REST_KEYRING` / `NYX_AT_REST_KEYRING_FILE` | [docs/37 P6, docs/10 §10.17] Key ring seal ber-versi (`ENC2:<keyId>:…`). Kosong = kunci legacy saja. Isi JSON `{active,keys}` atau path file 0400. Rotasi + re-seal lewat `scripts/reseal-at-rest.ts` |
+| `NYX_AT_REST_PEPPER` | [docs/28 Tier 0] Pepper hash identifier at-rest + kunci seal `p1`. **Wajib**: `utils/atRestSecrets.ts` melempar error di produksi tanpa ini; bocor = dump DB bisa dibalik |
+| `NYX_AT_REST_KEYRING` / `NYX_AT_REST_KEYRING_FILE` | [docs/43 §43.3.3, docs/10 §10.17] Key ring untuk `ENC2:<keyId>:…` (AAD). Kosong = hanya kunci `p1` turunan pepper. Isi JSON `{active,keys}` atau path file 0400. Tidak ada job re-seal: jangan rotasi selama ada baris ter-seal |
 | `NODE_ENV` | `production` — **diset `deploy.yml`** (`NODE_ENV=production pm2 start …`), bukan lagi diandalkan dari `.env`. Menentukan cookie `Secure`, CSP/HSTS produksi, guard `JWT_SECRET`, dan matinya access-log morgan (§10.20) |
 
 **Perilaku & fitur** (kosong = fitur mati / degradasi yang terlihat):
@@ -1187,14 +1187,15 @@ sungguhan (TPM/SE/Titan) dan rantai vendor nyata — keduanya butuh perangkat fi
 
 Kolom ter-seal (`UserHiddenConversation.userId`, `Story.authorTag`,
 `BlockedUser.*Tag`, `Message.senderId|sessionId|repliedToId`, `Device.nameSealed`,
-`PushSubscription.endpointSealed`, device id di `content` SYSTEM)
-dulu memakai satu kunci turunan `NYX_AT_REST_PEPPER` dan envelope tanpa versi.
-Sekarang envelope ber-versi dan kuncinya bisa dirotasi **tanpa downtime**.
+`PushSubscription.endpointSealed`, device id di `content` SYSTEM) disegel dengan
+`ENC2:<keyId>:<base64url(nonce‖ct)>` dan AAD `NYX_AT_REST_ENV_V2:<keyId>`.
+Hanya ada satu format: baris bare base64url (kunci id `0`) TIDAK dibaca lagi
+(docs/43 §43.3.3).
 
-**Format.** Legacy (tanpa prefiks) = kunci id `0` (turunan pepper) dan selalu
-tetap terbaca. Baru: `ENC2:<keyId>:<base64url(nonce‖ct)>`. Key id yang tidak ada
-di ring → `openAtRest` mengembalikan `null` (gagal baca terlihat), bukan
-plaintext/tebakan.
+**Format.** AAD mengikat ciphertext ke key id, jadi memindahkan id pada
+envelope membuat dekripsi gagal. Key id yang tidak ada di ring → `openAtRest`
+mengembalikan `null` (gagal baca terlihat), bukan plaintext/tebakan. Tanpa key
+ring, kunci `p1` diturunkan dari `NYX_AT_REST_PEPPER`.
 
 **Konfigurasi.**
 
@@ -1205,33 +1206,21 @@ NYX_AT_REST_KEYRING='{"active":"k2026-11","keys":{"k2026-11":"<32+ char>","k2026
 # NYX_AT_REST_KEYRING_FILE=/run/credentials/nyx-api.service/at-rest-keyring.json
 ```
 
-Id `0` dicadangkan. Key ring yang **ada tetapi tidak valid** (JSON rusak, id
+Id `p1` dicadangkan. Key ring yang **ada tetapi tidak valid** (JSON rusak, id
 aktif tidak ada, materi <16 char) membuat request gagal — bukan diam-diam
-kembali ke legacy. Status aman dilihat di `GET /api/admin/system-status` →
-`atRest: { ok, activeKeyId, keyCount, envelope, custody, legacyReadable }`.
+kembali ke kunci pepper. Status aman dilihat di `GET /api/admin/system-status`
+→ `atRest: { ok, activeKeyId, keyCount, envelope, custody }`.
 
-**Prosedur rotasi (urut, jangan dibalik).**
+**Rotasi (batas pre-launch).** Tidak ada job re-seal lagi. Menambah slot baru
+hanya mengubah kunci tulisan baru; baris lama tetap bisa dibuka selama slot
+lamanya masih ada, tetapi lookup memakai kunci aktif sehingga baris lama TIDAK
+ditemukan. Karena itu jangan merotasi key ring selama database berisi baris
+ter-seal; untuk instalasi baru, set key ring sebelum ada data.
 
-1. Backup DB **dan** key ring lama (dua tempat terpisah).
-2. Tambah slot baru di key ring, `active` = slot baru, restart `nyx-api`.
-   Tulisan baru langsung `ENC2`, baris lama tetap terbaca (lookup ganda).
-3. Dry-run re-seal dari `server/`:
-   `pnpm exec tsx scripts/reseal-at-rest.ts` → catat `legacy` dan `unreadable`.
-   `unreadable > 0` = berhenti; ada nilai yang tak bisa dibuka (kunci hilang),
-   jangan hapus apa pun.
-4. Terapkan: `pnpm exec tsx scripts/reseal-at-rest.ts --apply`
-   (batch 500 baris, idempoten, boleh dihentikan dan diulang).
-5. Verifikasi: jalankan dry-run lagi → `0 legacy`, `0 ditulis`. Baru setelah itu
-   slot lama boleh dihapus dari key ring.
-6. Cek fungsional: kirim pesan 1:1 & grup, buka daftar perangkat, blokir/unblock,
-   story, logout (hapus push), admin ban/unban.
-
-**Rollback.** Kembalikan `active` ke slot lama — **jangan** mengosongkan key
-ring setelah ada baris `ENC2`: nilai yang ditulis dengan slot baru hanya bisa
-dibuka bila slot itu masih ada di `keys`, dan tanpa key ring `openAtRest`
-mengembalikan `null` (gagal baca, tercatat sebagai peringatan `kunci … tidak ada
-di key ring`). Mengosongkan ring hanya aman **sebelum** langkah 4 dijalankan.
-Karena itu jangan menghapus slot mana pun sebelum langkah 5 hijau.
+**Rollback.** Kembalikan `active` ke slot lama sebelum ada tulisan dengan slot
+baru. Jangan mengosongkan key ring setelah ada baris `ENC2`: nilai yang ditulis
+dengan slot baru hanya bisa dibuka bila slot itu masih ada di `keys`; tanpa slot
+itu `openAtRest` mengembalikan `null` (gagal baca terlihat).
 
 **Yang tidak ikut berubah.** Blind index (`HMAC(pepper, nilai)`), tag instalasi,
 tag receipt, dan seed OPRF tetap memakai pepper: HMAC satu arah + plaintext tidak
