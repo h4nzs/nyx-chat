@@ -4,75 +4,63 @@
 
 import { ML_DSA_65_PUBLIC_KEY_BYTES, X25519_PUBLIC_KEY_BYTES, XWING_PUBLIC_KEY_BYTES } from './cryptoSuite.js';
 
-export const KT_VALUE_VERSION_V1 = 1;
+/**
+ * [docs/43 §43.3.2] Hanya satu format nilai log: `nyx-kt-value-v2`
+ * (ML-DSA-65 + SHA-256 index). V1 (Ed25519, tanpa kunci tanda tangan PQ)
+ * tidak punya log aktif lagi, jadi tidak ada cabang baca kedua: nilai v1
+ * ditolak sebagai versi tak dikenal, bukan diterjemahkan ke bentuk v2.
+ */
 export const KT_VALUE_VERSION_V2 = 2;
 
 export const KT_ED25519_SIGNING_KEY_BYTES = 32;
 
-export const KT_VALUE_V1_BYTES =
+export const KT_VALUE_V2_BYTES =
   1 +
   1 +
   X25519_PUBLIC_KEY_BYTES +
   XWING_PUBLIC_KEY_BYTES +
   KT_ED25519_SIGNING_KEY_BYTES +
+  ML_DSA_65_PUBLIC_KEY_BYTES +
   4;
 
-export const KT_VALUE_V2_BYTES = KT_VALUE_V1_BYTES + ML_DSA_65_PUBLIC_KEY_BYTES;
-
 export interface ParsedKtValue {
-  version: number;
+  version: typeof KT_VALUE_VERSION_V2;
   keyVersion: number;
   identityKey: Uint8Array;
   pqIdentityKey: Uint8Array;
   signingKey: Uint8Array;
-  signingKeyV2?: Uint8Array;
+  signingKeyV2: Uint8Array;
   updatedAtDay: number;
 }
 
-const V1_OFFSET_PQ = 2 + X25519_PUBLIC_KEY_BYTES;
-const V1_OFFSET_SIGN = V1_OFFSET_PQ + XWING_PUBLIC_KEY_BYTES;
-const V1_OFFSET_DAY = V1_OFFSET_SIGN + KT_ED25519_SIGNING_KEY_BYTES;
-const V2_OFFSET_SIGN_V2 = V1_OFFSET_DAY;
-const V2_OFFSET_DAY = V2_OFFSET_SIGN_V2 + ML_DSA_65_PUBLIC_KEY_BYTES;
+const OFFSET_PQ = 2 + X25519_PUBLIC_KEY_BYTES;
+const OFFSET_SIGN = OFFSET_PQ + XWING_PUBLIC_KEY_BYTES;
+const OFFSET_SIGN_V2 = OFFSET_SIGN + KT_ED25519_SIGNING_KEY_BYTES;
+const OFFSET_DAY = OFFSET_SIGN_V2 + ML_DSA_65_PUBLIC_KEY_BYTES;
 
 export function parseKtValueBytes(value: Uint8Array): ParsedKtValue {
   if (value.length < 2) {
     throw new Error(`kt: nilai log terlalu pendek (${value.length})`);
   }
   const version = value[0]!;
+  if (version !== KT_VALUE_VERSION_V2) {
+    throw new Error(`kt: versi nilai log tidak dikenal (${version}) — hanya v2`);
+  }
+  if (value.length < KT_VALUE_V2_BYTES) {
+    throw new Error(`kt: nilai log v2 terlalu pendek (${value.length} < ${KT_VALUE_V2_BYTES})`);
+  }
   const keyVersion = value[1]!;
   const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
 
-  if (version === KT_VALUE_VERSION_V1) {
-    if (value.length < KT_VALUE_V1_BYTES) {
-      throw new Error(`kt: nilai log v1 terlalu pendek (${value.length} < ${KT_VALUE_V1_BYTES})`);
-    }
-    return {
-      version,
-      keyVersion,
-      identityKey: value.subarray(2, V1_OFFSET_PQ).slice(),
-      pqIdentityKey: value.subarray(V1_OFFSET_PQ, V1_OFFSET_SIGN).slice(),
-      signingKey: value.subarray(V1_OFFSET_SIGN, V1_OFFSET_DAY).slice(),
-      updatedAtDay: view.getUint32(V1_OFFSET_DAY, false),
-    };
-  }
-
-  if (version === KT_VALUE_VERSION_V2) {
-    if (value.length < KT_VALUE_V2_BYTES) {
-      throw new Error(`kt: nilai log v2 terlalu pendek (${value.length} < ${KT_VALUE_V2_BYTES})`);
-    }
-    return {
-      version,
-      keyVersion,
-      identityKey: value.subarray(2, V1_OFFSET_PQ).slice(),
-      pqIdentityKey: value.subarray(V1_OFFSET_PQ, V1_OFFSET_SIGN).slice(),
-      signingKey: value.subarray(V1_OFFSET_SIGN, V1_OFFSET_DAY).slice(),
-      signingKeyV2: value.subarray(V2_OFFSET_SIGN_V2, V2_OFFSET_DAY).slice(),
-      updatedAtDay: view.getUint32(V2_OFFSET_DAY, false),
-    };
-  }
-
-  throw new Error(`kt: versi nilai log tidak dikenal (${version})`);
+  return {
+    version: KT_VALUE_VERSION_V2,
+    keyVersion,
+    identityKey: value.subarray(2, OFFSET_PQ).slice(),
+    pqIdentityKey: value.subarray(OFFSET_PQ, OFFSET_SIGN).slice(),
+    signingKey: value.subarray(OFFSET_SIGN, OFFSET_SIGN_V2).slice(),
+    signingKeyV2: value.subarray(OFFSET_SIGN_V2, OFFSET_DAY).slice(),
+    updatedAtDay: view.getUint32(OFFSET_DAY, false),
+  };
 }
 
 export function encodeKtValueV2(entry: {

@@ -41,7 +41,7 @@ export interface PrivacyKtEvidence {
 }
 
 export interface PrivacyStatusInput {
-  /** `spqrSendingEnabled()`: klien mengiklankan & mengirim ratchet v2. */
+  /** Braid SPQR v2 adalah satu-satunya jalur ratchet (`docs/43` §43.3.2). */
   ratchetSending: boolean;
   ohttp: boolean;
   oprf: boolean;
@@ -121,8 +121,8 @@ export interface PrivacyStatusDeps {
 export async function collectPrivacyStatus(
   deps: PrivacyStatusDeps = {}
 ): Promise<PrivacyLayerStatus[]> {
-  const ratchetSending =
-    deps.ratchetSending ?? (await import('./spqrNegotiation')).spqrSendingEnabled;
+  // Tidak ada saklar lagi: braid v2 selalu dikirim & diiklankan.
+  const ratchetSending = deps.ratchetSending ?? (() => true);
   const ohttpEnabled = deps.ohttpEnabled ?? (await import('./ohttpClient')).ohttpEnabled;
   const oprfEnabled =
     deps.oprfEnabled ?? (await import('./searchOprfClient')).oprfSearchEnabled;

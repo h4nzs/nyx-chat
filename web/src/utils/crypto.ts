@@ -49,25 +49,16 @@ import { resolvePqV2Enabled } from '@lib/pqCapability';
 // [DR PROTOCOL 2026-10-05] Keputusan protokol 1:1 — pure & unit-tested.
 import {
   attachClientProtocolFields,
-  extractPeerAck,
   getHandshakePayload,
-  shouldOmitRatchetCt,
   trimPaddedPlaintext,
   type DrProtocolStateView,
 } from '@lib/drProtocol';
-// [docs/33 §33.7 — jalur versi paralel v1/v2] Bentuk wire v2, keputusan versi,
-// dan state braid ter-seal. Modul-modul ini murni (bisa diuji tanpa worker).
-import {
-  SPQR_CAPABILITY_OVERRIDE,
-  resolveOutboundRatchetVersion,
-  spqrSendingEnabled,
-} from '@lib/spqrNegotiation';
+// [docs/43 §43.3.2] Bentuk wire braid v2 dan state braid ter-seal. Modul-modul
+// ini murni (bisa diuji tanpa worker).
 import {
   buildSpqrHeader,
   decodeSpqrFrames,
-  extractVersionDeclaration,
   parseSpqrHeader,
-  versionDeclaration,
   type SpqrDrHeader,
 } from '@lib/spqrWire';
 import {
@@ -252,15 +243,12 @@ export async function encryptGroupMetadata(
           ct,
           signature,
           senderDeviceKey: myDeviceKey,
-          // [PQ v4 Fase 1.5 — envelope v3] Pengenal kunci verifikasi pengirim.
-          ...(signingV2
-              ? {
-                    senderKeyId: sodium.to_base64(
-                        deriveGroupSenderKeyId(signingV2.publicKey),
-                        sodium.base64_variants.URLSAFE_NO_PADDING
-                    ),
-                }
-              : {}),
+          // [docs/43 §43.3.2] Pengenal kunci verifikasi pengirim — selalu ada
+          // karena metadata grup mensyaratkan `signingKeyV2`.
+          senderKeyId: sodium.to_base64(
+              deriveGroupSenderKeyId(signingV2.publicKey),
+              sodium.base64_variants.URLSAFE_NO_PADDING
+          ),
       });
   }
 
@@ -277,18 +265,20 @@ export async function decryptGroupMetadata(
   try {
     const wrapper = JSON.parse(encryptedMetadataStr);
 
-    // [V2 — SATU JALUR] Metadata KELUAR DARI CHAIN: dekripsi XChaCha dengan
-    // metadataKey era (receiver state di-route via chainId) + verifikasi tanda
-    // tangan pengirim. Blob v1 (metadata sebagai pesan rantai) sudah dihapus.
-    if (wrapper?.v === 2 && wrapper?.kind === 'group_metadata') {
+    // [docs/43 §43.3.2] Metadata grup hanya `sigV: 2` (ML-DSA-65). Wrapper
+    // tanpa `sigV: 2`/`senderKeyId` adalah format era lama yang tidak punya
+    // pembaca lagi — ditolak terlihat, bukan diterjemahkan.
+    if (
+        wrapper?.v === 2 &&
+        wrapper?.kind === 'group_metadata' &&
+        wrapper?.sigV === 2 &&
+        typeof wrapper?.senderKeyId === 'string'
+    ) {
         const { workerXChaChaOpen } = await import('@lib/crypto-worker-proxy');
         const { findGroupReceiverState, listGroupReceiverStates } = await import('@lib/keychainDb');
         const sodium = await getSodiumLib();
         const ctBytes = sodium.from_base64(wrapper.ct, sodium.base64_variants.URLSAFE_NO_PADDING);
         const signatureBytes = sodium.from_base64(wrapper.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-        // [PQ v4 Fase 1.5] `sigV: 2` = tanda tangan ML-DSA-65 (verifikasi dengan
-        // `signingKeyV2` pengirim); default `1` = Ed25519 (jalur v1 lama).
-        const sigV: number = typeof wrapper.sigV === 'number' ? wrapper.sigV : 1;
 
         // [AUDIT 2026-10-20 — MULTI-ERA] Metadata bisa tiba untuk era yang
         // state aktifnya sudah ditimpa era lebih baru (atau sudah keluar dari
@@ -343,35 +333,30 @@ export async function decryptGroupMetadata(
         };
 
         for (const record of candidates) {
-            let valid = false;
-            if (sigV === 2) {
-                let signingKeyV2ForSender = record.signingKeyV2;
-                if (!signingKeyV2ForSender) {
-                    signingKeyV2ForSender = (await resolveOnce()).signingKeyV2;
-                }
-                if (!signingKeyV2ForSender) continue;
-                const { mlDsaVerify, PQ_V2_DOMAINS } = await import('@nyx/shared');
-                // [PQ v4 Fase 1.5 — envelope v3/v4] Bila wrapper membawa
-                // `senderKeyId`, kunci verifikasi WAJIB menghasilkan id sama.
-                if (typeof wrapper.senderKeyId === 'string') {
-                    const derived = deriveGroupSenderKeyId(
-                        sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING)
-                    );
-                    const claimed = sodium.from_base64(wrapper.senderKeyId, sodium.base64_variants.URLSAFE_NO_PADDING);
-                    if (!constantTimeEqual(derived, claimed)) continue;
-                }
-                valid = mlDsaVerify(
+            let signingKeyV2ForSender = record.signingKeyV2;
+            if (!signingKeyV2ForSender) {
+                signingKeyV2ForSender = (await resolveOnce()).signingKeyV2;
+            }
+            if (!signingKeyV2ForSender) continue;
+            const { mlDsaVerify, PQ_V2_DOMAINS } = await import('@nyx/shared');
+            // [docs/43 §43.3.2] Kunci verifikasi WAJIB menghasilkan
+            // `senderKeyId` yang sama; tanpa ini kunci dari era/anggota lain
+            // bisa lolos hanya karena tanda tangannya sah untuk dirinya sendiri.
+            const derived = deriveGroupSenderKeyId(
+                sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING)
+            );
+            const claimed = sodium.from_base64(wrapper.senderKeyId, sodium.base64_variants.URLSAFE_NO_PADDING);
+            if (!constantTimeEqual(derived, claimed)) continue;
+            if (
+                !mlDsaVerify(
                     signatureBytes,
                     ctBytes,
                     sodium.from_base64(signingKeyV2ForSender, sodium.base64_variants.URLSAFE_NO_PADDING),
                     PQ_V2_DOMAINS.GROUP
-                );
-            } else {
-                // [PQ-only 2026-10-23] Wrapper `sigV: 1` tidak lagi diverifikasi
-                // (tanda tangan Ed25519 dihapus) — lewati era lama.
+                )
+            ) {
                 continue;
             }
-            if (!valid) continue;
 
             try {
                 const plaintext = await workerXChaChaOpen(record.metadataKey!, wrapper.ct);
@@ -408,20 +393,6 @@ export async function decryptGroupMetadata(
 // [docs/33 §33.7] Jalur v2 (braid SPQR) — pembantu 1:1
 // ---------------------------------------------------------------------------
 
-/**
- * Kapabilitas transport hasil negosiasi (kosong = fallback WSS / sidecar lama).
- * Impor dinamis: `transportClient` menarik store auth, dan `utils/crypto`
- * diimpor oleh store — impor statis akan membuat siklus modul.
- */
-async function transportCapabilities(): Promise<string[]> {
-  try {
-    const { getNegotiatedCapabilities } = await import('@lib/transportClient');
-    return getNegotiatedCapabilities();
-  } catch {
-    return [];
-  }
-}
-
 /** Bentuk hasil jalur v2 (state DR v1 tidak disentuh). */
 interface SpqrEncryptResult {
   state: DoubleRatchetState;
@@ -431,65 +402,59 @@ interface SpqrEncryptResult {
 }
 
 /**
- * Enkripsi jalur v2. Mengembalikan `null` (bukan melempar) bila jalur v2 belum
- * bisa dipakai — mis. modul WASM belum ter-cache dan perangkat offline, atau
- * sesi ini didirikan sebelum v2 ada (tidak punya akar braid). Pemanggil akan
- * memakai jalur v1; state braid TIDAK pernah maju setengah jalan karena op
- * worker mengembalikan state hanya saat seluruh langkah berhasil.
+ * Enkripsi jalur braid v2 — satu-satunya jalur kirim. Melempar bila sesi tidak
+ * punya akar braid atau op worker gagal: pengiriman tanpa braid tidak punya
+ * bentuk wire lain lagi (`docs/43` §43.3.2). State braid TIDAK pernah maju
+ * setengah jalan karena op worker mengembalikan state hanya saat seluruh
+ * langkah berhasil.
  */
 async function encryptSpqrMessage(input: {
   conversationId: string;
   state: DoubleRatchetState;
   sealedPayload: string;
-}): Promise<SpqrEncryptResult | null> {
+}): Promise<SpqrEncryptResult> {
   const authKeyB64 = input.state.spqrAuthKey;
   const direction = input.state.spqrDirection;
-  if (!authKeyB64 || !direction) return null;
+  if (!authKeyB64 || !direction) {
+    throw new Error('SPQR: sesi ini tidak punya akar braid (state X3DH lama)');
+  }
 
   const sodium = await getSodiumLib();
   const { worker_spqr_ratchet_init, worker_spqr_ratchet_encrypt } = await getWorkerProxy();
 
-  try {
-    let spqrState = (await loadSpqrState(input.conversationId))?.state;
-    if (!spqrState) {
-      const init = await worker_spqr_ratchet_init({
-        authKey: sodium.from_base64(authKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING),
-        direction,
-      });
-      spqrState = init.state;
-    }
-
-    const result = await worker_spqr_ratchet_encrypt({
-      serializedState: spqrState,
-      plaintext: input.sealedPayload,
+  let spqrState = (await loadSpqrState(input.conversationId))?.state;
+  if (!spqrState) {
+    const init = await worker_spqr_ratchet_init({
+      authKey: sodium.from_base64(authKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING),
+      direction,
     });
-
-    // Header dibangun SEBELUM state disimpan: header yang tidak sah (mis. frame
-    // kosong) harus menggagalkan pengiriman, bukan tersimpan sebagai state maju.
-    const header = buildSpqrHeader({ frames: result.frames });
-    await saveSpqrState({
-      sessionId: input.conversationId,
-      state: result.state,
-      version: 'v2',
-      // Langkah ratchet nyata → era ini layak diarsipkan (audit N10-04).
-      advanced: true,
-    });
-
-    return { state: input.state, header, ciphertext: result.ciphertext, mk: result.mk };
-  } catch (error) {
-    console.warn('[SPQR] Jalur v2 gagal — pengiriman ini memakai v1:', error);
-    return null;
+    spqrState = init.state;
   }
+
+  const result = await worker_spqr_ratchet_encrypt({
+    serializedState: spqrState,
+    plaintext: input.sealedPayload,
+  });
+
+  // Header dibangun SEBELUM state disimpan: header yang tidak sah (mis. frame
+  // kosong) harus menggagalkan pengiriman, bukan tersimpan sebagai state maju.
+  const header = buildSpqrHeader({ frames: result.frames });
+  await saveSpqrState({
+    sessionId: input.conversationId,
+    state: result.state,
+    // Langkah ratchet nyata → era ini layak diarsipkan (audit N10-04).
+    advanced: true,
+  });
+
+  return { state: input.state, header, ciphertext: result.ciphertext, mk: result.mk };
 }
 
 /**
  * Dekripsi pesan jalur v2 (header ber-`v: 2`).
  *
- * Anti-downgrade arah masuk: header v2 **tidak** pernah dicoba dibaca sebagai
- * v1. Bila kita tidak punya akar braid (sesi lama), hasilnya error/pending yang
- * terlihat — bukan pesan yang diam-diam gagal.
- *
- * Saklar operator TIDAK mematikan jalur baca (lihat catatan di badan fungsi).
+ * [docs/43 §43.3.2] Ini satu-satunya jalur baca pesan ratchet. Bila kita tidak
+ * punya akar braid, hasilnya error/pending yang terlihat — bukan pesan yang
+ * diam-diam gagal.
  */
 async function decryptSpqrMessage(input: {
   conversationId: string;
@@ -498,20 +463,13 @@ async function decryptSpqrMessage(input: {
   actualCipher: string;
 }): Promise<DecryptResult> {
   const sodium = await getSodiumLib();
-  // [KILL SWITCH 2026-10-14] Membaca v2 **tidak** ikut dimatikan oleh saklar
-  // operator (`VITE_SPQR_FORCE_V1` / kill switch runtime DEV). Saklar itu
-  // menghentikan **pengiriman & iklan** v2; menolak membaca v2 yang sudah
-  // terkirim akan mengubah tindakan operator menjadi kehilangan pesan, padahal
-  // state braid justru sengaja dipertahankan supaya rollback aman (`docs/33`
-  // §33.8). Bila state braid benar-benar tidak ada, hasilnya tetap error yang
-  // terlihat di bawah — bukan pesan yang diam-diam gagal.
 
   const state = await retrieveRatchetStateSecurely(input.conversationId);
   if (!state) return { status: 'pending', reason: 'waiting_for_ratchet_state' };
   if (!state.spqrAuthKey || !state.spqrDirection) {
-    // Sesi didirikan sebelum jalur v2 ada → tidak punya akar braid yang sama
-    // dengan pengirim. Terlihat sebagai error, bukan "coba v1 dan berharap".
-    return { status: 'error', error: new Error('spqr: sesi ini tidak punya state braid (didirikan sebagai v1)') };
+    // Sesi tanpa akar braid tidak punya jalur baca lain lagi. Terlihat sebagai
+    // error, bukan pesan yang diam-diam gagal.
+    return { status: 'error', error: new Error('spqr: sesi ini tidak punya akar braid') };
   }
 
   const { worker_spqr_ratchet_init, worker_spqr_ratchet_decrypt } = await getWorkerProxy();
@@ -574,7 +532,6 @@ async function decryptSpqrMessage(input: {
     await saveSpqrState({
       sessionId: input.conversationId,
       state: decodeResult.state,
-      version: 'v2',
       // Frame peer sudah dikonsumsi: state maju (audit N10-04).
       advanced: true,
     });
@@ -591,18 +548,14 @@ async function decryptSpqrMessage(input: {
   }
 
   const plaintext = sodium.to_string(decodeResult.plaintext);
-  const peerVersion = extractVersionDeclaration(plaintext);
-  // [docs/30 §30.5 tahap C] Sama seperti jalur v1: head gossip peer dicatat dari
-  // plaintext yang sudah lolos AEAD braid. Fail-open (lihat ktGossip).
+  // [docs/30 §30.5 tahap C] Head gossip peer dicatat dari plaintext yang sudah
+  // lolos AEAD braid. Fail-open (lihat ktGossip).
   const peerTreeHead = extractTreeHeadField(plaintext);
   if (peerTreeHead) void recordPeerTreeHead(input.conversationId, peerTreeHead);
   const persisted = attachClientProtocolFields(
     state,
     state,
-    {
-      peerSessionConfirmed: true,
-      ...(peerVersion ? { peerAckRatchetVersion: peerVersion } : {}),
-    }
+    { peerSessionConfirmed: true }
   );
   await storeRatchetStateSecurely(input.conversationId, persisted);
 
@@ -636,22 +589,6 @@ export async function retrieveRatchetStateSecurely(conversationId: string): Prom
     return JSON.parse(new TextDecoder().decode(stateBytes));
   } catch (error) {
     console.error(`Failed to decrypt ratchet state for ${conversationId}:`, error);
-    return null;
-  }
-}
-
-/**
- * [INVARIANT 1:1 — 2026-10-02] Decrypt bytes sesi arsip → state JSON.
- * Dipakai fallback era-lookup di jalur DR decrypt.
- */
-async function retrieveRatchetStateFromBytes(encryptedState: Uint8Array): Promise<DoubleRatchetState | null> {
-  try {
-    const masterSeed = await getMasterSeedOrThrow();
-    const { worker_decrypt_session_key } = await getWorkerProxy();
-    const stateBytes = await worker_decrypt_session_key(encryptedState, masterSeed);
-    return JSON.parse(new TextDecoder().decode(stateBytes));
-  } catch (error) {
-    console.error('Failed to decrypt archived ratchet state:', error);
     return null;
   }
 }
@@ -1368,9 +1305,10 @@ export type PairwiseKeyDistributionResult = {
 // v2 = 77 byte (tanpa senderKeyId), v3 = 85 byte (+8 byte senderKeyId).
 
 /**
- * [V2 — SATU JALUR] Seal + kirim distribusi sender key era saat ini ke semua
- * device target. `senderState` WAJIB punya chainId dan metadataKey (envelope v2
- * 77-byte); tanpa keduanya fungsi melempar (pack legacy v1/v0 sudah dihapus).
+ * [docs/43 §43.3.2] Seal + kirim distribusi sender key era saat ini ke semua
+ * device target. `senderState` WAJIB punya chainId dan metadataKey, dan
+ * perangkat WAJIB punya `signingKeyV2` — envelope yang ditulis selalu v4
+ * (2037 byte, membawa kunci verifikasi pengirim).
  */
 /**
  * [PQ v4 Fase 1.5] Kunci verifikasi ML-DSA kita sendiri (base64url), atau
@@ -1397,13 +1335,16 @@ export async function sendGroupSenderKeyDistribution(
   const signingPriv = await useAuthStore.getState().getSigningPrivateKey();
   const mySigningKeyB64 = sodium.to_base64(signingPriv.slice(32), sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  // [PQ v4 Fase 1.5] Sertakan kunci verifikasi ML-DSA kita bila v2 aktif —
-  // penerima mengikatnya ke receiver state agar verifikasi `sigV:2` tidak butuh
-  // lookup bundle lagi (pola sama dengan `senderSigningKey` Ed25519).
-  const mySigningV2 = resolvePqV2Enabled() ? await useAuthStore.getState().getSigningV2KeyPair() : undefined;
-  const mySigningKeyV2B64 = mySigningV2
-    ? sodium.to_base64(mySigningV2.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
-    : undefined;
+  // [docs/43 §43.3.2] Envelope grup hanya v4, jadi kunci verifikasi ML-DSA kita
+  // WAJIB ada: penerima mengikatnya ke receiver state agar verifikasi `sigV:2`
+  // tidak butuh lookup bundle lagi (pola sama dengan `senderSigningKey`).
+  // Tanpa kunci itu tidak ada envelope sah yang bisa ditulis — melempar jauh
+  // lebih baik daripada mengirim kunci grup yang tidak bisa diverifikasi.
+  const mySigningV2 = await useAuthStore.getState().getSigningV2KeyPair();
+  if (!mySigningV2) {
+    throw new Error('Distribusi sender key grup butuh signingKeyV2 perangkat (PQ-only)');
+  }
+  const mySigningKeyV2B64 = sodium.to_base64(mySigningV2.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   const ckToSeal = senderState.initialCK ?? senderState.CK;
   const iterToSeal = senderState.initialCK ? 0 : (senderState.N || 0);
@@ -1413,26 +1354,20 @@ export async function sendGroupSenderKeyDistribution(
   if (!senderState.chainId || !senderState.metadataKey) {
     throw new Error('Cannot distribute sender key: state lacks chainId/metadataKey (grup v2/v3 wajib)');
   }
-  // [PQ v4 Fase 1.5 — envelope v4] Saat ML-DSA aktif, envelope membawa
-  // `senderKeyId` (8B, turunan signingKeyV2) DAN public key verifikasi itu
-  // sendiri (1952B). Penerima tidak perlu lookup bundle (yang gagal bila
-  // pseudonym pengirim belum bisa di-resolve sebelum metadata ter-decrypt).
-  // Tanpa kunci v2 → tetap v2 77B (kompatibel penuh).
+  // [docs/43 §43.3.2] Envelope v4 membawa `senderKeyId` (8B, turunan
+  // signingKeyV2) DAN public key verifikasi itu sendiri (1952B), sehingga
+  // penerima tidak perlu lookup bundle (yang gagal bila pseudonym pengirim
+  // belum bisa di-resolve sebelum metadata ter-decrypt).
   const b64u = (s: string) => sodium.from_base64(s, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const envelopeBase = {
+  const packed: Uint8Array = packGroupEnvelope({
+    version: 4,
     chainId: b64u(senderState.chainId),
     iteration: iterToSeal,
     chainKey: b64u(ckToSeal),
     metadataKey: b64u(senderState.metadataKey),
-  };
-  const packed: Uint8Array = mySigningV2
-    ? packGroupEnvelope({
-        version: 4,
-        ...envelopeBase,
-        senderKeyId: deriveGroupSenderKeyId(mySigningV2.publicKey),
-        signingKeyV2: new Uint8Array(mySigningV2.publicKey),
-      })
-    : packGroupEnvelope({ version: 2, ...envelopeBase });
+    senderKeyId: deriveGroupSenderKeyId(mySigningV2.publicKey),
+    signingKeyV2: new Uint8Array(mySigningV2.publicKey),
+  });
 
   const distributionKeys: Array<Record<string, unknown>> = [];
   for (const t of targets) {
@@ -1731,10 +1666,9 @@ export async function handleGroupKeyDistribution(
       throw new Error('DECRYPTION_FAILED');
   }
 
-  // [V2/V3 — docs/35 §35.6.4] Parser bersama dengan test:
-  //   v2: [0x02][chainId(8)][u32 iter][CK(32)][metaKey(32)]
-  //   v3: v2 + [senderKeyId(8)]
-  // [2026-10 legacy purge] Reader v1 (36B) & v0 (32B) dihapus.
+  // [docs/43 §43.3.2] Parser bersama dengan test — hanya v4:
+  //   [0x04][chainId(8)][u32 iter][CK(32)][metaKey(32)][senderKeyId(8)][signingKeyV2(1952)]
+  // Envelope v2/v3 (tanpa kunci verifikasi pengirim) ditolak bersama v1/v0.
   let envelope: GroupEnvelope;
   try {
       envelope = parseGroupEnvelope(senderKeyBytes);
@@ -1756,40 +1690,36 @@ export async function handleGroupKeyDistribution(
   // ambil kunci verifikasi dari bundle perangkat pengirim, dicocokkan lewat
   // `senderDeviceKey` (identity key). Envelope v3 sendiri sudah mengikat
   // `senderKeyId`, jadi kunci yang salah tetap ditolak di bawah.
-  let effectiveSigningKey = senderSigningKey;
-  let effectiveSigningKeyV2 = senderSigningKeyV2;
-  // [PQ v4 Fase 1.5 — envelope v4] Kunci verifikasi ikut di dalam envelope
-  // (sudah diseal per-device) → sumber otoritatif, tanpa lookup bundle.
-  if (envelope.version === 4) {
-      const envelopeKeyB64 = b64u(envelope.signingKeyV2);
-      if (effectiveSigningKeyV2 && effectiveSigningKeyV2 !== envelopeKeyB64) {
-          console.error('[Crypto] envelope v4: signingKeyV2 envelope tidak sama dengan event');
-          throw new Error('GROUP_KEY_DISTRIBUTION_KEY_MISMATCH');
-      }
-      effectiveSigningKeyV2 = envelopeKeyB64;
+  // [docs/43 §43.3.2] Kunci verifikasi ML-DSA ikut di dalam envelope v4 (sudah
+  // diseal per-device) → sumber otoritatif, tanpa lookup bundle. Event yang
+  // membawa kunci berbeda berarti envelope dipindah/ditimpa: tolak.
+  const effectiveSigningKeyV2 = b64u(envelope.signingKeyV2);
+  if (senderSigningKeyV2 && senderSigningKeyV2 !== effectiveSigningKeyV2) {
+      console.error('[Crypto] envelope v4: signingKeyV2 envelope tidak sama dengan event');
+      throw new Error('GROUP_KEY_DISTRIBUTION_KEY_MISMATCH');
   }
-  if ((!effectiveSigningKey || !effectiveSigningKeyV2) && senderDeviceKey) {
+  // Ed25519 publik pengirim tidak ada di envelope v4; untuk state lama ia
+  // masih diambil dari bundle perangkat bila event tidak membawanya.
+  let effectiveSigningKey = senderSigningKey;
+  if (!effectiveSigningKey && senderDeviceKey) {
       const resolved = await resolveDeviceSigningKeys(
           conversationId,
           senderDeviceKey,
           resolvePseudonymToUserId(conversationId, senderId) ?? undefined
       );
-      effectiveSigningKey = effectiveSigningKey || resolved.signingKey;
-      effectiveSigningKeyV2 = effectiveSigningKeyV2 || resolved.signingKeyV2;
+      effectiveSigningKey = resolved.signingKey;
   }
 
-  // [PQ v4 Fase 1.5 — envelope v3] `senderKeyId` HARUS cocok dengan kunci
-  // verifikasi ML-DSA yang diklaim event. Ketidakcocokan = envelope dipindah
-  // antar-pengirim / event ditimpa: tolak sebelum menyentuh state.
-  let senderKeyIdB64: string | undefined;
-  if (envelope.version === 3 || envelope.version === 4) {
-      senderKeyIdB64 = b64u(envelope.senderKeyId);
-      if (effectiveSigningKeyV2) {
-          const claimed = sodium.from_base64(effectiveSigningKeyV2, sodium.base64_variants.URLSAFE_NO_PADDING);
-          if (!constantTimeEqual(deriveGroupSenderKeyId(claimed), envelope.senderKeyId)) {
-              console.error('[Crypto] envelope v3: senderKeyId tidak cocok dengan signingKeyV2 pengirim');
-              throw new Error('GROUP_KEY_DISTRIBUTION_KEY_ID_MISMATCH');
-          }
+  // [docs/43 §43.3.2] `senderKeyId` (selalu ada di envelope v4) HARUS cocok
+  // dengan kunci verifikasi ML-DSA yang diklaim event. Ketidakcocokan =
+  // envelope dipindah antar-pengirim / event ditimpa: tolak sebelum menyentuh
+  // state.
+  const senderKeyIdB64 = b64u(envelope.senderKeyId);
+  {
+      const claimed = sodium.from_base64(effectiveSigningKeyV2, sodium.base64_variants.URLSAFE_NO_PADDING);
+      if (!constantTimeEqual(deriveGroupSenderKeyId(claimed), envelope.senderKeyId)) {
+          console.error('[Crypto] envelope v4: senderKeyId tidak cocok dengan signingKeyV2 pengirim');
+          throw new Error('GROUP_KEY_DISTRIBUTION_KEY_ID_MISMATCH');
       }
   }
 
@@ -2239,23 +2169,17 @@ async function doEncryptMessage(
           };
       }
 
-      const { worker_dr_ratchet_encrypt } = await getWorkerProxy();
-
       const { publicKey } = await getMyEncryptionKeyPair();
       const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       // [DR PROTOCOL 2026-10-05 — ACK RATCHET] ackKem = KEMr kita (chain peer
       // yang sudah kita step) — diterima peer lewat payload TERENKRIPSI (AEAD
       // otentik); dipakai peer untuk memutuskan omit-ct di header berikutnya.
       //
-      // [docs/33 §33.7 / docs/04] + `ackV` = deklarasi versi ratchet yang BISA
-      // kita buka (v2 = braid SPQR). Deklarasi ini yang menjadi syarat peer
-      // mengirim v2 ke kita — kapabilitas transport saja tidak cukup.
       const sealedPayload = JSON.stringify({
           content: text,
           senderId: myId,
           senderDeviceKey: myPublicKeyB64,
           ...(state?.KEMr ? { ackKem: state.KEMr } : {}),
-          ...versionDeclaration(spqrSendingEnabled() ? 'v2' : 'v1'),
           // [docs/30 §30.5 tahap C / docs/34 §34.5] Jangkar gossip tree head KT:
           // peer membandingkannya dengan jangkarnya sendiri → split-view terdeteksi
           // tanpa server tahu, dan tanpa field tambahan di luar payload ter-seal.
@@ -2263,101 +2187,41 @@ async function doEncryptMessage(
           ...treeHeadField(getLocalAnchor())
       });
 
-      // [docs/33 §33.7 — jalur versi paralel] Versi pengiriman diputuskan per
-      // pesan: v2 hanya bila peer sudah menyatakan mampu (`ackV`) DAN relay
-      // mengiklankan kapabilitas `spqr-ratchet`. Peer yang belum menyatakan →
-      // jalur v1 beku, tanpa kecuali (klien lama tidak pernah menerima header v2).
-      const outboundDecision = resolveOutboundRatchetVersion({
-          currentOutbound: state?.ratchetVersion ?? 'v1',
-          peerDeclaredVersion: state?.peerAckRatchetVersion ?? null,
-          negotiatedCapabilities: await transportCapabilities(),
-          capabilityOverride: SPQR_CAPABILITY_OVERRIDE,
+      const clientFieldsPatch: DrProtocolStateView = x3dhData
+          ? { pendingHandshake: x3dhData, peerSessionConfirmed: false }
+          : {};
+
+      // [docs/43 §43.3.2] Satu-satunya jalur kirim: braid SPQR v2. Tidak ada
+      // fallback v1 — header v1 tidak ditulis maupun dibaca lagi.
+      const v2Result = await encryptSpqrMessage({
+          conversationId,
+          state: state ?? {},
+          sealedPayload,
       });
 
-      const clientFieldsPatch: DrProtocolStateView = {
-          ...(x3dhData ? { pendingHandshake: x3dhData, peerSessionConfirmed: false } : {}),
-          ratchetVersion: outboundDecision.version,
-      };
-
-      if (outboundDecision.version === 'v2') {
-          const v2Result = await encryptSpqrMessage({
-              conversationId,
-              state: state ?? {},
-              sealedPayload,
-          });
-          if (v2Result) {
-              if (messageId && v2Result.mk) {
-                  await storeMessageKeySecurely(messageId, new Uint8Array(v2Result.mk));
-              }
-              // State DR v1 TIDAK maju di jalur v2 (tidak ada frame v1 yang
-              // dikirim) — ia hanya menyimpan bidang klien (versi + handshake).
-              const persistedV2 = attachClientProtocolFields(
-                  v2Result.state,
-                  state ?? {},
-                  clientFieldsPatch
-              );
-              await storeRatchetStateSecurely(conversationId, persistedV2);
-
-              const handshakeV2 = getHandshakePayload(persistedV2);
-              const payloadV2 = JSON.stringify({
-                  dr: v2Result.header,
-                  ciphertext: sodium.to_base64(new Uint8Array(v2Result.ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING),
-                  ...(handshakeV2 ? { x3dh: handshakeV2 } : {})
-              });
-
-              return {
-                  ciphertext: payloadV2,
-                  mk: new Uint8Array(v2Result.mk),
-                  drHeader: v2Result.header as unknown as DrHeader,
-              };
-          }
-          // Jalur v2 gagal (mis. modul WASM belum ter-cache dan perangkat
-          // offline) → pengiriman ini memakai v1. Op worker bersifat atomik,
-          // jadi state braid tidak pernah maju setengah jalan; peer membaca v1
-          // lewat jalur beku yang sama. Percobaan v2 diulang pada pesan berikutnya.
+      if (messageId && v2Result.mk) {
+          await storeMessageKeySecurely(messageId, new Uint8Array(v2Result.mk));
       }
-
-      const result = await worker_dr_ratchet_encrypt({
-          serializedState: state,
-          plaintext: sealedPayload
-      });
-
-      if (messageId && result.mk) {
-          const mkBytes = new Uint8Array(result.mk);
-          await storeMessageKeySecurely(messageId, mkBytes);
-      }
-
-      // [DR PROTOCOL 2026-10-05] Bidang klien (pendingHandshake /
-      // peerSessionConfirmed / peerAckedKem) ditempel ulang — serializeState
-      // worker me-strip field di luar daftarnya.
-      const persistedState = attachClientProtocolFields(
-          result.state,
+      // State DR hanya menyimpan bidang klien (handshake); yang maju adalah braid.
+      const persistedV2 = attachClientProtocolFields(
+          v2Result.state,
           state ?? {},
           clientFieldsPatch
       );
-      await storeRatchetStateSecurely(conversationId, persistedState);
+      await storeRatchetStateSecurely(conversationId, persistedV2);
 
-      // [DR PROTOCOL 2026-10-05 — X3DH-UNTIL-CONFIRMED] Handshake awal sesi
-      // dikirim ulang di setiap pesan sampai balasan peer pertama berhasil
-      // didekripsi — pesan pertama (satu-satunya pembawa x3dh) yang hilang/
-      // expired tidak lagi melumpuhkan percakapan.
-      const handshakeForWire = getHandshakePayload(persistedState);
-      // [DR PROTOCOL 2026-10-05 — OMIT-CT] ct KEM (1120B) dihilangkan hanya
-      // bila peer sudah meng-ack chain kita saat ini (ack via payload
-      // terenkripsi); receiver yang belum step tetap menerima ct.
-      const omitCt = shouldOmitRatchetCt(
-          persistedState.peerAckedKem,
-          persistedState.KEMs?.publicKey ?? null
-      );
-      const wireHeader = omitCt ? { ...result.header, ct: '' } : result.header;
-
-      const payload = JSON.stringify({
-          dr: wireHeader,
-          ciphertext: sodium.to_base64(new Uint8Array(result.ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING),
-          ...(handshakeForWire ? { x3dh: handshakeForWire } : {})
+      const handshakeV2 = getHandshakePayload(persistedV2);
+      const payloadV2 = JSON.stringify({
+          dr: v2Result.header,
+          ciphertext: sodium.to_base64(new Uint8Array(v2Result.ciphertext), sodium.base64_variants.URLSAFE_NO_PADDING),
+          ...(handshakeV2 ? { x3dh: handshakeV2 } : {})
       });
 
-      return { ciphertext: payload, mk: new Uint8Array(result.mk), drHeader: result.header };
+      return {
+          ciphertext: payloadV2,
+          mk: new Uint8Array(v2Result.mk),
+          drHeader: v2Result.header as unknown as DrHeader,
+      };
   }
 
   const { groupRatchetEncrypt } = await getWorkerProxy();
@@ -2478,16 +2342,19 @@ async function doEncryptMessage(
       senderDeviceKey: myPublicKeyB64
   });
 
-  // [PQ v4 Fase 1.5] Bila v2 aktif dan device punya kunci ML-DSA, tanda tangan
-  // pesan memakai ML-DSA (`sigV:2`). v1 (Ed25519) tetap default.
-  const signingV2Keys = resolvePqV2Enabled() ? await useAuthStore.getState().getSigningV2KeyPair() : undefined;
+  // [docs/43 §43.3.2] Pesan grup selalu ditandatangani ML-DSA-65 (`sigV:2`).
+  // Tidak ada penulis non-PQ: tanpa kunci v2, enkripsi tidak bisa dilanjutkan.
+  const signingV2Keys = await useAuthStore.getState().getSigningV2KeyPair();
+  if (!signingV2Keys) {
+      throw new Error('Pesan grup butuh signingKeyV2 perangkat (PQ-only)');
+  }
 
   // Encrypt & Ratchet
   const result = await groupRatchetEncrypt(
       { CK: senderState.CK, N: senderState.N },
       sealedPayload,
       signingPrivateKey,
-      signingV2Keys?.secretKey
+      signingV2Keys.secretKey
   );
   
   // [FIX] Atomic order: save key before state
@@ -2532,16 +2399,12 @@ async function doEncryptMessage(
       sigV: result.signatureVersion,
       senderId: senderIdForServer,
       senderDeviceKey: myPublicKeyB64,
-      // [PQ v4 Fase 1.5 — envelope v3] Pengenal kunci verifikasi (8B b64url);
-      // penerima mencocokkannya dengan `signingKeyV2` yang terikat.
-      ...(signingV2Keys
-          ? {
-                senderKeyId: sodium.to_base64(
-                    deriveGroupSenderKeyId(signingV2Keys.publicKey),
-                    sodium.base64_variants.URLSAFE_NO_PADDING
-                ),
-            }
-          : {}),
+      // [docs/43 §43.3.2] Pengenal kunci verifikasi (8B b64url); penerima
+      // mencocokkannya dengan `signingKeyV2` yang terikat.
+      senderKeyId: sodium.to_base64(
+          deriveGroupSenderKeyId(signingV2Keys.publicKey),
+          sodium.base64_variants.URLSAFE_NO_PADDING
+      ),
   });
   
   // ✅ FIX: Atomic Persistence - Update state only after everything else succeeds
@@ -2558,7 +2421,7 @@ async function doEncryptMessage(
       chainId: senderState.chainId,
       metadataKey: senderState.metadataKey,
       // [PQ v4 Fase 1.5] Pertahankan kunci verifikasi ML-DSA di sender state.
-      signingKeyV2: senderState.signingKeyV2 ?? (signingV2Keys ? sodium.to_base64(signingV2Keys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined),
+      signingKeyV2: senderState.signingKeyV2 ?? sodium.to_base64(signingV2Keys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
       createdAt: senderState.createdAt || Date.now(),
       messageCount: (senderState.messageCount || 0) + 1,
       lastActivityTime: Date.now(),
@@ -2692,8 +2555,12 @@ async function doDecryptMessage(
     try {
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
-        // [PQ v4] `sigV:2` = tanda tangan grup ML-DSA-65 (default absen/1 = Ed25519).
-        const signatureVersion: number = typeof payload.sigV === 'number' ? payload.sigV : 1;
+        // [docs/43 §43.3.2] Hanya `sigV: 2` (ML-DSA-65). Wrapper tanpa `sigV: 2`
+        // adalah era Ed25519 yang tidak punya pembaca lagi.
+        if (payload.sigV !== 2) {
+            return { status: 'error', error: new Error('Grup: signatureVersion bukan 2 (format lama)') };
+        }
+        const signatureVersion = 2;
 
         // [T1 FIX 2026-09-27] senderId di wrapper = PSEUDONYM (metadata v2).
         // Resolusi signing key butuh USER ID: lookup bundle/partisipan server
@@ -2785,11 +2652,11 @@ async function doDecryptMessage(
              return { status: 'error', error: new Error('Missing sender signing key') };
         }
 
-        // [PQ v4 Fase 1.5] Resolusi kunci verifikasi ML-DSA — hanya saat `sigV:2`.
-        // Sumber utama receiver state (diikat saat distribusi); fallback bundle
-        // device (match `senderDeviceKey`) lalu participant/user.
+        // [docs/43 §43.3.2] Kunci verifikasi ML-DSA wajib ada: sumber utama
+        // receiver state (diikat saat distribusi); fallback bundle device
+        // (match `senderDeviceKey`) lalu participant/user.
         let keyV2ToUse: string | undefined;
-        if (signatureVersion === 2) {
+        {
             keyV2ToUse = receiverState.signingKeyV2;
             if (!keyV2ToUse && senderDeviceKey) {
                 // [PQ v4 Fase 1.5 — fallback 2026-10-20] Jangan hanya coba
@@ -2810,15 +2677,16 @@ async function doDecryptMessage(
         }
 
         const senderSigningKey = sodium.from_base64(keyToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const senderSigningKeyV2Bytes = keyV2ToUse
-            ? sodium.from_base64(keyV2ToUse, sodium.base64_variants.URLSAFE_NO_PADDING)
-            : undefined;
+        const senderSigningKeyV2Bytes = sodium.from_base64(keyV2ToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-        // [PQ v4 Fase 1.5 — envelope v3] Bila wrapper membawa `senderKeyId`,
-        // pastikan kunci verifikasi yang dipilih memang kunci pengirim itu.
-        if (typeof (payload as { senderKeyId?: unknown }).senderKeyId === 'string' && senderSigningKeyV2Bytes) {
+        // [docs/43 §43.3.2] `senderKeyId` selalu ada; kunci verifikasi yang
+        // dipilih harus menghasilkan id yang sama dengan yang diklaim wrapper.
+        if (typeof payload.senderKeyId !== 'string') {
+            return { status: 'error', error: new Error('Grup: senderKeyId tidak ada (format lama)') };
+        }
+        {
             const claimed = sodium.from_base64(
-                (payload as { senderKeyId: string }).senderKeyId,
+                payload.senderKeyId,
                 sodium.base64_variants.URLSAFE_NO_PADDING
             );
             if (!constantTimeEqual(deriveGroupSenderKeyId(senderSigningKeyV2Bytes), claimed)) {
@@ -2836,10 +2704,14 @@ async function doDecryptMessage(
         // Lookup TANPA penebakan: entri salah-era tidak akan pernah dikembalikan.
         // [2026-10 legacy purge] Alias keyId pesan (wrapper v1) dihapus.
         const { getGroupSkippedKey, deleteGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
-        const chainAlias = receiverState.chainId ?? receiverState.eraCK?.substring(0, 8);
-        let skippedMkB64 = chainAlias
-            ? await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, chainAlias)
-            : null;
+        // [docs/43 §43.3.2] Alias era = chainId eksplisit. Fallback prefix CK
+        // pra-v2 dihapus: state tanpa chainId adalah format lama yang tidak
+        // dibaca lagi.
+        const chainAlias = receiverState.chainId;
+        if (!chainAlias) {
+            return { status: 'error', error: new Error('Grup: receiver state tanpa chainId (format lama)') };
+        }
+        let skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n, chainAlias);
         if (!skippedMkB64 && receiverState.skippedKeys) {
             skippedMkB64 = receiverState.skippedKeys[String(header.n)] ?? null;
         }
@@ -2911,7 +2783,7 @@ async function doDecryptMessage(
         // Mirror ke tabel skipped-keys: keyed by chainId (STABIL — semua posisi
         // era yang sama berbagi alias). Entri tidak pernah dihapus (invarian
         // MK-persist).
-        const chainIdForSkip = chainAlias ?? receiverState.CK?.substring(0, 8);
+        const chainIdForSkip = chainAlias;
         for (const sk of result.skippedKeys) {
             await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk, chainIdForSkip);
         }
@@ -2998,12 +2870,7 @@ async function doDecryptMessage(
         return { status: 'success', value: sodium.to_string(decrypted) };
       }
 
-      const drHeader = payload.dr;
       const actualCipher = payload.ciphertext;
-      
-      // ✅ FIX: Get the post-quantum key directly from the new KEM header structure
-      const kemPk = drHeader.kemPk;
-      const headerKey = `${conversationId}_${kemPk}_${drHeader.n}`;
 
       // [FIX 4 — DUPLIKAT = SUCCESS 2026-10-02] MK cache per messageId dicek
       // DI AWAL (semua jalur): pesan yang sudah pernah didekripsi ulang dari
@@ -3023,139 +2890,19 @@ async function doDecryptMessage(
           }
       }
 
-      // [docs/33 §33.7 — jalur versi paralel] Header v2 (braid SPQR) ditangani
-      // modul terpisah dan TIDAK pernah dibaca sebagai v1: menerka versi dari
-      // header jaringan adalah cara paling mudah kehilangan riwayat pesan.
-      const spqrHeader = parseSpqrHeader(drHeader);
-      if (spqrHeader) {
-          return await decryptSpqrMessage({
-              conversationId,
-              messageId,
-              header: spqrHeader,
-              actualCipher,
-          });
+      // [docs/43 §43.3.2] Satu-satunya header ratchet yang diterima adalah braid
+      // v2 (`{v:2,b:[...]}`). Header DR v1 tidak dibaca lagi — bentuk lama
+      // dilaporkan sebagai error, bukan diterka sebagai v1.
+      const spqrHeader = parseSpqrHeader(payload.dr);
+      if (!spqrHeader) {
+          return { status: 'error', error: new Error('header ratchet bukan v2 (format lama)') };
       }
-
-      const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
-      if (skippedMkStr) {
-          const mk = sodium.from_base64(skippedMkStr, sodium.base64_variants.URLSAFE_NO_PADDING);
-          const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-          const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
-          const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
-          const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-          
-          // [FIX 2 — 2026-10-02] JANGAN hapus — MK persist ala libsignal
-          // (deleteSkippedKey kini no-op; cap LRU di storeSkippedKey).
-          // [ECHO FIX 2026-10-05] Pangkas padding sebelum decode.
-          return { status: 'success', value: sodium.to_string(trimPaddedPlaintext(decrypted)) };
-      }
-
-      const state = await retrieveRatchetStateSecurely(conversationId);
-      if (!state) {
-          return { status: 'pending', reason: 'waiting_for_ratchet_state' };
-      }
-
-      const { worker_dr_ratchet_decrypt } = await getWorkerProxy();
-      const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-      
-      let result: Awaited<ReturnType<typeof worker_dr_ratchet_decrypt>> | null = null;
-      try {
-          result = await worker_dr_ratchet_decrypt({
-              serializedState: state,
-              header: drHeader,
-              ciphertext: combined
-          });
-      } catch (err) {
-          // [FIX 1 — FALLBACK ERA ARSIP 2026-10-02] Ala libsignal
-          // previous_session_states: pesan dari DH-step/X3DH lama yang datang
-          // belakangan dicoba dengan state arsip SEBELUM gagal.
-          // [AUDIT FIX 2026-10-05] Arsip kini 3 slot FIFO (ala prior-states
-          // libsignal) — pesan yang datang 2+ DH-step terlambat (device offline
-          // beberapa step, skipped-key ter-evict LRU) tetap terselamatkan.
-          const errMsg = (err instanceof Error ? err.message : String(err)) || '';
-          const isEraMiss = errMsg.includes('Ratchet Advanced') ||
-              errMsg.includes('older than current state') ||
-              errMsg.includes('Decryption failed') ||
-              // [DR PROTOCOL 2026-10-05] Header omit-ct untuk chain yang belum
-              // dipegang receiver — coba slot arsip (bisa jadi era arsip = era
-              // header).
-              errMsg.includes('Missing ratchet key material');
-          if (!isEraMiss) throw err;
-
-          const { getArchivedRatchetSessions } = await import('@lib/keychainDb');
-          const archivedStates = await getArchivedRatchetSessions(conversationId);
-          if (archivedStates.length === 0) throw err;
-
-          let archivedResult: Awaited<ReturnType<typeof worker_dr_ratchet_decrypt>> | null = null;
-          for (const archivedState of archivedStates) {
-              const archivedPlain = await retrieveRatchetStateFromBytes(archivedState);
-              if (!archivedPlain) continue;
-              try {
-                  archivedResult = await worker_dr_ratchet_decrypt({
-                      serializedState: archivedPlain,
-                      header: drHeader,
-                      ciphertext: combined
-                  });
-                  break;
-              } catch {
-                  // Slot ini bukan eranya — coba slot arsip berikutnya.
-              }
-          }
-          if (!archivedResult) throw err;
-          result = archivedResult;
-
-          // Pesan dari arsip JANGAN menggeser state current (alam libsignal:
-          // arsip dipromosikan hanya bila mengalahkan current — di sini cukup
-          // MK disimpan; arsip tetap arsip).
-          for (const sk of result.skippedKeys) {
-              const hKey = `${conversationId}_${sk.kemPk}_${sk.n}`;
-              await storeSkippedMessageKeySecurely(hKey, sk.mk);
-          }
-          if (messageId && result.mk) {
-              await storeMessageKeySecurely(messageId, result.mk);
-          }
-          return { status: 'success', value: sodium.to_string(result.plaintext) };
-      }
-
-      // [FIX] ATOMIC ORDER: Store intermediate keys (gaps) FIRST
-      for (const sk of result.skippedKeys) {
-          const hKey = `${conversationId}_${sk.kemPk}_${sk.n}`;
-          await storeSkippedMessageKeySecurely(hKey, sk.mk);
-      }
-
-      // Store current message key
-      if (messageId) {
-          await storeMessageKeySecurely(messageId, result.mk);
-      }
-
-      // [DR PROTOCOL 2026-10-05] Dekripsi SUKSES atas state current = bukti
-      // peer memegang sesi ini: (1) hentikan re-kiriman x3dh (x3dh-until-
-      // confirmed), (2) simpan ackKem peer (pengirim berikutnya boleh omit-ct).
-      // Bidang klien ditempel ulang — serializeState worker me-strip-nya.
-      const decryptedPlaintext = sodium.to_string(new Uint8Array(result.plaintext));
-      const peerAck = extractPeerAck(decryptedPlaintext);
-      // [docs/33 §33.7] Deklarasi versi peer (`ackV`) hanya diterima dari payload
-      // yang sudah lolos AEAD — ia yang mengizinkan pengiriman v2 berikutnya.
-      const peerVersion = extractVersionDeclaration(decryptedPlaintext);
-      // [docs/30 §30.5 tahap C] Head tree KT peer — hanya dipercaya karena
-      // datang dari payload yang sudah lolos AEAD. Pencatatan fail-open: gossip
-      // adalah sinyal tambahan, bukan syarat pesan bisa dibaca.
-      const peerTreeHead = extractTreeHeadField(decryptedPlaintext);
-      if (peerTreeHead) void recordPeerTreeHead(conversationId, peerTreeHead);
-      const persistedState = attachClientProtocolFields(
-          result.state,
-          state ?? {},
-          {
-              peerSessionConfirmed: true,
-              ...(peerAck ? { peerAckedKem: peerAck } : {}),
-              ...(peerVersion ? { peerAckRatchetVersion: peerVersion } : {}),
-          }
-      );
-
-      // FINALLY, update the ratchet state to advance the chain
-      await storeRatchetStateSecurely(conversationId, persistedState);
-
-      return { status: 'success', value: sodium.to_string(result.plaintext) };
+      return await decryptSpqrMessage({
+          conversationId,
+          messageId,
+          header: spqrHeader,
+          actualCipher,
+      });
 
     } catch (e: unknown) {
       console.error('DR Decryption failed for convo:', conversationId, e);

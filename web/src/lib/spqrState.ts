@@ -38,7 +38,6 @@
 
 import { db } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
-import type { RatchetWireVersion } from './spqrNegotiation';
 
 /** Prefix baris state di `kvStore` (satu baris per sesi). */
 export const SPQR_STATE_KEY_PREFIX = 'nyx_spqr_state_v1:';
@@ -56,8 +55,6 @@ export const SPQR_STATE_WRITE_DEBOUNCE_MS = 250;
 
 export interface SpqrStateRecord {
   sessionId: string;
-  /** Versi wire yang memakai state ini (`v2` = jalur braid). */
-  version: RatchetWireVersion;
   state: Uint8Array;
   /** ms; kapan state terakhir benar-benar ditulis. */
   updatedAt: number;
@@ -93,7 +90,6 @@ function assertSessionId(sessionId: string): void {
 
 interface PendingWrite {
   sessionId: string;
-  version: RatchetWireVersion;
   state: Uint8Array;
   advanced: boolean;
   timer: ReturnType<typeof setTimeout> | null;
@@ -104,7 +100,7 @@ const pending = new Map<string, PendingWrite>();
 /** Tulis satu baris ter-seal pada kunci tertentu (tanpa debounce). */
 async function writeSealedRow(
   key: string,
-  input: { version: RatchetWireVersion; state: Uint8Array; now: number; advanced: boolean },
+  input: { state: Uint8Array; now: number; advanced: boolean },
 ): Promise<void> {
   if (input.state.length === 0) throw new SpqrStateError('spqr: state kosong');
   if (input.state.length > SPQR_MAX_STATE_BYTES) {
@@ -115,7 +111,7 @@ async function writeSealedRow(
   await db.kvStore.put({
     key,
     value: await encryptValueAtRest(JSON.stringify({
-      v: input.version,
+      v: 2,
       s: base64FromBytes(input.state),
       t: input.now,
       a: input.advanced ? 1 : 0,
@@ -126,7 +122,6 @@ async function writeSealedRow(
 /** Tulis baris state aktif sesi (tanpa debounce). */
 async function writeState(entry: PendingWrite, now: number): Promise<void> {
   await writeSealedRow(stateKey(entry.sessionId), {
-    version: entry.version,
     state: entry.state,
     now,
     advanced: entry.advanced,
@@ -137,15 +132,17 @@ async function writeState(entry: PendingWrite, now: number): Promise<void> {
 function decodeStoredRow(
   plain: string,
   label: string,
-): { version: RatchetWireVersion; state: Uint8Array; updatedAt: number; advanced: boolean } | undefined {
+): { state: Uint8Array; updatedAt: number; advanced: boolean } | undefined {
   try {
     const parsed = JSON.parse(plain) as { v?: unknown; s?: unknown; t?: unknown; a?: unknown };
-    if (parsed.v !== 'v1' && parsed.v !== 'v2') throw new Error('versi state tidak dikenal');
+    // [docs/43 §43.3.2] Penanda wire hanya v2 (braid). Baris rusak/versi lain
+    // dianggap tidak terbaca — pemanggil memulai sesi baru, bukan memakai state
+    // yang mungkin berasal dari format lain.
+    if (parsed.v !== 2) throw new Error('versi state tidak dikenal');
     if (typeof parsed.s !== 'string') throw new Error('state bukan base64');
     const state = bytesFromBase64(parsed.s);
     if (state.length === 0) throw new Error('state kosong');
     return {
-      version: parsed.v,
       state,
       updatedAt: typeof parsed.t === 'number' ? parsed.t : 0,
       // Baris lama (sebelum penanda ada) dianggap PERNAH maju: lebih baik
@@ -167,7 +164,6 @@ function decodeStoredRow(
 export async function saveSpqrState(input: {
   sessionId: string;
   state: Uint8Array;
-  version: RatchetWireVersion;
   now?: number;
   /**
    * State ini sudah membawa lalu lintas ratchet (encrypt/decrypt)?
@@ -193,7 +189,6 @@ export async function saveSpqrState(input: {
 
   const entry: PendingWrite = {
     sessionId: input.sessionId,
-    version: input.version,
     // Salin: pemanggil (langkah ratchet) boleh saja memakai ulang/memzero buffer.
     state: input.state.slice(),
     // Menempel: satu langkah yang sudah maju tidak boleh "dibatalkan" oleh
@@ -256,7 +251,6 @@ export async function loadSpqrState(sessionId: string): Promise<SpqrStateRecord 
   if (pendingEntry) {
     return {
       sessionId,
-      version: pendingEntry.version,
       state: pendingEntry.state.slice(),
       updatedAt: Date.now(),
       advanced: pendingEntry.advanced,
@@ -350,7 +344,6 @@ export async function rotateSpqrStateForNewSession(sessionId: string): Promise<v
         const older = await loadEraState(sessionId, slot - 1);
         if (older) {
           await writeSealedRow(eraStateKey(sessionId, slot), {
-            version: older.version,
             state: older.state,
             now: older.updatedAt,
             advanced: older.advanced,
@@ -360,7 +353,6 @@ export async function rotateSpqrStateForNewSession(sessionId: string): Promise<v
         }
       }
       await writeSealedRow(eraStateKey(sessionId, 0), {
-        version: current.version,
         state: current.state,
         now: current.updatedAt || Date.now(),
         advanced: current.advanced,

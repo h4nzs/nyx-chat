@@ -63,10 +63,9 @@ import {
 } from '../ktConfigPin';
 
 const pinFor = (mode: number): KtConfigPin => ({
-  abiVersion: 1,
+  abiVersion: 2,
   mode,
-  signatureKey: 'a'.repeat(64),
-  vrfKey: 'b'.repeat(64),
+  signatureKey: 'a'.repeat(3904),
   auditorKeys: [],
 });
 
@@ -95,7 +94,7 @@ describe('pin konfigurasi KT per akun', () => {
     state.userId = 'user-a';
     const restored = await loadKtConfigPin();
     expect(restored?.mode).toBe(1);
-    expect(restored?.abiVersion).toBe(1);
+    expect(restored?.abiVersion).toBe(2);
   });
 
   it('akun lain tidak membaca pin akun pertama', async () => {

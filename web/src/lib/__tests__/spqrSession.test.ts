@@ -133,9 +133,8 @@ withSkip('spqrSendStep / spqrRecvStep', () => {
   });
 
   it('urutan nyata jalur pesan: peer (B2A) yang mengirim v2 pertama', () => {
-    // Skenario yang benar-benar terjadi saat upgrade: deklarasi `ackV` datang
-    // di pesan v1, jadi bisa saja penerima (B2A) yang mengirim pesan v2
-    // pertama — braid kedua sisi sama-sama masih di state awal.
+    // Penerima (B2A) bisa saja mengirim pesan v2 pertama — braid kedua sisi
+    // sama-sama masih di state awal.
     const { alice, bob, a, b } = freshPair(0x8f2a);
 
     const fromBob = spqrSendStep(bob, b);

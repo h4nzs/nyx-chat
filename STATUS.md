@@ -42,8 +42,6 @@
 | `VITE_OHTTP_ENABLED` | mati | pencarian user dikirim langsung ke API (IP terlihat API/edge) |
 | `VITE_PIR_ENABLED` | mati | pencarian memakai jalur OPRF+basis data langsung, bukan PIR |
 | `VITE_PIR_OPRF_ENABLED` | mati | identifier mentah dipakai sebagai query (bukan index OPRF) |
-| `VITE_SPQR_FORCE_V1` | mati | klien tidak mengirim/mengiklankan ratchet v2 (tetap bisa membaca v2) |
-| `VITE_SPQR_FORCE_V2` | mati | v2 hanya diaktifkan bila relay menegosiasikan kapabilitasnya |
 
 ## Yang sengaja TIDAK di sini
 

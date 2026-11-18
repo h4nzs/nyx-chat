@@ -5,92 +5,79 @@
 import { describe, expect, it } from 'vitest';
 import { ktConfigPinMatches, parseKtConfigPin } from '../ktConfigPin';
 
-const KEY_A = 'a'.repeat(64);
-const KEY_B = 'b'.repeat(64);
-const AUDITOR_1 = 'c'.repeat(64);
-const AUDITOR_2 = 'd'.repeat(64);
 const MLDSA_A = 'a'.repeat(3904);
 const MLDSA_B = 'b'.repeat(3904);
-const MLDSA_AUDITOR = 'c'.repeat(3904);
+const MLDSA_AUDITOR_1 = 'c'.repeat(3904);
+const MLDSA_AUDITOR_2 = 'd'.repeat(3904);
+/** Panjang kunci ABI 1 (Ed25519, 32 byte) — harus ditolak. */
+const ED25519_A = 'a'.repeat(64);
+const ED25519_B = 'b'.repeat(64);
 
 describe('ktConfigPin — validasi bentuk', () => {
-  it('menerima konfigurasi ABI 1 lengkap dan menormalkan huruf besar', () => {
-    const pin = parseKtConfigPin({
-      abiVersion: 1,
-      mode: 1,
-      signatureKey: KEY_A.toUpperCase(),
-      vrfKey: KEY_B,
-      auditorKeys: [AUDITOR_1.toUpperCase()],
-    });
-    expect(pin).toEqual({
-      abiVersion: 1,
-      mode: 1,
-      signatureKey: KEY_A,
-      vrfKey: KEY_B,
-      auditorKeys: [AUDITOR_1],
-    });
-  });
-
-  it('menginferensikan pin lama menjadi ABI 1 (tanpa kehilangan pin)', () => {
-    expect(parseKtConfigPin({ mode: 1, signatureKey: KEY_A, vrfKey: KEY_B })).toEqual({
-      abiVersion: 1,
-      mode: 1,
-      signatureKey: KEY_A,
-      vrfKey: KEY_B,
-      auditorKeys: [],
-    });
-  });
-
-  it('menerima konfigurasi ABI 2 (ML-DSA 1952 byte) tanpa vrfKey', () => {
+  it('menerima konfigurasi ABI 2 (ML-DSA 1952 byte) dan menormalkan huruf besar', () => {
     const pin = parseKtConfigPin({
       abiVersion: 2,
       mode: 1,
       signatureKey: MLDSA_A.toUpperCase(),
-      auditorKeys: [MLDSA_AUDITOR],
+      auditorKeys: [MLDSA_AUDITOR_1.toUpperCase()],
     });
     expect(pin).toEqual({
       abiVersion: 2,
       mode: 1,
       signatureKey: MLDSA_A,
-      auditorKeys: [MLDSA_AUDITOR],
+      auditorKeys: [MLDSA_AUDITOR_1],
     });
-    expect(pin?.vrfKey).toBeUndefined();
   });
 
-  it('menolak panjang/tipe yang salah', () => {
+  it('menolak pin ABI 1 (tidak ada lagi jalur inferensi)', () => {
+    // Kunci 32 byte + vrfKey: bentuk pin lama. [docs/43 §43.3.2]
+    expect(
+      parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: ED25519_A, vrfKey: ED25519_B })
+    ).toBeUndefined();
+    // Pin lama tanpa `abiVersion` juga tidak diinferensikan lagi.
+    expect(
+      parseKtConfigPin({ mode: 1, signatureKey: ED25519_A, vrfKey: ED25519_B })
+    ).toBeUndefined();
+  });
+
+  it('menolak ABI 2 yang masih membawa vrfKey (bentuk campuran)', () => {
+    expect(
+      parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, vrfKey: ED25519_B })
+    ).toBeUndefined();
+  });
+
+  it('menolak panjang/tipe/ABI yang salah', () => {
     expect(parseKtConfigPin(undefined)).toBeUndefined();
     expect(parseKtConfigPin({})).toBeUndefined();
-    expect(parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: 'abc', vrfKey: KEY_B })).toBeUndefined();
-    expect(parseKtConfigPin({ abiVersion: 1, mode: 'x', signatureKey: KEY_A, vrfKey: KEY_B })).toBeUndefined();
-    expect(parseKtConfigPin({ abiVersion: 3, mode: 1, signatureKey: KEY_A, vrfKey: KEY_B })).toBeUndefined();
+    expect(parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: 'abc' })).toBeUndefined();
+    expect(parseKtConfigPin({ abiVersion: 2, mode: 'x', signatureKey: MLDSA_A })).toBeUndefined();
+    expect(parseKtConfigPin({ abiVersion: 3, mode: 1, signatureKey: MLDSA_A })).toBeUndefined();
+    expect(parseKtConfigPin({ abiVersion: '2', mode: 1, signatureKey: MLDSA_A })).toBeUndefined();
   });
 
-  it('menolak campuran ABI (kunci 1952 byte dengan vrfKey, atau sebaliknya)', () => {
+  it('menolak auditor yang bukan hex 1952 byte', () => {
     expect(
-      parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, vrfKey: KEY_B })
+      parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: ['nope'] })
     ).toBeUndefined();
     expect(
-      parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: KEY_A, vrfKey: KEY_B, auditorKeys: [MLDSA_AUDITOR] })
+      parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: [ED25519_A] })
+    ).toBeUndefined();
+    expect(
+      parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: ['y'.repeat(3904)] })
     ).toBeUndefined();
   });
 
-  it('menolak auditor bukan hex dengan panjang yang sesuai ABI', () => {
-    expect(
-      parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: KEY_A, vrfKey: KEY_B, auditorKeys: ['nope'] })
-    ).toBeUndefined();
-    expect(
-      parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: [AUDITOR_1] })
-    ).toBeUndefined();
+  it('auditor yang tidak disebut dianggap daftar kosong', () => {
+    expect(parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A })?.auditorKeys).toEqual([]);
   });
 });
 
 describe('ktConfigPin — ktConfigPinMatches', () => {
   const base = parseKtConfigPin({
-    abiVersion: 1,
+    abiVersion: 2,
     mode: 1,
-    signatureKey: KEY_A,
-    vrfKey: KEY_B,
-    auditorKeys: [AUDITOR_1, AUDITOR_2],
+    signatureKey: MLDSA_A,
+    auditorKeys: [MLDSA_AUDITOR_1, MLDSA_AUDITOR_2],
   })!;
 
   it('identik → cocok', () => {
@@ -98,11 +85,10 @@ describe('ktConfigPin — ktConfigPinMatches', () => {
       ktConfigPinMatches(
         base,
         parseKtConfigPin({
-          abiVersion: 1,
+          abiVersion: 2,
           mode: 1,
-          signatureKey: KEY_A,
-          vrfKey: KEY_B,
-          auditorKeys: [AUDITOR_1, AUDITOR_2],
+          signatureKey: MLDSA_A,
+          auditorKeys: [MLDSA_AUDITOR_1, MLDSA_AUDITOR_2],
         })!
       )
     ).toBe(true);
@@ -112,16 +98,7 @@ describe('ktConfigPin — ktConfigPinMatches', () => {
     expect(
       ktConfigPinMatches(
         base,
-        parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: KEY_B, vrfKey: KEY_B, auditorKeys: [AUDITOR_1, AUDITOR_2] })!
-      )
-    ).toBe(false);
-  });
-
-  it('kunci VRF berubah → tidak cocok', () => {
-    expect(
-      ktConfigPinMatches(
-        base,
-        parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: KEY_A, vrfKey: KEY_A, auditorKeys: [AUDITOR_1, AUDITOR_2] })!
+        parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_B, auditorKeys: [MLDSA_AUDITOR_1, MLDSA_AUDITOR_2] })!
       )
     ).toBe(false);
   });
@@ -130,32 +107,29 @@ describe('ktConfigPin — ktConfigPinMatches', () => {
     expect(
       ktConfigPinMatches(
         base,
-        parseKtConfigPin({ abiVersion: 1, mode: 2, signatureKey: KEY_A, vrfKey: KEY_B, auditorKeys: [AUDITOR_1, AUDITOR_2] })!
-      )
-    ).toBe(false);
-  });
-
-  it('ABI berbeda → tidak cocok (upgrade ditangani resolveConfig, bukan match)', () => {
-    expect(
-      ktConfigPinMatches(
-        base,
-        parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A })!
+        parseKtConfigPin({ abiVersion: 2, mode: 2, signatureKey: MLDSA_A, auditorKeys: [MLDSA_AUDITOR_1, MLDSA_AUDITOR_2] })!
       )
     ).toBe(false);
   });
 
   it('auditor ditambah/hilang/berbeda urutan → tidak cocok', () => {
     expect(
+      ktConfigPinMatches(base, parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: [MLDSA_AUDITOR_1] })!)
+    ).toBe(false);
+    expect(
       ktConfigPinMatches(
         base,
-        parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: KEY_A, vrfKey: KEY_B, auditorKeys: [AUDITOR_1] })!
+        parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: [MLDSA_AUDITOR_2, MLDSA_AUDITOR_1] })!
       )
     ).toBe(false);
     expect(
       ktConfigPinMatches(
         base,
-        parseKtConfigPin({ abiVersion: 1, mode: 1, signatureKey: KEY_A, vrfKey: KEY_B, auditorKeys: [AUDITOR_2, AUDITOR_1] })!
+        parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A, auditorKeys: [MLDSA_AUDITOR_1, MLDSA_AUDITOR_2, 'e'.repeat(3904)] })!
       )
+    ).toBe(false);
+    expect(
+      ktConfigPinMatches(base, parseKtConfigPin({ abiVersion: 2, mode: 1, signatureKey: MLDSA_A })!)
     ).toBe(false);
   });
 });

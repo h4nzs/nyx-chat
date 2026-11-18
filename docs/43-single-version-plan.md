@@ -104,6 +104,30 @@ Penghapusan berkas karena itu menuntut penulisan ulang rujukan, bukan sekadar
 | `web/src/utils/crypto.ts:2499,2512,2954` | prefix CK pra-v2, grup v2/v3 | hapus |
 | `server/src` `KT_SERVER_URL` | jalur v1 yang diabaikan dengan warning | hapus env + warning |
 
+**Selesai di kode 2026-11-18:** semua baris di atas sudah diterapkan.
+`ktConfigPin.ts` hanya menerima ABI 2 (pin tak cocok → `KtConfigPinMismatchError`,
+verdict `unverifiable`), `ktValue.ts` hanya `nyx-kt-value-v2`, `groupEnvelope.ts`
+hanya v4 (2037 byte), grup selalu menandatangani ML-DSA-65 dengan `senderKeyId`
+dan `chainId` wajib (tidak ada penulis non-PQ), ratchet hanya braid v2
+(`{v:2,b:[…]}` — tanpa `ackV`, kill switch, negosiasi, atau jalur DR v1 di jalur
+pesan; header lama dijawab error), dan server tidak lagi membaca `KT_SERVER_URL`.
+Gerbang yang hijau: `pnpm --filter @nyx/shared run build`, `tsc --noEmit`
+(web + server), unit server 856 lulus / 0 gagal, unit web 1122 lulus / 0 gagal,
+oxlint 0 error per paket, `pnpm run check:status` (8 saklar).
+
+E2E dua putaran penuh seperti yang diminta §43.8, keduanya hijau:
+`PIR_ENABLED=0 ABUSE_REGISTRATION_GUARD=off KT_QUERY_URL= VITE_FORCE_WSS=1 pnpm
+exec playwright test --project=chromium --grep-invert "WebTransport"` →
+putaran 1 **16 lulus / 7 skip / 0 gagal** (26,0 m), putaran 2 **16 lulus / 7
+skip / 0 gagal** (27,8 m). Tujuh skip itu sah dan bukan penutup kegagalan: tiga
+tes burner/grup butuh uplink WebTransport (`VITE_FORCE_WSS=1`, sidecar Rust
+tidak dijalankan lokal — CI mengujinya di job `e2e-chrome`), `call.spec.ts`
+tanpa coturn, `ktLive.spec.ts` tanpa `KT_QUERY_URL`, `pir.spec.ts` dan
+`a11y.spec.ts` di luar suite ini. `web/playwright.config.ts` ikut memaksa
+`VITE_OHTTP_ENABLED=0` untuk webServer E2E karena `searchUsersByHash` sengaja
+tidak punya fallback: tanpa itu `VITE_OHTTP_ENABLED=1` di `.env` lokal membuat
+setiap pencarian user gagal 502 dan UI menampilkan "No users found".
+
 ### 43.3.3 At-rest (Fase D)
 
 `server/src/utils/atRestSecrets.ts` sekarang menerima **dua** format: bare

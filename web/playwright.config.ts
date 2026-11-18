@@ -91,7 +91,14 @@ export default defineConfig({
       // menang atas berkas `.env` di Vite, jadi API dipaksa relatif: request
       // lewat proxy dev server, yaitu stack lokal (`NYX_E2E_API_PROXY_TARGET`
       // bila diset, default 4000).
-      env: { VITE_API_URL: '/api', VITE_PIR_ENABLED: '0' },
+      // [E2E OHTTP MATI] Alasan yang sama untuk OHTTP: stack ini tidak
+      // menjalankan relay `nyx-ohttp-relay`, dan `searchUsersByHash` sengaja
+      // TIDAK punya fallback diam-diam (gagal OHTTP = gagal pencarian). Tanpa
+      // paksaan ini, `VITE_OHTTP_ENABLED=1` di `web/.env` lokal membuat setiap
+      // pencarian user gagal `POST /api/ohttp/relay` (502) dan UI menampilkan
+      // "No users found" — gejalanya sama dengan bug pencarian, padahal jalur
+      // UI-nya benar. Stack OHTTP sungguhan diuji job `ohttp` di CI.
+      env: { VITE_API_URL: '/api', VITE_PIR_ENABLED: '0', VITE_OHTTP_ENABLED: '0' },
     }
   ],
 });

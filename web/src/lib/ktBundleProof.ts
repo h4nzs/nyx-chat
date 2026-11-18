@@ -111,11 +111,9 @@ export interface KtVerdict {
 export interface KtRemoteConfig {
   mode: number;
   signatureKey: string;
-  /** Hanya ABI 1 (Ed25519 + EC-VRF). Log v2 memakai ML-DSA-65 tanpa VRF. */
-  vrfKey?: string;
   auditorKeys?: string[];
   valueFormat?: string;
-  /** ABI frame verifier; tidak ada = 1 (server lama). */
+  /** ABI frame verifier; klien hanya menerima `2`. */
   abiVersion?: number;
 }
 
@@ -551,7 +549,6 @@ async function resolveConfig(
     abiVersion: 2,
     mode: remote.mode,
     signatureKey: remote.signatureKey,
-    vrfKey: remote.vrfKey,
     auditorKeys: remote.auditorKeys ?? [],
   });
   if (!observed) throw new Error('kt: config log tidak valid');
@@ -559,18 +556,12 @@ async function resolveConfig(
   let pinChanged = false;
   if (!pin || !ktConfigPinMatches(pin, observed)) {
     if (pin) {
-      // [docs/35 §35.7 Fase 7] Satu-satunya transisi yang diizinkan: pin ABI 1
-      // → config ABI 2 dengan mode sama. Pin baru ditulis setelah bukti v2
-      // terbukti sah (`commitKtConfigPin`), jadi config palsu tidak bisa
-      // "membajak" pin sebelum ada bukti yang lolos verifikasi. Arah v2 → v1
-      // (downgrade) dan perubahan kunci dalam ABI yang sama selalu ditolak.
-      const upgrading =
-        pin.abiVersion === 1 && observed.abiVersion === 2 && pin.mode === observed.mode;
-      if (!upgrading) {
-        throw new KtConfigPinMismatchError(
-          'kt: konfigurasi log berubah dari pin (kemungkinan server menukar kunci verifikasi)'
-        );
-      }
+      // [docs/43 §43.3.2] Tidak ada jalur upgrade ABI 1 → ABI 2 lagi: pin yang
+      // tidak cocok selalu berarti kunci verifikasi berubah di bawah pin yang
+      // sama. Itu harus terlihat sebagai `mismatch`, bukan di-pin ulang diam-diam.
+      throw new KtConfigPinMismatchError(
+        'kt: konfigurasi log berubah dari pin (kemungkinan server menukar kunci verifikasi)'
+      );
     }
     pinChanged = true;
   }

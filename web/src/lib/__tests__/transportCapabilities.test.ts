@@ -198,10 +198,9 @@ describe('wiring klien', () => {
   it('hanya mengiklankan kapabilitas yang benar-benar siap', () => {
     const announced = client.match(/const ANNOUNCED_CLIENT_CAPABILITIES[^=]*= \[([^\]]*)\]/)?.[1] ?? '';
     expect(announced).toContain('CLIENT_CAPABILITIES.HELLO_V1');
-    // [docs/33 §33.7] `spqr-ratchet` kini benar-benar ada implementasinya
-    // (jalur v2 landed), tapi TIDAK boleh di-hardcode di klien: ia harus lewat
-    // `advertisedCapabilities()` supaya kill switch `VITE_SPQR_FORCE_V1`
-    // benar-benar mematikan iklannya.
+    // [docs/43 §43.3.2] `spqr-ratchet` TIDAK di-hardcode di klien: nama
+    // kapabilitas hidup di `@nyx/shared` dan diiklankan lewat
+    // `advertisedCapabilities()`.
     expect(announced).toContain('advertisedCapabilities()');
     expect(announced).not.toContain('CLIENT_CAPABILITIES.SPQR_RATCHET');
     // [docs/35] `pq-v2` juga tidak boleh di-hardcode: iklannya harus lewat

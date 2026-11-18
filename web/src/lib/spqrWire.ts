@@ -3,16 +3,12 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/33 §33.7 poin 1 / docs/04 — jalur versi paralel] Bentuk **wire** jalur
- * ratchet v2 (braid SPQR) beserta deklarasi versi (`ackV`) di payload ter-seal.
+ * [docs/43 §43.3.2] Satu-satunya bentuk wire ratchet: braid SPQR v2.
  *
- * Kenapa header v1 **tidak boleh** ditambal: header DR v1 (`{kemPk, ct, n, pn}`)
- * adalah bagian protokol beku `docs/04` — `kemPk` 32 byte + `ct` KEM 1120 byte
- * yang menjadi identitas sesi. Jalur v2 tidak punya keduanya (braid mengirim
- * frame 37 byte dan tidak butuh `ct`), jadi receiver baru bisa membedakan
- * jalur **hanya** dari penanda versi eksplisit:
+ * Header DR v1 (`{kemPk, ct, n, pn}`) tidak dibaca maupun ditulis lagi. v2
+ * tidak punya keduanya (braid mengirim frame 37 byte dan tidak butuh `ct`),
+ * dan bentuknya eksplisit:
  *
- *   v1: `{ kemPk, ct, n, pn }`   — tidak punya `v` (§04, jangan ditambah).
  *   v2: `{ v: 2, b: [frame…] }`.
  *
  * v2 **tidak** membawa penghitung (`n`/`pn`): urutan & pesan hilang ditangani
@@ -24,17 +20,9 @@
  * frame yang membawa key — pengirim mengumpulkannya dalam satu pesan agar
  * "satu pesan pengguna = satu frame wire" tetap berlaku (`docs/04`).
  *
- * Deklarasi versi (`ackV`) hidup **di dalam payload ter-seal** (AEAD), bukan di
- * header: itulah satu-satunya kanal yang tidak bisa dipalsukan/dihilangkan
- * relay. Ia menyatakan "versi ratchet yang bisa SAYA buka", dan menjadi syarat
- * untuk mengirim v2 (lihat `spqrNegotiation.resolveOutboundRatchetVersion`) —
- * jangan pernah percaya klaim versi dari header mentah.
- *
  * Semua parser di sini fail-closed: masukan tak dikenal → `null`, bukan objek
  * setengah terbentuk. Header datang dari jaringan.
  */
-
-import type { RatchetWireVersion } from './spqrNegotiation';
 
 /** Penanda versi di header DR untuk jalur braid SPQR. */
 export const SPQR_RATCHET_WIRE_VERSION = 2;
@@ -107,34 +95,6 @@ export function buildSpqrHeader(input: { frames: Uint8Array[] }): SpqrDrHeader {
 /** Dekode frame dari header yang sudah divalidasi `parseSpqrHeader`. */
 export function decodeSpqrFrames(header: SpqrDrHeader): Uint8Array[] {
   return header.b.map((frame) => bytesFromBase64Url(frame));
-}
-
-// ---------------------------------------------------------------------------
-// Deklarasi versi (ackV) — di dalam payload ter-seal
-// ---------------------------------------------------------------------------
-
-/**
- * Bidang deklarasi versi untuk payload keluar. Hanya ditulis bila klien benar
- * bisa **membaca** v2; mengiklankannya tanpa kemampuan membuat peer mengirim
- * pesan yang tak bisa kita buka.
- */
-export function versionDeclaration(version: RatchetWireVersion): Record<string, number> {
-  return version === 'v2' ? { ackV: SPQR_RATCHET_WIRE_VERSION } : {};
-}
-
-/**
- * Baca deklarasi versi dari plaintext yang **sudah lolos AEAD**. Nilai lain
- * (bukan 2) atau payload non-JSON → `null` = peer tidak menyatakan kemampuan
- * v2 (jalur v1).
- */
-export function extractVersionDeclaration(decryptedPlaintext: string): RatchetWireVersion | null {
-  try {
-    const parsed = JSON.parse(decryptedPlaintext) as { ackV?: unknown };
-    if (parsed && parsed.ackV === SPQR_RATCHET_WIRE_VERSION) return 'v2';
-  } catch {
-    // Plaintext bukan JSON ter-seal (mis. pesan legacy) — tidak ada deklarasi.
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------

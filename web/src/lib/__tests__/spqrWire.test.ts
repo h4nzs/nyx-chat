@@ -3,17 +3,15 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/33 §33.7 poin 1] Bentuk wire jalur v2 + deklarasi versi (`ackV`).
+ * [docs/43 §43.3.2] Bentuk wire braid v2 — satu-satunya bentuk ratchet.
  *
  * Yang dikunci di sini adalah hal-hal yang, kalau salah, membuat pesan tidak
  * bisa dibuka tanpa pesan error yang jelas:
- *   1. Header v1 (beku, tanpa `v`) TIDAK pernah dikenali sebagai v2 — dan
- *      sebaliknya header v2 tidak pernah dianggap v1.
+ *   1. Header tanpa `v: 2` TIDAK pernah dikenali sebagai v2 (tidak ada jalur
+ *      v1 yang bisa disalahartikan).
  *   2. Frame braid bolak-balik utuh (base64url → byte → base64url).
  *   3. Batas parse ditegakkan (jumlah frame, panjang frame, karakter) karena
  *      header datang dari jaringan.
- *   4. `ackV` hanya diterima dari payload yang valid; nilai lain = "peer tidak
- *      menyatakan mampu v2" (jalur v1), bukan error.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -23,10 +21,8 @@ import {
   SPQR_RATCHET_WIRE_VERSION,
   buildSpqrHeader,
   decodeSpqrFrames,
-  extractVersionDeclaration,
   isSpqrHeader,
   parseSpqrHeader,
-  versionDeclaration,
 } from '../spqrWire';
 
 const FRAME = Uint8Array.from([1, 2, 3, 250, 251, 252]);
@@ -90,25 +86,4 @@ describe('header v2', () => {
   });
 });
 
-describe('deklarasi versi (ackV)', () => {
-  it('hanya v2 yang menulis deklarasi', () => {
-    expect(versionDeclaration('v2')).toEqual({ ackV: 2 });
-    expect(versionDeclaration('v1')).toEqual({});
-  });
 
-  it('deklarasi hanya dibaca dari payload ter-seal yang valid', () => {
-    expect(extractVersionDeclaration(JSON.stringify({ content: 'hai', ackV: 2 }))).toBe('v2');
-    expect(extractVersionDeclaration(JSON.stringify({ ackV: 1 }))).toBeNull();
-    expect(extractVersionDeclaration(JSON.stringify({ ackV: '2' }))).toBeNull();
-    expect(extractVersionDeclaration(JSON.stringify({ ackV: 3 }))).toBeNull();
-    expect(extractVersionDeclaration(JSON.stringify(['ackV', 2]))).toBeNull();
-    expect(extractVersionDeclaration('plain text legacy')).toBeNull();
-    expect(extractVersionDeclaration('')).toBeNull();
-  });
-
-  it('payload keluar dengan deklarasi tetap round-trip lewat JSON', () => {
-    const sealed = JSON.stringify({ content: 'x', senderId: 'u1', ...versionDeclaration('v2') });
-    expect(extractVersionDeclaration(sealed)).toBe('v2');
-    expect(JSON.parse(sealed)).toMatchObject({ ackV: 2 });
-  });
-});

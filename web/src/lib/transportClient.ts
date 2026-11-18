@@ -35,11 +35,10 @@ import type {
 // Server boleh memilih format payload berdasarkan daftar ini, jadi mengiklankan
 // fitur yang belum siap = pesan rusak (persis masalah yang mau dihindari).
 //
-// [docs/33 §33.7] `spqr-ratchet` masuk lewat `advertisedCapabilities()` (saklar
-// integrasi + kill switch `VITE_SPQR_FORCE_V1`), bukan literal di sini: nama
-// kapabilitas hidup di `@nyx/shared` dan keputusan mengiklankannya di
-// `spqrNegotiation.ts`. Kapabilitas ini hanya menyatakan "deployment boleh
-// melewatkan frame v2" — versi sesi tetap ditentukan deklarasi peer (`ackV`).
+// [docs/43 §43.3.2] `spqr-ratchet` masuk lewat `advertisedCapabilities()`, bukan
+// literal di sini: nama kapabilitas hidup di `@nyx/shared`. Kapabilitas ini
+// hanya menyatakan "deployment boleh melewatkan frame braid" — braid v2 sendiri
+// selalu dipakai klien ini.
 const ANNOUNCED_CLIENT_CAPABILITIES: string[] = [
   CLIENT_CAPABILITIES.HELLO_V1,
   ...advertisedCapabilities(),
@@ -336,8 +335,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       // [docs/29 §5.6 · docs/33 §33.7] Kapabilitas diiklankan lewat handshake;
       // gateway WSS membalas event `capabilities` (irisan dengan
       // SERVER_CAPABILITIES). Sebelum ini jalur WSS selalu "legacy", sehingga
-      // jalur ratchet v2 (braid SPQR) tidak pernah dipakai di sini walau kedua
-      // peer sudah saling menyatakan mampu in-band (`ackV`).
+      // frame braid tidak pernah dinegosiasikan di sini.
       //
       // [AUDIT 2026-10-25] `token` ikut dikirim: jalur WSS dulu HANYA bergantung
       // pada cookie `at`. Cookie itu host-only (kecuali COOKIE_DOMAIN di-set),

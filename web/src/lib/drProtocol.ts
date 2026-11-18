@@ -13,19 +13,8 @@
 //    Re-derive peer deterministik (sk = f(handshake yang sama) dan langkah
 //    ratchet KEM murni fungsi dari (sk, ct, kemPk)) → aman.
 //
-// 2. Omit-ct dengan ack — header DR membawa `ct` KEM (1120 byte) yang hanya
-//    dibutuhkan receiver yang BELUM step ke chain pengirim. Receiver meng-ack
-//    KEMr-nya di dalam payload terenkripsi (`ackKem`); bila ack = chain
-//    pengirim saat ini, `ct` dihilangkan dari header (~1.5KB/pesan hemat).
-//    Receiver yang belum step tetap menerima ct → tetap bisa step.
-//
-// 3. [docs/33 §33.7 / docs/04 jalur versi paralel] Versi wire ratchet — v1 (DR
-//    hybrid NYX, beku) vs v2 (braid SPQR). Keputusan versi keluar selalu
-//    `spqrNegotiation.resolveOutboundRatchetVersion`; berkas ini menyimpan
-//    hasilnya di state klien (`ratchetVersion`) beserta bukti dari peer
-//    (`peerAckRatchetVersion`).
-
-import type { RatchetWireVersion } from './spqrNegotiation';
+// [docs/43 §43.3.2] Wire ratchet hanya braid v2, jadi tidak ada lagi keputusan
+// versi maupun omit-ct v1 yang perlu disimpan di state klien.
 
 /** Bidang state DR yang relevan untuk keputusan protokol (sisi klien). */
 export interface DrProtocolStateView {
@@ -40,17 +29,6 @@ export interface DrProtocolStateView {
     /** `signingKeyV2` inisiator (ML-DSA) — verifikasi tanda tangan handshake v2. */
     initiatorSigningKeyV2?: string;
   } | null;
-  peerAckedKem?: string | null;
-  /**
-   * Versi ratchet untuk **pengiriman** di sesi ini (`v2` = braid SPQR).
-   * Diputuskan tiap pengiriman oleh `resolveOutboundRatchetVersion`.
-   */
-  ratchetVersion?: RatchetWireVersion | null;
-  /**
-   * Versi yang dinyatakan peer bisa dibaca (`ackV` di payload ter-seal).
-   * `null` = belum pernah ada deklarasi → tetap v1.
-   */
-  peerAckRatchetVersion?: RatchetWireVersion | null;
   /** Akar braid v2 (rahasia X3DH, base64url) — lihat `DoubleRatchetState`. */
   spqrAuthKey?: string;
   /** Peran braid v2 (`A2B` = inisiator, `B2A` = penerima). */
@@ -97,37 +75,6 @@ export function getHandshakePayload(
 }
 
 /**
- * Apakah `ct` boleh dihilangkan dari header pesan keluar?
- * Syarat: peer sudah meng-ack bahwa KEMr-nya = chain kita saat ini — dia tidak
- * lagi butuh ct untuk step (dia sudah berada di chain ini).
- */
-export function shouldOmitRatchetCt(
-  peerAckedKem: string | null | undefined,
-  currentKemPkB64: string | null | undefined
-): boolean {
-  if (!peerAckedKem || !currentKemPkB64) return false;
-  return peerAckedKem === currentKemPkB64;
-}
-
-/**
- * Proses `ackKem` dari payload terenkripsi pesan masuk. Return nilai
- * `peerAckedKem` baru untuk state, atau null bila payload bukan JSON/ tanpa
- * ack. Ack HANYA diterima dari payload yang berhasil didekripsi (otentikasi
- * AEAD) — tidak pernah dari envelope mentah.
- */
-export function extractPeerAck(decryptedPlaintext: string): string | null {
-  try {
-    const parsed = JSON.parse(decryptedPlaintext) as { ackKem?: unknown };
-    if (parsed && typeof parsed.ackKem === 'string' && parsed.ackKem.length > 0) {
-      return parsed.ackKem;
-    }
-  } catch {
-    // plaintext bukan JSON sealed-payload (mis. konten legacy) — tanpa ack.
-  }
-  return null;
-}
-
-/**
  * [ECHO FIX 2026-10-05] Pangkas padding traffic-cover dari plaintext hasil
  * `secretbox_open_easy` mentah. Ciphertext DR/group berisi plaintext PADDED
  * (mirror `padBuffer`/`unpadBuffer` di crypto.worker.ts — payload + marker
@@ -163,18 +110,6 @@ export function attachClientProtocolFields<S extends object>(
       patch.pendingHandshake !== undefined
         ? patch.pendingHandshake
         : (previous.pendingHandshake ?? null),
-    peerAckedKem:
-      patch.peerAckedKem !== undefined
-        ? patch.peerAckedKem
-        : (previous.peerAckedKem ?? null),
-    ratchetVersion:
-      patch.ratchetVersion !== undefined
-        ? patch.ratchetVersion
-        : (previous.ratchetVersion ?? 'v1'),
-    peerAckRatchetVersion:
-      patch.peerAckRatchetVersion !== undefined
-        ? patch.peerAckRatchetVersion
-        : (previous.peerAckRatchetVersion ?? null),
     spqrAuthKey:
       patch.spqrAuthKey !== undefined ? patch.spqrAuthKey : previous.spqrAuthKey,
     spqrDirection:

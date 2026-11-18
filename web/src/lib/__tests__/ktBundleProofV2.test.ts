@@ -12,8 +12,10 @@
  *
  *   1. Bukti v2 sah → `confirmed`, state tersimpan, pin ABI 2 ditulis.
  *   2. Kunci bundle berbeda dari log v2 → `mismatch`.
- *   3. Pin ABI 1 lama boleh naik ke ABI 2 **hanya setelah** bukti v2 sah.
- *   4. Bukti v2 yang ditolak tidak mengganti pin (fail-closed).
+ *   3. Pin ABI 1 lama **tidak** dinaikkan diam-diam: bentuknya tidak bisa
+ *      diparse lagi, jadi verifikasi berhenti `unverifiable` dan klien harus
+ *      melepas pin secara eksplisit (TOFU ulang).
+ *   4. Bukti/konfigurasi yang tidak cocok tidak mengganti pin (fail-closed).
  *   5. Downgrade ABI 2 → ABI 1 ditolak (`unverifiable`, tanpa panggilan bukti).
  */
 
@@ -119,13 +121,18 @@ const configOf = (json: FixtureJson): KtRemoteConfig => ({
   valueFormat: 'nyx-kt-value-v2',
 });
 
-/** Pin ABI 1 sintetis (Ed25519 32 B + ECVRF 32 B). */
-const LEGACY_PIN: KtConfigPin = parseKtConfigPin({
+/**
+ * Baris pin yang ditulis klien lama: ABI 1 (Ed25519 32 B + ECVRF 32 B).
+ * [docs/43 §43.3.2] `parseKtConfigPin` tidak lagi menerima bentuk ini, jadi
+ * objeknya hanya bisa muncul sebagai baris tersimpan dari versi sebelumnya.
+ */
+const LEGACY_PIN = {
   abiVersion: 1,
   mode: 1,
   signatureKey: 'e'.repeat(64),
   vrfKey: 'f'.repeat(64),
-})!;
+  auditorKeys: [],
+} as unknown as KtConfigPin;
 
 const withSkip = HAS_FIXTURES ? describe : describe.skip;
 
@@ -189,7 +196,6 @@ withSkip('ktBundleProof v2: verifikasi bundle terhadap log ML-DSA', () => {
     const pin = pinStore.current as KtConfigPin;
     expect(pin.abiVersion).toBe(2);
     expect(pin.signatureKey).toBe(fixture.json.signatureKey);
-    expect(pin.vrfKey).toBeUndefined();
   });
 
   it('kunci bundle berbeda dari log v2 → mismatch', async () => {
@@ -214,7 +220,7 @@ withSkip('ktBundleProof v2: verifikasi bundle terhadap log ML-DSA', () => {
     const { deps } = makeDeps({
       // Bentuk config yang dilayani `nyx-kt-query` v1: Ed25519 + VRF, tanpa
       // `abiVersion` dan `valueFormat`.
-      fetchConfig: async () => ({ mode: 1, signatureKey: 'e'.repeat(64), vrfKey: 'f'.repeat(64) }),
+      fetchConfig: async () => ({ mode: 1, signatureKey: 'e'.repeat(64) }),
     });
 
     const verdict = await checkBundleAgainstKeyTransparency(
@@ -233,8 +239,38 @@ withSkip('ktBundleProof v2: verifikasi bundle terhadap log ML-DSA', () => {
     expect(pinStore.current).toBeUndefined();
   });
 
-  it('pin ABI 1 lama naik ke ABI 2 setelah bukti v2 sah', async () => {
+  it('pin ABI 1 lama TIDAK dinaikkan diam-diam → unverifiable, pin tidak ditulis ulang', async () => {
     pinStore.current = LEGACY_PIN;
+    const { deps, fetchProof } = makeDeps();
+
+    const verdict = await checkBundleAgainstKeyTransparency(
+      {
+        userId: 'peer-alice',
+        username: 'alice',
+        identityKey: logIdentityKey(),
+        now: fixture.json.verifyNowMs,
+      },
+      deps
+    );
+
+    // [docs/43 §43.3.2] Tidak ada jalur upgrade: pin tak dikenal tetap tidak
+    // cocok dengan config ABI 2, dan bukti tidak perlu diambil untuk itu.
+    expect(verdict.status).toBe('unverifiable');
+    expect(verdict.reason).toContain('berubah dari pin');
+    expect(fetchProof).not.toHaveBeenCalled();
+    const pin = pinStore.current as KtConfigPin;
+    expect(pin.abiVersion).toBe(1);
+    expect(pin.signatureKey).toBe('e'.repeat(64));
+  });
+
+  it('pin ABI 2 dengan kunci berbeda tidak diganti walau verifikasi gagal (fail-closed)', async () => {
+    const otherPin = parseKtConfigPin({
+      abiVersion: 2,
+      mode: 1,
+      signatureKey: '9'.repeat(3904),
+      auditorKeys: [],
+    })!;
+    pinStore.current = otherPin;
     const { deps } = makeDeps();
 
     const verdict = await checkBundleAgainstKeyTransparency(
@@ -247,30 +283,9 @@ withSkip('ktBundleProof v2: verifikasi bundle terhadap log ML-DSA', () => {
       deps
     );
 
-    expect(verdict.status).toBe('confirmed');
-    const pin = pinStore.current as KtConfigPin;
-    expect(pin.abiVersion).toBe(2);
-    expect(pin.signatureKey).toBe(fixture.json.signatureKey);
-  });
-
-  it('bukti v2 yang ditolak tidak mengganti pin ABI 1 (fail-closed)', async () => {
-    pinStore.current = LEGACY_PIN;
-    const { deps } = makeDeps();
-
-    const verdict = await checkBundleAgainstKeyTransparency(
-      {
-        userId: 'peer-alice',
-        username: 'alice',
-        identityKey: logIdentityKey(),
-        // Di luar jendela timestamp (±24 jam) → verifier menolak tree head,
-        // walau kunci log sendiri sah. Pin lama tidak boleh tergantikan.
-        now: fixture.json.verifyNowMs + 2 * 24 * 60 * 60 * 1000,
-      },
-      deps
-    );
-
     expect(verdict.status).toBe('unverifiable');
-    expect((pinStore.current as KtConfigPin).abiVersion).toBe(1);
+    expect(pinStore.current).toBe(otherPin);
+    expect((pinStore.current as KtConfigPin).signatureKey).toBe('9'.repeat(3904));
   });
 
   it('downgrade ABI 2 → ABI 1 ditolak tanpa mengambil bukti', async () => {
@@ -291,7 +306,6 @@ withSkip('ktBundleProof v2: verifikasi bundle terhadap log ML-DSA', () => {
       fetchConfig: async () => ({
         mode: 1,
         signatureKey: 'e'.repeat(64),
-        vrfKey: 'f'.repeat(64),
         valueFormat: 'nyx-kt-value-v1',
       }),
     });

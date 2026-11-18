@@ -95,19 +95,17 @@ beforeEach(() => {
 
 describe('field gossip di payload ter-seal', () => {
   it('round-trip lewat payload pesan yang sebenarnya (kontrak dengan crypto.ts)', () => {
-    // Bentuk payload jalur kirim v1: konten + identitas + ackV + ktG.
+    // Bentuk payload jalur kirim: konten + identitas + ktG.
     const payload = JSON.stringify({
       content: 'hai',
       senderId: 'u1',
       senderDeviceKey: 'k',
-      ackKem: 'kem',
-      ackV: 2,
       ...treeHeadField({ root: ROOT_A, treeSize: 42 }),
     });
 
     expect(extractTreeHeadField(payload)).toEqual({ root: ROOT_A, treeSize: 42 });
     // Field lama tidak rusak oleh penambahan `ktG`.
-    expect(JSON.parse(payload)).toMatchObject({ content: 'hai', senderId: 'u1', ackV: 2 });
+    expect(JSON.parse(payload)).toMatchObject({ content: 'hai', senderId: 'u1' });
   });
 
   it('tanpa jangkar → tidak ada field sama sekali (klien baru tidak berubah)', () => {

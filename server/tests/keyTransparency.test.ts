@@ -43,7 +43,6 @@ import {
   encodeKtUpdateRequest,
   frameGrpcMessage,
   ktEntryTag,
-  ktRetiredEnvWarnings,
   ktSearchKey,
   parseGrpcFrames,
   publishKeyTransparencyEntry,
@@ -486,18 +485,6 @@ test('wiring: jalur yang menimpa Device.publicKey = 3 tertulis + 1 dikecualikan 
   for (const logged of ['routes/auth.ts', 'routes/keys.ts', 'routes/users.ts'] as const) {
     assert.match(readSrc(logged), /publishKeyTransparencyEntry\(|publishIdentityKeyChange\(/, `${logged} menulis log`);
   }
-});
-
-/**
- * [docs/38] Env jalur v1 yang pensiun: diabaikan, tetapi tidak diam-diam.
- */
-test('env v1 pensiun: KT_SERVER_URL memicu satu peringatan, kosong tidak', () => {
-  assert.deepEqual(ktRetiredEnvWarnings({}), []);
-  assert.deepEqual(ktRetiredEnvWarnings({ KT_SERVER_URL: '  ' }), []);
-  const warnings = ktRetiredEnvWarnings({ KT_SERVER_URL: 'http://127.0.0.1:8081' });
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0]!, /KT_SERVER_URL=http:\/\/127\.0\.0\.1:8081 diabaikan/);
-  assert.match(warnings[0]!, /KT_V2_SERVER_URL/);
 });
 
 /**

@@ -242,7 +242,7 @@ export interface KtGossipRow {
  * [docs/34 §34.5] Pin konfigurasi log Key Transparency (TOFU).
  *
  * Satu baris (lihat `KT_CONFIG_ROW_ID`) menyimpan kunci verifikasi log
- * (`mode`, `signatureKey`, `vrfKey`, `auditorKeys`) yang PERTAMA kali dilihat.
+ * (`mode`, `signatureKey`, `auditorKeys`) yang PERTAMA kali dilihat.
  * Tanpa pin, server yang menyajikan `/api/keys/kt/config` bisa menukar kunci dan
  * memalsukan seluruh log untuk klien. Baris ter-seal `ENC1:` (masterSeed) —
  * pin yang bisa dibaca memudahkan penyerang lokal menukarnya.

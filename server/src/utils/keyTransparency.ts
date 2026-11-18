@@ -30,11 +30,10 @@
  *     `nyx_kt_writes_total{result="error"}` dan di-log dengan search key
  *     ter-hash (tidak ada identitas).
  *   - **Nonaktif secara default** — tanpa `KT_V2_SERVER_URL`, modul ini no-op.
- *   - **Satu log saja (2026-10-28)** — log v1 (Ed25519/VRF) dipensiunkan:
- *     `KT_SERVER_URL`, format nilai v1, dan jalur dual-write dihapus. Entri
- *     ditulis hanya sebagai nilai **v2** (ML-DSA-65) ke `KT_V2_SERVER_URL`.
- *     `KT_SERVER_URL` yang masih ada di `.env` diabaikan dengan satu peringatan
- *     saat boot (`index.ts`), bukan ditafsirkan diam-diam.
+ *   - **Satu log saja (2026-10-28, `docs/43` §43.3.2)** — log v1
+ *     (Ed25519/VRF) dipensiunkan: `KT_SERVER_URL`, format nilai v1, dan jalur
+ *     dual-write dihapus tanpa pembaca/peringatan kompatibilitas. Entri ditulis
+ *     hanya sebagai nilai **v2** (ML-DSA-65) ke `KT_V2_SERVER_URL`.
  *
  * Sisa yang jujur (docs/34 §34.6): interop `cmd/kt-client` upstream dan auditor
  * pihak ketiga kedua belum ada. Verifier klien v2 (`docs/34` §34.6a) sudah
@@ -46,23 +45,6 @@ import { createHash } from 'node:crypto';
 import { encodeKtValueV2, ML_DSA_65_PUBLIC_KEY_BYTES } from '@nyx/shared';
 
 import { incCounter, setGauge, KT_WRITES, KT_LAST_SUCCESS } from './metrics.js';
-
-/**
- * [2026-10-28] Peringatan boot untuk env jalur v1 yang sudah pensiun.
- *
- * `KT_SERVER_URL` tidak lagi ditafsirkan: tidak ada penulisan ke pohon v1 dan
- * nilainya tidak dipakai untuk apa pun. Tetapi env yatim cenderung disalin ke
- * deployment berikutnya, jadi operator diberi tahu sekali saat boot alih-alih
- * dibiarkan mengira log v1 masih diisi (`docs/38`).
- */
-export function ktRetiredEnvWarnings(env: { KT_SERVER_URL?: string }): string[] {
-  const legacy = env.KT_SERVER_URL?.trim();
-  if (!legacy) return [];
-  return [
-    `KT_SERVER_URL=${legacy} diabaikan — log Key Transparency v1 sudah dipensiunkan (docs/38). ` +
-      'Penulisan log hanya ke KT_V2_SERVER_URL; hapus variabel ini dari .env.',
-  ];
-}
 
 /** Prefix tipe search key di server KT (`shared.UsernameHashPrefix`). */
 export const KT_USERNAME_HASH_PREFIX = 0x75;

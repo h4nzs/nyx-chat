@@ -136,14 +136,14 @@ withSkip('arsip era braid SPQR (dua sesi X3DH)', () => {
     const era1 = makeEra(0x11, 0xa1, 0xb1);
     const send1 = spqrSendStep(era1.ratchet, era1.alice);
 
-    await saveSpqrState({ sessionId: SESSION, state: era1.bob, version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: era1.bob });
     await flushSpqrState(SESSION);
 
     // Sesi baru lahir (X3DH baru): state era 1 diarsipkan, bukan dihapus.
     await rotateSpqrStateForNewSession(SESSION);
 
     const era2 = makeEra(0x22, 0xa2, 0xb2);
-    await saveSpqrState({ sessionId: SESSION, state: era2.bob, version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: era2.bob });
     await flushSpqrState(SESSION);
 
     const active = await loadSpqrState(SESSION);
@@ -184,7 +184,7 @@ withSkip('arsip era braid SPQR (dua sesi X3DH)', () => {
     for (let era = 0; era <= SPQR_STATE_ARCHIVE_SLOTS; era++) {
       const state = new Uint8Array(64).fill(era);
       states.push(state);
-      await saveSpqrState({ sessionId: SESSION, state, version: 'v2' });
+      await saveSpqrState({ sessionId: SESSION, state });
       await flushSpqrState(SESSION);
       await rotateSpqrStateForNewSession(SESSION);
     }
@@ -206,12 +206,12 @@ withSkip('arsip era braid SPQR (dua sesi X3DH)', () => {
   // era (kelas bug N5-01).
   it('era baru tanpa lalu lintas tidak menggeser arsip (advanced: false)', async () => {
     const era1 = makeEra(0x11, 0xa1, 0xb1);
-    await saveSpqrState({ sessionId: SESSION, state: era1.bob, version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: era1.bob, advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
     const era2 = makeEra(0x22, 0xa2, 0xb2);
-    await saveSpqrState({ sessionId: SESSION, state: era2.bob, version: 'v2', advanced: false });
+    await saveSpqrState({ sessionId: SESSION, state: era2.bob, advanced: false });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 

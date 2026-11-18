@@ -102,8 +102,6 @@ const PRIVACY_SWITCHES = [
   'VITE_OHTTP_ENABLED',
   'VITE_PIR_ENABLED',
   'VITE_PIR_OPRF_ENABLED',
-  'VITE_SPQR_FORCE_V1',
-  'VITE_SPQR_FORCE_V2',
 ];
 
 /** Isi semua berkas sumber (tanpa test/dist) sebagai satu string. */

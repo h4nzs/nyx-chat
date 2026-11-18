@@ -86,7 +86,7 @@ afterEach(() => {
 
 describe('saveSpqrState / loadSpqrState', () => {
   it('menulis setelah debounce, ter-seal, dan bisa dibaca utuh', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(7), version: 'v2', now: 1000 });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(7), now: 1000 });
     expect(putCount).toBe(0); // belum ada tulis
 
     await vi.advanceTimersByTimeAsync(SPQR_STATE_WRITE_DEBOUNCE_MS);
@@ -100,7 +100,6 @@ describe('saveSpqrState / loadSpqrState', () => {
 
     const loaded = await loadSpqrState(SESSION);
     expect(loaded?.sessionId).toBe(SESSION);
-    expect(loaded?.version).toBe('v2');
     expect(loaded?.state).toEqual(stateBytes(7));
     // [audit N10-04 → N11-02] Penanda kemajuan ikut tersimpan; default =
     // sudah maju (konservatif: era tidak dibuang diam-diam).
@@ -108,9 +107,9 @@ describe('saveSpqrState / loadSpqrState', () => {
   });
 
   it('beberapa simpan dalam satu jendela = SATU tulis (state terakhir yang menang)', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2' });
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(3), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1) });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2) });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(3) });
 
     await vi.advanceTimersByTimeAsync(SPQR_STATE_WRITE_DEBOUNCE_MS);
     expect(putCount).toBe(1);
@@ -118,7 +117,7 @@ describe('saveSpqrState / loadSpqrState', () => {
   });
 
   it('flush memaksa tulis sebelum debounce habis', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(9), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(9) });
     await flushSpqrState(SESSION);
     expect(putCount).toBe(1);
     expect((await loadSpqrState(SESSION))?.state).toEqual(stateBytes(9));
@@ -133,7 +132,6 @@ describe('saveSpqrState / loadSpqrState', () => {
       saveSpqrState({
         sessionId: SESSION,
         state: new Uint8Array(SPQR_MAX_STATE_BYTES + 1),
-        version: 'v2',
       })
     ).rejects.toThrow(SpqrStateError);
 
@@ -142,7 +140,7 @@ describe('saveSpqrState / loadSpqrState', () => {
   });
 
   it('sessionId kosong ditolak (nilai ini jadi bagian kunci baris)', async () => {
-    await expect(saveSpqrState({ sessionId: '', state: stateBytes(1), version: 'v2' })).rejects.toThrow(
+    await expect(saveSpqrState({ sessionId: '', state: stateBytes(1) })).rejects.toThrow(
       SpqrStateError
     );
   });
@@ -165,7 +163,7 @@ describe('saveSpqrState / loadSpqrState', () => {
 
 describe('hapus state', () => {
   it('deleteSpqrState membatalkan tulis yang tertunda untuk sesi itu', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(4), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(4) });
     await deleteSpqrState(SESSION);
     await vi.advanceTimersByTimeAsync(SPQR_STATE_WRITE_DEBOUNCE_MS);
 
@@ -175,8 +173,8 @@ describe('hapus state', () => {
 
   it('clearSpqrStates hanya menghapus baris ber-prefix braid', async () => {
     rows.set('nyx_peer_identity_v1', { key: 'nyx_peer_identity_v1', value: 'ENC1:lain' });
-    await saveSpqrState({ sessionId: 'a', state: stateBytes(1), version: 'v2' });
-    await saveSpqrState({ sessionId: 'b', state: stateBytes(2), version: 'v2' });
+    await saveSpqrState({ sessionId: 'a', state: stateBytes(1) });
+    await saveSpqrState({ sessionId: 'b', state: stateBytes(2) });
     await flushSpqrState();
 
     await clearSpqrStates();
@@ -193,7 +191,7 @@ describe('hapus state', () => {
 // arsip: era lama TETAP ada, FIFO, ter-seal, dan tidak pernah menjadi aktif.
 describe('arsip era braid (N5-01)', () => {
   it('rotate memindahkan state aktif ke arsip dan mengosongkan baris aktif', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), advanced: true });
     await flushSpqrState(SESSION);
 
     await rotateSpqrStateForNewSession(SESSION);
@@ -202,11 +200,10 @@ describe('arsip era braid (N5-01)', () => {
     const archived = await loadArchivedSpqrStates(SESSION);
     expect(archived).toHaveLength(1);
     expect(archived[0]?.state).toEqual(stateBytes(1));
-    expect(archived[0]?.version).toBe('v2');
   });
 
   it('rotate men-flush tulis yang masih menunggu debounce', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(5), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(5), advanced: true });
     // Belum ada flush: kalau rotate tidak mem-flush, arsip akan kosong/tertinggal.
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -215,7 +212,7 @@ describe('arsip era braid (N5-01)', () => {
 
   it('FIFO: era terbaru di slot 0 dan jumlah arsip dibatasi', async () => {
     for (let era = 0; era <= SPQR_STATE_ARCHIVE_SLOTS; era++) {
-      await saveSpqrState({ sessionId: SESSION, state: stateBytes(era), version: 'v2', advanced: true });
+      await saveSpqrState({ sessionId: SESSION, state: stateBytes(era), advanced: true });
       await flushSpqrState(SESSION);
       await rotateSpqrStateForNewSession(SESSION);
     }
@@ -230,7 +227,7 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('arsip ter-seal dan tidak memuat state plaintext', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(7), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(7), advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -246,7 +243,7 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('clearSpqrStates ikut menghapus arsip era', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(3), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(3), advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
     expect(await loadArchivedSpqrStates(SESSION)).toHaveLength(1);
@@ -262,7 +259,7 @@ describe('arsip era braid (N5-01)', () => {
   // Perbandingan byte saja tidak cukup: state awal era baru SELALU berbeda
   // (`authKey` berbeda), jadi penandanya adalah "era ini pernah maju".
   it('rotate era baru tanpa lalu lintas tidak menggeser arsip', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -271,7 +268,6 @@ describe('arsip era braid (N5-01)', () => {
     await saveSpqrState({
       sessionId: SESSION,
       state: stateBytes(2),
-      version: 'v2',
       advanced: false,
     });
     await flushSpqrState(SESSION);
@@ -284,11 +280,11 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('rotate setelah era maju tetap menggeser arsip', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(2), advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -301,7 +297,7 @@ describe('arsip era braid (N5-01)', () => {
   // TIDAK boleh membuang era lama. Hanya `advanced: false` eksplisit yang
   // menandai era belum maju.
   it('simpan tanpa penanda dianggap maju: era lama tetap diarsipkan', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2' });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1) });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
@@ -309,14 +305,13 @@ describe('arsip era braid (N5-01)', () => {
   });
 
   it('penanda false eksplisit menang atas default konservatif', async () => {
-    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), version: 'v2', advanced: true });
+    await saveSpqrState({ sessionId: SESSION, state: stateBytes(1), advanced: true });
     await flushSpqrState(SESSION);
     await rotateSpqrStateForNewSession(SESSION);
 
     await saveSpqrState({
       sessionId: SESSION,
       state: stateBytes(2),
-      version: 'v2',
       advanced: false,
     });
     await flushSpqrState(SESSION);

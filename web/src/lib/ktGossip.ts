@@ -23,7 +23,7 @@
  *    dari layanan yang sama yang buktinya diverifikasi (`/api/keys/kt/head`);
  *    kalau root itu berbeda dari bukti, verifikasi bukti yang gagal.
  *  - tidak menambah data yang dikirim ke server: field gossip hidup **di dalam
- *    payload ter-seal** (`ktG`), sama seperti deklarasi versi ratchet (`ackV`).
+ *    payload ter-seal** (`ktG`).
  *  - tidak memblokir kirim: split-view dicatat + dilaporkan, keputusan blokir
  *    tetap di jalur pin (`peerIdentityTrust`).
  *  - tidak menyimpan identitas user: kunci baris adalah `conversationId` (sesi

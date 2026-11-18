@@ -107,18 +107,16 @@ menambah jalur pembaca/penulis kedua.
   `conversationId`, `PP_SYNC_REQUIRED=1` untuk menegakkan), dan POST OHTTP saat
   `VITE_OHTTP_ENABLED=1` (gateway membatasi body 64 KB). Issuance berjalan di
   latar — sinkronisasi tidak boleh menunggu Privacy Pass.
-- **Ratchet v2 (braid SPQR)** (`docs/33` §33.10): header `{v:2,b:[frames]}`
-  (`web/src/lib/spqrWire.ts`), orkestrasi `spqrSession.ts`, worker op
-  `spqr_ratchet_init/encrypt/decrypt` (WASM `packages/spqr-wasm/dist/spqr.wasm`,
-  dimuat lazy lewat asset URL — jangan diimpor ke bundle utama, di-precache SW
-  via `**/*.wasm`), state braid di `spqrState.ts` baris `nyx_spqr_state_v1:*`
-  (`ENC1:`). v2 hanya dikirim setelah peer membuktikan bisa membacanya
-  (`ackV: 2` di dalam payload tersegel). Jalur v1, kill switch
-  `VITE_SPQR_FORCE_V1=1` / `localStorage['nyx_spqr_force_v1']`, dan E2E rollback
-  `web/e2e/spqr.spec.ts` dihapus pada fase C (`docs/38` §38.2) — selama masih
-  ada, kill switch hanya menghentikan pengiriman/iklan v2, tidak pernah
-  pembacaan, dan sidecar wajib tetap punya `spqr-ratchet` di
-  `SERVER_CAPABILITIES`.
+- **Ratchet = braid SPQR v2, satu-satunya wire** (`docs/43` §43.3.2): header
+  `{v:2,b:[frames]}` (`web/src/lib/spqrWire.ts`), orkestrasi `spqrSession.ts`,
+  worker op `spqr_ratchet_init/encrypt/decrypt` (WASM
+  `packages/spqr-wasm/dist/spqr.wasm`, dimuat lazy lewat asset URL — jangan
+  diimpor ke bundle utama, di-precache SW via `**/*.wasm`), state braid di
+  `spqrState.ts` baris `nyx_spqr_state_v1:*` (`ENC1:`, penanda `v: 2`). Tidak ada
+  header DR v1, deklarasi `ackV`, kill switch, atau negosiasi versi: pesan tanpa
+  akar braid gagal terlihat, bukan jatuh ke jalur lama. Kapabilitas
+  `spqr-ratchet` tetap wajib ada di `SERVER_CAPABILITIES` (kedua relay), karena
+  relay masih memakainya untuk mengizinkan frame braid lewat.
 
 ## Server gotchas
 
