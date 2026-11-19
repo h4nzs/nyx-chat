@@ -560,9 +560,21 @@ cross-origin` dari API. Aset lintas-origin lain (bucket R2, Turnstile, Google
 Fonts) tetap harus mengirim CORP/CORS — itu konfigurasi sisi bucket/penyedia,
 bukan nginx. Sinkronkan nginx manual ke VPS (docs/10 §10.9).
 
+**Selesai 2026-11-19:** notifikasi lintas tab `BroadcastChannel 'nyx-db'`
+(`web/src/lib/dbBroadcast.ts`) dikirim hanya setelah cermin SQLite benar-benar
+menulis (`mirrorMessageRows`/`mirrorDeleteMessage`/`mirrorDeleteMessages`/
+`mirrorDeleteConversation`/`mirrorClearMessages`; `withStore` mengembalikan
+status tulis). Payload hanya id lokal:
+`{type:'messages-changed', conversationId: string|null}`, `null` = cakupan tak
+diketahui (hapus per id / clear). Subscriber di `App.tsx` menyegarkan
+`loadConversations()` dan memuat ulang pesan percakapan yang sedang terbuka
+(`/chat/<id>` dari `window.location`, bukan hook Router) hanya bila id cocok atau
+`null`. Bukti: `web/src/lib/__tests__/dbBroadcast.test.ts` (3 tes), suite web
+141 berkas/1140 tes, E2E `storage.spec.ts` dua tab 1 lulus (22,7 s), E2E
+`opfsApp.spec.ts` 1 lulus (1,3 m).
+
 Belum dikerjakan: tabel keychain bertipe (`keychainDb.ts` masih Dexie; KeyStore
-baru dipakai untuk kunci DB SQLite), `contactStore`/KT, dan
-`BroadcastChannel 'nyx-db'` untuk notifikasi lintas tab. Default build tetap
+baru dipakai untuk kunci DB SQLite) dan `contactStore`/KT. Default build tetap
 Dexie; header OPFS di Vite masih opt-in `NYX_SQLITE_OPFS=1`.
 
 ---

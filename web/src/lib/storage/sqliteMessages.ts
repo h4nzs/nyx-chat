@@ -15,6 +15,7 @@ import { getSqliteMessagesKey } from './dbKey';
 import { initializeStorageSchema } from './schema';
 import { SqliteWorkerClient } from './sqliteClient';
 import { createSqliteKvStore, createSqliteMessageStore } from './sqliteStores';
+import { broadcastMessagesChanged } from '../dbBroadcast';
 
 const ENABLED = import.meta.env.VITE_SQLITE_MESSAGES === '1';
 const DB_NAME = '/nyx-messages.sqlite3';
@@ -95,38 +96,52 @@ async function openStore(): Promise<MessageStore | null> {
   return opening;
 }
 
-async function withStore(operation: (next: MessageStore) => Promise<void>): Promise<void> {
-  if (!ENABLED) return;
+async function withStore(operation: (next: MessageStore) => Promise<void>): Promise<boolean> {
+  if (!ENABLED) return false;
   try {
     const next = await openStore();
-    if (next) await operation(next);
+    if (!next) return false;
+    await operation(next);
+    return true;
   } catch (error) {
     degrade(error);
+    return false;
   }
 }
 
 export async function mirrorMessageRows(rows: DecryptedMessageRecord[]): Promise<void> {
   if (!ENABLED || rows.length === 0) return;
-  await withStore((next) => next.bulkPut(rows.map(toMessageRow)));
+  const written = await withStore((next) => next.bulkPut(rows.map(toMessageRow)));
+  // [docs/43 §43.11.3] Tab lain membaca database OPFS yang sama; beri tahu
+  // setelah tulisan benar-benar mendarat, bukan saat ia gagal.
+  if (!written) return;
+  for (const conversationId of new Set(rows.map((row) => row.conversationId))) {
+    broadcastMessagesChanged(conversationId);
+  }
 }
 
 export async function mirrorDeleteMessage(id: string): Promise<void> {
-  await withStore((next) => next.delete(id));
+  // Hapus per id tidak membawa conversationId; `null` = cakupan tidak diketahui
+  // sehingga penerima menyegarkan percakapan yang sedang terbuka.
+  if (await withStore((next) => next.delete(id))) broadcastMessagesChanged(null);
 }
 
 export async function mirrorDeleteMessages(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
-  await withStore(async (next) => {
+  const written = await withStore(async (next) => {
     for (const id of ids) await next.delete(id);
   });
+  if (written) broadcastMessagesChanged(null);
 }
 
 export async function mirrorDeleteConversation(conversationId: string): Promise<void> {
-  await withStore((next) => next.deleteByConversation(conversationId));
+  if (await withStore((next) => next.deleteByConversation(conversationId))) {
+    broadcastMessagesChanged(conversationId);
+  }
 }
 
 export async function mirrorClearMessages(): Promise<void> {
-  await withStore((next) => next.clear());
+  if (await withStore((next) => next.clear())) broadcastMessagesChanged(null);
 }
 
 export async function readSqliteMessages(

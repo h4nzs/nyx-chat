@@ -404,6 +404,36 @@ const AppContent = () => {
     }
   }, [user, location.pathname, isDeviceFlow]);
 
+  // 2a-bis. [docs/43 §43.11.3] Tab lain menulis ke cermin SQLite yang sama.
+  // Segarkan daftar percakapan (satu request) dan, bila event menyebut
+  // percakapan yang sedang terbuka, muat ulang pesannya. Tanpa ini tab pasif
+  // hanya berubah setelah reload. Id dibaca dari `window.location` supaya efek
+  // ini tidak perlu berlangganan ulang setiap navigasi.
+  useEffect(() => {
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const [{ onDbBroadcast }, { useMessageStore }] = await Promise.all([
+        import('@lib/dbBroadcast'),
+        import('./store/message'),
+      ]);
+      if (cancelled) return;
+      stop = onDbBroadcast((event) => {
+        void useConversationStore.getState().loadConversations();
+        const path = window.location.pathname;
+        if (!path.startsWith('/chat/')) return;
+        const openId = path.slice('/chat/'.length).split('/')[0];
+        if (!openId) return;
+        if (event.conversationId !== null && event.conversationId !== openId) return;
+        void useMessageStore.getState().loadMessagesForConversation(openId);
+      });
+    })();
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
   // 2b. [docs/34 §34.5] Loop monitor Key Transparency.
   //
   // Kenapa di app shell dan bukan di store kripto: langkah monitor adalah
