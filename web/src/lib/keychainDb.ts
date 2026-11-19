@@ -6,6 +6,57 @@ import { db, VaultEntry } from './db';
 import { pickChainState } from './groupEra';
 import { asConversationId, asUserId } from '@nyx/shared';
 import type { ConversationId, UserId, MessageId } from '@nyx/shared';
+import type { KeyStore } from './storage/types';
+
+// ============================================================
+// [docs/43 §43.11.6 B2] Keychain bertipe di KeyStore SQLite/OPFS.
+//
+// Lima kelompok kunci hot path (sessionKeys, groupKeys, ratchetSessions +
+// arsip FIFO, skippedKeys, groupSkippedKeys) memakai KeyStore bila
+// `VITE_SQLITE_MESSAGES=1`; selain itu tetap Dexie (build default).
+//
+// Impor DINAMIS wajib: rantai statis keychainDb → storage/sqliteMessages →
+// storage/dbKey → keychainDb adalah siklus (kunci database SQLite disegel
+// dengan masterSeed dari modul ini).
+//
+// Prefix kunci wajib karena satu KeyStore menampung lima tabel; tanpa prefix,
+// `sess:<conv>_<sid>` bisa menabrak `gskip:<conv>_<sender>_…`.
+// ============================================================
+const KEY_PREFIX = {
+  session: 'sess:',
+  group: 'gkey:',
+  ratchet: 'ratchet:',
+  skipped: 'skip:',
+  groupSkipped: 'gskip:',
+} as const;
+
+const TEXT_ENCODER = new TextEncoder();
+const TEXT_DECODER = new TextDecoder();
+
+/** KeyStore bersama, atau `null` → jalur Dexie. */
+async function sqliteKeys(): Promise<KeyStore | null> {
+  const { openSqliteKeyStore } = await import('./storage/sqliteMessages');
+  return openSqliteKeyStore();
+}
+
+/** Kunci ber-prefix, urut leksikografis (semantik indeks string Dexie). */
+async function keyNames(keys: KeyStore, prefix: string): Promise<string[]> {
+  return (await keys.keys(prefix)).sort();
+}
+
+async function deleteByPrefix(keys: KeyStore, prefix: string): Promise<void> {
+  for (const name of await keys.keys(prefix)) await keys.delete(name);
+}
+
+/** Buang kelima kelompok kunci keychain (dipakai wipe akun/percakapan). */
+async function wipeKeychainKeys(keys: KeyStore): Promise<void> {
+  for (const prefix of Object.values(KEY_PREFIX)) await deleteByPrefix(keys, prefix);
+}
+
+function skippedOrder(name: string): number {
+  const match = name.match(/_(\d+)$/);
+  return match ? Number(match[1]) : -1;
+}
 
 // ============================================================
 // AT-REST ENCRYPTION (masterSeed-bound)
@@ -425,6 +476,17 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
         // pesan lama yang message key-nya sudah terlewati ratchet (pola
         // add_sender_message_key libsignal: skipped keys hidup di state record).
         const MAX_SKIPPED_KEYS = 200;
+        const keys = await sqliteKeys();
+        if (keys) {
+            const names = await keys.keys(`${KEY_PREFIX.groupSkipped}${conversationId}_`);
+            if (names.length >= MAX_SKIPPED_KEYS) {
+                const oldest = names.sort((a, b) => skippedOrder(a) - skippedOrder(b))
+                    .slice(0, names.length - MAX_SKIPPED_KEYS + 1);
+                for (const name of oldest) await keys.delete(name);
+            }
+            await keys.put(`${KEY_PREFIX.groupSkipped}${key}`, TEXT_ENCODER.encode(await encryptValueAtRest(mk)));
+            return;
+        }
         const all = await db.groupSkippedKeys.where('key').startsWith(`${conversationId}_`).toArray();
         if (all.length >= MAX_SKIPPED_KEYS) {
             const parse = (k: string) => {
@@ -444,6 +506,31 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
  */
 export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number, keyId?: string): Promise<string | null> {
     return enqueueWrite(async () => {
+        const keys = await sqliteKeys();
+        if (keys && senderDeviceKey && senderDeviceKey !== 'undefined') {
+            const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+            const record = await keys.get(`${KEY_PREFIX.groupSkipped}${key}`);
+            if (record) return decryptValueAtRest(TEXT_DECODER.decode(record));
+            if (keyId) {
+                const fallbackKey = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+                const fallbackRecord = await keys.get(`${KEY_PREFIX.groupSkipped}${fallbackKey}`);
+                if (fallbackRecord) return decryptValueAtRest(TEXT_DECODER.decode(fallbackRecord));
+            }
+            return null;
+        }
+
+        if (keys) {
+            // Pesan lama tanpa senderDeviceKey: cocokkan suffix posisi, tetap
+            // memfilter senderId secara ketat (tanpa wildcard device).
+            const prefix = `${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_`;
+            for (const name of await keyNames(keys, prefix)) {
+                if (!name.endsWith(`_${n}`)) continue;
+                const record = await keys.get(name);
+                if (record) return decryptValueAtRest(TEXT_DECODER.decode(record));
+            }
+            return null;
+        }
+
         if (senderDeviceKey && senderDeviceKey !== 'undefined') {
             const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
             const record = await db.groupSkippedKeys.get(key);
@@ -481,6 +568,20 @@ export async function getGroupSkippedKey(conversationId: string, senderId: strin
  */
 export async function deleteGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number): Promise<void> {
     return enqueueWrite(async () => {
+        const keys = await sqliteKeys();
+        if (keys && senderDeviceKey && senderDeviceKey !== 'undefined') {
+            await keys.delete(`${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_${senderDeviceKey}_${n}`);
+            return;
+        }
+
+        if (keys) {
+            const prefix = `${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_`;
+            for (const name of await keyNames(keys, prefix)) {
+                if (name.endsWith(`_${n}`)) await keys.delete(name);
+            }
+            return;
+        }
+
         if (senderDeviceKey && senderDeviceKey !== 'undefined') {
             const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
             await db.groupSkippedKeys.delete(key);
@@ -513,6 +614,9 @@ export async function deleteGroupStates(conversationId: string): Promise<void> {
           .where('key')
           .between(conversationId + "_", conversationId + "_\uffff", true, true)
           .delete();
+
+      const keys = await sqliteKeys();
+      if (keys) await deleteByPrefix(keys, `${KEY_PREFIX.groupSkipped}${conversationId}_`);
   });
 }
 
@@ -574,6 +678,11 @@ export async function addSessionKey(
 ): Promise<void> {
   return enqueueWrite(async () => {
       const storageKey = `${conversationId}_${sessionId}`;
+      const keys = await sqliteKeys();
+      if (keys) {
+          await keys.put(`${KEY_PREFIX.session}${storageKey}`, key);
+          return;
+      }
       await db.sessionKeys.put({ storageKey, conversationId: conversationId as ConversationId, sessionId, key });
   });
 }
@@ -583,6 +692,8 @@ export async function getSessionKey(
   sessionId: string
 ): Promise<Uint8Array | null> {
   const storageKey = `${conversationId}_${sessionId}`;
+  const keys = await sqliteKeys();
+  if (keys) return (await keys.get(`${KEY_PREFIX.session}${storageKey}`)) ?? null;
   const record = await db.sessionKeys.get(storageKey);
   return record ? record.key : null;
 }
@@ -590,6 +701,16 @@ export async function getSessionKey(
 export async function getLatestSessionKey(
   conversationId: string
 ): Promise<{ sessionId: string; key: Uint8Array } | null> {
+  const keys = await sqliteKeys();
+  if (keys) {
+      const prefix = `${KEY_PREFIX.session}${conversationId}_`;
+      const names = await keyNames(keys, prefix);
+      const name = names[names.length - 1];
+      if (!name) return null;
+      const key = await keys.get(name);
+      return key ? { sessionId: name.slice(prefix.length), key } : null;
+  }
+
   const lastSession = await db.sessionKeys
       .where('storageKey')
       .between(conversationId + "_", conversationId + "_\uffff", true, true)
@@ -603,11 +724,18 @@ export async function getLatestSessionKey(
 
 export async function storeGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
+      const keys = await sqliteKeys();
+      if (keys) {
+          await keys.put(`${KEY_PREFIX.group}${conversationId}`, key);
+          return;
+      }
       await db.groupKeys.put({ conversationId: conversationId as ConversationId, key });
   });
 }
 
 export async function getGroupKey(conversationId: string): Promise<Uint8Array | null> {
+  const keys = await sqliteKeys();
+  if (keys) return (await keys.get(`${KEY_PREFIX.group}${conversationId}`)) ?? null;
   const record = await db.groupKeys.get(conversationId);
   return record ? record.key : null;
 }
@@ -618,6 +746,11 @@ export async function receiveGroupKey(conversationId: string, key: Uint8Array): 
 
 export async function deleteGroupKey(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
+      const keys = await sqliteKeys();
+      if (keys) {
+          await keys.delete(`${KEY_PREFIX.group}${conversationId}`);
+          return;
+      }
       await db.groupKeys.delete(conversationId);
   });
 }
@@ -643,6 +776,22 @@ export async function storeRatchetSession(conversationId: string, encryptedState
       // lama tetap decryptable via fallback lookup (crypto.ts DR path).
       // Legacy `#archived` (1 slot, pra-2026-10-05) dibaca di getter dan
       // dimigrasi otomatis ke slot baru saat penulisan berikutnya.
+      const keys = await sqliteKeys();
+      if (keys) {
+          const main = `${KEY_PREFIX.ratchet}${conversationId}`;
+          const ids = ratchetArchiveIds(conversationId).map(id => `${KEY_PREFIX.ratchet}${id}`);
+          const existing = await keys.get(main);
+          if (existing) {
+              for (let i = ids.length - 1; i > 0; i--) {
+                  const older = await keys.get(ids[i - 1]!);
+                  if (older) await keys.put(ids[i]!, older);
+              }
+              await keys.put(ids[0]!, existing);
+              await keys.delete(`${KEY_PREFIX.ratchet}${conversationId}#archived`);
+          }
+          await keys.put(main, encryptedState);
+          return;
+      }
       const existing = await db.ratchetSessions.get(conversationId);
       if (existing) {
           const ids = ratchetArchiveIds(conversationId);
@@ -662,6 +811,8 @@ export async function storeRatchetSession(conversationId: string, encryptedState
 }
 
 export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
+  const keys = await sqliteKeys();
+  if (keys) return (await keys.get(`${KEY_PREFIX.ratchet}${conversationId}`)) ?? null;
   const record = await db.ratchetSessions.get(conversationId);
   return record ? record.state : null;
 }
@@ -674,6 +825,15 @@ export async function getRatchetSession(conversationId: string): Promise<Uint8Ar
  */
 export async function getArchivedRatchetSessions(conversationId: string): Promise<Uint8Array[]> {
   const ids = ratchetArchiveIds(conversationId);
+  const keys = await sqliteKeys();
+  if (keys) {
+      const states: Uint8Array[] = [];
+      for (const id of [...ids, `${conversationId}#archived`]) {
+          const state = await keys.get(`${KEY_PREFIX.ratchet}${id}`);
+          if (state) states.push(state);
+      }
+      return states;
+  }
   const records = await db.ratchetSessions.bulkGet([
     ...ids.map(id => id as ConversationId),
     `${conversationId}#archived` as ConversationId
@@ -689,6 +849,18 @@ export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Arra
       // ratchet (pola state.add_sender_message_key libsignal).
       const convId = headerKey.split('_').slice(0, 2).join('_');
       const MAX_SKIPPED_DR = 200;
+      const keys = await sqliteKeys();
+      if (keys) {
+          const prefix = `${KEY_PREFIX.skipped}${convId}_`;
+          const names = await keys.keys(prefix);
+          if (names.length >= MAX_SKIPPED_DR) {
+              const oldest = names.sort((a, b) => skippedOrder(a) - skippedOrder(b))
+                  .slice(0, names.length - MAX_SKIPPED_DR + 1);
+              for (const name of oldest) await keys.delete(name);
+          }
+          await keys.put(`${KEY_PREFIX.skipped}${headerKey}`, encryptedKey);
+          return;
+      }
       const all = await db.skippedKeys.where('headerKey').startsWith(`${convId}_`).toArray();
       if (all.length >= MAX_SKIPPED_DR) {
           const parseN = (k: string) => {
@@ -704,6 +876,8 @@ export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Arra
 }
 
 export async function getSkippedKey(headerKey: string): Promise<Uint8Array | null> {
+  const keys = await sqliteKeys();
+  if (keys) return (await keys.get(`${KEY_PREFIX.skipped}${headerKey}`)) ?? null;
   const record = await db.skippedKeys.get(headerKey);
   return record ? record.key : null;
 }
@@ -718,6 +892,13 @@ export async function deleteSkippedKey(headerKey: string): Promise<void> {
 
 export async function deleteRatchetSession(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
+      const keys = await sqliteKeys();
+      if (keys) {
+          for (const id of [conversationId, ...ratchetArchiveIds(conversationId), `${conversationId}#archived`]) {
+              await keys.delete(`${KEY_PREFIX.ratchet}${id}`);
+          }
+          return;
+      }
       await db.ratchetSessions.delete(conversationId);
       // Hapus juga arsip era lama (wipe percakapan = hapus semua era),
       // termasuk slot FIFO baru dan id legacy `#archived`.
@@ -728,6 +909,11 @@ export async function deleteRatchetSession(conversationId: string): Promise<void
 
 export async function deleteSessionKeys(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
+      const keys = await sqliteKeys();
+      if (keys) {
+          await deleteByPrefix(keys, `${KEY_PREFIX.session}${conversationId}_`);
+          return;
+      }
       await db.sessionKeys
           .where('storageKey')
           .between(conversationId + "_", conversationId + "_\uffff", true, true)
@@ -746,6 +932,9 @@ export async function deleteGroupReceiverStates(conversationId: string): Promise
          .where('key')
          .between(conversationId + "_", conversationId + "_\uffff", true, true)
          .delete();
+
+     const keys = await sqliteKeys();
+     if (keys) await deleteByPrefix(keys, `${KEY_PREFIX.groupSkipped}${conversationId}_`);
   });
 }
 
@@ -804,6 +993,10 @@ export async function clearAllKeys(): Promise<void> {
       // Kosongkan mirror SQLite SEBELUM `kvStore` (tempat kunci DB) dihapus.
       const { resetSqliteMessages, closeSqliteMessages } = await import('./storage/sqliteMessages');
       await resetSqliteMessages().catch(() => {});
+      // [docs/43 §43.11.6 B2] Tabel pesan dikosongkan `resetSqliteMessages`;
+      // material kunci keychain ada di KeyStore yang sama → hapus per prefix.
+      const keys = await sqliteKeys();
+      if (keys) await wipeKeychainKeys(keys).catch(() => {});
       await closeSqliteMessages().catch(() => {});
       await Promise.all([
           db.messages.clear(),

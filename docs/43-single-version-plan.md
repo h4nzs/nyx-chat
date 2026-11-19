@@ -573,9 +573,30 @@ diketahui (hapus per id / clear). Subscriber di `App.tsx` menyegarkan
 141 berkas/1140 tes, E2E `storage.spec.ts` dua tab 1 lulus (22,7 s), E2E
 `opfsApp.spec.ts` 1 lulus (1,3 m).
 
-Belum dikerjakan: tabel keychain bertipe (`keychainDb.ts` masih Dexie; KeyStore
-baru dipakai untuk kunci DB SQLite) dan `contactStore`/KT. Default build tetap
-Dexie; header OPFS di Vite masih opt-in `NYX_SQLITE_OPFS=1`.
+**Selesai 2026-11-19:** keychain bertipe ikut pindah. `storage/sqliteMessages.ts`
+mengekspor `openSqliteKeyStore()` yang memakai klien dan database yang SAMA
+dengan pesan (`/nyx-messages.sqlite3`, satu worker, satu WAL) dan mengembalikan
+`null` bila `VITE_SQLITE_MESSAGES` mati, OPFS/kunci tak tersedia, atau store
+sudah terdegradasi. `keychainDb.ts` memakai KeyStore untuk lima kelompok kunci
+panas — `sessionKeys`, `groupKeys`, `ratchetSessions` (aktif + arsip FIFO 3
+slot), `skippedKeys`, `groupSkippedKeys` — dengan prefix `sess:`, `gkey:`,
+`ratchet:`, `skip:`, `gskip:` (satu KeyStore menampung kelimanya), sementara
+tabel lain (preKeys, identityKeys, pendingHeaders, messageKeys, storyKeys,
+groupSender/ReceiverStates, pqDrSessions, offlineQueue) tetap Dexie. Impor
+modul storage bersifat DINAMIS karena rantai statis `keychainDb →
+storage/sqliteMessages → storage/dbKey → keychainDb` adalah siklus (kunci
+database SQLite disegel dengan masterSeed dari `keychainDb`). Semantik lama
+dipertahankan persis: kunci sesi terbaru = nama kunci terbesar, arsip ratchet
+FIFO 3 slot, cap 200 per prefix untuk skipped key (urut `_<n>` terakhir),
+`groupSkippedKeys` mencari exact → tanpa `keyId` → suffix `_n` saat
+`senderDeviceKey` kosong, dan wipe akun (`clearAllKeys`) mengosongkan kelima
+prefix sebelum klien ditutup. Bukti: `__tests__/keychainSqlite.test.ts` (5 tes;
+Dexie di-mock agar MELEMPAR kalau jalur KeyStore menyentuhnya) plus suite web
+penuh dan E2E storage/opfsApp.
+
+Belum dikerjakan: `contactStore`/KT. Default build tetap Dexie (keychain hanya
+memakai SQLite saat `VITE_SQLITE_MESSAGES=1`); header OPFS di Vite masih opt-in
+`NYX_SQLITE_OPFS=1`.
 
 ---
 

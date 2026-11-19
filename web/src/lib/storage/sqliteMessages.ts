@@ -10,8 +10,9 @@ import { db, type DecryptedMessageRecord } from '../db';
 import { isExpiredMessageRow } from '../localAtRest';
 import { orderBucketOf } from '../localOrderBucket';
 import { pickOlderPage, resolveOrderInstants } from '../localOrderKey';
-import type { MessageRow, MessageStore, KvStore } from './types';
+import type { MessageRow, MessageStore, KvStore, KeyStore } from './types';
 import { getSqliteMessagesKey } from './dbKey';
+import { createKeyStore } from './keyStore';
 import { initializeStorageSchema } from './schema';
 import { SqliteWorkerClient } from './sqliteClient';
 import { createSqliteKvStore, createSqliteMessageStore } from './sqliteStores';
@@ -24,12 +25,27 @@ const READ_AHEAD = 32;
 
 let client: SqliteWorkerClient | null = null;
 let store: MessageStore | null = null;
+let kv: KvStore | null = null;
 let opening: Promise<MessageStore | null> | null = null;
 let warned = false;
 let degraded = false;
 
 export function isSqliteMessagesEnabled(): boolean {
   return ENABLED;
+}
+
+/**
+ * [docs/43 §43.11.6 B2] Keychain bertipe memakai klien & database yang SAMA
+ * dengan pesan (satu worker, satu WAL). `KeyStore` hanya menyimpan byte; segel
+ * `ENC1:` tetap tanggung jawab pemanggil. `null` = build tanpa
+ * `VITE_SQLITE_MESSAGES=1`, OPFS/kunci tidak tersedia, atau store sudah
+ * terdegradasi — pemanggil harus jatuh ke Dexie.
+ */
+export async function openSqliteKeyStore(): Promise<KeyStore | null> {
+  if (!ENABLED || degraded) return null;
+  const next = await openStore();
+  if (!next || !kv) return null;
+  return createKeyStore(kv);
 }
 
 function warn(error: unknown): void {
@@ -76,6 +92,7 @@ async function openStore(): Promise<MessageStore | null> {
       const nextKv = createSqliteKvStore(client);
       const nextStore = createSqliteMessageStore(client);
       await hydrate(nextStore, nextKv);
+      kv = nextKv;
       store = nextStore;
       return nextStore;
     } catch (error) {
@@ -87,6 +104,7 @@ async function openStore(): Promise<MessageStore | null> {
       }
       client = null;
       store = null;
+      kv = null;
       return null;
     } finally {
       opening = null;
@@ -277,6 +295,7 @@ export async function closeSqliteMessages(): Promise<void> {
   const active = client;
   client = null;
   store = null;
+  kv = null;
   opening = null;
   degraded = false;
   if (!active) return;
