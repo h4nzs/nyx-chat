@@ -478,6 +478,10 @@ server maupun web, jadi alert ditutup `tolerable_risk` dengan alasan tertulis.
 Kalau `picomatch` keluar dengan versi baru, Dependabot akan membuka alert baru
 dan bump itu masuk seperti bump lain di tabel atas.
 
+**Selesai 2026-11-19:** advisory itu tidak lagi muncul di `pnpm audit --prod`
+(0 kerentanan, 643 dependency produksi; lockfile masih `picomatch@4.0.7`), jadi
+entri pengecualiannya dihapus — lihat catatan gerbang di §9.6.
+
 **deepmerge.** `GHSA-gcqx-w48m-w2h4` tidak punya versi perbaikan (rentan
 `>=4.2.0 <=4.3.1`, dan 4.3.1 rilis terbaru). Alert #281 ditutup
 `tolerable_risk` dengan alasan tertulis: hanya dibawa
@@ -545,3 +549,12 @@ terpasang lewat override `>=4.0.4`, entri itu harus dihapus — gate juga menola
 pengecualian yang tidak lagi diperlukan. Kontrol negatif dijalankan: tanpa entri,
 gerbang gagal (`1 masalah`), jadi pengecualian ini bukan jalan memutar agar
 hijau.
+
+**Ditutup 2026-11-19.** Advisory `GHSA-fc5q-39xc-vjpf` berhenti dilaporkan
+(`pnpm audit --prod` → 0 kerentanan; lockfile tetap `picomatch@4.0.7`), sehingga
+aturan gate "pengecualian tidak lagi diperlukan" yang menyala lebih dulu:
+`node scripts/audit-prod.mjs` mencetak `pengecualian GHSA-fc5q-39xc-vjpf tidak
+lagi diperlukan … — hapus dari scripts/audit-exceptions.json` dan job
+`Dependency Audit` merah. Entri dihapus (berkas kini `{}`, 0 pengecualian aktif)
+dan gate kembali hijau; override `picomatch: '>=4.0.4'` tetap ada sebagai
+perlindungan kalau advisory muncul kembali.

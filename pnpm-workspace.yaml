@@ -49,10 +49,10 @@ overrides:
   ws: '>=8.20.1'
   'socket.io-parser': '^4.2.6'
   # [Dependabot 2026-11-18] GHSA-fc5q-39xc-vjpf: picomatch <=4.0.7 (ReDoS via
-  # extglob). Perbaikan 4.0.8 BELUM terbit (registry berhenti di 4.0.7), jadi
-  # rentangnya dibiarkan >=4.0.4: rilis perbaikan otomatis terpakai saat ada.
-  # Gerbang `pnpm audit --prod` menoleransinya lewat scripts/audit-exceptions.json
-  # yang punya tanggal kedaluwarsa.
+  # extglob). Perbaikan 4.0.8 belum terbit saat itu; advisory kini tidak lagi
+  # dilaporkan `pnpm audit --prod` (dicek 2026-11-19) sehingga pengecualian di
+  # scripts/audit-exceptions.json dihapus. Rentang >=4.0.4 dibiarkan supaya
+  # rilis perbaikan (kalau advisory kembali) otomatis terpakai.
   picomatch: '>=4.0.4'
   effect: '>=3.20.0'
   path-to-regexp: '^8.4.0'

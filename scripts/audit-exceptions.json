@@ -1,8 +1,2 @@
 {
-  "GHSA-fc5q-39xc-vjpf": {
-    "package": "picomatch",
-    "expires": "2026-12-02",
-    "rationale": "Advisory menyebut perbaikan 4.0.8, tetapi versi itu belum terbit: registry berhenti di 4.0.7 (dicek 2026-11-18), sehingga `pnpm audit --prod` menandai semua pohon produksi tanpa ada yang bisa dipasang. Jalurnya build tool marketing (`@astrojs/react` -> vite/tinyglobby -> fdir), bukan runtime API maupun klien. Override `picomatch: '>=4.0.4'` di `pnpm-workspace.yaml` membuat rilis perbaikan otomatis terpakai pada install berikutnya setelah terbit.",
-    "removalGate": "Hapus entri ini segera setelah 4.0.8 (atau lebih baru) terpasang di `pnpm-lock.yaml`. Kalau 4.0.8 belum terbit sampai tanggal `expires`, perpanjang hanya dengan alasan tertulis baru, atau matikan jalur build marketing yang menarik picomatch."
-  }
 }
