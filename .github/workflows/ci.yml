@@ -481,6 +481,23 @@ jobs:
         run: |
           node e2e/verify-required-tests.mjs --self-test
           node e2e/verify-required-tests.mjs --project chromium
+      # [docs/43 §43.11.3] Stack terpisah: Vite + COOP/COEP + flag SQLite, tanpa
+      # API/Postgres. Dua tab berbagi OPFS membuktikan jalur B2 nyata, bukan
+      # fallback Dexie.
+      - name: Run E2E SQLite OPFS (dua tab)
+        working-directory: web
+        env:
+          DEBUG: 'pw:webserver,pw:browser'
+        run: pnpm run test:e2e:storage
+      # [docs/43 §43.11.3] Bukan fixture: registrasi nyata + aset aplikasi di
+      # bawah COEP, lalu buka jalur baca SQLite setelah vault di-unlock.
+      - name: Run E2E app under COOP/COEP + SQLite
+        working-directory: web
+        env:
+          NYX_E2E_OPFS_APP: '1'
+          VITE_FORCE_WSS: '1'
+          DEBUG: 'pw:webserver,pw:browser'
+        run: pnpm exec playwright test --project=chromium e2e/opfsApp.spec.ts
       # [docs/35 §35.9] Build ini PQ-only: `VITE_PQ_V2` sudah tidak berpengaruh
       # dan tidak ada fallback v1. Step terpisah ini tetap ada supaya jalur X3DH
       # v2 / grup `sigV:2` / burner PQ-only punya bukti otomatis; suite utama

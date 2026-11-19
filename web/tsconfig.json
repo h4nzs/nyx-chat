@@ -54,7 +54,8 @@
     "src",
     "e2e",
     "playwright.config.ts",
-    "playwright.ohttp.config.ts"
+    "playwright.ohttp.config.ts",
+    "playwright.storage.config.ts"
   ],
   "references": []
 }

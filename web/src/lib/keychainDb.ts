@@ -214,6 +214,10 @@ async function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
 }
 
 export async function closeDatabaseConnection() {
+  // [docs/43 §43.11.6 B2] Worker SQLite memegang kunci DB di memori; tutup
+  // sebelum koneksi Dexie hilang supaya tidak ada worker yang tertinggal.
+  const { closeSqliteMessages } = await import('./storage/sqliteMessages');
+  await closeSqliteMessages().catch(() => {});
   if (db.isOpen()) {
     db.close();
   }
@@ -797,6 +801,10 @@ export async function getPeerIdentityKey(userId: string): Promise<string | undef
 
 export async function clearAllKeys(): Promise<void> {
   return enqueueWrite(async () => {
+      // Kosongkan mirror SQLite SEBELUM `kvStore` (tempat kunci DB) dihapus.
+      const { resetSqliteMessages, closeSqliteMessages } = await import('./storage/sqliteMessages');
+      await resetSqliteMessages().catch(() => {});
+      await closeSqliteMessages().catch(() => {});
       await Promise.all([
           db.messages.clear(),
           db.storyKeys.clear(),

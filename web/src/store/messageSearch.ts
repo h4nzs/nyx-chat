@@ -10,6 +10,10 @@ import { openLocalFlag } from '@lib/localAtRest';
 // mendekripsi seluruh percakapan di tiap ketikan.
 import { MessageSearchIndex, searchRowFingerprint, tokenizeSearchText } from '@lib/searchIndex';
 import type { DecryptedMessageRecord } from '@lib/db';
+import {
+  readSqliteConversationRows,
+  readSqliteMessagesByIds,
+} from '@lib/storage/sqliteMessages';
 import type { Message } from "./conversation";
 import type { MessageId } from '@nyx/shared';
 
@@ -40,7 +44,9 @@ export function resetSearchIndexForTests(): void {
  * substring lama tetap utuh).
  */
 async function syncConversationIndex(conversationId: string): Promise<DecryptedMessageRecord[]> {
-  const rows = await shadowVault.messages.where('conversationId').equals(conversationId).toArray();
+  const sqliteRows = await readSqliteConversationRows(conversationId);
+  const rows = sqliteRows
+    ?? await shadowVault.messages.where('conversationId').equals(conversationId).toArray();
   const fingerprints = indexedFingerprints.get(conversationId) ?? new Map<string, string>();
   const seen = new Set<string>();
 
@@ -128,8 +134,9 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       // persis seperti pencarian substring lama.
       let rawResults: DecryptedMessageRecord[] = conversationRows;
       if (candidateIds) {
-        const fetched = await shadowVault.messages.bulkGet(candidateIds);
-        rawResults = fetched.filter((row): row is DecryptedMessageRecord => !!row);
+        const sqliteFetched = await readSqliteMessagesByIds(candidateIds);
+        rawResults = sqliteFetched ?? (await shadowVault.messages.bulkGet(candidateIds))
+          .filter((row): row is DecryptedMessageRecord => !!row);
       }
 
       // Urut lama→baru (perilaku `sortBy('createdAt')` sebelumnya) dihitung dari

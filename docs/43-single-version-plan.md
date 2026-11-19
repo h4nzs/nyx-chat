@@ -437,6 +437,16 @@ dibungkus `masterSeed` dan hanya hidup di memori worker.** Alasan per pilihan:
    lapisan `web/src/lib/storage/` bertipe; Drizzle/Kysely bisa ditambahkan nanti
    tanpa mengubah skema ([SQLocal](https://sqlocal.dev/guide/introduction)).
 
+> **Koreksi implementasi 2026-11-19.** `@sqlite.org/sqlite-wasm` tidak memuat
+> SQLite3MC; runtime yang dipakai adalah `@aztec-labs/sqlite3mc-wasm@6.0.0`,
+> sedangkan paket resmi hanya devDependency untuk tipe. Yang lebih penting:
+> VFS `opfs` (dan `opfs-sahpool`) **menolak** `PRAGMA key` dengan
+> `Setting key failed. Encryption is not supported by the VFS.` Database
+> terenkripsi harus dibuka lewat wrapper yang didaftarkan
+> `sqlite3mc_vfs_create('opfs', 0)`, yaitu VFS `multipleciphers-opfs`.
+> Wrapper inilah yang membuat file benar-benar terenkripsi dan kunci salah
+> ditolak `SQLITE_NOTADB`.
+
 **Jangan pernah fallback diam-diam ke `:memory:`** saat OPFS tidak tersedia
 (Safari < 16.4, mode privat, storage diblokir). DB in-memory yang tampak bekerja
 lalu hilang saat reload adalah kehilangan data yang menyamar sebagai fitur.
@@ -455,8 +465,11 @@ jangan izinkan sesi baru, dan arahkan ke `.nyxbak`.
 - **Kunci & ratchet** tetap di tabel terpisah dengan `ENC1:` per nilai; jangan
   pindahkan ke kolom plaintext hanya karena SQLite punya tipe.
 - **Transaksi**: satu penulis, `BEGIN IMMEDIATE` untuk tulis yang membaca dulu,
-  `busy_timeout=5000`, `journal_mode=WAL`, `foreign_keys=ON`, `synchronous=FULL`
-  untuk pesan (durabilitas lebih penting daripada 1 ms).
+  `busy_timeout=5000`, `foreign_keys=ON`, `synchronous=FULL` untuk pesan
+  (durabilitas lebih penting daripada 1 ms). **WAL tidak tersedia di VFS OPFS**:
+  `PRAGMA journal_mode=WAL` jatuh ke `delete` (dikonfirmasi di Chromium), jadi
+  jangan mengklaim WAL; rollback journal tetap dipakai dan `synchronous=FULL`
+  tetap berlaku.
 - **Lintas tab**: SQLocal/SQLite tidak mengirim event; kirim `BroadcastChannel
   'nyx-db'` setelah commit, dan tab lain memakai `liveQuery`-nya sendiri. Uji dua
   tab di `storage.spec.ts`.
@@ -488,6 +501,69 @@ jangan izinkan sesi baru, dan arahkan ke `.nyxbak`.
 | B1 | `web/src/lib/storage/` (interface `MessageStore`, `KeyStore`, `KvStore`) + worker SQLite + `schema.sql` + SQLite3MC | unit kontrak dijalankan terhadap Dexie **dan** SQLite |
 | B2 | Pindahkan pembaca (`store/message.ts`, `keychainDb.ts`, `contactStore.ts`, KT) ke interface; dual-write di belakang flag DEV | E2E core + `storage.spec.ts` |
 | B3 | Hapus Dexie, 16 versi, `dexieMigration.test.ts`, `db.ts`; `BACKUP_TABLE_ORDER` diganti `VACUUM INTO` | `pnpm -r run build`, unit, E2E penuh 2× |
+
+**Status 2026-11-19 — B1 selesai; B2 inti di belakang flag.** Fondasi kontrak ada di
+`web/src/lib/storage/`: `types.ts` (`KvStore`, `MessageStore`, `KeyStore`,
+`SqlDriver`), `schema.ts` (skema idempoten `kvStore` + `messages`),
+`sqliteStores.ts` (implementasi SQLite), `dexieStores.ts` (implementasi Dexie),
+dan `keyStore.ts` (material kunci biner di atas `KvStore`). Suite kontrak
+(`__tests__/storesContract.test.ts`, 13 tes) menjalankan operasi yang sama pada
+Dexie dan SQLite, termasuk byte KeyStore, `getMany`, `listAll`, dan kursor
+bucket; sisi SQLite unit memakai `node:sqlite` in-memory.
+
+Worker nyata ada di `sqlite.worker.ts` + `sqliteClient.ts`: kunci 32 byte
+ditransfer ke worker lalu di-zero-kan setelah `PRAGMA key`, VFS dibuka lewat
+`multipleciphers-opfs`, `batch` memakai satu transaksi `BEGIN IMMEDIATE`,
+`busy_timeout=5000`, dan RPC punya timeout 30 detik. Bukti browser (dev dan
+preview build produksi): header file bukan `SQLite format 3`, reopen
+mengembalikan data, kunci salah ditolak `SQLITE_NOTADB`, `journal_mode=delete`,
+`synchronous=2`.
+
+Dua jebakan Vite yang sudah ditutup: (a) `@aztec-labs/sqlite3mc-wasm` **wajib**
+ada di `optimizeDeps.exclude`; kalau tidak, proxy OPFS dicari di `.vite/deps`
+dan VFS gagal dipasang — dua blok `optimizeDeps` di config sempat saling
+menimpa; (b) build produksi tidak meng-emit `sqlite3-opfs-async-proxy.js`
+(URL-nya relatif terhadap worker), jadi plugin `nyx-sqlite-opfs-proxy`
+menyalinnya ke direktori worker saat `closeBundle`.
+
+**B2 (aktif hanya dengan `VITE_SQLITE_MESSAGES=1`).** `storage/dbKey.ts`
+membuat kunci 32 byte acak, menyegelnya `ENC1:` dengan masterSeed, dan
+menyimpannya lewat `KeyStore` di `kvStore` (kunci yang ada tetapi gagal dibuka
+**tidak** diganti — lebih baik fallback Dexie daripada database lama tampak
+kosong). `storage/sqliteMessages.ts` menghidrasi seluruh baris Dexie sekali
+(marker `sqlite:messages:hydrated:v1`), lalu mirror setiap tulis/hapus shadow
+vault. Pembaca chat (`getMessagesByConversation`, `getMessage`,
+`getMessagesForExport`) dan pencarian (`messageSearch`) membaca SQLite bila
+tersedia; kegagalan mirror/baca men-degrade seluruh sesi ke Dexie, bukan
+menyajikan data parsial. Tes `__tests__/sqliteMessages.test.ts` (2 tes,
+`node:sqlite` + worker mock) mengunci hidrasi, mirror, baca, hapus, dan close.
+
+E2E `storage.spec.ts` berjalan di stack terpisah
+(`playwright.storage.config.ts`, Vite :5274, `NYX_SQLITE_OPFS=1` +
+`VITE_SQLITE_MESSAGES=1`): dua tab berbagi database OPFS yang sama, tab kedua
+membaca tulisan tab pertama, lalu tab pertama membaca tulisan tab kedua. Spec
+ini sengaja di-`testIgnore` dari suite default supaya tidak dianggap lulus
+lewat fallback Dexie; jalankan dengan
+`pnpm --filter nyx-web run test:e2e:storage`.
+
+`e2e/opfsApp.spec.ts` menutup celah yang tidak bisa dibuktikan fixture: dengan
+`NYX_E2E_OPFS_APP=1`, config default memasang COOP/COEP +
+`VITE_SQLITE_MESSAGES=1`, spec mendaftarkan akun nyata, memeriksa
+`crossOriginIsolated` di `/login` dan `/chat`, mencatat request/console yang
+terblokir COEP, lalu memanggil `readSqliteMessages` setelah vault di-unlock.
+Spec ini dijalankan sebagai step terpisah di job `e2e`, bukan bagian suite
+default.
+
+Header COOP/COEP sekarang dipasang di `ops/nginx/nyx.conf` untuk dokumen app
+(`location /`); `/uploads` sudah mengirim `Cross-Origin-Resource-Policy:
+cross-origin` dari API. Aset lintas-origin lain (bucket R2, Turnstile, Google
+Fonts) tetap harus mengirim CORP/CORS — itu konfigurasi sisi bucket/penyedia,
+bukan nginx. Sinkronkan nginx manual ke VPS (docs/10 §10.9).
+
+Belum dikerjakan: tabel keychain bertipe (`keychainDb.ts` masih Dexie; KeyStore
+baru dipakai untuk kunci DB SQLite), `contactStore`/KT, dan
+`BroadcastChannel 'nyx-db'` untuk notifikasi lintas tab. Default build tetap
+Dexie; header OPFS di Vite masih opt-in `NYX_SQLITE_OPFS=1`.
 
 ---
 

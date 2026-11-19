@@ -156,6 +156,42 @@ vi.mock('../localAtRest', () => ({
     if (payload === 'false') return false;
     return null;
   }),
+  readLocalExpiresAt: async (raw: string | number | null | undefined) => {
+    if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    if (raw.startsWith('ENC1:')) {
+      const parsed = Number(Buffer.from(raw.slice(5), 'base64').toString('utf8'));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const ms = Date.parse(raw);
+    return Number.isFinite(ms) ? ms : null;
+  },
+  isExpiredMessageRow: async (
+    row: { expiresAt?: string | number | null; autoDelete?: boolean | string | null },
+    now: number,
+  ) => {
+    const flag = row.autoDelete;
+    let auto = flag === true;
+    if (typeof flag === 'string') {
+      auto = flag === 'true'
+        || (flag.startsWith('ENC1:')
+          && Buffer.from(flag.slice(5), 'base64').toString('utf8') === 'true');
+    }
+    if (!auto) return false;
+    const raw = row.expiresAt;
+    let ms: number | null = null;
+    if (typeof raw === 'number') ms = raw;
+    else if (typeof raw === 'string') {
+      if (raw.startsWith('ENC1:')) {
+        const parsed = Number(Buffer.from(raw.slice(5), 'base64').toString('utf8'));
+        ms = Number.isFinite(parsed) ? parsed : null;
+      } else {
+        const parsed = Date.parse(raw);
+        ms = Number.isFinite(parsed) ? parsed : null;
+      }
+    }
+    return ms !== null && ms <= now;
+  },
 }));
 
 vi.mock('../localOrderKey', () => ({

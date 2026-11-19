@@ -1,4 +1,6 @@
 import { defineConfig } from 'vitest/config'
+import type { Plugin } from 'vite';
+import { copyFileSync, existsSync, readdirSync } from 'node:fs';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { compression } from 'vite-plugin-compression2';
@@ -9,6 +11,44 @@ import packageJson from './package.json' with { type: 'json' };
 
 // Bikin fungsi 'require' palsu karena kita di environment Module (ESM)
 const require = createRequire(import.meta.url);
+
+// [docs/43 §43.11.6] Worker SQLite memuat proxy OPFS lewat URL relatif
+// (`sqlite3-opfs-async-proxy.js`) terhadap `import.meta.url`. Di dev file itu
+// disajikan langsung dari paket; saat build Vite hanya meng-emit worker + wasm,
+// jadi proxy harus ikut disalin ke direktori worker.
+const sqliteOpfsProxyPath = require.resolve(
+  '@aztec-labs/sqlite3mc-wasm/vendor/jswasm/sqlite3-opfs-async-proxy.js',
+);
+
+function sqliteOpfsProxyAsset(): Plugin {
+  let outDir: string | undefined;
+  return {
+    name: 'nyx-sqlite-opfs-proxy',
+    apply: 'build',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      if (!outDir || !existsSync(outDir)) return;
+      const copyInto = (directory: string) => {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          const fullPath = path.join(directory, entry.name);
+          if (entry.isDirectory()) {
+            copyInto(fullPath);
+          } else if (
+            entry.name.startsWith('sqlite.worker-') && entry.name.endsWith('.js')
+          ) {
+            copyFileSync(
+              sqliteOpfsProxyPath,
+              path.join(directory, 'sqlite3-opfs-async-proxy.js'),
+            );
+          }
+        }
+      };
+      copyInto(outDir);
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
@@ -30,9 +70,19 @@ export default defineConfig(({ mode }) => {
     process.env.NYX_OHTTP_RELAY_PROXY_KEEP_PATH === '1'
       ? undefined
       : (proxyPath: string) => proxyPath.replace(/^\/api\/ohttp\/relay/, '/relay');
+  // [docs/43 §43.11.3] VFS SQLite `opfs` butuh SharedArrayBuffer, jadi dokumen
+  // harus cross-origin isolated. Opt-in sampai worker SQLite di-wire (B2):
+  // menyalakannya sekarang mengubah perilaku semua aset lintas-origin di E2E.
+  const sqliteOpfsHeaders = process.env.NYX_SQLITE_OPFS === '1'
+    ? {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    }
+    : {};
 
   return {
   plugins: [
+    sqliteOpfsProxyAsset(),
     tailwindcss(),
     react(),
     // 1. Kompresi Brotli (Terbaik untuk Browser Modern)
@@ -127,7 +177,21 @@ export default defineConfig(({ mode }) => {
   optimizeDeps: {
     // Paksa Vite untuk tidak meng-optimasi libsodium-wrappers
     // Ini memperbaiki error "Could not resolve ./libsodium.mjs"
-    include: ['libsodium-wrappers']
+    include: [
+      'libsodium-wrappers',
+      // [E2E storage] Ketiga paket ini baru ditemukan saat runtime (jalur
+      // worker/SW), dan dep optimizer lalu mengirim full-reload beberapa detik
+      // setelah halaman dimuat. Di dev-server dengan cache `.vite` dingin itu
+      // menghancurkan handle yang baru dipasang skrip E2E. Pre-bundle saat start
+      // menghapus reload-nya; tidak berpengaruh ke build produksi.
+      'workbox-core',
+      'workbox-precaching',
+      'workbox-routing',
+    ],
+    // [docs/43 §43.11.6] Paket ini memuat `sqlite3-opfs-async-proxy.js` lewat
+    // URL relatif terhadap modulnya. Dep optimizer menyalin ke `.vite/deps`
+    // tanpa file proxy itu, sehingga VFS OPFS gagal dipasang.
+    exclude: ['@aztec-labs/sqlite3mc-wasm'],
   },
   define: {
     // Only inject Buffer polyfill if NOT in test mode to avoid Vitest serialization crash
@@ -136,6 +200,7 @@ export default defineConfig(({ mode }) => {
   },
   server: {
     allowedHosts: true as const,
+    headers: sqliteOpfsHeaders,
     fs: {
       allow: ['..']
     },
@@ -168,6 +233,7 @@ export default defineConfig(({ mode }) => {
   // FIX: Konfigurasi untuk npm run build && npm run preview (Port 4173)
   preview: {
     allowedHosts: true as const,
+    headers: sqliteOpfsHeaders,
     port: 4173,
     // Tambahkan Proxy di sini agar preview bisa bicara ke backend lokal
     proxy: {

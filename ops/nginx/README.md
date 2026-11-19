@@ -14,6 +14,7 @@ hilang pada sinkronisasi berikutnya dan tidak pernah terlihat di review.
 | CSP dua sisi | Marketing lebih longgar; aplikasi **tanpa** `unsafe-eval` (Zod jitless, WASM lewat `wasm-unsafe-eval`). Jangan tambahkan `unsafe-eval` kembali. |
 | `location = /api/ohttp/relay` | [docs/37 §37.4 P7] Meneruskan ke relay OHTTP terpisah. Di repo tertulis `ohttp-relay:4100` (Docker); profil `selfhost` di skrip sync mengubahnya menjadi `127.0.0.1:4100`. **Exact match** supaya tidak tertelan prefix `/api`. Relay sengaja tidak menerima `X-Forwarded-For`/`X-Real-IP`. |
 | `location /api` | Proxy ke API: `server:4000` di repo (Docker), `127.0.0.1:4000` setelah profil `selfhost` ditransformasi. |
+| COOP/COEP aplikasi | `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` di `location /` app untuk SQLite OPFS/`SharedArrayBuffer`. Aset lintas-origin (R2, Turnstile, Google Fonts) **harus** mengirim CORP/CORS; `/uploads` sudah `cross-origin` dari `server/src/app.ts`, bucket R2 diatur di sisi bucket. |
 
 Yang **tidak** boleh ditambahkan ke config ini: route metrics. Enam exporter
 (`9464`–`9469`) hanya loopback dan tidak punya auth; mengeksposnya lewat nginx =

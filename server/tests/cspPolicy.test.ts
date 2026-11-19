@@ -49,6 +49,17 @@ test('web/index.html: tidak ada <script> inline (prasyarat CSP ketat)', () => {
   );
 });
 
+test('nginx: dokumen app memakai COOP/COEP untuk SQLite OPFS', () => {
+  const conf = read('../../ops/nginx/nyx.conf');
+  const app = conf.slice(conf.indexOf('server_name app.nyx-app.my.id;'));
+  const rootStart = app.indexOf('location / {');
+  const rootEnd = app.indexOf('location /assets/', rootStart);
+  assert.ok(rootStart >= 0 && rootEnd > rootStart, 'location / aplikasi tidak ditemukan');
+  const root = app.slice(rootStart, rootEnd);
+  assert.match(root, /add_header Cross-Origin-Opener-Policy "same-origin" always;/);
+  assert.match(root, /add_header Cross-Origin-Embedder-Policy "require-corp" always;/);
+});
+
 test('nginx: CSP aplikasi tanpa wildcard Cloudflare di script-src', () => {
   const conf = read('../../ops/nginx/nyx.conf');
   const match = conf.match(/set \$app_csp "([^"]+)"/);

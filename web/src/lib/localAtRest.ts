@@ -133,3 +133,33 @@ export async function openLocalFlag(raw: unknown): Promise<boolean | null> {
   }
   return null;
 }
+
+/**
+ * Batas kedaluwarsa lokal: ms ter-seal (baris baru) atau ISO plaintext (baris
+ * lama). Dipakai bersama oleh pembaca Dexie dan mirror SQLite supaya kedua
+ * jalur menyaring pesan timer dengan aturan yang sama.
+ */
+export async function readLocalExpiresAt(
+  raw: string | number | null | undefined,
+): Promise<number | null> {
+  const sealed = await openLocalNumber(raw ?? null);
+  if (sealed !== null) return sealed;
+  if (typeof raw === 'string' && raw.length > 0) {
+    const ms = Date.parse(raw);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  return null;
+}
+
+/**
+ * Hanya pesan timer (`autoDelete`) yang boleh hilang karena `expiresAt`.
+ * Deadline retensi server pada pesan biasa bukan expiry UI (lihat docs/30).
+ */
+export async function isExpiredMessageRow(
+  row: { expiresAt?: string | number | null; autoDelete?: boolean | string | null },
+  now: number,
+): Promise<boolean> {
+  if ((await openLocalFlag(row.autoDelete)) !== true) return false;
+  const expiresAt = await readLocalExpiresAt(row.expiresAt);
+  return expiresAt !== null && expiresAt <= now;
+}

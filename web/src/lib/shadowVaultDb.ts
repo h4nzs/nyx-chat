@@ -8,13 +8,24 @@ import type { StoryId } from '@nyx/shared';
 // [docs/29 §5.5/§7.3] bucket waktu + seal metadata lokal (vault).
 import {
   bucketLocalTimestamp,
+  isExpiredMessageRow,
   openLocalFlag,
   openLocalNumber,
   openLocalText,
+  readLocalExpiresAt,
   sealLocalFlag,
   sealLocalNumber,
   sealLocalText,
 } from './localAtRest';
+import {
+  mirrorDeleteConversation,
+  mirrorDeleteMessage,
+  mirrorDeleteMessages,
+  mirrorMessageRows,
+  readAllSqliteMessages,
+  readSqliteMessage,
+  readSqliteMessages,
+} from './storage/sqliteMessages';
 import { AT_REST_PREFIX } from './keychainDb';
 // [docs/30 WS-F] skema urutan terenkripsi untuk kolom pengurutan pesan.
 import {
@@ -31,50 +42,6 @@ import {
 // Kunci vault (deterministik dari identity private key) di-cache per sesi —
 // sebelumnya di-derive ulang (crypto_generichash) di SETIAP encrypt/decrypt pesan.
 let vaultKeyCache: { key: Uint8Array; privateKeyRef: Uint8Array } | null = null;
-
-/**
- * [docs/30 WS-F langkah 3] Baca `expiresAt` dari baris vault: ms ter-seal
- * (baris baru) atau ISO plaintext (baris lama). `openLocalNumber` sendirian
- * tidak cukup — ISO legacy akan jadi `NaN` → `null`, dan baris kedaluwarsa
- * warisan itu akan lolos saringan.
- */
-const readExpiresAt = async (raw: string | number | null | undefined): Promise<number | null> => {
-  const sealed = await openLocalNumber(raw ?? null);
-  if (sealed !== null) return sealed;
-  if (typeof raw === 'string' && raw.length > 0) {
-    const ms = Date.parse(raw);
-    return Number.isFinite(ms) ? ms : null;
-  }
-  return null;
-};
-
-/**
- * [BUGFIX 2026-10-30] Baris pesan kedaluwarsa untuk TUJUAN TAMPILAN hanya bila
- * ia memang pesan timer (disappearing message, `autoDelete`) dan deadline-nya
- * lewat.
- *
- * Kenapa: pada 1:1, `expiresAt` di wire **bukan** janji "bubble ini menghilang".
- * Server memakai kolom yang sama untuk retensi store-and-forward (14 hari) dan,
- * begitu pesan dibaca, mempersempitnya ke `now + READ_DELETE_GRACE_MS` (24 jam)
- * supaya salinan servernya cepat hilang — penerima sudah punya salinan lokal.
- * Dulu pembaca vault memperlakukan deadline itu sebagai expiry UI: setelah
- * pesan dibaca >24 jam, `getMessagesByConversation` menyaringnya DAN
- * `bulkDelete` menghapus barisnya, sehingga riwayat percakapan biasa lenyap
- * sehari setelah dibaca. Penanda `autoDelete` (ikut AEAD, hanya ditulis saat
- * pengirim memilih timer) adalah satu-satunya sumber kebenaran untuk "pesan ini
- * menghapus diri".
- *
- * Baris lama yang terlanjur menyimpan deadline server tidak perlu dimigrasi:
- * tanpa `autoDelete` mereka kini diabaikan oleh saringan ini.
- */
-const isExpiredMessageRow = async (
-  row: { expiresAt?: string | number | null; autoDelete?: boolean | string | null },
-  now: number
-): Promise<boolean> => {
-  if ((await openLocalFlag(row.autoDelete)) !== true) return false;
-  const expiresAt = await readExpiresAt(row.expiresAt);
-  return expiresAt !== null && expiresAt <= now;
-};
 
 const getVaultKey = async () => {
   const { privateKey } = await getMyEncryptionKeyPair();
@@ -231,6 +198,7 @@ class NyxShadowVaultProxy {
           normalized.push(await ensureOrderFields(row));
         }
         await db.messages.bulkPut(normalized);
+        await mirrorMessageRows(normalized);
         console.log(`[ShadowVault] Successfully imported ${normalized.length} messages.`);
       }
     } catch (e) {
@@ -265,7 +233,10 @@ class NyxShadowVaultProxy {
         const sealed = await this.sealLegacyStructFields(row);
         if (sealed) sealedRows.push(sealed);
       }
-      if (sealedRows.length > 0) await db.messages.bulkPut(sealedRows);
+      if (sealedRows.length > 0) {
+        await db.messages.bulkPut(sealedRows);
+        await mirrorMessageRows(sealedRows);
+      }
       updated += sealedRows.length;
 
       const convs = await db.conversations.toArray();
@@ -443,7 +414,10 @@ class NyxShadowVaultProxy {
         updates.push(normalized);
       }
     }
-    if (updates.length > 0) await db.messages.bulkPut(updates);
+    if (updates.length > 0) {
+      await db.messages.bulkPut(updates);
+      await mirrorMessageRows(updates);
+    }
     return updates.length;
   }
 
@@ -578,7 +552,7 @@ class NyxShadowVaultProxy {
           // pembaca yang sama dengan saringan.
           const ms = m.expiresAt ? Date.parse(m.expiresAt) : Number.NaN;
           if (Number.isFinite(ms)) {
-            const current = await readExpiresAt(existing?.expiresAt ?? null);
+            const current = await readLocalExpiresAt(existing?.expiresAt ?? null);
             if (current !== ms) expiresAtRaw = (await sealLocalNumber(ms)) ?? ms;
           }
         } else if (!existing) {
@@ -629,6 +603,7 @@ class NyxShadowVaultProxy {
         }));
       }
       await db.messages.bulkPut(records);
+      await mirrorMessageRows(records);
     } catch (err) {
       console.error("Iron Vault Encryption Error:", err);
     }
@@ -636,6 +611,9 @@ class NyxShadowVaultProxy {
 
   async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
+      const sqliteRows = await readSqliteMessages(conversationId, limit, beforeDate);
+      if (sqliteRows !== null) return this.parseRecordsToMessages(sqliteRows);
+
       const now = Date.now();
       const parsedBefore = beforeDate ? Date.parse(beforeDate) : Number.NaN;
       // Kursor tetap **inklusif** seperti perintah lama (`between` dua sisi tertutup).
@@ -708,6 +686,7 @@ class NyxShadowVaultProxy {
 
           if (expired.length > 0) {
             await db.messages.bulkDelete(expired);
+            await mirrorDeleteMessages(expired);
           }
         } catch (e) {
             console.error("Failed to clean expired messages:", e);
@@ -755,7 +734,7 @@ class NyxShadowVaultProxy {
         const autoDelete = (await openLocalFlag(r.autoDelete)) === true;
         const senderIdText = (await openLocalText(r.senderId)) ?? r.senderId;
         const repliedToIdText = r.repliedToId ? await openLocalText(r.repliedToId) : null;
-        const expiresAtMs = await readExpiresAt(r.expiresAt);
+        const expiresAtMs = await readLocalExpiresAt(r.expiresAt);
 
         if (r.content && !isDeletedLocal) plainText = await decryptVaultText(r.content);
         if (r.repliedTo) {
@@ -899,7 +878,8 @@ class NyxShadowVaultProxy {
    */
   async getMessagesForExport(): Promise<Message[]> {
     try {
-      const rows = await db.messages.toArray();
+      const sqliteRows = await readAllSqliteMessages();
+      const rows = sqliteRows ?? await db.messages.toArray();
       const now = Date.now();
       const messages: Message[] = [];
       for (const row of rows) {
@@ -927,6 +907,11 @@ class NyxShadowVaultProxy {
 
   async getMessage(id: string): Promise<Message | null> {
     try {
+      const sqlite = await readSqliteMessage(id);
+      if (sqlite.available) {
+        return sqlite.row ? await this.decodeMessageRecord(sqlite.row) : null;
+      }
+
       const r = await db.messages.get(id);
       if (!r) return null;
       
@@ -940,6 +925,7 @@ class NyxShadowVaultProxy {
   async deleteMessage(id: string) {
     try {
       await db.messages.delete(id);
+      await mirrorDeleteMessage(id);
     } catch (e) {
       console.error("Failed to delete message from vault", e);
     }
@@ -978,6 +964,7 @@ class NyxShadowVaultProxy {
   async deleteConversationMessages(conversationId: string) {
     try {
       await db.messages.where('conversationId').equals(conversationId).delete();
+      await mirrorDeleteConversation(conversationId);
     } catch (e) {
       console.error("Failed to delete conversation messages from vault", e);
     }

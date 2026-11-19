@@ -3,9 +3,25 @@ import { defineConfig, devices } from '@playwright/test';
 // [E2E DB terpisah] Bila `NYX_E2E_DATABASE_URL` diset, server E2E memakai DB
 // itu — bukan DATABASE_URL aplikasi di server/.env. Di selfhost keduanya bisa
 // menunjuk DB yang sama, dan reset global akan menghapus data aplikasi.
-const e2eDatabaseEnv = process.env.NYX_E2E_DATABASE_URL
-  ? { env: { DATABASE_URL: process.env.NYX_E2E_DATABASE_URL } }
+const e2eServerEnv: Record<string, string> = {
+  // Stack E2E default tidak menjalankan sidecar XOR-PIR. Tanpa ini `.env`
+  // selfhost (`PIR_ENABLED=1`) membuat server gagal boot karena PIR_SERVERS
+  // kosong, padahal client sudah dipaksa mati di blok web di bawah.
+  PIR_ENABLED: '0',
+  ...(process.env.NYX_E2E_DATABASE_URL
+    ? { DATABASE_URL: process.env.NYX_E2E_DATABASE_URL }
+    : {}),
+};
+
+// [docs/43 §43.11.3] Smoke aplikasi di bawah header OPFS. Opt-in supaya suite
+// default tetap berjalan tanpa COOP/COEP; step CI menyalakannya khusus untuk
+// `opfsApp.spec.ts`.
+const opfsAppE2E = process.env.NYX_E2E_OPFS_APP === '1';
+const opfsAppEnv: Record<string, string> = opfsAppE2E
+  ? { NYX_SQLITE_OPFS: '1', VITE_SQLITE_MESSAGES: '1' }
   : {};
+const ignoredSpecs = [/a11y\.spec\.ts/, /pir\.spec\.ts/, /storage\.spec\.ts/];
+if (!opfsAppE2E) ignoredSpecs.push(/opfsApp\.spec\.ts/);
 
 export default defineConfig({
   testDir: './e2e',
@@ -16,7 +32,10 @@ export default defineConfig({
   // `pir.spec.ts` butuh dua sidecar XOR-PIR + OHTTP (lihat
   // `playwright.pir.config.ts` / `test:e2e:pir`). Di stack E2E default PIR mati,
   // jadi spec itu dijalankan job drills `pir-e2e`, bukan di sini.
-  testIgnore: [/a11y\.spec\.ts/, /pir\.spec\.ts/],
+  // `storage.spec.ts` punya stack sendiri (`playwright.storage.config.ts`:
+  // COOP/COEP + VITE_SQLITE_MESSAGES=1). Jangan memasukkannya ke suite default;
+  // tanpa header itu spec hanya akan menguji fallback, bukan SQLite OPFS.
+  testIgnore: ignoredSpecs,
   fullyParallel: true,
   // workers: 1 (serial) — suite berbagi 1 server dev + Postgres/Redis lokal;
   // spec profile/settings flaky bila >1 browser berjalan bersamaan (timing event
@@ -70,7 +89,7 @@ export default defineConfig({
       url: 'http://localhost:4000/health',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
-      ...e2eDatabaseEnv,
+      env: e2eServerEnv,
     },
     {
       command: 'pnpm --filter nyx-web dev',
@@ -98,7 +117,12 @@ export default defineConfig({
       // pencarian user gagal `POST /api/ohttp/relay` (502) dan UI menampilkan
       // "No users found" — gejalanya sama dengan bug pencarian, padahal jalur
       // UI-nya benar. Stack OHTTP sungguhan diuji job `ohttp` di CI.
-      env: { VITE_API_URL: '/api', VITE_PIR_ENABLED: '0', VITE_OHTTP_ENABLED: '0' },
+      env: {
+        VITE_API_URL: '/api',
+        VITE_PIR_ENABLED: '0',
+        VITE_OHTTP_ENABLED: '0',
+        ...opfsAppEnv,
+      },
     }
   ],
 });
