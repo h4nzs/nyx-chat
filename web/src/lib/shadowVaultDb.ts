@@ -1,4 +1,11 @@
-import { db, DecryptedMessageRecord, PqDrSessionRecord } from './db';
+import { db, DecryptedMessageRecord, PqDrSessionRecord, type ConversationRecord, type ProfileCacheRecord } from './db';
+import {
+  deleteAppRow,
+  getAppRow,
+  listAppRows,
+  putAppRow,
+  putAppRows,
+} from './storage/appStorage';
 import { Dexie } from 'dexie';
 import type { Message, Conversation } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
@@ -93,10 +100,6 @@ export const decryptVaultText = async (encryptedBase64: string): Promise<string 
 class NyxShadowVaultProxy {
   get messages() {
     return db.messages;
-  }
-
-  get storyKeys() {
-    return db.storyKeys;
   }
 
   async savePqDrSession(record: Omit<PqDrSessionRecord, 'id'> & { id?: string }): Promise<void> {
@@ -246,7 +249,7 @@ class NyxShadowVaultProxy {
       }
       updated += sealedRows.length;
 
-      const convs = await db.conversations.toArray();
+      const convs = await listAppRows<ConversationRecord>('conversations');
       const sealedConvs: typeof convs = [];
       for (const conv of convs) {
         if (typeof conv.isGroup !== 'boolean') continue;
@@ -254,7 +257,7 @@ class NyxShadowVaultProxy {
         if (!sealed) continue; // vault terkunci
         sealedConvs.push({ ...conv, isGroup: sealed });
       }
-      if (sealedConvs.length > 0) await db.conversations.bulkPut(sealedConvs);
+      if (sealedConvs.length > 0) await putAppRows('conversations', sealedConvs);
       updated += sealedConvs.length;
 
       // [docs/30 WS-F §30.10] Kolom waktu yang masih plaintext di tabel lain:
@@ -273,7 +276,7 @@ class NyxShadowVaultProxy {
       if (sealedContacts.length > 0) await db.contacts.bulkPut(sealedContacts);
       updated += sealedContacts.length;
 
-      const profiles = await db.profileCache.toArray();
+      const profiles = await listAppRows<ProfileCacheRecord>('profileCache');
       const sealedProfiles = [];
       for (const profile of profiles) {
         if (typeof profile.updatedAt !== 'number') continue;
@@ -281,7 +284,7 @@ class NyxShadowVaultProxy {
         if (!sealed) continue; // vault terkunci
         sealedProfiles.push({ ...profile, updatedAt: sealed });
       }
-      if (sealedProfiles.length > 0) await db.profileCache.bulkPut(sealedProfiles);
+      if (sealedProfiles.length > 0) await putAppRows('profileCache', sealedProfiles);
       updated += sealedProfiles.length;
 
       // [docs/30 WS-F] `pqDrSessionsV2.lastActivity` — waktu aktivitas per sesi
@@ -947,7 +950,7 @@ class NyxShadowVaultProxy {
       // Hapus record percakapan itu sendiri — sebelumnya hanya pesan + state
       // kripto yang dihapus, sehingga percakapan yang sudah "dihapus" muncul
       // kembali setelah reload karena baris di tabel `conversations` masih ada.
-      await db.conversations.delete(id);
+      await deleteAppRow('conversations', id);
     } catch (e) {
       console.error("Failed to delete conversation data from vault", e);
     }
@@ -961,7 +964,7 @@ class NyxShadowVaultProxy {
    */
   async forgetConversation(id: string) {
     try {
-      await db.conversations.delete(id);
+      await deleteAppRow('conversations', id);
     } catch (e) {
       console.error("Failed to forget conversation record", e);
     }
@@ -985,7 +988,7 @@ class NyxShadowVaultProxy {
       if (conv.decryptedMetadata) {
         encryptedDecryptedMetadata = await encryptVaultText(JSON.stringify(conv.decryptedMetadata));
       }
-      await db.conversations.put({
+      await putAppRow('conversations', conv.id, {
         id: conv.id,
         // [docs/30 WS-F langkah 3] `isGroup` di-seal (tidak ada query yang
         // memakainya sebagai indeks — lihat Dexie v10).
@@ -1004,7 +1007,7 @@ class NyxShadowVaultProxy {
 
   async getAllConversations(): Promise<Conversation[]> {
     try {
-      const records = await db.conversations.toArray();
+      const records = await listAppRows<ConversationRecord>('conversations');
       const conversations = await Promise.all(records.map(async r => {
         const decryptedParticipantsStr = await decryptVaultText(r.participants);
         const participants = decryptedParticipantsStr ? JSON.parse(decryptedParticipantsStr) : [];
@@ -1042,12 +1045,12 @@ export const shadowVault = new NyxShadowVaultProxy();
 
 export async function saveStoryKey(storyId: string, base64Key: string): Promise<void> {
   const { encryptValueAtRest } = await import('./keychainDb');
-  await db.storyKeys.put({ storyId: storyId as StoryId, key: await encryptValueAtRest(base64Key) });
+  await putAppRow('storyKeys', storyId, { storyId: storyId as StoryId, key: await encryptValueAtRest(base64Key) });
 }
 
 export async function getStoryKey(storyId: string): Promise<string | null> {
   const { decryptValueAtRest } = await import('./keychainDb');
-  const record = await db.storyKeys.get(storyId);
+  const record = await getAppRow<{ storyId: StoryId; key: string }>('storyKeys', storyId);
   if (!record) return null;
   return decryptValueAtRest(record.key);
 }

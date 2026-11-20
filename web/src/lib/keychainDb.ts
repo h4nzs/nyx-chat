@@ -3,6 +3,8 @@ import { isPlainObject } from '@utils/typeGuards';
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { db, VaultEntry, type PqDrSessionRecord } from './db';
+import { clearAppTable, listAppRows, putAppRows } from './storage/appStorage';
+import type { StoryId } from '@nyx/shared';
 import { base64UrlToBytes, bytesToBase64Url } from './base64url';
 import { pickChainState } from './groupEra';
 import { asConversationId, asUserId } from '@nyx/shared';
@@ -1271,8 +1273,10 @@ export async function clearAllKeys(): Promise<void> {
       await closeSqliteMessages().catch(() => {});
       await Promise.all([
           db.messages.clear(),
-          db.storyKeys.clear(),
-          db.offlineQueue.clear(),
+          clearAppTable('storyKeys'),
+          clearAppTable('offlineQueue'),
+          clearAppTable('conversations'),
+          clearAppTable('profileCache'),
           db.kvStore.clear(),
           db.sessionKeys.clear(),
           db.groupKeys.clear(),
@@ -1352,12 +1356,14 @@ export async function migrateKeychainAtRestEncryption(): Promise<void> {
     }
 
     // 4. Story keys (di store storyKeys — shared dengan ShadowVault)
-    const storyRecords = await db.storyKeys.toArray();
+    const storyRecords = await listAppRows<{ storyId: StoryId; key: string }>('storyKeys');
+    const sealedStoryKeys: Array<{ storyId: StoryId; key: string }> = [];
     for (const r of storyRecords) {
       if (!r.key.startsWith(AT_REST_PREFIX)) {
-        await db.storyKeys.put({ storyId: r.storyId, key: await encryptValueAtRest(r.key) });
+        sealedStoryKeys.push({ storyId: r.storyId, key: await encryptValueAtRest(r.key) });
       }
     }
+    if (sealedStoryKeys.length > 0) await putAppRows('storyKeys', sealedStoryKeys);
   });
 }
 

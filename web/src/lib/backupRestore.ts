@@ -316,23 +316,94 @@ export async function writeTablesToDexie(
   });
 }
 
+const SQLITE_BACKUP_TABLES = new Set(['sqliteMeta', 'sqliteKv', 'sqliteMessages']);
+/** Tabel Dexie yang saat SQLite aktif sudah diwakili oleh `sqliteKv`/`sqliteMessages`. */
+const SQLITE_MIGRATED_TABLES = new Set(
+  BACKUP_TABLE_ORDER.filter((table) => table !== 'kvStore' && !SQLITE_BACKUP_TABLES.has(table))
+);
+
+export function isSqliteBackupTable(table: string): boolean {
+  return SQLITE_BACKUP_TABLES.has(table);
+}
+
+/** Hanya `kvStore` yang masih Dexie saat dump SQLite disertakan. */
+export function needsDexieRead(table: string, sqliteDump: boolean): boolean {
+  if (SQLITE_BACKUP_TABLES.has(table)) return false;
+  return !sqliteDump || !SQLITE_MIGRATED_TABLES.has(table);
+}
+
 /**
- * Store produksi di atas `./db`. Diimpor **dinamis** supaya modul ini tetap
- * aman di lingkungan test tanpa IndexedDB.
+ * Store produksi di atas `./db` + database SQLite. Diimpor **dinamis** supaya
+ * modul ini tetap aman di lingkungan test tanpa IndexedDB/Worker.
+ *
+ * [docs/43 §43.11.6 B3] Saat SQLite aktif, seluruh tabel yang sudah dipindah
+ * dibaca dari dump logisnya (`sqliteKv`, `sqliteMessages`) dan **bukan** dari
+ * Dexie yang mungkin basi. Restore menulis SQLite lebih dulu; bila arsip berisi
+ * SQLite tetapi runtime tidak bisa membukanya, restore gagal sebelum Dexie
+ * disentuh — tidak ada pemisahan data diam-diam.
  */
 export async function liveBackupStore(): Promise<BackupStore> {
   const { db } = await import('./db');
+  const sqlite = await import('./storage/sqliteMessages');
   const database = db as unknown as BackupDexieLike;
+
   return {
-    readTables: (tables, onProgress) => readTablesFromDexie(database, tables, onProgress),
+    readTables: async (tables = BACKUP_TABLE_ORDER, onProgress) => {
+      const dump = sqlite.isSqliteMessagesEnabled() ? await sqlite.readSqliteBackup() : null;
+      const out: Record<string, unknown[]> = {};
+      for (let i = 0; i < tables.length; i++) {
+        const table = tables[i]!;
+        if (table === 'sqliteMeta') {
+          out[table] = dump ? [{ key: 'dbKey', value: dump.key }] : [];
+        } else if (table === 'sqliteKv') {
+          out[table] = dump ? dump.kv : [];
+        } else if (table === 'sqliteMessages') {
+          out[table] = dump ? dump.messages : [];
+        } else if (needsDexieRead(table, !!dump)) {
+          out[table] = await database.table(table).toArray();
+        } else {
+          out[table] = [];
+        }
+        onProgress?.(i + 1, tables.length);
+      }
+      return out;
+    },
+
     writeTables: async (recordsByTable, onProgress) => {
-      await writeTablesToDexie(database, recordsByTable, onProgress);
+      const meta = (recordsByTable.sqliteMeta ?? []).find(
+        (row): row is { key: string; value: Uint8Array } =>
+          !!row && typeof row === 'object' && (row as { key?: unknown }).key === 'dbKey'
+      );
+      const hasSqliteRows = (recordsByTable.sqliteKv?.length ?? 0) > 0
+        || (recordsByTable.sqliteMessages?.length ?? 0) > 0;
+
+      if (hasSqliteRows && !meta) {
+        throw new BackupFormatError('Backup berisi data SQLite tanpa kunci database');
+      }
+      if (meta) {
+        const key = meta.value;
+        if (!(key instanceof Uint8Array) || key.length !== 32) {
+          throw new BackupFormatError('Kunci database SQLite di backup tidak sah');
+        }
+        const kvRows = (recordsByTable.sqliteKv ?? []) as Array<{ key: string; value: unknown }>;
+        const messageRows = (recordsByTable.sqliteMessages ?? []) as Array<{ id: string; conversationId: string }>;
+        await sqlite.restoreSqliteBackup(key, kvRows, messageRows);
+      }
+
+      const dexieRecords: Record<string, unknown[]> = {};
+      for (const [table, rows] of Object.entries(recordsByTable)) {
+        if (isSqliteBackupTable(table)) continue;
+        if (meta && SQLITE_MIGRATED_TABLES.has(table)) continue;
+        dexieRecords[table] = rows;
+      }
+
+      await writeTablesToDexie(database, dexieRecords, onProgress);
       // [docs/30 WS-F] Arsip dari klien pra-v9 membawa baris pesan **tanpa**
       // `orderBucketMs`; `bulkPut` mentah membuatnya tak muncul di indeks
       // `[conversationId+orderBucketMs]` (tersimpan, tapi tak pernah tampil di
       // query berpaginasi). Rapikan sekali setelah tulis — idempoten, jadi
       // arsip dari klien baru hanya lewat tanpa perubahan.
-      if ((recordsByTable.messages?.length ?? 0) > 0) {
+      if ((dexieRecords.messages?.length ?? 0) > 0) {
         const { shadowVault } = await import('./shadowVaultDb');
         const repaired = await shadowVault.normalizeOrderIndex();
         if (repaired > 0) console.log(`[Backup] order index repaired for ${repaired} messages`);

@@ -57,6 +57,113 @@ export async function openSqliteKvStore(): Promise<KvStore | null> {
   return next && kv ? kv : null;
 }
 
+/** [docs/43 §43.11.6 B3] Isi SQLite yang ikut `.nyxbak`. */
+export interface SqliteBackupDump {
+  /** Kunci DB saat dump; disimpan di frame `sqliteMeta` yang terenkripsi arsip. */
+  key: Uint8Array;
+  kv: Array<{ key: string; value: unknown }>;
+  messages: MessageRow[];
+}
+
+/**
+ * Baca seluruh database SQLite untuk backup. `null` = flag mati / SQLite tidak
+ * tersedia, sehingga pemanggil memakai Dexie. Error setelah store terbuka
+ * dilempar — backup yang diam-diam kehilangan tabel bukan pilihan.
+ */
+export async function readSqliteBackup(): Promise<SqliteBackupDump | null> {
+  if (!ENABLED) return null;
+  const active = await openStore();
+  if (!active || !kv) return null;
+
+  const key = await getSqliteMessagesKey();
+  const kvRows: Array<{ key: string; value: unknown }> = [];
+  for (const name of await kv.keys()) {
+    kvRows.push({ key: name, value: await kv.get(name) });
+  }
+  return { key, kv: kvRows, messages: await active.listAll() };
+}
+
+async function deleteSqliteOpfsDatabase(): Promise<void> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.getDirectory) {
+    throw new Error('OPFS tidak tersedia untuk restore SQLite');
+  }
+  const root = await navigator.storage.getDirectory();
+  const name = DB_NAME.replace(/^\//, '');
+  for (const entry of [name, `${name}-journal`, `${name}-wal`, `${name}-shm`]) {
+    try {
+      await root.removeEntry(entry);
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'NotFoundError') throw error;
+    }
+  }
+}
+
+/**
+ * Tulis dump backup ke database SQLite **baru** memakai kunci dari arsip.
+ * Database lama dihapus setelah seluruh baris divalidasi; kegagalan sebelum
+ * titik itu tidak menyentuh apa pun.
+ *
+ * Restore berjalan sebelum vault terbuka, jadi kunci tidak bisa diturunkan dari
+ * masterSeed. Kunci dari `sqliteMeta` hanya bisa dibaca setelah arsip lolos AEAD
+ * phrase — tidak ada jalur plaintext tambahan.
+ */
+export async function restoreSqliteBackup(
+  key: Uint8Array,
+  kvRows: Array<{ key: string; value: unknown }>,
+  messageRows: MessageRow[],
+): Promise<void> {
+  if (!ENABLED) {
+    throw new Error('Backup berisi SQLite, tetapi build ini tidak mengaktifkan VITE_SQLITE_MESSAGES');
+  }
+  if (typeof Worker === 'undefined') {
+    throw new Error('Worker SQLite tidak tersedia; restore SQLite tidak bisa dijalankan');
+  }
+  if (!(key instanceof Uint8Array) || key.length !== 32) {
+    throw new Error('Kunci database SQLite di backup tidak sah');
+  }
+  for (const item of kvRows) {
+    if (!item || typeof item.key !== 'string') {
+      throw new Error('Baris sqliteKv di backup tidak sah');
+    }
+  }
+  for (const row of messageRows) {
+    if (!row || typeof row.id !== 'string' || typeof row.conversationId !== 'string') {
+      throw new Error('Baris sqliteMessages di backup tidak sah');
+    }
+  }
+
+  await closeSqliteMessages();
+  await deleteSqliteOpfsDatabase();
+
+  let active: SqliteWorkerClient | null = null;
+  try {
+    active = await SqliteWorkerClient.open({ key: key.slice(), dbName: DB_NAME });
+    await initializeStorageSchema(active);
+    const nextKv = createSqliteKvStore(active);
+    const nextStore = createSqliteMessageStore(active);
+    await nextKv.clear();
+    for (const item of kvRows) await nextKv.put(item);
+    await nextStore.clear();
+    await nextStore.bulkPut(messageRows);
+    // Marker hidrasi: jangan salin Dexie lama di atas hasil restore.
+    await nextKv.put({ key: HYDRATED_KEY, value: true });
+    client = active;
+    kv = nextKv;
+    store = nextStore;
+    degraded = false;
+  } catch (error) {
+    try {
+      await active?.close();
+    } catch {
+      // Error asli tetap dilaporkan.
+    }
+    client = null;
+    store = null;
+    kv = null;
+    throw error;
+  }
+}
+
 function warn(error: unknown): void {
   if (warned) return;
   warned = true;

@@ -625,8 +625,28 @@ flag aktif. `wipeKeychainKeys` mengosongkan semua prefix. Bukti:
 `keychainResidualSqlite.test.ts` (6 tes; Dexie dibuat melempar) plus round-trip
 `opfsApp.spec.ts` setelah reload untuk prekey, message key, dan pin peer.
 
-Belum dikerjakan: `shadowVaultDb`/conversations/story/profile/offlineQueue,
-dan B3 (hapus Dexie + `VACUUM INTO`). Default build
+**Selesai 2026-11-20:** empat tabel sisa (`conversations`, `profileCache`,
+`storyKeys`, `offlineQueue`) memakai adapter baris logis `storage/appStorage.ts`
+di `KvStore` SQLite (prefix `conversation:`, `profile:`, `story:`, `offline:`),
+dengan fallback Dexie saat flag mati. `shadowVaultDb`, profile store, offline
+queue, wipe, dan migrasi at-rest memakai adapter itu. Bukti:
+`appStorageSqlite.test.ts` (3 tes; Dexie dibuat melempar) dan `opfsApp.spec.ts`
+menulis/membaca keempat tabel setelah reload.
+
+**Selesai 2026-11-20 — backup SQLite-aware:** `.nyxbak` sekarang membawa tiga
+tabel dump (`sqliteMeta`, `sqliteKv`, `sqliteMessages`) saat SQLite aktif, dan
+**tidak** membaca 19 tabel Dexie yang sudah dimigrasikan. Frame tetap memakai
+AEAD backup; kunci database SQLite ada di `sqliteMeta` sehingga restore bisa
+membuka DB baru sebelum vault terbuka. Restore memvalidasi kunci/baris,
+menghapus file OPFS lama, menulis SQLite lebih dulu, lalu hanya menulis
+`kvStore` ke Dexie. Bila runtime tidak punya Worker/flag SQLite, restore gagal
+sebelum menyentuh Dexie — bukan menulis ke backend yang salah. Bukti:
+`opfsApp.spec.ts` membaca dump, me-restore-nya, lalu memastikan baris aplikasi
+masih terbaca; `backupRestore.test.ts` mengunci pemilihan tabel.
+
+Belum dikerjakan: `kvStore` masih Dexie (14 pemakai) dan B3 (hapus Dexie +
+`VACUUM INTO`) belum aman karena `messages`, `kvStore`, serta beberapa pembaca
+lain masih memakai Dexie. Default build
 tetap Dexie (keychain dan contactStore hanya memakai SQLite saat
 `VITE_SQLITE_MESSAGES=1`); header OPFS di Vite masih opt-in
 `NYX_SQLITE_OPFS=1`.

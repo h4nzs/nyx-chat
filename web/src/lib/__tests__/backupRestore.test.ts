@@ -37,6 +37,8 @@ import {
   formatBackupSize,
   normalizeBackupPhrase,
   openFramedBackupWithPhrase,
+  isSqliteBackupTable,
+  needsDexieRead,
   readTablesFromDexie,
   restoreFramedBackup,
   writeTablesToDexie,
@@ -322,6 +324,15 @@ describe('backupRestore: adapter Dexie', () => {
     const { db, transactions } = fakeDexie();
     await writeTablesToDexie(db, {});
     expect(transactions).toEqual([]);
+  });
+
+  it('dump SQLite menggantikan tabel yang sudah dimigrasikan, tetapi kvStore tetap Dexie', () => {
+    expect(isSqliteBackupTable('sqliteKv')).toBe(true);
+    expect(isSqliteBackupTable('messages')).toBe(false);
+    expect(needsDexieRead('messages', true)).toBe(false);
+    expect(needsDexieRead('contacts', true)).toBe(false);
+    expect(needsDexieRead('kvStore', true)).toBe(true);
+    expect(needsDexieRead('messages', false)).toBe(true);
   });
 });
 

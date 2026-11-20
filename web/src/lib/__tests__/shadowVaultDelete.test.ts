@@ -10,6 +10,7 @@ function makeTable<T extends { id: string }>() {
     get(id: string) { return rows.get(id) },
     delete: vi.fn(async (id: string) => { rows.delete(id) }),
     bulkPut(items: T[]) { for (const i of items) rows.set(i.id, i) },
+    bulkDelete(ids: string[]) { for (const id of ids) rows.delete(id) },
     count() { return rows.size },
   }
 }
@@ -34,11 +35,22 @@ const db = {
   conversations: fakeConversations,
   ratchetSessions: fakeRatchet,
   groupSenderStates: fakeGroupSender,
+  groupSkippedKeys: {
+    where: () => ({
+      between: () => ({ delete: vi.fn(async () => {}) }),
+    }),
+  },
   groupReceiverStates: {
     where: () => ({
       startsWith: (prefix: string) => ({
         delete: vi.fn(async () => {
           const rows = [...fakeGroupReceiver._rows.entries()].filter(([id]) => id.startsWith(prefix))
+          for (const [id] of rows) fakeGroupReceiver._rows.delete(id)
+        }),
+      }),
+      between: (lower: string) => ({
+        delete: vi.fn(async () => {
+          const rows = [...fakeGroupReceiver._rows.entries()].filter(([id]) => id.startsWith(lower))
           for (const [id] of rows) fakeGroupReceiver._rows.delete(id)
         }),
       }),

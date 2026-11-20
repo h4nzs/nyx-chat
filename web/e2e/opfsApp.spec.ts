@@ -76,6 +76,73 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
       peerKey: 'pub-key',
     });
 
+    const appRowsBefore = await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const app = await import('/src/lib/storage/appStorage.ts');
+      await app.putAppRow('conversations', 'opfs-conv', { id: 'opfs-conv', isGroup: false });
+      await app.putAppRow('profileCache', 'opfs-profile', { id: 'opfs-profile', name: 'OPFS' });
+      await app.putAppRow('storyKeys', 'opfs-story', { storyId: 'opfs-story', key: 'ENC1:story' });
+      await app.putAppRow('offlineQueue', 77, { tempId: 77, timestamp: 1, data: { content: 'queued' } });
+      const conversation = await app.getAppRow('conversations', 'opfs-conv') as { id?: string } | undefined;
+      const profile = await app.getAppRow('profileCache', 'opfs-profile') as { name?: string } | undefined;
+      const story = await app.getAppRow('storyKeys', 'opfs-story') as { key?: string } | undefined;
+      const queued = await app.getAppRow('offlineQueue', 77) as { tempId?: number } | undefined;
+      return {
+        conversation: conversation?.id ?? null,
+        profile: profile?.name ?? null,
+        story: story?.key ?? null,
+        queued: queued?.tempId ?? null,
+      };
+    });
+    expect(appRowsBefore).toEqual({
+      conversation: 'opfs-conv',
+      profile: 'OPFS',
+      story: 'ENC1:story',
+      queued: 77,
+    });
+
+    // [docs/43 §43.11.6 B3] Backup harus membawa dump SQLite, bukan tabel
+    // Dexie yang sudah basi — dan restore harus menulis dump itu kembali.
+    const backupRoundtrip = await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { liveBackupStore } = await import('/src/lib/backupRestore.ts');
+      const store = await liveBackupStore();
+      const dump = await store.readTables([
+        'sqliteMeta', 'sqliteKv', 'sqliteMessages', 'conversations', 'contacts', 'kvStore',
+      ]);
+      const before = {
+        meta: dump.sqliteMeta?.length ?? 0,
+        kv: dump.sqliteKv?.length ?? 0,
+        messages: dump.sqliteMessages?.length ?? 0,
+        dexieConversations: dump.conversations?.length ?? 0,
+        dexieContacts: dump.contacts?.length ?? 0,
+      };
+      await store.writeTables({
+        sqliteMeta: dump.sqliteMeta ?? [],
+        sqliteKv: dump.sqliteKv ?? [],
+        sqliteMessages: dump.sqliteMessages ?? [],
+      });
+      const afterDump = await store.readTables(['sqliteMeta', 'sqliteKv', 'sqliteMessages']);
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const app = await import('/src/lib/storage/appStorage.ts');
+      const afterApp = {
+        conversation: (await app.getAppRow('conversations', 'opfs-conv') as { id?: string } | undefined)?.id ?? null,
+        profile: (await app.getAppRow('profileCache', 'opfs-profile') as { name?: string } | undefined)?.name ?? null,
+      };
+      return {
+        before,
+        after: { meta: afterDump.sqliteMeta?.length ?? 0, kv: afterDump.sqliteKv?.length ?? 0 },
+        afterApp,
+      };
+    });
+    expect(backupRoundtrip.before.meta).toBe(1);
+    expect(backupRoundtrip.before.kv).toBeGreaterThan(0);
+    expect(backupRoundtrip.before.dexieConversations).toBe(0);
+    expect(backupRoundtrip.before.dexieContacts).toBe(0);
+    expect(backupRoundtrip.after.meta).toBe(1);
+    expect(backupRoundtrip.after.kv).toBe(backupRoundtrip.before.kv);
+    expect(backupRoundtrip.afterApp).toEqual({ conversation: 'opfs-conv', profile: 'OPFS' });
+
     const ktBefore = await page.evaluate(async () => {
       // @ts-ignore — path absolut Vite dev server (runtime-only)
       const { saveKtState, loadKtStates } = await import('/src/lib/ktMonitoring.ts');
@@ -129,6 +196,25 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
       preKey: [1, 2, 3, 250],
       messageKey: [4, 5, 6],
       peerKey: 'pub-key',
+    });
+    await expect.poll(async () => page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const app = await import('/src/lib/storage/appStorage.ts');
+      const conversation = await app.getAppRow('conversations', 'opfs-conv') as { id?: string } | undefined;
+      const profile = await app.getAppRow('profileCache', 'opfs-profile') as { name?: string } | undefined;
+      const story = await app.getAppRow('storyKeys', 'opfs-story') as { key?: string } | undefined;
+      const queued = await app.getAppRow('offlineQueue', 77) as { tempId?: number } | undefined;
+      return {
+        conversation: conversation?.id ?? null,
+        profile: profile?.name ?? null,
+        story: story?.key ?? null,
+        queued: queued?.tempId ?? null,
+      };
+    }), { timeout: 60_000 }).toEqual({
+      conversation: 'opfs-conv',
+      profile: 'OPFS',
+      story: 'ENC1:story',
+      queued: 77,
     });
     await expect.poll(async () => page.evaluate(async () => {
       // @ts-ignore — path absolut Vite dev server (runtime-only)

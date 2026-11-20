@@ -1,7 +1,8 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import { decryptProfile } from '@lib/crypto-worker-proxy';
 import { getProfileKey } from '@lib/keychainDb';
-import { db } from '@lib/db';
+import { getAppRow, putAppRow } from '@lib/storage/appStorage';
+import type { ProfileCacheRecord } from '@lib/db';
 // [docs/30 WS-F §30.10] kolom waktu cache profil di-seal (tidak ada pembaca).
 import { sealLocalNumber } from '@lib/localAtRest';
 import type { UserId } from '@nyx/shared';
@@ -52,7 +53,7 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     if (cached) return cached;
 
     // 2. Check IndexedDB
-    const idbCache = await db.profileCache.get(userId);
+    const idbCache = await getAppRow<ProfileCacheRecord>('profileCache', userId);
     if (idbCache && idbCache.encryptedHash === encryptedProfile) {
       const parsed: DecryptedProfile = {
         name: idbCache.name,
@@ -83,7 +84,7 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     if (!encryptedProfile) return fallback;
 
     // 4. Try Persistent Cache (IndexedDB)
-    const idbCache = await db.profileCache.get(userId);
+    const idbCache = await getAppRow<ProfileCacheRecord>('profileCache', userId);
     if (idbCache && idbCache.encryptedHash === encryptedProfile) {
       const parsed: DecryptedProfile = {
         name: idbCache.name,
@@ -107,7 +108,7 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
       set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed, [idKey]: parsed } }));
 
       // 8. Save to IndexedDB
-      await db.profileCache.put({
+      await putAppRow('profileCache', userId, {
         id: userId as UserId,
         name: parsed.name,
         avatarUrl: parsed.avatarUrl || null,
@@ -140,7 +141,7 @@ export async function hydrateProfileForPlainId(userId: string | UserId, encrypte
   const direct = store.profiles[idKey];
   if (direct) return direct;
 
-  const idbCache = await db.profileCache.get(userId).catch(() => undefined);
+  const idbCache = await getAppRow<ProfileCacheRecord>('profileCache', userId).catch(() => undefined);
   if (idbCache) {
     const parsed: DecryptedProfile = {
       name: idbCache.name,

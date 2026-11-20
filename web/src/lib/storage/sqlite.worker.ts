@@ -87,7 +87,9 @@ function runStatement(
 ): void {
   const statement = connection.prepare(sql);
   try {
-    statement.bind(params);
+    // sqlite3mc melempar "no bindable parameters" untuk `bind([])`; statement
+    // tanpa placeholder (DELETE/COMMIT) tidak boleh memanggil bind sama sekali.
+    if (params.length > 0) statement.bind(params);
     statement.step();
   } finally {
     statement.finalize();

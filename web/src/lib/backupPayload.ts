@@ -73,8 +73,9 @@ export const BACKUP_CHUNK_BYTES = 256 * 1024;
 /**
  * Tabel yang ikut backup, dipetakan ke tipe frame. Urutan array = urutan
  * deterministik pembuatan frame (sebelum scramble). Sumber daftar: `db.ts`
- * (`NyxUnifiedDB` versi 8). Sejak 2026-10-29 daftar ini adalah **satu-satunya**
- * jalur backup — export JSON lama (`.nyxvault`) sudah dihapus (docs/31 §31.6).
+ * (`NyxUnifiedDB` versi 16) ditambah tiga tabel dump SQLite (docs/43 §43.11.6).
+ * Sejak 2026-10-29 daftar ini adalah **satu-satunya** jalur backup — export JSON
+ * lama (`.nyxvault`) sudah dihapus (docs/31 §31.6).
  */
 export const BACKUP_TABLE_FRAME_TYPE: Readonly<Record<string, BackupFrameType>> = {
   // Account — identitas & sesi kripto perangkat.
@@ -103,6 +104,11 @@ export const BACKUP_TABLE_FRAME_TYPE: Readonly<Record<string, BackupFrameType>> 
   // Settings — KV + cache profil.
   kvStore: BackupFrameType.Settings,
   profileCache: BackupFrameType.Settings,
+  // [docs/43 §43.11.6 B3] Dump logis database SQLite. Tabel `*Dexie` di atas
+  // tidak dibaca saat SQLite aktif; tiga tabel ini yang membawa isinya.
+  sqliteMeta: BackupFrameType.Settings,
+  sqliteKv: BackupFrameType.Settings,
+  sqliteMessages: BackupFrameType.Message,
 };
 
 /** Urutan tabel yang stabil & dapat direproduksi. */
@@ -133,6 +139,9 @@ export const BACKUP_TABLE_KEY_PATH: Readonly<Record<string, string>> = {
   conversations: 'id',
   profileCache: 'id',
   groupCachedParticipants: 'conversationId',
+  sqliteMeta: 'key',
+  sqliteKv: 'key',
+  sqliteMessages: 'id',
 };
 
 /** Tipe frame yang boleh muncul di arsip (Tombstone dicadangkan, belum diproduksi). */
