@@ -528,7 +528,8 @@ menyalinnya ke direktori worker saat `closeBundle`.
 
 **B2 (aktif hanya dengan `VITE_SQLITE_MESSAGES=1`).** `storage/dbKey.ts`
 membuat kunci 32 byte acak, menyegelnya `ENC1:` dengan masterSeed, dan
-menyimpannya lewat `KeyStore` di `kvStore` (kunci yang ada tetapi gagal dibuka
+menyimpannya lewat `KeyStore` di IndexedDB mentah `nyx-key-vault` (sejak
+2026-11-20; sebelumnya `kvStore` Dexie — lihat B3 di bawah) (kunci yang ada tetapi gagal dibuka
 **tidak** diganti — lebih baik fallback Dexie daripada database lama tampak
 kosong). `storage/sqliteMessages.ts` menghidrasi seluruh baris Dexie sekali
 (marker `sqlite:messages:hydrated:v1`), lalu mirror setiap tulis/hapus shadow
@@ -656,14 +657,21 @@ milik Dexie (dipakai `clearSpqrStates`), dan `clearAllKeys` mengosongkan kv
 **sebelum** worker SQLite ditutup. Bukti: `appKv.test.ts` (hidrasi sekali +
 fallback Dexie) dan suite terkait (111 + 51 tes) hijau.
 
-Belum dikerjakan — B3 (hapus Dexie + `VACUUM INTO`), terhalang tiga hal:
-(a) kunci database SQLite sendiri disimpan di `kvStore` Dexie
-(`storage/dbKey.ts`) — butuh bootstrap kunci tanpa Dexie, mis. turunan
-masterSeed; (b) fallback Dexie di keychain/contactStore/KT/`appStorage`/
-`shadowVaultDb` masih dipakai ~33 berkas tes jsdom (tidak ada Worker/OPFS);
-(c) `VACUUM INTO` tidak portabel di worker WASM, jadi tetap lewat dump SQL.
-Default build masih Dexie (`VITE_SQLITE_MESSAGES=1` untuk mengaktifkan SQLite);
-header OPFS di Vite masih opt-in `NYX_SQLITE_OPFS=1`.
+**B3 langkah 1 selesai 2026-11-20 — kunci DB bebas Dexie.** `storage/idbKv.ts`
+adalah `KvStore` di atas IndexedDB mentah (`nyx-key-vault`); `dbKey` memakainya,
+jadi kunci tidak lagi bergantung pada database yang hendak dihapus. Restore kini
+menulis kunci dari arsip ke vault itu (`persistSqliteMessagesKey`) — sebelumnya
+kunci hasil restore tidak pernah disimpan sehingga reload berikutnya membuka DB
+baru dengan kunci perangkat yang salah. Wipe/panic menghapus vault lewat
+`clearSqliteMessagesKey`. Bukti: `idbKv.test.ts` (3 tes, `fake-indexeddb`) +
+suite storage/backup (44 tes).
+
+Sisa B3: (a) fallback Dexie di keychain/contactStore/KT/`appStorage`/
+`shadowVaultDb` dan ~33 berkas tes jsdom yang memakai `db` langsung (jsdom tidak
+punya Worker/OPFS) — perlu seam injeksi store untuk tes sebelum `db.ts` bisa
+dihapus; (b) `VACUUM INTO` tidak portabel di worker WASM, jadi backup tetap lewat
+dump SQL; (c) default build masih Dexie (`VITE_SQLITE_MESSAGES=1` untuk
+mengaktifkan SQLite; header OPFS di Vite dev masih `NYX_SQLITE_OPFS=1`).
 
 ---
 

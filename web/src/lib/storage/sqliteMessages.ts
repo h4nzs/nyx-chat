@@ -11,7 +11,7 @@ import { isExpiredMessageRow } from '../localAtRest';
 import { orderBucketOf } from '../localOrderBucket';
 import { pickOlderPage, resolveOrderInstants } from '../localOrderKey';
 import type { MessageRow, MessageStore, KvStore, KeyStore } from './types';
-import { getSqliteMessagesKey } from './dbKey';
+import { getSqliteMessagesKey, persistSqliteMessagesKey } from './dbKey';
 import { createKeyStore } from './keyStore';
 import { initializeStorageSchema } from './schema';
 import { SqliteWorkerClient } from './sqliteClient';
@@ -147,6 +147,9 @@ export async function restoreSqliteBackup(
     await nextStore.bulkPut(messageRows);
     // Marker hidrasi: jangan salin Dexie lama di atas hasil restore.
     await nextKv.put({ key: HYDRATED_KEY, value: true });
+    // Database baru memakai kunci dari arsip; tanpa ini reload berikutnya
+    // membuka DB dengan kunci perangkat yang salah (SQLITE_NOTADB).
+    await persistSqliteMessagesKey(key);
     client = active;
     kv = nextKv;
     store = nextStore;

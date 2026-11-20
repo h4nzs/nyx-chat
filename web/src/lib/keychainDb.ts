@@ -1276,6 +1276,10 @@ export async function clearAllKeys(): Promise<void> {
         .then((m) => m.getKvStore())
         .catch(() => null);
       if (kv) await kv.clear().catch(() => {});
+      // Kunci DB tidak berada di kvStore (B3): kosongkan vault IDB-nya juga.
+      await import('./storage/dbKey')
+        .then((m) => m.clearSqliteMessagesKey())
+        .catch(() => {});
       await closeSqliteMessages().catch(() => {});
       await Promise.all([
           db.messages.clear(),
