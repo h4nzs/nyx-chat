@@ -42,10 +42,19 @@ export function isSqliteMessagesEnabled(): boolean {
  * terdegradasi — pemanggil harus jatuh ke Dexie.
  */
 export async function openSqliteKeyStore(): Promise<KeyStore | null> {
+  const next = await openSqliteKvStore();
+  return next ? createKeyStore(next) : null;
+}
+
+/**
+ * [docs/43 §43.11.6 B2] Permukaan nilai untuk tabel non-pesan (contacts, KT)
+ * pada database SQLite yang sama. `null` = flag mati, OPFS/kunci tidak
+ * tersedia, atau store terdegradasi → pemanggil memakai Dexie.
+ */
+export async function openSqliteKvStore(): Promise<KvStore | null> {
   if (!ENABLED || degraded) return null;
   const next = await openStore();
-  if (!next || !kv) return null;
-  return createKeyStore(kv);
+  return next && kv ? kv : null;
 }
 
 function warn(error: unknown): void {

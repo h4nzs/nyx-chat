@@ -594,8 +594,23 @@ prefix sebelum klien ditutup. Bukti: `__tests__/keychainSqlite.test.ts` (5 tes;
 Dexie di-mock agar MELEMPAR kalau jalur KeyStore menyentuhnya) plus suite web
 penuh dan E2E storage/opfsApp.
 
-Belum dikerjakan: `contactStore`/KT. Default build tetap Dexie (keychain hanya
-memakai SQLite saat `VITE_SQLITE_MESSAGES=1`); header OPFS di Vite masih opt-in
+**Selesai 2026-11-20:** `contactStore` memakai `openSqliteKvStore()` (database
+SQLite yang sama, kunci `contacts:<userId>`) saat `VITE_SQLITE_MESSAGES=1`.
+Hidrasi Dexie hanya sekali lewat marker `meta:contacts:hydrated:v1`; bila SQLite
+sudah berisi kontak, salinan Dexie yang lebih lama tidak menimpa. CRUD, restore
+bundle, dan wipe memakai backend yang sama; kegagalan SQLite jatuh ke Dexie.
+`contactStoreSqlite.test.ts` (1 tes) mengunci jalur ini dengan Dexie yang
+sengaja melempar. `opfsApp.spec.ts` juga menulis kontak lewat contactStore,
+memastikan baris `contacts:` ada di SQLite, me-reload halaman, lalu membaca
+kontak itu lagi. Bukti tambahan: `contactStore.test.ts` 33 tes lulus bersama
+typecheck; suite web penuh tidak diselesaikan dalam batas waktu 300 detik.
+
+Belum dikerjakan: state KT (`ktMonitoring`/`ktGossip`/`ktConfig`), tabel
+keychain residual (preKeys, identityKeys, pendingHeaders, messageKeys,
+groupSender/ReceiverStates, pqDrSessionsV2), `shadowVaultDb`/conversations/
+story/profile/offlineQueue, dan B3 (hapus Dexie + `VACUUM INTO`). Default build
+tetap Dexie (keychain dan contactStore hanya memakai SQLite saat
+`VITE_SQLITE_MESSAGES=1`); header OPFS di Vite masih opt-in
 `NYX_SQLITE_OPFS=1`.
 
 ---

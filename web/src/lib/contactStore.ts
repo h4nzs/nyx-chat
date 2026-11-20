@@ -9,10 +9,12 @@
 //   3. Tiga rumusan derive Participant (id | userId | user.id) tersebar di UI.
 //
 // Solusi (mengadopsi pola Signal — Storage Service + Contact model):
-//   • Lokal  : tabel Dexie `contacts` (db.ts) — kolom `data` berisi JSON
-//              ContactRecord TERENKRIPSI via encryptVaultText (kunci
-//              deterministik dari identity private key → bisa didekripsi
-//              kembali di device mana pun yang me-restore identity key).
+//   • Lokal  : tabel `contacts` — saat `VITE_SQLITE_MESSAGES=1` memakai
+//              KvStore SQLite (prefix `contacts:`), selain itu Dexie (db.ts).
+//              Kolom `data` berisi JSON ContactRecord TERENKRIPSI via
+//              encryptVaultText (kunci deterministik dari identity private key
+//              → bisa didekripsi kembali di device mana pun yang me-restore
+//              identity key).
 //   • Server : SATU blob opaque per user (users.encryptedContactBundle).
 //              Server tidak bisa membaca isinya (zero-knowledge tetap utuh);
 //              kolom plain hanya version + updatedAt untuk fetch kondisional.
@@ -31,14 +33,96 @@ import {
     serializeContactBundle,
     type ContactRecord,
     type Conversation,
+    type UserId,
 } from '@nyx/shared';
 import { encryptVaultText, decryptVaultText } from './shadowVaultDb';
 // [docs/30 WS-F §30.10] `ContactRow.updatedAt` di-seal (pola `seq`): nilai
 // presisi hanya bocor lewat indeks — kolom ini tidak diindeks, jadi cukup
 // envelope `ENC1:` + pembacaan toleran baris lama (`openLocalNumber`).
 import { openLocalNumber, sealLocalNumber } from './localAtRest';
+import type { KvStore } from './storage/types';
 
 const BUNDLE_VERSION_KEY = 'contact_bundle_version';
+const CONTACT_KEY_PREFIX = 'contacts:';
+const CONTACT_HYDRATED_KEY = 'meta:contacts:hydrated:v1';
+
+/**
+ * [docs/43 §43.11.6 B2] Kontak adalah baris JSON (`data` + `updatedAt`), bukan
+ * material kunci, jadi cukup `KvStore`. Prefix mencegah tabrakan dengan kunci
+ * keychain/pesan di database yang sama.
+ *
+ * Hydrasi dari Dexie hanya sekali. Bila SQLite sudah berisi kontak (mis. proses
+ * sebelumnya sempat menulis) marker tetap dipasang tanpa menimpa baris itu —
+ * salinan Dexie yang lebih lama tidak boleh mengalahkan data SQLite.
+ */
+interface ContactBackend {
+    get(userId: UserId): Promise<ContactRow | undefined>;
+    put(row: ContactRow): Promise<void>;
+    delete(userId: UserId): Promise<void>;
+    all(): Promise<ContactRow[]>;
+    clear(): Promise<void>;
+}
+
+const dexieContacts: ContactBackend = {
+    get: (userId) => db.contacts.get(userId),
+    put: async (row) => { await db.contacts.put(row); },
+    delete: async (userId) => { await db.contacts.delete(userId); },
+    all: () => db.contacts.toArray(),
+    clear: async () => { await db.contacts.clear(); },
+};
+
+function sqliteContacts(kv: KvStore): ContactBackend {
+    const keyOf = (userId: UserId) => `${CONTACT_KEY_PREFIX}${userId}`;
+    const contactKeys = async () =>
+        (await kv.keys()).filter((key) => key.startsWith(CONTACT_KEY_PREFIX));
+    return {
+        get: (userId) => kv.get<ContactRow>(keyOf(userId)),
+        put: async (row) => { await kv.put({ key: keyOf(row.userId), value: row }); },
+        delete: async (userId) => { await kv.delete(keyOf(userId)); },
+        all: async () => {
+            const rows: ContactRow[] = [];
+            for (const key of await contactKeys()) {
+                const row = await kv.get<ContactRow>(key);
+                if (row) rows.push(row);
+            }
+            return rows;
+        },
+        clear: async () => {
+            for (const key of await contactKeys()) await kv.delete(key);
+        },
+    };
+}
+
+let contactHydrated = false;
+
+async function sqliteContactBackend(kv: KvStore): Promise<ContactBackend> {
+    if (!contactHydrated) {
+        if (await kv.get<boolean>(CONTACT_HYDRATED_KEY) !== true) {
+            const existing = (await kv.keys()).some((key) => key.startsWith(CONTACT_KEY_PREFIX));
+            if (!existing) {
+                for (const row of await db.contacts.toArray()) {
+                    await kv.put({ key: `${CONTACT_KEY_PREFIX}${row.userId}`, value: row });
+                }
+            }
+            await kv.put({ key: CONTACT_HYDRATED_KEY, value: true });
+        }
+        contactHydrated = true;
+    }
+    return sqliteContacts(kv);
+}
+
+/** SQLite hanya dicoba saat flag aktif; kegagalan apa pun kembali ke Dexie. */
+async function getContactBackend(): Promise<ContactBackend> {
+    if (import.meta.env.VITE_SQLITE_MESSAGES !== '1') return dexieContacts;
+    try {
+        const { openSqliteKvStore } = await import('./storage/sqliteMessages');
+        const kv = await openSqliteKvStore();
+        return kv ? await sqliteContactBackend(kv) : dexieContacts;
+    } catch (e) {
+        console.warn('[ContactStore] SQLite tidak tersedia; memakai Dexie:', e);
+        return dexieContacts;
+    }
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -132,7 +216,8 @@ export async function upsertContact(input: {
     const userId = asUserId(input.userId);
     const now = nowMs();
 
-    const existing = await db.contacts.get(userId);
+    const backend = await getContactBackend();
+    const existing = await backend.get(userId);
     const prev = existing ? await decryptRow(existing) : null;
 
     const record: ContactRecord = {
@@ -152,7 +237,7 @@ export async function upsertContact(input: {
     // plaintext). Kontak yang sudah ada tetap utuh; pembaruan berikutnya saat
     // vault terbuka akan menulisnya lagi.
     try {
-        await db.contacts.put({
+        await backend.put({
             userId,
             data: await encryptRecord(record),
             updatedAt: (await sealLocalNumber(now)) ?? 0,
@@ -174,7 +259,8 @@ export async function setContactBlocked(userId: string, blocked: boolean): Promi
 
 /** Hapus satu kontak (dipakai wipe/nuke; TIDAK otomatis saat delete conv — kontak boleh survive). */
 export async function deleteContact(userId: string): Promise<void> {
-    await db.contacts.delete(asUserId(userId));
+    const backend = await getContactBackend();
+    await backend.delete(asUserId(userId));
     void scheduleContactBundlePush();
     notifyContactsChanged();
 }
@@ -194,7 +280,8 @@ export async function saveContactRecord(record: ContactRecord): Promise<void> {
     if (!isPersistableUserId(record.userId)) return;
     const now = nowMs();
     try {
-        await db.contacts.put({
+        const backend = await getContactBackend();
+        await backend.put({
             userId: asUserId(record.userId),
             data: await encryptRecord(record),
             updatedAt: (await sealLocalNumber(record.lastSeenAt || now)) ?? 0,
@@ -209,7 +296,7 @@ export async function saveContactRecord(record: ContactRecord): Promise<void> {
 
 /** Semua kontak terdekripsi (terbaru lastSeenAt dulu). */
 export async function getAllContacts(): Promise<ContactRecord[]> {
-    const rows = await db.contacts.toArray();
+    const rows = await (await getContactBackend()).all();
     const records = await Promise.all(rows.map(decryptRow));
     return records
         .filter((r): r is ContactRecord => r !== null)
@@ -223,7 +310,7 @@ export async function getActiveContacts(): Promise<ContactRecord[]> {
 }
 
 export async function getContact(userId: string): Promise<ContactRecord | null> {
-    const row = await db.contacts.get(asUserId(userId));
+    const row = await (await getContactBackend()).get(asUserId(userId));
     if (!row) return null;
     return decryptRow(row);
 }
@@ -462,12 +549,13 @@ export async function restoreContactsFromBundle(): Promise<number> {
             return 0;
         }
 
-        const known = new Set((await db.contacts.toArray()).map(r => String(r.userId)));
+        const backend = await getContactBackend();
+        const known = new Set((await backend.all()).map(r => String(r.userId)));
         const now = nowMs();
         let added = 0;
         for (const c of bundle.contacts) {
             if (known.has(c.userId)) continue; // lokal menang
-            await db.contacts.put({
+            await backend.put({
                 userId: asUserId(c.userId),
                 data: await encryptRecord(c),
                 updatedAt: (await sealLocalNumber(now)) ?? now,
@@ -488,6 +576,9 @@ export async function wipeContactBackup(): Promise<void> {
         const { authFetch } = await import('@lib/api');
         await authFetch('/api/users/me/contact-bundle', { method: 'DELETE' });
     } catch (_e) { /* best-effort */ }
+    // Hapus kedua jalur: SQLite adalah sumber baru, Dexie bisa menyimpan
+    // salinan pra-migrasi yang tidak boleh muncul lagi setelah wipe.
+    await (await getContactBackend()).clear();
     await db.contacts.clear();
     lastPushedVersion = 0;
     notifyContactsChanged();

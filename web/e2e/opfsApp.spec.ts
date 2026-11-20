@@ -43,6 +43,30 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
     });
 
     expect(storage).toEqual({ enabled: true, available: true, count: 0 });
+
+    const contactId = `opfs-peer-${Date.now()}`;
+    const contact = await page.evaluate(async (id) => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { upsertContact, getContact } = await import('/src/lib/contactStore.ts');
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { openSqliteKvStore } = await import('/src/lib/storage/sqliteMessages.ts');
+      await upsertContact({ userId: id, conversationId: 'opfs-app-smoke' });
+      const row = await getContact(id);
+      const kv = await openSqliteKvStore();
+      const stored = (await kv?.get(`contacts:${id}`)) as { data?: string } | undefined;
+      return { userId: row?.userId ?? null, stored: Boolean(stored?.data) };
+    }, contactId);
+    expect(contact).toEqual({ userId: contactId, stored: true });
+
+    // Reload membuktikan kontak bertahan di SQLite, bukan hanya di memori.
+    await page.reload();
+    await expect(page).toHaveURL(/\/chat/, { timeout: 60_000 });
+    await expect.poll(async () => page.evaluate(async (id) => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { getContact } = await import('/src/lib/contactStore.ts');
+      return (await getContact(id))?.userId ?? null;
+    }, contactId), { timeout: 60_000 }).toBe(contactId);
+
     expect(blocked, `Request/console terblokir COEP:\n${blocked.join('\n')}`).toEqual([]);
   });
 });
