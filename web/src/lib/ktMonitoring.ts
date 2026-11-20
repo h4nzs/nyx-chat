@@ -32,12 +32,10 @@
  * pemanggil (`KtMonitorOutcome.changed`) supaya modul ini bebas UI/toast.
  */
 
-import { db, type KtMonitoringRecord } from './db';
+import type { KtMonitoringRecord } from './db';
 import { decryptValueAtRest, deriveKtSearchIndexKey, encryptValueAtRest } from './keychainDb';
 import {
   clearKvPrefix,
-  hydrateKvPrefix,
-  KT_MONITORING_MARKER,
   KT_MONITORING_PREFIX,
   listKvPrefix,
   openKtSqliteKv,
@@ -156,14 +154,6 @@ interface KtMonitoringBackend {
   clear(): Promise<void>;
 }
 
-const dexieKtMonitoring: KtMonitoringBackend = {
-  get: (id) => db.ktMonitoring.get(id),
-  put: async (record) => { await db.ktMonitoring.put(record); },
-  delete: async (id) => { await db.ktMonitoring.delete(id); },
-  all: () => db.ktMonitoring.toArray(),
-  clear: async () => { await db.ktMonitoring.clear(); },
-};
-
 function sqliteKtMonitoring(kv: KvStore): KtMonitoringBackend {
   return {
     get: (id) => kv.get<KtMonitoringRecord>(`${KT_MONITORING_PREFIX}${id}`),
@@ -176,29 +166,8 @@ function sqliteKtMonitoring(kv: KvStore): KtMonitoringBackend {
   };
 }
 
-let ktMonitoringHydrated = false;
-
 async function getKtMonitoringBackend(): Promise<KtMonitoringBackend> {
-  const kv = await openKtSqliteKv();
-  if (!kv) return dexieKtMonitoring;
-  try {
-    if (!ktMonitoringHydrated) {
-      await hydrateKvPrefix({
-        kv,
-        prefix: KT_MONITORING_PREFIX,
-        marker: KT_MONITORING_MARKER,
-        loadDexie: async () => (await db.ktMonitoring.toArray()).map((row) => ({
-          key: row.searchKeyHex,
-          value: row,
-        })),
-      });
-      ktMonitoringHydrated = true;
-    }
-    return sqliteKtMonitoring(kv);
-  } catch (error) {
-    console.warn('[KT] State monitoring SQLite gagal; memakai Dexie:', error);
-    return dexieKtMonitoring;
-  }
+  return sqliteKtMonitoring(await openKtSqliteKv());
 }
 
 /** Baris mentah untuk panel privasi (nilai tetap ter-seal). */
@@ -392,9 +361,7 @@ export async function runKtMonitorOnce(deps: {
 
 /** Hapus semua state monitoring (logout/wipe). */
 export async function clearKtStates(): Promise<void> {
-  // Hapus kedua jalur; sisa baris Dexie tidak boleh muncul setelah wipe.
   await (await getKtMonitoringBackend()).clear();
-  await db.ktMonitoring.clear();
 }
 
 // ---------------------------------------------------------------------------

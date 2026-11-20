@@ -27,15 +27,9 @@
  * terbuka). Pin kuat sejati (trust anchor dari rilis aplikasi) menunggu KT Scope B.
  */
 
-import { db, type KtConfigRow } from './db';
+import type { KtConfigRow } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
-import {
-  clearKvPrefix,
-  hydrateKvPrefix,
-  KT_CONFIG_MARKER,
-  KT_CONFIG_PREFIX,
-  openKtSqliteKv,
-} from './storage/ktKv';
+import { clearKvPrefix, KT_CONFIG_PREFIX, openKtSqliteKv } from './storage/ktKv';
 import type { KvStore } from './storage/types';
 
 /** Prefix PK di tabel `ktConfig`. */
@@ -119,12 +113,6 @@ interface KtConfigBackend {
   clear(): Promise<void>;
 }
 
-const dexieKtConfig: KtConfigBackend = {
-  get: (id) => db.ktConfig.get(id),
-  put: async (row) => { await db.ktConfig.put(row); },
-  clear: async () => { await db.ktConfig.clear(); },
-};
-
 function sqliteKtConfig(kv: KvStore): KtConfigBackend {
   return {
     get: (id) => kv.get<KtConfigRow>(`${KT_CONFIG_PREFIX}${id}`),
@@ -133,29 +121,8 @@ function sqliteKtConfig(kv: KvStore): KtConfigBackend {
   };
 }
 
-let ktConfigHydrated = false;
-
 async function getKtConfigBackend(): Promise<KtConfigBackend> {
-  const kv = await openKtSqliteKv();
-  if (!kv) return dexieKtConfig;
-  try {
-    if (!ktConfigHydrated) {
-      await hydrateKvPrefix({
-        kv,
-        prefix: KT_CONFIG_PREFIX,
-        marker: KT_CONFIG_MARKER,
-        loadDexie: async () => (await db.ktConfig.toArray()).map((row) => ({
-          key: row.id,
-          value: row,
-        })),
-      });
-      ktConfigHydrated = true;
-    }
-    return sqliteKtConfig(kv);
-  } catch (error) {
-    console.warn('[KT] Pin konfigurasi SQLite gagal; memakai Dexie:', error);
-    return dexieKtConfig;
-  }
+  return sqliteKtConfig(await openKtSqliteKv());
 }
 
 /** Id akun yang sedang login; `undefined` bila belum/tidak ada sesi. */
@@ -233,7 +200,6 @@ export async function saveKtConfigPin(pin: KtConfigPin): Promise<void> {
 export async function clearKtConfigPin(): Promise<void> {
   try {
     await (await getKtConfigBackend()).clear();
-    await db.ktConfig.clear();
   } catch {
     // Baris ikut terhapus bersama IndexedDB saat wipe.
   }

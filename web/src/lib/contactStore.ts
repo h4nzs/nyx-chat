@@ -9,8 +9,8 @@
 //   3. Tiga rumusan derive Participant (id | userId | user.id) tersebar di UI.
 //
 // Solusi (mengadopsi pola Signal — Storage Service + Contact model):
-//   • Lokal  : tabel `contacts` — saat `VITE_SQLITE_MESSAGES=1` memakai
-//              KvStore SQLite (prefix `contacts:`), selain itu Dexie (db.ts).
+//   • Lokal  : `KvStore` SQLite (prefix `contacts:`). Dexie sudah dihapus di
+//              B3; tidak ada jalur cadangan per-tabel lagi.
 //              Kolom `data` berisi JSON ContactRecord TERENKRIPSI via
 //              encryptVaultText (kunci deterministik dari identity private key
 //              → bisa didekripsi kembali di device mana pun yang me-restore
@@ -24,7 +24,6 @@
 // boleh menghapus kontak lokal.
 // ============================================================================
 
-import { db } from './db';
 import type { ContactRow } from './db';
 import {
     asUserId,
@@ -63,14 +62,6 @@ interface ContactBackend {
     clear(): Promise<void>;
 }
 
-const dexieContacts: ContactBackend = {
-    get: (userId) => db.contacts.get(userId),
-    put: async (row) => { await db.contacts.put(row); },
-    delete: async (userId) => { await db.contacts.delete(userId); },
-    all: () => db.contacts.toArray(),
-    clear: async () => { await db.contacts.clear(); },
-};
-
 function sqliteContacts(kv: KvStore): ContactBackend {
     const keyOf = (userId: UserId) => `${CONTACT_KEY_PREFIX}${userId}`;
     const contactKeys = async () =>
@@ -93,35 +84,9 @@ function sqliteContacts(kv: KvStore): ContactBackend {
     };
 }
 
-let contactHydrated = false;
-
-async function sqliteContactBackend(kv: KvStore): Promise<ContactBackend> {
-    if (!contactHydrated) {
-        if (await kv.get<boolean>(CONTACT_HYDRATED_KEY) !== true) {
-            const existing = (await kv.keys()).some((key) => key.startsWith(CONTACT_KEY_PREFIX));
-            if (!existing) {
-                for (const row of await db.contacts.toArray()) {
-                    await kv.put({ key: `${CONTACT_KEY_PREFIX}${row.userId}`, value: row });
-                }
-            }
-            await kv.put({ key: CONTACT_HYDRATED_KEY, value: true });
-        }
-        contactHydrated = true;
-    }
-    return sqliteContacts(kv);
-}
-
-/** SQLite hanya dicoba saat flag aktif; kegagalan apa pun kembali ke Dexie. */
 async function getContactBackend(): Promise<ContactBackend> {
-    if (import.meta.env.VITE_SQLITE_MESSAGES !== '1') return dexieContacts;
-    try {
-        const { openSqliteKvStore } = await import('./storage/sqliteMessages');
-        const kv = await openSqliteKvStore();
-        return kv ? await sqliteContactBackend(kv) : dexieContacts;
-    } catch (e) {
-        console.warn('[ContactStore] SQLite tidak tersedia; memakai Dexie:', e);
-        return dexieContacts;
-    }
+    const { getKvStore } = await import('./storage/appKv');
+    return sqliteContacts(await getKvStore());
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -576,10 +541,7 @@ export async function wipeContactBackup(): Promise<void> {
         const { authFetch } = await import('@lib/api');
         await authFetch('/api/users/me/contact-bundle', { method: 'DELETE' });
     } catch (_e) { /* best-effort */ }
-    // Hapus kedua jalur: SQLite adalah sumber baru, Dexie bisa menyimpan
-    // salinan pra-migrasi yang tidak boleh muncul lagi setelah wipe.
     await (await getContactBackend()).clear();
-    await db.contacts.clear();
     lastPushedVersion = 0;
     notifyContactsChanged();
 }

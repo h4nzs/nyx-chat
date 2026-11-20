@@ -35,14 +35,8 @@
  * sama ukuran tapi beda root (`split-view`).
  */
 
-import { db } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
-import {
-  hydrateKvPrefix,
-  KT_GOSSIP_MARKER,
-  KT_GOSSIP_PREFIX,
-  openKtSqliteKv,
-} from './storage/ktKv';
+import { KT_GOSSIP_PREFIX, openKtSqliteKv } from './storage/ktKv';
 import type { KvStore } from './storage/types';
 
 /** Nama field di payload ter-seal. Pendek: payload ikut ke setiap pesan. */
@@ -329,58 +323,24 @@ export function createKtGossip(deps: KtGossipDeps): KtGossip {
 }
 
 // ---------------------------------------------------------------------------
-// Instance produksi (Dexie `ktGossip`, nilai ter-seal masterSeed)
+// Instance produksi (`KvStore` SQLite, nilai ter-seal masterSeed)
 // ---------------------------------------------------------------------------
 
 export const KT_GOSSIP_ROW_ID = 'peers';
 
-const dexieStorage: KtGossipStorage = {
-  async read(): Promise<string | undefined> {
-    const row = await db.ktGossip.get(KT_GOSSIP_ROW_ID);
-    if (!row?.blob) return undefined;
-    return (await decryptValueAtRest(row.blob)) ?? undefined;
-  },
-  async write(value: string): Promise<void> {
-    await db.ktGossip.put({ id: KT_GOSSIP_ROW_ID, blob: await encryptValueAtRest(value) });
-  },
-};
-
-let gossipHydrated = false;
-
-async function getGossipKv(): Promise<KvStore | null> {
-  const kv = await openKtSqliteKv();
-  if (!kv) return null;
-  try {
-    if (!gossipHydrated) {
-      await hydrateKvPrefix({
-        kv,
-        prefix: KT_GOSSIP_PREFIX,
-        marker: KT_GOSSIP_MARKER,
-        loadDexie: async () => {
-          const row = await db.ktGossip.get(KT_GOSSIP_ROW_ID);
-          return row ? [{ key: KT_GOSSIP_ROW_ID, value: row }] : [];
-        },
-      });
-      gossipHydrated = true;
-    }
-    return kv;
-  } catch (error) {
-    console.warn('[KT] Gossip SQLite gagal; memakai Dexie:', error);
-    return null;
-  }
+async function getGossipKv(): Promise<KvStore> {
+  return openKtSqliteKv();
 }
 
 const storage: KtGossipStorage = {
   async read(): Promise<string | undefined> {
     const kv = await getGossipKv();
-    if (!kv) return dexieStorage.read();
     const row = await kv.get<{ blob: string }>(`${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`);
     if (!row?.blob) return undefined;
     return (await decryptValueAtRest(row.blob)) ?? undefined;
   },
   async write(value: string): Promise<void> {
     const kv = await getGossipKv();
-    if (!kv) return dexieStorage.write(value);
     await kv.put({
       key: `${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`,
       value: { id: KT_GOSSIP_ROW_ID, blob: await encryptValueAtRest(value) },

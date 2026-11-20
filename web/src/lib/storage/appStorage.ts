@@ -1,13 +1,11 @@
 /**
- * [docs/43 §43.11.6 B2] Tabel aplikasi non-pesan di `KvStore` SQLite.
+ * [docs/43 §43.11.6 B3] Tabel aplikasi non-pesan di `KvStore` SQLite.
  *
  * Nilai disimpan sebagai JSON baris utuh di bawah prefix per tabel, sehingga
- * backup/restore dan pembaca tidak perlu tahu detail kolom. Saat flag mati
- * (atau SQLite gagal dibuka), helper kembali ke tabel Dexie dengan bentuk baris
- * yang sama.
+ * backup/restore dan pembaca tidak perlu tahu detail kolom. Dexie sudah tidak
+ * dipakai: tidak ada jalur cadangan per-tabel lagi.
  */
-import { db } from '../db';
-import { openSqliteKvStore } from './sqliteMessages';
+import { getKvStore } from './appKv';
 import type { KvStore } from './types';
 
 export type AppTable = 'conversations' | 'profileCache' | 'storyKeys' | 'offlineQueue';
@@ -19,46 +17,20 @@ const PREFIX: Record<AppTable, string> = {
   offlineQueue: 'offline:',
 };
 
-interface DexieLikeTable<T> {
-  get(id: string | number): Promise<T | undefined>;
-  put(row: T): Promise<unknown>;
-  delete(id: string | number): Promise<void>;
-  clear(): Promise<void>;
-  toArray(): Promise<T[]>;
-  bulkPut(rows: T[]): Promise<unknown>;
-}
-
-function dexieTable<T>(table: AppTable): DexieLikeTable<T> {
-  return (db as unknown as Record<string, DexieLikeTable<T>>)[table]!;
-}
-
 export async function getAppRow<T>(table: AppTable, id: string | number): Promise<T | undefined> {
-  const kv = await openSqliteKvStore();
-  if (!kv) return dexieTable<T>(table).get(id);
-  return kv.get<T>(`${PREFIX[table]}${id}`);
+  return (await getKvStore()).get<T>(`${PREFIX[table]}${id}`);
 }
 
 export async function putAppRow<T>(table: AppTable, id: string | number, row: T): Promise<void> {
-  const kv = await openSqliteKvStore();
-  if (!kv) {
-    await dexieTable<T>(table).put(row);
-    return;
-  }
-  await kv.put({ key: `${PREFIX[table]}${id}`, value: row });
+  await (await getKvStore()).put({ key: `${PREFIX[table]}${id}`, value: row });
 }
 
 export async function deleteAppRow(table: AppTable, id: string | number): Promise<void> {
-  const kv = await openSqliteKvStore();
-  if (!kv) {
-    await dexieTable(table).delete(id);
-    return;
-  }
-  await kv.delete(`${PREFIX[table]}${id}`);
+  await (await getKvStore()).delete(`${PREFIX[table]}${id}`);
 }
 
 export async function listAppRows<T>(table: AppTable): Promise<T[]> {
-  const kv = await openSqliteKvStore();
-  if (!kv) return dexieTable<T>(table).toArray();
+  const kv = await getKvStore();
   const prefix = PREFIX[table];
   const rows: T[] = [];
   for (const key of await kv.keys()) {
@@ -71,11 +43,7 @@ export async function listAppRows<T>(table: AppTable): Promise<T[]> {
 
 export async function putAppRows<T>(table: AppTable, rows: T[]): Promise<void> {
   if (rows.length === 0) return;
-  const kv = await openSqliteKvStore();
-  if (!kv) {
-    await dexieTable<T>(table).bulkPut(rows);
-    return;
-  }
+  const kv = await getKvStore();
   for (const row of rows) {
     const id = (row as { id?: string; storyId?: string; tempId?: number }).id
       ?? (row as { storyId?: string }).storyId
@@ -86,15 +54,7 @@ export async function putAppRows<T>(table: AppTable, rows: T[]): Promise<void> {
 }
 
 export async function clearAppTable(table: AppTable): Promise<void> {
-  const kv = await openSqliteKvStore();
-  if (!kv) {
-    await dexieTable(table).clear();
-    return;
-  }
-  const prefix = PREFIX[table];
-  for (const key of await kv.keys()) {
-    if (key.startsWith(prefix)) await kv.delete(key);
-  }
+  await (await getKvStore()).deleteByPrefix(PREFIX[table]);
 }
 
 /** Baris mentah untuk backup (tanpa dekripsi). */
