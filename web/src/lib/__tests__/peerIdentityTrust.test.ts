@@ -41,6 +41,8 @@ vi.mock('@lib/keychainDb', () => ({
     decryptValueAtRest: vi.fn(async (stored: string) =>
         stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null
     ),
+    // Pin legacy dibaca lewat helper keychain (Dexie atau SQLite).
+    getPeerIdentityKey: vi.fn(async (userId: string) => identityKeys.get(`ID_PUB_${userId}`)?.key),
 }));
 
 vi.mock('@store/conversation', () => ({

@@ -26,7 +26,16 @@ import {
   readSqliteMessage,
   readSqliteMessages,
 } from './storage/sqliteMessages';
-import { AT_REST_PREFIX } from './keychainDb';
+import {
+  AT_REST_PREFIX,
+  deleteGroupStates,
+  deletePqDrSessionRow,
+  deletePqDrSessionRows,
+  deleteRatchetSession,
+  getPqDrSessionRow,
+  listPqDrSessionRows,
+  putPqDrSessionRow,
+} from './keychainDb';
 // [docs/30 WS-F] skema urutan terenkripsi untuk kolom pengurutan pesan.
 import {
   ensureOrderFields,
@@ -94,7 +103,7 @@ class NyxShadowVaultProxy {
     try {
       const encryptedState = await encryptVaultText(JSON.stringify(record.state));
       const id = record.id || `${record.conversationId}_${record.peerDeviceId || 'unknown'}`;
-      await db.pqDrSessionsV2.put({
+      await putPqDrSessionRow({
         ...record,
         id,
         // [docs/30 WS-F] waktu aktivitas sesi juga presisi (ms) → di-seal di
@@ -115,13 +124,13 @@ class NyxShadowVaultProxy {
       // If we have a specific device, fetch that exact session
       if (peerDeviceId) {
           const id = `${conversationId}_${peerDeviceId}`;
-          const record = await db.pqDrSessionsV2.get(id);
+          const record = await getPqDrSessionRow(id);
           if (!record) return undefined;
           return this.decryptPqDrSession(record);
       }
 
       // Fallback: Get the most recently active session for this conversation
-      const records = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).toArray();
+      const records = await listPqDrSessionRows(conversationId);
       if (records.length === 0) return undefined;
 
       // [docs/30 WS-F] `lastActivity` ter-seal → urutkan lewat nilai yang dibuka,
@@ -155,8 +164,7 @@ class NyxShadowVaultProxy {
 
   async hasPqDrSession(conversationId: string): Promise<boolean> {
     try {
-      const count = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).count();
-      return count > 0;
+      return (await listPqDrSessionRows(conversationId)).length > 0;
     } catch (e) {
       console.error("Failed to check PQ-DR session:", e);
       return false;
@@ -166,10 +174,9 @@ class NyxShadowVaultProxy {
   async deletePqDrSession(conversationId: string, peerDeviceId?: string): Promise<void> {
     try {
       if (peerDeviceId) {
-         await db.pqDrSessionsV2.delete(`${conversationId}_${peerDeviceId}`);
+         await deletePqDrSessionRow(`${conversationId}_${peerDeviceId}`);
       } else {
-         const records = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).primaryKeys();
-         await db.pqDrSessionsV2.bulkDelete(records);
+         await deletePqDrSessionRows(conversationId);
       }
     } catch (e) {
       console.error("Failed to delete PQ-DR session:", e);
@@ -280,16 +287,16 @@ class NyxShadowVaultProxy {
       // [docs/30 WS-F] `pqDrSessionsV2.lastActivity` — waktu aktivitas per sesi
       // PQ-DR, presisi ms. Sama polanya dengan kolom waktu di atas: di-seal di
       // tempat, baris lama angka plaintext tetap terbaca pembacanya.
-      const sessions = await db.pqDrSessionsV2.toArray();
-      const sealedSessions = [];
+      const sessions = await listPqDrSessionRows();
+      let sealedSessionCount = 0;
       for (const session of sessions) {
         if (typeof session.lastActivity !== 'number') continue;
         const sealed = await sealLocalNumber(session.lastActivity);
         if (!sealed) continue; // vault terkunci
-        sealedSessions.push({ ...session, lastActivity: sealed });
+        await putPqDrSessionRow({ ...session, lastActivity: sealed });
+        sealedSessionCount += 1;
       }
-      if (sealedSessions.length > 0) await db.pqDrSessionsV2.bulkPut(sealedSessions);
-      updated += sealedSessions.length;
+      updated += sealedSessionCount;
     } catch (e) {
       console.error('[ShadowVault] At-rest sealing migration failed:', e);
     }
@@ -935,9 +942,8 @@ class NyxShadowVaultProxy {
     try {
       await this.deleteConversationMessages(id);
       // Clean up related crypto states if they exist
-      await db.ratchetSessions.delete(id);
-      await db.groupSenderStates.delete(id);
-      await db.groupReceiverStates.where('id').startsWith(id + '_').delete();
+      await deleteRatchetSession(id);
+      await deleteGroupStates(id);
       // Hapus record percakapan itu sendiri — sebelumnya hanya pesan + state
       // kripto yang dihapus, sehingga percakapan yang sudah "dihapus" muncul
       // kembali setelah reload karena baris di tabel `conversations` masih ada.

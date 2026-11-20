@@ -27,8 +27,16 @@
  * terbuka). Pin kuat sejati (trust anchor dari rilis aplikasi) menunggu KT Scope B.
  */
 
-import { db } from './db';
+import { db, type KtConfigRow } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
+import {
+  clearKvPrefix,
+  hydrateKvPrefix,
+  KT_CONFIG_MARKER,
+  KT_CONFIG_PREFIX,
+  openKtSqliteKv,
+} from './storage/ktKv';
+import type { KvStore } from './storage/types';
 
 /** Prefix PK di tabel `ktConfig`. */
 export const KT_CONFIG_ROW_ID = 'kt-config';
@@ -105,6 +113,51 @@ export function ktConfigPinRowId(userId: string): string {
   return `${KT_CONFIG_ROW_ID}:${userId}`;
 }
 
+interface KtConfigBackend {
+  get(id: string): Promise<KtConfigRow | undefined>;
+  put(row: KtConfigRow): Promise<void>;
+  clear(): Promise<void>;
+}
+
+const dexieKtConfig: KtConfigBackend = {
+  get: (id) => db.ktConfig.get(id),
+  put: async (row) => { await db.ktConfig.put(row); },
+  clear: async () => { await db.ktConfig.clear(); },
+};
+
+function sqliteKtConfig(kv: KvStore): KtConfigBackend {
+  return {
+    get: (id) => kv.get<KtConfigRow>(`${KT_CONFIG_PREFIX}${id}`),
+    put: async (row) => { await kv.put({ key: `${KT_CONFIG_PREFIX}${row.id}`, value: row }); },
+    clear: () => clearKvPrefix(kv, KT_CONFIG_PREFIX),
+  };
+}
+
+let ktConfigHydrated = false;
+
+async function getKtConfigBackend(): Promise<KtConfigBackend> {
+  const kv = await openKtSqliteKv();
+  if (!kv) return dexieKtConfig;
+  try {
+    if (!ktConfigHydrated) {
+      await hydrateKvPrefix({
+        kv,
+        prefix: KT_CONFIG_PREFIX,
+        marker: KT_CONFIG_MARKER,
+        loadDexie: async () => (await db.ktConfig.toArray()).map((row) => ({
+          key: row.id,
+          value: row,
+        })),
+      });
+      ktConfigHydrated = true;
+    }
+    return sqliteKtConfig(kv);
+  } catch (error) {
+    console.warn('[KT] Pin konfigurasi SQLite gagal; memakai Dexie:', error);
+    return dexieKtConfig;
+  }
+}
+
 /** Id akun yang sedang login; `undefined` bila belum/tidak ada sesi. */
 async function currentKtAccountId(): Promise<string | undefined> {
   try {
@@ -139,7 +192,7 @@ export async function resolveKtConfigPin(): Promise<KtConfigPinState> {
   // boleh dipakai sebagai jangkar, dan "tidak tahu akun" bukan "belum di-pin".
   if (!accountId) return { status: 'unknown-account' };
   try {
-    const row = await db.ktConfig.get(ktConfigPinRowId(accountId));
+    const row = await (await getKtConfigBackend()).get(ktConfigPinRowId(accountId));
     if (!row) return { status: 'empty' };
     const plain = await decryptValueAtRest(row.blob);
     if (!plain) return { status: 'unreadable' };
@@ -165,7 +218,7 @@ export async function saveKtConfigPin(pin: KtConfigPin): Promise<void> {
     const accountId = await currentKtAccountId();
     if (!accountId) return;
     const blob = await encryptValueAtRest(JSON.stringify(pin));
-    await db.ktConfig.put({ id: ktConfigPinRowId(accountId), blob });
+    await (await getKtConfigBackend()).put({ id: ktConfigPinRowId(accountId), blob });
   } catch {
     // IndexedDB ikut terhapus saat wipe; kegagalan menulis bukan alasan
     // menggagalkan jalur kunci.
@@ -179,6 +232,7 @@ export async function saveKtConfigPin(pin: KtConfigPin): Promise<void> {
  */
 export async function clearKtConfigPin(): Promise<void> {
   try {
+    await (await getKtConfigBackend()).clear();
     await db.ktConfig.clear();
   } catch {
     // Baris ikut terhapus bersama IndexedDB saat wipe.

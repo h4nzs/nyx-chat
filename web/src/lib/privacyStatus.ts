@@ -146,8 +146,7 @@ export async function collectPrivacyStatus(
  */
 async function loadKtEvidence(): Promise<PrivacyKtEvidence | null> {
   try {
-    const [{ db }, { decryptValueAtRest }, { loadKtStates }] = await Promise.all([
-      import('./db'),
+    const [{ decryptValueAtRest }, { loadKtStates, listKtMonitoringRows }] = await Promise.all([
       import('./keychainDb'),
       import('./ktMonitoring'),
     ]);
@@ -155,7 +154,7 @@ async function loadKtEvidence(): Promise<PrivacyKtEvidence | null> {
     const withProof = states.filter((state) => state.treeHead !== undefined);
     if (withProof.length === 0) return null;
 
-    const records = await db.ktMonitoring.toArray();
+    const records = await listKtMonitoringRows();
     let verifiedAt: number | undefined;
     for (const record of records) {
       const plain = await decryptValueAtRest(record.updatedAt).catch(() => null);

@@ -697,19 +697,15 @@ export const evaluateControlMessage = async (decrypted: Message, conversationId:
                   const senderId = decrypted.senderId || data.senderId;
                   if (senderId) {
                       try {
-                          const { db } = await import('@lib/db');
                           // [AUDIT FIX 2026-10-05] Index komposit [conversationId+senderId]
-                          // TIDAK ADA di schema (hanya 'id') → Dexie SchemaError tiap
-                          // PROTOCOL_RESET. Scan via id-prefix + filter senderId di
-                          // state (id kini device-keyed — senderId ada DI DALAM state).
-                          const { listGroupReceiverStates } = await import('@lib/keychainDb');
+                          // TIDAK ADA di schema (hanya 'id') → scan via id-prefix +
+                          // filter senderId di state (id kini device-keyed).
+                          const { listGroupReceiverStates, deleteGroupReceiverState, deleteRatchetSession } = await import('@lib/keychainDb');
                           const staleStates = (await listGroupReceiverStates(conversationId))
                               .filter(s => s.senderId === senderId)
                               .map(s => s.id);
-                          if (staleStates.length > 0) {
-                              await db.groupReceiverStates.bulkDelete(staleStates);
-                          }
-                          await db.ratchetSessions.delete(conversationId);
+                          for (const id of staleStates) await deleteGroupReceiverState(id);
+                          await deleteRatchetSession(conversationId);
                           
                           // [AUDIT F-12] `getSodiumLib` dan `useAuthStore` diimpor
                           // di sini tetapi tidak dipakai — sisa refactor. Dibuang

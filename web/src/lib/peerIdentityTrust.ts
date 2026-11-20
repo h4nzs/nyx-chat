@@ -34,11 +34,10 @@
  */
 
 import { db } from './db';
-import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
+import { decryptValueAtRest, encryptValueAtRest, getPeerIdentityKey } from './keychainDb';
 import { KT_CONFIRMATION_TTL_MS } from './ktBundleProof';
 
 const KV_KEY = 'nyx_peer_identity_v1';
-const LEGACY_PREFIX = 'ID_PUB_';
 
 /**
  * [audit F-09] Verdict KT ditulis di modul ini, tetapi banner membaca state
@@ -171,8 +170,8 @@ async function saveMap(map: Record<string, PeerIdentityTrust>): Promise<void> {
 /** Pin legacy (plaintext `ID_PUB_<userId>` di tabel identityKeys). */
 async function legacyTrustedKey(peerId: string): Promise<string | undefined> {
   try {
-    const row = await db.identityKeys.get(`${LEGACY_PREFIX}${peerId}`);
-    return row?.key ?? undefined;
+    const row = await getPeerIdentityKey(peerId);
+    return row ?? undefined;
   } catch {
     return undefined;
   }

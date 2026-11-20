@@ -37,6 +37,13 @@
 
 import { db } from './db';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
+import {
+  hydrateKvPrefix,
+  KT_GOSSIP_MARKER,
+  KT_GOSSIP_PREFIX,
+  openKtSqliteKv,
+} from './storage/ktKv';
+import type { KvStore } from './storage/types';
 
 /** Nama field di payload ter-seal. Pendek: payload ikut ke setiap pesan. */
 export const KT_GOSSIP_FIELD = 'ktG';
@@ -338,6 +345,49 @@ const dexieStorage: KtGossipStorage = {
   },
 };
 
+let gossipHydrated = false;
+
+async function getGossipKv(): Promise<KvStore | null> {
+  const kv = await openKtSqliteKv();
+  if (!kv) return null;
+  try {
+    if (!gossipHydrated) {
+      await hydrateKvPrefix({
+        kv,
+        prefix: KT_GOSSIP_PREFIX,
+        marker: KT_GOSSIP_MARKER,
+        loadDexie: async () => {
+          const row = await db.ktGossip.get(KT_GOSSIP_ROW_ID);
+          return row ? [{ key: KT_GOSSIP_ROW_ID, value: row }] : [];
+        },
+      });
+      gossipHydrated = true;
+    }
+    return kv;
+  } catch (error) {
+    console.warn('[KT] Gossip SQLite gagal; memakai Dexie:', error);
+    return null;
+  }
+}
+
+const storage: KtGossipStorage = {
+  async read(): Promise<string | undefined> {
+    const kv = await getGossipKv();
+    if (!kv) return dexieStorage.read();
+    const row = await kv.get<{ blob: string }>(`${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`);
+    if (!row?.blob) return undefined;
+    return (await decryptValueAtRest(row.blob)) ?? undefined;
+  },
+  async write(value: string): Promise<void> {
+    const kv = await getGossipKv();
+    if (!kv) return dexieStorage.write(value);
+    await kv.put({
+      key: `${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`,
+      value: { id: KT_GOSSIP_ROW_ID, blob: await encryptValueAtRest(value) },
+    });
+  },
+};
+
 let singleton: KtGossip | null = null;
 
 /** Pendengar split-view yang dipasang jalur UI (lazy; hindari siklus impor). */
@@ -354,7 +404,7 @@ export function onKtSplitView(listener: SplitViewListener): () => void {
 export function ktGossip(): KtGossip {
   if (!singleton) {
     singleton = createKtGossip({
-      storage: dexieStorage,
+      storage,
       log: (event, detail) => {
         try {
           console.warn(`[KT] ${event}`, detail);

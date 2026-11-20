@@ -105,12 +105,8 @@ export default function KeyManagementPage() {
             // 5. Wipe only sessions tied to the old identity (initiator/sender state). 
             // We PRESERVE groupReceiverStates so we can still read group metadata and incoming messages!
             try {
-              const { db } = await import('@lib/db');
-              await Promise.all([
-                  db.ratchetSessions.clear(),
-                  db.groupSenderStates.clear(),
-                  db.sessionKeys.clear()
-              ]);
+              const { clearIdentitySessions } = await import('@lib/keychainDb');
+              await clearIdentitySessions();
             } catch (e) {
               console.error("Failed to clear old sessions", e);
             }

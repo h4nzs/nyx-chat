@@ -58,7 +58,58 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
     }, contactId);
     expect(contact).toEqual({ userId: contactId, stored: true });
 
-    // Reload membuktikan kontak bertahan di SQLite, bukan hanya di memori.
+    const keychainBefore = await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const keychain = await import('/src/lib/keychainDb.ts');
+      await keychain.storeOneTimePreKey(99, Uint8Array.from([1, 2, 3, 250]), 'pq-public');
+      await keychain.storeMessageKey('opfs-msg-key', Uint8Array.from([4, 5, 6]));
+      await keychain.savePeerIdentityKey('opfs-keychain-peer', 'pub-key');
+      return {
+        preKey: Array.from((await keychain.getOneTimePreKey(99)) ?? []),
+        messageKey: Array.from((await keychain.getMessageKey('opfs-msg-key')) ?? []),
+        peerKey: (await keychain.getPeerIdentityKey('opfs-keychain-peer')) ?? null,
+      };
+    });
+    expect(keychainBefore).toEqual({
+      preKey: [1, 2, 3, 250],
+      messageKey: [4, 5, 6],
+      peerKey: 'pub-key',
+    });
+
+    const ktBefore = await page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { saveKtState, loadKtStates } = await import('/src/lib/ktMonitoring.ts');
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { saveKtConfigPin, loadKtConfigPin } = await import('/src/lib/ktConfigPin.ts');
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { storeAnchor, loadStoredAnchor } = await import('/src/lib/ktGossip.ts');
+
+      const searchKey = Uint8Array.from([1, 2, 3]);
+      await saveKtState({ searchKey, keyVersion: 7, treeSize: 10 });
+      await saveKtConfigPin({
+        abiVersion: 2,
+        mode: 1,
+        signatureKey: 'a'.repeat(3904),
+        auditorKeys: [],
+      });
+      await storeAnchor({ root: 'b'.repeat(64), treeSize: 10 });
+
+      const states = await loadKtStates();
+      return {
+        keyVersion: states[0]?.keyVersion ?? null,
+        treeSize: states[0]?.treeSize ?? null,
+        pinMode: (await loadKtConfigPin())?.mode ?? null,
+        anchor: await loadStoredAnchor(),
+      };
+    });
+    expect(ktBefore).toEqual({
+      keyVersion: 7,
+      treeSize: 10,
+      pinMode: 1,
+      anchor: { root: 'b'.repeat(64), treeSize: 10 },
+    });
+
+    // Reload membuktikan kontak, keychain residual, dan state KT bertahan di SQLite.
     await page.reload();
     await expect(page).toHaveURL(/\/chat/, { timeout: 60_000 });
     await expect.poll(async () => page.evaluate(async (id) => {
@@ -66,6 +117,39 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
       const { getContact } = await import('/src/lib/contactStore.ts');
       return (await getContact(id))?.userId ?? null;
     }, contactId), { timeout: 60_000 }).toBe(contactId);
+    await expect.poll(async () => page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const keychain = await import('/src/lib/keychainDb.ts');
+      return {
+        preKey: Array.from((await keychain.getOneTimePreKey(99)) ?? []),
+        messageKey: Array.from((await keychain.getMessageKey('opfs-msg-key')) ?? []),
+        peerKey: (await keychain.getPeerIdentityKey('opfs-keychain-peer')) ?? null,
+      };
+    }), { timeout: 60_000 }).toEqual({
+      preKey: [1, 2, 3, 250],
+      messageKey: [4, 5, 6],
+      peerKey: 'pub-key',
+    });
+    await expect.poll(async () => page.evaluate(async () => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { loadKtStates } = await import('/src/lib/ktMonitoring.ts');
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { loadKtConfigPin } = await import('/src/lib/ktConfigPin.ts');
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const { loadStoredAnchor } = await import('/src/lib/ktGossip.ts');
+      const states = await loadKtStates();
+      return {
+        keyVersion: states[0]?.keyVersion ?? null,
+        treeSize: states[0]?.treeSize ?? null,
+        pinMode: (await loadKtConfigPin())?.mode ?? null,
+        anchor: await loadStoredAnchor(),
+      };
+    }), { timeout: 60_000 }).toEqual({
+      keyVersion: 7,
+      treeSize: 10,
+      pinMode: 1,
+      anchor: { root: 'b'.repeat(64), treeSize: 10 },
+    });
 
     expect(blocked, `Request/console terblokir COEP:\n${blocked.join('\n')}`).toEqual([]);
   });

@@ -145,8 +145,8 @@ export default function BackupRestoreModal({ isOpen, onClose }: BackupRestoreMod
       // Selaraskan dengan alur "Import Vault" yang sudah ada: paksa bootstrap
       // identitas baru untuk perangkat ini (deviceId + kunci identitas lokal).
       localStorage.removeItem('deviceId');
-      const { db } = await import('@lib/db');
-      await db.identityKeys.clear();
+      const { clearIdentityKeys } = await import('@lib/keychainDb');
+      await clearIdentityKeys();
 
       toast.success(
         t('modals:backup_restore.success', 'Brankas dipulihkan: {{records}} catatan · {{size}}', {

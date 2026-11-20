@@ -34,6 +34,15 @@
 
 import { db, type KtMonitoringRecord } from './db';
 import { decryptValueAtRest, deriveKtSearchIndexKey, encryptValueAtRest } from './keychainDb';
+import {
+  clearKvPrefix,
+  hydrateKvPrefix,
+  KT_MONITORING_MARKER,
+  KT_MONITORING_PREFIX,
+  listKvPrefix,
+  openKtSqliteKv,
+} from './storage/ktKv';
+import type { KvStore } from './storage/types';
 import type {
   KeyTransparencyVerifier,
   KtConfig,
@@ -136,6 +145,68 @@ async function openBytes(sealed: string | null | undefined): Promise<Uint8Array 
 }
 
 // ---------------------------------------------------------------------------
+// Backend penyimpanan (Dexie saat flag mati, KvStore SQLite saat aktif)
+// ---------------------------------------------------------------------------
+
+interface KtMonitoringBackend {
+  get(id: string): Promise<KtMonitoringRecord | undefined>;
+  put(record: KtMonitoringRecord): Promise<void>;
+  delete(id: string): Promise<void>;
+  all(): Promise<KtMonitoringRecord[]>;
+  clear(): Promise<void>;
+}
+
+const dexieKtMonitoring: KtMonitoringBackend = {
+  get: (id) => db.ktMonitoring.get(id),
+  put: async (record) => { await db.ktMonitoring.put(record); },
+  delete: async (id) => { await db.ktMonitoring.delete(id); },
+  all: () => db.ktMonitoring.toArray(),
+  clear: async () => { await db.ktMonitoring.clear(); },
+};
+
+function sqliteKtMonitoring(kv: KvStore): KtMonitoringBackend {
+  return {
+    get: (id) => kv.get<KtMonitoringRecord>(`${KT_MONITORING_PREFIX}${id}`),
+    put: async (record) => {
+      await kv.put({ key: `${KT_MONITORING_PREFIX}${record.searchKeyHex}`, value: record });
+    },
+    delete: async (id) => { await kv.delete(`${KT_MONITORING_PREFIX}${id}`); },
+    all: () => listKvPrefix<KtMonitoringRecord>(kv, KT_MONITORING_PREFIX),
+    clear: () => clearKvPrefix(kv, KT_MONITORING_PREFIX),
+  };
+}
+
+let ktMonitoringHydrated = false;
+
+async function getKtMonitoringBackend(): Promise<KtMonitoringBackend> {
+  const kv = await openKtSqliteKv();
+  if (!kv) return dexieKtMonitoring;
+  try {
+    if (!ktMonitoringHydrated) {
+      await hydrateKvPrefix({
+        kv,
+        prefix: KT_MONITORING_PREFIX,
+        marker: KT_MONITORING_MARKER,
+        loadDexie: async () => (await db.ktMonitoring.toArray()).map((row) => ({
+          key: row.searchKeyHex,
+          value: row,
+        })),
+      });
+      ktMonitoringHydrated = true;
+    }
+    return sqliteKtMonitoring(kv);
+  } catch (error) {
+    console.warn('[KT] State monitoring SQLite gagal; memakai Dexie:', error);
+    return dexieKtMonitoring;
+  }
+}
+
+/** Baris mentah untuk panel privasi (nilai tetap ter-seal). */
+export async function listKtMonitoringRows(): Promise<KtMonitoringRecord[]> {
+  return (await getKtMonitoringBackend()).all();
+}
+
+// ---------------------------------------------------------------------------
 // Simpan / muat
 // ---------------------------------------------------------------------------
 
@@ -149,9 +220,10 @@ export async function saveKtState(update: KtStateUpdate): Promise<void> {
   const legacyKeyHex = ktSearchKeyHex(update.searchKey);
   // Baris lama memakai search key mentah sebagai PK; ambil isinya sekali agar
   // pembaruan parsial tidak menghapus bukti yang sudah ada saat migrasi.
+  const backend = await getKtMonitoringBackend();
   const legacyRow =
-    legacyKeyHex === searchKeyHex ? undefined : await db.ktMonitoring.get(legacyKeyHex);
-  const existing = (await db.ktMonitoring.get(searchKeyHex)) ?? legacyRow;
+    legacyKeyHex === searchKeyHex ? undefined : await backend.get(legacyKeyHex);
+  const existing = (await backend.get(searchKeyHex)) ?? legacyRow;
 
   const record: KtMonitoringRecord = {
     searchKeyHex,
@@ -171,13 +243,14 @@ export async function saveKtState(update: KtStateUpdate): Promise<void> {
     updatedAt: await encryptValueAtRest(new Date().toISOString()),
   };
 
-  await db.ktMonitoring.put(record);
-  if (legacyRow) await db.ktMonitoring.delete(legacyKeyHex);
+  await backend.put(record);
+  if (legacyRow) await backend.delete(legacyKeyHex);
 }
 
 /** Baca semua state; nilai yang tidak bisa dibuka (vault terkunci) dilewati. */
 export async function loadKtStates(): Promise<KtStoredState[]> {
-  const records = await db.ktMonitoring.toArray();
+  const backend = await getKtMonitoringBackend();
+  const records = await backend.all();
   const out: KtStoredState[] = [];
   for (const record of records) {
     let searchKey: Uint8Array | undefined;
@@ -198,16 +271,16 @@ export async function loadKtStates(): Promise<KtStoredState[]> {
       try {
         const rowId = await ktSearchKeyRowId(searchKey);
         if (rowId !== record.searchKeyHex) {
-          const existing = await db.ktMonitoring.get(rowId);
+          const existing = await backend.get(rowId);
           if (existing) {
-            await db.ktMonitoring.delete(record.searchKeyHex);
+            await backend.delete(record.searchKeyHex);
           } else {
-            await db.ktMonitoring.put({
+            await backend.put({
               ...record,
               searchKeyHex: rowId,
               searchKey: (await sealBytes(searchKey)) ?? null,
             });
-            await db.ktMonitoring.delete(record.searchKeyHex);
+            await backend.delete(record.searchKeyHex);
           }
         }
       } catch {
@@ -319,6 +392,8 @@ export async function runKtMonitorOnce(deps: {
 
 /** Hapus semua state monitoring (logout/wipe). */
 export async function clearKtStates(): Promise<void> {
+  // Hapus kedua jalur; sisa baris Dexie tidak boleh muncul setelah wipe.
+  await (await getKtMonitoringBackend()).clear();
   await db.ktMonitoring.clear();
 }
 

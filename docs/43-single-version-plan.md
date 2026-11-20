@@ -605,10 +605,28 @@ memastikan baris `contacts:` ada di SQLite, me-reload halaman, lalu membaca
 kontak itu lagi. Bukti tambahan: `contactStore.test.ts` 33 tes lulus bersama
 typecheck; suite web penuh tidak diselesaikan dalam batas waktu 300 detik.
 
-Belum dikerjakan: state KT (`ktMonitoring`/`ktGossip`/`ktConfig`), tabel
-keychain residual (preKeys, identityKeys, pendingHeaders, messageKeys,
-groupSender/ReceiverStates, pqDrSessionsV2), `shadowVaultDb`/conversations/
-story/profile/offlineQueue, dan B3 (hapus Dexie + `VACUUM INTO`). Default build
+**Selesai 2026-11-20:** state KT (`ktMonitoring`, `ktGossip`, `ktConfig`)
+memakai `KvStore` SQLite yang sama lewat helper `storage/ktKv.ts` (prefix
+`kt:mon:`, `kt:gossip:`, `kt:config:`) dan marker hidrasi sekali dari Dexie.
+`privacyStatus` membaca baris mentah lewat `listKtMonitoringRows()`, bukan
+tabel Dexie langsung. Kegagalan SQLite kembali ke Dexie. Bukti:
+`ktStateSqlite.test.ts` (3 tes; Dexie dibuat melempar), suite KT lama 45 tes,
+dan `opfsApp.spec.ts` menulis/membaca monitoring, pin, dan gossip setelah reload.
+
+**Selesai 2026-11-20:** tabel keychain residual pindah ke `KeyStore` yang sama:
+`preKeys` (`pre:`, byte kunci disimpan base64 di dalam JSON), `identityKeys`
+(`id:`), `pendingHeaders` (`ph:`), `messageKeys` (`mk:`, byte mentah),
+`groupSenderStates` (`gs:`), `groupReceiverStates` (`gr:`),
+`groupCachedParticipants` (`gcp:`), dan `pqDrSessionsV2` (`pq:`, isi `state`
+tetap disegel oleh `shadowVaultDb`). Penghapusan/arsip grup, rotasi identitas,
+restore backup, dan pembersihan receiver state pada `PROTOCOL_RESET` memakai
+helper keychain yang sama, jadi tidak ada lagi tulisan Dexie di jalur itu saat
+flag aktif. `wipeKeychainKeys` mengosongkan semua prefix. Bukti:
+`keychainResidualSqlite.test.ts` (6 tes; Dexie dibuat melempar) plus round-trip
+`opfsApp.spec.ts` setelah reload untuk prekey, message key, dan pin peer.
+
+Belum dikerjakan: `shadowVaultDb`/conversations/story/profile/offlineQueue,
+dan B3 (hapus Dexie + `VACUUM INTO`). Default build
 tetap Dexie (keychain dan contactStore hanya memakai SQLite saat
 `VITE_SQLITE_MESSAGES=1`); header OPFS di Vite masih opt-in
 `NYX_SQLITE_OPFS=1`.
