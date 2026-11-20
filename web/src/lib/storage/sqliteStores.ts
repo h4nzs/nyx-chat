@@ -59,6 +59,12 @@ export function createSqliteKvStore(driver: SqlDriver): KvStore {
       await driver.run('DELETE FROM kvStore WHERE key = ?', [key]);
     },
 
+    async deleteByPrefix(prefix: string): Promise<void> {
+      // `%`/`_` di dalam prefix adalah karakter biasa, bukan wildcard.
+      const escaped = prefix.replace(/[\\%_]/g, '\\$&');
+      await driver.run("DELETE FROM kvStore WHERE key LIKE ? ESCAPE '\\'", [`${escaped}%`]);
+    },
+
     async clear(): Promise<void> {
       await driver.run('DELETE FROM kvStore');
     },

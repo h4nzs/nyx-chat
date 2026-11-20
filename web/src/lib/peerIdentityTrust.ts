@@ -33,7 +33,7 @@
  * memunculkan warning palsu), lalu tidak ditulis lagi.
  */
 
-import { db } from './db';
+import { getKvStore } from './storage/appKv';
 import { decryptValueAtRest, encryptValueAtRest, getPeerIdentityKey } from './keychainDb';
 import { KT_CONFIRMATION_TTL_MS } from './ktBundleProof';
 
@@ -145,8 +145,7 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 
 async function loadMap(): Promise<Record<string, PeerIdentityTrust>> {
   try {
-    const row = await db.kvStore.get(KV_KEY);
-    const stored = typeof row?.value === 'string' ? row.value : null;
+    const stored = await (await getKvStore()).get<string>(KV_KEY);
     if (!stored) return {};
     const plain = await decryptValueAtRest(stored);
     if (!plain) return {};
@@ -161,7 +160,7 @@ async function loadMap(): Promise<Record<string, PeerIdentityTrust>> {
 
 async function saveMap(map: Record<string, PeerIdentityTrust>): Promise<void> {
   try {
-    await db.kvStore.put({ key: KV_KEY, value: await encryptValueAtRest(JSON.stringify(map)) });
+    await (await getKvStore()).put({ key: KV_KEY, value: await encryptValueAtRest(JSON.stringify(map)) });
   } catch (e) {
     console.error('[PeerIdentityTrust] Gagal menyimpan pin identitas:', e);
   }
@@ -525,7 +524,7 @@ export async function hasPendingIdentityChangeForConversation(conversationId: st
 export async function clearPeerIdentityTrust(): Promise<void> {
   await enqueue(async () => {
     try {
-      await db.kvStore.delete(KV_KEY);
+      await (await getKvStore()).delete(KV_KEY);
     } catch (e) {
       console.warn('[PeerIdentityTrust] Gagal menghapus pin identitas:', e);
     }

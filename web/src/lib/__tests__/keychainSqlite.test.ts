@@ -63,6 +63,9 @@ function memoryKv(): KvStore {
     get: async <T,>(key: string) => rows.get(key) as T | undefined,
     put: async (item) => { rows.set(item.key, item.value); },
     delete: async (key) => { rows.delete(key); },
+    deleteByPrefix: async (prefix) => {
+      for (const key of [...rows.keys()]) if (key.startsWith(prefix)) rows.delete(key);
+    },
     clear: async () => { rows.clear(); },
     keys: async () => [...rows.keys()],
   };

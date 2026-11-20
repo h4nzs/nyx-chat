@@ -331,7 +331,7 @@ describe('backupRestore: adapter Dexie', () => {
     expect(isSqliteBackupTable('messages')).toBe(false);
     expect(needsDexieRead('messages', true)).toBe(false);
     expect(needsDexieRead('contacts', true)).toBe(false);
-    expect(needsDexieRead('kvStore', true)).toBe(true);
+    expect(needsDexieRead('kvStore', true)).toBe(false);
     expect(needsDexieRead('messages', false)).toBe(true);
   });
 });

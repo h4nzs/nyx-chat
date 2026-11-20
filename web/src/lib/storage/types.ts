@@ -17,6 +17,8 @@ export interface KvStore {
   get<T = unknown>(key: string): Promise<T | undefined>;
   put(item: KvItem): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Hapus semua kunci ber-prefix (mis. `nyx_spqr_state_v1:`). */
+  deleteByPrefix(prefix: string): Promise<void>;
   clear(): Promise<void>;
   keys(): Promise<string[]>;
 }

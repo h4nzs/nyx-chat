@@ -1270,6 +1270,12 @@ export async function clearAllKeys(): Promise<void> {
       // material kunci keychain ada di KeyStore yang sama → hapus per prefix.
       const keys = await sqliteKeys();
       if (keys) await wipeKeychainKeys(keys).catch(() => {});
+      // `kvStore` dikosongkan SEBELUM worker ditutup: setelah close, adapter
+      // akan membuka database baru dengan kunci yang baru saja dihapus.
+      const kv = await import('./storage/appKv')
+        .then((m) => m.getKvStore())
+        .catch(() => null);
+      if (kv) await kv.clear().catch(() => {});
       await closeSqliteMessages().catch(() => {});
       await Promise.all([
           db.messages.clear(),
@@ -1277,7 +1283,6 @@ export async function clearAllKeys(): Promise<void> {
           clearAppTable('offlineQueue'),
           clearAppTable('conversations'),
           clearAppTable('profileCache'),
-          db.kvStore.clear(),
           db.sessionKeys.clear(),
           db.groupKeys.clear(),
           db.preKeys.clear(),

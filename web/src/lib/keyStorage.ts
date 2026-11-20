@@ -1,6 +1,6 @@
 import { isPlainObject } from '@utils/typeGuards';
 // web/src/lib/keyStorage.ts
-import { db } from './db';
+import { getKvStore } from './storage/appKv';
 import { sha256 } from 'hash-wasm';
 import { getSodium } from './sodiumInitializer';
 
@@ -13,17 +13,14 @@ const STORAGE_KEYS = {
 };
 
 // Helper for KV operations
-const get = async <T>(key: string): Promise<T | undefined> => {
-  const item = await db.kvStore.get(key);
-  return item?.value as T | undefined;
-};
+const get = async <T>(key: string): Promise<T | undefined> => (await getKvStore()).get<T>(key);
 
 const set = async (key: string, value: unknown) => {
-  await db.kvStore.put({ key, value });
+  await (await getKvStore()).put({ key, value });
 };
 
 const del = async (key: string) => {
-  await db.kvStore.delete(key);
+  await (await getKvStore()).delete(key);
 };
 
 const arrayBufferToBase64 = (buffer: Uint8Array) => {

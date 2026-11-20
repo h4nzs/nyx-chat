@@ -7,7 +7,7 @@ import { Conversation } from './conversation';
 import { useAuthStore } from './auth';
 import { computeSafetyNumberParts, PeerSecurityInfo } from '@utils/safetyNumber';
 import { getParticipantUserId } from '@nyx/shared';
-import { db } from '@lib/db';
+import { getKvStore } from '@lib/storage/appKv';
 import { decryptValueAtRest, encryptValueAtRest } from '@lib/keychainDb';
 import {
   acceptPendingPeerIdentity,
@@ -94,8 +94,7 @@ export const computeFingerprint = async (peer: PeerSecurityInfo) => {
 /** Baca fingerprint terverifikasi dari kvStore (ENC1). */
 async function loadStoredVerifications(): Promise<Record<string, string>> {
   try {
-    const row = await db.kvStore.get(KV_KEY);
-    const stored = typeof row?.value === 'string' ? row.value : null;
+    const stored = await (await getKvStore()).get<string>(KV_KEY);
     if (stored) {
       const plain = await decryptValueAtRest(stored);
       if (plain) {
@@ -114,7 +113,7 @@ async function loadStoredVerifications(): Promise<Record<string, string>> {
 
 async function persistStoredVerifications(map: Record<string, string>): Promise<void> {
   try {
-    await db.kvStore.put({ key: KV_KEY, value: await encryptValueAtRest(JSON.stringify(map)) });
+    await (await getKvStore()).put({ key: KV_KEY, value: await encryptValueAtRest(JSON.stringify(map)) });
   } catch (e) {
     console.error('[Verification] Gagal menyimpan state verifikasi:', e);
   }

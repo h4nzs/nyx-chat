@@ -19,7 +19,7 @@
  * Tidak ada data sensitif yang bocor bila perangkat di-dump.
  */
 
-import { db } from './db';
+import { getKvStore } from './storage/appKv';
 import { receiveLinkedHistory, type HistoryImportProgress } from './linkHistoryImport';
 
 /** Satu baris di `kvStore`; nilai `true` = masih ada impor yang tertunda. */
@@ -34,7 +34,7 @@ export type HistoryRetryOutcome =
 /** Tandai bahwa impor riwayat belum selesai (dipanggil saat impor gagal). */
 export async function markHistoryImportPending(): Promise<void> {
   try {
-    await db.kvStore.put({ key: HISTORY_RETRY_KEY, value: true });
+    await (await getKvStore()).put({ key: HISTORY_RETRY_KEY, value: true });
   } catch (error) {
     // Gagal menyimpan penanda tidak boleh menggagalkan alur tautan itu sendiri.
     console.warn('[Link] Gagal menandai impor riwayat yang tertunda:', error);
@@ -44,7 +44,7 @@ export async function markHistoryImportPending(): Promise<void> {
 /** Hapus penanda (impor sukses, atau server menyatakan arsipnya sudah tidak ada). */
 export async function clearHistoryImportPending(): Promise<void> {
   try {
-    await db.kvStore.delete(HISTORY_RETRY_KEY);
+    await (await getKvStore()).delete(HISTORY_RETRY_KEY);
   } catch (error) {
     console.warn('[Link] Gagal menghapus penanda impor riwayat:', error);
   }
@@ -52,7 +52,7 @@ export async function clearHistoryImportPending(): Promise<void> {
 
 export async function hasPendingHistoryImport(): Promise<boolean> {
   try {
-    return (await db.kvStore.get(HISTORY_RETRY_KEY)) !== undefined;
+    return (await (await getKvStore()).get(HISTORY_RETRY_KEY)) !== undefined;
   } catch {
     return false;
   }

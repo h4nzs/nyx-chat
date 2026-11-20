@@ -319,7 +319,7 @@ export async function writeTablesToDexie(
 const SQLITE_BACKUP_TABLES = new Set(['sqliteMeta', 'sqliteKv', 'sqliteMessages']);
 /** Tabel Dexie yang saat SQLite aktif sudah diwakili oleh `sqliteKv`/`sqliteMessages`. */
 const SQLITE_MIGRATED_TABLES = new Set(
-  BACKUP_TABLE_ORDER.filter((table) => table !== 'kvStore' && !SQLITE_BACKUP_TABLES.has(table))
+  BACKUP_TABLE_ORDER.filter((table) => !SQLITE_BACKUP_TABLES.has(table))
 );
 
 export function isSqliteBackupTable(table: string): boolean {

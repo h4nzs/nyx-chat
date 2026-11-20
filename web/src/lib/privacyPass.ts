@@ -82,12 +82,11 @@ export async function loadPpIssuer (): Promise<PpIssuer> {
 
 async function loadStoredGrants (): Promise<Record<string, StoredGrant>> {
   try {
-    const [{ db }, { decryptValueAtRest }] = await Promise.all([
-      import('@lib/db'),
+    const [{ getKvStore }, { decryptValueAtRest }] = await Promise.all([
+      import('@lib/storage/appKv'),
       import('@lib/keychainDb'),
     ]);
-    const row = await db.kvStore.get(KV_KEY);
-    const sealed = (row?.value as Record<string, string> | undefined) ?? {};
+    const sealed = (await (await getKvStore()).get<Record<string, string>>(KV_KEY)) ?? {};
     const grants: Record<string, StoredGrant> = {};
     for (const [conversationId, value] of Object.entries(sealed)) {
       const plain = await decryptValueAtRest(value);
@@ -103,18 +102,17 @@ async function loadStoredGrants (): Promise<Record<string, StoredGrant>> {
 
 async function saveStoredGrant (conversationId: string, grant: StoredGrant | null): Promise<void> {
   try {
-    const [{ db }, { encryptValueAtRest }] = await Promise.all([
-      import('@lib/db'),
+    const [{ getKvStore }, { encryptValueAtRest }] = await Promise.all([
+      import('@lib/storage/appKv'),
       import('@lib/keychainDb'),
     ]);
-    const row = await db.kvStore.get(KV_KEY);
-    const sealed = (row?.value as Record<string, string> | undefined) ?? {};
+    const sealed = (await (await getKvStore()).get<Record<string, string>>(KV_KEY)) ?? {};
     if (grant && grant.tokens.length > 0) {
       sealed[conversationId] = await encryptValueAtRest(JSON.stringify(grant));
     } else {
       delete sealed[conversationId];
     }
-    await db.kvStore.put({ key: KV_KEY, value: sealed });
+    await (await getKvStore()).put({ key: KV_KEY, value: sealed });
   } catch {
     // Vault terkunci / DB belum siap: token tetap di memori untuk sesi ini.
   }

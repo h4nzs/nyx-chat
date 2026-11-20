@@ -638,18 +638,32 @@ tabel dump (`sqliteMeta`, `sqliteKv`, `sqliteMessages`) saat SQLite aktif, dan
 **tidak** membaca 19 tabel Dexie yang sudah dimigrasikan. Frame tetap memakai
 AEAD backup; kunci database SQLite ada di `sqliteMeta` sehingga restore bisa
 membuka DB baru sebelum vault terbuka. Restore memvalidasi kunci/baris,
-menghapus file OPFS lama, menulis SQLite lebih dulu, lalu hanya menulis
-`kvStore` ke Dexie. Bila runtime tidak punya Worker/flag SQLite, restore gagal
+menghapus file OPFS lama, menulis SQLite lebih dulu, lalu **tidak** menulis
+`kvStore` ke Dexie saat dump SQLite ada (barisnya dipulihkan lewat `sqliteKv`).
+Bila runtime tidak punya Worker/flag SQLite, restore gagal
 sebelum menyentuh Dexie — bukan menulis ke backend yang salah. Bukti:
 `opfsApp.spec.ts` membaca dump, me-restore-nya, lalu memastikan baris aplikasi
 masih terbaca; `backupRestore.test.ts` mengunci pemilihan tabel.
 
-Belum dikerjakan: `kvStore` masih Dexie (14 pemakai) dan B3 (hapus Dexie +
-`VACUUM INTO`) belum aman karena `messages`, `kvStore`, serta beberapa pembaca
-lain masih memakai Dexie. Default build
-tetap Dexie (keychain dan contactStore hanya memakai SQLite saat
-`VITE_SQLITE_MESSAGES=1`); header OPFS di Vite masih opt-in
-`NYX_SQLITE_OPFS=1`.
+**Selesai 2026-11-20 — `kvStore` pindah ke SQLite:** keempat belas pemakai
+(panic hash, identitas KT, token admin grup, state SPQR + arsip era, Privacy
+Pass, epoch grup, verifikasi fingerprint, installation id, auto-unlock, retry
+riwayat) kini lewat satu pintu `lib/storage/appKv.ts`; Dexie hanya adapter
+cadangan. Nilai lama disalin sekali ke SQLite (marker `sqlite:kv:hydrated:v1`)
+supaya build yang baru mengaktifkan flag tidak tampak kehilangan panic lock atau
+identitas KT. `KvStore.deleteByPrefix` menggantikan `where('key').startsWith()`
+milik Dexie (dipakai `clearSpqrStates`), dan `clearAllKeys` mengosongkan kv
+**sebelum** worker SQLite ditutup. Bukti: `appKv.test.ts` (hidrasi sekali +
+fallback Dexie) dan suite terkait (111 + 51 tes) hijau.
+
+Belum dikerjakan — B3 (hapus Dexie + `VACUUM INTO`), terhalang tiga hal:
+(a) kunci database SQLite sendiri disimpan di `kvStore` Dexie
+(`storage/dbKey.ts`) — butuh bootstrap kunci tanpa Dexie, mis. turunan
+masterSeed; (b) fallback Dexie di keychain/contactStore/KT/`appStorage`/
+`shadowVaultDb` masih dipakai ~33 berkas tes jsdom (tidak ada Worker/OPFS);
+(c) `VACUUM INTO` tidak portabel di worker WASM, jadi tetap lewat dump SQL.
+Default build masih Dexie (`VITE_SQLITE_MESSAGES=1` untuk mengaktifkan SQLite);
+header OPFS di Vite masih opt-in `NYX_SQLITE_OPFS=1`.
 
 ---
 

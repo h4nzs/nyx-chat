@@ -34,6 +34,10 @@ export function createDexieKvStore(
       await database.kvStore.delete(key);
     },
 
+    async deleteByPrefix(prefix: string): Promise<void> {
+      await database.kvStore.where('key').startsWith(prefix).delete();
+    },
+
     async clear(): Promise<void> {
       await database.kvStore.clear();
     },

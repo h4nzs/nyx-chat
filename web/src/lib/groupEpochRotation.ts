@@ -53,12 +53,11 @@ function toMs (value: string | null): number | null {
 
 async function loadStates (): Promise<Record<string, StoredEpochState>> {
   try {
-    const [{ db }, { decryptValueAtRest }] = await Promise.all([
-      import('@lib/db'),
+    const [{ getKvStore }, { decryptValueAtRest }] = await Promise.all([
+      import('@lib/storage/appKv'),
       import('@lib/keychainDb'),
     ]);
-    const row = await db.kvStore.get(KV_KEY);
-    const sealed = (row?.value as Record<string, string> | undefined) ?? {};
+    const sealed = (await (await getKvStore()).get<Record<string, string>>(KV_KEY)) ?? {};
     const states: Record<string, StoredEpochState> = {};
     for (const [conversationId, value] of Object.entries(sealed)) {
       const plain = await decryptValueAtRest(value);
@@ -82,15 +81,14 @@ async function writeState (conversationId: string, state: StoredEpochState | nul
   if (state) memory.set(conversationId, state);
   else memory.delete(conversationId);
   try {
-    const [{ db }, { encryptValueAtRest }] = await Promise.all([
-      import('@lib/db'),
+    const [{ getKvStore }, { encryptValueAtRest }] = await Promise.all([
+      import('@lib/storage/appKv'),
       import('@lib/keychainDb'),
     ]);
-    const row = await db.kvStore.get(KV_KEY);
-    const sealed = (row?.value as Record<string, string> | undefined) ?? {};
+    const sealed = (await (await getKvStore()).get<Record<string, string>>(KV_KEY)) ?? {};
     if (state) sealed[conversationId] = await encryptValueAtRest(JSON.stringify(state));
     else delete sealed[conversationId];
-    await db.kvStore.put({ key: KV_KEY, value: sealed });
+    await (await getKvStore()).put({ key: KV_KEY, value: sealed });
   } catch {
     // Vault terkunci: state tetap di memori, cukup untuk sesi ini.
   }

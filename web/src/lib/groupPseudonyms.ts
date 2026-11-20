@@ -188,12 +188,11 @@ export function storeMyAdminToken(conversationId: string, token: string): void {
   void (async () => {
     try {
       const { encryptValueAtRest } = await import('./keychainDb');
-      const { db } = await import('./db');
+      const { getKvStore } = await import('./storage/appKv');
       const KV_KEY = 'nyx_group_admin_tokens';
-      const item = await db.kvStore.get(KV_KEY);
-      const existing = ((item?.value as Record<string, string> | undefined) || {});
+      const existing = (await (await getKvStore()).get<Record<string, string>>(KV_KEY)) ?? {};
       existing[conversationId] = await encryptValueAtRest(token);
-      await db.kvStore.put({ key: KV_KEY, value: existing });
+      await (await getKvStore()).put({ key: KV_KEY, value: existing });
     } catch (e) {
       console.warn('[RBAC] Failed to persist admin token:', e);
     }
@@ -204,9 +203,8 @@ export function storeMyAdminToken(conversationId: string, token: string): void {
 export async function hydrateMyAdminTokens(): Promise<void> {
   try {
     const { decryptValueAtRest } = await import('./keychainDb');
-    const { db } = await import('./db');
-    const item = await db.kvStore.get('nyx_group_admin_tokens');
-    const existing = ((item?.value as Record<string, string> | undefined) || {});
+    const { getKvStore } = await import('./storage/appKv');
+    const existing = (await (await getKvStore()).get<Record<string, string>>('nyx_group_admin_tokens')) ?? {};
     const convStore = useConversationStore.getState();
     for (const [convId, enc] of Object.entries(existing)) {
       if (!convStore.conversations.some(c => c.id === convId)) continue; // grup sudah tidak ada

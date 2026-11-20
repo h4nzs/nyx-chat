@@ -36,7 +36,7 @@
  * ditulis ke disk seperti biasa.
  */
 
-import { db } from './db';
+import { getKvStore } from './storage/appKv';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
 
 /** Prefix baris state di `kvStore` (satu baris per sesi). */
@@ -108,7 +108,7 @@ async function writeSealedRow(
       `spqr: state terlalu besar (${input.state.length} > ${SPQR_MAX_STATE_BYTES} byte)`
     );
   }
-  await db.kvStore.put({
+  await (await getKvStore()).put({
     key,
     value: await encryptValueAtRest(JSON.stringify({
       v: 2,
@@ -257,10 +257,10 @@ export async function loadSpqrState(sessionId: string): Promise<SpqrStateRecord 
     };
   }
 
-  const row = await db.kvStore.get(stateKey(sessionId));
-  if (typeof row?.value !== 'string') return undefined;
+  const stored = await (await getKvStore()).get<string>(stateKey(sessionId));
+  if (typeof stored !== 'string') return undefined;
 
-  const plain = await decryptValueAtRest(row.value);
+  const plain = await decryptValueAtRest(stored);
   if (!plain) {
     console.warn('[SPQR] State ratchet tidak bisa dibuka (vault terkunci?) — sesi dianggap baru.');
     return undefined;
@@ -277,7 +277,7 @@ export async function deleteSpqrState(sessionId: string): Promise<void> {
   const entry = pending.get(sessionId);
   if (entry?.timer) clearTimeout(entry.timer);
   pending.delete(sessionId);
-  await db.kvStore.delete(stateKey(sessionId));
+  await (await getKvStore()).delete(stateKey(sessionId));
 }
 
 // ---------------------------------------------------------------------------
@@ -307,9 +307,9 @@ async function loadEraState(
   sessionId: string,
   slot: number,
 ): Promise<SpqrStateRecord | undefined> {
-  const row = await db.kvStore.get(eraStateKey(sessionId, slot));
-  if (typeof row?.value !== 'string') return undefined;
-  const plain = await decryptValueAtRest(row.value);
+  const stored = await (await getKvStore()).get<string>(eraStateKey(sessionId, slot));
+  if (typeof stored !== 'string') return undefined;
+  const plain = await decryptValueAtRest(stored);
   if (!plain) return undefined;
   const decoded = decodeStoredRow(plain, `${sessionId}#era_${slot}`);
   if (!decoded) return undefined;
@@ -349,7 +349,7 @@ export async function rotateSpqrStateForNewSession(sessionId: string): Promise<v
             advanced: older.advanced,
           });
         } else {
-          await db.kvStore.delete(eraStateKey(sessionId, slot));
+          await (await getKvStore()).delete(eraStateKey(sessionId, slot));
         }
       }
       await writeSealedRow(eraStateKey(sessionId, 0), {
@@ -382,7 +382,7 @@ export async function loadArchivedSpqrStates(sessionId: string): Promise<SpqrSta
 export async function clearSpqrStates(): Promise<void> {
   discardPendingSpqrState();
   try {
-    await db.kvStore.where('key').startsWith(SPQR_STATE_KEY_PREFIX).delete();
+    await (await getKvStore()).deleteByPrefix(SPQR_STATE_KEY_PREFIX);
   } catch (error) {
     console.warn('[SPQR] Gagal menghapus state braid:', error);
   }
