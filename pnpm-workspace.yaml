@@ -54,7 +54,9 @@ overrides:
   # scripts/audit-exceptions.json dihapus. Rentang >=4.0.4 dibiarkan supaya
   # rilis perbaikan (kalau advisory kembali) otomatis terpakai.
   picomatch: '>=4.0.4'
-  effect: '>=3.20.0'
+  # [Dependabot 2026-11-21] GHSA-7589-6fvf-x4pw: ReDoS di Schema.TemplateLiteral
+  # effect <=3.22.0 (dibawa @prisma/config). Perbaikan terbit di 3.22.1.
+  effect: '>=3.22.1 <4'
   path-to-regexp: '^8.4.0'
   defu: '>=6.1.5'
   lodash: '>=4.18.1'
