@@ -8,16 +8,19 @@ import type { StoryId } from '@nyx/shared';
 import { base64UrlToBytes, bytesToBase64Url } from './base64url';
 import { pickChainState } from './groupEra';
 import { asConversationId, asUserId } from '@nyx/shared';
-import type { ConversationId, UserId, MessageId } from '@nyx/shared';
+import type { ConversationId, UserId } from '@nyx/shared';
 import type { KeyStore } from './storage/types';
+import { createDexieKvStore } from './storage/dexieStores';
+import { createKeyStore } from './storage/keyStore';
 import { useDexieTestFallback } from './storage/testFallback';
 
 // ============================================================
-// [docs/43 §43.11.6 B2] Keychain bertipe di KeyStore SQLite/OPFS.
+// [docs/43 §43.11.6 B2/B3] Keychain bertipe di KeyStore SQLite/OPFS.
 //
-// Seluruh kelompok kunci hot path memakai KeyStore SQLite. `sqliteKeys()`
-// tidak pernah mengembalikan `null`; cabang Dexie yang masih ada di berkas ini
-// adalah sisa migrasi yang tidak dieksekusi (lihat sisa B3 di docs/43).
+// Seluruh kelompok kunci hot path memakai SATU KeyStore. `sqliteKeys()` tidak
+// pernah mengembalikan `null`; tes jsdom memakai `db.kvStore` sebagai KeyStore
+// (lewat `createDexieKvStore`), jadi tidak ada cabang tabel Dexie bertipe di
+// satu pun fungsi CRUD di berkas ini.
 //
 // Impor DINAMIS wajib: rantai statis keychainDb → storage/sqliteMessages →
 // storage/dbKey → keychainDb adalah siklus (kunci database SQLite disegel
@@ -45,13 +48,17 @@ const KEY_PREFIX = {
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 
-/** KeyStore bersama, atau `null` → jalur Dexie (hanya saat tes jsdom). */
-async function sqliteKeys(): Promise<KeyStore | null> {
+/**
+ * KeyStore bersama. Produksi selalu SQLite. Tes jsdom memakai `db.kvStore`
+ * sebagai KeyStore Dexie, sehingga seluruh jalur keychain tetap satu bentuk
+ * (tidak ada cabang tabel Dexie bertipe di fungsi CRUD).
+ */
+async function sqliteKeys(): Promise<KeyStore> {
   try {
     const { openSqliteKeyStore } = await import('./storage/sqliteMessages');
     return await openSqliteKeyStore();
   } catch (error) {
-    if (useDexieTestFallback()) return null;
+    if (useDexieTestFallback()) return createKeyStore(createDexieKvStore(db));
     throw error;
   }
 }
@@ -85,41 +92,26 @@ type GroupParticipantsRow = Parameters<typeof db.groupCachedParticipants.put>[0]
 
 async function getGroupSenderRow(conversationId: string): Promise<GroupSenderRow | undefined> {
   const keys = await sqliteKeys();
-  if (keys) {
-    return decodeJson<GroupSenderRow>(await keys.get(`${KEY_PREFIX.groupSender}${conversationId}`));
-  }
-  return db.groupSenderStates.get(conversationId);
+  return decodeJson<GroupSenderRow>(await keys.get(`${KEY_PREFIX.groupSender}${conversationId}`));
 }
 
 async function putGroupSenderRow(row: GroupSenderRow): Promise<void> {
   const keys = await sqliteKeys();
-  if (keys) {
-    await keys.put(`${KEY_PREFIX.groupSender}${row.conversationId}`, encodeJson(row));
-    return;
-  }
-  await db.groupSenderStates.put(row);
+  await keys.put(`${KEY_PREFIX.groupSender}${row.conversationId}`, encodeJson(row));
 }
 
 async function getGroupReceiverRow(id: string): Promise<GroupReceiverRow | undefined> {
   const keys = await sqliteKeys();
-  if (keys) return decodeJson<GroupReceiverRow>(await keys.get(`${KEY_PREFIX.groupReceiver}${id}`));
-  return db.groupReceiverStates.get(id);
+  return decodeJson<GroupReceiverRow>(await keys.get(`${KEY_PREFIX.groupReceiver}${id}`));
 }
 
 async function putGroupReceiverRow(row: GroupReceiverRow): Promise<void> {
   const keys = await sqliteKeys();
-  if (keys) {
-    await keys.put(`${KEY_PREFIX.groupReceiver}${row.id}`, encodeJson(row));
-    return;
-  }
-  await db.groupReceiverStates.put(row);
+  await keys.put(`${KEY_PREFIX.groupReceiver}${row.id}`, encodeJson(row));
 }
 
 async function listGroupReceiverRows(prefix: string): Promise<GroupReceiverRow[]> {
   const keys = await sqliteKeys();
-  if (!keys) {
-    return db.groupReceiverStates.where('id').startsWith(prefix).toArray();
-  }
   const rows: GroupReceiverRow[] = [];
   for (const name of await keyNames(keys, `${KEY_PREFIX.groupReceiver}${prefix}`)) {
     const row = decodeJson<GroupReceiverRow>(await keys.get(name));
@@ -130,11 +122,7 @@ async function listGroupReceiverRows(prefix: string): Promise<GroupReceiverRow[]
 
 async function deleteGroupReceiverRows(prefix: string): Promise<void> {
   const keys = await sqliteKeys();
-  if (keys) {
-    await deleteByPrefix(keys, `${KEY_PREFIX.groupReceiver}${prefix}`);
-    return;
-  }
-  await db.groupReceiverStates.where('id').startsWith(prefix).delete();
+  await deleteByPrefix(keys, `${KEY_PREFIX.groupReceiver}${prefix}`);
 }
 
 async function deleteByPrefix(keys: KeyStore, prefix: string): Promise<void> {
@@ -537,8 +525,7 @@ export async function archiveGroupReceiverState(state: GroupReceiverState): Prom
       const oldest = archived.shift();
       if (oldest) {
         const keys = await sqliteKeys();
-        if (keys) await keys.delete(`${KEY_PREFIX.groupReceiver}${oldest.id}`);
-        else await db.groupReceiverStates.delete(oldest.id);
+        await keys.delete(`${KEY_PREFIX.groupReceiver}${oldest.id}`);
       }
     }
 
@@ -574,27 +561,13 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
         // add_sender_message_key libsignal: skipped keys hidup di state record).
         const MAX_SKIPPED_KEYS = 200;
         const keys = await sqliteKeys();
-        if (keys) {
-            const names = await keys.keys(`${KEY_PREFIX.groupSkipped}${conversationId}_`);
-            if (names.length >= MAX_SKIPPED_KEYS) {
-                const oldest = names.sort((a, b) => skippedOrder(a) - skippedOrder(b))
-                    .slice(0, names.length - MAX_SKIPPED_KEYS + 1);
-                for (const name of oldest) await keys.delete(name);
-            }
-            await keys.put(`${KEY_PREFIX.groupSkipped}${key}`, Uint8Array.from(TEXT_ENCODER.encode(await encryptValueAtRest(mk))));
-            return;
+        const names = await keys.keys(`${KEY_PREFIX.groupSkipped}${conversationId}_`);
+        if (names.length >= MAX_SKIPPED_KEYS) {
+            const oldest = names.sort((a, b) => skippedOrder(a) - skippedOrder(b))
+                .slice(0, names.length - MAX_SKIPPED_KEYS + 1);
+            for (const name of oldest) await keys.delete(name);
         }
-        const all = await db.groupSkippedKeys.where('key').startsWith(`${conversationId}_`).toArray();
-        if (all.length >= MAX_SKIPPED_KEYS) {
-            const parse = (k: string) => {
-                const m = k.match(/_(\d+)$/);
-                return m ? Number(m[1]) : -1;
-            };
-            const sorted = all.sort((a, b) => parse(a.key) - parse(b.key));
-            const toDelete = sorted.slice(0, all.length - MAX_SKIPPED_KEYS + 1);
-            await db.groupSkippedKeys.bulkDelete(toDelete.map(r => r.key));
-        }
-        await db.groupSkippedKeys.put({ key, mk: await encryptValueAtRest(mk) });
+        await keys.put(`${KEY_PREFIX.groupSkipped}${key}`, Uint8Array.from(TEXT_ENCODER.encode(await encryptValueAtRest(mk))));
     });
 }
 
@@ -604,40 +577,15 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
 export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number, keyId?: string): Promise<string | null> {
     return enqueueWrite(async () => {
         const keys = await sqliteKeys();
-        if (keys && senderDeviceKey && senderDeviceKey !== 'undefined') {
+        if (senderDeviceKey && senderDeviceKey !== 'undefined') {
             const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
             const record = await keys.get(`${KEY_PREFIX.groupSkipped}${key}`);
             if (record) return decryptValueAtRest(TEXT_DECODER.decode(record));
             if (keyId) {
+                // Fallback ke format lama tanpa keyId.
                 const fallbackKey = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
                 const fallbackRecord = await keys.get(`${KEY_PREFIX.groupSkipped}${fallbackKey}`);
                 if (fallbackRecord) return decryptValueAtRest(TEXT_DECODER.decode(fallbackRecord));
-            }
-            return null;
-        }
-
-        if (keys) {
-            // Pesan lama tanpa senderDeviceKey: cocokkan suffix posisi, tetap
-            // memfilter senderId secara ketat (tanpa wildcard device).
-            const prefix = `${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_`;
-            for (const name of await keyNames(keys, prefix)) {
-                if (!name.endsWith(`_${n}`)) continue;
-                const record = await keys.get(name);
-                if (record) return decryptValueAtRest(TEXT_DECODER.decode(record));
-            }
-            return null;
-        }
-
-        if (senderDeviceKey && senderDeviceKey !== 'undefined') {
-            const key = keyId ? `${conversationId}_${senderId}_${senderDeviceKey}_${keyId}_${n}` : `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
-            const record = await db.groupSkippedKeys.get(key);
-            if (record) return decryptValueAtRest(record.mk);
-
-            if (keyId) {
-                // Fallback to legacy format without keyId
-                const fallbackKey = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
-                const fallbackRecord = await db.groupSkippedKeys.get(fallbackKey);
-                if (fallbackRecord) return decryptValueAtRest(fallbackRecord.mk);
             }
 
             // [REWRITE 2026-10-02 — TIDAK ADA SCAN TANPA FILTER] DULU di sini ada
@@ -652,11 +600,13 @@ export async function getGroupSkippedKey(conversationId: string, senderId: strin
 
         // Fallback HANYA untuk pesan lama yang benar-benar tanpa senderDeviceKey:
         // tetap memfilter senderId secara ketat (tanpa wildcard device).
-        const prefix = `${conversationId}_${senderId}_`;
-        const suffix = `_${n}`;
-        const records = await db.groupSkippedKeys.toArray();
-        const found = records.find(r => r.key.startsWith(prefix) && r.key.endsWith(suffix));
-        return found ? decryptValueAtRest(found.mk) : null;
+        const prefix = `${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_`;
+        for (const name of await keyNames(keys, prefix)) {
+            if (!name.endsWith(`_${n}`)) continue;
+            const record = await keys.get(name);
+            if (record) return decryptValueAtRest(TEXT_DECODER.decode(record));
+        }
+        return null;
     });
 }
 
@@ -666,31 +616,14 @@ export async function getGroupSkippedKey(conversationId: string, senderId: strin
 export async function deleteGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number): Promise<void> {
     return enqueueWrite(async () => {
         const keys = await sqliteKeys();
-        if (keys && senderDeviceKey && senderDeviceKey !== 'undefined') {
+        if (senderDeviceKey && senderDeviceKey !== 'undefined') {
             await keys.delete(`${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_${senderDeviceKey}_${n}`);
             return;
         }
 
-        if (keys) {
-            const prefix = `${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_`;
-            for (const name of await keyNames(keys, prefix)) {
-                if (name.endsWith(`_${n}`)) await keys.delete(name);
-            }
-            return;
-        }
-
-        if (senderDeviceKey && senderDeviceKey !== 'undefined') {
-            const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
-            await db.groupSkippedKeys.delete(key);
-            return;
-        }
-        
-        const prefix = `${conversationId}_${senderId}_`;
-        const suffix = `_${n}`;
-        const records = await db.groupSkippedKeys.toArray();
-        const found = records.find(r => r.key.startsWith(prefix) && r.key.endsWith(suffix));
-        if (found) {
-            await db.groupSkippedKeys.delete(found.key);
+        const prefix = `${KEY_PREFIX.groupSkipped}${conversationId}_${senderId}_`;
+        for (const name of await keyNames(keys, prefix)) {
+            if (name.endsWith(`_${n}`)) await keys.delete(name);
         }
     });
 }
@@ -698,33 +631,16 @@ export async function deleteGroupSkippedKey(conversationId: string, senderId: st
 export async function deleteGroupStates(conversationId: string): Promise<void> {
   await enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.groupSender}${conversationId}`);
-          await deleteGroupReceiverRows(`${conversationId}_`);
-          await deleteByPrefix(keys, `${KEY_PREFIX.groupSkipped}${conversationId}_`);
-          return;
-      }
-
-      await db.groupSenderStates.delete(conversationId);
-      await db.groupReceiverStates
-          .where('id')
-          .between(conversationId + "_", conversationId + "_\uffff", true, true)
-          .delete();
-      await db.groupSkippedKeys
-          .where('key')
-          .between(conversationId + "_", conversationId + "_\uffff", true, true)
-          .delete();
+      await keys.delete(`${KEY_PREFIX.groupSender}${conversationId}`);
+      await deleteGroupReceiverRows(`${conversationId}_`);
+      await deleteByPrefix(keys, `${KEY_PREFIX.groupSkipped}${conversationId}_`);
   });
 }
 
 export async function deleteGroupSenderState(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.groupSender}${conversationId}`);
-          return;
-      }
-      await db.groupSenderStates.delete(conversationId);
+      await keys.delete(`${KEY_PREFIX.groupSender}${conversationId}`);
   });
 }
 
@@ -732,11 +648,7 @@ export async function deleteGroupSenderState(conversationId: string): Promise<vo
 export async function deleteGroupReceiverState(id: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.groupReceiver}${id}`);
-          return;
-      }
-      await db.groupReceiverStates.delete(id);
+      await keys.delete(`${KEY_PREFIX.groupReceiver}${id}`);
   });
 }
 
@@ -744,17 +656,9 @@ export async function deleteGroupReceiverState(id: string): Promise<void> {
 export async function clearIdentitySessions(): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await deleteByPrefix(keys, KEY_PREFIX.session);
-          await deleteByPrefix(keys, KEY_PREFIX.ratchet);
-          await deleteByPrefix(keys, KEY_PREFIX.groupSender);
-          return;
-      }
-      await Promise.all([
-          db.ratchetSessions.clear(),
-          db.groupSenderStates.clear(),
-          db.sessionKeys.clear(),
-      ]);
+      await deleteByPrefix(keys, KEY_PREFIX.session);
+      await deleteByPrefix(keys, KEY_PREFIX.ratchet);
+      await deleteByPrefix(keys, KEY_PREFIX.groupSender);
   });
 }
 
@@ -762,19 +666,14 @@ type StoredPreKey = Omit<PreKeyRow, 'encryptedPrivateKey'> & { encryptedPrivateK
 
 async function getPendingHeaderRow(conversationId: string): Promise<PendingHeaderRow | undefined> {
   const keys = await sqliteKeys();
-  if (keys) return decodeJson<PendingHeaderRow>(await keys.get(`${KEY_PREFIX.pendingHeader}${conversationId}`));
-  return db.pendingHeaders.get(conversationId);
+  return decodeJson<PendingHeaderRow>(await keys.get(`${KEY_PREFIX.pendingHeader}${conversationId}`));
 }
 
 export async function storePendingHeader(conversationId: string, header: Record<string, unknown>): Promise<void> {
   return enqueueWrite(async () => {
       const row = { conversationId: conversationId as ConversationId, header };
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.put(`${KEY_PREFIX.pendingHeader}${conversationId}`, encodeJson(row));
-          return;
-      }
-      await db.pendingHeaders.put(row);
+      await keys.put(`${KEY_PREFIX.pendingHeader}${conversationId}`, encodeJson(row));
   });
 }
 
@@ -786,11 +685,7 @@ export async function getPendingHeader(conversationId: string): Promise<Record<s
 export async function deletePendingHeader(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.pendingHeader}${conversationId}`);
-          return;
-      }
-      await db.pendingHeaders.delete(conversationId);
+      await keys.delete(`${KEY_PREFIX.pendingHeader}${conversationId}`);
   });
 }
 
@@ -798,16 +693,12 @@ export async function storeOneTimePreKey(keyId: number, encryptedPrivateKey: Uin
   return enqueueWrite(async () => {
       try {
           const keys = await sqliteKeys();
-          if (keys) {
-              const row: StoredPreKey = {
-                  keyId: Number(keyId),
-                  pqPublicKey,
-                  encryptedPrivateKey: bytesToBase64Url(encryptedPrivateKey),
-              };
-              await keys.put(`${KEY_PREFIX.preKey}${keyId}`, encodeJson(row));
-              return;
-          }
-          await db.preKeys.put({ keyId: Number(keyId), pqPublicKey, encryptedPrivateKey });
+          const row: StoredPreKey = {
+              keyId: Number(keyId),
+              pqPublicKey,
+              encryptedPrivateKey: bytesToBase64Url(encryptedPrivateKey),
+          };
+          await keys.put(`${KEY_PREFIX.preKey}${keyId}`, encodeJson(row));
       } catch (err) {
           console.error(`[KeychainDB] CRITICAL: Failed to save OneTimePreKey ${keyId}`, err);
           throw err;
@@ -817,37 +708,25 @@ export async function storeOneTimePreKey(keyId: number, encryptedPrivateKey: Uin
 
 export async function getOneTimePreKey(keyId: number): Promise<Uint8Array | null> {
   const keys = await sqliteKeys();
-  if (keys) {
-      const row = decodeJson<StoredPreKey>(await keys.get(`${KEY_PREFIX.preKey}${keyId}`));
-      return row ? base64UrlToBytes(row.encryptedPrivateKey) : null;
-  }
-  const record = await db.preKeys.get(keyId);
-  return record ? record.encryptedPrivateKey : null;
+  const row = decodeJson<StoredPreKey>(await keys.get(`${KEY_PREFIX.preKey}${keyId}`));
+  return row ? base64UrlToBytes(row.encryptedPrivateKey) : null;
 }
 
 export async function deleteOneTimePreKey(keyId: number): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.preKey}${keyId}`);
-          return;
-      }
-      await db.preKeys.delete(keyId);
+      await keys.delete(`${KEY_PREFIX.preKey}${keyId}`);
   });
 }
 
 export async function getLastOtpkId(): Promise<number> {
   const keys = await sqliteKeys();
-  if (keys) {
-      let max = 0;
-      for (const name of await keys.keys(KEY_PREFIX.preKey)) {
-          const id = Number(name.slice(KEY_PREFIX.preKey.length));
-          if (Number.isFinite(id) && id > max) max = id;
-      }
-      return max;
+  let max = 0;
+  for (const name of await keys.keys(KEY_PREFIX.preKey)) {
+      const id = Number(name.slice(KEY_PREFIX.preKey.length));
+      if (Number.isFinite(id) && id > max) max = id;
   }
-  const lastKey = await db.preKeys.orderBy('keyId').last();
-  return lastKey ? lastKey.keyId : 0;
+  return max;
 }
 
 export async function addSessionKey(
@@ -858,11 +737,7 @@ export async function addSessionKey(
   return enqueueWrite(async () => {
       const storageKey = `${conversationId}_${sessionId}`;
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.put(`${KEY_PREFIX.session}${storageKey}`, key);
-          return;
-      }
-      await db.sessionKeys.put({ storageKey, conversationId: conversationId as ConversationId, sessionId, key });
+      await keys.put(`${KEY_PREFIX.session}${storageKey}`, key);
   });
 }
 
@@ -872,51 +747,31 @@ export async function getSessionKey(
 ): Promise<Uint8Array | null> {
   const storageKey = `${conversationId}_${sessionId}`;
   const keys = await sqliteKeys();
-  if (keys) return (await keys.get(`${KEY_PREFIX.session}${storageKey}`)) ?? null;
-  const record = await db.sessionKeys.get(storageKey);
-  return record ? record.key : null;
+  return (await keys.get(`${KEY_PREFIX.session}${storageKey}`)) ?? null;
 }
 
 export async function getLatestSessionKey(
   conversationId: string
 ): Promise<{ sessionId: string; key: Uint8Array } | null> {
   const keys = await sqliteKeys();
-  if (keys) {
-      const prefix = `${KEY_PREFIX.session}${conversationId}_`;
-      const names = await keyNames(keys, prefix);
-      const name = names[names.length - 1];
-      if (!name) return null;
-      const key = await keys.get(name);
-      return key ? { sessionId: name.slice(prefix.length), key } : null;
-  }
-
-  const lastSession = await db.sessionKeys
-      .where('storageKey')
-      .between(conversationId + "_", conversationId + "_\uffff", true, true)
-      .last();
-
-  if (lastSession) {
-      return { sessionId: lastSession.sessionId, key: lastSession.key };
-  }
-  return null;
+  const prefix = `${KEY_PREFIX.session}${conversationId}_`;
+  const names = await keyNames(keys, prefix);
+  const name = names[names.length - 1];
+  if (!name) return null;
+  const key = await keys.get(name);
+  return key ? { sessionId: name.slice(prefix.length), key } : null;
 }
 
 export async function storeGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.put(`${KEY_PREFIX.group}${conversationId}`, key);
-          return;
-      }
-      await db.groupKeys.put({ conversationId: conversationId as ConversationId, key });
+      await keys.put(`${KEY_PREFIX.group}${conversationId}`, key);
   });
 }
 
 export async function getGroupKey(conversationId: string): Promise<Uint8Array | null> {
   const keys = await sqliteKeys();
-  if (keys) return (await keys.get(`${KEY_PREFIX.group}${conversationId}`)) ?? null;
-  const record = await db.groupKeys.get(conversationId);
-  return record ? record.key : null;
+  return (await keys.get(`${KEY_PREFIX.group}${conversationId}`)) ?? null;
 }
 
 export async function receiveGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
@@ -926,11 +781,7 @@ export async function receiveGroupKey(conversationId: string, key: Uint8Array): 
 export async function deleteGroupKey(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.group}${conversationId}`);
-          return;
-      }
-      await db.groupKeys.delete(conversationId);
+      await keys.delete(`${KEY_PREFIX.group}${conversationId}`);
   });
 }
 
@@ -956,44 +807,24 @@ export async function storeRatchetSession(conversationId: string, encryptedState
       // Legacy `#archived` (1 slot, pra-2026-10-05) dibaca di getter dan
       // dimigrasi otomatis ke slot baru saat penulisan berikutnya.
       const keys = await sqliteKeys();
-      if (keys) {
-          const main = `${KEY_PREFIX.ratchet}${conversationId}`;
-          const ids = ratchetArchiveIds(conversationId).map(id => `${KEY_PREFIX.ratchet}${id}`);
-          const existing = await keys.get(main);
-          if (existing) {
-              for (let i = ids.length - 1; i > 0; i--) {
-                  const older = await keys.get(ids[i - 1]!);
-                  if (older) await keys.put(ids[i]!, older);
-              }
-              await keys.put(ids[0]!, existing);
-              await keys.delete(`${KEY_PREFIX.ratchet}${conversationId}#archived`);
-          }
-          await keys.put(main, encryptedState);
-          return;
-      }
-      const existing = await db.ratchetSessions.get(conversationId);
+      const main = `${KEY_PREFIX.ratchet}${conversationId}`;
+      const ids = ratchetArchiveIds(conversationId).map(id => `${KEY_PREFIX.ratchet}${id}`);
+      const existing = await keys.get(main);
       if (existing) {
-          const ids = ratchetArchiveIds(conversationId);
-          // Geser FIFO: slot terakhir dibuang, sisanya turun satu posisi.
-          for (let i = RATCHET_ARCHIVE_SLOTS - 1; i > 0; i--) {
-              const older = await db.ratchetSessions.get(ids[i - 1] as ConversationId);
-              if (older) {
-                  await db.ratchetSessions.put({ conversationId: ids[i] as ConversationId, state: older.state });
-              }
+          for (let i = ids.length - 1; i > 0; i--) {
+              const older = await keys.get(ids[i - 1]!);
+              if (older) await keys.put(ids[i]!, older);
           }
-          const legacy = await db.ratchetSessions.get(`${conversationId}#archived` as ConversationId);
-          await db.ratchetSessions.put({ conversationId: ids[0] as ConversationId, state: existing.state });
-          if (legacy) await db.ratchetSessions.delete(`${conversationId}#archived` as ConversationId);
+          await keys.put(ids[0]!, existing);
+          await keys.delete(`${KEY_PREFIX.ratchet}${conversationId}#archived`);
       }
-      await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState });
+      await keys.put(main, encryptedState);
   });
 }
 
 export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
   const keys = await sqliteKeys();
-  if (keys) return (await keys.get(`${KEY_PREFIX.ratchet}${conversationId}`)) ?? null;
-  const record = await db.ratchetSessions.get(conversationId);
-  return record ? record.state : null;
+  return (await keys.get(`${KEY_PREFIX.ratchet}${conversationId}`)) ?? null;
 }
 
 /**
@@ -1005,19 +836,12 @@ export async function getRatchetSession(conversationId: string): Promise<Uint8Ar
 export async function getArchivedRatchetSessions(conversationId: string): Promise<Uint8Array[]> {
   const ids = ratchetArchiveIds(conversationId);
   const keys = await sqliteKeys();
-  if (keys) {
-      const states: Uint8Array[] = [];
-      for (const id of [...ids, `${conversationId}#archived`]) {
-          const state = await keys.get(`${KEY_PREFIX.ratchet}${id}`);
-          if (state) states.push(state);
-      }
-      return states;
+  const states: Uint8Array[] = [];
+  for (const id of [...ids, `${conversationId}#archived`]) {
+      const state = await keys.get(`${KEY_PREFIX.ratchet}${id}`);
+      if (state) states.push(state);
   }
-  const records = await db.ratchetSessions.bulkGet([
-    ...ids.map(id => id as ConversationId),
-    `${conversationId}#archived` as ConversationId
-  ]);
-  return records.filter((r): r is NonNullable<typeof r> => !!r).map(r => r.state);
+  return states;
 }
 
 export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
@@ -1029,36 +853,20 @@ export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Arra
       const convId = headerKey.split('_').slice(0, 2).join('_');
       const MAX_SKIPPED_DR = 200;
       const keys = await sqliteKeys();
-      if (keys) {
-          const prefix = `${KEY_PREFIX.skipped}${convId}_`;
-          const names = await keys.keys(prefix);
-          if (names.length >= MAX_SKIPPED_DR) {
-              const oldest = names.sort((a, b) => skippedOrder(a) - skippedOrder(b))
-                  .slice(0, names.length - MAX_SKIPPED_DR + 1);
-              for (const name of oldest) await keys.delete(name);
-          }
-          await keys.put(`${KEY_PREFIX.skipped}${headerKey}`, encryptedKey);
-          return;
+      const prefix = `${KEY_PREFIX.skipped}${convId}_`;
+      const names = await keys.keys(prefix);
+      if (names.length >= MAX_SKIPPED_DR) {
+          const oldest = names.sort((a, b) => skippedOrder(a) - skippedOrder(b))
+              .slice(0, names.length - MAX_SKIPPED_DR + 1);
+          for (const name of oldest) await keys.delete(name);
       }
-      const all = await db.skippedKeys.where('headerKey').startsWith(`${convId}_`).toArray();
-      if (all.length >= MAX_SKIPPED_DR) {
-          const parseN = (k: string) => {
-              const m = k.match(/_(\d+)$/);
-              return m ? Number(m[1]) : -1;
-          };
-          const sorted = all.sort((a, b) => parseN(a.headerKey) - parseN(b.headerKey));
-          const toDelete = sorted.slice(0, all.length - MAX_SKIPPED_DR + 1);
-          await db.skippedKeys.bulkDelete(toDelete.map(r => r.headerKey));
-      }
-      await db.skippedKeys.put({ headerKey, key: encryptedKey });
+      await keys.put(`${KEY_PREFIX.skipped}${headerKey}`, encryptedKey);
   });
 }
 
 export async function getSkippedKey(headerKey: string): Promise<Uint8Array | null> {
   const keys = await sqliteKeys();
-  if (keys) return (await keys.get(`${KEY_PREFIX.skipped}${headerKey}`)) ?? null;
-  const record = await db.skippedKeys.get(headerKey);
-  return record ? record.key : null;
+  return (await keys.get(`${KEY_PREFIX.skipped}${headerKey}`)) ?? null;
 }
 
 export async function deleteSkippedKey(headerKey: string): Promise<void> {
@@ -1072,80 +880,45 @@ export async function deleteSkippedKey(headerKey: string): Promise<void> {
 export async function deleteRatchetSession(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          for (const id of [conversationId, ...ratchetArchiveIds(conversationId), `${conversationId}#archived`]) {
-              await keys.delete(`${KEY_PREFIX.ratchet}${id}`);
-          }
-          return;
-      }
-      await db.ratchetSessions.delete(conversationId);
       // Hapus juga arsip era lama (wipe percakapan = hapus semua era),
       // termasuk slot FIFO baru dan id legacy `#archived`.
-      const ids = [...ratchetArchiveIds(conversationId), `${conversationId}#archived` as ConversationId];
-      await db.ratchetSessions.bulkDelete(ids);
+      for (const id of [conversationId, ...ratchetArchiveIds(conversationId), `${conversationId}#archived`]) {
+          await keys.delete(`${KEY_PREFIX.ratchet}${id}`);
+      }
   });
 }
 
 export async function deleteSessionKeys(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await deleteByPrefix(keys, `${KEY_PREFIX.session}${conversationId}_`);
-          return;
-      }
-      await db.sessionKeys
-          .where('storageKey')
-          .between(conversationId + "_", conversationId + "_\uffff", true, true)
-          .delete();
+      await deleteByPrefix(keys, `${KEY_PREFIX.session}${conversationId}_`);
   });
 }
 
 export async function deleteGroupReceiverStates(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
      const keys = await sqliteKeys();
-     if (keys) {
-         await deleteGroupReceiverRows(`${conversationId}_`);
-         await deleteByPrefix(keys, `${KEY_PREFIX.groupSkipped}${conversationId}_`);
-         return;
-     }
-
-     await db.groupReceiverStates
-         .where('id')
-         .between(conversationId + "_", conversationId + "_\uffff", true, true)
-         .delete();
-     await db.groupSkippedKeys
-         .where('key')
-         .between(conversationId + "_", conversationId + "_\uffff", true, true)
-         .delete();
+     await deleteGroupReceiverRows(`${conversationId}_`);
+     await deleteByPrefix(keys, `${KEY_PREFIX.groupSkipped}${conversationId}_`);
   });
 }
 
 export async function storeMessageKey(messageId: string, encryptedMk: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.put(`${KEY_PREFIX.messageKey}${messageId}`, encryptedMk);
-          return;
-      }
-      await db.messageKeys.put({ messageId: messageId as MessageId, key: encryptedMk });
+      await keys.put(`${KEY_PREFIX.messageKey}${messageId}`, encryptedMk);
   });
 }
 
 export async function getMessageKey(messageId: string): Promise<Uint8Array | null> {
   const keys = await sqliteKeys();
-  if (keys) return (await keys.get(`${KEY_PREFIX.messageKey}${messageId}`)) ?? null;
-  const record = await db.messageKeys.get(messageId);
-  return record ? record.key : null;
+  return (await keys.get(`${KEY_PREFIX.messageKey}${messageId}`)) ?? null;
 }
 
 export async function deleteMessageKey(messageId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.messageKey}${messageId}`);
-          return;
-      }
-      await db.messageKeys.delete(messageId);
+      await keys.delete(`${KEY_PREFIX.messageKey}${messageId}`);
   });
 }
 
@@ -1162,18 +935,13 @@ export async function deleteConversationKeychain(conversationId: string): Promis
 
 async function getIdentityRow(userId: string): Promise<IdentityRow | undefined> {
   const keys = await sqliteKeys();
-  if (keys) return decodeJson<IdentityRow>(await keys.get(`${KEY_PREFIX.identity}${userId}`));
-  return db.identityKeys.get(userId);
+  return decodeJson<IdentityRow>(await keys.get(`${KEY_PREFIX.identity}${userId}`));
 }
 
 async function putIdentityRow(userId: string, key: string): Promise<void> {
   const row = { userId: userId as UserId, key };
   const keys = await sqliteKeys();
-  if (keys) {
-      await keys.put(`${KEY_PREFIX.identity}${userId}`, encodeJson(row));
-      return;
-  }
-  await db.identityKeys.put(row);
+  await keys.put(`${KEY_PREFIX.identity}${userId}`, encodeJson(row));
 }
 
 export async function saveProfileKey(userId: string, keyB64: string): Promise<void> {
@@ -1202,11 +970,7 @@ export async function getPeerIdentityKey(userId: string): Promise<string | undef
 export async function clearIdentityKeys(): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await deleteByPrefix(keys, KEY_PREFIX.identity);
-          return;
-      }
-      await db.identityKeys.clear();
+      await deleteByPrefix(keys, KEY_PREFIX.identity);
   });
 }
 
@@ -1214,27 +978,17 @@ export async function clearIdentityKeys(): Promise<void> {
 export async function putPqDrSessionRow(row: PqDrSessionRecord): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.put(`${KEY_PREFIX.pqDr}${row.id}`, encodeJson(row));
-          return;
-      }
-      await db.pqDrSessionsV2.put(row);
+      await keys.put(`${KEY_PREFIX.pqDr}${row.id}`, encodeJson(row));
   });
 }
 
 export async function getPqDrSessionRow(id: string): Promise<PqDrSessionRecord | undefined> {
   const keys = await sqliteKeys();
-  if (keys) return decodeJson<PqDrSessionRecord>(await keys.get(`${KEY_PREFIX.pqDr}${id}`));
-  return db.pqDrSessionsV2.get(id);
+  return decodeJson<PqDrSessionRecord>(await keys.get(`${KEY_PREFIX.pqDr}${id}`));
 }
 
 export async function listPqDrSessionRows(conversationId?: string): Promise<PqDrSessionRecord[]> {
   const keys = await sqliteKeys();
-  if (!keys) {
-      return conversationId
-          ? db.pqDrSessionsV2.where('conversationId').equals(conversationId).toArray()
-          : db.pqDrSessionsV2.toArray();
-  }
   const rows: PqDrSessionRecord[] = [];
   for (const name of await keyNames(keys, KEY_PREFIX.pqDr)) {
       const row = decodeJson<PqDrSessionRecord>(await keys.get(name));
@@ -1246,26 +1000,17 @@ export async function listPqDrSessionRows(conversationId?: string): Promise<PqDr
 export async function deletePqDrSessionRow(id: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.delete(`${KEY_PREFIX.pqDr}${id}`);
-          return;
-      }
-      await db.pqDrSessionsV2.delete(id);
+      await keys.delete(`${KEY_PREFIX.pqDr}${id}`);
   });
 }
 
 export async function deletePqDrSessionRows(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       const keys = await sqliteKeys();
-      if (keys) {
-          for (const name of await keyNames(keys, KEY_PREFIX.pqDr)) {
-              const row = decodeJson<PqDrSessionRecord>(await keys.get(name));
-              if (row?.conversationId === conversationId) await keys.delete(name);
-          }
-          return;
+      for (const name of await keyNames(keys, KEY_PREFIX.pqDr)) {
+          const row = decodeJson<PqDrSessionRecord>(await keys.get(name));
+          if (row?.conversationId === conversationId) await keys.delete(name);
       }
-      const records = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).primaryKeys();
-      await db.pqDrSessionsV2.bulkDelete(records);
   });
 }
 
@@ -1277,7 +1022,7 @@ export async function clearAllKeys(): Promise<void> {
       // [docs/43 §43.11.6 B2] Tabel pesan dikosongkan `resetSqliteMessages`;
       // material kunci keychain ada di KeyStore yang sama → hapus per prefix.
       const keys = await sqliteKeys();
-      if (keys) await wipeKeychainKeys(keys).catch(() => {});
+      await wipeKeychainKeys(keys).catch(() => {});
       // `kvStore` dikosongkan SEBELUM worker ditutup: setelah close, adapter
       // akan membuka database baru dengan kunci yang baru saja dihapus.
       const kv = await import('./storage/appKv')
@@ -1325,103 +1070,56 @@ export async function migrateKeychainAtRestEncryption(): Promise<void> {
     if (!masterSeed) return; // session belum ter-unlock — tunda sampai unlock berikutnya
 
     const keys = await sqliteKeys();
-    if (keys) {
-      // 1. Group sender states (CK + initialCK)
-      for (const name of await keyNames(keys, KEY_PREFIX.groupSender)) {
-        const row = decodeJson<GroupSenderRow>(await keys.get(name));
-        if (!row?.state) continue;
-        const state = row.state as unknown as Record<string, unknown>;
-        const rawCk = state.CK;
-        const rawInitialCk = state.initialCK;
-        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
-        const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
-        if (!needsCk && !needsInitialCk) continue;
-        await keys.put(name, encodeJson({
-          ...row,
-          state: {
-            ...state,
-            CK: needsCk ? await encryptValueAtRest(rawCk as string) : state.CK,
-            initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : state.initialCK,
-          },
-        }));
-      }
 
-      // 2. Group receiver states (CK + skippedKeys)
-      for (const name of await keyNames(keys, KEY_PREFIX.groupReceiver)) {
-        const row = decodeJson<GroupReceiverRow>(await keys.get(name));
-        if (!row?.state) continue;
-        const state = row.state as unknown as Record<string, unknown>;
-        const rawCk = state.CK;
-        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
-        const skipped = (state.skippedKeys ?? {}) as Record<string, string>;
-        const needsSkipped = Object.values(skipped).some(
-          (value) => typeof value === 'string' && !value.startsWith(AT_REST_PREFIX),
-        );
-        if (!needsCk && !needsSkipped) continue;
-        await keys.put(name, encodeJson({
-          ...row,
-          state: {
-            ...state,
-            CK: needsCk ? await encryptValueAtRest(rawCk as string) : state.CK,
-            skippedKeys: needsSkipped ? await encryptSkippedKeysAtRest(skipped) : state.skippedKeys,
-          },
-        }));
-      }
+    // 1. Group sender states (CK + initialCK)
+    for (const name of await keyNames(keys, KEY_PREFIX.groupSender)) {
+      const row = decodeJson<GroupSenderRow>(await keys.get(name));
+      if (!row?.state) continue;
+      const state = row.state as unknown as Record<string, unknown>;
+      const rawCk = state.CK;
+      const rawInitialCk = state.initialCK;
+      const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+      const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
+      if (!needsCk && !needsInitialCk) continue;
+      await keys.put(name, encodeJson({
+        ...row,
+        state: {
+          ...state,
+          CK: needsCk ? await encryptValueAtRest(rawCk as string) : state.CK,
+          initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : state.initialCK,
+        },
+      }));
+    }
 
-      // 3. Group skipped keys (mk)
-      for (const name of await keyNames(keys, KEY_PREFIX.groupSkipped)) {
-        const stored = await keys.get(name);
-        if (!stored) continue;
-        const raw = TEXT_DECODER.decode(stored);
-        if (raw.startsWith(AT_REST_PREFIX)) continue;
-        await keys.put(name, Uint8Array.from(TEXT_ENCODER.encode(await encryptValueAtRest(raw))));
-      }
-    } else {
-      // Fallback tes jsdom: Dexie hanya dipakai saat SQLite tidak bisa dibuka.
-      const senderRecords = await db.groupSenderStates.toArray();
-      for (const r of senderRecords) {
-        const rawCk: unknown = r.state.CK;
-        const rawInitialCk: unknown = r.state.initialCK;
-        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
-        const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
-        if (needsCk || needsInitialCk) {
-          await db.groupSenderStates.put({
-            conversationId: r.conversationId,
-            state: {
-              ...r.state,
-              CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
-              initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : r.state.initialCK,
-            },
-          });
-        }
-      }
+    // 2. Group receiver states (CK + skippedKeys)
+    for (const name of await keyNames(keys, KEY_PREFIX.groupReceiver)) {
+      const row = decodeJson<GroupReceiverRow>(await keys.get(name));
+      if (!row?.state) continue;
+      const state = row.state as unknown as Record<string, unknown>;
+      const rawCk = state.CK;
+      const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+      const skipped = (state.skippedKeys ?? {}) as Record<string, string>;
+      const needsSkipped = Object.values(skipped).some(
+        (value) => typeof value === 'string' && !value.startsWith(AT_REST_PREFIX),
+      );
+      if (!needsCk && !needsSkipped) continue;
+      await keys.put(name, encodeJson({
+        ...row,
+        state: {
+          ...state,
+          CK: needsCk ? await encryptValueAtRest(rawCk as string) : state.CK,
+          skippedKeys: needsSkipped ? await encryptSkippedKeysAtRest(skipped) : state.skippedKeys,
+        },
+      }));
+    }
 
-      const receiverRecords = await db.groupReceiverStates.toArray();
-      for (const r of receiverRecords) {
-        const rawCk: unknown = r.state.CK;
-        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
-        let needsSkipped = false;
-        for (const v of Object.values(r.state.skippedKeys || {})) {
-          if (!v.startsWith(AT_REST_PREFIX)) { needsSkipped = true; break; }
-        }
-        if (needsCk || needsSkipped) {
-          await db.groupReceiverStates.put({
-            id: r.id,
-            state: {
-              ...r.state,
-              CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
-              skippedKeys: needsSkipped ? await encryptSkippedKeysAtRest(r.state.skippedKeys) : r.state.skippedKeys,
-            },
-          });
-        }
-      }
-
-      const groupSkippedRecords = await db.groupSkippedKeys.toArray();
-      for (const r of groupSkippedRecords) {
-        if (!r.mk.startsWith(AT_REST_PREFIX)) {
-          await db.groupSkippedKeys.put({ key: r.key, mk: await encryptValueAtRest(r.mk) });
-        }
-      }
+    // 3. Group skipped keys (mk)
+    for (const name of await keyNames(keys, KEY_PREFIX.groupSkipped)) {
+      const stored = await keys.get(name);
+      if (!stored) continue;
+      const raw = TEXT_DECODER.decode(stored);
+      if (raw.startsWith(AT_REST_PREFIX)) continue;
+      await keys.put(name, Uint8Array.from(TEXT_ENCODER.encode(await encryptValueAtRest(raw))));
     }
 
     // 4. Story keys (di store storyKeys — shared dengan ShadowVault)
@@ -1447,11 +1145,7 @@ export async function saveCachedGroupParticipants(conversationId: string, userId
   return enqueueWrite(async () => {
       const row: GroupParticipantsRow = { conversationId, userIds };
       const keys = await sqliteKeys();
-      if (keys) {
-          await keys.put(`${KEY_PREFIX.groupParticipants}${conversationId}`, encodeJson(row));
-          return;
-      }
-      await db.groupCachedParticipants.put(row);
+      await keys.put(`${KEY_PREFIX.groupParticipants}${conversationId}`, encodeJson(row));
   });
 }
 
@@ -1461,12 +1155,8 @@ export async function saveCachedGroupParticipants(conversationId: string, userId
  */
 export async function getCachedGroupParticipants(conversationId: string): Promise<string[] | null> {
   const keys = await sqliteKeys();
-  if (keys) {
-      const row = decodeJson<GroupParticipantsRow>(await keys.get(`${KEY_PREFIX.groupParticipants}${conversationId}`));
-      return row ? row.userIds : null;
-  }
-  const record = await db.groupCachedParticipants.get(conversationId);
-  return record ? record.userIds : null;
+  const row = decodeJson<GroupParticipantsRow>(await keys.get(`${KEY_PREFIX.groupParticipants}${conversationId}`));
+  return row ? row.userIds : null;
 }
 
 /**
@@ -1478,7 +1168,6 @@ export async function listCachedGroupParticipants(): Promise<
   Array<{ conversationId: string; userIds: string[] }>
 > {
   const keys = await sqliteKeys();
-  if (!keys) return db.groupCachedParticipants.toArray();
   const rows: GroupParticipantsRow[] = [];
   for (const name of await keyNames(keys, KEY_PREFIX.groupParticipants)) {
       const row = decodeJson<GroupParticipantsRow>(await keys.get(name));

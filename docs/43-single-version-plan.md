@@ -709,12 +709,23 @@ memverifikasi CK/initialCK/skippedKeys menjadi `ENC1:`, dan membuktikan migrasi
 idempoten. Tes ini juga menangkap bug realm: `TEXT_ENCODER.encode()` harus
 dinormalkan dengan `Uint8Array.from(...)` sebelum masuk KeyStore.
 
-Sisa B3: (a) `keychainDb` CRUD masih menyimpan cabang Dexie untuk fallback tes;
-`migrateAtRestSealing` juga masih menyegel `contacts`/`profileCache` lewat `db`
-(pesan dan migrasi keychain sudah SQLite-first) — seam tes di atas tidak boleh
-menjadi alasan menunda pemindahan ini; (b) `VACUUM INTO` tidak portabel di
-worker WASM, jadi backup tetap lewat dump SQL; (c) header OPFS di Vite dev masih
-`NYX_SQLITE_OPFS=1`.
+**P1c — cabang Dexie keychain dicabut (2026-11-21).** `sqliteKeys()` selalu
+mengembalikan `KeyStore` (produksi SQLite; tes jsdom memakai
+`createDexieKvStore(db)`), jadi seluruh CRUD keychain — session, group key,
+ratchet + arsip, skipped key, prekey, identitas, pending header, message key,
+PQ-DR, cache partisipan, dan migrasi at-rest — berjalan di satu jalur tanpa
+`if (keys)`/`else db`. `keychainDb.ts` turun dari 1.570 ke 1.253 baris.
+`clearAllKeys` sengaja TETAP mengosongkan tabel Dexie bertipe lama: perangkat
+yang upgrade dari klien pra-SQLite tidak boleh menyisakan kunci setelah wipe,
+dan tabelnya baru hilang bersama `db.ts` di B3. Bukti: 22 tes di lima berkas
+keychain/shadowVault (termasuk `shadowVaultDelete` yang kini memeriksa prefix
+`ratchet:`/`gs:`/`gr:`/`gskip:` di `db.kvStore`), suite web 150 berkas/1168 tes,
+`tsc --noEmit` 0, oxlint 0 error.
+
+Sisa B3: (a) `migrateAtRestSealing` masih menyegel `contacts`/`profileCache`
+lewat `db` (pesan dan keychain sudah SQLite-first); (b) `VACUUM INTO` tidak
+portabel di worker WASM, jadi backup tetap lewat dump SQL; (c) header OPFS di
+Vite dev masih `NYX_SQLITE_OPFS=1`.
 
 ---
 
