@@ -425,10 +425,13 @@ describe('[langkah 3] kolom struktur di-seal di tempat', () => {
       seq: 7,
     });
     conversationRows.set('c1', { id: 'c1', isGroup: true, participants: 'VAULT:W10=' });
-    // Baris kontak lama: `updatedAt` masih angka plaintext.
+    // [docs/43 §43.11.6 B3] Baris kontak lama di Dexie sudah tidak dibaca kode
+    // produksi mana pun (kontak hidup di KvStore SQLite dan `saveContactRecord`
+    // menyegel `updatedAt` saat menulis). Baris ini dipakai sebagai penjaga:
+    // migrasi TIDAK boleh menulis Dexie lagi.
     contactRows.set('peer1', { userId: 'peer1', data: 'VAULT:W10=', updatedAt: 1_700_000_000_000 });
 
-    await expect(shadowVault.migrateAtRestSealing()).resolves.toBe(3);
+    await expect(shadowVault.migrateAtRestSealing()).resolves.toBe(2);
 
     const raw = messageRows.get('legacy1')!;
     const sealed = (v: unknown) => typeof v === 'string' && v.startsWith('ENC1:');
@@ -441,9 +444,10 @@ describe('[langkah 3] kolom struktur di-seal di tempat', () => {
     expect(raw.orderBucketMs).toBe(B0);
     expect(raw.createdAt).toBeNull();
     expect(sealed(conversationRows.get('c1')!.isGroup)).toBe(true);
-    expect(sealed(contactRows.get('peer1')!.updatedAt)).toBe(true);
+    // Kontak tidak dimigrasikan lagi: baris Dexie dibiarkan apa adanya.
+    expect(contactRows.get('peer1')!.updatedAt).toBe(1_700_000_000_000);
 
-    // Idempoten: jalan kedua tidak menyentuh apa pun (termasuk tabel kontak).
+    // Idempoten: jalan kedua tidak menyentuh apa pun.
     await expect(shadowVault.migrateAtRestSealing()).resolves.toBe(0);
 
     // …dan nilainya tetap terbaca benar setelah dibuka.

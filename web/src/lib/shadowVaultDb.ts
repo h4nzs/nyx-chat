@@ -331,21 +331,15 @@ class NyxShadowVaultProxy {
       updated += sealedConvs.length;
 
       // [docs/30 WS-F §30.10] Kolom waktu yang masih plaintext di tabel lain:
-      // `ContactRow.updatedAt` (pola aktivitas per kontak) dan
-      // `ProfileCacheRecord.updatedAt`. Tidak ada indeks/query yang
-      // bergantung padanya, jadi cukup di-seal di tempat; baris yang sudah
-      // ter-seal dilewati (idempoten).
-      const contacts = await db.contacts.toArray();
-      const sealedContacts = [];
-      for (const contact of contacts) {
-        if (typeof contact.updatedAt !== 'number') continue;
-        const sealed = await sealLocalNumber(contact.updatedAt);
-        if (!sealed) continue; // vault terkunci
-        sealedContacts.push({ ...contact, updatedAt: sealed });
-      }
-      if (sealedContacts.length > 0) await db.contacts.bulkPut(sealedContacts);
-      updated += sealedContacts.length;
-
+      // `ProfileCacheRecord.updatedAt`. Tidak ada indeks/query yang bergantung
+      // padanya, jadi cukup di-seal di tempat; baris yang sudah ter-seal
+      // dilewati (idempoten).
+      //
+      // [docs/43 §43.11.6 B3] `ContactRow.updatedAt` TIDAK lagi dimigrasikan di
+      // sini: kontak disimpan di KvStore SQLite sebagai satu record utuh dan
+      // `saveContactRecord` sudah menyegel `updatedAt` saat menulis (tidak ada
+      // hidrasi dari Dexie), jadi blok migrasi lama hanya menulis Dexie di jalur
+      // produksi tanpa membaca apa pun yang masih dipakai.
       const profiles = await listAppRows<ProfileCacheRecord>('profileCache');
       const sealedProfiles = [];
       for (const profile of profiles) {

@@ -255,7 +255,7 @@ describe('pembaca vault di atas IndexedDB nyata', () => {
     expect(a2Read?.seq).toBe(7);
   });
 
-  it('migrateAtRestSealing menyegel kolom waktu contacts/profileCache (IndexedDB nyata, idempoten)', async () => {
+  it('migrateAtRestSealing menyegel profileCache dan TIDAK menulis Dexie contacts', async () => {
     const legacyAt = B0 + 7 * MIN;
     await dbInstance.contacts.put({
       userId: 'peer-legacy-time' as never,
@@ -274,14 +274,21 @@ describe('pembaca vault di atas IndexedDB nyata', () => {
     await expect(shadowVault.migrateAtRestSealing()).resolves.toBeGreaterThan(0);
 
     const sealed = (v: unknown) => typeof v === 'string' && v.startsWith('ENC1:');
-    const contact = await dbInstance.contacts.get('peer-legacy-time' as never);
-    expect(sealed(contact?.updatedAt)).toBe(true);
-    expect(String(contact?.updatedAt)).not.toContain(String(legacyAt));
     const profile = await dbInstance.profileCache.get('peer-cache' as never);
     expect(sealed(profile?.updatedAt)).toBe(true);
 
-    // Nilai presisi tetap bisa dibaca (dipakai fallback firstSeenAt/lastSeenAt).
+    // [docs/43 §43.11.6 B3] Kontak hidup di KvStore SQLite dan disegel oleh
+    // jalur tulis (`saveContactRecord`), bukan oleh migrasi; baris Dexie lama
+    // tidak dibaca kode produksi mana pun. Migrasi harus membiarkannya utuh —
+    // kalau blok `db.contacts` kembali ditulis, assertion ini gagal.
+    const contact = await dbInstance.contacts.get('peer-legacy-time' as never);
+    expect(contact?.updatedAt).toBe(legacyAt);
+    // Pembaca lama tetap toleran terhadap baris plaintext (tidak crash).
     expect(await openLocalNumber(contact?.updatedAt)).toBe(legacyAt);
+
+    // Baris mati itu dihapus supaya gate pemindaian mentah di bawah tidak
+    // menghitungnya sebagai kebocoran tabel yang masih dipakai.
+    await dbInstance.contacts.delete('peer-legacy-time' as never);
 
     // Idempoten: jalan kedua tidak menulis ulang apa pun.
     await expect(shadowVault.migrateAtRestSealing()).resolves.toBe(0);

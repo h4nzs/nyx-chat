@@ -722,10 +722,18 @@ keychain/shadowVault (termasuk `shadowVaultDelete` yang kini memeriksa prefix
 `ratchet:`/`gs:`/`gr:`/`gskip:` di `db.kvStore`), suite web 150 berkas/1168 tes,
 `tsc --noEmit` 0, oxlint 0 error.
 
-Sisa B3: (a) `migrateAtRestSealing` masih menyegel `contacts`/`profileCache`
-lewat `db` (pesan dan keychain sudah SQLite-first); (b) `VACUUM INTO` tidak
-portabel di worker WASM, jadi backup tetap lewat dump SQL; (c) header OPFS di
-Vite dev masih `NYX_SQLITE_OPFS=1`.
+**P2 — migrasi at-rest tidak lagi menulis Dexie (2026-11-21).**
+Blok `db.contacts` di `migrateAtRestSealing` (`shadowVaultDb.ts`) dihapus:
+`conversations`/`profileCache` sudah lewat `appStorage` (KvStore SQLite), dan
+`ContactRow.updatedAt` tidak perlu dimigrasikan karena kontak disimpan sebagai
+satu record di KvStore dan `saveContactRecord` menyegel `updatedAt` saat menulis
+(tidak ada hidrasi Dexie → baris lama di Dexie tidak dibaca kode produksi mana
+pun). Tes `shadowVaultOrderIndex` mengunci invarian baru: hasil migrasi `2`
+(pesan + percakapan), baris kontak Dexie dibiarkan apa adanya sebagai penjaga
+bahwa migrasi tidak boleh menulis Dexie lagi, dan putaran kedua `0`.
+
+Sisa B3: (a) `VACUUM INTO` tidak portabel di worker WASM, jadi backup tetap
+lewat dump SQL; (b) header OPFS di Vite dev masih `NYX_SQLITE_OPFS=1`.
 
 ---
 
