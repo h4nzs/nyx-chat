@@ -1,9 +1,10 @@
 /**
- * [docs/43 §43.11.6 B3] Satu-satunya penyimpanan pesan: SQLite OPFS.
+ * [docs/43 §43.11.6 B3] Penyimpanan pesan SQLite OPFS.
  *
- * Dexie sudah dihapus, jadi tidak ada hidrasi maupun fallback. Kegagalan membuka
- * worker/kunci dilempar ke pemanggil — aplikasi lebih baik gagal terlihat
- * daripada diam-diam menulis ke backend lain (atau ke `:memory:`).
+ * Tidak ada hidrasi dari Dexie maupun fallback. Kegagalan membuka worker/kunci
+ * dilempar ke pemanggil — aplikasi lebih baik gagal terlihat daripada diam-diam
+ * menulis ke backend lain (atau ke `:memory:`). `shadowVaultDb` masih menulis
+ * salinan Dexie untuk pembaca legacy; itu sisa B3, bukan jalur cadangan modul ini.
  */
 import type { DecryptedMessageRecord } from '../db';
 import { isExpiredMessageRow } from '../localAtRest';
@@ -24,11 +25,6 @@ let client: SqliteWorkerClient | null = null;
 let store: MessageStore | null = null;
 let kv: KvStore | null = null;
 let opening: Promise<MessageStore> | null = null;
-
-/** Dipertahankan untuk pemanggil lama (backup); SQLite selalu aktif. */
-export function isSqliteMessagesEnabled(): boolean {
-  return true;
-}
 
 /**
  * [docs/43 §43.11.6 B3] Keychain bertipe memakai klien & database yang SAMA
@@ -59,7 +55,7 @@ export interface SqliteBackupDump {
  * diam-diam kehilangan tabel bukan pilihan.
  */
 export async function readSqliteBackup(): Promise<SqliteBackupDump> {
-  await openStore();
+  const active = await openStore();
   if (!kv) throw new Error('Tabel kvStore SQLite tidak tersedia');
 
   const key = await getSqliteMessagesKey();
@@ -135,7 +131,6 @@ export async function restoreSqliteBackup(
     client = active;
     kv = nextKv;
     store = nextStore;
-    degraded = false;
   } catch (error) {
     try {
       await active?.close();

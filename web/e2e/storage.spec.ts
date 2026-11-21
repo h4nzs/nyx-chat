@@ -115,12 +115,6 @@ test.describe('SQLite OPFS lintas tab', () => {
 
       for (const tab of [page, second]) {
         await expect.poll(() => tab.evaluate(() => crossOriginIsolated)).toBe(true);
-        const enabled = await tab.evaluate(async () => {
-          // @ts-ignore — path absolut Vite dev server (runtime-only)
-          const mod = await import('/src/lib/storage/sqliteMessages.ts');
-          return mod.isSqliteMessagesEnabled();
-        });
-        expect(enabled).toBe(true);
       }
 
       await writeRow(page, {

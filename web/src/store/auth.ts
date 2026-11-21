@@ -1092,8 +1092,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       try {
         const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
         const autoUnlockKey = await getDeviceAutoUnlockKey();
+        // Jangan sentuh storage kunci saat tidak ada auto-unlock: pemanggil bisa
+        // sedang membuka SQLite itu sendiri (bootstrap kunci DB) → deadlock.
+        if (!autoUnlockKey) return undefined;
         const encryptedKeys = await getEncryptedKeys();
-        if (!autoUnlockKey || !encryptedKeys) return undefined;
+        if (!encryptedKeys) return undefined;
         const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
         if (!result.success) return undefined;
         privateKeysCache = result.keys;

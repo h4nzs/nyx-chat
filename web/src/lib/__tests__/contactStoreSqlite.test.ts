@@ -5,9 +5,8 @@
 /**
  * [docs/43 §43.11.6 B2] Contact store di KvStore SQLite.
  *
- * Dexie sengaja dibuat melempar: dengan flag SQLite aktif dan marker hidrasi
- * sudah ada, seluruh CRUD kontak harus berhenti di KvStore. Ini menjaga jalur
- * migrasi tidak diam-diam menulis ke dua tempat.
+ * Dexie sengaja dibuat melempar: seluruh CRUD kontak harus berhenti di KvStore,
+ * bukan diam-diam menulis ke dua tempat.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,9 +65,6 @@ vi.mock('@lib/api', () => ({
   authFetch: vi.fn(async () => ({ success: true })),
 }));
 
-vi.stubEnv('VITE_SQLITE_MESSAGES', '1');
-kvRows.set('meta:contacts:hydrated:v1', true);
-
 const {
   deleteContact,
   getAllContacts,
@@ -79,7 +75,6 @@ const {
 describe('contactStore di KvStore SQLite', () => {
   beforeEach(() => {
     kvRows.clear();
-    kvRows.set('meta:contacts:hydrated:v1', true);
   });
 
   it('upsert, baca, daftar, dan hapus tanpa menyentuh Dexie', async () => {

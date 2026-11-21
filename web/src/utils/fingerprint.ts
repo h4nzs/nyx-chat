@@ -1,4 +1,5 @@
-import { getKvStore } from '../lib/storage/appKv';
+import { keyVault } from '../lib/storage/idbKv';
+
 const uuidv4 = () => crypto.randomUUID();
 
 /**
@@ -39,20 +40,20 @@ export async function getBrowserFingerprint(): Promise<string> {
 }
 
 /**
- * Gets or creates a persistent installation ID stored in IndexedDB.
- * This ID survives cache clears (unless IndexedDB is wiped) and is 
- * much more stable than Cookies or LocalStorage.
+ * Gets or creates a persistent installation ID stored in the raw IDB vault.
+ * It must be readable before the SQLite vault is unlocked (API/CSRF headers),
+ * so it cannot live in the SQLite-backed `kvStore`.
  */
 export async function getPersistentInstallationId(): Promise<string> {
   try {
-    const existing = await (await getKvStore()).get<string>('installation_id');
+    const existing = await keyVault.get<string>('installation_id');
     if (existing && typeof existing === 'string') {
       return existing;
     }
     
     // Create a new one if it doesn't exist
     const newId = `nyx_inst_${uuidv4()}`;
-    await (await getKvStore()).put({ key: 'installation_id', value: newId });
+    await keyVault.put({ key: 'installation_id', value: newId });
     return newId;
   } catch (e) {
     console.warn("[Fingerprint] Failed to access IndexedDB, falling back to LocalStorage:", e);

@@ -1,6 +1,6 @@
 /**
- * [docs/43 §43.11.6 B2] Orkestrasi pembaca SQLite: hidrasi Dexie sekali,
- * mirror tulis/hapus, baca per percakapan/id, dan close worker.
+ * [docs/43 §43.11.6 B3] Orkestrasi pembaca SQLite: mirror tulis/hapus, baca
+ * per percakapan/id, dan close worker. Tidak ada hidrasi dari Dexie.
  *
  * Driver worker diganti `node:sqlite` supaya tes ini tidak membutuhkan OPFS,
  * COOP/COEP, atau browser. VFS SQLite3MC sudah diuji terpisah di harness B1.
@@ -27,9 +27,6 @@ const hoisted = vi.hoisted(() => ({
   driver: null as unknown,
   open: vi.fn(),
   close: vi.fn(),
-  dexieRows: [
-    { id: 'm1', conversationId: 'c1', orderBucketMs: 100, content: 'satu' },
-  ],
 }));
 
 vi.mock('../sqliteClient', () => ({
@@ -38,14 +35,6 @@ vi.mock('../sqliteClient', () => ({
 
 vi.mock('../dbKey', () => ({
   getSqliteMessagesKey: async () => new Uint8Array(32),
-}));
-
-vi.mock('../../db', () => ({
-  db: {
-    messages: {
-      toArray: async () => hoisted.dexieRows,
-    },
-  },
 }));
 
 vi.mock('../../localOrderKey', () => ({
@@ -92,7 +81,6 @@ function nodeDriver(database: NodeDatabase) {
 }
 
 vi.stubGlobal('Worker', class {});
-vi.stubEnv('VITE_SQLITE_MESSAGES', '1');
 vi.resetModules();
 
 const sqlite = new DatabaseSync(':memory:');
@@ -107,11 +95,11 @@ afterAll(async () => {
 });
 
 describe('sqliteMessages', () => {
-  it('hydrates once, mirrors writes/deletes, and reads through the contract', async () => {
-    const initial = await messages.readSqliteMessages('c1', 10);
-    expect(initial?.map((row) => row.id)).toEqual(['m1']);
+  it('mirrors writes/deletes and reads through the contract', async () => {
+    expect(await messages.readSqliteMessages('c1', 10)).toEqual([]);
 
     await messages.mirrorMessageRows([
+      { id: 'm1', conversationId: 'c1', orderBucketMs: 100, content: 'satu' } as never,
       { id: 'm2', conversationId: 'c1', orderBucketMs: 200, content: 'dua' } as never,
     ]);
 

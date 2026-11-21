@@ -36,13 +36,12 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
       const mod = await import('/src/lib/storage/sqliteMessages.ts');
       const rows = await mod.readSqliteMessages('opfs-app-smoke', 10);
       return {
-        enabled: mod.isSqliteMessagesEnabled(),
         available: rows !== null,
         count: rows?.length ?? -1,
       };
     });
 
-    expect(storage).toEqual({ enabled: true, available: true, count: 0 });
+    expect(storage).toEqual({ available: true, count: 0 });
 
     const contactId = `opfs-peer-${Date.now()}`;
     const contact = await page.evaluate(async (id) => {

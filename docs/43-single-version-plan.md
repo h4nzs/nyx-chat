@@ -649,13 +649,12 @@ masih terbaca; `backupRestore.test.ts` mengunci pemilihan tabel.
 **Selesai 2026-11-20 — `kvStore` pindah ke SQLite:** keempat belas pemakai
 (panic hash, identitas KT, token admin grup, state SPQR + arsip era, Privacy
 Pass, epoch grup, verifikasi fingerprint, installation id, auto-unlock, retry
-riwayat) kini lewat satu pintu `lib/storage/appKv.ts`; Dexie hanya adapter
-cadangan. Nilai lama disalin sekali ke SQLite (marker `sqlite:kv:hydrated:v1`)
-supaya build yang baru mengaktifkan flag tidak tampak kehilangan panic lock atau
-identitas KT. `KvStore.deleteByPrefix` menggantikan `where('key').startsWith()`
-milik Dexie (dipakai `clearSpqrStates`), dan `clearAllKeys` mengosongkan kv
-**sebelum** worker SQLite ditutup. Bukti: `appKv.test.ts` (hidrasi sekali +
-fallback Dexie) dan suite terkait (111 + 51 tes) hijau.
+riwayat) kini lewat satu pintu `lib/storage/appKv.ts`; tidak ada fallback Dexie.
+SQLite selalu aktif dan tidak ada hidrasi: build ini pre-launch, jadi baris
+Dexie lama sengaja tidak disalin. `KvStore.deleteByPrefix` menggantikan
+`where('key').startsWith()` milik Dexie (dipakai `clearSpqrStates`), dan
+`clearAllKeys` mengosongkan kv **sebelum** worker SQLite ditutup. Bukti:
+`appKv.test.ts` (delegasi SQLite + error tanpa fallback) dan suite terkait hijau.
 
 **B3 langkah 1 selesai 2026-11-20 — kunci DB bebas Dexie.** `storage/idbKv.ts`
 adalah `KvStore` di atas IndexedDB mentah (`nyx-key-vault`); `dbKey` memakainya,
@@ -664,14 +663,58 @@ menulis kunci dari arsip ke vault itu (`persistSqliteMessagesKey`) — sebelumny
 kunci hasil restore tidak pernah disimpan sehingga reload berikutnya membuka DB
 baru dengan kunci perangkat yang salah. Wipe/panic menghapus vault lewat
 `clearSqliteMessagesKey`. Bukti: `idbKv.test.ts` (3 tes, `fake-indexeddb`) +
-suite storage/backup (44 tes).
+suite storage/backup hijau.
 
-Sisa B3: (a) fallback Dexie di keychain/contactStore/KT/`appStorage`/
-`shadowVaultDb` dan ~33 berkas tes jsdom yang memakai `db` langsung (jsdom tidak
-punya Worker/OPFS) — perlu seam injeksi store untuk tes sebelum `db.ts` bisa
-dihapus; (b) `VACUUM INTO` tidak portabel di worker WASM, jadi backup tetap lewat
-dump SQL; (c) default build masih Dexie (`VITE_SQLITE_MESSAGES=1` untuk
-mengaktifkan SQLite; header OPFS di Vite dev masih `NYX_SQLITE_OPFS=1`).
+**Bootstrap vault bebas SQLite (2026-11-21).** Menaruh encrypted private keys
+dan installation ID di SQLite membuat boot menggantung: kunci SQLite ter-seal
+masterSeed, masterSeed berasal dari encrypted keys, dan encrypted keys ada di
+dalam SQLite. Keduanya (dan installation ID, pengenal publik) pindah ke
+`nyx-key-vault`; `getMasterSeedIfUnlocked` berhenti sebelum membaca storage kunci
+bila auto-unlock tidak tersedia. Kunci SQLite tetap ter-seal `ENC1:` masterSeed.
+Bukti: `bootstrapStorage.test.ts` (2 tes, `appKv` dibuat melempar) dan E2E
+`opfsApp.spec.ts` melewati `/register` tanpa spinner.
+
+**Tindak lanjut 2026-11-21 — fallback per-tabel dicabut dari produksi.**
+`appKv`, `appStorage` (conversations/profile/story/offline), contactStore, dan
+tiga state KT tidak lagi membaca atau menulis Dexie di produksi; `sqliteMessages`
+juga tidak lagi menghidrasi pesan dari Dexie. `VITE_SQLITE_MESSAGES` tidak
+dibaca lagi — SQLite selalu menjadi backend, dan kegagalan membukanya dilempar
+ke pemanggil. Marker hidrasi lama (`sqlite:*:hydrated:v1`) hanya tinggal nama
+kunci. Bukti: `appStorageSqlite.test.ts`, `appKv.test.ts`,
+`contactStoreSqlite.test.ts`, `ktStateSqlite.test.ts`, `sqliteMessages.test.ts`,
+dan E2E `opfsApp.spec.ts`.
+
+**Seam tes (2026-11-21).** Tes jsdom tidak punya Worker/OPFS, jadi modul yang
+sebelumnya diuji lewat `db` palsu memakai `web/src/lib/storage/testFallback.ts`:
+hanya saat `MODE === 'test'` dan hanya setelah `openSqlite*` gagal, `appKv`,
+`appStorage`, `contactStore`, `keychainDb`, `ktKv`, dan pembaca ShadowVault
+memakai adapter Dexie. Build produksi/dev tetap fail-closed. Dengan seam ini
+suite penuh **150 berkas / 1168 tes hijau**. Ini bukan pengganti injeksi store:
+saat tes punya fake SQLite, fallback `testFallback.ts` harus dihapus.
+
+**P1a — dual-write pesan dicabut (2026-11-21).** `shadowVault` kini memakai satu
+backend untuk pesan: `writeMessageRows`, `deleteMessageRow`,
+`deleteConversationMessageRows`, `exportDatabase`, `importDatabase`,
+`normalizeOrderIndex`, `migrateAtRestSealing`, dan cleanup kedaluwarsa semuanya
+menulis ke SQLite di produksi. Dexie hanya dipakai bila `openSqlite*` gagal di
+`MODE=test`; tidak ada lagi `bulkPut` SQLite + Dexie untuk baris yang sama.
+Getter `shadowVault.messages` tetap ada sebagai fallback baca tes/kompatibilitas,
+bukan jalur tulis produksi.
+
+**P1b — migrasi at-rest keychain SQLite (2026-11-21).**
+`migrateKeychainAtRestEncryption` kini membaca dan menulis prefix `gs:`/`gr:`/`gskip:`
+lewat KeyStore SQLite; cabang Dexie hanya tersisa untuk fallback tes jsdom.
+`keychainMigrationSqlite.test.ts` memaksa semua akses tabel Dexie melempar,
+memverifikasi CK/initialCK/skippedKeys menjadi `ENC1:`, dan membuktikan migrasi
+idempoten. Tes ini juga menangkap bug realm: `TEXT_ENCODER.encode()` harus
+dinormalkan dengan `Uint8Array.from(...)` sebelum masuk KeyStore.
+
+Sisa B3: (a) `keychainDb` CRUD masih menyimpan cabang Dexie untuk fallback tes;
+`migrateAtRestSealing` juga masih menyegel `contacts`/`profileCache` lewat `db`
+(pesan dan migrasi keychain sudah SQLite-first) — seam tes di atas tidak boleh
+menjadi alasan menunda pemindahan ini; (b) `VACUUM INTO` tidak portabel di
+worker WASM, jadi backup tetap lewat dump SQL; (c) header OPFS di Vite dev masih
+`NYX_SQLITE_OPFS=1`.
 
 ---
 

@@ -166,8 +166,20 @@ function sqliteKtMonitoring(kv: KvStore): KtMonitoringBackend {
   };
 }
 
+async function dexieKtMonitoring(): Promise<KtMonitoringBackend> {
+  const { db } = await import('./db');
+  return {
+    get: (id) => db.ktMonitoring.get(id),
+    put: async (record) => { await db.ktMonitoring.put(record); },
+    delete: async (id) => { await db.ktMonitoring.delete(id); },
+    all: () => db.ktMonitoring.toArray(),
+    clear: () => db.ktMonitoring.clear(),
+  };
+}
+
 async function getKtMonitoringBackend(): Promise<KtMonitoringBackend> {
-  return sqliteKtMonitoring(await openKtSqliteKv());
+  const kv = await openKtSqliteKv();
+  return kv ? sqliteKtMonitoring(kv) : dexieKtMonitoring();
 }
 
 /** Baris mentah untuk panel privasi (nilai tetap ter-seal). */

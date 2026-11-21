@@ -16,6 +16,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import Dexie from 'dexie';
+import type { PqDrSessionRecord } from '../db';
 
 // ─── Stub crypto (mirror bentuk nyata: prefix `ENC1:` + base64) ──────────────
 vi.mock('@lib/keychainDb', () => ({
@@ -26,6 +27,17 @@ vi.mock('@lib/keychainDb', () => ({
   decryptValueAtRest: vi.fn(async (stored: string) =>
     stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null
   ),
+  putPqDrSessionRow: async (row: PqDrSessionRecord) => {
+    await dbInstance.pqDrSessionsV2.put(row);
+  },
+  listPqDrSessionRows: async (conversationId?: string) =>
+    conversationId
+      ? dbInstance.pqDrSessionsV2.where('conversationId').equals(conversationId).toArray()
+      : dbInstance.pqDrSessionsV2.toArray(),
+  deletePqDrSessionRow: async (id: string) => { await dbInstance.pqDrSessionsV2.delete(id); },
+  deletePqDrSessionRows: async (conversationId: string) => {
+    await dbInstance.pqDrSessionsV2.where('conversationId').equals(conversationId).delete();
+  },
 }));
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({

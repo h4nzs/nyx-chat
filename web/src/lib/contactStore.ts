@@ -9,8 +9,8 @@
 //   3. Tiga rumusan derive Participant (id | userId | user.id) tersebar di UI.
 //
 // Solusi (mengadopsi pola Signal — Storage Service + Contact model):
-//   • Lokal  : `KvStore` SQLite (prefix `contacts:`). Dexie sudah dihapus di
-//              B3; tidak ada jalur cadangan per-tabel lagi.
+//   • Lokal  : `KvStore` SQLite (prefix `contacts:`). Tabel ini tidak punya
+//              jalur cadangan Dexie lagi.
 //              Kolom `data` berisi JSON ContactRecord TERENKRIPSI via
 //              encryptVaultText (kunci deterministik dari identity private key
 //              → bisa didekripsi kembali di device mana pun yang me-restore
@@ -24,7 +24,7 @@
 // boleh menghapus kontak lokal.
 // ============================================================================
 
-import type { ContactRow } from './db';
+import { db, type ContactRow } from './db';
 import {
     asUserId,
     getParticipantUserId,
@@ -40,10 +40,9 @@ import { encryptVaultText, decryptVaultText } from './shadowVaultDb';
 // envelope `ENC1:` + pembacaan toleran baris lama (`openLocalNumber`).
 import { openLocalNumber, sealLocalNumber } from './localAtRest';
 import type { KvStore } from './storage/types';
+import { useDexieTestFallback } from './storage/testFallback';
 
-const BUNDLE_VERSION_KEY = 'contact_bundle_version';
 const CONTACT_KEY_PREFIX = 'contacts:';
-const CONTACT_HYDRATED_KEY = 'meta:contacts:hydrated:v1';
 
 /**
  * [docs/43 §43.11.6 B2] Kontak adalah baris JSON (`data` + `updatedAt`), bukan
@@ -85,8 +84,19 @@ function sqliteContacts(kv: KvStore): ContactBackend {
 }
 
 async function getContactBackend(): Promise<ContactBackend> {
-    const { getKvStore } = await import('./storage/appKv');
-    return sqliteContacts(await getKvStore());
+    try {
+        const { openSqliteKvStore } = await import('./storage/sqliteMessages');
+        return sqliteContacts(await openSqliteKvStore());
+    } catch (error) {
+        if (!useDexieTestFallback()) throw error;
+        return {
+            get: (userId) => db.contacts.get(userId),
+            put: async (row) => { await db.contacts.put(row); },
+            delete: async (userId) => { await db.contacts.delete(userId); },
+            all: () => db.contacts.toArray(),
+            clear: () => db.contacts.clear(),
+        };
+    }
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────

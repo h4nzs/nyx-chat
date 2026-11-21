@@ -24,8 +24,8 @@ function getKeyStore(): KeyStore {
  * masterSeed, jadi bootstrap hanya boleh terjadi setelah vault terbuka.
  *
  * Baris yang ada tetapi tidak bisa dibuka **tidak** diganti dengan kunci baru:
- * itu akan membuat database lama tampak kosong. Pemanggil harus jatuh ke Dexie
- * dan melaporkan error.
+ * itu akan membuat database lama tampak kosong. Pemanggil menerima error; jangan
+ * membuat database baru di atas kunci yang salah.
  */
 export async function getSqliteMessagesKey(): Promise<Uint8Array> {
   const store = getKeyStore();
@@ -62,7 +62,7 @@ export async function persistSqliteMessagesKey(key: Uint8Array): Promise<void> {
   await getKeyStore().put(DB_KEY_ID, new TextEncoder().encode(sealed));
 }
 
-/** Wipe/panic: kunci ikut hilang bersama database SQLite-nya. */
+/** Wipe/panic: kunci DB, encrypted keys, dan installation ID ikut hilang. */
 export async function clearSqliteMessagesKey(): Promise<void> {
-  await getKeyStore().delete(DB_KEY_ID);
+  await keyVault.clear();
 }

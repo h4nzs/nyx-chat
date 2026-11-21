@@ -336,11 +336,11 @@ export function needsDexieRead(table: string, sqliteDump: boolean): boolean {
  * Store produksi di atas `./db` + database SQLite. Diimpor **dinamis** supaya
  * modul ini tetap aman di lingkungan test tanpa IndexedDB/Worker.
  *
- * [docs/43 §43.11.6 B3] Saat SQLite aktif, seluruh tabel yang sudah dipindah
- * dibaca dari dump logisnya (`sqliteKv`, `sqliteMessages`) dan **bukan** dari
- * Dexie yang mungkin basi. Restore menulis SQLite lebih dulu; bila arsip berisi
- * SQLite tetapi runtime tidak bisa membukanya, restore gagal sebelum Dexie
- * disentuh — tidak ada pemisahan data diam-diam.
+ * [docs/43 §43.11.6 B3] Seluruh tabel yang sudah dipindah dibaca dari dump
+ * logisnya (`sqliteKv`, `sqliteMessages`) dan **bukan** dari Dexie yang mungkin
+ * basi. Restore menulis SQLite lebih dulu; bila arsip berisi SQLite tetapi
+ * runtime tidak bisa membukanya, restore gagal sebelum Dexie disentuh — tidak
+ * ada pemisahan data diam-diam.
  */
 export async function liveBackupStore(): Promise<BackupStore> {
   const { db } = await import('./db');
@@ -349,7 +349,7 @@ export async function liveBackupStore(): Promise<BackupStore> {
 
   return {
     readTables: async (tables = BACKUP_TABLE_ORDER, onProgress) => {
-      const dump = sqlite.isSqliteMessagesEnabled() ? await sqlite.readSqliteBackup() : null;
+      const dump = await sqlite.readSqliteBackup();
       const out: Record<string, unknown[]> = {};
       for (let i = 0; i < tables.length; i++) {
         const table = tables[i]!;

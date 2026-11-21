@@ -6,8 +6,7 @@
  * [docs/43 §43.11.6 B2] State KT di KvStore SQLite.
  *
  * Dexie sengaja dibuat melempar supaya jalur SQLite tidak diam-diam menulis ke
- * dua tempat. Marker hidrasi sudah dipasang agar tes tidak mencoba membaca
- * Dexie untuk migrasi awal.
+ * dua tempat.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,8 +65,6 @@ vi.mock('@store/auth', () => ({
   },
 }));
 
-vi.stubEnv('VITE_SQLITE_MESSAGES', '1');
-
 const { loadKtStates, saveKtState } = await import('../ktMonitoring');
 const { loadKtConfigPin, saveKtConfigPin } = await import('../ktConfigPin');
 const {
@@ -76,11 +73,8 @@ const {
   storeAnchor,
 } = await import('../ktGossip');
 
-function seedMarkers(): void {
+function resetRows(): void {
   kvRows.clear();
-  kvRows.set('meta:kt:monitoring:hydrated:v1', true);
-  kvRows.set('meta:kt:config:hydrated:v1', true);
-  kvRows.set('meta:kt:gossip:hydrated:v1', true);
 }
 
 const installPin = {
@@ -92,7 +86,7 @@ const installPin = {
 
 describe('state KT di KvStore SQLite', () => {
   beforeEach(() => {
-    seedMarkers();
+    resetRows();
     authState.userId = 'user-kt-sqlite';
     resetKtGossipForTests();
   });

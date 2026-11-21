@@ -10,13 +10,14 @@ import { pickChainState } from './groupEra';
 import { asConversationId, asUserId } from '@nyx/shared';
 import type { ConversationId, UserId, MessageId } from '@nyx/shared';
 import type { KeyStore } from './storage/types';
+import { useDexieTestFallback } from './storage/testFallback';
 
 // ============================================================
 // [docs/43 §43.11.6 B2] Keychain bertipe di KeyStore SQLite/OPFS.
 //
-// Lima kelompok kunci hot path (sessionKeys, groupKeys, ratchetSessions +
-// arsip FIFO, skippedKeys, groupSkippedKeys) memakai KeyStore bila
-// `VITE_SQLITE_MESSAGES=1`; selain itu tetap Dexie (build default).
+// Seluruh kelompok kunci hot path memakai KeyStore SQLite. `sqliteKeys()`
+// tidak pernah mengembalikan `null`; cabang Dexie yang masih ada di berkas ini
+// adalah sisa migrasi yang tidak dieksekusi (lihat sisa B3 di docs/43).
 //
 // Impor DINAMIS wajib: rantai statis keychainDb → storage/sqliteMessages →
 // storage/dbKey → keychainDb adalah siklus (kunci database SQLite disegel
@@ -44,10 +45,15 @@ const KEY_PREFIX = {
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 
-/** KeyStore bersama, atau `null` → jalur Dexie. */
+/** KeyStore bersama, atau `null` → jalur Dexie (hanya saat tes jsdom). */
 async function sqliteKeys(): Promise<KeyStore | null> {
-  const { openSqliteKeyStore } = await import('./storage/sqliteMessages');
-  return openSqliteKeyStore();
+  try {
+    const { openSqliteKeyStore } = await import('./storage/sqliteMessages');
+    return await openSqliteKeyStore();
+  } catch (error) {
+    if (useDexieTestFallback()) return null;
+    throw error;
+  }
 }
 
 /** Kunci ber-prefix, urut leksikografis (semantik indeks string Dexie). */
@@ -56,7 +62,9 @@ async function keyNames(keys: KeyStore, prefix: string): Promise<string[]> {
 }
 
 function encodeJson(value: unknown): Uint8Array {
-  return TEXT_ENCODER.encode(JSON.stringify(value));
+  // `TextEncoder` jsdom/Node bisa berasal dari realm lain; KeyStore memeriksa
+  // `instanceof Uint8Array`, jadi salin ke realm modul ini.
+  return Uint8Array.from(TEXT_ENCODER.encode(JSON.stringify(value)));
 }
 
 function decodeJson<T>(value: Uint8Array | undefined): T | undefined {
@@ -573,7 +581,7 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
                     .slice(0, names.length - MAX_SKIPPED_KEYS + 1);
                 for (const name of oldest) await keys.delete(name);
             }
-            await keys.put(`${KEY_PREFIX.groupSkipped}${key}`, TEXT_ENCODER.encode(await encryptValueAtRest(mk)));
+            await keys.put(`${KEY_PREFIX.groupSkipped}${key}`, Uint8Array.from(TEXT_ENCODER.encode(await encryptValueAtRest(mk))));
             return;
         }
         const all = await db.groupSkippedKeys.where('key').startsWith(`${conversationId}_`).toArray();
@@ -1316,51 +1324,103 @@ export async function migrateKeychainAtRestEncryption(): Promise<void> {
     const masterSeed = await getMasterSeedOrUndefined();
     if (!masterSeed) return; // session belum ter-unlock — tunda sampai unlock berikutnya
 
-    // 1. Group sender states (CK)
-    const senderRecords = await db.groupSenderStates.toArray();
-    for (const r of senderRecords) {
-      const rawCk: unknown = r.state.CK;
-      const rawInitialCk: unknown = r.state.initialCK;
-      const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
-      const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
-      if (needsCk || needsInitialCk) {
-        await db.groupSenderStates.put({
-          conversationId: r.conversationId,
+    const keys = await sqliteKeys();
+    if (keys) {
+      // 1. Group sender states (CK + initialCK)
+      for (const name of await keyNames(keys, KEY_PREFIX.groupSender)) {
+        const row = decodeJson<GroupSenderRow>(await keys.get(name));
+        if (!row?.state) continue;
+        const state = row.state as unknown as Record<string, unknown>;
+        const rawCk = state.CK;
+        const rawInitialCk = state.initialCK;
+        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+        const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
+        if (!needsCk && !needsInitialCk) continue;
+        await keys.put(name, encodeJson({
+          ...row,
           state: {
-            ...r.state,
-            CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
-            initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : r.state.initialCK
-          }
-        });
+            ...state,
+            CK: needsCk ? await encryptValueAtRest(rawCk as string) : state.CK,
+            initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : state.initialCK,
+          },
+        }));
       }
-    }
 
-    // 2. Group receiver states (CK + skippedKeys)
-    const receiverRecords = await db.groupReceiverStates.toArray();
-    for (const r of receiverRecords) {
-      const rawCk: unknown = r.state.CK;
-      const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
-      let needsSkipped = false;
-      for (const v of Object.values(r.state.skippedKeys || {})) {
-        if (!v.startsWith(AT_REST_PREFIX)) { needsSkipped = true; break; }
-      }
-      if (needsCk || needsSkipped) {
-        await db.groupReceiverStates.put({
-          id: r.id,
+      // 2. Group receiver states (CK + skippedKeys)
+      for (const name of await keyNames(keys, KEY_PREFIX.groupReceiver)) {
+        const row = decodeJson<GroupReceiverRow>(await keys.get(name));
+        if (!row?.state) continue;
+        const state = row.state as unknown as Record<string, unknown>;
+        const rawCk = state.CK;
+        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+        const skipped = (state.skippedKeys ?? {}) as Record<string, string>;
+        const needsSkipped = Object.values(skipped).some(
+          (value) => typeof value === 'string' && !value.startsWith(AT_REST_PREFIX),
+        );
+        if (!needsCk && !needsSkipped) continue;
+        await keys.put(name, encodeJson({
+          ...row,
           state: {
-            ...r.state,
-            CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
-            skippedKeys: needsSkipped ? await encryptSkippedKeysAtRest(r.state.skippedKeys) : r.state.skippedKeys
-          }
-        });
+            ...state,
+            CK: needsCk ? await encryptValueAtRest(rawCk as string) : state.CK,
+            skippedKeys: needsSkipped ? await encryptSkippedKeysAtRest(skipped) : state.skippedKeys,
+          },
+        }));
       }
-    }
 
-    // 3. Group skipped keys (mk)
-    const groupSkippedRecords = await db.groupSkippedKeys.toArray();
-    for (const r of groupSkippedRecords) {
-      if (!r.mk.startsWith(AT_REST_PREFIX)) {
-        await db.groupSkippedKeys.put({ key: r.key, mk: await encryptValueAtRest(r.mk) });
+      // 3. Group skipped keys (mk)
+      for (const name of await keyNames(keys, KEY_PREFIX.groupSkipped)) {
+        const stored = await keys.get(name);
+        if (!stored) continue;
+        const raw = TEXT_DECODER.decode(stored);
+        if (raw.startsWith(AT_REST_PREFIX)) continue;
+        await keys.put(name, Uint8Array.from(TEXT_ENCODER.encode(await encryptValueAtRest(raw))));
+      }
+    } else {
+      // Fallback tes jsdom: Dexie hanya dipakai saat SQLite tidak bisa dibuka.
+      const senderRecords = await db.groupSenderStates.toArray();
+      for (const r of senderRecords) {
+        const rawCk: unknown = r.state.CK;
+        const rawInitialCk: unknown = r.state.initialCK;
+        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+        const needsInitialCk = typeof rawInitialCk === 'string' && !rawInitialCk.startsWith(AT_REST_PREFIX);
+        if (needsCk || needsInitialCk) {
+          await db.groupSenderStates.put({
+            conversationId: r.conversationId,
+            state: {
+              ...r.state,
+              CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
+              initialCK: needsInitialCk ? await encryptValueAtRest(rawInitialCk as string) : r.state.initialCK,
+            },
+          });
+        }
+      }
+
+      const receiverRecords = await db.groupReceiverStates.toArray();
+      for (const r of receiverRecords) {
+        const rawCk: unknown = r.state.CK;
+        const needsCk = typeof rawCk === 'string' && !rawCk.startsWith(AT_REST_PREFIX);
+        let needsSkipped = false;
+        for (const v of Object.values(r.state.skippedKeys || {})) {
+          if (!v.startsWith(AT_REST_PREFIX)) { needsSkipped = true; break; }
+        }
+        if (needsCk || needsSkipped) {
+          await db.groupReceiverStates.put({
+            id: r.id,
+            state: {
+              ...r.state,
+              CK: needsCk ? await encryptValueAtRest(rawCk as string) : r.state.CK,
+              skippedKeys: needsSkipped ? await encryptSkippedKeysAtRest(r.state.skippedKeys) : r.state.skippedKeys,
+            },
+          });
+        }
+      }
+
+      const groupSkippedRecords = await db.groupSkippedKeys.toArray();
+      for (const r of groupSkippedRecords) {
+        if (!r.mk.startsWith(AT_REST_PREFIX)) {
+          await db.groupSkippedKeys.put({ key: r.key, mk: await encryptValueAtRest(r.mk) });
+        }
       }
     }
 

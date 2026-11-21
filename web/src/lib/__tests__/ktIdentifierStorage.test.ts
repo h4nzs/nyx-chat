@@ -42,14 +42,17 @@ vi.stubGlobal('sessionStorage', {
   clear: vi.fn(),
 })
 
-vi.mock('../db', () => ({
-  db: {
-    kvStore: {
-      get: vi.fn(async (key: string) => kv.get(key)),
-      put: vi.fn(async (item: { key: string; value: unknown }) => { kv.set(item.key, item) }),
-      delete: vi.fn(async (key: string) => { kv.delete(key) }),
+vi.mock('../storage/appKv', () => ({
+  getKvStore: async () => ({
+    get: async <T,>(key: string) => kv.get(key)?.value as T | undefined,
+    put: async (item: { key: string; value: unknown }) => { kv.set(item.key, item) },
+    delete: async (key: string) => { kv.delete(key) },
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of kv.keys()) if (key.startsWith(prefix)) kv.delete(key)
     },
-  },
+    clear: async () => { kv.clear() },
+    keys: async () => [...kv.keys()],
+  }),
 }))
 vi.mock('../keychainDb', () => ({
   migrateKeychainAtRestEncryption: vi.fn(async () => {}),

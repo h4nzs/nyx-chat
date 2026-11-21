@@ -32,7 +32,9 @@ import {
   readAllSqliteMessages,
   readSqliteMessage,
   readSqliteMessages,
+  readSqliteMessagesByIds,
 } from './storage/sqliteMessages';
+import { useDexieTestFallback } from './storage/testFallback';
 import {
   AT_REST_PREFIX,
   deleteGroupStates,
@@ -53,6 +55,78 @@ import {
   previousOrderBucket,
   resolveOrderInstants,
 } from './localOrderKey';
+
+/** Tes jsdom belum punya Worker/OPFS: baca SQLite boleh gagal → Dexie. */
+async function tryReadSqliteMessages(
+  conversationId: string,
+  limit: number,
+  beforeDate?: string,
+): Promise<DecryptedMessageRecord[] | null> {
+  try {
+    return await readSqliteMessages(conversationId, limit, beforeDate);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    return null;
+  }
+}
+
+async function tryReadAllSqliteMessages(): Promise<DecryptedMessageRecord[] | null> {
+  try {
+    return await readAllSqliteMessages();
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    return null;
+  }
+}
+
+async function tryReadSqliteMessage(
+  id: string,
+): Promise<{ available: boolean; row?: DecryptedMessageRecord } | null> {
+  try {
+    return await readSqliteMessage(id);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    return null;
+  }
+}
+
+async function tryReadSqliteMessagesByIds(ids: string[]): Promise<DecryptedMessageRecord[] | null> {
+  try {
+    return await readSqliteMessagesByIds(ids);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    return null;
+  }
+}
+
+/** Satu backend: SQLite di produksi; Dexie hanya saat tes jsdom. */
+async function writeMessageRows(rows: DecryptedMessageRecord[]): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    await mirrorMessageRows(rows);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    await db.messages.bulkPut(rows);
+  }
+}
+
+async function deleteMessageRow(id: string): Promise<void> {
+  try {
+    await mirrorDeleteMessage(id);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    await db.messages.delete(id);
+  }
+}
+
+async function deleteConversationMessageRows(conversationId: string): Promise<void> {
+  try {
+    await mirrorDeleteConversation(conversationId);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    await db.messages.where('conversationId').equals(conversationId).delete();
+  }
+}
 
 // --- CRYPTO ENGINE FOR IRON VAULT ---
 // Kunci vault (deterministik dari identity private key) di-cache per sesi —
@@ -188,7 +262,7 @@ class NyxShadowVaultProxy {
 
   async exportDatabase(): Promise<string> {
     try {
-      const messages = await db.messages.toArray();
+      const messages = (await tryReadAllSqliteMessages()) ?? await db.messages.toArray();
       return JSON.stringify({ messages });
     } catch (e) {
       console.error("Export DB failed:", e);
@@ -207,8 +281,7 @@ class NyxShadowVaultProxy {
         for (const row of data.messages as DecryptedMessageRecord[]) {
           normalized.push(await ensureOrderFields(row));
         }
-        await db.messages.bulkPut(normalized);
-        await mirrorMessageRows(normalized);
+        await writeMessageRows(normalized);
         console.log(`[ShadowVault] Successfully imported ${normalized.length} messages.`);
       }
     } catch (e) {
@@ -237,16 +310,13 @@ class NyxShadowVaultProxy {
   async migrateAtRestSealing(): Promise<number> {
     let updated = 0;
     try {
-      const rows = await db.messages.toArray();
+      const rows = (await tryReadAllSqliteMessages()) ?? await db.messages.toArray();
       const sealedRows: DecryptedMessageRecord[] = [];
       for (const row of rows) {
         const sealed = await this.sealLegacyStructFields(row);
         if (sealed) sealedRows.push(sealed);
       }
-      if (sealedRows.length > 0) {
-        await db.messages.bulkPut(sealedRows);
-        await mirrorMessageRows(sealedRows);
-      }
+      await writeMessageRows(sealedRows);
       updated += sealedRows.length;
 
       const convs = await listAppRows<ConversationRecord>('conversations');
@@ -408,7 +478,7 @@ class NyxShadowVaultProxy {
    * Mengembalikan jumlah baris yang diperbarui.
    */
   async normalizeOrderIndex(): Promise<number> {
-    const rows = await db.messages.toArray();
+    const rows = (await tryReadAllSqliteMessages()) ?? await db.messages.toArray();
     const updates: DecryptedMessageRecord[] = [];
     for (const row of rows) {
       if (hasIndexableOrder(row) && row.createdAtSealed) continue;
@@ -424,10 +494,7 @@ class NyxShadowVaultProxy {
         updates.push(normalized);
       }
     }
-    if (updates.length > 0) {
-      await db.messages.bulkPut(updates);
-      await mirrorMessageRows(updates);
-    }
+    await writeMessageRows(updates);
     return updates.length;
   }
 
@@ -458,9 +525,14 @@ class NyxShadowVaultProxy {
     if (validMessages.length === 0) return;
 
     try {
+      const ids = validMessages.map((m) => String(m.id));
+      const existingRows = (await tryReadSqliteMessagesByIds(ids))
+        ?? (await Promise.all(ids.map((id) => db.messages.get(id))))
+          .filter((row): row is DecryptedMessageRecord => !!row);
+      const existingById = new Map(existingRows.map((row) => [String(row.id), row]));
       const records: DecryptedMessageRecord[] = [];
       for (const m of validMessages) {
-        const existing = await db.messages.get(m.id);
+        const existing = existingById.get(String(m.id));
         
         let encryptedContent: string | null = null;
         let encryptedRepliedTo: string | undefined = undefined;
@@ -612,8 +684,7 @@ class NyxShadowVaultProxy {
             : existing?.seq
         }));
       }
-      await db.messages.bulkPut(records);
-      await mirrorMessageRows(records);
+      await writeMessageRows(records);
     } catch (err) {
       console.error("Iron Vault Encryption Error:", err);
     }
@@ -621,7 +692,7 @@ class NyxShadowVaultProxy {
 
   async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
-      const sqliteRows = await readSqliteMessages(conversationId, limit, beforeDate);
+      const sqliteRows = await tryReadSqliteMessages(conversationId, limit, beforeDate);
       if (sqliteRows !== null) return this.parseRecordsToMessages(sqliteRows);
 
       const now = Date.now();
@@ -683,9 +754,20 @@ class NyxShadowVaultProxy {
       // Eksekusi pembersihan kadaluarsa tanpa memblokir thread
       queueMicrotask(async () => {
         try {
-          // [docs/30 WS-F langkah 3] `expiresAt` ter-seal → tidak bisa disaring
-          // lewat `.filter()` sinkron Dexie; ambil baris percakapan ini lalu
-          // saring di memori (jalan di luar jalur kritis, via queueMicrotask).
+          // [docs/30 WS-F langkah 3] `expiresAt` ter-seal → saring di memori.
+          // Jalankan pada backend yang sama dengan pembaca: SQLite di produksi,
+          // Dexie hanya saat tes jsdom.
+          const sqliteRows = await tryReadAllSqliteMessages();
+          if (sqliteRows !== null) {
+            const expired: string[] = [];
+            for (const r of sqliteRows) {
+              if (r.conversationId !== conversationId) continue;
+              if (await isExpiredMessageRow(r, now)) expired.push(r.id);
+            }
+            if (expired.length > 0) await mirrorDeleteMessages(expired);
+            return;
+          }
+
           const rows = await db.messages.where('conversationId').equals(conversationId).toArray();
           const expired: string[] = [];
           for (const r of rows) {
@@ -693,11 +775,7 @@ class NyxShadowVaultProxy {
             // pesan biasa tidak boleh dibuang karena deadline server.
             if (await isExpiredMessageRow(r, now)) expired.push(r.id);
           }
-
-          if (expired.length > 0) {
-            await db.messages.bulkDelete(expired);
-            await mirrorDeleteMessages(expired);
-          }
+          if (expired.length > 0) await db.messages.bulkDelete(expired);
         } catch (e) {
             console.error("Failed to clean expired messages:", e);
         }
@@ -888,7 +966,7 @@ class NyxShadowVaultProxy {
    */
   async getMessagesForExport(): Promise<Message[]> {
     try {
-      const sqliteRows = await readAllSqliteMessages();
+      const sqliteRows = await tryReadAllSqliteMessages();
       const rows = sqliteRows ?? await db.messages.toArray();
       const now = Date.now();
       const messages: Message[] = [];
@@ -917,8 +995,8 @@ class NyxShadowVaultProxy {
 
   async getMessage(id: string): Promise<Message | null> {
     try {
-      const sqlite = await readSqliteMessage(id);
-      if (sqlite.available) {
+      const sqlite = await tryReadSqliteMessage(id);
+      if (sqlite?.available) {
         return sqlite.row ? await this.decodeMessageRecord(sqlite.row) : null;
       }
 
@@ -934,8 +1012,7 @@ class NyxShadowVaultProxy {
 
   async deleteMessage(id: string) {
     try {
-      await db.messages.delete(id);
-      await mirrorDeleteMessage(id);
+      await deleteMessageRow(id);
     } catch (e) {
       console.error("Failed to delete message from vault", e);
     }
@@ -972,8 +1049,7 @@ class NyxShadowVaultProxy {
 
   async deleteConversationMessages(conversationId: string) {
     try {
-      await db.messages.where('conversationId').equals(conversationId).delete();
-      await mirrorDeleteConversation(conversationId);
+      await deleteConversationMessageRows(conversationId);
     } catch (e) {
       console.error("Failed to delete conversation messages from vault", e);
     }

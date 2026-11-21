@@ -1,12 +1,10 @@
 /**
- * [docs/43 §43.11.6 B3] IndexedDB mentah khusus kunci database SQLite.
+ * [docs/43 §43.11.6 B3] IndexedDB mentah untuk bootstrap vault.
  *
- * Kunci DB dipakai **sebelum** vault terbuka (restore) dan tidak bisa diturunkan
- * dari masterSeed, jadi tidak boleh ikut tabel SQLite yang justru dibuka oleh
- * kunci itu. Sampai B2 tempatnya `kvStore` Dexie; B3 menghapus Dexie, sehingga
- * bootstrap-nya pindah ke database IDB kecil tanpa dependensi.
- *
- * Nilai disimpan apa adanya (sudah ter-seal `ENC1:` oleh `dbKey.ts`).
+ * Isinya harus bisa dibaca **sebelum** SQLite terbuka: kunci DB (ter-seal
+ * `ENC1:`), blob encrypted private keys (sudah terenkripsi password), dan
+ * installation ID (pengenal publik). Menaruhnya di SQLite menciptakan siklus
+ * karena kunci SQLite sendiri butuh masterSeed dari blob encrypted keys.
  */
 import type { KvItem, KvStore } from './types';
 

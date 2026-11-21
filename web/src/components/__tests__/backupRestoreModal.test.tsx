@@ -59,11 +59,20 @@ vi.mock('@lib/backupRestore', async (importOriginal) => {
 });
 
 vi.mock('@lib/sodiumInitializer', () => ({ getSodium: vi.fn(async () => ({})) }));
-vi.mock('@lib/backupFormat', () => ({ libsodiumBackupCrypto: vi.fn(() => ({})) }));
-vi.mock('@lib/backupPayload', () => ({ libsodiumBackupValueCodec: vi.fn(() => ({})) }));
+vi.mock('@lib/backupFormat', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lib/backupFormat')>();
+  return { ...actual, libsodiumBackupCrypto: vi.fn(() => ({})) };
+});
+vi.mock('@lib/backupPayload', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lib/backupPayload')>();
+  return { ...actual, libsodiumBackupValueCodec: vi.fn(() => ({})) };
+});
 
 const identityKeysClear = vi.fn();
 vi.mock('@lib/db', () => ({ db: { identityKeys: { clear: (...a: unknown[]) => identityKeysClear(...a) } } }));
+vi.mock('@lib/keychainDb', () => ({
+  clearIdentityKeys: (...a: unknown[]) => identityKeysClear(...a),
+}));
 
 import toast from 'react-hot-toast';
 import { ApiError } from '@lib/api';

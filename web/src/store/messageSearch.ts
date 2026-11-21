@@ -14,6 +14,7 @@ import {
   readSqliteConversationRows,
   readSqliteMessagesByIds,
 } from '@lib/storage/sqliteMessages';
+import { useDexieTestFallback } from '@lib/storage/testFallback';
 import type { Message } from "./conversation";
 import type { MessageId } from '@nyx/shared';
 
@@ -44,7 +45,12 @@ export function resetSearchIndexForTests(): void {
  * substring lama tetap utuh).
  */
 async function syncConversationIndex(conversationId: string): Promise<DecryptedMessageRecord[]> {
-  const sqliteRows = await readSqliteConversationRows(conversationId);
+  let sqliteRows: DecryptedMessageRecord[] | null = null;
+  try {
+    sqliteRows = await readSqliteConversationRows(conversationId);
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+  }
   const rows = sqliteRows
     ?? await shadowVault.messages.where('conversationId').equals(conversationId).toArray();
   const fingerprints = indexedFingerprints.get(conversationId) ?? new Map<string, string>();
@@ -134,7 +140,12 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       // persis seperti pencarian substring lama.
       let rawResults: DecryptedMessageRecord[] = conversationRows;
       if (candidateIds) {
-        const sqliteFetched = await readSqliteMessagesByIds(candidateIds);
+        let sqliteFetched: DecryptedMessageRecord[] | null = null;
+        try {
+          sqliteFetched = await readSqliteMessagesByIds(candidateIds);
+        } catch (error) {
+          if (!useDexieTestFallback()) throw error;
+        }
         rawResults = sqliteFetched ?? (await shadowVault.messages.bulkGet(candidateIds))
           .filter((row): row is DecryptedMessageRecord => !!row);
       }

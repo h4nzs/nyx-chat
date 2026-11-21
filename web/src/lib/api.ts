@@ -102,7 +102,7 @@ function combineWithTimeout(
 let onAuthFailure: (() => Promise<void>) | null = null;
 
 // Identifier per-klien untuk state CSRF server (mencegah dua klien saling menimpa token).
-// WAJIB sama dengan installationId yang dikirim flow register/login (kvStore Dexie) —
+// WAJIB sama dengan installationId yang dikirim flow register/login (`nyx-key-vault`) —
 // kalau beda, token CSRF di-generate & divalidasi dengan id berbeda → 403.
 let clientInstallationIdPromise: Promise<string> | null = null;
 

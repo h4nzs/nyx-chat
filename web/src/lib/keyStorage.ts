@@ -1,6 +1,7 @@
 import { isPlainObject } from '@utils/typeGuards';
 // web/src/lib/keyStorage.ts
 import { getKvStore } from './storage/appKv';
+import { keyVault } from './storage/idbKv';
 import { sha256 } from 'hash-wasm';
 import { getSodium } from './sodiumInitializer';
 
@@ -87,23 +88,26 @@ export const checkPanicPassword = async (password: string): Promise<boolean> => 
 };
 
 /**
- * Menyimpan Encrypted Private Keys ke IndexedDB
+ * Menyimpan Encrypted Private Keys ke vault IDB mentah.
+ *
+ * Blob ini sudah terenkripsi dengan password, dan harus dibaca **sebelum**
+ * vault terbuka untuk mendapatkan masterSeed. Menaruhnya di SQLite membuat
+ * siklus: kunci SQLite butuh masterSeed, masterSeed butuh blob ini.
  */
 export const saveEncryptedKeys = async (keysData: string) => {
   try {
-    await set(STORAGE_KEYS.ENCRYPTED_KEYS, keysData);
+    await keyVault.put({ key: STORAGE_KEYS.ENCRYPTED_KEYS, value: keysData });
   } catch (error) {
     console.error('Failed to save keys to IndexedDB:', error);
     throw new Error('Storage failure');
   }
 };
 
-/**
- * Mengambil Encrypted Private Keys dari IndexedDB
- */
+/** Mengambil Encrypted Private Keys dari vault IDB mentah. */
 export const getEncryptedKeys = async (): Promise<string | undefined> => {
   try {
-    return await get<string>(STORAGE_KEYS.ENCRYPTED_KEYS);
+    const value = await keyVault.get<string>(STORAGE_KEYS.ENCRYPTED_KEYS);
+    return typeof value === 'string' ? value : undefined;
   } catch (error) {
     console.error('Failed to retrieve keys from IndexedDB:', error);
     return undefined;
@@ -275,8 +279,9 @@ export const saveDeviceAutoUnlockKey = async (key: string) => {
     // notifikasi (konten didekripsi app-side), jadi persistence permanen tidak diperlukan
     // dan hanya menambah surface bagi penyerang dengan akses disk lokal.
     sessionStorage.setItem(consumeScopedKey(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY), obfKey);
-    // Bersihkan nilai lama yang pernah dipersist ke IndexedDB (migrasi)
-    await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
+    // Nilai lama di SQLite tidak dibaca lagi oleh getDeviceAutoUnlockKey; wipe
+    // mengosongkan seluruh database. Jangan sentuh SQLite di sini — jalur ini
+    // juga berjalan sebelum kunci DB tersedia.
 
     // Sesi sudah ter-unlock → jalankan migrasi enkripsi at-rest keychain,
     // lalu migrasi vault (docs/30 WS-F §30.10 poin 2: baris lama yang masih
@@ -351,8 +356,8 @@ export const clearKeys = async () => {
   try {
     sessionStorage.removeItem(consumeScopedKey(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY));
     sessionStorage.removeItem(consumeScopedKey(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY));
-    // Bersihkan juga sisa persistence IDB dari versi lama + key global legacy
-    await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
+    // Encrypted keys ikut dihapus saat logout; instalasi ID tetap.
+    await keyVault.delete(STORAGE_KEYS.ENCRYPTED_KEYS);
     sessionStorage.removeItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
     sessionStorage.removeItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);
   } catch (error) {

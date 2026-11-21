@@ -121,8 +121,18 @@ function sqliteKtConfig(kv: KvStore): KtConfigBackend {
   };
 }
 
+async function dexieKtConfig(): Promise<KtConfigBackend> {
+  const { db } = await import('./db');
+  return {
+    get: (id) => db.ktConfig.get(id),
+    put: async (row) => { await db.ktConfig.put(row); },
+    clear: () => db.ktConfig.clear(),
+  };
+}
+
 async function getKtConfigBackend(): Promise<KtConfigBackend> {
-  return sqliteKtConfig(await openKtSqliteKv());
+  const kv = await openKtSqliteKv();
+  return kv ? sqliteKtConfig(kv) : dexieKtConfig();
 }
 
 /** Id akun yang sedang login; `undefined` bila belum/tidak ada sesi. */

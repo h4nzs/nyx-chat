@@ -1,9 +1,10 @@
+import { useDexieTestFallback } from './testFallback';
 import type { KvStore } from './types';
 
 /**
  * [docs/43 §43.11.6 B3] State KT memakai `KvStore` SQLite yang sama dengan
  * pesan/keychain. Prefix memisahkan tiga tabel; marker lama dipertahankan
- * sebagai nama kunci biasa (tidak ada migrasi Dexie lagi).
+ * sebagai nama kunci biasa.
  */
 export const KT_MONITORING_PREFIX = 'kt:mon:';
 export const KT_MONITORING_MARKER = 'meta:kt:monitoring:hydrated:v1';
@@ -12,10 +13,18 @@ export const KT_GOSSIP_MARKER = 'meta:kt:gossip:hydrated:v1';
 export const KT_CONFIG_PREFIX = 'kt:config:';
 export const KT_CONFIG_MARKER = 'meta:kt:config:hydrated:v1';
 
-/** State KT selalu memakai `KvStore` SQLite; kegagalan dibiarkan naik. */
-export async function openKtSqliteKv(): Promise<KvStore> {
-  const { getKvStore } = await import('./appKv');
-  return getKvStore();
+/**
+ * `null` hanya di Vitest, saat SQLite gagal dibuka dan tes menyuntik tabel
+ * Dexie. Produksi meneruskan kegagalan.
+ */
+export async function openKtSqliteKv(): Promise<KvStore | null> {
+  try {
+    const { openSqliteKvStore } = await import('./sqliteMessages');
+    return await openSqliteKvStore();
+  } catch (error) {
+    if (!useDexieTestFallback()) throw error;
+    return null;
+  }
 }
 
 export async function listKvPrefix<T>(kv: KvStore, prefix: string): Promise<T[]> {

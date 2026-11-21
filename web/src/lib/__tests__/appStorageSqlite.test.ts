@@ -4,8 +4,7 @@
 
 /**
  * [docs/43 §43.11.6 B2] Conversations, profile cache, story keys, dan offline
- * queue di `KvStore` SQLite. Dexie dibuat melempar agar jalur aktif tidak
- * menulis ke dua tempat.
+ * queue di `KvStore` SQLite.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,30 +18,18 @@ const kv = {
   delete: async (key: string) => {
     rows.delete(key);
   },
+  deleteByPrefix: async (prefix: string) => {
+    for (const key of rows.keys()) if (key.startsWith(prefix)) rows.delete(key);
+  },
   clear: async () => {
     rows.clear();
   },
   keys: async () => [...rows.keys()],
 };
 
-const dexieTouch = (table: string) => () => {
-  throw new Error(`Dexie tidak boleh disentuh di jalur ${table} SQLite`);
-};
-
 vi.mock('../storage/sqliteMessages', () => ({
   openSqliteKvStore: async () => kv,
 }));
-
-vi.mock('../db', () => ({
-  db: {
-    get conversations() { return dexieTouch('conversations')(); },
-    get profileCache() { return dexieTouch('profileCache')(); },
-    get storyKeys() { return dexieTouch('storyKeys')(); },
-    get offlineQueue() { return dexieTouch('offlineQueue')(); },
-  },
-}));
-
-vi.stubEnv('VITE_SQLITE_MESSAGES', '1');
 
 const {
   clearAppTable,

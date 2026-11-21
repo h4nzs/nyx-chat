@@ -7,6 +7,7 @@
 //
 // keyStorage membaca identitas via globalThis.__nyxAuthStore (di-set auth store)
 // dan fallback localStorage 'user'. Di sini keduanya di-stub langsung.
+import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const sessionStore = new Map<string, string>()

@@ -5,7 +5,7 @@
 /**
  * [docs/43 §43.11.6 B2] Tabel keychain residual di KeyStore SQLite.
  *
- * Dexie sengaja dibuat melempar: dengan flag SQLite aktif, preKeys,
+ * Dexie sengaja dibuat melempar: preKeys,
  * identityKeys, pendingHeaders, messageKeys, state grup, cache partisipan, dan
  * sesi PQ-DR tidak boleh menulis ke dua tempat. Kunci biner harus round-trip
  * sebagai byte, bukan JSON `Uint8Array`.
@@ -70,8 +70,6 @@ vi.mock('@lib/sodiumInitializer', () => ({
     base64_variants: { URLSAFE_NO_PADDING: 1 },
   }),
 }));
-
-vi.stubEnv('VITE_SQLITE_MESSAGES', '1');
 
 const {
   clearIdentityKeys,
