@@ -13,13 +13,10 @@ const e2eServerEnv: Record<string, string> = {
     : {}),
 };
 
-// [docs/43 §43.11.3] Smoke aplikasi di bawah header OPFS. Opt-in supaya suite
-// default tetap berjalan tanpa COOP/COEP; step CI menyalakannya khusus untuk
-// `opfsApp.spec.ts`.
+// [docs/43 §43.11.3] Smoke aplikasi di bawah header OPFS (COOP/COEP sekarang
+// selalu dipasang dev server). Opt-in hanya menentukan apakah `opfsApp.spec.ts`
+// ikut dijalankan: spec itu butuh stack bersih tanpa reset DB global.
 const opfsAppE2E = process.env.NYX_E2E_OPFS_APP === '1';
-const opfsAppEnv: Record<string, string> = opfsAppE2E
-  ? { NYX_SQLITE_OPFS: '1', VITE_SQLITE_MESSAGES: '1' }
-  : {};
 const ignoredSpecs = [/a11y\.spec\.ts/, /pir\.spec\.ts/, /storage\.spec\.ts/];
 if (!opfsAppE2E) ignoredSpecs.push(/opfsApp\.spec\.ts/);
 
@@ -33,8 +30,9 @@ export default defineConfig({
   // `playwright.pir.config.ts` / `test:e2e:pir`). Di stack E2E default PIR mati,
   // jadi spec itu dijalankan job drills `pir-e2e`, bukan di sini.
   // `storage.spec.ts` punya stack sendiri (`playwright.storage.config.ts`:
-  // COOP/COEP + VITE_SQLITE_MESSAGES=1). Jangan memasukkannya ke suite default;
-  // tanpa header itu spec hanya akan menguji fallback, bukan SQLite OPFS.
+  // Vite :5274 tanpa API). Jangan memasukkannya ke suite default; stack itu
+  // sengaja tanpa reset DB global. Header COOP/COEP kini dipasang semua dev
+  // server, jadi spec tetap menguji SQLite OPFS sungguhan.
   testIgnore: ignoredSpecs,
   fullyParallel: true,
   // workers: 1 (serial) — suite berbagi 1 server dev + Postgres/Redis lokal;
@@ -121,7 +119,6 @@ export default defineConfig({
         VITE_API_URL: '/api',
         VITE_PIR_ENABLED: '0',
         VITE_OHTTP_ENABLED: '0',
-        ...opfsAppEnv,
       },
     }
   ],

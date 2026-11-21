@@ -71,14 +71,14 @@ export default defineConfig(({ mode }) => {
       ? undefined
       : (proxyPath: string) => proxyPath.replace(/^\/api\/ohttp\/relay/, '/relay');
   // [docs/43 §43.11.3] VFS SQLite `opfs` butuh SharedArrayBuffer, jadi dokumen
-  // harus cross-origin isolated. Opt-in sampai worker SQLite di-wire (B2):
-  // menyalakannya sekarang mengubah perilaku semua aset lintas-origin di E2E.
-  const sqliteOpfsHeaders = process.env.NYX_SQLITE_OPFS === '1'
-    ? {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-    }
-    : {};
+  // HARUS cross-origin isolated. Sejak Dexie dilepas (B3) tidak ada lagi jalur
+  // cadangan, jadi header ini selalu dipasang di dev — sama seperti produksi
+  // (`ops/nginx/nyx.conf`). Sebelumnya opt-in `NYX_SQLITE_OPFS=1`, dan suite
+  // E2E default tanpa header itu gagal total (`sqlite3mc_vfs_create` rc 12).
+  const sqliteOpfsHeaders = {
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+  };
 
   return {
   plugins: [

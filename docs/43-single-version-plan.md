@@ -540,16 +540,15 @@ menyajikan data parsial. Tes `__tests__/sqliteMessages.test.ts` (2 tes,
 `node:sqlite` + worker mock) mengunci hidrasi, mirror, baca, hapus, dan close.
 
 E2E `storage.spec.ts` berjalan di stack terpisah
-(`playwright.storage.config.ts`, Vite :5274, `NYX_SQLITE_OPFS=1` +
-`VITE_SQLITE_MESSAGES=1`): dua tab berbagi database OPFS yang sama, tab kedua
-membaca tulisan tab pertama, lalu tab pertama membaca tulisan tab kedua. Spec
-ini sengaja di-`testIgnore` dari suite default supaya tidak dianggap lulus
-lewat fallback Dexie; jalankan dengan
+(`playwright.storage.config.ts`, Vite :5274): dua tab berbagi database OPFS
+yang sama, tab kedua membaca tulisan tab pertama, lalu tab pertama membaca
+tulisan tab kedua. Spec ini sengaja di-`testIgnore` dari suite default supaya
+tidak dianggap lulus lewat fallback Dexie; jalankan dengan
 `pnpm --filter nyx-web run test:e2e:storage`.
 
 `e2e/opfsApp.spec.ts` menutup celah yang tidak bisa dibuktikan fixture: dengan
-`NYX_E2E_OPFS_APP=1`, config default memasang COOP/COEP +
-`VITE_SQLITE_MESSAGES=1`, spec mendaftarkan akun nyata, memeriksa
+`NYX_E2E_OPFS_APP=1` (yang kini hanya menentukan apakah spec ini ikut jalan),
+spec mendaftarkan akun nyata, memeriksa
 `crossOriginIsolated` di `/login` dan `/chat`, mencatat request/console yang
 terblokir COEP, lalu memanggil `readSqliteMessages` setelah vault di-unlock.
 Spec ini dijalankan sebagai step terpisah di job `e2e`, bukan bagian suite
@@ -733,7 +732,22 @@ pun). Tes `shadowVaultOrderIndex` mengunci invarian baru: hasil migrasi `2`
 bahwa migrasi tidak boleh menulis Dexie lagi, dan putaran kedua `0`.
 
 Sisa B3: (a) `VACUUM INTO` tidak portabel di worker WASM, jadi backup tetap
-lewat dump SQL; (b) header OPFS di Vite dev masih `NYX_SQLITE_OPFS=1`.
+lewat dump SQL.
+
+**P3 — header OPFS selalu aktif di dev (2026-11-21).** B3 mencabut jalur
+cadangan Dexie, sehingga VFS `opfs` yang gagal dipasang (`sqlite3mc_vfs_create`
+rc 12 tanpa cross-origin isolation) membuat aplikasi tidak berfungsi sama
+sekali, bukan men-degrade. Regresi itu masuk ke `main` tanpa terlihat karena
+suite E2E default berjalan tanpa COOP/COEP: run `8f882c06`, `7f9ee131`,
+`13803ae0`, dan `ba6bce64` semuanya `cancelled` di job E2E (timeout 40/45 menit,
+setiap spec gagal ~3 menit), terakhir hijau `0de3794f` (2026-11-19).
+`web/vite.config.ts` kini selalu memasang `Cross-Origin-Opener-Policy:
+same-origin` + `Cross-Origin-Embedder-Policy: require-corp` (sama dengan
+`ops/nginx/nyx.conf`), dan `playwright.config.ts` /
+`playwright.storage.config.ts` tidak lagi menyetel `NYX_SQLITE_OPFS` maupun
+`VITE_SQLITE_MESSAGES` (keduanya sisa mati). Bukti: `auth.spec` register 1,1 m
+(sebelumnya 3,2 m timeout), `backupRestore.spec` 1,4 m, `chat.spec` 2,9 m —
+ketiganya lulus tanpa variabel lingkungan tambahan.
 
 ---
 

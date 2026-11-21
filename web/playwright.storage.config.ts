@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
 // [docs/43 §43.11.3] Stack E2E khusus storage: hanya Vite + browser, tanpa
-// API/Postgres/Redis dan tanpa global reset DB. Flag SQLite dan COOP/COEP
-// dipasang di webServer supaya tidak mengubah suite E2E default.
+// API/Postgres/Redis dan tanpa global reset DB. COOP/COEP kini selalu dipasang
+// dev server (SQLite OPFS wajib cross-origin isolated), jadi yang khas di sini
+// hanya port dan spec-nya.
 const WEB_PORT = 5274;
 
 export default defineConfig({
@@ -27,8 +28,6 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120 * 1000,
       env: {
-        NYX_SQLITE_OPFS: '1',
-        VITE_SQLITE_MESSAGES: '1',
         // Aplikasi boleh memanggil API; spec storage tidak bergantung padanya.
         VITE_API_URL: '/api',
         VITE_PIR_ENABLED: '0',
