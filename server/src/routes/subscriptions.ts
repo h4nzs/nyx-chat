@@ -33,6 +33,13 @@ router.post('/create-crypto-transaction', requireAuth, async (req: Request, res:
   try {
     if (!req.user) throw new ApiError(401, 'Unauthorized');
 
+    // [docs/43 §43.15.2 #3] Fail-closed seperti webhook: panggilan NOWPayments
+    // dengan kunci kosong berakhir 500 generik. Tanpa konfigurasi, jawab 503
+    // yang bisa dibedakan klien/operator dan jangan menyentuh provider.
+    if (!nowPaymentsApiKey) {
+      return res.status(503).json({ error: 'PAYMENTS_NOT_CONFIGURED' });
+    }
+
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user) throw new ApiError(404, 'User not found');
 
