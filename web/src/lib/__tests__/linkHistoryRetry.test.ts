@@ -12,18 +12,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const kv = vi.hoisted(() => new Map<string, unknown>());
 const receive = vi.hoisted(() => vi.fn());
 
-vi.mock('@lib/db', () => ({
-  db: {
-    kvStore: {
-      get: async (key: string) => (kv.has(key) ? { key, value: kv.get(key) } : undefined),
-      put: async (row: { key: string; value: unknown }) => {
-        kv.set(row.key, row.value);
-      },
-      delete: async (key: string) => {
-        kv.delete(key);
-      },
+vi.mock('@lib/storage/sqliteMessages', () => ({
+  openSqliteKvStore: async () => ({
+    get: async (key: string) => kv.get(key),
+    put: async (row: { key: string; value: unknown }) => {
+      kv.set(row.key, row.value);
     },
-  },
+    delete: async (key: string) => {
+      kv.delete(key);
+    },
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of kv.keys()) if (key.startsWith(prefix)) kv.delete(key);
+    },
+    clear: async () => kv.clear(),
+    keys: async () => [...kv.keys()],
+  }),
 }));
 
 vi.mock('../linkHistoryImport', () => ({

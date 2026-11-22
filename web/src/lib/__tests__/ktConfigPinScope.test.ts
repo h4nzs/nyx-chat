@@ -18,26 +18,29 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({
-  rows: new Map<string, { id: string; blob: string }>(),
-  userId: undefined as string | undefined,
-}));
-
-vi.mock('../db', () => ({
-  db: {
-    ktConfig: {
-      get: async (id: string) => state.rows.get(id),
-      put: async (row: { id: string; blob: string }) => {
-        state.rows.set(row.id, row);
-      },
-      delete: async (id: string) => {
-        state.rows.delete(id);
-      },
-      clear: async () => {
-        state.rows.clear();
-      },
+const state = vi.hoisted(() => {
+  const rows = new Map<string, { id: string; blob: string }>();
+  const kv = {
+    get: async (key: string) => rows.get(key),
+    put: async (item: { key: string; value: { id: string; blob: string } }) => {
+      rows.set(item.key, item.value);
     },
-  },
+    delete: async (key: string) => {
+      rows.delete(key);
+    },
+    clear: async () => {
+      rows.clear();
+    },
+    keys: async () => [...rows.keys()],
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of rows.keys()) if (key.startsWith(prefix)) rows.delete(key);
+    },
+  };
+  return { rows, kv, userId: undefined as string | undefined };
+});
+
+vi.mock('../storage/sqliteMessages', () => ({
+  openSqliteKvStore: async () => state.kv,
 }));
 
 vi.mock('@store/auth', () => ({
@@ -52,6 +55,7 @@ vi.mock('../keychainDb', () => ({
     value.startsWith('ENC1:') ? value.slice('ENC1:'.length) : value,
 }));
 
+import { KT_CONFIG_PREFIX } from '../storage/ktKv';
 import {
   KT_CONFIG_ROW_ID,
   clearKtConfigPin,
@@ -61,6 +65,8 @@ import {
   saveKtConfigPin,
   type KtConfigPin,
 } from '../ktConfigPin';
+
+const storedKey = (id: string) => `${KT_CONFIG_PREFIX}${id}`;
 
 const pinFor = (mode: number): KtConfigPin => ({
   abiVersion: 2,
@@ -83,7 +89,7 @@ describe('pin konfigurasi KT per akun', () => {
   it('pin bertahan setelah logout (akun yang sama memakai pin yang sama)', async () => {
     state.userId = 'user-a';
     await saveKtConfigPin(pinFor(1));
-    expect(state.rows.has(ktConfigPinRowId('user-a'))).toBe(true);
+    expect(state.rows.has(storedKey(ktConfigPinRowId('user-a')))).toBe(true);
 
     // Logout = tidak ada sesi; modul tidak menghapus baris apa pun.
     state.userId = undefined;
@@ -120,7 +126,7 @@ describe('pin konfigurasi KT per akun', () => {
     expect(await loadKtConfigPin()).toBeUndefined();
     await saveKtConfigPin(pinFor(3));
     expect(state.rows.size).toBe(1);
-    expect(state.rows.has(ktConfigPinRowId('user-a'))).toBe(true);
+    expect(state.rows.has(storedKey(ktConfigPinRowId('user-a')))).toBe(true);
   });
 
   // [audit N9-02] "belum di-pin" dan "tidak tahu pin" tidak boleh sama:
@@ -137,14 +143,14 @@ describe('pin konfigurasi KT per akun', () => {
     expect((await resolveKtConfigPin()).status).toBe('unknown-account');
 
     state.userId = 'user-a';
-    state.rows.set(ktConfigPinRowId('user-a'), {
+    state.rows.set(storedKey(ktConfigPinRowId('user-a')), {
       id: ktConfigPinRowId('user-a'),
       blob: 'bukan-json',
     });
     expect((await resolveKtConfigPin()).status).toBe('unreadable');
 
     // Pin ABI 2 yang bentuknya tidak sah juga bukan "belum di-pin".
-    state.rows.set(ktConfigPinRowId('user-a'), {
+    state.rows.set(storedKey(ktConfigPinRowId('user-a')), {
       id: ktConfigPinRowId('user-a'),
       blob: 'ENC1:' + JSON.stringify({ abiVersion: 2, mode: 1, signatureKey: 'pendek' }),
     });

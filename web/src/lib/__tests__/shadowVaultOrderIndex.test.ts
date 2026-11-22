@@ -150,6 +150,28 @@ vi.mock('../db', () => ({
 
 // Vault crypto di-stub: isi konten juga, supaya round-trip tulis→baca kolom
 // struktur (langkah 3) bisa diuji tanpa masterSeed/crypto worker.
+// [docs/43 §43.11.6 B3] conversations/profileCache dibaca lewat appStorage;
+// fake tabel di atas tetap dipakai sebagai backend-nya.
+vi.mock('@lib/storage/appStorage', () => ({
+  getAppRow: async (table: string, id: string) =>
+    (table === 'conversations' ? conversationRows : profileRows).get(id),
+  putAppRow: async (table: string, id: string, row: unknown) => {
+    (table === 'conversations' ? conversationRows : profileRows).set(id, row as Record<string, unknown>);
+  },
+  deleteAppRow: async (table: string, id: string) => {
+    (table === 'conversations' ? conversationRows : profileRows).delete(id);
+  },
+  listAppRows: async (table: string) =>
+    [...(table === 'conversations' ? conversationRows : profileRows).values()],
+  putAppRows: async (table: string, rows: { id: string }[]) => {
+    const target = table === 'conversations' ? conversationRows : profileRows;
+    for (const row of rows) target.set(row.id, row as Record<string, unknown>);
+  },
+  clearAppTable: async (table: string) => {
+    (table === 'conversations' ? conversationRows : profileRows).clear();
+  },
+}));
+
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({
     crypto_generichash: () => new Uint8Array(32),

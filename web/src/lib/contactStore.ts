@@ -24,7 +24,7 @@
 // boleh menghapus kontak lokal.
 // ============================================================================
 
-import { db, type ContactRow } from './db';
+import type { ContactRow } from './db';
 import {
     asUserId,
     getParticipantUserId,
@@ -39,8 +39,8 @@ import { encryptVaultText, decryptVaultText } from './shadowVaultDb';
 // presisi hanya bocor lewat indeks — kolom ini tidak diindeks, jadi cukup
 // envelope `ENC1:` + pembacaan toleran baris lama (`openLocalNumber`).
 import { openLocalNumber, sealLocalNumber } from './localAtRest';
+import { openSqliteKvStore } from './storage/sqliteMessages';
 import type { KvStore } from './storage/types';
-import { useDexieTestFallback } from './storage/testFallback';
 
 const CONTACT_KEY_PREFIX = 'contacts:';
 
@@ -49,9 +49,8 @@ const CONTACT_KEY_PREFIX = 'contacts:';
  * material kunci, jadi cukup `KvStore`. Prefix mencegah tabrakan dengan kunci
  * keychain/pesan di database yang sama.
  *
- * Hydrasi dari Dexie hanya sekali. Bila SQLite sudah berisi kontak (mis. proses
- * sebelumnya sempat menulis) marker tetap dipasang tanpa menimpa baris itu —
- * salinan Dexie yang lebih lama tidak boleh mengalahkan data SQLite.
+ * Tidak ada backend kedua dan tidak ada hidrasi dari Dexie: setiap tulisan
+ * langsung ke KvStore SQLite sebagai satu record utuh.
  */
 interface ContactBackend {
     get(userId: UserId): Promise<ContactRow | undefined>;
@@ -84,19 +83,7 @@ function sqliteContacts(kv: KvStore): ContactBackend {
 }
 
 async function getContactBackend(): Promise<ContactBackend> {
-    try {
-        const { openSqliteKvStore } = await import('./storage/sqliteMessages');
-        return sqliteContacts(await openSqliteKvStore());
-    } catch (error) {
-        if (!useDexieTestFallback()) throw error;
-        return {
-            get: (userId) => db.contacts.get(userId),
-            put: async (row) => { await db.contacts.put(row); },
-            delete: async (userId) => { await db.contacts.delete(userId); },
-            all: () => db.contacts.toArray(),
-            clear: () => db.contacts.clear(),
-        };
-    }
+    return sqliteContacts(await openSqliteKvStore());
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────

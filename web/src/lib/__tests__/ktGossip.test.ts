@@ -17,25 +17,34 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-interface Row {
-  id: string;
-  blob: string;
-}
+import { KT_GOSSIP_PREFIX } from '../storage/ktKv';
 
-const rows = new Map<string, Row>();
-let tableAvailable = true;
-
-vi.mock('@lib/db', () => ({
-  db: {
-    get ktGossip() {
-      if (!tableAvailable) return undefined;
-      return {
-        get: async (key: string) => rows.get(key),
-        put: async (row: Row) => {
-          rows.set(row.id, row);
-        },
-      };
+const { rows, kv } = vi.hoisted(() => {
+  const rows = new Map<string, { id: string; blob: string }>();
+  const kv = {
+    get: async (key: string) => rows.get(key),
+    put: async (item: { key: string; value: { id: string; blob: string } }) => {
+      rows.set(item.key, item.value);
     },
+    delete: async (key: string) => {
+      rows.delete(key);
+    },
+    clear: async () => {
+      rows.clear();
+    },
+    keys: async () => [...rows.keys()],
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of rows.keys()) if (key.startsWith(prefix)) rows.delete(key);
+    },
+  };
+  return { rows, kv };
+});
+let storeAvailable = true;
+
+vi.mock('@lib/storage/sqliteMessages', () => ({
+  openSqliteKvStore: async () => {
+    if (!storeAvailable) throw new Error('SQLite tidak tersedia');
+    return kv;
   },
 }));
 
@@ -89,7 +98,7 @@ function memoryStorage(): { storage: { read: () => Promise<string | undefined>; 
 
 beforeEach(() => {
   rows.clear();
-  tableAvailable = true;
+  storeAvailable = true;
   resetKtGossipForTests();
 });
 
@@ -275,11 +284,11 @@ describe('createKtGossip', () => {
   });
 });
 
-describe('adapter produksi (Dexie ktGossip, ter-seal)', () => {
+describe('adapter produksi (KvStore SQLite, ter-seal)', () => {
   it('menyimpan satu baris ter-seal dan memuat jangkarnya kembali', async () => {
     await storeAnchor({ root: ROOT_A, treeSize: 42 });
 
-    const row = rows.get(KT_GOSSIP_ROW_ID)!;
+    const row = rows.get(`${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`)!;
     expect(row).toBeDefined();
     expect(row.blob.startsWith('ENC1:')).toBe(true);
     expect(row.blob).not.toContain(ROOT_A); // root tidak plaintext di IndexedDB
@@ -293,7 +302,7 @@ describe('adapter produksi (Dexie ktGossip, ter-seal)', () => {
     expect(await recordPeerTreeHead('conv-1', { r: ROOT_B, s: 10 })).toBe('split-view');
     expect(await ktGossip().splitViews()).toHaveLength(1);
 
-    tableAvailable = false;
+    storeAvailable = false;
     resetKtGossipForTests();
     await expect(recordPeerTreeHead('conv-2', { r: ROOT_A, s: 10 })).resolves.toBe('no-anchor');
     await expect(storeAnchor({ root: ROOT_A, treeSize: 11 })).resolves.toBeUndefined();

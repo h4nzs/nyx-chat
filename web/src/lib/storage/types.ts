@@ -96,4 +96,6 @@ export interface SqlDriver {
   all<T = Record<string, unknown>>(sql: string, params?: SqlValue[]): Promise<T[]>;
   run(sql: string, params?: SqlValue[]): Promise<void>;
   batch(statements: SqlStatement[]): Promise<void>;
+  /** Dipakai `sqliteMessages` saat menutup store; driver tes boleh no-op. */
+  close?(): Promise<void>;
 }

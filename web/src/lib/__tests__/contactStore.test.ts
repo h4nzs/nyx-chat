@@ -9,29 +9,35 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ─── Stubs (vi.hoisted agar bisa dipakai di factory vi.mock) ──────────────
 
-const { rows, authFetchMock } = vi.hoisted(() => ({
-    rows: new Map<string, { userId: string; data: string; updatedAt: number }>(),
+const { rows, kvStore, authFetchMock } = vi.hoisted(() => {
+    const rows = new Map<string, { userId: string; data: string; updatedAt: number | string }>();
+    // KvStore SQLite palsu dengan prefix `contacts:` seperti produksi.
+    const kvStore = {
+        get: async (key: string) => rows.get(key),
+        put: async (item: { key: string; value: unknown }) => {
+            rows.set(item.key, item.value as { userId: string; data: string; updatedAt: number | string });
+        },
+        delete: async (key: string) => {
+            rows.delete(key);
+        },
+        clear: async () => {
+            rows.clear();
+        },
+        keys: async () => [...rows.keys()],
+        deleteByPrefix: async (prefix: string) => {
+            for (const key of rows.keys()) if (key.startsWith(prefix)) rows.delete(key);
+        },
+    };
     // Tidak diberi tipe ketat — implementasi berbeda per test (sukses/restore/korup).
-    authFetchMock: vi.fn(),
+    return { rows, kvStore, authFetchMock: vi.fn() };
+});
+
+vi.mock('../storage/sqliteMessages', () => ({
+    openSqliteKvStore: async () => kvStore,
 }));
 
-vi.mock('../db', () => ({
-    db: {
-        contacts: {
-            get: async (k: string) => rows.get(k),
-            put: async (row: { userId: string; data: string; updatedAt: number }) => {
-                rows.set(String(row.userId), row);
-            },
-            delete: async (k: string) => {
-                rows.delete(String(k));
-            },
-            clear: async () => {
-                rows.clear();
-            },
-            toArray: async () => Array.from(rows.values()),
-        },
-    },
-}));
+const CONTACTS_PREFIX = 'contacts:';
+const storedContact = (userId: string) => rows.get(`${CONTACTS_PREFIX}${userId}`);
 
 // Vault crypto stub: prefix ENC1: + base64 (mirror bentuk nyata secara kasar)
 vi.mock('../shadowVaultDb', () => ({
@@ -192,7 +198,7 @@ async function flushPush(): Promise<void> {
 describe('contactStore CRUD', () => {
     it('upsert membuat record terenkripsi at-rest', async () => {
         await upsertContact({ userId: 'peer1', conversationId: 'conv1', encryptedProfile: 'ep1' });
-        const row = rows.get('peer1')!;
+        const row = storedContact('peer1')!;
         expect(row).toBeDefined();
         expect(row.data.startsWith('ENC1:')).toBe(true); // ENCRYPTED, bukan plaintext
         const rec = await getContact('peer1');
@@ -210,7 +216,7 @@ describe('contactStore CRUD', () => {
 
     it('[docs/30 WS-F] kolom waktu baris (`updatedAt`) tersimpan TER-SEAL, bukan angka plaintext', async () => {
         await upsertContact({ userId: 'peer-time', conversationId: null });
-        const row = rows.get('peer-time')!;
+        const row = storedContact('peer-time')!;
         expect(typeof row.updatedAt).toBe('string');
         expect(String(row.updatedAt).startsWith('ENC1:')).toBe(true);
         // Nilai presisi tidak boleh bisa dibaca dari dump IndexedDB.
@@ -222,7 +228,7 @@ describe('contactStore CRUD', () => {
         // Record lama tanpa firstSeenAt/lastSeenAt + baris dengan angka plaintext:
         // satu-satunya sumber waktu adalah kolom `updatedAt`.
         const legacyAt = 1_700_000_000_000;
-        rows.set('peer-legacy', {
+        rows.set(`${CONTACTS_PREFIX}peer-legacy`, {
             userId: 'peer-legacy',
             data: 'ENC1:' + Buffer.from(JSON.stringify({ userId: 'peer-legacy', blocked: false }), 'utf8').toString('base64'),
             updatedAt: legacyAt,
@@ -527,7 +533,7 @@ describe('pushContactBundle / restore', () => {
         // baris. Isi non-kosong juga memastikan version berbeda dari push kosong
         // sebelumnya, jadi guard version-hash tidak memotong lebih awal.
         const record = { userId: 'peer-vault', conversationId: null, firstSeenAt: 1, lastSeenAt: 2 };
-        rows.set('peer-vault', {
+        rows.set(`${CONTACTS_PREFIX}peer-vault`, {
             userId: 'peer-vault',
             data: 'ENC1:' + Buffer.from(JSON.stringify(record), 'utf8').toString('base64'),
             updatedAt: 0,
@@ -538,7 +544,7 @@ describe('pushContactBundle / restore', () => {
         await replaceContactBundleWithLocal();
 
         expect(authFetchMock).not.toHaveBeenCalled();
-        expect(rows.has('peer-vault')).toBe(true); // lokal tidak disentuh
+        expect(rows.has(`${CONTACTS_PREFIX}peer-vault`)).toBe(true); // lokal tidak disentuh
     });
 
     it('wipe menghapus lokal + server', async () => {

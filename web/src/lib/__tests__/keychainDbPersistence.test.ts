@@ -17,28 +17,26 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 type Row = { id?: string; conversationId?: string; state: Record<string, unknown> };
 
-const { kvRows, kvStore } = vi.hoisted(() => {
-  const kvRows = new Map<string, { key: string; value: unknown }>();
-  const kvStore = {
-    // Seperti tabel Dexie: `get` mengembalikan record `{key, value}`;
-    // `createDexieKvStore` yang membuka `.value` untuk `createKeyStore`.
-    get: async (key: string) => kvRows.get(key),
-    put: async (item: { key: string; value: unknown }) => { kvRows.set(item.key, item); },
-    delete: async (key: string) => { kvRows.delete(key); },
-    clear: async () => { kvRows.clear(); },
-    where: () => ({ startsWith: () => ({ delete: async () => {} }) }),
-    toCollection: () => ({ primaryKeys: async () => [...kvRows.keys()] }),
+const { keyRows, keyStore } = vi.hoisted(() => {
+  const keyRows = new Map<string, Uint8Array>();
+  const keyStore = {
+    get: async (key: string) => keyRows.get(key),
+    put: async (key: string, value: Uint8Array) => { keyRows.set(key, value); },
+    delete: async (key: string) => { keyRows.delete(key); },
+    keys: async (prefix?: string) => [...keyRows.keys()].filter((key) => !prefix || key.startsWith(prefix)),
+    clear: async () => { keyRows.clear(); },
   };
-  return { kvRows, kvStore };
+  return { keyRows, keyStore };
 });
 
+// `keychainDb` menulis langsung ke KeyStore SQLite; tidak ada jalur Dexie lagi.
+vi.mock('../storage/sqliteMessages', () => ({
+  openSqliteKeyStore: async () => keyStore,
+}));
+
 vi.mock('../db', () => ({
-  db: {
-    kvStore,
-    isOpen: () => true,
-    close: () => {},
-  },
-  VaultEntry: {},
+  db: { isOpen: () => true, close: () => {} },
+  VaultEntry: class {},
 }));
 
 // [audit D7] Penulisan at-rest fail-closed: tanpa masterSeed, `encryptValueAtRest`
@@ -109,7 +107,7 @@ const SENDER_STATE = {
 } as const;
 
 beforeEach(() => {
-  kvRows.clear();
+  keyRows.clear();
 });
 
 describe('GroupReceiverState persistence', () => {
@@ -153,10 +151,7 @@ describe('GroupReceiverState persistence', () => {
 
   it('nilai yang tersimpan benar-benar ter-seal (bukan plaintext) — [audit D7]', async () => {
     await saveGroupReceiverState(RECEIVER_STATE as never);
-    const stored = kvRows.get(`gr:${RECEIVER_STATE.id}`)!.value as { v: string };
-    const row = JSON.parse(new TextDecoder().decode(
-      Uint8Array.from(Buffer.from(stored.v.replace(/-/g, '+').replace(/_/g, '/'), 'base64'))
-    )) as Row;
+    const row = JSON.parse(new TextDecoder().decode(keyRows.get(`gr:${RECEIVER_STATE.id}`)!)) as Row;
     const state = row.state as Record<string, unknown>;
 
     expect(String(state.CK).startsWith('ENC1:')).toBe(true);

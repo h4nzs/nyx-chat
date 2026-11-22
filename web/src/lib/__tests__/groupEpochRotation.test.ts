@@ -35,15 +35,21 @@ vi.mock('@utils/crypto', () => ({
 
 const kv = new Map<string, unknown>();
 
-vi.mock('@lib/db', () => ({
-  db: {
-    kvStore: {
-      get: async (key: string) => (kv.has(key) ? { key, value: kv.get(key) } : undefined),
-      put: async (row: { key: string; value: unknown }) => {
-        kv.set(row.key, row.value);
-      },
+vi.mock('@lib/storage/sqliteMessages', () => ({
+  openSqliteKvStore: async () => ({
+    get: async (key: string) => kv.get(key),
+    put: async (row: { key: string; value: unknown }) => {
+      kv.set(row.key, row.value);
     },
-  },
+    delete: async (key: string) => {
+      kv.delete(key);
+    },
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of kv.keys()) if (key.startsWith(prefix)) kv.delete(key);
+    },
+    clear: async () => kv.clear(),
+    keys: async () => [...kv.keys()],
+  }),
 }));
 
 vi.mock('@lib/keychainDb', () => ({

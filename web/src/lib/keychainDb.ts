@@ -10,9 +10,7 @@ import { pickChainState } from './groupEra';
 import { asConversationId, asUserId } from '@nyx/shared';
 import type { ConversationId, UserId } from '@nyx/shared';
 import type { KeyStore } from './storage/types';
-import { createDexieKvStore } from './storage/dexieStores';
 import { createKeyStore } from './storage/keyStore';
-import { useDexieTestFallback } from './storage/testFallback';
 
 // ============================================================
 // [docs/43 §43.11.6 B2/B3] Keychain bertipe di KeyStore SQLite/OPFS.
@@ -49,18 +47,12 @@ const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 
 /**
- * KeyStore bersama. Produksi selalu SQLite. Tes jsdom memakai `db.kvStore`
- * sebagai KeyStore Dexie, sehingga seluruh jalur keychain tetap satu bentuk
- * (tidak ada cabang tabel Dexie bertipe di fungsi CRUD).
+ * KeyStore bersama — satu-satunya backend keychain. Kegagalan membuka SQLite
+ * diteruskan ke pemanggil; tidak ada jalur cadangan kedua.
  */
 async function sqliteKeys(): Promise<KeyStore> {
-  try {
-    const { openSqliteKeyStore } = await import('./storage/sqliteMessages');
-    return await openSqliteKeyStore();
-  } catch (error) {
-    if (useDexieTestFallback()) return createKeyStore(createDexieKvStore(db));
-    throw error;
-  }
+  const { openSqliteKeyStore } = await import('./storage/sqliteMessages');
+  return openSqliteKeyStore();
 }
 
 /** Kunci ber-prefix, urut leksikografis (semantik indeks string Dexie). */

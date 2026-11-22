@@ -21,17 +21,17 @@ const identityKeys = new Map<string, { userId: string; key: string }>();
 const conversationState = { conversations: [] as unknown[] };
 const authState = { user: { id: 'me' } as { id: string } | null };
 
-vi.mock('@lib/db', () => ({
-    db: {
-        kvStore: {
-            get: async (key: string) => kvStore.get(key),
-            put: async (row: { key: string; value: unknown }) => { kvStore.set(row.key, row); },
-            delete: async (key: string) => { kvStore.delete(key); },
+vi.mock('@lib/storage/sqliteMessages', () => ({
+    openSqliteKvStore: async () => ({
+        get: async (key: string) => kvStore.get(key)?.value,
+        put: async (row: { key: string; value: unknown }) => { kvStore.set(row.key, row); },
+        delete: async (key: string) => { kvStore.delete(key); },
+        deleteByPrefix: async (prefix: string) => {
+            for (const key of kvStore.keys()) if (key.startsWith(prefix)) kvStore.delete(key);
         },
-        identityKeys: {
-            get: async (userId: string) => identityKeys.get(userId),
-        },
-    },
+        clear: async () => { kvStore.clear(); },
+        keys: async () => [...kvStore.keys()],
+    }),
 }));
 
 vi.mock('@lib/keychainDb', () => ({

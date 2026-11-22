@@ -17,6 +17,7 @@
  *      state tersimpan.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { KT_MONITORING_PREFIX } from '../storage/ktKv';
 import { resolve } from 'node:path';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,24 +31,29 @@ interface Row {
   updatedAt: string;
 }
 
-const rows = new Map<string, Row>();
-
-vi.mock('@lib/db', () => ({
-  db: {
-    ktMonitoring: {
-      get: async (key: string) => rows.get(key),
-      put: async (row: Row) => {
-        rows.set(row.searchKeyHex, row);
-      },
-      delete: async (key: string) => {
-        rows.delete(key);
-      },
-      toArray: async () => [...rows.values()],
-      clear: async () => {
-        rows.clear();
-      },
+const { rows, kv } = vi.hoisted(() => {
+  const rows = new Map<string, Record<string, unknown>>();
+  const kv = {
+    get: async (key: string) => rows.get(key),
+    put: async (item: { key: string; value: Record<string, unknown> }) => {
+      rows.set(item.key, item.value);
     },
-  },
+    delete: async (key: string) => {
+      rows.delete(key);
+    },
+    clear: async () => {
+      rows.clear();
+    },
+    keys: async () => [...rows.keys()],
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of rows.keys()) if (key.startsWith(prefix)) rows.delete(key);
+    },
+  };
+  return { rows, kv };
+});
+
+vi.mock('@lib/storage/sqliteMessages', () => ({
+  openSqliteKvStore: async () => kv,
 }));
 
 vi.mock('@lib/keychainDb', () => ({
@@ -122,6 +128,8 @@ beforeAll(() => {
   };
 });
 
+const storedRow = (id: string) => rows.get(`${KT_MONITORING_PREFIX}${id}`) as Row | undefined;
+
 beforeEach(() => {
   rows.clear();
 });
@@ -135,7 +143,7 @@ describe('penyimpanan state KT', () => {
     await saveKtState({ searchKey, treeHead, monitoringData, keyVersion: 1 });
 
     const rowId = await ktSearchKeyRowId(searchKey);
-    const stored = rows.get(rowId)!;
+    const stored = storedRow(rowId)!;
     expect(stored).toBeDefined();
     // Nilai bukti TIDAK plaintext — hanya envelope ENC1:
     expect(stored.treeHead!.startsWith('ENC1:')).toBe(true);
@@ -158,7 +166,7 @@ describe('penyimpanan state KT', () => {
   it('[audit N7-02] baris legacy dipindah ke PK HMAC dan search key disegel', async () => {
     const searchKey = hexToBytes('dd'.repeat(33));
     const rawHex = ktSearchKeyHex(searchKey);
-    rows.set(rawHex, {
+    rows.set(`${KT_MONITORING_PREFIX}${rawHex}`, {
       searchKeyHex: rawHex,
       treeHead: null,
       monitoringData: null,
@@ -171,8 +179,8 @@ describe('penyimpanan state KT', () => {
     expect(loaded!.searchKey).toEqual(searchKey);
 
     const rowId = await ktSearchKeyRowId(searchKey);
-    expect(rows.has(rawHex)).toBe(false);
-    const migrated = rows.get(rowId)!;
+    expect(rows.has(`${KT_MONITORING_PREFIX}${rawHex}`)).toBe(false);
+    const migrated = storedRow(rowId)!;
     expect(migrated.searchKeyHex).toBe(rowId);
     expect(migrated.searchKey!.startsWith('ENC1:')).toBe(true);
   });
@@ -251,7 +259,7 @@ describe('runKtMonitorOnce', () => {
 
       // 2. Bukti tidak sah → verifikasi gagal dan state TIDAK berubah.
       const fixtureRowId = await ktSearchKeyRowId(hexToBytes(fixture.searchKey));
-      const before = rows.get(fixtureRowId)!;
+      const before = storedRow(fixtureRowId)!;
       const captured: Uint8Array[] = [];
       await expect(
         runKtMonitorOnce({
@@ -269,7 +277,7 @@ describe('runKtMonitorOnce', () => {
       expect(captured).toHaveLength(1);
       expect(captured[0]!.length).toBeGreaterThan(0);
       // Fail-closed: baris tersimpan identik dengan sebelumnya.
-      expect(rows.get(fixtureRowId)).toEqual(before);
+      expect(storedRow(fixtureRowId)).toEqual(before);
     }
   );
 });

@@ -58,6 +58,26 @@ vi.mock('@lib/crypto-worker-proxy', () => ({
   ),
 }));
 
+const appDbRef = vi.hoisted(() => ({ current: null as Record<string, { get(id: unknown): Promise<unknown>; put(row: unknown): Promise<unknown>; delete(id: unknown): Promise<unknown>; toArray(): Promise<unknown[]>; bulkPut(rows: unknown[]): Promise<unknown>; clear(): Promise<unknown> }> | null }));
+
+// [docs/43 §43.11.6 B3] conversations/profileCache lewat appStorage. Delegasi ke
+// Dexie nyata supaya migrasi & pembaca tetap diuji di IndexedDB sungguhan.
+vi.mock('@lib/storage/appStorage', () => {
+  const table = (name: string) => {
+    const active = appDbRef.current;
+    if (!active) throw new Error('db belum siap');
+    return active[name]!;
+  };
+  return {
+    getAppRow: (name: string, id: string) => table(name).get(id),
+    putAppRow: async (name: string, _id: string, row: unknown) => { await table(name).put(row); },
+    deleteAppRow: async (name: string, id: string) => { await table(name).delete(id); },
+    listAppRows: (name: string) => table(name).toArray(),
+    putAppRows: async (name: string, rows: unknown[]) => { await table(name).bulkPut(rows); },
+    clearAppTable: async (name: string) => { await table(name).clear(); },
+  };
+});
+
 const MIN = 60 * 1000;
 const BUCKET = 15 * MIN;
 const B0 = Math.floor(Date.now() / BUCKET) * BUCKET - 6 * BUCKET;
@@ -120,6 +140,7 @@ beforeAll(async () => {
   ({ NyxDatabase } = await import('../db'));
   ({ shadowVault } = await import('../shadowVaultDb'));
   dbInstance = new NyxDatabase();
+  appDbRef.current = dbInstance as never;
   await dbInstance.open();
 });
 

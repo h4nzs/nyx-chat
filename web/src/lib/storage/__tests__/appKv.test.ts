@@ -5,9 +5,8 @@
 /**
  * [docs/43 §43.11.6 B3] `kvStore` lewat satu pintu SQLite.
  *
- * Di produksi kegagalan membuka SQLite harus sampai ke pemanggil. Di Vitest,
- * seam `useDexieTestFallback()` boleh memakai tabel Dexie palsu agar tes lama
- * tetap berjalan selama migrasi.
+ * Di produksi kegagalan membuka SQLite harus sampai ke pemanggil — tidak ada
+ * backend kedua (Dexie sudah dilepas), jadi galat tidak boleh ditelan.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KvStore } from '../types';
@@ -33,8 +32,6 @@ vi.mock('../sqliteMessages', () => ({
   },
 }));
 
-vi.mock('../../db', () => ({ db: { kvStore: {} } }));
-
 const { getKvStore } = await import('../appKv');
 
 describe('appKv', () => {
@@ -53,8 +50,8 @@ describe('appKv', () => {
     expect(await kv.keys()).toEqual(['nyx_panic_hash']);
   });
 
-  it('memakai fallback Dexie hanya di lingkungan tes', async () => {
+  it('meneruskan kegagalan membuka SQLite ke pemanggil (tidak ada fallback)', async () => {
     failOpen = true;
-    await expect(getKvStore()).resolves.toBeDefined();
+    await expect(getKvStore()).rejects.toThrow('OPFS tidak tersedia');
   });
 });

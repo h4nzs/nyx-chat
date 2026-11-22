@@ -32,14 +32,12 @@ vi.mock('@lib/keychainDb', () => ({
         stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null,
 }));
 
-vi.mock('@lib/db', () => ({
-    db: {
-        profileCache: {
-            get: async (userId: string) => idbProfiles.get(userId),
-            put: async (row: { id: string; name: string; avatarUrl: string | null; description: string | null; encryptedHash: string; updatedAt: number | string }) => {
-                idbProfiles.set(row.id, row);
-            },
-        },
+// [docs/43 §43.11.6 B3] Cache profil dibaca/ditulis lewat appStorage (SQLite),
+// bukan tabel Dexie.
+vi.mock('@lib/storage/appStorage', () => ({
+    getAppRow: async (_table: string, id: string) => idbProfiles.get(id),
+    putAppRow: async (_table: string, _id: string, row: { id: string; name: string; avatarUrl: string | null; description: string | null; encryptedHash: string; updatedAt: number | string }) => {
+        idbProfiles.set(row.id, row);
     },
 }));
 

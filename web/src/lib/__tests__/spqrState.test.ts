@@ -20,28 +20,22 @@ interface Row {
 const rows = new Map<string, Row>();
 let putCount = 0;
 
-vi.mock('@lib/db', () => ({
-  db: {
-    kvStore: {
-      get: async (key: string) => rows.get(key),
-      put: async (row: Row) => {
-        putCount += 1;
-        rows.set(row.key, row);
-      },
-      delete: async (key: string) => {
-        rows.delete(key);
-      },
-      where: () => ({
-        startsWith: (prefix: string) => ({
-          delete: async () => {
-            for (const key of Array.from(rows.keys())) {
-              if (key.startsWith(prefix)) rows.delete(key);
-            }
-          },
-        }),
-      }),
+vi.mock('@lib/storage/sqliteMessages', () => ({
+  openSqliteKvStore: async () => ({
+    get: async (key: string) => rows.get(key)?.value,
+    put: async (row: Row) => {
+      putCount += 1;
+      rows.set(row.key, row);
     },
-  },
+    delete: async (key: string) => {
+      rows.delete(key);
+    },
+    deleteByPrefix: async (prefix: string) => {
+      for (const key of rows.keys()) if (key.startsWith(prefix)) rows.delete(key);
+    },
+    clear: async () => rows.clear(),
+    keys: async () => [...rows.keys()],
+  }),
 }));
 
 vi.mock('@lib/keychainDb', () => ({

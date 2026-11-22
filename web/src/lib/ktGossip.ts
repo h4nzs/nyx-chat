@@ -328,45 +328,35 @@ export function createKtGossip(deps: KtGossipDeps): KtGossip {
 
 export const KT_GOSSIP_ROW_ID = 'peers';
 
-async function getGossipKv(): Promise<KvStore | null> {
+async function getGossipKv(): Promise<KvStore> {
   return openKtSqliteKv();
 }
 
-async function getGossipTable(): Promise<{ get(id: string): Promise<{ blob: string } | undefined>; put(row: { id: string; blob: string }): Promise<unknown> } | undefined> {
-  const { db } = await import('./db');
-  return db.ktGossip as unknown as {
-    get(id: string): Promise<{ blob: string } | undefined>;
-    put(row: { id: string; blob: string }): Promise<unknown>;
-  } | undefined;
-}
-
+// Gossip tidak boleh menggagalkan jalur pesan: store yang tidak tersedia
+// (SQLite belum terbuka, masterSeed belum siap) berarti "tidak ada gossip",
+// dan jangkar RAM tetap dipakai sampai penulisan berikutnya berhasil.
 const storage: KtGossipStorage = {
   async read(): Promise<string | undefined> {
-    const kv = await getGossipKv();
-    if (kv) {
+    try {
+      const kv = await getGossipKv();
       const row = await kv.get<{ blob: string }>(`${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`);
       if (!row?.blob) return undefined;
       return (await decryptValueAtRest(row.blob)) ?? undefined;
+    } catch {
+      return undefined;
     }
-    const table = await getGossipTable();
-    if (!table) return undefined;
-    const row = await table.get(KT_GOSSIP_ROW_ID);
-    if (!row?.blob) return undefined;
-    return (await decryptValueAtRest(row.blob)) ?? undefined;
   },
   async write(value: string): Promise<void> {
-    const blob = await encryptValueAtRest(value);
-    const kv = await getGossipKv();
-    if (kv) {
+    try {
+      const blob = await encryptValueAtRest(value);
+      const kv = await getGossipKv();
       await kv.put({
         key: `${KT_GOSSIP_PREFIX}${KT_GOSSIP_ROW_ID}`,
         value: { id: KT_GOSSIP_ROW_ID, blob },
       });
-      return;
+    } catch {
+      // fail-open: tanpa persistensi, jangkar hanya hidup di RAM.
     }
-    const table = await getGossipTable();
-    if (!table) return; // fail-open: jalur pesan tidak boleh gagal karena gossip
-    await table.put({ id: KT_GOSSIP_ROW_ID, blob });
   },
 };
 

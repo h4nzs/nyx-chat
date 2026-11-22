@@ -1,19 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// [docs/43 §43.11.6 B3] keychainDb punya SATU backend. Tes jsdom memakai
-// `db.kvStore` sebagai KeyStore (createDexieKvStore), jadi state ratchet/grup
-// dihapus di sana — bukan di tabel Dexie bertipe lama.
-// Seperti tabel Dexie `kvStore`: record `{key, value}`, bukan nilai saja.
-const kvRows = new Map<string, { key: string; value: unknown }>()
+// [docs/43 §43.11.6 B3] keychainDb punya SATU backend: KeyStore SQLite (byte
+// mentah). State ratchet/grup dihapus di sana — bukan di tabel Dexie lama.
+const kvRows = new Map<string, Uint8Array>()
 
-const kvStore = {
+const keyStore = {
   get: async (key: string) => kvRows.get(key),
-  put: async (item: { key: string; value: unknown }) => { kvRows.set(item.key, item) },
+  put: async (key: string, value: Uint8Array) => { kvRows.set(key, value) },
   delete: async (key: string) => { kvRows.delete(key) },
+  keys: async (prefix?: string) => [...kvRows.keys()].filter((key) => !prefix || key.startsWith(prefix)),
   clear: async () => { kvRows.clear() },
-  where: () => ({ startsWith: () => ({ delete: async () => {} }) }),
-  toCollection: () => ({ primaryKeys: async () => [...kvRows.keys()] }),
 }
+
+vi.mock('@lib/storage/sqliteMessages', () => ({
+  openSqliteKeyStore: async () => keyStore,
+}))
 
 const fakeMessages = new Map<string, { id: string; conversationId: string }>()
 const fakeConversations = new Map<string, { id: string }>()
@@ -21,7 +22,6 @@ const fakeConversations = new Map<string, { id: string }>()
 // Fake in-memory tables cukup untuk memverifikasi perilaku deleteConversation:
 // pesan, state kripto, dan — yang menjadi regresi — baris `conversations`.
 const db = {
-  kvStore,
   messages: {
     where: () => ({
       equals: (value: string) => ({
@@ -47,6 +47,27 @@ const db = {
 
 vi.mock('@lib/db', () => ({ db, Dexie: class {} }))
 
+// [docs/43 §43.11.6 B3] Baris percakapan hidup di appStorage (SQLite); fake di
+// atas yang menjadi backend-nya.
+vi.mock('@lib/storage/appStorage', () => ({
+  getAppRow: async (table: string, id: string) =>
+    table === 'conversations' ? fakeConversations.get(id) : undefined,
+  putAppRow: async (table: string, id: string, row: { id: string }) => {
+    if (table === 'conversations') fakeConversations.set(id, row)
+  },
+  deleteAppRow: async (table: string, id: string) => {
+    if (table === 'conversations') fakeConversations.delete(id)
+  },
+  listAppRows: async (table: string) =>
+    table === 'conversations' ? [...fakeConversations.values()] : [],
+  putAppRows: async (table: string, rows: { id: string }[]) => {
+    if (table === 'conversations') for (const row of rows) fakeConversations.set(row.id, row)
+  },
+  clearAppTable: async (table: string) => {
+    if (table === 'conversations') fakeConversations.clear()
+  },
+}))
+
 // Import AFTER mock registration
 const { shadowVault } = await import('@lib/shadowVaultDb')
 
@@ -66,14 +87,15 @@ describe('shadowVault.deleteConversation', () => {
     fakeConversations.set('conv_2', { id: 'conv_2' })
 
     // State kripto di KeyStore — baris conv_2 harus utuh.
-    kvRows.set('ratchet:conv_1', { key: 'ratchet:conv_1', value: { v: 'AAAA' } })
-    kvRows.set('ratchet:conv_2', { key: 'ratchet:conv_2', value: { v: 'BBBB' } })
-    kvRows.set('gs:conv_1', { key: 'gs:conv_1', value: { v: 'CCCC' } })
-    kvRows.set('gs:conv_2', { key: 'gs:conv_2', value: { v: 'DDDD' } })
-    kvRows.set('gr:conv_1_device', { key: 'gr:conv_1_device', value: { v: 'EEEE' } })
-    kvRows.set('gr:conv_2_device', { key: 'gr:conv_2_device', value: { v: 'FFFF' } })
-    kvRows.set('gskip:conv_1_device_1', { key: 'gskip:conv_1_device_1', value: { v: 'GGGG' } })
-    kvRows.set('gskip:conv_2_device_1', { key: 'gskip:conv_2_device_1', value: { v: 'HHHH' } })
+    const at = (label: string) => new TextEncoder().encode(label)
+    kvRows.set('ratchet:conv_1', at('AAAA'))
+    kvRows.set('ratchet:conv_2', at('BBBB'))
+    kvRows.set('gs:conv_1', at('CCCC'))
+    kvRows.set('gs:conv_2', at('DDDD'))
+    kvRows.set('gr:conv_1_device', at('EEEE'))
+    kvRows.set('gr:conv_2_device', at('FFFF'))
+    kvRows.set('gskip:conv_1_device_1', at('GGGG'))
+    kvRows.set('gskip:conv_2_device_1', at('HHHH'))
 
     await shadowVault.deleteConversation('conv_1')
 

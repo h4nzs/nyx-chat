@@ -749,6 +749,19 @@ same-origin` + `Cross-Origin-Embedder-Policy: require-corp` (sama dengan
 (sebelumnya 3,2 m timeout), `backupRestore.spec` 1,4 m, `chat.spec` 2,9 m —
 ketiganya lulus tanpa variabel lingkungan tambahan.
 
+**P4 — seam tes SQLite per berkas (2026-11-22).** Setelah Dexie dicabut dari
+`keychainDb`, `appKv`, `appStorage`, kontak, dan state KT, suite jsdom tidak
+boleh lagi mengandalkan tabel Dexie sebagai backend. Percobaan mem-mock
+`sqliteClient` secara global di `SetupTests.ts` membuat 16 berkas tes lain ikut
+berpindah backend (pesan masih di Dexie) dan 69 tes gagal; harness itu dibuang.
+Sebagai gantinya setiap suite mem-mock seam yang dipakainya sendiri:
+`storage/sqliteMessages` (`openSqliteKvStore`/`openSqliteKeyStore`) untuk
+keychain, kontak, SPQR, Privacy Pass, dan KT; `storage/appStorage` untuk
+percakapan/profil. `contactStore` memakai impor statis ke seam itu karena impor
+dinamis di dalam `Promise.all` tidak selalu terkena mock Vitest. Suite web
+kembali 150 berkas / 1168 tes, dan `nodeSqliteTestDriver.ts` dihapus karena
+tidak ada pemakainya.
+
 ---
 
 ## 43.12 Rekomendasi teknologi lain (dengan keputusan)
