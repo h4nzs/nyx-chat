@@ -47,6 +47,11 @@ vi.mock('@lib/shadowVaultDb', () => ({
   }),
 }));
 
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('../../lib/__tests__/helpers/memoryMessageModule');
+  return memoryMessageModule(rows as never);
+});
+
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({
     to_hex: () => 'token',

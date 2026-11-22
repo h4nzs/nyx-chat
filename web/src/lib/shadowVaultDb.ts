@@ -1,4 +1,3 @@
-import { db } from './db';
 import type {
   ConversationRecord,
   DecryptedMessageRecord,
@@ -12,7 +11,6 @@ import {
   putAppRow,
   putAppRows,
 } from './storage/appStorage';
-import { Dexie } from 'dexie';
 import type { Message, Conversation } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
@@ -40,7 +38,6 @@ import {
   readSqliteMessages,
   readSqliteMessagesByIds,
 } from './storage/sqliteMessages';
-import { useDexieTestFallback } from './storage/testFallback';
 import {
   AT_REST_PREFIX,
   deleteGroupStates,
@@ -62,76 +59,19 @@ import {
   resolveOrderInstants,
 } from './localOrderKey';
 
-/** Tes jsdom belum punya Worker/OPFS: baca SQLite boleh gagal → Dexie. */
-async function tryReadSqliteMessages(
-  conversationId: string,
-  limit: number,
-  beforeDate?: string,
-): Promise<DecryptedMessageRecord[] | null> {
-  try {
-    return await readSqliteMessages(conversationId, limit, beforeDate);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    return null;
-  }
-}
-
-async function tryReadAllSqliteMessages(): Promise<DecryptedMessageRecord[] | null> {
-  try {
-    return await readAllSqliteMessages();
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    return null;
-  }
-}
-
-async function tryReadSqliteMessage(
-  id: string,
-): Promise<{ available: boolean; row?: DecryptedMessageRecord } | null> {
-  try {
-    return await readSqliteMessage(id);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    return null;
-  }
-}
-
-async function tryReadSqliteMessagesByIds(ids: string[]): Promise<DecryptedMessageRecord[] | null> {
-  try {
-    return await readSqliteMessagesByIds(ids);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    return null;
-  }
-}
-
-/** Satu backend: SQLite di produksi; Dexie hanya saat tes jsdom. */
+// Satu backend pesan: SQLite. Kegagalan dibiarkan naik ke pemanggil; tidak ada
+// tabel Dexie kedua yang bisa diam-diam menerima tulisan.
 async function writeMessageRows(rows: DecryptedMessageRecord[]): Promise<void> {
   if (rows.length === 0) return;
-  try {
-    await mirrorMessageRows(rows);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    await db.messages.bulkPut(rows);
-  }
+  await mirrorMessageRows(rows);
 }
 
 async function deleteMessageRow(id: string): Promise<void> {
-  try {
-    await mirrorDeleteMessage(id);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    await db.messages.delete(id);
-  }
+  await mirrorDeleteMessage(id);
 }
 
 async function deleteConversationMessageRows(conversationId: string): Promise<void> {
-  try {
-    await mirrorDeleteConversation(conversationId);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-    await db.messages.where('conversationId').equals(conversationId).delete();
-  }
+  await mirrorDeleteConversation(conversationId);
 }
 
 // --- CRYPTO ENGINE FOR IRON VAULT ---
@@ -178,10 +118,6 @@ export const decryptVaultText = async (encryptedBase64: string): Promise<string 
 // ------------------------------------
 
 class NyxShadowVaultProxy {
-  get messages() {
-    return db.messages;
-  }
-
   async savePqDrSession(record: Omit<PqDrSessionRecord, 'id'> & { id?: string }): Promise<void> {
     try {
       const encryptedState = await encryptVaultText(JSON.stringify(record.state));
@@ -268,7 +204,7 @@ class NyxShadowVaultProxy {
 
   async exportDatabase(): Promise<string> {
     try {
-      const messages = (await tryReadAllSqliteMessages()) ?? await db.messages.toArray();
+      const messages = await readAllSqliteMessages();
       return JSON.stringify({ messages });
     } catch (e) {
       console.error("Export DB failed:", e);
@@ -316,7 +252,7 @@ class NyxShadowVaultProxy {
   async migrateAtRestSealing(): Promise<number> {
     let updated = 0;
     try {
-      const rows = (await tryReadAllSqliteMessages()) ?? await db.messages.toArray();
+      const rows = await readAllSqliteMessages();
       const sealedRows: DecryptedMessageRecord[] = [];
       for (const row of rows) {
         const sealed = await this.sealLegacyStructFields(row);
@@ -478,7 +414,7 @@ class NyxShadowVaultProxy {
    * Mengembalikan jumlah baris yang diperbarui.
    */
   async normalizeOrderIndex(): Promise<number> {
-    const rows = (await tryReadAllSqliteMessages()) ?? await db.messages.toArray();
+    const rows = await readAllSqliteMessages();
     const updates: DecryptedMessageRecord[] = [];
     for (const row of rows) {
       if (hasIndexableOrder(row) && row.createdAtSealed) continue;
@@ -526,9 +462,7 @@ class NyxShadowVaultProxy {
 
     try {
       const ids = validMessages.map((m) => String(m.id));
-      const existingRows = (await tryReadSqliteMessagesByIds(ids))
-        ?? (await Promise.all(ids.map((id) => db.messages.get(id))))
-          .filter((row): row is DecryptedMessageRecord => !!row);
+      const existingRows = await readSqliteMessagesByIds(ids);
       const existingById = new Map(existingRows.map((row) => [String(row.id), row]));
       const records: DecryptedMessageRecord[] = [];
       for (const m of validMessages) {
@@ -692,96 +626,27 @@ class NyxShadowVaultProxy {
 
   async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
-      const sqliteRows = await tryReadSqliteMessages(conversationId, limit, beforeDate);
-      if (sqliteRows !== null) return this.parseRecordsToMessages(sqliteRows);
+      const rows = await readSqliteMessages(conversationId, limit, beforeDate);
 
+      // Pembersihan kadaluarsa tanpa memblokir thread. Hanya pesan timer yang
+      // boleh hilang; deadline retensi server bukan expiry UI.
       const now = Date.now();
-      const parsedBefore = beforeDate ? Date.parse(beforeDate) : Number.NaN;
-      // Kursor tetap **inklusif** seperti perintah lama (`between` dua sisi tertutup).
-      const beforeMs = Number.isFinite(parsedBefore) ? parsedBefore : null;
-
-      // [docs/30 WS-F] Kandidat diambil PER BUCKET UTUH dari indeks
-      // `[conversationId+orderBucketMs]` — bukan rentang yang dipotong `limit`,
-      // karena indeks mengurutkan kunci bucket yang sama berdasarkan primary
-      // key: memotong di sana akan melewatkan baris lebih tua di dalam bucket
-      // batas secara permanen (halaman berikutnya tidak menjemputnya lagi).
-      // Presisi baru dipulihkan setelah kandidat terkumpul.
-      const candidates: DecryptedMessageRecord[] = [];
-      // Batas kerja satu halaman (32 × 15 menit ≈ 8 jam ke belakang) supaya
-      // rangkaian bucket kosong di riwayat lama tidak menyapu seluruh masa lalu.
-      // Kalau jendela ini habis sebelum halaman penuh (mis. percakapan berlanjut
-      // keesokan hari), halaman kembali kosong dan store jatuh ke fallback fetch
-      // server yang sudah ada — bukan mengulang-ulang seluruh masa lalu.
-      const MAX_BUCKETS_PER_PAGE = 32;
-
-      // Halaman pertama TIDAK boleh mulai dari `now`: percakapan yang sudah sepi
-      // berhari-hari tidak akan punya bucket di 8 jam terakhir → chat tampak
-      // kosong. Mulai dari bucket TERBARU yang benar-benar ada di percakapan ini
-      // (satu baris dari indeks, `.reverse().limit(1)`), sedangkan halaman
-      // berikutnya mulai dari bucket kursor.
-      let bucket: number | null;
-      if (beforeMs !== null) {
-        bucket = orderBucketOf(beforeMs);
-      } else {
-        const newest = await db.messages
-          .where('[conversationId+orderBucketMs]')
-          .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
-          .reverse()
-          .limit(1)
-          .toArray();
-        bucket = newest[0]?.orderBucketMs ?? null;
-      }
-
-      for (let scanned = 0; bucket !== null && scanned < MAX_BUCKETS_PER_PAGE; scanned++) {
-        const batch = await db.messages
-          .where('[conversationId+orderBucketMs]')
-          .equals([conversationId, bucket])
-          .toArray();
-        for (const row of batch) {
-          // [BUGFIX 2026-10-30] Hanya pesan timer yang boleh hilang karena
-          // `expiresAt` — deadline server bukan expiry UI (lihat
-          // `isExpiredMessageRow`).
-          if (await isExpiredMessageRow(row, now)) continue;
-          candidates.push(row);
-        }
-        if (candidates.length >= limit) break;
-        bucket = previousOrderBucket(bucket);
-      }
-
-      const instants = await resolveOrderInstants(candidates);
-      const { page: validRecords } = pickOlderPage(candidates, instants, limit, beforeMs);
-
-      // Eksekusi pembersihan kadaluarsa tanpa memblokir thread
       queueMicrotask(async () => {
         try {
-          // [docs/30 WS-F langkah 3] `expiresAt` ter-seal → saring di memori.
-          // Jalankan pada backend yang sama dengan pembaca: SQLite di produksi,
-          // Dexie hanya saat tes jsdom.
-          const sqliteRows = await tryReadAllSqliteMessages();
-          if (sqliteRows !== null) {
-            const expired: string[] = [];
-            for (const r of sqliteRows) {
-              if (r.conversationId !== conversationId) continue;
-              if (await isExpiredMessageRow(r, now)) expired.push(r.id);
-            }
-            if (expired.length > 0) await mirrorDeleteMessages(expired);
-            return;
-          }
-
-          const rows = await db.messages.where('conversationId').equals(conversationId).toArray();
+          // Baca SEMUA baris: `rows` di atas sudah disaring expiry, jadi timer
+          // yang kedaluwarsa tidak akan pernah ikut terhapus kalau memakainya.
           const expired: string[] = [];
-          for (const r of rows) {
-            // [BUGFIX 2026-10-30] Hanya pesan timer yang benar-benar dihapus —
-            // pesan biasa tidak boleh dibuang karena deadline server.
-            if (await isExpiredMessageRow(r, now)) expired.push(r.id);
+          for (const row of await readAllSqliteMessages()) {
+            if (row.conversationId !== conversationId) continue;
+            if (await isExpiredMessageRow(row, now)) expired.push(row.id);
           }
-          if (expired.length > 0) await db.messages.bulkDelete(expired);
+          if (expired.length > 0) await mirrorDeleteMessages(expired);
         } catch (e) {
-            console.error("Failed to clean expired messages:", e);
+          console.error("Failed to clean expired messages:", e);
         }
       });
 
-      return this.parseRecordsToMessages(validRecords);
+      return this.parseRecordsToMessages(rows);
     } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];
@@ -966,8 +831,8 @@ class NyxShadowVaultProxy {
    */
   async getMessagesForExport(): Promise<Message[]> {
     try {
-      const sqliteRows = await tryReadAllSqliteMessages();
-      const rows = sqliteRows ?? await db.messages.toArray();
+      const sqliteRows = await readAllSqliteMessages();
+      const rows = await readAllSqliteMessages();
       const now = Date.now();
       const messages: Message[] = [];
       for (const row of rows) {
@@ -995,16 +860,9 @@ class NyxShadowVaultProxy {
 
   async getMessage(id: string): Promise<Message | null> {
     try {
-      const sqlite = await tryReadSqliteMessage(id);
-      if (sqlite?.available) {
-        return sqlite.row ? await this.decodeMessageRecord(sqlite.row) : null;
-      }
-
-      const r = await db.messages.get(id);
-      if (!r) return null;
-      
-      const parsedArray = await this.parseRecordsToMessages([r]);
-      return parsedArray.length > 0 ? (parsedArray[0] ?? null) : null;
+      const sqlite = await readSqliteMessage(id);
+      if (!sqlite.available) return null;
+      return sqlite.row ? await this.decodeMessageRecord(sqlite.row) : null;
     } catch (_e) {
       return null;
     }

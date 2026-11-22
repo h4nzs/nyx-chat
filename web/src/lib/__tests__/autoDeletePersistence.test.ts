@@ -125,12 +125,12 @@ function makeMessagesTable() {
 // secara statis, sehingga modul di-evaluasi SEBELUM baris `const` di bawah —
 // mock factory yang menutup variabel top-level akan meledak seperti
 // "Cannot access 'db' before initialization".
-const { fakeMessages, db } = vi.hoisted(() => {
-  const table = makeMessagesTable();
-  return { fakeMessages: table, db: { messages: table } };
-});
+const { fakeMessages } = vi.hoisted(() => ({ fakeMessages: makeMessagesTable() }));
 
-vi.mock('@lib/db', () => ({ db }));
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('./helpers/memoryMessageModule');
+  return memoryMessageModule(fakeMessages._rows as never);
+});
 
 vi.mock('@lib/keychainDb', () => ({
   AT_REST_PREFIX: 'ENC1:',

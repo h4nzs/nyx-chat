@@ -343,9 +343,7 @@ export function needsDexieRead(table: string, sqliteDump: boolean): boolean {
  * ada pemisahan data diam-diam.
  */
 export async function liveBackupStore(): Promise<BackupStore> {
-  const { db } = await import('./db');
   const sqlite = await import('./storage/sqliteMessages');
-  const database = db as unknown as BackupDexieLike;
 
   return {
     readTables: async (tables = BACKUP_TABLE_ORDER, onProgress) => {
@@ -359,9 +357,9 @@ export async function liveBackupStore(): Promise<BackupStore> {
           out[table] = dump ? dump.kv : [];
         } else if (table === 'sqliteMessages') {
           out[table] = dump ? dump.messages : [];
-        } else if (needsDexieRead(table, !!dump)) {
-          out[table] = await database.table(table).toArray();
         } else {
+          // Tabel non-SQLite sudah hidup di `sqliteKv` (keychain, kontak,
+          // percakapan, profil, story/offline queue); tidak ada sumber lain.
           out[table] = [];
         }
         onProgress?.(i + 1, tables.length);
@@ -390,20 +388,16 @@ export async function liveBackupStore(): Promise<BackupStore> {
         await sqlite.restoreSqliteBackup(key, kvRows, messageRows);
       }
 
-      const dexieRecords: Record<string, unknown[]> = {};
-      for (const [table, rows] of Object.entries(recordsByTable)) {
-        if (isSqliteBackupTable(table)) continue;
-        if (meta && SQLITE_MIGRATED_TABLES.has(table)) continue;
-        dexieRecords[table] = rows;
-      }
-
-      await writeTablesToDexie(database, dexieRecords, onProgress);
+      onProgress?.(
+        Object.keys(recordsByTable).length,
+        Object.keys(recordsByTable).length,
+      );
       // [docs/30 WS-F] Arsip dari klien pra-v9 membawa baris pesan **tanpa**
       // `orderBucketMs`; `bulkPut` mentah membuatnya tak muncul di indeks
       // `[conversationId+orderBucketMs]` (tersimpan, tapi tak pernah tampil di
       // query berpaginasi). Rapikan sekali setelah tulis — idempoten, jadi
       // arsip dari klien baru hanya lewat tanpa perubahan.
-      if ((dexieRecords.messages?.length ?? 0) > 0) {
+      if ((recordsByTable.sqliteMessages?.length ?? 0) > 0) {
         const { shadowVault } = await import('./shadowVaultDb');
         const repaired = await shadowVault.normalizeOrderIndex();
         if (repaired > 0) console.log(`[Backup] order index repaired for ${repaired} messages`);

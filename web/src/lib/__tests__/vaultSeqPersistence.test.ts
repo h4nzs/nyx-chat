@@ -82,9 +82,11 @@ function makeMessagesTable() {
 }
 
 const fakeMessages = makeMessagesTable();
-const db = { messages: fakeMessages };
 
-vi.mock('@lib/db', () => ({ db }));
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('./helpers/memoryMessageModule');
+  return memoryMessageModule(fakeMessages._rows as never);
+});
 
 // [docs/29 §5.5] `seq` kini disimpan sebagai envelope `ENC1:` (masterSeed-bound).
 // Keychain nyata butuh sesi ter-unlock + crypto worker → di-stub dengan bentuk

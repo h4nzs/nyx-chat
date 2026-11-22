@@ -1,5 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
+import { decryptVaultText } from '@lib/shadowVaultDb';
 // [docs/30 WS-F] kolom pengurutan `createdAt` kini ter-seal → urutkan lewat
 // lapis presisi (`openOrderInstant`), bukan `sortBy('createdAt')` mentah.
 import { openOrderInstant, resolveOrderInstants } from '@lib/localOrderKey';
@@ -14,7 +14,6 @@ import {
   readSqliteConversationRows,
   readSqliteMessagesByIds,
 } from '@lib/storage/sqliteMessages';
-import { useDexieTestFallback } from '@lib/storage/testFallback';
 import type { Message } from "./conversation";
 import type { MessageId } from '@nyx/shared';
 
@@ -45,14 +44,7 @@ export function resetSearchIndexForTests(): void {
  * substring lama tetap utuh).
  */
 async function syncConversationIndex(conversationId: string): Promise<DecryptedMessageRecord[]> {
-  let sqliteRows: DecryptedMessageRecord[] | null = null;
-  try {
-    sqliteRows = await readSqliteConversationRows(conversationId);
-  } catch (error) {
-    if (!useDexieTestFallback()) throw error;
-  }
-  const rows = sqliteRows
-    ?? await shadowVault.messages.where('conversationId').equals(conversationId).toArray();
+  const rows = await readSqliteConversationRows(conversationId);
   const fingerprints = indexedFingerprints.get(conversationId) ?? new Map<string, string>();
   const seen = new Set<string>();
 
@@ -140,14 +132,7 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       // persis seperti pencarian substring lama.
       let rawResults: DecryptedMessageRecord[] = conversationRows;
       if (candidateIds) {
-        let sqliteFetched: DecryptedMessageRecord[] | null = null;
-        try {
-          sqliteFetched = await readSqliteMessagesByIds(candidateIds);
-        } catch (error) {
-          if (!useDexieTestFallback()) throw error;
-        }
-        rawResults = sqliteFetched ?? (await shadowVault.messages.bulkGet(candidateIds))
-          .filter((row): row is DecryptedMessageRecord => !!row);
+        rawResults = await readSqliteMessagesByIds(candidateIds);
       }
 
       // Urut lama→baru (perilaku `sortBy('createdAt')` sebelumnya) dihitung dari

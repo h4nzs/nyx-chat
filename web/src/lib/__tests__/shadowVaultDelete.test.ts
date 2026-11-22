@@ -45,7 +45,13 @@ const db = {
   },
 }
 
-vi.mock('@lib/db', () => ({ db, Dexie: class {} }))
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('./helpers/memoryMessageModule');
+  return {
+    ...memoryMessageModule(fakeMessages as never),
+    openSqliteKeyStore: async () => keyStore,
+  };
+});
 
 // [docs/43 §43.11.6 B3] Baris percakapan hidup di appStorage (SQLite); fake di
 // atas yang menjadi backend-nya.

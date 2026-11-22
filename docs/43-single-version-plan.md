@@ -771,6 +771,18 @@ lagi mengimpor `db` sama sekali — `clearAllKeys` hanya membersihkan SQLite dan
 tabel appStorage, `closeDatabaseConnection` hanya menutup worker. Sisa pemakai
 `db.ts` tinggal jalur pesan: `shadowVaultDb` (runtime), `backupRestore`, dan
 `dexieMigration.test.ts`.
+
+**P6 — `db.ts` dihapus, jalur pesan SQLite-only (2026-11-22).** `shadowVaultDb`
+tidak lagi membaca/menulis Dexie: baca/tulis/hapus pesan langsung ke
+`storage/sqliteMessages`, `messages` getter (tabel Dexie) dihapus, dan
+`backupRestore.liveBackupStore` hanya membaca dump SQLite (`sqliteMeta`,
+`sqliteKv`, `sqliteMessages`) — tabel non-SQLite sudah hidup di `sqliteKv`.
+Tes jalur pesan memakai `__tests__/helpers/memoryMessageModule.ts` sebagai
+pengganti seam, `dexieMigration.test.ts` diganti
+`storage/__tests__/schema.test.ts` (invarian skema SQLite), dan `db.ts` +
+`testFallback.ts` dihapus. Dexie yang tersisa hanya benchmark
+`devicePipelineBench` (memang mengukur IndexedDB) dan oracle kontrak
+`storage/dexieStores.ts` yang dipakai `storesContract.test.ts`.
 ---
 
 ## 43.12 Rekomendasi teknologi lain (dengan keputusan)

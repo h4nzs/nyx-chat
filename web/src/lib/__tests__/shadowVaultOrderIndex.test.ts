@@ -172,6 +172,11 @@ vi.mock('@lib/storage/appStorage', () => ({
   },
 }));
 
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('./helpers/memoryMessageModule');
+  return memoryMessageModule(messageRows as never);
+});
+
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({
     crypto_generichash: () => new Uint8Array(32),

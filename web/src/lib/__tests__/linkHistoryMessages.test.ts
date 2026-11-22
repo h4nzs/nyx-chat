@@ -91,13 +91,14 @@ const rows: Row[] = [
   },
 ];
 
-vi.mock('../db', () => ({
-  db: {
-    messages: {
-      toArray: async () => rows,
-    },
-  },
-}));
+const memoryRows = vi.hoisted(() => new Map<string, Record<string, unknown>>());
+
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('./helpers/memoryMessageModule');
+  return memoryMessageModule(memoryRows as never);
+});
+
+for (const row of rows) memoryRows.set(String(row.id), row);
 
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn(async () => ({

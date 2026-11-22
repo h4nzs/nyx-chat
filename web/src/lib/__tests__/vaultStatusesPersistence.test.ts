@@ -86,9 +86,11 @@ function makeMessagesTable() {
 }
 
 const fakeMessages = makeMessagesTable();
-const db = { messages: fakeMessages };
 
-vi.mock('@lib/db', () => ({ db }));
+vi.mock('@lib/storage/sqliteMessages', async () => {
+  const { memoryMessageModule } = await import('./helpers/memoryMessageModule');
+  return memoryMessageModule(fakeMessages._rows as never);
+});
 
 vi.mock('@lib/keychainDb', () => ({
   AT_REST_PREFIX: 'ENC1:',
