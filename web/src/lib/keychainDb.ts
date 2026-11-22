@@ -2,7 +2,14 @@ import { isPlainObject } from '@utils/typeGuards';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import { db, VaultEntry, type PqDrSessionRecord } from './db';
+import type {
+  GroupReceiverRow,
+  GroupSenderRow,
+  IdentityRow,
+  PendingHeaderRow,
+  PqDrSessionRecord,
+  PreKeyRow,
+} from './storage/types';
 import { clearAppTable, listAppRows, putAppRows } from './storage/appStorage';
 import type { StoryId } from '@nyx/shared';
 import { base64UrlToBytes, bytesToBase64Url } from './base64url';
@@ -75,12 +82,7 @@ function decodeJson<T>(value: Uint8Array | undefined): T | undefined {
   }
 }
 
-type GroupSenderRow = Parameters<typeof db.groupSenderStates.put>[0];
-type GroupReceiverRow = Parameters<typeof db.groupReceiverStates.put>[0];
-type PreKeyRow = Parameters<typeof db.preKeys.put>[0];
-type IdentityRow = Parameters<typeof db.identityKeys.put>[0];
-type PendingHeaderRow = Parameters<typeof db.pendingHeaders.put>[0];
-type GroupParticipantsRow = Parameters<typeof db.groupCachedParticipants.put>[0];
+type GroupParticipantsRow = { conversationId: string; userIds: string[] };
 
 async function getGroupSenderRow(conversationId: string): Promise<GroupSenderRow | undefined> {
   const keys = await sqliteKeys();
@@ -339,12 +341,9 @@ async function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
 
 export async function closeDatabaseConnection() {
   // [docs/43 §43.11.6 B2] Worker SQLite memegang kunci DB di memori; tutup
-  // sebelum koneksi Dexie hilang supaya tidak ada worker yang tertinggal.
+  // supaya tidak ada worker yang tertinggal saat logout/wipe.
   const { closeSqliteMessages } = await import('./storage/sqliteMessages');
   await closeSqliteMessages().catch(() => {});
-  if (db.isOpen()) {
-    db.close();
-  }
 }
 
 // ... existing helpers ...
@@ -1026,29 +1025,18 @@ export async function clearAllKeys(): Promise<void> {
         .then((m) => m.clearSqliteMessagesKey())
         .catch(() => {});
       await closeSqliteMessages().catch(() => {});
+      // [docs/43 §43.11.6 B3] Tidak ada tabel Dexie yang perlu dikosongkan:
+      // pesan, keychain, dan kvStore semuanya hidup di SQLite dan sudah dihapus
+      // di atas. Tabel aplikasi non-pesan tetap dibersihkan lewat appStorage.
       await Promise.all([
-          db.messages.clear(),
           clearAppTable('storyKeys'),
           clearAppTable('offlineQueue'),
           clearAppTable('conversations'),
           clearAppTable('profileCache'),
-          db.sessionKeys.clear(),
-          db.groupKeys.clear(),
-          db.preKeys.clear(),
-          db.identityKeys.clear(),
-          db.ratchetSessions.clear(),
-          db.groupSenderStates.clear(),
-          db.groupReceiverStates.clear(),
-          db.skippedKeys.clear(),
-          db.messageKeys.clear(),
-          db.pendingHeaders.clear(),
-          db.groupSkippedKeys.clear(),
-          db.pqDrSessions.clear()
       ]);
   });
 }
 
-export type { VaultEntry };
 
 // ============================================================
 // MIGRASI AT-REST: enkripsi ulang nilai plaintext legacy (tanpa

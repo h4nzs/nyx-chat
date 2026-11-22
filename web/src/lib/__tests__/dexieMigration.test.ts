@@ -16,7 +16,7 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import Dexie from 'dexie';
-import type { PqDrSessionRecord } from '../db';
+import type { PqDrSessionRecord } from '../storage/types';
 
 // ─── Stub crypto (mirror bentuk nyata: prefix `ENC1:` + base64) ──────────────
 vi.mock('@lib/keychainDb', () => ({

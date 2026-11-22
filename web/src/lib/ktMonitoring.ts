@@ -32,7 +32,7 @@
  * pemanggil (`KtMonitorOutcome.changed`) supaya modul ini bebas UI/toast.
  */
 
-import type { KtMonitoringRecord } from './db';
+import type { KtMonitoringRecord } from './storage/types';
 import { decryptValueAtRest, deriveKtSearchIndexKey, encryptValueAtRest } from './keychainDb';
 import {
   clearKvPrefix,

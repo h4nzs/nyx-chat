@@ -6,7 +6,7 @@
  * menulis ke backend lain (atau ke `:memory:`). `shadowVaultDb` masih menulis
  * salinan Dexie untuk pembaca legacy; itu sisa B3, bukan jalur cadangan modul ini.
  */
-import type { DecryptedMessageRecord } from '../db';
+import type { DecryptedMessageRecord } from './types';
 import { isExpiredMessageRow } from '../localAtRest';
 import { orderBucketOf } from '../localOrderBucket';
 import { pickOlderPage, resolveOrderInstants } from '../localOrderKey';

@@ -2,7 +2,7 @@ import { createWithEqualityFn } from 'zustand/traditional';
 import { decryptProfile } from '@lib/crypto-worker-proxy';
 import { getProfileKey } from '@lib/keychainDb';
 import { getAppRow, putAppRow } from '@lib/storage/appStorage';
-import type { ProfileCacheRecord } from '@lib/db';
+import type { ProfileCacheRecord } from '@lib/storage/types';
 // [docs/30 WS-F §30.10] kolom waktu cache profil di-seal (tidak ada pembaca).
 import { sealLocalNumber } from '@lib/localAtRest';
 import type { UserId } from '@nyx/shared';

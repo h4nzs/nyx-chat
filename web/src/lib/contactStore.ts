@@ -24,7 +24,7 @@
 // boleh menghapus kontak lokal.
 // ============================================================================
 
-import type { ContactRow } from './db';
+import type { ContactRow } from './storage/types';
 import {
     asUserId,
     getParticipantUserId,

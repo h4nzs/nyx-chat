@@ -27,7 +27,7 @@
  * terbuka). Pin kuat sejati (trust anchor dari rilis aplikasi) menunggu KT Scope B.
  */
 
-import type { KtConfigRow } from './db';
+import type { KtConfigRow } from './storage/types';
 import { decryptValueAtRest, encryptValueAtRest } from './keychainDb';
 import { clearKvPrefix, KT_CONFIG_PREFIX, openKtSqliteKv } from './storage/ktKv';
 import type { KvStore } from './storage/types';

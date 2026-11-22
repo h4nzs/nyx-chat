@@ -9,7 +9,7 @@ import { openLocalFlag } from '@lib/localAtRest';
 // [docs/30 WS-F §30.10 poin 3] indeks pencarian in-memory → pencarian tidak lagi
 // mendekripsi seluruh percakapan di tiap ketikan.
 import { MessageSearchIndex, searchRowFingerprint, tokenizeSearchText } from '@lib/searchIndex';
-import type { DecryptedMessageRecord } from '@lib/db';
+import type { DecryptedMessageRecord } from '@lib/storage/types';
 import {
   readSqliteConversationRows,
   readSqliteMessagesByIds,

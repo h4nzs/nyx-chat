@@ -1,4 +1,10 @@
-import { db, DecryptedMessageRecord, PqDrSessionRecord, type ConversationRecord, type ProfileCacheRecord } from './db';
+import { db } from './db';
+import type {
+  ConversationRecord,
+  DecryptedMessageRecord,
+  PqDrSessionRecord,
+  ProfileCacheRecord,
+} from './storage/types';
 import {
   deleteAppRow,
   getAppRow,

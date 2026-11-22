@@ -762,6 +762,15 @@ dinamis di dalam `Promise.all` tidak selalu terkena mock Vitest. Suite web
 kembali 150 berkas / 1168 tes, dan `nodeSqliteTestDriver.ts` dihapus karena
 tidak ada pemakainya.
 
+
+**P5 — tipe baris pindah, keychain lepas dari Dexie (2026-11-22).** Bentuk baris
+domain (`DecryptedMessageRecord`, `PqDrSessionRecord`, `ConversationRecord`,
+`ProfileCacheRecord`, `ContactRow`, `KtMonitoringRecord`, `KtConfigRow`, baris
+keychain) pindah dari `lib/db.ts` ke `lib/storage/types.ts`; `keychainDb` tidak
+lagi mengimpor `db` sama sekali — `clearAllKeys` hanya membersihkan SQLite dan
+tabel appStorage, `closeDatabaseConnection` hanya menutup worker. Sisa pemakai
+`db.ts` tinggal jalur pesan: `shadowVaultDb` (runtime), `backupRestore`, dan
+`dexieMigration.test.ts`.
 ---
 
 ## 43.12 Rekomendasi teknologi lain (dengan keputusan)
