@@ -7,16 +7,18 @@
  *
  * Kripto yang dipakai SUNGGUHAN (libsodium + arsip ber-frame); hanya
  * *penyimpanan* yang dipalsukan — unit test tidak boleh butuh IndexedDB.
- * Adapter Dexie diuji lewat `BackupDexieLike` palsu, sehingga logika
- * clear-lalu-bulkPut dan pemilihan tabel benar-benar diperiksa, bukan stub.
+ * Adapter Dexie drill perangkat lama diuji lewat `BackupDexieLike` palsu,
+ * sehingga logika clear-lalu-bulkPut dan pemilihan tabel benar-benar diperiksa,
+ * bukan stub.
  *
  * Properti yang dikunci:
  *   1. Roundtrip build → restore mempertahankan nilai biner/Date/at-rest.
  *   2. Progres dilaporkan per frame (jumlah panggilan = frameCount).
  *   3. Kunci salah / phrase salah ditolak sebelum database disentuh.
  *   4. Tabel kosong → arsip kosong ditolak (bukan restore "sukses" senyap).
- *   5. Adapter Dexie: clear() sebelum bulkPut, tabel yang tidak ada di backup
- *      tidak disentuh, dan semuanya dalam satu transaksi.
+ *   5. Adapter Dexie (drill): clear() sebelum bulkPut, tabel yang tidak ada di
+ *      backup tidak disentuh, dan semuanya dalam satu transaksi.
+ *   6. Arsip klien pra-SQLite ditolak, bukan restore "sukses" tanpa data.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import sodium from 'libsodium-wrappers';
@@ -32,13 +34,12 @@ import {
   type BackupValueCodec,
 } from '../backupPayload';
 import {
+  assertRestorableBackupTables,
   averageFrameBytes,
   createFramedBackup,
   formatBackupSize,
   normalizeBackupPhrase,
   openFramedBackupWithPhrase,
-  isSqliteBackupTable,
-  needsDexieRead,
   readTablesFromDexie,
   restoreFramedBackup,
   writeTablesToDexie,
@@ -267,7 +268,7 @@ describe('backupRestore: jalur berkas manual (recovery phrase)', () => {
   });
 });
 
-describe('backupRestore: adapter Dexie', () => {
+describe('backupRestore: adapter Dexie drill perangkat lama', () => {
   function fakeDexie(initial: Record<string, unknown[]> = {}) {
     const state = new Map<string, { rows: unknown[]; cleared: number; puts: number }>();
     const get = (name: string) => {
@@ -325,14 +326,19 @@ describe('backupRestore: adapter Dexie', () => {
     await writeTablesToDexie(db, {});
     expect(transactions).toEqual([]);
   });
+});
 
-  it('dump SQLite menggantikan tabel yang sudah dimigrasikan, tetapi kvStore tetap Dexie', () => {
-    expect(isSqliteBackupTable('sqliteKv')).toBe(true);
-    expect(isSqliteBackupTable('messages')).toBe(false);
-    expect(needsDexieRead('messages', true)).toBe(false);
-    expect(needsDexieRead('contacts', true)).toBe(false);
-    expect(needsDexieRead('kvStore', true)).toBe(false);
-    expect(needsDexieRead('messages', false)).toBe(true);
+describe('backupRestore: arsip pra-SQLite', () => {
+  it('menolak arsip tanpa tabel SQLite alih-alih restore kosong yang "berhasil"', () => {
+    expect(() => assertRestorableBackupTables({})).toThrow(BackupFormatError);
+    expect(() => assertRestorableBackupTables({ kvStore: [{ key: 'locale', value: 'id' }] }))
+      .toThrow(/klien lama/);
+  });
+
+  it('menerima arsip dengan kunci atau baris SQLite', () => {
+    expect(() => assertRestorableBackupTables({ sqliteMeta: [{ key: 'dbKey', value: new Uint8Array(32) }] })).not.toThrow();
+    expect(() => assertRestorableBackupTables({ sqliteKv: [{ key: 'locale', value: 'id' }] })).not.toThrow();
+    expect(() => assertRestorableBackupTables({ sqliteMessages: [{ id: 'm1' }] })).not.toThrow();
   });
 });
 

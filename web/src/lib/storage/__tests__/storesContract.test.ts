@@ -1,12 +1,11 @@
 /**
- * [docs/43 §43.11.6 B1] Kontrak yang sama dijalankan terhadap Dexie dan
- * SQLite. Sisi SQLite di sini memakai `node:sqlite` in-memory sebagai driver;
- * yang diuji adalah skema + semantik store, bukan VFS OPFS atau SQLite3MC.
+ * [docs/43 §43.11.6 B1/P7] Kontrak store dijalankan terhadap SQLite, satu-satunya
+ * backend sejak Dexie dihapus. Sisi SQLite memakai `node:sqlite` in-memory
+ * sebagai driver; yang diuji adalah skema + semantik store, bukan VFS OPFS atau
+ * SQLite3MC.
  */
-import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import Dexie from 'dexie';
 
 import type {
   KeyStore,
@@ -21,11 +20,6 @@ import {
   createSqliteKvStore,
   createSqliteMessageStore,
 } from '../sqliteStores';
-import {
-  createDexieKvStore,
-  createDexieMessageStore,
-  type DexieStorageLike,
-} from '../dexieStores';
 import { createKeyStore } from '../keyStore';
 
 interface NodeStatement {
@@ -93,33 +87,6 @@ async function createSqliteBackend(): Promise<Backend> {
   };
 }
 
-let dexieSequence = 0;
-
-async function createDexieBackend(): Promise<Backend> {
-  const name = `NyxStorageContract_${Date.now()}_${++dexieSequence}`;
-  const database = new Dexie(name) as unknown as Dexie & DexieStorageLike;
-  database.version(1).stores({
-    kvStore: 'key',
-    messages: 'id,conversationId,[conversationId+orderBucketMs]',
-  });
-  await database.open();
-  const kv = createDexieKvStore(database);
-  return {
-    kv,
-    keys: createKeyStore(kv),
-    messages: createDexieMessageStore(database),
-    close: async () => {
-      database.close();
-      await Dexie.delete(name);
-    },
-  };
-}
-
-const backends = [
-  { name: 'sqlite', create: createSqliteBackend },
-  { name: 'dexie', create: createDexieBackend },
-];
-
 const rows: MessageRow[] = [
   { id: 'm1', conversationId: 'c1', orderBucketMs: 100, content: 'satu' },
   { id: 'm2', conversationId: 'c1', orderBucketMs: 300, content: 'tiga' },
@@ -127,11 +94,11 @@ const rows: MessageRow[] = [
   { id: 'm4', conversationId: 'c2', orderBucketMs: 400, content: 'lain' },
 ];
 
-describe.each(backends)('$name storage contract', ({ create }) => {
+describe('sqlite storage contract', () => {
   let backend: Backend;
 
   beforeEach(async () => {
-    backend = await create();
+    backend = await createSqliteBackend();
   });
 
   afterEach(async () => {

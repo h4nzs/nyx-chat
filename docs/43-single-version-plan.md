@@ -781,8 +781,20 @@ Tes jalur pesan memakai `__tests__/helpers/memoryMessageModule.ts` sebagai
 pengganti seam, `dexieMigration.test.ts` diganti
 `storage/__tests__/schema.test.ts` (invarian skema SQLite), dan `db.ts` +
 `testFallback.ts` dihapus. Dexie yang tersisa hanya benchmark
-`devicePipelineBench` (memang mengukur IndexedDB) dan oracle kontrak
-`storage/dexieStores.ts` yang dipakai `storesContract.test.ts`.
+`devicePipelineBench` (memang mengukur IndexedDB).
+
+**P7 — sisa Dexie dan arsip lama (2026-11-22).** Oracle kontrak
+`storage/dexieStores.ts` dihapus; `storesContract.test.ts` kini menjalankan
+kontrak hanya terhadap SQLite. Helper mati `needsDexieRead`/`isSqliteBackupTable`
+(termasuk set `SQLITE_*`-nya) dicabut dari `backupRestore.ts`. Adapter
+`readTablesFromDexie`/`writeTablesToDexie` **dipertahankan** karena
+`web/scripts/client-restore-drill.ts` masih memakainya untuk memerankan
+perangkat pra-SQLite — drill itu kini menguji format arsip, bukan jalur restore
+produksi (`liveBackupStore`), jadi migrasinya ke SQLite adalah item terpisah.
+Restore `liveBackupStore` menolak arsip tanpa `sqliteMeta`/baris SQLite
+(`assertRestorableBackupTables`): arsip dari klien pra-SQLite sebelumnya
+"berhasil" tanpa memulihkan apa pun. `dexie` tetap dependency hanya untuk
+benchmark IndexedDB yang dimuat lazy di `/bench/pq`.
 ---
 
 ## 43.12 Rekomendasi teknologi lain (dengan keputusan)
@@ -955,6 +967,11 @@ dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
 | 9 | TODO deploy | `.github/workflows/deploy.yml:159` masih password SSH | pindah ke `secrets.VPS_SSH_KEY`; satu perubahan terkontrol, bukan saat deploy tergesa | P2 |
 | 10 | Klaim PIR 04:15 basi | lihat §43.15.1 | koreksi `AGENTS.md` + `docs/10` §10.19 saat menyentuhnya | P1 |
 | 11 | a11y baru 3 halaman | `web/e2e/a11y.spec.ts` (login, register, settings) | tambah `chat`, `privacy`, modal story; jalankan di config a11y | P2 |
+
+> **Status 2026-11-22:** #1–#3 selesai — `server/.env.example` disinkronkan
+> (kunci blind-RSA grup dihapus, OHTTP/OPRF/PIR/PP/keyring ditambahkan), typo
+> `VITE_PIR_RELAYS==` diperbaiki, dan `POST /create-crypto-transaction`
+> menjawab 503 `PAYMENTS_NOT_CONFIGURED` sebelum memanggil NOWPayments.
 
 ### 43.15.3 Yang diperiksa dan **tidak** bermasalah
 

@@ -9,17 +9,18 @@
  * Modul ini adalah "lem" antara tiga lapisan yang sudah ada:
  *   - `backupFormat`  → bentuk byte arsip (header, padding, AEAD, AAD),
  *   - `backupPayload` → pemetaan tabel Keychain ↔ frame,
- *   - `db` (Dexie)    → penyimpanan nyata.
+ *   - `storage/sqliteMessages` → penyimpanan nyata (dump `sqliteMeta`,
+ *     `sqliteKv`, `sqliteMessages`).
  *
  * Yang dilakukan di sini: membaca tabel dari penyimpanan, membangun arsip, dan
  * (arah sebaliknya) mem-parse arsip lalu menulisnya kembali ke penyimpanan —
  * dengan **progres per frame** dan **laporan ukuran** yang bisa ditampilkan UI.
  *
- * Kenapa `BackupStore` disuntikkan (bukan langsung `db`): test tidak boleh
- * butuh IndexedDB (aturan repo — unit test tanpa Postgres/Redis/IDB). Logika
- * di sini diuji dengan store palsu; adapter Dexie nyata hanya disentuh lewat
- * `liveBackupStore()` yang memuat `./db` secara **dinamis**, sehingga mengimpor
- * modul ini tidak pernah meng-instansiasi Dexie di lingkungan test.
+ * Kenapa `BackupStore` disuntikkan (bukan langsung penyimpanan): test tidak
+ * boleh butuh IndexedDB/Worker (aturan repo — unit test tanpa Postgres/Redis/
+ * IDB). Logika di sini diuji dengan store palsu; penyimpanan nyata hanya
+ * disentuh lewat `liveBackupStore()`, yang memuat `./storage/sqliteMessages`
+ * secara **dinamis**.
  *
  * Catatan kunci: arsip ber-frame **tidak** menentukan asal kunci, tetapi
  * pemanggil produksi hanya punya satu jalur (lihat `docs/31` §31.6c):
@@ -63,7 +64,7 @@ export function normalizeBackupPhrase(phrase: string): string {
 
 /**
  * Kontrak penyimpanan yang dibutuhkan restore/build. Implementasi nyata ada di
- * `readTablesFromDexie`/`writeTablesToDexie`; test memakai objek sederhana.
+ * `liveBackupStore`; test memakai objek sederhana.
  */
 export interface BackupStore {
   readTables(
@@ -259,7 +260,11 @@ export async function openFramedBackupWithPhrase(
   });
 }
 
-/** Bentuk Dexie yang dibutuhkan — struktural supaya test bisa memakai objek palsu. */
+/**
+ * Bentuk Dexie yang dibutuhkan — struktural supaya test bisa memakai objek palsu.
+ * Sejak docs/43 B3 ini **bukan** jalur produksi: hanya dipakai
+ * `web/scripts/client-restore-drill.ts` untuk memerankan perangkat pra-SQLite.
+ */
 export interface BackupDexieLike {
   table(name: string): {
     toArray(): Promise<unknown[]>;
@@ -289,6 +294,7 @@ export async function readTablesFromDexie(
 
 /**
  * Tulis hasil restore ke Dexie dalam **satu transaksi** `rw`: untuk setiap tabel
+ * (dipakai drill perangkat lama, bukan `liveBackupStore` produksi.)
  * yang hadir di backup, `clear()` lalu `bulkPut()`. Tabel yang tidak muncul di
  * backup **tidak** disentuh — pada perangkat pengganti yang masih kosong itu
  * titik awal yang benar, dan untuk restore di atas state lama kita sengaja tidak
@@ -316,20 +322,20 @@ export async function writeTablesToDexie(
   });
 }
 
-const SQLITE_BACKUP_TABLES = new Set(['sqliteMeta', 'sqliteKv', 'sqliteMessages']);
-/** Tabel Dexie yang saat SQLite aktif sudah diwakili oleh `sqliteKv`/`sqliteMessages`. */
-const SQLITE_MIGRATED_TABLES = new Set(
-  BACKUP_TABLE_ORDER.filter((table) => !SQLITE_BACKUP_TABLES.has(table))
-);
-
-export function isSqliteBackupTable(table: string): boolean {
-  return SQLITE_BACKUP_TABLES.has(table);
-}
-
-/** Hanya `kvStore` yang masih Dexie saat dump SQLite disertakan. */
-export function needsDexieRead(table: string, sqliteDump: boolean): boolean {
-  if (SQLITE_BACKUP_TABLES.has(table)) return false;
-  return !sqliteDump || !SQLITE_MIGRATED_TABLES.has(table);
+/**
+ * [docs/43 §43.11.6 P7] Arsip dari klien pra-SQLite hanya membawa tabel Dexie;
+ * tidak ada backend yang bisa menulisnya. Tanpa pemeriksaan ini restore
+ * melaporkan "berhasil" padahal tidak memulihkan satu baris pun.
+ */
+export function assertRestorableBackupTables(recordsByTable: Record<string, unknown[]>): void {
+  const hasMeta = (recordsByTable.sqliteMeta?.length ?? 0) > 0;
+  const hasRows = (recordsByTable.sqliteKv?.length ?? 0) > 0
+    || (recordsByTable.sqliteMessages?.length ?? 0) > 0;
+  if (!hasMeta && !hasRows) {
+    throw new BackupFormatError(
+      'Arsip .nyxbak ini dibuat oleh klien lama (tanpa penyimpanan SQLite) dan tidak bisa dipulihkan di versi ini'
+    );
+  }
 }
 
 /**
@@ -368,6 +374,7 @@ export async function liveBackupStore(): Promise<BackupStore> {
     },
 
     writeTables: async (recordsByTable, onProgress) => {
+      assertRestorableBackupTables(recordsByTable);
       const meta = (recordsByTable.sqliteMeta ?? []).find(
         (row): row is { key: string; value: Uint8Array } =>
           !!row && typeof row === 'object' && (row as { key?: unknown }).key === 'dbKey'
