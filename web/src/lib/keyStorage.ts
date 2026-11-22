@@ -64,8 +64,24 @@ export const setPanicPassword = async (password: string) => {
   await set(STORAGE_KEYS.PANIC_HASH, JSON.stringify(record));
 };
 
+/**
+ * Verifikasi panic password.
+ *
+ * `get()` (KvStore SQLite) dibaca sebelum vault terbuka, dan kuncinya sendiri
+ * ter-seal `ENC1:` dengan masterSeed — jadi pada perangkat baru / setelah state
+ * lokal dikosongkan pembacaan itu bisa melempar `AtRestSealUnavailableError`.
+ * Itu **bukan** alasan menggagalkan login: tanpa hash yang terbaca, jawabannya
+ * adalah "bukan panic password". Error dari `workerPanicHash` tetap ditelan
+ * seperti sebelumnya (fail-closed).
+ */
 export const checkPanicPassword = async (password: string): Promise<boolean> => {
-  const storedRecordStr = await get<string>(STORAGE_KEYS.PANIC_HASH);
+  let storedRecordStr: string | undefined;
+  try {
+    storedRecordStr = await get<string>(STORAGE_KEYS.PANIC_HASH);
+  } catch (e) {
+    console.warn('[KeyStorage] Hash panic password tidak terbaca (vault belum siap):', e);
+    return false;
+  }
   if (!storedRecordStr) return false;
   
   try {
