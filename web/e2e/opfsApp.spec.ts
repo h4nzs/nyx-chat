@@ -113,8 +113,8 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
         meta: dump.sqliteMeta?.length ?? 0,
         kv: dump.sqliteKv?.length ?? 0,
         messages: dump.sqliteMessages?.length ?? 0,
-        dexieConversations: dump.conversations?.length ?? 0,
-        dexieContacts: dump.contacts?.length ?? 0,
+        legacyConversations: dump.conversations?.length ?? 0,
+        legacyContacts: dump.contacts?.length ?? 0,
       };
       await store.writeTables({
         sqliteMeta: dump.sqliteMeta ?? [],
@@ -136,8 +136,8 @@ test.describe('Aplikasi di bawah COOP/COEP', () => {
     });
     expect(backupRoundtrip.before.meta).toBe(1);
     expect(backupRoundtrip.before.kv).toBeGreaterThan(0);
-    expect(backupRoundtrip.before.dexieConversations).toBe(0);
-    expect(backupRoundtrip.before.dexieContacts).toBe(0);
+    expect(backupRoundtrip.before.legacyConversations).toBe(0);
+    expect(backupRoundtrip.before.legacyContacts).toBe(0);
     expect(backupRoundtrip.after.meta).toBe(1);
     expect(backupRoundtrip.after.kv).toBe(backupRoundtrip.before.kv);
     expect(backupRoundtrip.afterApp).toEqual({ conversation: 'opfs-conv', profile: 'OPFS' });

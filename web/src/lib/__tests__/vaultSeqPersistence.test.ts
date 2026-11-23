@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 function makeMessagesTable() {
   const rows = new Map<string, Record<string, unknown>>();
 
-  // [docs/30 WS-F] Query di-scope ke kunci yang diminta — meniru indeks Dexie
+  // [docs/30 WS-F] Query di-scope ke kunci yang diminta — meniru indeks lama
   // (`conversationId` dan `[conversationId+orderBucketMs]`). Sebelumnya fake ini
   // mengembalikan SELURUH tabel untuk `equals()` apa pun; itu tidak lagi setara
   // dengan skema sekarang (pembaca berpaginasi berjalan per bucket, sehingga
@@ -29,7 +29,7 @@ function makeMessagesTable() {
     if (selector === '[conversationId+orderBucketMs]') {
       const [convId, bucket] = arg as [string, unknown];
       const owned = all.filter((r) => r.conversationId === convId && typeof r.orderBucketMs === 'number');
-      // Perhatikan: `Dexie.minKey`/`maxKey` adalah `-Infinity`/`Infinity`, jadi
+      // Perhatikan: `minKey`/`maxKey` adalah `-Infinity`/`Infinity`, jadi
       // batas non-finite berarti rentang penuh (dipakai pencarian bucket terbaru),
       // bukan pencocokan bucket.
       if (typeof bucket === 'number' && Number.isFinite(bucket)) {

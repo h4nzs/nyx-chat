@@ -33,7 +33,7 @@ NYX treats the server as an honest-but-curious (and sometimes actively malicious
 1. **No PII Storage:** No emails, phone numbers, or plaintext usernames. Raw IP addresses are never written to the database; where abuse limiting needs a network signal, it uses **peppered HMAC tags** (IP, installation, ASN) that cannot be reversed from a dump.
 2. **Blind Indexing (Memory-Hard):** Your username is hashed client-side with Argon2id (64 MB memory cost). The server stores only a peppered form of that hash (`HMAC(pepper, usernameHash)`, pepper kept outside the database) and cannot reverse it — a dump alone cannot be used to build a rainbow table.
 3. **Ghost Profiles:** Your name, bio, and avatar are encrypted locally with a symmetric `ProfileKey`, shared *only* with trusted contacts through E2EE payloads. To the server, your profile is an opaque blob.
-4. **Local-First Sovereignty:** Your chat history lives on your device (IndexedDB "Shadow Vault"). Ciphertext is relayed and kept server-side only briefly (≤ 14 days); plaintext history is never synced to the cloud.
+4. **Local-First Sovereignty:** Your chat history lives on your device (SQLite over OPFS, the "Shadow Vault"). Ciphertext is relayed and kept server-side only briefly (≤ 14 days); plaintext history is never synced to the cloud.
 5. **Sealed Metadata:** Sender identity, delivery receipts, hidden-conversation routing, story authors, and block relations are stored as **opaque, domain-separated tags or sealed blobs** rather than user IDs. Redis keys use identity tags instead of real user IDs, and presence is **per-contact and opt-in** (no global "who is online" roster).
 
 ---
@@ -90,7 +90,7 @@ Registration is additionally guarded by tiered counters per source, installation
 * **Styling:** Tailwind CSS v4
 * **Real-time:** native **WebTransport** in a dedicated Web Worker, with a Socket.IO WebSocket gateway as the second relay path
 * **Crypto engine:** `libsodium-wrappers` (X-Wing/PQC support) + Rust-compiled **WASM** modules (`spqr-wasm`, `keytrans-wasm-v2`) loaded lazily
-* **Storage:** IndexedDB via `dexie` ("Unified Shadow Vault"), OPFS for encrypted attachment cache
+* **Storage:** SQLite over OPFS ("Unified Shadow Vault"), IndexedDB only for the sealed local key vault, OPFS for encrypted attachment cache
 * **PWA & i18n:** service worker (precache only), four languages (`en`, `es`, `id`, `pt-BR`)
 
 ### Backend — `server/`

@@ -5,8 +5,8 @@
 /**
  * [docs/43 §43.11.6 B2] State KT di KvStore SQLite.
  *
- * Dexie sengaja dibuat melempar supaya jalur SQLite tidak diam-diam menulis ke
- * dua tempat.
+ * Tidak ada backend kedua: state KT hanya boleh ditulis ke KvStore SQLite,
+ * bukan ke modul `db`/Dexie yang sudah dihapus.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

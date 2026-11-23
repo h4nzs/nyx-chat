@@ -5,8 +5,8 @@
 /**
  * [docs/43 §43.11.6 B2] Contact store di KvStore SQLite.
  *
- * Dexie sengaja dibuat melempar: seluruh CRUD kontak harus berhenti di KvStore,
- * bukan diam-diam menulis ke dua tempat.
+ * Seluruh CRUD kontak harus berhenti di KvStore SQLite — tidak ada backend
+ * kedua (`db`/Dexie sudah dihapus).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

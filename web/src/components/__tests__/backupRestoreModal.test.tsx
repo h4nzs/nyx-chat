@@ -15,7 +15,7 @@
  *  5. Sumber alternatif awan: `downloadCloudBackup` → byte-nya dipakai jalur
  *     restore yang sama; 404 (belum ada backup) dibedakan dari error lain.
  *
- * Semua modul berat (libsodium, Dexie, arsip) dipalsukan — yang diuji adalah
+ * Semua modul berat (libsodium, storage, arsip) dipalsukan — yang diuji adalah
  * wiring UI, bukan kripto (itu sudah diuji di `backupRestore.test.ts`).
  * `normalizeBackupPhrase` sengaja REAL: normalisasi itulah kontrak antar jalur.
  */

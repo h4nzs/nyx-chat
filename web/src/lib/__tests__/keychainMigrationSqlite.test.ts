@@ -4,8 +4,8 @@
 
 /**
  * [docs/43 §43.11.6 B3] Migrasi at-rest keychain harus mengikuti backend yang
- * sama dengan penyimpanan: KeyStore SQLite di produksi. Dexie hanya boleh
- * menjadi fallback tes; menyentuhnya di jalur SQLite adalah regresi dual-write.
+ * sama dengan penyimpanan: KeyStore SQLite di produksi. Tidak ada lagi modul
+ * `db`/Dexie; tes memakai KeyStore in-memory sebagai satu-satunya backend.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createKeyStore } from '../storage/keyStore';

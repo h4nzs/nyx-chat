@@ -6,7 +6,7 @@
  * ContactRow kontak tanpa ep) membaca key polos `${id}` → profil sukses
  * didekripsi TETAP tak terlihat → "Anonymous" senyap di picker/panel grup.
  *
- * Semua dependency eksternal (worker dekripsi, keychain, Dexie) di-stub —
+ * Semua dependency eksternal (worker dekripsi, keychain, appStorage) di-stub —
  * tidak butuh Postgres/Redis (aturan repo).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';

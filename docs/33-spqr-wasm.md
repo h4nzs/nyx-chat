@@ -114,8 +114,7 @@ Interpretasi (yang menentukan desain integrasi):
 - **Wire kecil, state besar.** Pesan braid hanya 37 B di steady state (chunk
   erasure dikirim saat dibutuhkan), tetapi **state 3,8 KiB di-rewrite setiap
   langkah**. Konsekuensi arsitektur: state wajib disimpan di keychain ter-seal
-  (`ENC1:`) dengan penulisan di-debounce/koalesensi per batch pesan — bukan
-  satu tulis IndexedDB per pesan.
+  (`ENC1:`) dengan penulisan di-debounce/koalesensi per batch pesan —bukan satu tulis penyimpanan per pesan.
 - **Ukuran state tumbuh** kalau skipped key menumpuk (pesan hilang berturut-turut
   menahan key), jadi store v2 butuh batas retensi yang sama dengan DR sekarang.
 
@@ -262,7 +261,7 @@ berlaku paritas yang sama dengan sidecar Rust (`transportCapabilities.test.ts`).
 
 Benchmark §33.5 memberi dua angka yang menentukan desain: langkah ratchet murah
 (p50 0,26 ms) tetapi **state 3,8 KiB ditulis ulang setiap langkah**. Jadi modul
-ini bukan sekadar pembungkus IndexedDB:
+ini bukan sekadar pembungkus penyimpanan:
 
 - **Ter-seal `ENC1:`** (masterSeed), sama seperti state DR v1 — state braid memuat
   chunk ML-KEM yang belum dipertukarkan, dan membocorkannya = kehilangan PCS.

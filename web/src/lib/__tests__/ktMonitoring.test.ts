@@ -401,7 +401,7 @@ describe('startKtMonitorLoop', () => {
  */
 describe('monitorKeyTransparency', () => {
   // [flake 2026-11-02] Import dinamis `../ktBundleProof` memuat seluruh graf
-  // modul KT (WASM, ktGossip/Dexie, api) — 4,5–5 dtk di mesin lambat atau saat
+  // modul KT (WASM, ktGossip/SQLite, api) — 4,5–5 dtk di mesin lambat atau saat
   // suite paralel. Itu biaya pemuatan modul, bukan perilaku yang diuji, dan
   // batas bawaan 5 dtk membuat tes ini gagal acak. Waktu dinaikkan TANPA
   // melonggarkan satu asersi pun; import tetap dinamis supaya mesin tanpa

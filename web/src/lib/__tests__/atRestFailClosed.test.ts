@@ -19,7 +19,8 @@
  *   3. baris LAMA yang plaintext tetap terbaca (perangkat user tidak bisa
  *      di-reset seperti DB server).
  *
- * keychainDb nyata dipakai; hanya auth/crypto worker/sodium/Dexie yang di-stub.
+ * keychainDb nyata dipakai; hanya auth/crypto worker/sodium (dan backend storage)
+ * yang di-stub.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

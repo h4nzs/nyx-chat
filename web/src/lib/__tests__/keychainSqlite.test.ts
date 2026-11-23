@@ -10,8 +10,8 @@
  * sesi terbaru = nama terbesar, arsip ratchet FIFO 3 slot, cap LRU 200 untuk
  * skipped key, dan prefix antar tabel tidak saling menabrak.
  *
- * Dexie sengaja di-mock agar SETIAP akses tabel melempar — jalur SQLite yang
- * diam-diam menyentuh Dexie harus terlihat sebagai kegagalan, bukan lolos.
+ * Tidak ada lagi modul `db`/Dexie: KeyStore in-memory adalah satu-satunya
+ * backend, jadi jalur yang diam-diam menyentuh storage lain akan gagal.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

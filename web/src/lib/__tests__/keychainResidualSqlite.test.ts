@@ -5,10 +5,10 @@
 /**
  * [docs/43 §43.11.6 B2] Tabel keychain residual di KeyStore SQLite.
  *
- * Dexie sengaja dibuat melempar: preKeys,
- * identityKeys, pendingHeaders, messageKeys, state grup, cache partisipan, dan
- * sesi PQ-DR tidak boleh menulis ke dua tempat. Kunci biner harus round-trip
- * sebagai byte, bukan JSON `Uint8Array`.
+ * Semua tabel residual (preKeys, identityKeys, pendingHeaders, messageKeys,
+ * state grup, cache partisipan, sesi PQ-DR) harus berhenti di KeyStore SQLite —
+ * tidak ada backend kedua. Kunci biner harus round-trip sebagai byte, bukan
+ * JSON `Uint8Array`.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

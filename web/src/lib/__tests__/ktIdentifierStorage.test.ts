@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
-/** kvStore palsu: menyimpan RECORD (`{ key, value }`), sama seperti Dexie. */
+/** kvStore palsu: menyimpan RECORD (`{ key, value }`), sama seperti KvStore. */
 const kv = new Map<string, { key: string; value: unknown }>()
 const localStore = new Map<string, string>()
 

@@ -206,8 +206,8 @@ Alternatif yang ditolak: magic baru (`NYXH`) — memaksa jalur parse kedua untuk
 manfaat yang sama, dan `docs/31` sengaja menjaga satu implementasi.
 
 **Konsekuensi penting:** payload arsip riwayat adalah **objek domain**, bukan
-baris Dexie (`.nyxbak` = baris). Karena itu arsip ini **tidak boleh** pernah
-masuk `writeTablesToDexie` — penanda `k` adalah pagar runtime untuk itu.
+baris storage (`.nyxbak` = baris). Karena itu arsip ini **tidak boleh** pernah
+masuk `writeTables` restore — penanda `k` adalah pagar runtime untuk itu.
 
 ---
 
@@ -356,7 +356,7 @@ tersedia".
 ## 40.7 Ekspor di perangkat lama
 
 Modul baru `web/src/lib/linkHistoryExport.ts`, memakai **pembaca yang sudah
-ada** — bukan query mentah ke Dexie:1. `HISTORY_TABLES = ['contacts','conversations','messages','groupCachedParticipants']`.
+ada** — bukan query mentah ke penyimpanan:1. `HISTORY_TABLES = ['contacts','conversations','messages','groupCachedParticipants']`.
    `groupCachedParticipants` (2026-10-30) ikut karena isinya hanya **id**
    anggota grup — bukan rahasia, dan tanpanya grup hasil impor tampil tanpa
    daftar anggota sampai server mengirim ulang cache-nya. Ia ditulis apa adanya
@@ -385,7 +385,7 @@ ada** — bukan query mentah ke Dexie:1. `HISTORY_TABLES = ['contacts','conversa
    HISTORY_TABLES, chunkBytes: 256 KB, scramble: true, marker: 'history' })`
    (+ opsi `marker` kecil di `buildBackupFrames`). **`historyStore` bukan
    `liveBackupStore()`**: `readTables`-nya mengembalikan objek domain hasil
-   langkah 2–4, bukan baris Dexie — itu inti pembeda arsip ini dari `.nyxbak`.
+   langkah 2–4, bukan baris storage — itu inti pembeda arsip ini dari `.nyxbak`.
 7. `sealedKey = await sealForDevice(JSON.stringify({v:1,k,n,d}), pqPublicKey_new)`.
 8. Sebelum presign, baca `GET /link/history/limits` (kuota efektif akun: tier,
    dipotong 25 MB bila belum terverifikasi). Bila `size > maxBytes`, batalkan
@@ -414,7 +414,7 @@ memberi ekspor **960 ms** / impor **249 ms** dengan arsip tetap 3,46 MB / 17
 frame — variasi antar-run ±5%, gate tidak berubah.
 
 Batasannya jujur: penulis impor di-inject sebagai no-op, jadi **penyegelan ulang
-(crypto worker) dan tulis IndexedDB nyata tidak termasuk**; angka ini batas
+(crypto worker) dan tulis SQLite/OPFS nyata tidak termasuk**; angka ini batas
 bawah untuk serialisasi + arsip. Angka 3,46 MB juga menunjukkan padding 1 KB
 per frame menyembunyikan panjang per pesan tetapi **bukan** volume total —
 ukuran arsip tetap membocorkan kasar banyaknya riwayat (§40.10).
@@ -445,7 +445,7 @@ Modul baru `web/src/lib/linkHistoryImport.ts`:
 
 Karena impor **merge** (`bulkPut` per id, tanpa `clear()`), impor ulang tidak
 menduplikasi dan tidak menghapus apa pun yang dibuat perangkat baru sendiri.
-Ini alasan `writeTablesToDexie` (yang `clear()` dulu) **tidak** dipakai ulang.
+Ini alasan `writeTables` restore (yang mengganti isi tabel) **tidak** dipakai ulang.
 
 UI: fase baru di `LinkDevicePage` (`'importing'`) dengan jumlah pesan yang sudah
 masuk ke vault; kegagalan → `markHistoryImportPending()` (boolean plaintext di

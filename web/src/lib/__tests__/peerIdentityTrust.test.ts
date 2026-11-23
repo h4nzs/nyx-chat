@@ -12,7 +12,7 @@
  * perubahan yang belum diterima memblokir pengiriman pesan 1:1.
  *
  * DB & keychain di-stub: kontrak yang diuji adalah LOGIKA pin + bentuk
- * penyimpanan terenkripsi (`ENC1:`), bukan IndexedDB/Dexie.
+ * penyimpanan terenkripsi (`ENC1:`), bukan IndexedDB mentah.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -41,7 +41,7 @@ vi.mock('@lib/keychainDb', () => ({
     decryptValueAtRest: vi.fn(async (stored: string) =>
         stored.startsWith('ENC1:') ? Buffer.from(stored.slice(5), 'base64').toString('utf8') : null
     ),
-    // Pin legacy dibaca lewat helper keychain (Dexie atau SQLite).
+    // Pin legacy dibaca lewat helper keychain (KeyStore SQLite).
     getPeerIdentityKey: vi.fn(async (userId: string) => identityKeys.get(`ID_PUB_${userId}`)?.key),
 }));
 

@@ -48,7 +48,7 @@ Rules: prefer granular selectors (`useShallow`), never call `set()` in loops (ba
 
 | Store | Purpose |
 |---|---|
-| `NyxUnifiedDB` (Dexie, `db.ts`) | Messages vault, keychain tables, story keys, offline queue, profile cache |
+| SQLite over OPFS (`storage/schema.ts`, `sqliteMessages.ts`, `appStorage.ts`) | Messages vault, keychain tables, story keys, offline queue, profile cache |
 | OPFS (`opfsStorage.ts`) | Encrypted attachment cache (500MB LRU) |
 | `blobCache.ts` (RAM) | Decrypted `blob:` URLs for media rendering |
 | `sessionStorage` | Auto-unlock key (session-only — deliberately NOT persisted to IDB) |

@@ -364,8 +364,8 @@ punya satu root → ukuran sama + root beda = **split-view** (toast
 konsistensi. Root diambil dari `GET /api/keys/kt/head` (JSON kecil dari
 `kt-query`): root tidak bisa dibaca dari byte `FullTreeHead` tanpa parser
 protobuf, dan parser protobuf hanya boleh di WASM (`§34.2`). State (jangkar +
-head peer per sesi) disimpan ter-seal `ENC1:` di Dexie **v13** (`ktGossip`, satu
-baris), dimuat saat app siap, dan dibersihkan `executeLocalWipe`. 17 test
+head peer per sesi) disimpan ter-seal `ENC1:` di `KvStore` SQLite (prefix
+`ktGossip:`, satu baris), dimuat saat app siap, dan dibersihkan `executeLocalWipe`. 17 test
 (`ktGossip.test.ts`) termasuk payload peer yang rusak, dedup tulis, batas 64 peer,
 head peer yang lebih tua/lebih baru, dan fail-open saat tabel tidak ada.
 

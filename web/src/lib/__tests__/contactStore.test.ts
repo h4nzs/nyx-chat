@@ -2,7 +2,7 @@
  * [CONTACT STORE — P1 2026-10-05] Unit test helper normalisasi Participant +
  * serializer/parser bundle backup + CRUD contactStore (merge/seed/restore).
  *
- * Semua dependency eksternal (Dexie, vault crypto, auth store, api, sodium)
+ * Semua dependency eksternal (storage, vault crypto, auth store, api, sodium)
  * di-stub — tidak butuh Postgres/Redis (aturan repo).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -172,7 +172,7 @@ describe('parseContactBundle', () => {
     });
 });
 
-// ─── CRUD contactStore (stub vault + Dexie) ───────────────────────────────
+// ─── CRUD contactStore (stub vault + KvStore) ─────────────────────────────
 
 beforeEach(() => {
     rows.clear();

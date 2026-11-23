@@ -292,8 +292,7 @@ logika mana pun:
 
 | Fungsi | Peran |
 |---|---|
-| `readTablesFromDexie` / `writeTablesToDexie` | Adapter Dexie: baca tabel; tulis dalam **satu transaksi** `rw` `clear()` → `bulkPut()` |
-| `liveBackupStore()` | Store produksi; `./db` diimpor **dinamis**, jadi modul ini tidak meng-instansiasi Dexie di lingkungan test |
+| `liveBackupStore()` | Store produksi di atas SQLite (`storage/schema.ts` + store OPFS); dibuka **dinamis** supaya modul ini aman di lingkungan test tanpa Worker |
 | `createFramedBackup` | Baca tabel → `buildBackupFrames` → `buildBackupArchive`; laporan `{ size, frameCount, records, tables }` |
 | `restoreFramedBackup` | `readBackupHeader` → `parseBackupArchive` → dekode **per frame** (`readBackupChunk`, progres `done/total`) → tulis |
 | `openFramedBackupWithPhrase` | Jalur berkas manual: salt dari header → `deriveBackupKey(phrase)` → restore |
@@ -320,9 +319,8 @@ diturunkan, jadi berkas asing/terpotong ditolak lebih awal.
 **Validasi yang diuji** (`web/src/lib/__tests__/backupRestore.test.ts`, 10 test,
 kripto sungguhan): roundtrip biner/`Date`/nilai `ENC1:` apa adanya; progres per
 frame (jumlah panggilan = `frameCount`, monotonik); kunci salah ditolak
-**sebelum** `writeTables`; arsip kosong ditolak; phrase salah ditolak; adapter
-Dexie (clear-sebelum-bulkPut, tabel yang tidak ada di arsip tidak disentuh, satu
-transaksi); format ukuran.
+**sebelum** `writeTables`; arsip kosong ditolak; phrase salah ditolak; arsip pra-SQLite
+ditolak (`assertRestorableBackupTables`); format ukuran.
 
 **Batasan yang jujur:**
 
@@ -450,7 +448,7 @@ mesin CI/VPS; angka sebenarnya selalu dicetak.
 
 - **I/O IndexedDB tidak termasuk.** Penyimpanan di-inject sebagai store
   in-memory, jadi angka di atas adalah batas bawah untuk kripto + serialisasi +
-  AEAD, bukan profil browser (Dexie/OPFS bisa menambah ratusan ms di perangkat
+  AEAD, bukan profil browser (SQLite/OPFS bisa menambah ratusan ms di perangkat
   kelas bawah).
 - Puncak memori diukur lewat sampling `process.memoryUsage()` setiap 10 ms; pada
   fase yang sangat singkat puncak sebenarnya bisa sedikit lebih tinggi dari yang

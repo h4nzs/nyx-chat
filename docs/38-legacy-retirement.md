@@ -29,7 +29,7 @@ Rincian berkas dan barisnya ada di `docs/43` §43.3. Ringkasnya:
 
 | Fase | Cakupan | Contoh titik |
 |---|---|---|
-| B — data lokal | rantai Dexie v1–v15, migrasi `nyx_bio_vault`, prefiks `verified_conversation_`, fallback keychain/keyStorage/contact/message | `web/src/lib/db.ts:305-442`, `biometricUnlock.ts:154,198,250` |
+| B — data lokal (✅ selesai 2026-11-22, `db.ts` dihapus) | rantai Dexie v1–v15, migrasi `nyx_bio_vault`, prefiks `verified_conversation_`, fallback keychain/keyStorage/contact/message | dulu `web/src/lib/db.ts`; sekarang semua lewat SQLite (`storage/`), `biometricUnlock.ts:154,198,250` |
 | C — protokol | pin ABI-1, `ktValue-1`, envelope grup v2/v3, jalur tulis non-PQ saat `signingKeyV2` absen, header SPQR v1 + kill switch, `KT_SERVER_URL` | `ktConfigPin.ts`, `ktValue.ts`, `groupEnvelope.ts`, `crypto.ts:1304` |
 | D — at-rest | ✅ selesai 2026-11-18 — format bare base64url (kunci id `0`), `sealedLookupCandidates()`, `server/scripts/reseal-at-rest.ts` dihapus; hanya `ENC2:<keyId>:<payload>` + AAD | `server/src/utils/atRestSecrets.ts` |
 | E — kripto | Blind RSA di `web/src/lib/privacyPass.ts`, KEM X25519 pada OHTTP | `privacyPass.ts` |

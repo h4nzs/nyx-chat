@@ -226,7 +226,7 @@ test.describe('Regression: burner flows', () => {
         async () =>
           page.evaluate(async (room) => {
             // Path absolut Vite dev server (runtime-only). Sejak B3 tidak ada
-            // Dexie: metadata percakapan ada di KvStore SQLite (`conversation:`)
+            // Metadata percakapan ada di KvStore SQLite (`conversation:`)
             // dan pesan di tabel SQLite, jadi barrier membaca modul produksi.
             // @ts-ignore — path absolut Vite dev server (runtime-only)
             const { getAppRow } = await import('/src/lib/storage/appStorage.ts');

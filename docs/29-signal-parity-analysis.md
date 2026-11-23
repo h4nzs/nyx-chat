@@ -83,7 +83,7 @@
 | Transport | WebTransport/QUIC (sidecar Rust) + **fallback WSS socket.io**, opcode biner, negosiasi kapabilitas di kedua jalur | WebSocket/gRPC + REST protobuf |
 | Kripto inti | PQX3DH (X25519 + ML-KEM-768 X-Wing), DR hybrid, **braid SPQR**, sender key v2, burner PQ-DR, XChaCha20-Poly1305, BLAKE2b, Argon2id, Ed25519 + **ML-DSA-65** | X3DH/PQXDH, Double Ratchet, Sender Keys, **SPQR** (ML-KEM Braid), AES-GCM (RustCrypto), zkgroup (pairing/BBS) |
 | Identitas | Tanpa PII: `usernameHash` Argon2id 64 MB client-side + index OPRF hibrida + `shareId` publik + recovery phrase (BIP39) + attestation WebAuthn | Nomor telepon (ACI/PNI) + opsional username; PIN + Secure Value Recovery |
-| Storage lokal | IndexedDB (Dexie) — **struktur & konten sensitif ter-seal `ENC1:`**, urutan dua lapis; OPFS hanya blob terenkripsi | SQLCipher (seluruh DB) + FTS5 terenkripsi |
+| Storage lokal | SQLite di OPFS — **struktur & konten sensitif ter-seal `ENC1:`**, urutan dua lapis | SQLCipher (seluruh DB) + FTS5 terenkripsi |
 | Verifikasi kunci | **KT** (log Merkle, monitor, auditor, gossip) + pin + safety number manual + gate kirim saat `mismatch` | Key transparency (log Merkle + monitor/auditor), tanpa safety number wajib |
 | Pencarian user | hash identifier (Argon2id) → OPRF → PIR dua server (XOR) via OHTTP; tanpa social graph | SGX/Icelake PSI atas nomor telepon; username links |
 | Lisensi | AGPL-3.0 | AGPL-3.0(-only) — termasuk SPQR & key-transparency-server |
@@ -115,7 +115,7 @@ Verdict: **NYX+** = NYX jelas lebih baik · **≈** = paritas · **SIG+** = Sign
 | 10 | Backup/restore | **format `NYXB` v1** ber-frame, AEAD+AAD, kunci dari recovery phrase, opsional di R2 + migrasi streaming | format backup protobuf tervalidasi ketat + SVR/PIN + frame/padding/scramble | **≈** |
 | 11 | At-rest server (dump) | sealed senderId/sessionId/device key, bucketing waktu, `identityTag` Redis, token-only membership, audit script | sealed sender di transit, kolom DB tetap ter-join ke akun | **NYX+** |
 | 12 | Sealed sender | 1:1 `senderId` ter-seal/NULL; server tahu penulis saat write | sealed sender + sender certificate + access-key/rate-limit token | **≈** (tujuan sama, mekanisme beda) |
-| 13 | Storage lokal | Dexie; konten + kolom struktur ter-seal, sisa plaintext = primary key & bucket indeks | SQLCipher penuh + FTS5 terenkripsi | **SIG+** (lebih sederhana: satu kunci DB) |
+| 13 | Storage lokal | SQLite di OPFS; konten + kolom struktur ter-seal, sisa plaintext = primary key & bucket indeks | SQLCipher penuh + FTS5 terenkripsi | **SIG+** (lebih sederhana: satu kunci DB) |
 | 14 | Media/lampiran | R2 presigned + secretstream, deleteAt, batas ukuran per tier | CDN + `media` crate (thumbnail/transcode terkendali) | **≈** |
 | 15 | Calls | WebRTC P2P; signaling lewat **token relay** (bukan userId); coturn primari → Cloudflare → STUN operator → 503 | RingRTC, call links, blinded signaling, SFU-less multi-party | **SIG+** (fitur); mekanisme privasi NYX kini setara arah |
 | 16 | Push | VAPID, body generik, payload per-device ter-seal ≤3 KB | push tanpa konten + NSE/notification extension native | ≈ untuk web, **SIG+** untuk mobile |
@@ -202,7 +202,7 @@ server; bundle palsu terarah tak bisa dibuktikan siapa pun.
 | Monitor | `runKtMonitorOnce` **fail-closed** (state hanya ditulis setelah `verifyMonitor` sukses) + loop di `App.tsx` |
 | Auditor | `server/kt-query/cmd/nyx-kt-auditor` (mode 3, `TreeSize`/`Audit`/`SetAuditorHead`) + varian v2 |
 | Gossip | `ktGossip.ts`: jangkar `(treeSize, root)` di payload ter-seal (field `ktG`) → `split-view` saat dua klien melihat root berbeda untuk ukuran sama |
-| State klien | tabel Dexie `ktMonitoring`/`ktGossip`, ter-seal `ENC1:`, dibersihkan saat wipe |
+| State klien | baris `KvStore` SQLite `ktMonitoring:`/`ktGossip:`, ter-seal `ENC1:`, dibersihkan saat wipe |
 
 **Batasan yang jujur (tetap ada).**
 `unavailable` (KT mati/jaringan), `unverifiable` (anchor basi), dan
@@ -285,7 +285,7 @@ jalur versi paralel seperti di atas.
 
 ### 5.5 Storage lokal & pencarian terenkripsi — **SEBAGIAN BESAR SELESAI**
 
-**NYX.** IndexedDB Dexie; kolom sensitif **dan** kolom struktur ter-seal.
+**NYX.** SQLite di OPFS; kolom sensitif **dan** kolom struktur ter-seal.
 
 > **[2026-10-12 — WS-F]** `lastMessageAt` di-bucket 15 menit (bucket sama dengan
 > server), `seq`/`senderId`/`repliedToId`/`isViewOnce`/`isDeletedLocal`/`expiresAt`/
@@ -296,8 +296,8 @@ jalur versi paralel seperti di atas.
 >
 > **[2026-10-16 — verifikasi gate `docs/30` §30.10]** `sentAt` dan
 > `pqDrSessionsV2.lastActivity` sempat lolos plaintext (presisi ms) dan **kini**
-> ter-seal, dengan pemindai baris mentah di `dexieMigration.test.ts` (plus kontrol
-> negatif). Sisa yang disengaja plaintext: `id` (primary key), kolom bucket indeks
+> ter-seal; invarian itu kini dikunci `storage/__tests__/schema.test.ts` (plus
+> kontrol negatif). Sisa yang disengaja plaintext: `id` (primary key), kolom bucket indeks
 > (`orderBucketMs`, `Conversation.lastMessageAt`), dan `offlineQueue.timestamp`
 > (antrean kirim sementara).
 
@@ -308,7 +308,7 @@ terbaca.
 **Signal:** SQLCipher mengenkripsi seluruh DB + FTS5 untuk pencarian.
 
 Sisa perbedaan nyata: SQLCipher menyembunyikan **semua** kolom (termasuk primary
-key & jumlah baris) dengan satu kunci; Dexie menyembunyikan nilai tetapi tidak
+key & jumlah baris) dengan satu kunci; SQLite di sini menyembunyikan nilai tetapi tidak
 bentuk. Pencarian lokal penuh ala FTS5 tidak realistis di IndexedDB; NYX memakai
 indeks in-memory saat vault terbuka — trade-off yang didokumentasikan.
 

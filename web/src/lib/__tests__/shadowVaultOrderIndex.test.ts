@@ -2,11 +2,11 @@
  * [docs/30 WS-F] Test perilaku vault setelah kolom pengurutan (`createdAt`)
  * di-seal dan range-scan pindah ke indeks bucket.
  *
- * Konvensi repo: Dexie + crypto di-stub (tidak butuh Postgres/Redis/IndexedDB).
+ * Konvensi repo: crypto di-stub (tidak butuh Postgres/Redis/IndexedDB).
  * Tabel palsu di bawah meniru `where('[conversationId+orderBucketMs]').equals([conv, bucket])`
- * seolah-olah IndexedDB, jadi yang diverifikasi di sini adalah **logika pembaca**
+ * dari skema lama, jadi yang diverifikasi di sini adalah **logika pembaca**
  * (loop bucket mundur, pemangkasan presisi, kursor, perbaikan baris lama) —
- * bukan semantik indeks Dexie yang sesungguhnya (butuh browser).
+ * bukan semantik indeks IndexedDB yang sesungguhnya (butuh browser).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
