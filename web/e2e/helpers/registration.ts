@@ -341,7 +341,9 @@ export async function openDirectChatWith(
  * Asersi kemunculan bubble & pengukuran latency tetap di spec masing-masing.
  */
 export async function sendChatMessage(page: Page, text: string): Promise<void> {
-  const messageInput = page.locator('textarea[placeholder*="essage"], input[placeholder*="essage"]').first();
+  // Selector struktural: placeholder composer berubah saat offline ("Offline —
+  // will send when reconnected"), jadi jangan bergantung pada kata "message".
+  const messageInput = page.locator('main form input[type="text"], main form textarea').first();
   await expect(messageInput).toBeVisible({ timeout: 10000 });
   await messageInput.fill(text);
   await messageInput.press('Enter');

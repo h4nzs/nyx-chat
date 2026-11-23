@@ -10,7 +10,7 @@
     "placeholder": "Ketik pesan...",
     "placeholder_default": "Kirim pesan...",
     "placeholder_disappearing": "Pesan menghilang...",
-    "placeholder_offline": "Koneksi Terputus",
+    "placeholder_offline": "Offline — dikirim saat tersambung",
     "recording": "Merekam...",
     "recording_state": "Merekam Audio...",
     "cancel_recording": "Batalkan",

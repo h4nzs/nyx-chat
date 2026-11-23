@@ -10,7 +10,7 @@
     "placeholder": "Escribe un mensaje...",
     "placeholder_default": "Enviar mensaje...",
     "placeholder_disappearing": "Mensaje temporal...",
-    "placeholder_offline": "Sin conexión",
+    "placeholder_offline": "Sin conexión — se enviará al reconectar",
     "recording": "Grabando...",
     "recording_state": "Grabando audio...",
     "cancel_recording": "Cancelar",

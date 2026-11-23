@@ -16,11 +16,11 @@
  *
  * Batas yang jujur: reload **saat offline** tidak diuji karena navigasi dev
  * server butuh jaringan (app shell SW tidak dijamin di dev); persistensi
- * dibuktikan langsung dari baris SQLite sebelum reconnect. Composer juga
- * dinonaktifkan saat transport putus, jadi pengiriman offline dipicu lewat
- * aksi store `sendMessage` yang sama dengan tombol kirim (jalur `addToQueue`),
- * bukan dengan mengetik di UI. Jalur ini memakai WSS gateway bila WebTransport
- * tidak ada, jadi tidak perlu skip.
+ * dibuktikan langsung dari baris SQLite sebelum reconnect. Composer tetap bisa
+ * diketik saat putus: teks masuk `offlineQueue`, sedangkan lampiran/voice,
+ * edit pesan, dan burner tetap butuh koneksi karena tidak punya jalur antrean.
+ * Jalur ini memakai WSS gateway bila WebTransport tidak ada, jadi tidak perlu
+ * skip.
  */
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import {
@@ -51,9 +51,7 @@ async function connectionStatus(page: Page): Promise<string> {
 }
 
 async function waitForComposer(page: Page): Promise<void> {
-  const composer = page
-    .locator('textarea[placeholder*="essage"], input[placeholder*="essage"]')
-    .first();
+  const composer = page.locator('main form input[type="text"], main form textarea').first();
   await expect(composer).toBeVisible({ timeout: 120000 });
   await expect(composer).toBeEnabled({ timeout: 120000 });
 }
@@ -101,20 +99,8 @@ test.describe('Antrean offline (SQLite)', () => {
         })
         .toBe('disconnected');
 
-      // Composer disabled saat offline: panggil aksi store yang sama dengan
-      // tombol kirim, sehingga `sendMessage` melihat transport terputus dan
-      // menulis `offlineQueue` (bukan jalur tiruan khusus tes).
-      await pageA.evaluate(
-        async ({ conversationId: id, content }) => {
-          // @ts-ignore — path absolut Vite dev server (runtime-only)
-          const { useMessageStore } = await import('/src/store/message.ts');
-          await (useMessageStore.getState().sendMessage as (
-            conversationId: string,
-            data: { content: string }
-          ) => Promise<void>)(id, { content });
-        },
-        { conversationId, content: text }
-      );
+      // Jalur pengguna: ketik dan kirim lewat composer meski transport putus.
+      await sendChatMessage(pageA, text);
 
       // Persistensi: baris antrean harus ada di SQLite, bukan hanya di memori.
       await expect

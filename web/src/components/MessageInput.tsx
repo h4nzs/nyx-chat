@@ -182,10 +182,19 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   // user menonaktifkan composer (bukan sekadar banner) sampai safety number baru
   // diverifikasi — mencegah pesan terkirim ke kunci penyerang.
   const hasIdentityAlert = useVerificationStore(s => !!s.identityAlerts[conversation.id]);
-  const isInputDisabled = !isConnected || isOtherParticipantBlocked || isWaitingForGuest || hasIdentityAlert;
+  // Teks boleh diketik saat transport putus: `sendMessage` menulis ke
+  // `offlineQueue` dan antrean dikuras saat reconnect. Lampiran/voice (upload
+  // HTTP), edit pesan (`sendEdit` tidak punya antrean), dan burner (kanal DR
+  // sendiri, bukan `message:send`) tetap butuh koneksi.
+  const isOffline = !isConnected;
+  const isTextDisabled =
+    isOtherParticipantBlocked || isWaitingForGuest || hasIdentityAlert ||
+    (isOffline && (isBurner || !!editingMessage));
+  const isMediaDisabled = isTextDisabled || isOffline;
 
   const getPlaceholderText = () => {
     if (isWaitingForGuest) return "Waiting for guest to establish secure connection...";
+    if (isOffline) return t('chat:input.placeholder_offline');
     return t('chat:input.placeholder');
   };
 
@@ -351,7 +360,9 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     if (e) e.preventDefault();
     const currentText = inputRef.current?.value || '';
     
-    if ((!currentText.trim() && stagedFiles.length === 0) || !isConnected) return;
+    if (!currentText.trim() && stagedFiles.length === 0) return;
+    // Hanya teks yang punya jalur antrean offline; lihat `isTextDisabled`.
+    if (!isConnected && (editingMessage || stagedFiles.length > 0 || isBurner)) return;
     
     if (!forceSilent) triggerSendFeedback();
     setShowSilentMenu(false);
@@ -566,18 +577,18 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       ) : (
         <form onSubmit={handleSubmit} className="relative flex items-center gap-2 p-2 rounded-2xl bg-bg-main w-full m-2 md:m-4 shadow-neu-pressed dark:shadow-neu-pressed-dark max-w-[calc(100%-1rem)] md:max-w-[calc(100%-2rem)]">
           <div className="hidden md:flex items-center gap-1">
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-accent active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiPaperclip size={18} /></button>
-            <button type="button" onClick={() => setShowTimerMenu(!showTimerMenu)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500")}><FiClock size={18} /></button>
-            <button type="button" onClick={() => setIsViewOnce(!isViewOnce)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", isViewOnce ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent")}><FiEye size={18} /></button>
-            <button type="button" onClick={() => setIsHD(!isHD)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center justify-center", isHD ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent")}>HD</button>
-            <button type="button" onClick={() => setIsVoiceAnonymized(!isVoiceAnonymized)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center gap-1 justify-center", isVoiceAnonymized ? "text-red-500 bg-red-500/10 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.4)]" : "text-text-secondary hover:text-red-400")}><FiCpu size={14} /> ANON</button>
-            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-yellow-500 active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiSmile size={18} /></button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isMediaDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-accent active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiPaperclip size={18} /></button>
+            <button type="button" onClick={() => setShowTimerMenu(!showTimerMenu)} disabled={isMediaDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500")}><FiClock size={18} /></button>
+            <button type="button" onClick={() => setIsViewOnce(!isViewOnce)} disabled={isMediaDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", isViewOnce ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent")}><FiEye size={18} /></button>
+            <button type="button" onClick={() => setIsHD(!isHD)} disabled={isMediaDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center justify-center", isHD ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent")}>HD</button>
+            <button type="button" onClick={() => setIsVoiceAnonymized(!isVoiceAnonymized)} disabled={isMediaDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center gap-1 justify-center", isVoiceAnonymized ? "text-red-500 bg-red-500/10 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.4)]" : "text-text-secondary hover:text-red-400")}><FiCpu size={14} /> ANON</button>
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={isTextDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-yellow-500 active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiSmile size={18} /></button>
           </div>
           <div className="md:hidden flex items-center">
-            <button type="button" onClick={() => setShowPlusMenu(!showPlusMenu)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary")}><motion.div animate={{ rotate: showPlusMenu ? 45 : 0 }} transition={{ duration: 0.2 }}><FiPlus size={20} /></motion.div></button>
+            <button type="button" onClick={() => setShowPlusMenu(!showPlusMenu)} disabled={isMediaDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary")}><motion.div animate={{ rotate: showPlusMenu ? 45 : 0 }} transition={{ duration: 0.2 }}><FiPlus size={20} /></motion.div></button>
           </div>
 
-          <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleLocalFileChange} disabled={isInputDisabled} />
+          <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleLocalFileChange} disabled={isMediaDisabled} />
 
           <div className="flex-1 relative group">
             {/* ✅ UNCONTROLLED INPUT: Hapus `value={text}`! */}
@@ -585,7 +596,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               ref={inputRef}
               type="text"
               onChange={handleTextChange}
-              disabled={isInputDisabled}
+              disabled={isTextDisabled}
               placeholder={getPlaceholderText()}
               className="w-full bg-transparent border-none outline-none text-text-primary placeholder:text-text-secondary/50 h-10 px-2 font-medium"
             />
@@ -600,9 +611,9 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
                )}
             </AnimatePresence>
             {hasContentToSend ? (
-               <button ref={sendButtonRef} type="submit" onMouseDown={handleSendTouchStart} onMouseUp={handleSendTouchEnd} onMouseLeave={handleSendTouchEnd} onTouchStart={handleSendTouchStart} onTouchEnd={handleSendTouchEnd} disabled={isInputDisabled} className="p-3 rounded-xl bg-accent text-white shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5 active:translate-y-0 transition-all"><FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} /></button>
+               <button ref={sendButtonRef} type="submit" onMouseDown={handleSendTouchStart} onMouseUp={handleSendTouchEnd} onMouseLeave={handleSendTouchEnd} onTouchStart={handleSendTouchStart} onTouchEnd={handleSendTouchEnd} disabled={isTextDisabled} className="p-3 rounded-xl bg-accent text-white shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5 active:translate-y-0 transition-all"><FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} /></button>
             ) : (
-               <button type="button" onClick={handleStartRecording} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary shadow-neu-icon dark:shadow-neu-icon-dark hover:text-red-500 active:scale-95 transition-all"><FiMic size={18} /></button>
+               <button type="button" onClick={handleStartRecording} disabled={isMediaDisabled} className="p-3 rounded-xl text-text-secondary shadow-neu-icon dark:shadow-neu-icon-dark hover:text-red-500 active:scale-95 transition-all"><FiMic size={18} /></button>
             )}
           </div>
         </form>

@@ -10,7 +10,7 @@
     "placeholder": "Type a message...",
     "placeholder_default": "Transmit secure message...",
     "placeholder_disappearing": "Disappearing message...",
-    "placeholder_offline": "Connection Lost",
+    "placeholder_offline": "Offline — will send when reconnected",
     "recording": "Recording...",
     "recording_state": "Recording Audio Feed...",
     "cancel_recording": "Slide to cancel",
