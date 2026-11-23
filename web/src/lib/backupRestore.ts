@@ -261,68 +261,6 @@ export async function openFramedBackupWithPhrase(
 }
 
 /**
- * Bentuk Dexie yang dibutuhkan — struktural supaya test bisa memakai objek palsu.
- * Sejak docs/43 B3 ini **bukan** jalur produksi: hanya dipakai
- * `web/scripts/client-restore-drill.ts` untuk memerankan perangkat pra-SQLite.
- */
-export interface BackupDexieLike {
-  table(name: string): {
-    toArray(): Promise<unknown[]>;
-    clear(): Promise<void>;
-    bulkPut(items: unknown[]): Promise<unknown>;
-  };
-  transaction(
-    mode: string,
-    tables: ReadonlyArray<unknown>,
-    scope: () => Promise<void>
-  ): Promise<unknown>;
-}
-
-/** Baca tabel dari Dexie. Urutan mengikuti `tables` (deterministik). */
-export async function readTablesFromDexie(
-  database: BackupDexieLike,
-  tables: readonly string[] = BACKUP_TABLE_ORDER,
-  onProgress?: BackupProgress
-): Promise<Record<string, unknown[]>> {
-  const out: Record<string, unknown[]> = {};
-  for (let i = 0; i < tables.length; i++) {
-    out[tables[i]!] = await database.table(tables[i]!).toArray();
-    onProgress?.(i + 1, tables.length);
-  }
-  return out;
-}
-
-/**
- * Tulis hasil restore ke Dexie dalam **satu transaksi** `rw`: untuk setiap tabel
- * (dipakai drill perangkat lama, bukan `liveBackupStore` produksi.)
- * yang hadir di backup, `clear()` lalu `bulkPut()`. Tabel yang tidak muncul di
- * backup **tidak** disentuh — pada perangkat pengganti yang masih kosong itu
- * titik awal yang benar, dan untuk restore di atas state lama kita sengaja tidak
- * menghapus data yang tidak ada di backup (lebih aman daripada menghapus tanpa
- * sinyal).
- */
-export async function writeTablesToDexie(
-  database: BackupDexieLike,
-  recordsByTable: Record<string, unknown[]>,
-  onProgress?: BackupProgress
-): Promise<void> {
-  const targets = (Object.keys(recordsByTable) as string[]).filter(
-    (table) => (recordsByTable[table]?.length ?? 0) > 0
-  );
-  if (targets.length === 0) return;
-
-  const dexieTables = targets.map((table) => database.table(table));
-  await database.transaction('rw', dexieTables, async () => {
-    for (let i = 0; i < targets.length; i++) {
-      const table = dexieTables[i]!;
-      await table.clear();
-      await table.bulkPut(recordsByTable[targets[i]!]!);
-      onProgress?.(i + 1, targets.length);
-    }
-  });
-}
-
-/**
  * [docs/43 §43.11.6 P7] Arsip dari klien pra-SQLite hanya membawa tabel Dexie;
  * tidak ada backend yang bisa menulisnya. Tanpa pemeriksaan ini restore
  * melaporkan "berhasil" padahal tidak memulihkan satu baris pun.

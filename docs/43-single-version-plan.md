@@ -787,14 +787,26 @@ pengganti seam, `dexieMigration.test.ts` diganti
 `storage/dexieStores.ts` dihapus; `storesContract.test.ts` kini menjalankan
 kontrak hanya terhadap SQLite. Helper mati `needsDexieRead`/`isSqliteBackupTable`
 (termasuk set `SQLITE_*`-nya) dicabut dari `backupRestore.ts`. Adapter
-`readTablesFromDexie`/`writeTablesToDexie` **dipertahankan** karena
+`readTablesFromDexie`/`writeTablesToDexie` sempat dipertahankan karena
 `web/scripts/client-restore-drill.ts` masih memakainya untuk memerankan
-perangkat pra-SQLite — drill itu kini menguji format arsip, bukan jalur restore
-produksi (`liveBackupStore`), jadi migrasinya ke SQLite adalah item terpisah.
+perangkat pra-SQLite; keduanya dicabut di P8 setelah drill ikut pindah ke SQLite.
 Restore `liveBackupStore` menolak arsip tanpa `sqliteMeta`/baris SQLite
 (`assertRestorableBackupTables`): arsip dari klien pra-SQLite sebelumnya
 "berhasil" tanpa memulihkan apa pun. `dexie` tetap dependency hanya untuk
 benchmark IndexedDB yang dimuat lazy di `/bench/pq`.
+
+**P8 — drill klien memakai jalur produksi (2026-11-23).**
+`web/scripts/client-restore-drill.ts` tidak lagi memalsukan tabel Dexie: perangkat
+dibuka dengan `initializeStorageSchema` + `createSqliteKvStore`/
+`createSqliteMessageStore` di atas driver `node:sqlite`
+(`web/scripts/lib/nodeSqliteDriver.ts`, `:memory:`), lalu diekspor/dipulihkan
+lewat `createFramedBackup`/`openFramedBackupWithPhrase` +
+`assertRestorableBackupTables` yang sama dengan produksi. Karena itu
+`BackupDexieLike`/`readTablesFromDexie`/`writeTablesToDexie` dihapus beserta tes
+adapternya, dan cakupan drill naik ke 23 tabel (`sqliteMeta`/`sqliteKv`/
+`sqliteMessages` ikut berisi). Bukti: `bash scripts/client-restore-drill.sh`
+exit 0 — dump → klaster sementara → fixture → arsip → restore, isi identik,
+kontrol negatif (phrase salah, 1 byte rusak) ditolak tanpa menulis baris.
 ---
 
 ## 43.12 Rekomendasi teknologi lain (dengan keputusan)

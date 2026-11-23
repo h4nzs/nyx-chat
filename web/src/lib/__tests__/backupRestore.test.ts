@@ -6,19 +6,14 @@
  * [docs/30 WS-C fase 4 / docs/31 §31.6c] Orkestrasi restore `.nyxbak`.
  *
  * Kripto yang dipakai SUNGGUHAN (libsodium + arsip ber-frame); hanya
- * *penyimpanan* yang dipalsukan — unit test tidak boleh butuh IndexedDB.
- * Adapter Dexie drill perangkat lama diuji lewat `BackupDexieLike` palsu,
- * sehingga logika clear-lalu-bulkPut dan pemilihan tabel benar-benar diperiksa,
- * bukan stub.
+ * *penyimpanan* yang dipalsukan — unit test tidak boleh butuh IndexedDB/Worker.
  *
  * Properti yang dikunci:
  *   1. Roundtrip build → restore mempertahankan nilai biner/Date/at-rest.
  *   2. Progres dilaporkan per frame (jumlah panggilan = frameCount).
  *   3. Kunci salah / phrase salah ditolak sebelum database disentuh.
  *   4. Tabel kosong → arsip kosong ditolak (bukan restore "sukses" senyap).
- *   5. Adapter Dexie (drill): clear() sebelum bulkPut, tabel yang tidak ada di
- *      backup tidak disentuh, dan semuanya dalam satu transaksi.
- *   6. Arsip klien pra-SQLite ditolak, bukan restore "sukses" tanpa data.
+ *   5. Arsip klien pra-SQLite ditolak, bukan restore "sukses" tanpa data.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import sodium from 'libsodium-wrappers';
@@ -40,10 +35,7 @@ import {
   formatBackupSize,
   normalizeBackupPhrase,
   openFramedBackupWithPhrase,
-  readTablesFromDexie,
   restoreFramedBackup,
-  writeTablesToDexie,
-  type BackupDexieLike,
   type BackupStore,
 } from '../backupRestore';
 
@@ -265,66 +257,6 @@ describe('backupRestore: jalur berkas manual (recovery phrase)', () => {
 
     expect(report.records).toBe(7);
     expect(target.data.messages).toHaveLength(1);
-  });
-});
-
-describe('backupRestore: adapter Dexie drill perangkat lama', () => {
-  function fakeDexie(initial: Record<string, unknown[]> = {}) {
-    const state = new Map<string, { rows: unknown[]; cleared: number; puts: number }>();
-    const get = (name: string) => {
-      if (!state.has(name)) state.set(name, { rows: [], cleared: 0, puts: 0 });
-      return state.get(name)!;
-    };
-    for (const [table, rows] of Object.entries(initial)) get(table).rows = rows.slice();
-
-    const transactions: string[] = [];
-    const db: BackupDexieLike = {
-      table: (name) => ({
-        toArray: async () => get(name).rows.slice(),
-        clear: async () => { const t = get(name); t.rows = []; t.cleared++; },
-        bulkPut: async (items) => { const t = get(name); t.rows.push(...(items as unknown[])); t.puts++; },
-      }),
-      transaction: async (_mode, tables, scope) => {
-        transactions.push(String(tables.length));
-        if (tables.length === 0) return undefined;
-        await scope();
-        return undefined;
-      },
-    };
-    return { db, get, transactions };
-  }
-
-  it('readTablesFromDexie membaca per tabel sesuai urutan dan melaporkan progres', async () => {
-    const { db, get } = fakeDexie({ messages: [{ id: 'm1' }], contacts: [{ userId: 'u1' }] });
-    get('conversations');
-
-    const calls: Array<[number, number]> = [];
-    const records = await readTablesFromDexie(db, ['messages', 'contacts'], (d, t) => calls.push([d, t]));
-
-    expect(records).toEqual({ messages: [{ id: 'm1' }], contacts: [{ userId: 'u1' }] });
-    expect(calls).toEqual([[1, 2], [2, 2]]);
-  });
-
-  it('writeTablesToDexie clear-lalu-bulkPut hanya tabel yang ada di backup, dalam satu transaksi', async () => {
-    const { db, get, transactions } = fakeDexie({ messages: [{ id: 'stale' }], contacts: [{ userId: 'stale' }] });
-
-    await writeTablesToDexie(db, { messages: [{ id: 'm1' }, { id: 'm2' }], kvStore: [] });
-
-    expect(get('messages').rows).toEqual([{ id: 'm1' }, { id: 'm2' }]);
-    expect(get('messages').cleared).toBe(1);
-    expect(get('messages').puts).toBe(1);
-    // contacts tidak ikut di backup → tidak disentuh sama sekali.
-    expect(get('contacts').cleared).toBe(0);
-    expect(get('contacts').rows).toEqual([{ userId: 'stale' }]);
-    // kvStore kosong → tidak ada tabel target.
-    expect(get('kvStore').cleared).toBe(0);
-    expect(transactions).toEqual(['1']);
-  });
-
-  it('writeTablesToDexie tidak membuka transaksi untuk backup tanpa catatan', async () => {
-    const { db, transactions } = fakeDexie();
-    await writeTablesToDexie(db, {});
-    expect(transactions).toEqual([]);
   });
 });
 

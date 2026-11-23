@@ -116,18 +116,30 @@ Yang dijalankan (semua langkah ❌ menggagalkan skrip):
 
 | # | Langkah | Bukti yang dicetak |
 |---|---|---|
-| 0 | **Penjaga cakupan**: daftar tabel drill harus sama dengan `BACKUP_TABLE_ORDER`, dan setiap tabel punya minimal satu baris | `cakupan tabel lengkap: 20/20` |
+| 0 | **Penjaga cakupan**: daftar tabel drill harus sama dengan `BACKUP_TABLE_ORDER`, dan setiap tabel punya minimal satu baris | `cakupan tabel lengkap: 23/23` |
 | 1 | Perkakas + `server/.env` sumber | `semua perkakas tersedia` |
 | 2 | `pg_dump -Fc` dari database sumber (cara yang sama dengan backup harian) | ukuran + durasi + `users\|conversations\|messages\|devices` |
 | 3 | Klaster `initdb` sendiri (port 15433), **bukan** database hidup | versi Postgres + alamat |
 | 4 | `pg_restore --no-owner --no-privileges` ke DB baru | durasi, exit 0 |
 | 5 | Isi: jumlah tabel + jumlah baris = sumber | `tabel: 17 (sumber 17)` |
 | 6 | Fixture klien diekspor dari hasil restore (id, ciphertext, kunci publik perangkat) | ukuran fixture |
-| 7 | Perangkat lama → arsip → perangkat pengganti (Dexie + IndexedDB nyata, KDF argon2id, XChaCha20-Poly1305) | `header NYXB v1, N frame, M byte` |
-| 8 | Isi **20 tabel** identik byte-per-byte (`Uint8Array`, `Date`, objek bersarang) + semua nilai `ENC1:` utuh + kunci publik sama dengan dump | satu baris `OK` per tabel |
+| 7 | Perangkat sumber → arsip → perangkat pengganti (store SQLite produksi di atas driver `node:sqlite`, KDF argon2id, XChaCha20-Poly1305) | `header NYXB v1, N frame, M byte` |
+| 8 | Isi **23 tabel** identik byte-per-byte (`Uint8Array`, `Date`, objek bersarang) + semua nilai `ENC1:` utuh + kunci publik sama dengan dump | satu baris `OK` per tabel |
 | 9 | Silang-cek dengan dump: semua id pesan/percakapan ada, ciphertext sama persis | `semua N id pesan dump ada di klien` |
 | 10 | Ekspor ulang dari perangkat pengganti: urutan + payload frame identik | `ekspor ulang: N frame, urutan + payload identik` |
 | 11 | Kontrol negatif: phrase salah dan arsip dirusak 1 byte **ditolak**, 0 baris tertulis | dua `GAGAL` yang tidak muncul = lulus |
+
+**Revisi 2026-11-23 — drill pindah ke SQLite.** Sejak B3 satuan penyimpanan
+klien adalah SQLite, bukan Dexie, jadi drill tidak lagi memalsukan tabel Dexie:
+`web/scripts/client-restore-drill.ts` membuka perangkat dengan
+`initializeStorageSchema` + `createSqliteKvStore`/`createSqliteMessageStore` di
+atas driver `node:sqlite` (`web/scripts/lib/nodeSqliteDriver.ts`, database
+`:memory:`), lalu memakai `createFramedBackup`/`openFramedBackupWithPhrase` +
+`assertRestorableBackupTables` yang sama dengan produksi. Adapter
+`readTablesFromDexie`/`writeTablesToDexie` dihapus dari `backupRestore.ts`.
+Cakupan ikut naik ke **23 tabel** karena `sqliteMeta`/`sqliteKv`/`sqliteMessages`
+sekarang berisi; `dexie` tinggal dipakai benchmark `devicePipelineBench`.
+Diuji ulang 2026-11-23: `bash scripts/client-restore-drill.sh` exit 0.
 
 Baris klien **tidak dikarang**: bentuk tiap tabel disalin dari penulisnya di
 kode — `keychainDb.ts` (identitas, state grup, kunci DR terlewat, pending
@@ -169,7 +181,7 @@ yang menangkapnya. Karena itu langkah 9 ada, dan jangan dihapus demi kecepatan.
 **Yang tidak dibuktikan:** arsipnya **tidak** diekspor dari profil browser
 sungguhan (tidak ada profil pengguna di mesin drill). Baris lokal dibentuk dari
 dump dengan bentuk yang dipakai klien, jadi yang terbukti adalah round-trip
-untuk ke-20 tabel + keterkaitan id/ciphertext dengan dump — bukan klik "Ekspor"
+untuk ke-23 tabel + keterkaitan id/ciphertext dengan dump — bukan klik "Ekspor"
 di UI. Dua hal yang secara struktural tidak bisa dibuktikan drill ini: tabel
 state grup diisi pada satu percakapan yang di dump sebenarnya 1:1 (drill menguji
 pemetaan frame + round-trip, bukan semantik grup), dan kunci privat tiruan di

@@ -8,7 +8,8 @@
 # Drill ini menutup jarak itu: dump diambil dengan cara yang sama seperti backup
 # harian (`pg_dump -Fc`), direstore ke klaster sementara, lalu baris klien
 # dibangun dari hasil restore itu dan diputar lewat jalur produksi
-# (KDF argon2id + XChaCha20-Poly1305 + Dexie/IndexedDB nyata).
+# (KDF argon2id + XChaCha20-Poly1305 + store SQLite produksi di atas driver
+# `node:sqlite`; tidak ada tabel Dexie yang dipalsukan).
 #
 # Tidak menyentuh database hidup: klaster `initdb` sendiri di /tmp, port
 # sendiri, dihapus di akhir (trap, juga saat gagal).
