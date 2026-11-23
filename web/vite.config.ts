@@ -78,6 +78,13 @@ export default defineConfig(({ mode }) => {
   const sqliteOpfsHeaders = {
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Embedder-Policy': 'require-corp',
+    // [nightly 45151288651] WebKit menolak worker dev-client Vite
+    // (`/@fs/.../vite/dist/client/env.mjs`) di bawah COEP tanpa CORP:
+    // "Worker load was blocked by Cross-Origin-Embedder-Policy" lalu
+    // "Importing a module script failed", sehingga halaman tidak pernah siap
+    // dan registrasi menunggu 180 dtk. Aset produksi sudah terkemas; header ini
+    // hanya untuk dev/preview dan membuat worker dev-client lolos COEP.
+    'Cross-Origin-Resource-Policy': 'cross-origin',
   };
 
   return {
