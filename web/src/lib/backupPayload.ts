@@ -4,7 +4,8 @@
 
 /**
  * [docs/30 WS-C fase 2 / docs/31 §31.6] Pengaitan payload: memetakan tabel
- * Keychain (IndexedDB `NyxUnifiedDB`) menjadi frame `backupFormat`, dan kembali.
+ * vault (dulu IndexedDB `NyxUnifiedDB`, kini baris SQLite) menjadi frame
+ * `backupFormat`, dan kembali.
  *
  * Pembagian tugas:
  *   - `backupFormat.ts` mengurus **bentuk byte** arsip (header, padding, AEAD,

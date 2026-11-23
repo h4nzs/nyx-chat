@@ -144,11 +144,11 @@ mengembalikan `Uint8Array` dari realm lain dan libsodium menolaknya
 
 ## 31.6a Fase 2 — pengaitan payload (selesai)
 
-`web/src/lib/backupPayload.ts` memetakan tabel `NyxUnifiedDB` (versi 8) menjadi
-frame `backupFormat`, dan kembali. Test di `backupPayload.test.ts` memakai kripto
+`web/src/lib/backupPayload.ts` memetakan tabel vault (era Dexie versi 8, kini
+baris SQLite) menjadi frame `backupFormat`, dan kembali. Test di `backupPayload.test.ts` memakai kripto
 sungguhan (libsodium + Argon2id + arsip ber-frame).
 
-**Tabel → tipe frame** (`BACKUP_TABLE_FRAME_TYPE`, 20 tabel). Tipe yang dipakai:
+**Tabel → tipe frame** (`BACKUP_TABLE_FRAME_TYPE`, 23 tabel). Tipe yang dipakai:
 `Account` (identitas + sesi kripto: `identityKeys`, `preKeys`, `sessionKeys`,
 `ratchetSessions`, `pqDrSessionsV2`), `Contacts` (`contacts`), `Conversation`
 (`conversations`, `groupKeys`, `groupSenderStates`, `groupReceiverStates`,
@@ -384,7 +384,7 @@ sekadar duplikasi:
   adanya.
 - **Cakupan lebih kecil:** 16 tabel (tanpa `conversations`, `contacts`,
   `profileCache`, `groupCachedParticipants`) dan `Date` hilang jadi string,
-  sedangkan `.nyxbak` memuat 20 tabel dengan penanda `__type`.
+  sedangkan `.nyxbak` memuat 23 tabel dengan penanda `__type`.
 - **Import-nya tidak menjalankan `normalizeOrderIndex()`**, jadi pesan dari
   vault pra-v9 bisa tersimpan tapi tak pernah muncul di query berpaginasi, dan
   ia menghapus `identityKeys` (bukan hanya `deviceId`).

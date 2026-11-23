@@ -719,8 +719,8 @@ man's switch/urutan device "terbaru" (tie-break `createdAt`) — sudah disengaja
 pada B4. Backfill `seq` untuk baris lama belum dijalankan (butuh `db push`).
 
 **DITUTUP (residual `seq` lokal):** `seq` kini dipersist ke ShadowVault
-(`DecryptedMessageRecord.seq` di `web/src/lib/db.ts`, tulis di `upsertMessages`,
-baca di `parseRecordsToMessages`). Sebelumnya, setelah reload kursor paginasi
+(`DecryptedMessageRecord.seq` di `web/src/lib/shadowVaultDb.ts`, tulis di
+`upsertMessages`, baca di `parseRecordsToMessages`). Sebelumnya, setelah reload kursor paginasi
 kehilangan `seq` dan jatuh ke jalur ISO-date legacy yang bisa mengulang sebagian
 halaman; kini `oldestMessage.seq` tetap tersedia. Guard:
 `web/src/lib/__tests__/vaultSeqPersistence.test.ts` (4 test).
