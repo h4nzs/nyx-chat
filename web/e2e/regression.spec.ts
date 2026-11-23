@@ -201,7 +201,7 @@ test.describe('Regression: burner flows', () => {
     await expect(destroyBtn).toBeVisible({ timeout: 15000 });
     await destroyBtn.click();
 
-    // Efek destroy asinkron (baris conversation dihapus dari IndexedDB lokal).
+    // Efek destroy asinkron (baris conversation dihapus dari SQLite lokal).
     // Reload terlalu cepat membatalkan penghapusan itu dan room tampak "kembali"
     // — jadi tunggu barisnya benar-benar hilang dulu (sekaligus asersi bahwa
     // destroy memang membersihkan UI tanpa reload).
@@ -212,7 +212,7 @@ test.describe('Regression: burner flows', () => {
     // Barrier di lapis PERSISTENSI — bukan UI.
     //
     // `deleteConversation` menghapus baris dari state UI secara **sinkron**, lalu
-    // menunggu hapus di IndexedDB; handler klik di `ChatWindow` tidak menunggu
+    // menunggu hapus di SQLite; handler klik di `ChatWindow` tidak menunggu
     // rantai itu. Jadi baris UI yang sudah hilang BUKAN bukti bahwa penghapusan
     // sudah tertulis, dan reload tepat setelahnya membatalkannya → room "muncul
     // kembali", membuat spec ini lulus/gagal bergantung timing (terbukti: lulus 2
@@ -225,10 +225,15 @@ test.describe('Regression: burner flows', () => {
       .poll(
         async () =>
           page.evaluate(async (room) => {
+            // Path absolut Vite dev server (runtime-only). Sejak B3 tidak ada
+            // Dexie: metadata percakapan ada di KvStore SQLite (`conversation:`)
+            // dan pesan di tabel SQLite, jadi barrier membaca modul produksi.
             // @ts-ignore — path absolut Vite dev server (runtime-only)
-            const { db } = await import('/src/lib/db.ts');
-            const conversation = await db.conversations.get(room);
-            const messages = await db.messages.where('conversationId').equals(room).count();
+            const { getAppRow } = await import('/src/lib/storage/appStorage.ts');
+            // @ts-ignore — path absolut Vite dev server (runtime-only)
+            const { readSqliteConversationRows } = await import('/src/lib/storage/sqliteMessages.ts');
+            const conversation = await getAppRow('conversations', room);
+            const messages = (await readSqliteConversationRows(room)).length;
             return `${conversation ? 1 : 0}/${messages}`;
           }, roomId),
         { timeout: 30000, message: 'vault masih memuat percakapan/pesan burner yang sudah dihancurkan' }
