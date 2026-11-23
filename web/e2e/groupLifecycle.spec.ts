@@ -23,71 +23,10 @@
 import { test, expect, Browser, Page } from '@playwright/test';
 import { randomBytes, createHash } from 'node:crypto';
 import { registerUser } from './helpers/registration';
+import { apiFor, csrfFor } from './helpers/api';
 
 const PASSWORD = 'StrongPass123!';
 const RUN = Date.now();
-
-type Api = {
-  get: (path: string) => Promise<import('@playwright/test').APIResponse>;
-  post: (path: string, data: unknown) => Promise<import('@playwright/test').APIResponse>;
-  delete: (path: string, data?: unknown) => Promise<import('@playwright/test').APIResponse>;
-};
-
-/**
- * Klien API kecil yang meniru kontrak klien web: setiap mutasi membawa
- * `csrf-token` + `x-nyx-installation-id`, dan token CSRF diambil dari endpoint
- * yang sama dengan aplikasi. Installation id harus sama dengan yang dipakai
- * saat token diterbitkan, karena server menyimpan state CSRF per klien.
- */
-async function apiFor(page: Page, installationId: string): Promise<Api> {
-  let csrfToken = '';
-
-  async function refreshCsrf() {
-    const response = await page.request.get('/api/csrf-token', {
-      headers: { 'x-nyx-installation-id': installationId },
-    });
-    expect(response.status(), 'GET /api/csrf-token harus 200').toBe(200);
-    csrfToken = ((await response.json()) as { csrfToken: string }).csrfToken;
-  }
-
-  await refreshCsrf();
-
-  const headers = (extra: Record<string, string> = {}) => ({
-    'x-nyx-installation-id': installationId,
-    'csrf-token': csrfToken,
-    ...extra,
-  });
-
-  return {
-    get: (path) => page.request.get(path, { headers: headers() }),
-    post: async (path, data) => {
-      const response = await page.request.post(path, { headers: headers(), data });
-      if (response.status() === 403) {
-        // Token bisa kedaluwarsa setelah rotasi; ambil ulang sekali lalu ulangi.
-        await refreshCsrf();
-        return page.request.post(path, { headers: headers(), data });
-      }
-      return response;
-    },
-    delete: async (path, data) => {
-      const response = await page.request.delete(path, { headers: headers(), data });
-      if (response.status() === 403) {
-        await refreshCsrf();
-        return page.request.delete(path, { headers: headers(), data });
-      }
-      return response;
-    },
-  };
-}
-
-/** Token CSRF untuk installation id tertentu (mutasi admin tetap butuh CSRF). */
-async function csrfFor(page: Page, installationId: string): Promise<string> {
-  const response = await page.request.get('/api/csrf-token', {
-    headers: { 'x-nyx-installation-id': installationId },
-  });
-  expect(response.status(), 'GET /api/csrf-token harus 200').toBe(200);
-  return ((await response.json()) as { csrfToken: string }).csrfToken;
-}
 
 async function currentUserId(page: Page): Promise<string> {
   const response = await page.request.get('/api/users/me');
