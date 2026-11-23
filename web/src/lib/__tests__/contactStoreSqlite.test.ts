@@ -32,14 +32,6 @@ vi.mock('../storage/sqliteMessages', () => ({
   openSqliteKvStore: async () => kv,
 }));
 
-vi.mock('../db', () => ({
-  db: {
-    get contacts() {
-      throw new Error('Dexie contacts tidak boleh disentuh di jalur SQLite');
-    },
-  },
-}));
-
 vi.mock('../shadowVaultDb', () => ({
   encryptVaultText: vi.fn(async (text: string) => 'ENC1:' + Buffer.from(text, 'utf8').toString('base64')),
   decryptVaultText: vi.fn(async (enc: string) =>

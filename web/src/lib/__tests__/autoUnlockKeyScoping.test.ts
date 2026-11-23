@@ -26,10 +26,7 @@ vi.stubGlobal('localStorage', {
   clear: vi.fn(() => localStore.clear()),
 })
 
-// Stub IDB deps keyStorage (kvStore + keychainDb migration) — tidak dipakai logika yang dites.
-vi.mock('../db', () => ({
-  db: { kvStore: { get: vi.fn(async () => undefined), put: vi.fn(async () => {}), delete: vi.fn(async () => {}) } },
-}))
+// Stub keychainDb migration — tidak dipakai logika yang dites.
 vi.mock('../keychainDb', () => ({
   migrateKeychainAtRestEncryption: vi.fn(async () => {}),
 }))

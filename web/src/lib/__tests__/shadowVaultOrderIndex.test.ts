@@ -38,120 +38,18 @@ type Row = {
 };
 
 const messageRows = new Map<string, Row>();
-const deletedIds: string[] = [];
-
-const fakeMessages = {
-  toArray: async () => [...messageRows.values()],
-  get: async (id: string) => messageRows.get(id),
-  bulkPut: async (items: Row[]) => {
-    for (const item of items) messageRows.set(item.id, item);
-  },
-  bulkDelete: async (ids: string[]) => {
-    for (const id of ids) messageRows.delete(id);
-  },
-  delete: async (id: string) => {
-    deletedIds.push(id);
-    messageRows.delete(id);
-  },
-  where: (selector: string) => {
-    if (selector === '[conversationId+orderBucketMs]') {
-      const owned = (conversationId: string) =>
-        [...messageRows.values()].filter(
-          (r) => r.conversationId === conversationId && typeof r.orderBucketMs === 'number'
-        );
-      return {
-        equals: ([conversationId, bucket]: [string, number]) => ({
-          toArray: async () => owned(conversationId).filter((r) => r.orderBucketMs === bucket),
-        }),
-        // Rentang penuh (`minKey..maxKey`) + `.reverse().limit(1)` → baris
-        // dengan bucket tertinggi (dipakai pembaca halaman pertama).
-        between: ([conversationId]: [string, unknown], _upper: [string, unknown]) => {
-          let limitCount: number | null = null;
-          const api = {
-            reverse: () => api,
-            limit: (n: number) => {
-              limitCount = n;
-              return api;
-            },
-            toArray: async () => {
-              const rows = owned(conversationId).sort(
-                (a, b) => (b.orderBucketMs as number) - (a.orderBucketMs as number)
-              );
-              return limitCount === null ? rows : rows.slice(0, limitCount);
-            },
-          };
-          return api;
-        },
-      };
-    }
-    return {
-      equals: (conversationId: string) => {
-        const owned = () => [...messageRows.values()].filter((r) => r.conversationId === conversationId);
-        return {
-          toArray: async () => owned(),
-          primaryKeys: async () => owned().map((r) => r.id),
-          filter: (fn: (row: Row) => boolean) => ({
-            primaryKeys: async () => owned().filter(fn).map((r) => r.id),
-          }),
-          delete: async () => {
-            for (const row of owned()) messageRows.delete(row.id);
-          },
-        };
-      },
-    };
-  },
-};
 
 const conversationRows = new Map<string, Record<string, unknown>>();
-// [docs/30 WS-F §30.10] Migrasi juga menyegel kolom waktu kontak & cache profil
-// → fake db harus punya tabelnya (kalau tidak, migrasi gagal dan test lolos
-// palsu karena error-nya ditelan).
+// [docs/30 WS-F §30.10] Penjaga: baris kontak lama di Dexie tidak lagi dibaca
+// atau ditulis kode produksi (tidak ada `db` sama sekali), jadi migrasi tidak
+// boleh menyentuhnya.
 const contactRows = new Map<string, Record<string, unknown>>();
 const profileRows = new Map<string, Record<string, unknown>>();
-
-vi.mock('../db', () => ({
-  db: {
-    messages: fakeMessages,
-    contacts: {
-      toArray: async () => [...contactRows.values()],
-      bulkPut: async (items: { userId: string }[]) => {
-        for (const item of items) contactRows.set(String(item.userId), item as unknown as Record<string, unknown>);
-      },
-    },
-    profileCache: {
-      toArray: async () => [...profileRows.values()],
-      bulkPut: async (items: { id: string }[]) => {
-        for (const item of items) profileRows.set(String(item.id), item as unknown as Record<string, unknown>);
-      },
-    },
-    conversations: {
-      put: async (row: { id: string }) => {
-        conversationRows.set(String(row.id), row as unknown as Record<string, unknown>);
-      },
-      bulkPut: async (items: { id: string }[]) => {
-        for (const item of items) {
-          conversationRows.set(String(item.id), item as unknown as Record<string, unknown>);
-        }
-      },
-      toArray: async () => [...conversationRows.values()],
-      delete: async (id: string) => {
-        conversationRows.delete(String(id));
-      },
-    },
-    ratchetSessions: {},
-    groupSenderStates: {},
-    groupReceiverStates: {},
-    pqDrSessionsV2: {
-      toArray: async () => [],
-      bulkPut: async () => {},
-    },
-  },
-}));
 
 // Vault crypto di-stub: isi konten juga, supaya round-trip tulis→baca kolom
 // struktur (langkah 3) bisa diuji tanpa masterSeed/crypto worker.
 // [docs/43 §43.11.6 B3] conversations/profileCache dibaca lewat appStorage;
-// fake tabel di atas tetap dipakai sebagai backend-nya.
+// peta di atas adalah backend palsunya.
 vi.mock('@lib/storage/appStorage', () => ({
   getAppRow: async (table: string, id: string) =>
     (table === 'conversations' ? conversationRows : profileRows).get(id),
@@ -292,7 +190,6 @@ async function sealedRow(id: string, conversationId: string, ms: number, extra: 
 beforeEach(() => {
   messageRows.clear();
   conversationRows.clear();
-  deletedIds.length = 0;
 });
 
 describe('shadowVault.normalizeOrderIndex', () => {

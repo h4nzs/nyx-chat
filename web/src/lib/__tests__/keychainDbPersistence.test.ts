@@ -34,11 +34,6 @@ vi.mock('../storage/sqliteMessages', () => ({
   openSqliteKeyStore: async () => keyStore,
 }));
 
-vi.mock('../db', () => ({
-  db: { isOpen: () => true, close: () => {} },
-  VaultEntry: class {},
-}));
-
 // [audit D7] Penulisan at-rest fail-closed: tanpa masterSeed, `encryptValueAtRest`
 // MELEMPAR (dulu nilai disimpan plaintext). Test ini karena itu menyediakan seed
 // + stub crypto supaya mapper field diuji pada jalur yang sebenarnya dipakai.

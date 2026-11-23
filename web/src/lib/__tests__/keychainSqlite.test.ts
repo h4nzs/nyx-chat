@@ -18,21 +18,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KvStore, KeyStore } from '../storage/types';
 import { createKeyStore } from '../storage/keyStore';
 
-const dexieTouch = (table: string) => () => {
-  throw new Error(`Dexie tidak boleh disentuh di jalur KeyStore (${table})`);
-};
-
-vi.mock('@lib/db', () => ({
-  db: {
-    get sessionKeys() { return dexieTouch('sessionKeys')(); },
-    get groupKeys() { return dexieTouch('groupKeys')(); },
-    get ratchetSessions() { return dexieTouch('ratchetSessions')(); },
-    get skippedKeys() { return dexieTouch('skippedKeys')(); },
-    get groupSkippedKeys() { return dexieTouch('groupSkippedKeys')(); },
-  },
-  VaultEntry: class {},
-}));
-
 let keyStore: KeyStore | null = null;
 
 vi.mock('@lib/storage/sqliteMessages', () => ({

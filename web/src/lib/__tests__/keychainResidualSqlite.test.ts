@@ -28,26 +28,8 @@ const keyStore = {
   keys: async (prefix = '') => [...rows.keys()].filter((key) => key.startsWith(prefix)),
 };
 
-const dexieTouch = (table: string) => () => {
-  throw new Error(`Dexie tidak boleh disentuh di jalur keychain SQLite (${table})`);
-};
-
 vi.mock('../storage/sqliteMessages', () => ({
   openSqliteKeyStore: async () => keyStore,
-}));
-
-vi.mock('../db', () => ({
-  db: {
-    get preKeys() { return dexieTouch('preKeys')(); },
-    get identityKeys() { return dexieTouch('identityKeys')(); },
-    get pendingHeaders() { return dexieTouch('pendingHeaders')(); },
-    get messageKeys() { return dexieTouch('messageKeys')(); },
-    get groupSenderStates() { return dexieTouch('groupSenderStates')(); },
-    get groupReceiverStates() { return dexieTouch('groupReceiverStates')(); },
-    get groupCachedParticipants() { return dexieTouch('groupCachedParticipants')(); },
-    get pqDrSessionsV2() { return dexieTouch('pqDrSessionsV2')(); },
-  },
-  VaultEntry: {},
 }));
 
 vi.mock('@store/auth', () => ({

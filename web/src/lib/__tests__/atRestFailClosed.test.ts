@@ -34,10 +34,6 @@ vi.mock('@store/auth', () => ({
     },
 }));
 
-// `encryptValueAtRest` tidak menyentuh DB; stub cukup agar modul bisa dimuat
-// tanpa IndexedDB.
-vi.mock('@lib/db', () => ({ db: {} }));
-
 vi.mock('@lib/crypto-worker-proxy', () => ({
     worker_encrypt_session_key: vi.fn(async (bytes: Uint8Array) => {
         if (cryptoState.failEncrypt) throw new Error('worker mati');

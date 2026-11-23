@@ -29,20 +29,8 @@ const kv = {
   keys: async () => [...kvRows.keys()],
 };
 
-const dexieTouch = (table: string) => () => {
-  throw new Error(`Dexie tidak boleh disentuh di jalur KT SQLite (${table})`);
-};
-
 vi.mock('../storage/sqliteMessages', () => ({
   openSqliteKvStore: async () => kv,
-}));
-
-vi.mock('../db', () => ({
-  db: {
-    get ktMonitoring() { return dexieTouch('ktMonitoring')(); },
-    get ktConfig() { return dexieTouch('ktConfig')(); },
-    get ktGossip() { return dexieTouch('ktGossip')(); },
-  },
 }));
 
 vi.mock('../keychainDb', () => ({

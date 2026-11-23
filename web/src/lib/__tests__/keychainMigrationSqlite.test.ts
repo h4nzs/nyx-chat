@@ -26,10 +26,6 @@ const memoryKv: KvStore = {
   keys: async () => [...kvRows.keys()],
 };
 
-const dexieTouch = (table: string) => () => {
-  throw new Error(`Dexie tidak boleh disentuh di migrasi keychain SQLite (${table})`);
-};
-
 vi.mock('../storage/sqliteMessages', () => ({
   openSqliteKeyStore: async () => {
     if (!keyStore) throw new Error('KeyStore tes belum disiapkan');
@@ -40,15 +36,6 @@ vi.mock('../storage/sqliteMessages', () => ({
 vi.mock('../storage/appStorage', () => ({
   listAppRows: async () => [],
   putAppRows: async () => {},
-}));
-
-vi.mock('../db', () => ({
-  db: {
-    get groupSenderStates() { return dexieTouch('groupSenderStates')(); },
-    get groupReceiverStates() { return dexieTouch('groupReceiverStates')(); },
-    get groupSkippedKeys() { return dexieTouch('groupSkippedKeys')(); },
-  },
-  VaultEntry: class {},
 }));
 
 vi.mock('@store/auth', () => ({

@@ -69,7 +69,6 @@ vi.mock('@lib/backupPayload', async (importOriginal) => {
 });
 
 const identityKeysClear = vi.fn();
-vi.mock('@lib/db', () => ({ db: { identityKeys: { clear: (...a: unknown[]) => identityKeysClear(...a) } } }));
 vi.mock('@lib/keychainDb', () => ({
   clearIdentityKeys: (...a: unknown[]) => identityKeysClear(...a),
 }));

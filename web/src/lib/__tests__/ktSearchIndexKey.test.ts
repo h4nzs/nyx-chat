@@ -24,14 +24,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authState = vi.hoisted(() => ({ seed: new Uint8Array(32).fill(1) as Uint8Array | undefined }));
 
-vi.mock('../db', () => ({
-  db: {
-    isOpen: () => false,
-    close: () => {},
-  },
-  VaultEntry: {},
-}));
-
 vi.mock('@store/auth', () => ({
   useAuthStore: {
     getState: () => ({ getMasterSeedIfUnlocked: () => authState.seed }),
