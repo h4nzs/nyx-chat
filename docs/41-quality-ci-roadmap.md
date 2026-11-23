@@ -53,7 +53,7 @@ mengukurnya kembali.
 | Tes Go KT | 58 | `cd server/kt-query && ./build.sh test` |
 | Aturan alert | 44 | `grep -c '^\s*- alert:' ops/prometheus/alerts.yml` |
 | Required contexts `main` | 14 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
-| Manifest E2E | chromium 13 / chrome 16 `mustPass`, `minTotal` 26 | `web/e2e/required-tests.json` |
+| Manifest E2E | chromium 14 / chrome 17 `mustPass`, `minTotal` 27 | `web/e2e/required-tests.json` |
 | Durasi job E2E | 19,5 m (`chromium`) / 17,2 m (`chrome`) pada run `43692225973`, batas 40/45 m | halaman run Actions |
 | Alert Dependabot terbuka | 11 (2 high / 5 medium / 4 low) — per cek terakhir | `gh api .../dependabot/alerts?state=open` |
 
