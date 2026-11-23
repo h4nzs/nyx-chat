@@ -30,8 +30,6 @@ const REQUIRED = [
   // Privacy Pass (docs/37 §37.3.3)
   'PP_ISSUER_PRIVATE_JWK',
   'PP_SYNC_REQUIRED',
-  // Credential (fail-closed allowlist; suite kosong di build ini)
-  'CREDENTIAL_SUITE_ALLOWLIST',
   // Arsip riwayat perangkat hasil link (docs/40) — kill switch operator.
   'LINK_HISTORY_ENABLED',
   // KT + PIR

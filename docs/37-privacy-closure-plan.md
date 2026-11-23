@@ -50,7 +50,7 @@ Pengecualian eksplisit (tidak dikerjakan di sini):
 | Sync anonim | ✅ `POST /api/groups/sync` (token di body, tanpa cookie/JWT, dipasang sebelum CSRF); `GET /api/conversations/sync` hanya untuk id yang sudah diketahui |
 | Graf kunci hilang | ✅ klien: envelope kunci ditulis ke mailbox grup (`web/src/lib/groupMailbox.ts`, tag HMAC per penerima) dengan fallback `group:fulfilled_key` hanya bila metadata/token belum tersedia; ⚠️ server masih melayani jalur legacy itu (matikan setelah semua klien baru) |
 | Revocation | ✅ `POST /:id/epoch` (admin capability) + `DELETE /:id/membership`; kick merotasi epoch, leave menghapus baris |
-| Credential | ✅ route verifier biner fail-closed (`POST /:id/credential/present`, tanpa issuer); ❌ spike BRaccoon ditutup tanpa implementasi (§37.9) — signature level 1 11,5 KB sudah melewati batas 8 KiB |
+| Credential | ✅ dihapus 2026-11-23 (rute + verifier tidak pernah punya issuer, jadi hanya fail-closed tanpa pemilik); ❌ spike BRaccoon ditutup tanpa implementasi (§37.9) — signature level 1 11,5 KB sudah melewati batas 8 KiB |
 | PCS kasar | ✅ rotasi terjadwal (24 jam / 500 pesan, admin online) + rotasi manual yang menaikkan epoch (`lib/groupEpochRotation.ts`); ❌ bukan PCS per-pesan — kompromi satu anggota tetap membaca era berjalan sampai rotasi berikutnya |
 | at-rest | ✅ satu format `ENC2:<keyId>:…` + AAD + key ring (`NYX_AT_REST_KEYRING`/`_FILE`) + custody env/file (`docs/43` §43.3.3, `docs/10` §10.17). Tanpa job re-seal: lookup memakai kunci aktif. ❌ blind index (`HMAC(pepper, nilai)`) tetap tidak bisa dirotasi dari server — HMAC satu arah, plaintext tak disimpan |
 | KT baca | ✅ v2 live di selfhost (`nyx-kt-query-v2` :8089 + `nyx-kt-auditor-v2` :8088), `KT_QUERY_URL` menunjuk v2 |
@@ -181,23 +181,14 @@ di sini adalah keputusan protokol (`docs/03` §3.7.1).
   serial/token di log. Metrik: `nyx_group_epoch_bumps_total{reason}`,
   `nyx_group_sync_total{result}`.
 
-### 37.3.5 Credential presentation (verifier saja)
+### 37.3.5 Credential presentation — **DIHAPUS 2026-11-23**
 
-`POST /api/groups/credential/present` — `application/octet-stream`, skema biner:
-
-```
-magic "NYXC" (4) | suite u8 | keyVersion u16 | epoch u64 | groupIdLen u8 |
-groupId | expiresAt u64 | sigLen u16 | sig
-```
-
-- Verifier membaca **binding lengkap** (`groupId+epoch+keyVersion+suite+expiry`)
-  dan menolak bila salah satu tidak cocok dengan baris grup.
-- `CREDENTIAL_SUITE_ALLOWLIST` (default kosong) → **fail-closed**: suite tidak
-  dikenal/diizinkan = 403, tidak ada fallback RSA.
-- Issuer **tidak** diimplementasikan; endpoint hanya bisa lulus bila operator
-  memasang verifier module (interface `CredentialVerifier`), dan default build
-  tidak punya module. Tujuannya mengunci kontrak + fail-closed + tes, bukan
-  menghidupkan fitur.
+Rute `POST /api/groups/:id/credential/present`, parser/verifier biner, metrik
+`nyx_credential_present_total`, dan `CREDENTIAL_SUITE_ALLOWLIST` dihapus. Build
+ini tidak pernah punya issuer/verifier, jadi rute itu hanya fail-closed tanpa
+pemilik (`docs/16` §16.5.1 D4, `docs/43` §43.15.2 #4). Wire format lama tetap
+tersimpan di riwayat dokumen ini; jangan menghidupkan kembali tanpa suite PQ
+yang lulus review **dan** verifier nyata.
 
 ### 37.3.6 PCS kasar tanpa MLS
 
@@ -265,11 +256,10 @@ groupId | expiresAt u64 | sigLen u16 | sig
 - Rotasi terjadwal sesuai 37.3.6, wiring admin capability, distribusi mailbox.
 - Tes waktu (`GROUP_EPOCH_MAX_AGE` di-inject), tes idempoten.
 
-### P5 — Credential verifier skeleton
+### P5 — Credential verifier skeleton — **DIBATALKAN 2026-11-23**
 
-- `server/src/utils/credentialPresentation.ts` (parser biner + binding +
-  allowlist + fail-closed), route `POST /api/groups/credential/present`.
-- Tes: tiap field mismatch, suite tidak diizinkan, body rusak, tidak ada issuer.
+Parser/verifier, rute, metrik, dan flag allowlist dihapus; lihat §37.3.5 dan
+`docs/43` §43.15.2 #4.
 
 ### P6 — At-rest v2 + custody — **SELESAI (2026-10-25)**
 
@@ -419,8 +409,8 @@ estimasi penulis, bukan hasil pengukuran kami.
 
 ### 37.9.3 Kenapa belum layak di NYX sekarang
 
-1. **Tidak muat di batas yang sudah frozen.** `CREDENTIAL_MAX_BYTES` = 8 KiB
-   (`server/src/utils/credentialPresentation.ts`), envelope cover-traffic 8 KB,
+1. **Tidak muat di batas yang sudah frozen.** Batas kontrak biner 8 KiB
+   (parser/verifier dihapus 2026-11-23), envelope cover-traffic 8 KB,
    item mailbox ≤8 KB, body OHTTP ≤64 KB. Satu signature Raccoon level 1 saja
    11,5 KB — sudah melewati tiga dari empat batas itu sebelum ada proof apa pun.
    Menaikkan batas berarti mengubah format frozen + padding, yang justru dilarang.
@@ -439,10 +429,9 @@ estimasi penulis, bukan hasil pengukuran kami.
 
 ### 37.9.4 Keputusan dan konsekuensinya
 
-- **Tidak implementasi BRaccoon/blind UOV sekarang.** Verifier tetap seperti
-  sekarang: kontrak biner, binding lengkap, allowlist suite **kosong** =
-  fail-closed (`POST /api/groups/:id/credential/present` selalu menolak sampai
-  operator memasang module verifier yang tidak ada di build ini).
+- **Tidak implementasi BRaccoon/blind UOV sekarang.** Rute presentasi dan
+  verifier-nya **dihapus 2026-11-23** (tidak pernah ada issuer/verifier),
+  sehingga tidak ada lagi kontrak fail-closed tanpa pemilik.
 - **Wire format credential tidak diubah.** `sigLen` tetap u16 dan batas 8 KiB,
   jadi suite PQ kelak bisa masuk tanpa migrasi format bila signature-nya muat.
 - **Yang tidak boleh diklaim:** token grup ber-epoch bukan credential PQ; token

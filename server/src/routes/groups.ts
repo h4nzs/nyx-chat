@@ -20,7 +20,7 @@
  *   DELETE /api/groups/:id/membership  — holder-initiated revoke
  */
 
-import express, { Router } from 'express'
+import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { redisClient } from '../lib/redis.js'
@@ -39,8 +39,7 @@ import {
 import { resolveSyncMemberships, MAX_SYNC_TOKENS, type SyncDb } from '../utils/groupSync.js'
 import { evaluateSyncProofs } from '../utils/syncProofs.js'
 import { createCheckRateLimit } from '../utils/redisResilience.js'
-import { incCounter, GROUP_SYNC, PRIVACY_PASS, CREDENTIAL_PRESENT } from '../utils/metrics.js'
-import { parseSuiteAllowlist, verifyCredentialPresentation } from '../utils/credentialPresentation.js'
+import { incCounter, GROUP_SYNC, PRIVACY_PASS } from '../utils/metrics.js'
 import {
   MAILBOX_MAX_ITEMS_PER_PULL,
   parseMailboxCursor,
@@ -462,52 +461,6 @@ router.post('/:id/epoch', async (req, res, next) => {
     next(error)
   }
 })
-
-/**
- * [docs/37 §37.3.5] Presentasi credential (body biner).
- *
- * Build ini TIDAK punya issuer/verifier terpasang: dengan allowlist kosong
- * (default) semua presentasi ditolak 403 — fail-closed, bukan 501 "belum
- * diimplementasikan" yang bisa disalahartikan sebagai fitur hidup.
- */
-router.post(
-  '/:id/credential/present',
-  express.raw({ type: '*/*', limit: '8kb' }),
-  async (req, res, next) => {
-    try {
-      const conversationId = String(req.params.id)
-      const body = Buffer.isBuffer(req.body) ? new Uint8Array(req.body) : new Uint8Array(0)
-      if (body.length === 0) {
-        incCounter(CREDENTIAL_PRESENT, { result: 'bad_lengths' })
-        return res.status(400).json({ error: 'CREDENTIAL_REJECTED', reason: 'truncated' })
-      }
-
-      const conversation = await groupDb.conversation.findUnique({
-        where: { id: conversationId },
-        select: { id: true, isGroup: true, groupEpoch: true },
-      })
-      if (!conversation) return res.status(404).json({ error: 'Not found' })
-      if (!conversation.isGroup) return res.status(400).json({ error: 'Not a group' })
-
-      const result = await verifyCredentialPresentation(body, {
-        groupId: conversationId,
-        epoch: conversation.groupEpoch ?? 0,
-        allowlist: parseSuiteAllowlist(process.env.CREDENTIAL_SUITE_ALLOWLIST),
-      })
-
-      if (!result.ok) {
-        incCounter(CREDENTIAL_PRESENT, { result: result.reason })
-        const status = result.reason === 'suite_not_allowed' || result.reason === 'no_verifier' ? 403 : 400
-        return res.status(status).json({ error: 'CREDENTIAL_REJECTED', reason: result.reason })
-      }
-
-      incCounter(CREDENTIAL_PRESENT, { result: 'ok' })
-      res.status(204).end()
-    } catch (error) {
-      next(error)
-    }
-  }
-)
 
 router.delete('/:id/membership', zodValidate({ body: membershipBodySchema }), async (req, res, next) => {
   try {

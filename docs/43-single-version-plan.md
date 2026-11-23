@@ -971,8 +971,8 @@ dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
 | 1 | `server/.env.example` **basi** | tidak memuat `PIR_ENABLED`, `OHTTP_ENABLED`, `PIR_OPRF_ENABLED`, `PP_*`, `NYX_AT_REST_KEYRING`; masih memuat `GROUP_ISSUER_KEY_PKCS8/VERSION` untuk blind-RSA grup yang **dihapus 2026-10-23** | satu template saja (root) atau sinkronkan; hapus kunci fitur yang sudah tidak dibaca | **P0** |
 | 2 | Typo template root | `.env.example:321` berbunyi `VITE_PIR_RELAYS==` | `VITE_PIR_RELAYS=`; tambah pemeriksaan template di `check:status` atau skrip kecil | **P0** |
 | 3 | Pembayaran tanpa guard | `routes/subscriptions.ts:21,47` tidak memeriksa `nowPaymentsApiKey`; webhook sudah 503 | jawab 503 `PAYMENTS_NOT_CONFIGURED` sebelum fetch, dan sembunyikan tombol upgrade bila `available:false` | **P0** |
-| 4 | Endpoint kredensial grup zombie | `POST /api/groups/:id/credential/present` masih ada (`routes/groups.ts:474`) dan membaca `CREDENTIAL_SUITE_ALLOWLIST`, tetapi tidak ada verifier yang dikirim → selalu 403 `no_verifier` | hapus rute + flag + metrik `CREDENTIAL_PRESENT`, atau nyatakan sebagai API mati di `STATUS.md`; jangan biarkan route fail-closed tanpa pemilik | P1 |
-| 5 | `/api/engine` + `/embed/chat/:id` tanpa pemilik | `server/src/routes/engine.ts` membuat room iframe dan mengembalikan URL; halaman embed ada; **tidak ada pemanggil `/api/engine` dari web, tidak ada E2E, tidak disebut di docs/STATUS**; prefix `/api/engine` dikecualikan dari CSRF (`app.ts:435`) | **Diputuskan: hapus seluruh tenant/B2B/embed.** Rencana lengkap + inventaris file di §43.17; jangan menambah tes untuk fitur ini | **P0** |
+| 4 | Endpoint kredensial grup zombie | `POST /api/groups/:id/credential/present` masih ada (`routes/groups.ts:474`) dan membaca `CREDENTIAL_SUITE_ALLOWLIST`, tetapi tidak ada verifier yang dikirim → selalu 403 `no_verifier` | ✅ selesai 2026-11-23: rute, `utils/credentialPresentation.ts`, metrik `CREDENTIAL_PRESENT`, flag `CREDENTIAL_SUITE_ALLOWLIST`, dan tesnya dihapus | P1 |
+| 5 | `/api/engine` + `/embed/chat/:id` tanpa pemilik | `server/src/routes/engine.ts` membuat room iframe dan mengembalikan URL; halaman embed ada; **tidak ada pemanggil `/api/engine` dari web, tidak ada E2E, tidak disebut di docs/STATUS**; prefix `/api/engine` dikecualikan dari CSRF (`app.ts:435`) | **Diputuskan: hapus seluruh tenant/B2B/embed.** ✅ selesai 2026-11-17 (`0ddaa0a0`): kode, skema, UI, i18n, tes, dan marketing dihapus; drop kolom fisik mengikuti `prisma db push` saat deploy | **P0** |
 | 6 | Story tidak punya E2E | UI aktif (`ChatList.tsx:555` → `StoryTray` → `CreateStoryModal`/`StoryViewer`), server punya blocklist + rate limit + expiry 24 jam; **tidak ada spec E2E** dan tidak ada tes distribusi kunci story | satu spec: posting, terlihat oleh penerima kunci, tidak terlihat tanpa kunci, hilang setelah expiry, blokir 403 | P1 |
 | 7 | Antrean offline tanpa E2E | `offlineQueueDb` dipakai `store/message.ts` (tulis saat putus, retry ≤5, drop + `FAILED`); tidak ada spec yang memuat ulang halaman saat offline | spec: kirim saat offline → reload → online → pesan terkirim tepat sekali | P1 |
 | 8 | TODO di fork KT | `packages/keytrans-v2/src/proto/wire.proto:115` (`signature = 5; TODO`) dan `src/log.rs:432` (`PathMismatch maybe?`) | bukan bug NYX (kode upstream), tetapi catat sebagai batasan fork di `NOTICE` §2; jangan "memperbaiki" tanpa pindah pin | P2 |
@@ -984,6 +984,11 @@ dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
 > (kunci blind-RSA grup dihapus, OHTTP/OPRF/PIR/PP/keyring ditambahkan), typo
 > `VITE_PIR_RELAYS==` diperbaiki, dan `POST /create-crypto-transaction`
 > menjawab 503 `PAYMENTS_NOT_CONFIGURED` sebelum memanggil NOWPayments.
+>
+> **Status 2026-11-23:** #5 selesai 2026-11-17 di `0ddaa0a0` — residual
+> `tenant|externalIdSealed|/api/engine|embed_at|EmbedChat` di kode, skema,
+> locale, dan marketing sudah nol (§43.17.4). #4 (rute kredensial zombie)
+> selesai 2026-11-23; tinggal #6–#11.
 
 ### 43.15.3 Yang diperiksa dan **tidak** bermasalah
 

@@ -155,11 +155,10 @@ Pertahankan, dan jadikan rujukan saat menambah fitur baru.
 **4.3 Blind RSA membership credential (26.8.1) — historis, dihapus 2026-10-23.**
 > **Dihapus pada cutover PQ-only.** `groupCredentials.ts`, endpoint issuance/
 > commit/revoke, op worker `credential_*`, dan persist Dexie tidak ada lagi.
-> Grup memakai token-first; route `POST /api/groups/:id/credential/present`
-> (`server/src/routes/groups.ts`, di-mount di `/api/groups`) masih ter-mount
-> tetapi **fail-closed**: tanpa issuer/verifier semua presentasi dijawab **403**
-> (`docs/16` §16.5.1), untuk membekukan wire format. Bagian di bawah hanya catatan
-> desain lama dan tidak boleh dijadikan acuan implementasi.
+> Grup memakai token-first; rute `POST /api/groups/:id/credential/present` dan
+> modul verifier-nya **dihapus 2026-11-23** — build ini tidak pernah punya
+> issuer/verifier, jadi rute itu hanya fail-closed tanpa pemilik. Bagian di bawah
+> hanya catatan desain lama dan tidak boleh dijadikan acuan implementasi.
 
 Dulu: suite `RSABSSA-SHA384-PSS-Randomized` (RFC 9474), private key issuer dari
 env (`GROUP_ISSUER_KEY_PKCS8`), fail-closed di production, DB hanya menyimpan

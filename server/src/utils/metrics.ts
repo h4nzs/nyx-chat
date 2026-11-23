@@ -779,14 +779,3 @@ export const PRIVACY_PASS = defineCounter(
   'Operasi issuance/redemption Privacy Pass, per jalur dan hasil',
   ['route', 'result']
 );
-
-/**
- * [docs/37 §37.3.5] Presentasi credential, per hasil penolakan.
- * Label = enum alasan (`ok|bad_magic|epoch_mismatch|suite_not_allowed|…`) —
- * tidak ada suite/keyVersion/groupId sebagai nilai bebas.
- */
-export const CREDENTIAL_PRESENT = defineCounter(
-  'nyx_credential_present_total',
-  'Presentasi credential grup, per hasil verifikasi',
-  ['result']
-);

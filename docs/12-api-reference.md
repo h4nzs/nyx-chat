@@ -105,7 +105,6 @@ ada handler yang menulis/membaca `userId` (`docs/37` §37.3).
 | GET | `/pp/issuer` | `{suite, keyId, publicJwk}` — kunci verifikasi Privacy Pass |
 | POST | `/pp/issue` | `{groupToken, memberToken, blinded[]}` → `{signatures, suite, keyId}`; issuer menandatangani pesan ter-blind (tidak melihat isinya) |
 | POST | `/pp/redeem` | `{conversationId, tokens[]}` → `{accepted, spent, invalid}`; 403 bila tidak ada yang diterima |
-| POST | `/:id/credential/present` | Body biner `NYXC…` ≤8 KB; verifier fail-closed — build ini tanpa issuer/verifier (`CREDENTIAL_SUITE_ALLOWLIST` kosong = tolak semua), jadi selalu **403 `CREDENTIAL_REJECTED`** (400 hanya untuk body cacat). Bukan kapabilitas hidup; tidak ada klien yang memakainya (`docs/16` §16.5.1 D4) |
 
 ## messages — `/api/messages`
 

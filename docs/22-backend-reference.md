@@ -69,7 +69,6 @@ Tabel di bawah menyorot helper yang mengatur batas keamanan; `ls server/src/util
 | `authGate.ts` | Satu aturan blacklist JTI + ban (dipakai REST `requireAuth` **dan** realtime gateway) |
 | `ohttpToken.ts` | Token carriage OHTTP (scope/aud `ohttp`, 120 dtk) + `isOhttpScopeRequestAllowed` (allowlist yang sama dengan gateway) |
 | `searchOprf.ts` | Kunci OPRF server dari at-rest pepper + `searchOprfIndexForIdentifier` (isi `User.oprfIndex` saat register/login) |
-| `credentialPresentation.ts` | Verifikasi presentasi token grup (menggantikan credential blind RSA yang dihapus 2026-10-23) |
 | `groupAccess.ts` | Otorisasi jalur grup: add/kick anggota, leave, details, rotasi kunci, purge (`BLIND_AUTH_REQUIRED` / `ADMIN_AUTH_REQUIRED` / `MEMBERS_REMAIN`) |
 | `adminCapability.ts` | `hashAdminToken`/`isAdminTokenValid` (SHA-256, constant-time, NULL hash = fail-closed) |
 | `keyBundle.ts` | Pemetaan device Prisma → `IDeviceTemplate`/bundle publik |

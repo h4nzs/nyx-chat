@@ -267,10 +267,10 @@ skip di project tersebut.
 | `nightly` (**terjadwal**, `.github/workflows/nightly.yml`) | Firefox + WebKit (smoke), Chromium (a11y) | 02:00 UTC harian: fuzz web 1 jam (`fuzz:parsers:hour`), fuzz framing sidecar 1 jam (`NYX_FUZZ_SECONDS=3600`), k6 100 VU di stack ephemeral (Postgres+Redis service; **menulis pesan**), smoke `auth`+`settings` di Firefox/WebKit, `a11y.spec.ts`, dan contract test HTTP (`httpContract.test.ts`) |
 | `dr-oracle` | — | oracle Go: `build`/`vet`/`test` + gate drift vektor (`go run . -check`) + `x3dhOracleVectors.test.ts` + `x3dhOracleInterop.test.ts` |
 
-Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR dan **belum** punya workflow
-terjadwal — keduanya masih manual, dijalankan sebelum rilis besar (`docs/30`
-§30.20 sisa WS-G). Satu-satunya yang terjadwal sekarang adalah drill
-(`.github/workflows/drills.yml`, Senin 04:00 UTC). Terakhir dijalankan
+Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR; keduanya dijalankan
+**nightly** (`.github/workflows/nightly.yml`, 02:00 UTC) dan masih bisa manual
+sebelum rilis besar (`docs/30` §30.20 sisa WS-G). Drill berjalan terjadwal Senin
+04:00 UTC (`.github/workflows/drills.yml`). Terakhir dijalankan manual
 (2026-10-14): fuzz sidecar 160,9 juta iterasi/300 s (0 temuan) dan k6 beban penuh
 (`scripts/load/run-relay-load.sh`, 500 VU — send p95 74,4 ms / fetch p95 68,8 ms,
 0% error). Drill alert + vektor oracle **sudah** jalan per-PR (tabel di atas).
