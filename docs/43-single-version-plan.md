@@ -961,8 +961,9 @@ kosong; snapshot PIR hanya berisi user `where oprfIndex != null`
 
 `jobs/pirSnapshot.ts` juga sudah menyegarkan shard **tiap 3 menit bila ada
 penulisan baru** (`PIR_DIRTY_REFRESH_CRON = '*/3 * * * *'`), bukan hanya 04:15.
-Kalimat di `AGENTS.md` dan `docs/10` §10.19 yang menyatakan akun baru tidak bisa
-dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
+Kalimat basi "akun baru tidak bisa dicari sampai 04:15" sudah dikoreksi 2026-11-24:
+`AGENTS.md`, `docs/10` §10.19, dan `docs/42` §42.8 kini menyebut dirty-refresh
+3 menit dan menempatkan 04:15 sebagai jaring pengaman penuh.
 
 ### 43.15.2 Implementasi setengah / tidak konsisten (harus diperbaiki)
 
@@ -977,7 +978,7 @@ dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
 | 7 | Antrean offline tanpa E2E | `offlineQueueDb` dipakai `store/message.ts` (tulis saat putus, retry ≤5, drop + `FAILED`); tidak ada spec yang memuat ulang halaman saat offline | ✅ selesai 2026-11-23: `web/e2e/offlineQueue.spec.ts` mengetik lewat composer saat transport putus, membaca baris `offlineQueue` langsung dari SQLite, membuktikan drain reconnect tepat satu kali, dan reload tidak mengirim ulang. Composer kini mengizinkan teks offline; lampiran/voice, edit pesan, dan burner tetap butuh koneksi | P1 |
 | 8 | TODO di fork KT | `packages/keytrans-v2/src/proto/wire.proto:115` (`signature = 5; TODO`) dan `src/log.rs:432` (`PathMismatch maybe?`) | ✅ selesai 2026-11-24: `NOTICE` §2 mencatat kedua TODO sebagai perilaku upstream yang dibawa apa adanya; jangan "memperbaiki" tanpa pindah pin | P2 |
 | 9 | TODO deploy | `.github/workflows/deploy.yml:159` masih password SSH | pindah ke `secrets.VPS_SSH_KEY`; satu perubahan terkontrol, bukan saat deploy tergesa | P2 |
-| 10 | Klaim PIR 04:15 basi | lihat §43.15.1 | koreksi `AGENTS.md` + `docs/10` §10.19 saat menyentuhnya | P1 |
+| 10 | Klaim PIR 04:15 basi | lihat §43.15.1 | ✅ selesai 2026-11-24: `AGENTS.md`, `docs/10` §10.19, dan `docs/42` §42.8 sudah menyebut rebuild dirty tiap 3 menit; 04:15 tetap jaring pengaman penuh | P1 |
 | 11 | a11y baru 3 halaman | `web/e2e/a11y.spec.ts` (login, register, settings) | ✅ selesai 2026-11-24: tes keempat memindai chat, privacy status, dan modal story dalam satu registrasi (rate limit menahan registrasi ketiga berturut-turut). Temuan diperbaiki di UI: nama tombol lonceng notifikasi, kontras empty-state chat + tombol Refresh privacy, dan sr-only pada tombol story sendiri (label-content-name-mismatch) | P2 |
 
 > **Status 2026-11-22:** #1–#3 selesai — `server/.env.example` disinkronkan
