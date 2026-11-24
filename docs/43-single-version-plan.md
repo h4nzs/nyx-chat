@@ -989,8 +989,8 @@ Kalimat basi "akun baru tidak bisa dicari sampai 04:15" sudah dikoreksi 2026-11-
 > **Status 2026-11-23:** #5 selesai 2026-11-17 di `0ddaa0a0` — residual
 > `tenant|externalIdSealed|/api/engine|embed_at|EmbedChat` di kode, skema,
 > locale, dan marketing sudah nol (§43.17.4). #4 (rute kredensial zombie)
-> selesai 2026-11-23. **Status 2026-11-24:** #6–#8 dan #11 selesai; tinggal
-> #9 (kunci SSH deploy) dan #10 (klaim PIR 04:15 di `AGENTS.md`/`docs/10`).
+> selesai 2026-11-23. **Status 2026-11-24:** #6–#8, #10, dan #11 selesai;
+> tinggal #9 (kunci SSH deploy) yang menunggu secret `VPS_SSH_KEY`.
 
 ### 43.15.3 Yang diperiksa dan **tidak** bermasalah
 
