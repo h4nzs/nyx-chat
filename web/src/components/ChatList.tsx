@@ -585,7 +585,7 @@ export default function ChatList() {
               components={{
                 Header: () => <div className="h-2"></div>,
                 EmptyPlaceholder: () => (
-                  <div className="flex flex-col items-center justify-center h-40 text-text-secondary/50">
+                  <div className="flex flex-col items-center justify-center h-40 text-text-secondary">
                     <p className="text-sm font-medium">{t('chat:sidebar.no_conversations')}</p>
                   </div>
                 ),

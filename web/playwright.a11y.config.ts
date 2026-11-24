@@ -28,13 +28,17 @@ export default defineConfig({
       url: 'http://localhost:4000/health',
       reuseExistingServer: true,
       timeout: 120 * 1000,
+      // Sama seperti config utama: stack a11y tidak menjalankan sidecar PIR,
+      // sedangkan `server/.env` selfhost bisa `PIR_ENABLED=1` tanpa
+      // `PIR_SERVERS` (boot fatal). Paksa mati agar spec bisa start API.
+      env: { PIR_ENABLED: '0' },
     },
     {
       command: 'pnpm --filter nyx-web dev',
       url: 'http://localhost:5173',
       reuseExistingServer: true,
       timeout: 120 * 1000,
-      env: { VITE_API_URL: '/api' },
+      env: { VITE_API_URL: '/api', VITE_PIR_ENABLED: '0' },
     },
   ],
 });

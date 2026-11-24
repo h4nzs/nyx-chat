@@ -61,6 +61,12 @@ the v1 wrapper (`packages/keytrans-wasm`) were removed with the v1 retirement
 (`docs/38`), so differences from upstream can now only be reviewed against the commit
 above.
 
+Two upstream TODOs are carried over unchanged and are **not** NYX behavior
+changes: `src/proto/wire.proto` marks the `signature` field `TODO`, and
+`src/log.rs` carries a `PathMismatch maybe?` note (`docs/43` §43.15.2 #8). Do
+not edit the fork to silence them; resolve by moving the upstream pin with
+`scripts/vendor-signal.sh` and re-running `bash scripts/check-vendor.sh`.
+
 Other parts of libsignal were read only as an implementation reference, without
 copying code — e.g. the group sender-key design (`docs/16`). The
 cross-implementation ratchet checks that DO exist (`docs/30` WS-G(6), `docs/11`

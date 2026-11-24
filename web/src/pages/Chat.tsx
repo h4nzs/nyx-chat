@@ -157,7 +157,7 @@ export default function Chat() {
             )}
 
             {/* Placeholder Empty State */}
-            <div className="flex-1 flex flex-col items-center justify-center text-text-secondary p-8 opacity-50">
+            <div className="flex-1 flex flex-col items-center justify-center text-text-secondary p-8">
               <div className="p-8 rounded-full bg-bg-surface shadow-neumorphic-convex mb-6">
                 <FiMessageSquare size={64} className="opacity-50" />
               </div>

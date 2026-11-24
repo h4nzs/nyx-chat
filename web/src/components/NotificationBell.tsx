@@ -4,9 +4,11 @@ import useNotificationStore from '@store/notification';
 import { useShallow } from 'zustand/react/shallow';
 import NotificationPopover from './NotificationPopover';
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, useAnimationControls } from 'framer-motion';
 
 const NotificationBell = () => {
+  const { t } = useTranslation(['modals']);
   const { unreadCount, markAllAsRead } = useNotificationStore(useShallow(state => ({
     unreadCount: state.unreadCount,
     markAllAsRead: state.markAllAsRead,
@@ -35,7 +37,10 @@ const NotificationBell = () => {
   return (
     <Popover.Root onOpenChange={handleOpenChange}>
       <Popover.Trigger asChild>
-        <button className="btn-flat p-2 rounded-full text-text-secondary hover:text-text-primary">
+        <button
+          aria-label={t('notifications.title')}
+          className="btn-flat p-2 rounded-full text-text-secondary hover:text-text-primary"
+        >
           <motion.div animate={controls}>
             <FiBell />
           </motion.div>

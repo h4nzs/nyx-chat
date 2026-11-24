@@ -975,10 +975,10 @@ dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
 | 5 | `/api/engine` + `/embed/chat/:id` tanpa pemilik | `server/src/routes/engine.ts` membuat room iframe dan mengembalikan URL; halaman embed ada; **tidak ada pemanggil `/api/engine` dari web, tidak ada E2E, tidak disebut di docs/STATUS**; prefix `/api/engine` dikecualikan dari CSRF (`app.ts:435`) | **Diputuskan: hapus seluruh tenant/B2B/embed.** ✅ selesai 2026-11-17 (`0ddaa0a0`): kode, skema, UI, i18n, tes, dan marketing dihapus; drop kolom fisik mengikuti `prisma db push` saat deploy | **P0** |
 | 6 | Story tidak punya E2E | UI aktif (`ChatList.tsx:555` → `StoryTray` → `CreateStoryModal`/`StoryViewer`), server punya blocklist + rate limit + expiry 24 jam; **tidak ada spec E2E** dan tidak ada tes distribusi kunci story | ✅ selesai 2026-11-23: `web/e2e/story.spec.ts` memposting lewat UI, membuktikan `STORY_KEY` sampai dan terdekripsi di penerima, ciphertext tersaring di klien tanpa kunci, blocklist 403 `STORY_BLOCKED`, dan expiry (baris dimajukan lewat `psql`) → daftar kosong + 410 | P1 |
 | 7 | Antrean offline tanpa E2E | `offlineQueueDb` dipakai `store/message.ts` (tulis saat putus, retry ≤5, drop + `FAILED`); tidak ada spec yang memuat ulang halaman saat offline | ✅ selesai 2026-11-23: `web/e2e/offlineQueue.spec.ts` mengetik lewat composer saat transport putus, membaca baris `offlineQueue` langsung dari SQLite, membuktikan drain reconnect tepat satu kali, dan reload tidak mengirim ulang. Composer kini mengizinkan teks offline; lampiran/voice, edit pesan, dan burner tetap butuh koneksi | P1 |
-| 8 | TODO di fork KT | `packages/keytrans-v2/src/proto/wire.proto:115` (`signature = 5; TODO`) dan `src/log.rs:432` (`PathMismatch maybe?`) | bukan bug NYX (kode upstream), tetapi catat sebagai batasan fork di `NOTICE` §2; jangan "memperbaiki" tanpa pindah pin | P2 |
+| 8 | TODO di fork KT | `packages/keytrans-v2/src/proto/wire.proto:115` (`signature = 5; TODO`) dan `src/log.rs:432` (`PathMismatch maybe?`) | ✅ selesai 2026-11-24: `NOTICE` §2 mencatat kedua TODO sebagai perilaku upstream yang dibawa apa adanya; jangan "memperbaiki" tanpa pindah pin | P2 |
 | 9 | TODO deploy | `.github/workflows/deploy.yml:159` masih password SSH | pindah ke `secrets.VPS_SSH_KEY`; satu perubahan terkontrol, bukan saat deploy tergesa | P2 |
 | 10 | Klaim PIR 04:15 basi | lihat §43.15.1 | koreksi `AGENTS.md` + `docs/10` §10.19 saat menyentuhnya | P1 |
-| 11 | a11y baru 3 halaman | `web/e2e/a11y.spec.ts` (login, register, settings) | tambah `chat`, `privacy`, modal story; jalankan di config a11y | P2 |
+| 11 | a11y baru 3 halaman | `web/e2e/a11y.spec.ts` (login, register, settings) | ✅ selesai 2026-11-24: tes keempat memindai chat, privacy status, dan modal story dalam satu registrasi (rate limit menahan registrasi ketiga berturut-turut). Temuan diperbaiki di UI: nama tombol lonceng notifikasi, kontras empty-state chat + tombol Refresh privacy, dan sr-only pada tombol story sendiri (label-content-name-mismatch) | P2 |
 
 > **Status 2026-11-22:** #1–#3 selesai — `server/.env.example` disinkronkan
 > (kunci blind-RSA grup dihapus, OHTTP/OPRF/PIR/PP/keyring ditambahkan), typo
@@ -988,7 +988,8 @@ dicari sampai 04:15 sudah basi dan harus dikoreksi saat menyentuh dokumen itu.
 > **Status 2026-11-23:** #5 selesai 2026-11-17 di `0ddaa0a0` — residual
 > `tenant|externalIdSealed|/api/engine|embed_at|EmbedChat` di kode, skema,
 > locale, dan marketing sudah nol (§43.17.4). #4 (rute kredensial zombie)
-> selesai 2026-11-23; tinggal #6–#11.
+> selesai 2026-11-23. **Status 2026-11-24:** #6–#8 dan #11 selesai; tinggal
+> #9 (kunci SSH deploy) dan #10 (klaim PIR 04:15 di `AGENTS.md`/`docs/10`).
 
 ### 43.15.3 Yang diperiksa dan **tidak** bermasalah
 

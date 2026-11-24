@@ -62,7 +62,7 @@ export default function PrivacyStatusPage() {
         <button
           type="button"
           onClick={() => void refresh()}
-          className="flex items-center gap-2 text-sm font-semibold text-accent hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2 text-sm font-semibold text-text-primary hover:text-accent transition-colors"
         >
           <FiRefreshCw size={16} />
           {t('privacy_status.refresh')}

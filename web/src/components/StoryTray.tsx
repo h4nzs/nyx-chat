@@ -78,7 +78,7 @@ const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId:
 });
 
 export default function StoryTray() {
-  const { t } = useTranslation(['chat', 'common']);
+  const { t } = useTranslation(['chat', 'common', 'modals']);
   const { conversations } = useConversationStore(useShallow(s => ({ conversations: s.conversations })));
   const { user: me } = useAuthStore(useShallow(s => ({ user: s.user })));
   const { fetchActiveStories, stories } = useStoryStore(useShallow(s => ({ fetchActiveStories: s.fetchActiveStories, stories: s.stories })));
@@ -138,6 +138,9 @@ export default function StoryTray() {
               onClick={() => myStories.length > 0 ? setViewingUserId(me!.id) : setShowCreateModal(true)}
               className="group focus:outline-none"
             >
+              {/* Nama aksesibel dari konten (inisial avatar tidak bisa dipakai);
+                  aria-label akan memicu label-content-name-mismatch. */}
+              <span className="sr-only">{t('chat:stories.your_story')}</span>
               <div className={clsx(
                 "relative w-14 h-14 rounded-full p-[2px] transition-all duration-300 shadow-neu-flat dark:shadow-neu-flat-dark group-active:scale-95",
                 myStories.length > 0 ? "bg-gradient-to-tr from-text-secondary to-text-secondary/50" : "bg-transparent"
@@ -162,6 +165,7 @@ export default function StoryTray() {
                 e.stopPropagation();
                 setShowCreateModal(true);
               }}
+              aria-label={t('modals:create_story.title')}
               className="absolute top-9 right-1 bg-accent text-white rounded-full p-[3px] border-[3px] border-bg-main z-10 hover:scale-110 transition-transform shadow-sm cursor-pointer"
             >
               <FiPlus size={12} strokeWidth={3} />

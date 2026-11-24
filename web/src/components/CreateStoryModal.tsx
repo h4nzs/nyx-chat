@@ -195,6 +195,7 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
           )}
 
           <textarea
+            aria-label={t('modals:create_story.placeholder')}
             placeholder={t('modals:create_story.placeholder')}
             className="w-full p-4 bg-bg-surface border border-text-secondary/10 rounded-xl shadow-neu-inner text-text-primary focus:outline-none focus:ring-1 focus:ring-accent resize-none h-24"
             value={text}
