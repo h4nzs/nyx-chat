@@ -214,18 +214,22 @@ terbukti hijau di CI: run `43700149030` (head `5e470d43`) 12/12 job sukses,
 `web/e2e/required-tests.json` (`minTotal`, `mustPass`, `allowedSkipReasons`) +
 `web/e2e/verify-required-tests.mjs` membaca report JSON Playwright. Gagal bila:
 entri cocok dengan 0 tes, tes `mustPass` di-skip, atau skip tanpa alasan yang
-terdaftar. `--self-test` menjalankan 12 skenario sintetis (8 gate: lulus, skip
+terdaftar. `--self-test` menjalankan 16 skenario sintetis (8 gate: lulus, skip
 beralasan, tes wajib di-skip, skip tanpa alasan, alasan tak diizinkan, tes
 hilang, jumlah menyusut; 4 karantina: sah, kedaluwarsa, tes hilang, masih
-berjalan) dan ikut jalan di CI.
+berjalan; 4 snapshot: cocok, tes hilang, tes baru, `minTotal` tidak sinkron)
+dan ikut jalan di CI.
 
 Cakupan `mustPass` (dihitung 16 November 2026 dari manifest): auth
 (register/login/wrong password), profile, security, settings, recovery,
 deviceLinking, group lifecycle, group era, group faults, backup/restore —
 **12 tes di chromium** — plus transport (2), chat, dan seluruh daftar chromium di
 chrome (**15 tes**). Angka di paragraf ini pernah tertinggal (10/13) saat
-`groupEra`/`groupFaults` masuk; §43.10.1 `docs/43` menggantinya dengan generator
-manifest supaya tidak terulang. Skip
+`groupEra`/`groupFaults` masuk; sejak 2026-11-24 `web/e2e/required-tests.snapshot.json`
+mengunci himpunan `file::title` dan gate mensyaratkan `minTotal` sama dengan
+jumlah entri snapshot. Tes baru/berubah tidak bisa lolos tanpa memperbarui
+snapshot (`pnpm --filter nyx-web run test:e2e:snapshot`, dijalankan dari `web/`),
+dan perubahannya terlihat di review. Skip
 hanya sah bila labelnya cocok dengan `allowedSkipReasons`; alasan baru berarti PR
 yang mengubah manifest. (`call.spec.ts` sengaja **tidak** ada di `mustPass`:
 butuh coturn, dan di luar job `e2e-chrome` ia skip dengan alasan tertulis.)

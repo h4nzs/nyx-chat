@@ -23,6 +23,9 @@
 //                    daftar `allowedSkipReasons` project itu. Skip tanpa alasan
 //                    atau dengan alasan baru = pelanggaran, jadi menambah skip
 //                    baru harus lewat manifest (terlihat di review).
+//   4. snapshot     — himpunan `file::title` sama persis dengan snapshot yang
+//                    di-commit. Tanpa ini, jumlah 27 bisa tetap 27 sementara
+//                    isinya diganti tes lain yang judulnya tidak diperiksa.
 //
 // Pemakaian:
 //   node e2e/verify-required-tests.mjs --project chromium
@@ -34,12 +37,14 @@
 //   --report <path>     report JSON (default: playwright-report/results.json)
 //   --manifest <path>   manifest (default: e2e/required-tests.json)
 //   --quarantine <path> daftar karantina flake (default: e2e/quarantine.json)
+//   --snapshot <path>   snapshot judul tes (default: e2e/required-tests.snapshot.json)
 //   --self-test         buktikan gate ini bisa gagal, dengan report sintetis
 //
 // Keluar 0 bila lolos, 1 bila ada pelanggaran, 2 bila argumen/berkas salah.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -60,7 +65,7 @@ function arg(name, fallback) {
  * terhadap `testDir`, `test.status` = expected|unexpected|flaky|skipped, alasan
  * skip ada di `test.annotations[]` dengan `type: 'skip'`.
  */
-function flattenTests(report) {
+export function flattenTests(report) {
   const rows = [];
   const walk = (suite, ancestors, depth) => {
     // Suite kedalaman 0 selalu mewakili satu berkas (judulnya nama berkas) dan
@@ -102,13 +107,41 @@ function reasonAllowed(reason, patterns) {
 }
 
 /** Fungsi murni: (report, manifest, project) → daftar pelanggaran. */
-export function evaluate(report, manifest, project) {
+export function evaluate(report, manifest, project, snapshot = null) {
   const config = manifest.projects?.[project];
   if (!config) return [`manifest tidak punya project "${project}"`];
 
   const all = flattenTests(report);
   const tests = all.filter((t) => t.projectName === project);
   const violations = [];
+
+  // 0. Himpunan tes harus sama dengan snapshot: tes tidak bisa diganti tes lain
+  //    yang kebetulan menjaga jumlah, dan tes baru harus terlihat di review.
+  const snapshotExpected = snapshot?.projects?.[project];
+  if (snapshot && !Array.isArray(snapshotExpected)) {
+    violations.push(`snapshot tidak memuat project "${project}"`);
+  } else if (Array.isArray(snapshotExpected)) {
+    const expectedKeys = [...new Set(snapshotExpected)].sort();
+    const actualKeys = [...new Set(tests.map((t) => `${t.file}::${t.title}`))].sort();
+    for (const key of expectedKeys) {
+      if (!actualKeys.includes(key)) {
+        violations.push(`tes hilang dari suite (tercatat di snapshot): ${key}`);
+      }
+    }
+    for (const key of actualKeys) {
+      if (!expectedKeys.includes(key)) {
+        violations.push(
+          `tes baru/berubah belum masuk snapshot: ${key} — jalankan \`pnpm --filter nyx-web run test:e2e:snapshot\``
+        );
+      }
+    }
+    if ((config.minTotal ?? 0) !== expectedKeys.length) {
+      violations.push(
+        `minTotal ${config.minTotal ?? 0} tidak sama dengan jumlah tes di snapshot (${expectedKeys.length}); ` +
+          'perbarui manifest bersama snapshot'
+      );
+    }
+  }
 
   // 1. Jumlah tes tidak boleh menyusut.
   if (tests.length < (config.minTotal ?? 0)) {
@@ -323,6 +356,44 @@ function selfTest() {
     },
   ];
 
+  const snapshotManifest = {
+    projects: { demo: { minTotal: 2, mustPass: [], allowedSkipReasons: [] } },
+  };
+  const matchingSnapshot = {
+    projects: { demo: ['wajib.spec.ts::Grup › wajib jalan', 'suite.spec.ts::lain'] },
+  };
+  const baseReport = () =>
+    makeReport([
+      { file: 'wajib.spec.ts', title: 'Grup › wajib jalan' },
+      { title: 'lain' },
+    ]);
+  const snapshotCases = [
+    { name: 'snapshot cocok', report: baseReport(), snapshot: matchingSnapshot, expectFail: false },
+    {
+      name: 'tes hilang dari suite padahal tercatat di snapshot',
+      report: makeReport([{ file: 'wajib.spec.ts', title: 'Grup › wajib jalan' }]),
+      snapshot: matchingSnapshot,
+      expectFail: true,
+    },
+    {
+      name: 'tes baru belum masuk snapshot',
+      report: makeReport([
+        { file: 'wajib.spec.ts', title: 'Grup › wajib jalan' },
+        { title: 'lain' },
+        { title: 'baru' },
+      ]),
+      snapshot: matchingSnapshot,
+      expectFail: true,
+    },
+    {
+      name: 'minTotal tidak sinkron dengan snapshot',
+      report: baseReport(),
+      snapshot: matchingSnapshot,
+      manifest: { projects: { demo: { minTotal: 3, mustPass: [], allowedSkipReasons: [] } } },
+      expectFail: true,
+    },
+  ];
+
   let failed = 0;
   for (const testCase of cases) {
     const violations = evaluate(testCase.report, manifest, 'demo');
@@ -397,14 +468,33 @@ function selfTest() {
     if (!ok) console.log(`   pelanggaran: ${JSON.stringify(violations)}`);
   }
 
+  for (const testCase of snapshotCases) {
+    const violations = evaluate(
+      testCase.report,
+      testCase.manifest ?? snapshotManifest,
+      'demo',
+      testCase.snapshot
+    );
+    const got = violations.length > 0;
+    const ok = got === testCase.expectFail;
+    if (!ok) failed += 1;
+    console.log(`${ok ? '✓' : '✗'} self-test snapshot: ${testCase.name} → ${got ? 'menolak' : 'lolos'}`);
+    if (!ok) console.log(`   pelanggaran: ${JSON.stringify(violations)}`);
+  }
+
+  const totalCases = cases.length + quarantineCases.length + snapshotCases.length;
   if (failed > 0) {
-    console.error(`✗ self-test gate gagal: ${failed}/${cases.length + quarantineCases.length} skenario tidak sesuai harapan`);
+    console.error(`✗ self-test gate gagal: ${failed}/${totalCases} skenario tidak sesuai harapan`);
     process.exit(1);
   }
-  console.log(`✓ self-test gate: ${cases.length + quarantineCases.length}/${cases.length + quarantineCases.length} skenario sesuai harapan`);
+  console.log(`✓ self-test gate: ${totalCases}/${totalCases} skenario sesuai harapan`);
 }
 
-if (process.argv.includes('--self-test')) {
+const isCli =
+  Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (!isCli) {
+  // Diimpor sebagai modul (mis. writer snapshot): jangan jalankan CLI.
+} else if (process.argv.includes('--self-test')) {
   selfTest();
 } else {
   const project = arg('project', null);
@@ -414,9 +504,11 @@ if (process.argv.includes('--self-test')) {
   }
   const reportPath = path.resolve(arg('report', 'playwright-report/results.json'));
   const manifestPath = path.resolve(arg('manifest', 'e2e/required-tests.json'));
+  const snapshotPath = path.resolve(arg('snapshot', 'e2e/required-tests.snapshot.json'));
 
   let report;
   let manifest;
+  let snapshot;
   try {
     report = JSON.parse(readFileSync(reportPath, 'utf8'));
   } catch (error) {
@@ -429,9 +521,15 @@ if (process.argv.includes('--self-test')) {
     console.error(`verify-required-tests: gagal membaca manifest ${manifestPath} — ${error.message}`);
     process.exit(2);
   }
+  try {
+    snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8'));
+  } catch (error) {
+    console.error(`verify-required-tests: gagal membaca snapshot ${snapshotPath} — ${error.message}`);
+    process.exit(2);
+  }
 
   summarize(report, project);
-  let violations = evaluate(report, manifest, project);
+  let violations = evaluate(report, manifest, project, snapshot);
 
   // [docs/41 §7.4] Karantina dijalankan pada report yang sama: entri yang
   // kedaluwarsa/menunjuk tes hilang/masih dijalankan menggagalkan job.

@@ -284,7 +284,8 @@ dan gate `required-tests.json` dengan `minTotal: 26`.
 
 > **Per 2026-11-24:** 25 berkas spec, 34 `test()`, `minTotal` 27 dengan
 > `mustPass` 14 (chromium) / 17 (chrome), dan a11y 4 tes. Angka di tabel bawah
-> adalah potret 16 November; angka hidup ada di `docs/41` §6.5.
+> adalah potret 16 November; angka hidup ada di `docs/41` §6.5. Himpunan judul
+> tes dikunci `web/e2e/required-tests.snapshot.json` (27/27 per project).
 
 | Proyek / config | Berkas | Tes | Dijalankan |
 |---|---|---|---|
@@ -329,17 +330,20 @@ Perbaikan (Fase G, kecil dan langsung):
    Di chromium itu tetap mengecualikan `chat`/`transport`/`regression` (WT tidak
    ada) dan `pqBenchThrottle` (opt-in); di chrome hanya tes yang butuh R2/flag
    yang dikecualikan, sehingga tes burner "destroyed after reload" masuk.
-2. **Snapshot judul tes**: commit `web/e2e/required-tests.snapshot.json` berisi
-   `file::title` untuk **semua** tes per proyek; gate gagal bila himpunan hasil
-   berbeda dari snapshot (tes hilang, tes baru belum didaftarkan, atau satu tes
-   diganti tes lain). Inilah yang menutup lubang "jumlah tetap 26 tapi isinya
-   berbeda".
+2. ✅ **Snapshot judul tes** (2026-11-24): `web/e2e/required-tests.snapshot.json`
+   berisi `file::title` untuk **semua** tes per proyek (27/27 chromium dan
+   chrome). Gate gagal bila himpunan hasil berbeda dari snapshot (tes hilang,
+   tes baru belum didaftarkan, atau satu tes diganti tes lain), dan writer
+   `pnpm --filter nyx-web run test:e2e:snapshot` membuatnya dari
+   `playwright test --list` tanpa butuh DB/sidecar.
 3. **Tambahkan ke `mustPass` chrome** tes yang hanya butuh sidecar dan sudah
    berjalan di job itu: `regression.spec.ts` → "burner conversation destroyed on
    host stays deleted after reload". Jangan tambahkan tes foto burner (butuh R2)
    atau `pqBenchThrottle` (opt-in).
-4. **Generator `minTotal`**: hitung dari report, jangan diketik; angka manual
-   sudah basi sekali (§6.5 `docs/41` menulis 10/13 padahal manifest 12/15).
+4. ✅ **`minTotal` tidak lagi angka bebas** (2026-11-24): gate mensyaratkan
+   `minTotal` sama dengan jumlah entri snapshot, dan snapshot dihitung dari
+   suite yang benar-benar terdaftar — angka manual tidak bisa lagi menyimpang
+   diam-diam (§6.5 `docs/41` pernah menulis 10/13 padahal manifest 12/15).
 
 ### 43.10.2 Fitur yang tidak punya E2E sama sekali
 
