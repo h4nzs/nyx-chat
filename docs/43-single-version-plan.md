@@ -282,6 +282,10 @@ Diukur 16 November 2026 dari repo (bukan dari ingatan): **21 berkas spec, 30 `te
 26 tes di suite utama** (a11y dan PIR punya config sendiri), 4 config Playwright,
 dan gate `required-tests.json` dengan `minTotal: 26`.
 
+> **Per 2026-11-24:** 25 berkas spec, 34 `test()`, `minTotal` 27 dengan
+> `mustPass` 14 (chromium) / 17 (chrome), dan a11y 4 tes. Angka di tabel bawah
+> adalah potret 16 November; angka hidup ada di `docs/41` §6.5.
+
 | Proyek / config | Berkas | Tes | Dijalankan |
 |---|---|---|---|
 | `chromium` (PR) | 19 | 26 | `pnpm exec playwright test --project=chromium` |
@@ -297,7 +301,8 @@ pun tes baru.
 
 ### 43.10.1 Celah gate yang paling berbahaya
 
-`mustPass` hanya memuat **12 tes (chromium)** dan **15 tes (chrome)** dari 26.
+`mustPass` hanya memuat **12 tes (chromium)** dan **15 tes (chrome)** dari 26 saat
+diukur; per 2026-11-24 menjadi 14/17 dari 27.
 `minTotal` menjaga *jumlah* dan `mustPass` menjaga identitas, tetapi hanya untuk
 tes yang terdaftar. Konsekuensi yang perlu disadari: tes di luar `mustPass` boleh
 berubah menjadi skip dengan alasan yang sudah diizinkan — atau diganti tes lain
@@ -306,7 +311,7 @@ yang judulnya tidak diperiksa — tanpa gate gagal. Di chromium itu mencakup
 tidak punya), `spqr`/`pqV2`/`ohttp`/`call`/`ktLive` (infra opsional), dan
 `pqBenchThrottle` (opt-in `NYX_PQ_THROTTLE=1`). Semuanya punya alasan skip sah,
 jadi bukan pelanggaran — tetapi artinya **lapisan yang dijamin gate hanya 12 dari
-26 tes**.
+26 tes** (kini 14 dari 27).
 
 Dua akibat konkret dari membaca spec-nya:
 
@@ -341,11 +346,11 @@ Perbaikan (Fase G, kecil dan langsung):
 | Area | Bukti di kode | Risiko | Prioritas |
 |---|---|---|---|
 | Panic password / wipe | `web/src/store/auth.ts`, `nukeProtocol` | keamanan: klaim "wipe" tidak diuji end-to-end | **P0** |
-| Multi-tab | tidak ada spec | dua tab menulis DB yang sama; dengan SQLite §43.11 ini justru titik gagal baru | **P0** |
-| Offline / PWA / antrean kirim | `offlineQueue`, service worker | pesan hilang saat jaringan putus, SW basi menolak envelope grup | **P0** |
+| Multi-tab | ✅ `storage.spec.ts` (dua tab berbagi OPFS) + `opfsApp.spec.ts` (2026-11-19) | dua tab menulis DB yang sama; dengan SQLite §43.11 ini justru titik gagal baru | **P0** |
+| Offline / PWA / antrean kirim | ✅ antrean: `offlineQueue.spec.ts` (2026-11-23); SW/PWA penuh belum ada spec | pesan hilang saat jaringan putus, SW basi menolak envelope grup | **P0** |
 | Quota / storage penuh | belum ada | DB gagal tulis tanpa pesan yang benar | P1 |
 | i18n 4 bahasa | `web/public/locales/{en,es,id,pt-BR}` | `missingKey` hanya terlihat di konsol; tidak ada gate | P1 |
-| Story, link history | `stories`, `linkHistory` (0 spec) | regresi senyap | P1 |
+| Story, link history | ✅ Story: `story.spec.ts` (2026-11-23); link history belum punya spec | regresi senyap | P1 |
 | Burner regression | `regression.spec.ts` | **selalu skip** tanpa WT+R2; tes "destroyed after reload" tidak pernah jalan meski hanya butuh sidecar | **P0** |
 | Push notification | `usePushNotifications`, `pushSupport` | sudah ada unit test gerbang; jalur nyata butuh HTTPS + izin | P2 |
 | Client version gate | `ClientVersionRequiredPage` | klien tua tidak tertahan | P1 |
@@ -361,12 +366,11 @@ Perbaikan (Fase G, kecil dan langsung):
   modal chain-nya sumber flake. Spec yang tidak menguji onboarding memakai helper
   yang membuat akun via `POST /api/auth/register` lalu menyuntikkan kunci hasil
   `registerUser` yang sudah ada.
-- **Spec baru wajib**: `storage.spec.ts` (reload, dua tab, tulis bersamaan,
-  `SQLITE_BUSY` ditangani, quota), `offline.spec.ts` (SW prod, offline, antrean
-  terkirim saat online), `panic.spec.ts` (panic → IndexedDB/OPFS kosong, cookie
-  mati, redirect), `i18n.spec.ts` (4 locale × 1 halaman, asersi tidak ada
-  `missingKey` di konsol), `clientVersion.spec.ts` (header versi lama → halaman
-  gate), `a11y` diperluas ke chat/grup/settings-tab.
+- **Spec baru wajib**: ✅ `storage.spec.ts` (dua tab; COOP/COEP + OPFS lewat
+  `opfsApp.spec.ts`) dan ✅ `offlineQueue.spec.ts` (antrean offline,
+  2026-11-23); ✅ a11y diperluas ke chat/privacy/modal story (2026-11-24; grup
+  dan tab Settings belum). **Belum ada**: quota/`panic.spec.ts`,
+  `i18n.spec.ts`, `clientVersion.spec.ts`, dan SW prod penuh.
 - **Metrik flake**: report JSON sudah memuat `status: flaky/expected`; simpan
   ringkasannya sebagai artifact dan tampilkan tren di `docs/41`. `quarantine.json`
   tetap kosong sampai ada data, bukan sebagai tempat menyembunyikan tes.
@@ -731,8 +735,9 @@ pun). Tes `shadowVaultOrderIndex` mengunci invarian baru: hasil migrasi `2`
 (pesan + percakapan), baris kontak Dexie dibiarkan apa adanya sebagai penjaga
 bahwa migrasi tidak boleh menulis Dexie lagi, dan putaran kedua `0`.
 
-Sisa B3: (a) `VACUUM INTO` tidak portabel di worker WASM, jadi backup tetap
-lewat dump SQL.
+**B3 selesai 2026-11-22 (P6/P7):** `db.ts` dihapus dan Dexie hanya tersisa di
+benchmark `devicePipelineBench` (memang mengukur IndexedDB). Sisa: (a) `VACUUM INTO`
+tidak portabel di worker WASM, jadi backup tetap lewat dump SQL.
 
 **P3 — header OPFS selalu aktif di dev (2026-11-21).** B3 mencabut jalur
 cadangan Dexie, sehingga VFS `opfs` yang gagal dipasang (`sqlite3mc_vfs_create`
@@ -952,7 +957,7 @@ bagian ini dinyalakan dan diuji.
 | Privacy Pass wajib | `PP_SYNC_REQUIRED` kosong | kunci issuer stabil (`PP_ISSUER_PRIVATE_JWK`) + semua klien terbaru | Sync anonim lama tetap lolos tanpa bukti (by design, tapi jangan disebut "wajib") |
 | Jitter rilis grup | `GROUP_RELEASE_JITTER_MS` kosong | angka ≤ 2000 ms | Menambah latensi; metrik `nyx_group_release_delay_ms` harus dipantau |
 | Arsip riwayat link | **`LINK_HISTORY_ENABLED=on`** (default hidup) | kredensial R2 + lifecycle rule `link-history/` | Tanpa R2, `/limits.available=false` dan presign 503 — sudah terlihat, bukan diam |
-| Pembayaran kripto | `NOWPAYMENTS_*` kosong | API key + IPN secret | **Tidak konsisten**: webhook fail-closed 503, tetapi `create-crypto-transaction` tanpa guard memanggil NOWPayments dengan `x-api-key` kosong lalu jatuh ke 500 generik (lihat §43.15.2) |
+| Pembayaran kripto | `NOWPAYMENTS_*` kosong | API key + IPN secret | ✅ guard 2026-11-22 (§43.15.2 #3): `POST /create-crypto-transaction` menjawab 503 `PAYMENTS_NOT_CONFIGURED` sebelum memanggil NOWPayments; webhook juga 503 |
 
 Catatan urutan yang tidak boleh dibalik: **OPRF → backfill `oprfIndex` → PIR →
 OHTTP untuk klien**. PIR tanpa OPRF bukan "mode degraded", melainkan direktori
@@ -1007,7 +1012,7 @@ router yatim selain temuan #5.
 ### 43.15.4 Urutan kerja yang aman
 
 1. **P0 dokumen/ops** (#1, #2, #3): satu template env, typo, guard pembayaran.
-   Tidak menyentuh kripto dan bisa masuk satu PR.
+   ✅ selesai 2026-11-22.
 2. **OPRF + backfill** (#43.15.1): skrip `oprf:backfill` yang menghitung
    `oprfIndex` untuk akun lama (idempoten, batch, log agregat) **sebelum** PIR
    dinyalakan.
@@ -1018,8 +1023,9 @@ router yatim selain temuan #5.
 5. **KT**: baca → tulis → backfill → monitor `active` di Privacy Self-Check.
 6. **Push**: tiga VAPID + tes pengiriman nyata (bukan hanya tombol subscribe).
 7. **Gerbang versi + anti-abuse** paling akhir; keduanya bisa mengunci pengguna.
-8. **Keputusan hapus/pertahankan**: #4 masih perlu keputusan; #5 sudah
-   diputuskan hapus (§43.17). E2E #6–#7 masuk Fase G.
+8. **Keputusan hapus/pertahankan**: ✅ #4 dan #5 sudah dihapus (2026-11-23 /
+   2026-11-17, §43.17); ✅ E2E #6–#7 ada (`story.spec.ts`,
+   `offlineQueue.spec.ts`, 2026-11-23).
 
 Aturan tetap: setiap flag yang dinyalakan harus punya satu bukti round-trip
 (metrik, baris DB, atau E2E) yang bisa ditunjukkan — bukan hanya "env sudah
@@ -1076,6 +1082,14 @@ wajib, bukan opsional.
 | T7 | **TURN plaintext didahulukan** | `.env.example:76` menaruh `turn:...?transport=udp` sebelum `turns:...:5349` | Metadata panggilan (IP peer, waktu) terlihat di jaringan bila klien memilih UDP | `turns:` lebih dulu/ satu-satunya di contoh produksi; dokumentasikan bahwa coturn tetap melihat IP peer (residual) | P1 |
 | T8 | **OHTTP/PIR default mati** | lihat §43.15.1 | Pencarian belum anonim di deployment default | Sama dengan §43.15.4; jangan duplikasi pekerjaan | P1 |
 
+> **Status 2026-11-24:** T1–T7 ✅ terverifikasi di kode — `fetchTypingLinkPreview`
+> sudah tidak ada, key upload `<folder>/<uuid>` tanpa ekstensi, payload push tanpa
+> `conversationId`/`messageId` (deep link `pushToken`), header `X-Edge-Relay`/
+> `X-Sec-Protocol`/`X-Powered-By` hanya tinggal komentar, log gateway memakai
+> `identityTag`, kompresi dikecualikan untuk `/api`, dan `TURN_URLS` menaruh
+> `turns:` lebih dulu. **T8 tetap terbuka**: PIR/OHTTP masih default mati
+> (§43.15.1).
+
 ### 43.16.3 Timestamp presisi yang belum dikasar
 
 Prinsip yang sudah dipakai (`temporalBucket.ts`): waktu yang tidak dibutuhkan
@@ -1102,10 +1116,10 @@ model baru tidak lolos. `lastUsedAt` tetap boleh diurutkan; resolusinya cukup
 |---|---|---|---|
 | R1 | **Edge graph tetap plaintext** | `Device.userId` (FK), `SessionKey.deviceId` + `conversationId`, `Message.conversationId`, `UserHiddenConversation.conversationId`; hanya `userId` keanggotaan yang sealed | Tak terhindarkan untuk routing, tetapi dump tetap bisa menggambar akun→perangkat→percakapan. Dokumentasikan sebagai residual; pertahankan purge `SessionKey` 30 hari; **jangan menambah edge plaintext baru** |
 | R2 | **Volume pesan** | `Conversation.messageSeq` + `Message.seq` | Jumlah/urutan per percakapan terlihat walau isi dan ukuran di-pad. Residual; jangan tambah counter yang tidak perlu |
-| R3 | **`banReason` teks bebas** | `schema.prisma` model `User` | Bisa memuat kutipan laporan/PII. Seal, atau batasi enum + catatan terpisah |
+| R3 | **`banReason` teks bebas** | ✅ selesai 2026-11-17: `BanReason` enum di `schema.prisma`; `toBanReason()` memetakan kalimat bebas, respons 403 membawa kode |
 | R4 | **Fingerprint authenticator** | `Authenticator.credentialID`, `transports`, `credentialDeviceType`, `credentialBackedUp` | **Diputuskan tetap (2026-11-18):** `transports` bukan metadata hiasan — dipakai `routes/auth.ts:1666/1725/1820` + `utils/webauthnCredentials.ts:50` (daftar `allowCredentials` dan verifikasi assertion). Membuangnya menurunkan UX passkey tanpa menghilangkan fingerprint (credentialID + deviceType + backedUp sudah cukup). Risiko rendah, dicatat sebagai residual |
 | R5 | **Kunci push + deviceId** | `PushSubscription.p256dh`/`auth` plaintext, `deviceId` FK | Bukan identifier sendiri, tetapi terikat perangkat. Endpoint sudah sealed; biarkan |
-| R6 | **Tabel tak terpakai** | `MessageViewOnceRecipient`, `PreKeyBundle`, `GroupMailboxItem` **dipakai** lewat `utils/viewOnceRecipients.ts`, `utils/keyBundle.ts`, `utils/groupMailbox.ts`; satu-satunya tabel mati adalah `Tenant` | Tidak ada tabel yatim selain `Tenant`; hapus lewat §43.17 |
+| R6 | **Tabel tak terpakai** | `MessageViewOnceRecipient`, `PreKeyBundle`, `GroupMailboxItem` **dipakai** lewat `utils/viewOnceRecipients.ts`, `utils/keyBundle.ts`, `utils/groupMailbox.ts`; `Tenant` (satu-satunya tabel mati) sudah dihapus | ✅ `Tenant` dihapus 2026-11-17 (§43.17); tidak ada tabel yatim tersisa |
 | R7 | **Identifier deterministik** | `usernameHash`, `oprfIndex` unik | Ber-pepper, jadi dump tanpa env tidak bisa membalik; enumerasi online dibatasi rate limit. Pertahankan |
 | R8 | **Hash rahasia otoritas** | `Conversation.authSecret`, `adminSecretHash`, `Message.deleteSecret` | SHA-256 dari token 256-bit acak — benar, jangan diganti |
 | R9 | **Dump audit belum memeriksa waktu/graph** | `utils/dumpAudit.ts` | **Selesai 2026-11-18:** `auditTemporalBuckets()` membaca `TEMPORAL_BUCKETS`/`TEMPORAL_EXCEPTIONS`/`DERIVED_TIME_MODELS` dan gagal bila nilai timestamp tidak jatuh di batas bucket (15 menit / harian); `auditResidualPlaintextEdges()` memindai SELURUH kolom dump dan hanya mengizinkan userId asli di `User.id` + `Device.userId` (R1), sehingga kolom baru yang lupa di-seal langsung tertangkap; `parseDumpTimestamp()` menghormati offset zona. Skrip `scripts/privacy-dump-audit.ts` memakai `auditDumpComprehensive()`; 7 tes di `server/tests/dumpAudit.test.ts` (19 total) mengunci termasuk kontrol negatif (presisi bocor & userId di kolom tak tercatat → GAGAL) |
@@ -1188,8 +1202,8 @@ Keputusan: fitur **tenant, B2B Engine, dan halaman embed dihapus seluruhnya**.
 Alasannya bukan hanya "tanpa pemilik" (§43.15.2 #5), tetapi juga privasi:
 `Tenant` mengelompokkan akun di bawah satu organisasi, `tenantId` menjadi edge
 linkability lintas akun, dan `/api/engine` adalah satu-satunya prefix yang
-dikecualikan dari CSRF. Ini dicatat **sebelum** kode disentuh; belum ada
-penghapusan pada commit ini.
+dikecualikan dari CSRF. Ini dicatat **sebelum** kode disentuh; eksekusinya selesai 2026-11-17
+(status di atas), jadi kalimat rencana di bawah bersifat historis.
 
 ### 43.17.1 Prasyarat
 
