@@ -950,7 +950,7 @@ bagian ini dinyalakan dan diuji.
 | Fitur | Flag default | Yang harus ada untuk menyalakan | Risiko bila dinyalakan tanpa urutan |
 |---|---|---|---|
 | PIR dua server | `PIR_ENABLED` kosong; klien `VITE_PIR_ENABLED` kosong | 2 sidecar role a/b, `PIR_SERVERS`, `PIR_MANIFEST_KEYS`, `PIR_SIGNING_KEYS`, `PIR_SHARD_DIR`, `PIR_ADMIN_TOKEN`; klien butuh OHTTP + OPRF | **Indeks kosong**: `oprfIndex` hanya ditulis bila `PIR_OPRF_ENABLED=1` (`utils/searchOprf.ts:67`), jadi PIR menyala tanpa OPRF = semua query "tidak ditemukan" |
-| OPRF pencarian | `PIR_OPRF_ENABLED` kosong; klien `VITE_PIR_OPRF_ENABLED` kosong | seed (`NYX_OPRF_SEED` atau pepper), flag server **dan** klien bersamaan | Akun lama belum punya `oprfIndex`; baru terisi saat login (`routes/auth.ts:598`) — belum ada skrip backfill |
+| OPRF pencarian | `PIR_OPRF_ENABLED` kosong; klien `VITE_PIR_OPRF_ENABLED` kosong | seed (`NYX_OPRF_SEED` atau pepper), flag server **dan** klien bersamaan | Akun lama belum punya `oprfIndex`; baru terisi saat login (`routes/auth.ts:598`). Backfill server-side **tidak mungkin** karena `User.usernameHash` sudah HMAC ber-pepper dan identifier Argon2 mentah tidak disimpan; ukur kesiapan dengan `pnpm --filter nyx-server run oprf:readiness -- --require-ready` (agregat, baca-saja) |
 | OHTTP | `OHTTP_ENABLED` kosong; klien `VITE_OHTTP_ENABLED` kosong | pasangan kunci (`ohttp-key:generate`), relay proses terpisah, `OHTTP_INTERNAL_TOKEN` sama di API+relay | Klien tidak punya fallback HTTP biasa; relay mati = pencarian mati, bukan "lambat" |
 | KT baca | `KT_QUERY_URL` kosong | `nyx-kt-query-v2` + config ABI 2 | `/api/keys/kt/*` 503; semua verdict `unavailable`, banner muncul (fail-closed, bukan diam) |
 | KT tulis | `KT_V2_SERVER_URL` kosong | penulis gRPC v2 + `KT_V2_SERVER_URL` | Rotasi kunci tidak ter-audit; monitor tidak bisa "active" |
@@ -1017,9 +1017,12 @@ router yatim selain temuan #5.
 
 1. **P0 dokumen/ops** (#1, #2, #3): satu template env, typo, guard pembayaran.
    ✅ selesai 2026-11-22.
-2. **OPRF + backfill** (#43.15.1): skrip `oprf:backfill` yang menghitung
-   `oprfIndex` untuk akun lama (idempoten, batch, log agregat) **sebelum** PIR
-   dinyalakan.
+2. **OPRF tanpa backfill server-side** (#43.15.1): `User.usernameHash` sudah
+   di-pepper, jadi `oprfIndex` hanya bisa dihitung saat login (jalur yang sudah
+   ada). Sebelum PIR dinyalakan, ukur kesiapan agregat dengan
+   `pnpm --filter nyx-server run oprf:readiness -- --require-ready`; skrip
+   baca-saja, tidak mencetak identitas, dan gagal bila masih ada akun tanpa
+   index atau gate OPRF mati.
 3. **PIR**: sidecar a/b → rebuild manual → `/admin/rebuild` → query E2E dua
    relay → baru `PIR_ENABLED=1`.
 4. **OHTTP**: kunci → relay proses terpisah → `OHTTP_INTERNAL_TOKEN` sama →
@@ -1084,7 +1087,7 @@ wajib, bukan opsional.
 | T5 | **UserId mentah di log** | `realtime/gateway.ts:289` (`Handler ${event} gagal untuk user ${userId}`), `network/redisBridge.ts:86` (error object dari payload upstream) | Log agregator/operator mendapat timeline akun; log bocor = identitas bocor | Ganti dengan tag HMAC (`userIdTag`), jangan log payload/identifier; uji tidak ada userId mentah | P1 |
 | T6 | **Kompresi global termasuk `/api`** | `app.ts:79` `app.use(compression())` | Kelas BREACH: token CSRF di JSON + input yang bisa dipantulkan; ciphertext sendiri untungnya high-entropy | Filter: jangan kompres `/api`, atau `no-transform` untuk respons ber-token | P1 |
 | T7 | **TURN plaintext didahulukan** | `.env.example:76` menaruh `turn:...?transport=udp` sebelum `turns:...:5349` | Metadata panggilan (IP peer, waktu) terlihat di jaringan bila klien memilih UDP | `turns:` lebih dulu/ satu-satunya di contoh produksi; dokumentasikan bahwa coturn tetap melihat IP peer (residual) | P1 |
-| T8 | **OHTTP/PIR default mati** | lihat §43.15.1 | Pencarian belum anonim di deployment default | Sama dengan §43.15.4; jangan duplikasi pekerjaan | P1 |
+| T8 | **OHTTP/PIR default mati** | lihat §43.15.1 | Pencarian belum anonim di deployment default | 🟡 prasyarat kode selesai 2026-11-24: tidak ada backfill server-side yang mungkin (identifier mentah tidak disimpan), dan `oprf:readiness --require-ready` menjadi gate sebelum PIR. **Mengaktifkan tetap tindakan operator** (dua sidecar + relay + kunci), bukan perubahan default di repo | P1 |
 
 > **Status 2026-11-24:** T1–T7 ✅ terverifikasi di kode — `fetchTypingLinkPreview`
 > sudah tidak ada, key upload `<folder>/<uuid>` tanpa ekstensi, payload push tanpa
@@ -1092,7 +1095,9 @@ wajib, bukan opsional.
 > `X-Sec-Protocol`/`X-Powered-By` hanya tinggal komentar, log gateway memakai
 > `identityTag`, kompresi dikecualikan untuk `/api`, dan `TURN_URLS` menaruh
 > `turns:` lebih dulu. **T8 tetap terbuka**: PIR/OHTTP masih default mati
-> (§43.15.1).
+> (§43.15.1). Prasyarat kodenya sudah diukur: `oprf:readiness` memblokir
+> aktivasi selama ada akun tanpa `oprfIndex` atau gate OPRF mati; sisanya
+> konfigurasi operator.
 
 ### 43.16.3 Timestamp presisi yang belum dikasar
 
