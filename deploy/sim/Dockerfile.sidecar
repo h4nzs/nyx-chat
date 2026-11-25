@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+FROM rust:1.95-bookworm AS build
+
+WORKDIR /src
+COPY server/transport-sidecar/Cargo.toml server/transport-sidecar/Cargo.lock ./
+COPY server/transport-sidecar/src ./src
+RUN cargo build --release --locked
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates coreutils \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/target/release/transport-sidecar /usr/local/bin/transport-sidecar
+
+# Sertifikat self-signed dibuat/dirotasi sidecar sendiri. Volume ini harus
+# bertahan antar-restart supaya pin `VITE_TRANSPORT_CERT_HASH` tetap cocok.
+WORKDIR /certs
+EXPOSE 33333/udp
+CMD ["transport-sidecar"]

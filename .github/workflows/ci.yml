@@ -719,3 +719,50 @@ jobs:
             /tmp/sidecar.log
           if-no-files-found: ignore
           retention-days: 7
+
+  e2e-stack:
+    # [deploy/sim] Suite yang sama dengan job `e2e-chrome`, tetapi aplikasi
+    # dijalankan seperti deployment: Vite dev di belakang nginx, API, sidecar
+    # WebTransport, relay OHTTP terpisah, dua sidecar PIR, KT v2 + auditor,
+    # Postgres/Redis, dan coturn — semuanya lewat Docker Compose. Ini menutup
+    # celah "E2E hijau padahal layanan privasi tidak pernah hidup bersamaan".
+    name: E2E stack (semua layanan — Docker Compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      # Playwright + `reset-test-env.ts` berjalan di host (bukan container),
+      # jadi dependency workspace tetap diperlukan di runner.
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - name: Install Google Chrome (channel 'chrome')
+        working-directory: web
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+      - name: Build stack, nyalakan semua layanan, jalankan E2E + gate
+        run: bash scripts/sim/e2e.sh
+      - name: Dump log compose saat gagal
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml ps || true
+          docker compose -f docker-compose.yml logs --tail=250 || true
+      - name: Upload artifact Playwright saat gagal
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-stack-artifacts
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7

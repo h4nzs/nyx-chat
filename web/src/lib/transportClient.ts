@@ -166,7 +166,18 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   // Dipakai job E2E Chromium yang tidak menjalankan sidecar: Chromium baru
   // mengekspos WebTransport walau tidak ada uplink, sehingga deteksi
   // `typeof WebTransport` saja tidak lagi cukup.
-  private mode: 'wt' | 'wss' = import.meta.env.VITE_FORCE_WSS === '1' ? 'wss' : 'wt';
+  // Di build DEV, `localStorage['nyx_force_wss']='1'` adalah override runtime
+  // (pola sama dengan kill switch SPQR): spec `offlineQueue` memakainya karena
+  // `setOffline` CDP memutus HTTP/WS tetapi TIDAK memutus sesi QUIC.
+  private mode: 'wt' | 'wss' = (() => {
+    if (import.meta.env.VITE_FORCE_WSS === '1') return 'wss';
+    if (!import.meta.env.DEV) return 'wt';
+    try {
+      return globalThis.localStorage?.getItem('nyx_force_wss') === '1' ? 'wss' : 'wt';
+    } catch {
+      return 'wt';
+    }
+  })();
   private wtFailCount = 0;
   private readonly WT_MAX_FAILS = 2;
   private readonly WT_TIMEOUT_MS = 8000;

@@ -191,8 +191,10 @@ async function walkOnboarding(
 ): Promise<string> {
   let phrase = '';
   await page.goto('/register');
-  // Tunggu form benar-benar siap (i18n/hydration selesai) sebelum mengisi.
-  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 30000 });
+  // Tunggu form benar-benar siap (i18n/hydration + skrip Turnstile) sebelum
+  // mengisi. 30 dtk terlalu ketat pada tes pertama di stack (Cloudflare test
+  // key kadang baru selesai setelah ~40 dtk), sedangkan kegagalan tetap jelas.
+  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 60000 });
 
   await fillStable(page.getByRole('textbox', { name: /Display Name/i }), displayName);
   await fillStable(page.getByRole('textbox', { name: /Username/i }), username);
@@ -251,7 +253,7 @@ async function walkOnboarding(
 /** Registrasi varian spec Settings: skip biometric dulu, lalu recovery/init/tour. */
 export async function registerUserViaBiometric(page: Page, displayName: string, username: string) {
   await page.goto('/register');
-  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 30000 });
+  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 60000 });
 
   await fillStable(page.getByRole('textbox', { name: /Display Name/i }), displayName);
   await fillStable(page.getByRole('textbox', { name: /Username/i }), username);

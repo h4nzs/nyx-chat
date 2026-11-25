@@ -64,6 +64,21 @@ test.describe('Antrean offline (SQLite)', () => {
     const text = `offline-queued-${run}`;
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
+    // [deploy/sim] Di stack Chrome sungguhan, WebTransport aktif. `setOffline`
+    // CDP hanya memutus HTTP/WS, bukan sesi QUIC, sehingga status tetap
+    // `connected` dan antrean tidak pernah terbentuk. Paksa fallback WSS
+    // (jalur produksi yang memang dipakai bila QUIC tidak tersedia) lewat
+    // override DEV sebelum modul aplikasi dimuat.
+    for (const ctx of [ctxA, ctxB]) {
+      await ctx.addInitScript(() => {
+        try {
+          localStorage.setItem('nyx_force_wss', '1');
+        } catch {
+          // about:blank/opaque origin: tidak apa-apa, skrip berjalan lagi
+          // untuk origin aplikasi pada navigasi berikutnya.
+        }
+      });
+    }
     const pageA = await ctxA.newPage();
     const pageB = await ctxB.newPage();
     pageA.setDefaultTimeout(60000);

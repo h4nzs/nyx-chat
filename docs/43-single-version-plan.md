@@ -215,7 +215,8 @@ Satu peran per host, batas kepercayaan eksplisit:
 | E, F | PIR server A dan B | shard, saling jujur-sedikit |
 | G | KT log | komitmen kunci, tanpa isi |
 | H | KT auditor | salinan log, kunci auditor sendiri |
-| I | Prometheus/Alertmanager | metrik event-only |
+| I | Prometheus/Alertmanager, Grafana | metrik event-only dan observability |
+| J | Coturn | Coturn call service |
 
 `docs/10` berhenti membahas `vm.swappiness`, `shared_buffers`, atau jumlah core;
 yang dibahas adalah batas kepercayaan antar-host, port loopback per exporter, dan

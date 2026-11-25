@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1.7
+# Web stack simulasi: Vite DEV server, bukan bundle produksi.
+#
+# Suite E2E memeriksa perilaku internal lewat `await import('/src/...')`
+# (pqCapability, transportClient, api, appStorage, sqliteMessages, store/auth,
+# store/story, store/connection, shadowVaultDb). Modul sumber hanya ada di graph
+# Vite dev, jadi stack ini menyajikan dev server dan nginx meneruskan `/` ke
+# port 5173. Konsekuensi yang disengaja (dicatat di deploy/sim/README.md):
+# minify/tree-shake bundle tidak diuji di sini — itu tugas `vite build` di CI —
+# dan nilai VITE_* dibaca saat start, bukan dibakar ke bundle.
+FROM node:24-bookworm-slim
+
+RUN npm install -g pnpm@11.4.0
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/shared/package.json packages/shared/
+COPY web/package.json web/
+RUN pnpm install --frozen-lockfile
+
+COPY packages ./packages
+COPY web ./web
+# `@nyx/shared` dikonsumsi dari dist/.
+RUN pnpm --filter @nyx/shared run build
+
+WORKDIR /app/web
+EXPOSE 5173
+CMD ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]

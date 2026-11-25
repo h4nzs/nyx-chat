@@ -114,6 +114,16 @@ test('PIR config: URL sidecar dibatasi (loopback http atau https)', () => {
   });
   assert.ok(loadPirConfig(envFor(remote)));
 
+  // Non-loopback HTTP hanya boleh dengan opt-in eksplisit (jaringan internal).
+  const insecure = baseConfig({
+    servers: [
+      { id: 'a', url: 'http://pir-a:9470' },
+      { id: 'b', url: 'http://pir-b:9471' },
+    ],
+  });
+  assert.throws(() => loadPirConfig(envFor(insecure)), /non-loopback harus https/);
+  assert.ok(loadPirConfig(envFor(insecure, { PIR_ALLOW_INSECURE_HTTP: '1' })));
+
   for (const url of [
     'http://pir-a.nyx.example',
     'https://127.0.0.1:9470',

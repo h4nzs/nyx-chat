@@ -18,6 +18,8 @@
     "test:e2e:ohttp": "playwright test --config playwright.ohttp.config.ts --project=chromium",
     "test:e2e:storage": "playwright test --config playwright.storage.config.ts --project=chromium",
     "test:e2e:pir": "playwright test --config playwright.pir.config.ts --project=chromium",
+    "test:e2e:stack": "playwright test --config playwright.stack.config.ts",
+    "test:e2e:stack:chrome": "playwright test --config playwright.stack.config.ts --project=chrome",
     "test:e2e:verify-required": "node e2e/verify-required-tests.mjs",
     "test:e2e:snapshot": "node e2e/write-required-snapshot.mjs",
     "test:a11y": "playwright test --config playwright.a11y.config.ts --project=chromium",

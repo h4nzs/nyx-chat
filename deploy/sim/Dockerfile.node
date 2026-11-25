@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.7
+# Image Node tunggal untuk `server`, `ohttp-relay`, `migrate`, dan alat
+# sekali-jalan (`pir:snapshot`, generator kunci). DevDependencies sengaja
+# dipertahankan: `prisma db push` dan `tsx` dipakai oleh layanan sekali-jalan;
+# image ini untuk simulasi, bukan artefak rilis.
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g pnpm@11.4.0
+
+WORKDIR /app
+
+# Manifest saja dulu supaya layer install stabil terhadap perubahan sumber.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/shared/package.json packages/shared/
+COPY server/package.json server/
+COPY web/package.json web/
+COPY marketing/package.json marketing/
+RUN pnpm install --frozen-lockfile
+
+COPY packages/shared ./packages/shared
+COPY server/tsconfig.json server/prisma.config.ts server/package.json ./server/
+COPY server/prisma ./server/prisma
+COPY server/src ./server/src
+COPY server/scripts ./server/scripts
+
+RUN pnpm --filter @nyx/shared run build \
+ && cd server \
+ && DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build" pnpm exec prisma generate \
+ && pnpm build
+
+WORKDIR /app/server
+EXPOSE 4000
+CMD ["node", "dist/index.js"]

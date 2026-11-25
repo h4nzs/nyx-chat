@@ -1,0 +1,20 @@
+# Konteks build stack simulasi (docker-compose.yml).
+.git
+.gitignore
+.sim
+**/node_modules
+server/dist
+web/dist
+marketing/dist
+**/coverage
+web/test-results
+web/playwright-report
+graphify-out
+server/uploads
+# Artefak build Rust (dikompilasi ulang di dalam image) — kalau tidak
+# dikecualikan, konteks build membengkak ~1,4 GB (packages/*/target).
+**/target
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example

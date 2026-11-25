@@ -20,6 +20,17 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_SHARD_DIR: &str = "pir-shards";
 
+/// Kebijakan bind dipisah supaya bisa diuji tanpa membuka soket.
+fn ensure_bind_allowed(addr: SocketAddr, allow_non_loopback: bool) -> Result<()> {
+    if addr.ip().is_loopback() || allow_non_loopback {
+        return Ok(());
+    }
+    bail!(
+        "PIR_BIND harus loopback (127.0.0.1 / ::1); set PIR_ALLOW_NON_LOOPBACK_BIND=1 \
+         hanya bila port ini berada di jaringan internal (mis. Docker compose)"
+    );
+}
+
 fn parse_role() -> Result<String> {
     let role = env::var("PIR_ROLE").unwrap_or_else(|_| "a".to_string());
     match role.trim() {
@@ -79,9 +90,13 @@ async fn main() -> Result<()> {
     let addr: SocketAddr = bind
         .parse()
         .with_context(|| format!("PIR_BIND bukan alamat valid: {bind}"))?;
-    if !addr.ip().is_loopback() {
-        bail!("PIR_BIND harus loopback (127.0.0.1 / ::1)");
-    }
+    // Default tetap fail-closed: bind non-loopback hanya boleh bila operator
+    // menyalakannya eksplisit. Di stack simulasi/compose, sidecar berada di
+    // jaringan internal Docker dan hanya API yang bisa menjangkaunya.
+    ensure_bind_allowed(
+        addr,
+        env::var("PIR_ALLOW_NON_LOOPBACK_BIND").as_deref() == Ok("1"),
+    )?;
 
     let role = parse_role()?;
     let admin_token = env::var("PIR_ADMIN_TOKEN")
@@ -110,6 +125,31 @@ async fn main() -> Result<()> {
         .await
         .context("server PIR berhenti dengan error")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_bind_allowed;
+
+    fn addr(raw: &str) -> std::net::SocketAddr {
+        raw.parse().expect("alamat uji valid")
+    }
+
+    #[test]
+    fn loopback_selalu_diizinkan() {
+        assert!(ensure_bind_allowed(addr("127.0.0.1:9470"), false).is_ok());
+        assert!(ensure_bind_allowed(addr("[::1]:9470"), false).is_ok());
+    }
+
+    #[test]
+    fn non_loopback_ditolak_secara_default() {
+        assert!(ensure_bind_allowed(addr("0.0.0.0:9470"), false).is_err());
+    }
+
+    #[test]
+    fn non_loopback_boleh_dengan_opt_in() {
+        assert!(ensure_bind_allowed(addr("0.0.0.0:9470"), true).is_ok());
+    }
 }
 
 async fn shutdown_signal() {

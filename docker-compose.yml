@@ -1,87 +1,389 @@
+# =============================================================================
+# NYX — stack simulasi lokal (staging-like) dengan SEMUA layanan.
+#
+# Bukan pengganti deploy produksi: ini menyalakan topologi yang sama di satu
+# host (Postgres, Redis, API, WebTransport sidecar, OHTTP relay, dua sidecar
+# XOR-PIR, log KT v2 + auditor, web/nginx, coturn) dengan batas jaringan
+# terpisah. Jalankan lewat `bash scripts/sim/up.sh`; skrip itu membuat
+# `.sim/env`, kunci OHTTP/PIR, dan cert hash WebTransport yang dibutuhkan.
+#
+# Jaringan:
+#   edge    — hanya titik masuk publik (web, API, relay, sidecar, coturn)
+#   appnet  — internal: API ↔ relay ↔ PIR ↔ KT (tanpa rute keluar)
+#   data    — internal: Postgres/Redis; hanya API & sidecar yang menyentuh
+# =============================================================================
+name: nyx-sim
+
+x-node-build: &node-build
+  context: .
+  dockerfile: deploy/sim/Dockerfile.node
+
+x-kt-build: &kt-build
+  context: .
+  dockerfile: deploy/sim/Dockerfile.kt
+
+x-pir-build: &pir-build
+  context: .
+  dockerfile: deploy/sim/Dockerfile.pir
+
 services:
-  # 1. Database PostgreSQL
   postgres:
     image: postgres:18-alpine
-    container_name: nyx-db
-    restart: always
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}      # <--- Mengambil dari .env
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # <--- Mengambil dari .env
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: nyx
+      POSTGRES_PASSWORD: ${SIM_DB_PASSWORD:-nyx-sim-db-password-not-for-prod}
+      POSTGRES_DB: nyx
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - nyx-net
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nyx -d nyx"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [data]
 
-  # 2. Redis Cache
   redis:
-    image: redis:alpine
-    container_name: nyx-redis
-    restart: always
-    networks:
-      - nyx-net
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data]
 
-  # 3. Backend (API)
+  # Satu kali jalan: schema Prisma. Server menunggu job ini selesai.
+  migrate:
+    build: *node-build
+    restart: "no"
+    working_dir: /app/server
+    # Prisma 7 menghapus `--skip-generate` (opsi tak dikenal = exit 1).
+    command: ["pnpm", "exec", "prisma", "db", "push"]
+    environment:
+      DATABASE_URL: postgresql://nyx:${SIM_DB_PASSWORD:-nyx-sim-db-password-not-for-prod}@postgres:5432/nyx
+      DIRECT_URL: postgresql://nyx:${SIM_DB_PASSWORD:-nyx-sim-db-password-not-for-prod}@postgres:5432/nyx
+      PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION: consent for ephemeral simulation database
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [data]
+
   server:
-    build: ./server
-    container_name: nyx-api
-    restart: always
-    depends_on:
-      - postgres
-      - redis
+    build: *node-build
+    restart: unless-stopped
+    working_dir: /app/server
+    env_file:
+      - .sim/env
     environment:
-      PORT: 4000
-      # Gunakan nama service docker ('postgres') sebagai hostname
-      DATABASE_URL: ${DATABASE_URL} 
-      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "4000"
+      DATABASE_URL: postgresql://nyx:${SIM_DB_PASSWORD:-nyx-sim-db-password-not-for-prod}@postgres:5432/nyx
+      DIRECT_URL: postgresql://nyx:${SIM_DB_PASSWORD:-nyx-sim-db-password-not-for-prod}@postgres:5432/nyx
       REDIS_URL: redis://redis:6379
-      CLIENT_URL: ${CLIENT_URL:-http://localhost}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
-    networks:
-      - nyx-net
-
-  # 4. Relay OHTTP proses terpisah (docs/37 §37.4 P7, docs/10 §10.18).
-  #    Klien memakai `/api/ohttp/relay` (nginx → service ini → gateway di API).
-  #    `OHTTP_GATEWAY_TRUSTED_HOSTS=server` adalah SATU-SATUNYA alasan relay mau
-  #    meneruskan ke host non-loopback; jangan longgarkan tanpa memahami bahwa
-  #    relay yang meneruskan ke sembarang host = open proxy.
-  #    Set `OHTTP_RELAY_EXTERNAL=1` di environment `server` agar API berhenti
-  #    memasang /api/ohttp/relay sendiri.
-  ohttp-relay:
-    build: ./server
-    container_name: nyx-ohttp-relay
-    restart: always
+      APP_URL: http://localhost:8080
+      CORS_ORIGIN: http://localhost:8080
+      UPLOAD_DIR: uploads
+      # Default server = on; tanpa kredensial R2 route tetap ada dan
+      # `/limits.available=false` (bukan 404), sesuai kontrak docs/40.
+      LINK_HISTORY_ENABLED: "on"
+      ABUSE_REGISTRATION_GUARD: "off"
+      TURN_URLS: "turn:127.0.0.1:3478?transport=udp"
+      TURN_STATIC_AUTH_SECRET: ${SIM_TURN_SECRET:-nyx-sim-turn-secret-not-for-prod}
+      # OHTTP: relay proses terpisah di depannya (nginx → relay → gateway API).
+      OHTTP_ENABLED: "1"
+      OHTTP_TOKEN_MODE: "on"
+      OHTTP_RELAY_EXTERNAL: "1"
+      # Dua sidecar XOR-PIR + OPRF; index dibangun ulang tiap 3 menit.
+      PIR_ENABLED: "1"
+      PIR_OPRF_ENABLED: "1"
+      # Sidecar hanya ada di jaringan `appnet` (internal, tanpa rute keluar).
+      # Tanpa opt-in ini server menolak http:// non-loopback (default aman).
+      PIR_ALLOW_INSECURE_HTTP: "1"
+      PIR_RECORD_BYTES: "8192"
+      PIR_SERVERS: '[{"id":"a","url":"http://pir-a:9470"},{"id":"b","url":"http://pir-b:9471"}]'
+      PIR_ADMIN_TOKEN: ${SIM_PIR_ADMIN_TOKEN:-nyx-sim-pir-admin-token-not-for-prod}
+      # Diisi env_file setelah `up.sh` membuat kunci; default kosong hanya
+      # dipakai saat build image (server belum dijalankan).
+      PIR_MANIFEST_KEYS: "${SIM_PIR_MANIFEST_KEYS:-}"
+      PIR_SIGNING_KEYS: '{"a":"/keys/a.key","b":"/keys/b.key"}'
+      PIR_SHARD_DIR: /shards
+      # KT v2: tulis (gRPC) + baca (HTTP) ke proses log yang sama.
+      KT_V2_SERVER_URL: http://kt-query:8088
+      KT_QUERY_URL: http://kt-query:8089
+      KT_SNAPSHOT_DIR: /kt-snapshots
+      KT_V2_BACKFILL_ON_LOGIN: "1"
+      METRICS_PORT: "9464"
+    volumes:
+      - uploads:/app/server/uploads
+      - ./.sim/pir-keys:/keys:ro
+      - pirshards:/shards
+      - ktsnap:/kt-snapshots:ro
     depends_on:
-      - server
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kt-query:
+        condition: service_started
+      pir-a:
+        condition: service_started
+      pir-b:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [edge, appnet, data]
+
+  ohttp-relay:
+    build: *node-build
+    restart: unless-stopped
+    working_dir: /app/server
+    command: ["node", "dist/ohttp/relay.js"]
     environment:
+      NODE_ENV: development
+      OHTTP_RELAY_HOST: 0.0.0.0
+      OHTTP_RELAY_ALLOW_PUBLIC_BIND: "1"
+      OHTTP_RELAY_PORT: "4100"
       OHTTP_GATEWAY_TARGET: http://server:4000/api/ohttp/gateway
       OHTTP_GATEWAY_TRUSTED_HOSTS: server
-      OHTTP_RELAY_HOST: 0.0.0.0
-      # Bind lebar di jaringan container = disengaja (nginx yang mengekspos).
-      OHTTP_RELAY_ALLOW_PUBLIC_BIND: "1"
-      OHTTP_RELAY_PORT: 4100
-      OHTTP_RELAY_RATE_LIMIT: 120
-      NODE_ENV: production
-    command: ["pnpm", "run", "relay"]
-    networks:
-      - nyx-net
-
-  # 5. Frontend (Web + Nginx Reverse Proxy)
-  web:
-    build: ./web
-    container_name: nyx-web
-    restart: always
+      OHTTP_INTERNAL_TOKEN: ${SIM_OHTTP_INTERNAL_TOKEN:-nyx-sim-ohttp-internal-token-0123456789}
+      OHTTP_TOKEN_MODE: "on"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
+    networks: [edge, appnet]
+
+  sidecar:
+    build:
+      context: .
+      dockerfile: deploy/sim/Dockerfile.sidecar
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${SIM_JWT_SECRET:-nyx-sim-jwt-secret-not-for-prod}
+      REDIS_URL: redis://redis:6379
+      TRANSPORT_PORT: "33333"
+      # Exporter tidak di-scrape di stack ini; matikan agar tidak ada port liar.
+      TRANSPORT_METRICS_ADDR: "0"
+    volumes:
+      - sidecar-certs:/certs
     ports:
-      - "3000" # Akses aplikasi di http://localhost
-    networks:
-      - nyx-net
-    # Konfigurasi reverse proxy sederhana via docker labels atau nginx config tambahan
-    # Agar lebih simpel, kita akan update nginx.conf di Langkah 2 sedikit lagi di bawah
+      - "33333:33333/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [edge, data]
+
+  pir-a:
+    build: *pir-build
+    restart: unless-stopped
+    environment:
+      PIR_ROLE: a
+      PIR_BIND: 0.0.0.0:9470
+      # Hanya jaringan `appnet` (internal) yang bisa menjangkau port ini.
+      PIR_ALLOW_NON_LOOPBACK_BIND: "1"
+      PIR_ADMIN_TOKEN: ${SIM_PIR_ADMIN_TOKEN:-nyx-sim-pir-admin-token-not-for-prod}
+      PIR_SHARD_DIR: /shards/a
+    volumes:
+      - pirshards:/shards
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9470/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [appnet]
+
+  pir-b:
+    build: *pir-build
+    restart: unless-stopped
+    environment:
+      PIR_ROLE: b
+      PIR_BIND: 0.0.0.0:9471
+      PIR_ALLOW_NON_LOOPBACK_BIND: "1"
+      PIR_ADMIN_TOKEN: ${SIM_PIR_ADMIN_TOKEN:-nyx-sim-pir-admin-token-not-for-prod}
+      PIR_SHARD_DIR: /shards/b
+    volumes:
+      - pirshards:/shards
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9471/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [appnet]
+
+  # Bootstrap idempoten: config + kunci log/auditor dibuat di volume, tidak
+  # pernah lewat CI. `-force` tidak dipakai, jadi restart tidak mengganti
+  # identitas log.
+  kt-init:
+    build: *kt-build
+    restart: "no"
+    # `nyx-kt-v2-init` sengaja MENOLAK config yang sudah ada (mengganti
+    # identitas log = semua bukti lama tak terverifikasi). Karena itu wrapper
+    # ini hanya menjalankannya saat config belum ada, supaya `up` berikutnya
+    # tetap exit 0 dan `kt-query` bisa start.
+    command:
+      [
+        "sh",
+        "-c",
+        "test -f /kt/config/config.yaml || exec nyx-kt-v2-init -config-dir /kt/config -db /kt/tree/tree.db -auditor-key /kt/config/auditor.key",
+      ]
+    volumes:
+      - ktdata:/kt
+    networks: [appnet]
+
+  kt-query:
+    build: *kt-build
+    restart: unless-stopped
+    command: ["nyx-kt-query-v2", "-config", "/kt/config/config.yaml"]
+    environment:
+      NYX_KT_V2_QUERY_ADDR: 0.0.0.0:8089
+      NYX_KT_V2_WRITE_ADDR: 0.0.0.0:8088
+      NYX_KT_V2_AUDITOR_ADDR: 0.0.0.0:8087
+      NYX_KT_V2_SNAPSHOT_DIR: /kt/snapshots
+      NYX_KT_V2_SNAPSHOT_INTERVAL: 24h
+      NYX_KT_V2_SNAPSHOT_KEEP: "2"
+      NYX_KT_V2_METRICS_ADDR: 127.0.0.1:9468
+    volumes:
+      - ktdata:/kt
+      - ktsnap:/kt/snapshots
+    depends_on:
+      kt-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8089/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks: [appnet]
+
+  kt-auditor:
+    build: *kt-build
+    restart: unless-stopped
+    command: ["nyx-kt-auditor-v2"]
+    environment:
+      NYX_KT_V2_AUDITOR_NAME: nyx-primary-auditor-v2
+      NYX_KT_V2_AUDITOR_KEY_FILE: /kt/config/auditor.key
+      NYX_KT_V2_AUDITOR_STATE_FILE: /state/state.json
+      NYX_KT_V2_QUERY_URL: http://kt-query:8089
+      NYX_KT_V2_AUDITOR_ADDR: kt-query:8087
+      NYX_KT_V2_AUDITOR_INTERVAL: 5s
+      NYX_KT_V2_AUDITOR_SIGNATURE_INTERVAL: 10s
+      NYX_KT_V2_AUDITOR_METRICS_ADDR: "0"
+    volumes:
+      - ktdata:/kt:ro
+      - ktauditor:/state
+    depends_on:
+      kt-query:
+        condition: service_healthy
+    networks: [appnet]
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/sim/Dockerfile.web
+    # Vite dev server, bukan bundle produksi: suite E2E mengimpor `/src/...`
+    # di dalam page.evaluate, yang tidak ada setelah `vite build`. Karena itu
+    # nilai VITE_* dibaca saat container start, bukan dibakar saat build.
+    environment:
+        VITE_API_URL: /api
+        VITE_APP_SECRET: ${SIM_APP_SECRET:-nyx-sim-app-secret-not-for-prod}
+        VITE_TRANSPORT_URL: https://localhost:33333
+        VITE_TRANSPORT_CERT_HASH: ${SIM_TRANSPORT_CERT_HASH:-}
+        VITE_WSS_TRANSPORTS: websocket
+        VITE_OHTTP_ENABLED: "1"
+        VITE_OHTTP_TOKEN_MODE: "on"
+        VITE_PIR_ENABLED: ${SIM_PIR_CLIENT:-1}
+        VITE_PIR_OPRF_ENABLED: ${SIM_PIR_CLIENT:-1}
+        VITE_PIR_MANIFEST_KEYS: "${SIM_PIR_MANIFEST_KEYS:-}"
+        VITE_PIR_RELAYS: "${SIM_PIR_RELAYS:-}"
+        VITE_TURNSTILE_SITE_KEY: ${SIM_TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
+    restart: unless-stopped
+    expose:
+      - "5173"
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [edge]
+
+  # Edge nginx: satu origin untuk aplikasi (Vite dev di `web:5173`) + API,
+  # relay OHTTP, dan socket.io. Header COOP/COEP dipasang di sini, bukan di
+  # container web, supaya perilaku sama dengan deployment selfhost.
+  edge:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./deploy/sim/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      web:
+        condition: service_started
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [edge]
+
+  # TURN relay uji. `network_mode: host` disengaja: peer Playwright berada di
+  # loopback host, dan coturn butuh melihat/melayani loopback (`allow-loopback-
+  # peers`). Produksi tidak boleh memakai setelan ini.
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SIM_TURN_SECRET: ${SIM_TURN_SECRET:-nyx-sim-turn-secret-not-for-prod}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        exec turnserver
+        --listening-ip=127.0.0.1
+        --relay-ip=127.0.0.1
+        --listening-port=3478
+        --min-port=49160
+        --max-port=49200
+        --use-auth-secret
+        --static-auth-secret="$$SIM_TURN_SECRET"
+        --realm=nyx.sim
+        --fingerprint
+        --no-cli
+        --no-tls
+        --no-dtls
+        --allow-loopback-peers
+        --log-file=stdout
 
 volumes:
-  postgres_data:
+  pgdata:
+  uploads:
+  sidecar-certs:
+  pirshards:
+  ktdata:
+  ktsnap:
+  ktauditor:
 
 networks:
-  nyx-net:
+  edge:
+  appnet:
+    internal: true
+  data:
+    internal: true

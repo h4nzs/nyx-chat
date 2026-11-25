@@ -51,7 +51,7 @@ function isLoopbackHostname(hostname: string): boolean {
   );
 }
 
-function parseServerUrl(raw: unknown, id: string): string {
+function parseServerUrl(raw: unknown, id: string, allowInsecureHttp: boolean): string {
   if (typeof raw !== 'string' || raw.trim() === '') {
     throw new Error(`PIR: URL server ${id} kosong`);
   }
@@ -70,7 +70,15 @@ function parseServerUrl(raw: unknown, id: string): string {
     throw new Error(`PIR: server ${id} loopback harus http:// tanpa TLS`);
   }
   if (!isLoopbackHostname(url.hostname) && url.protocol !== 'https:') {
-    throw new Error(`PIR: server ${id} non-loopback harus https://`);
+    // Default fail-closed: sidecar non-loopback tanpa TLS berarti token admin
+    // dan respons PIR lewat jaringan terbuka. Stack simulasi/compose memakai
+    // jaringan internal dan menyalakan opt-in ini secara eksplisit.
+    if (!allowInsecureHttp) {
+      throw new Error(
+        `PIR: server ${id} non-loopback harus https:// ` +
+          '(set PIR_ALLOW_INSECURE_HTTP=1 hanya untuk jaringan internal)',
+      );
+    }
   }
   if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
     throw new Error(`PIR: URL server ${id} tidak boleh memuat credentials/path/query/hash`);
@@ -78,7 +86,7 @@ function parseServerUrl(raw: unknown, id: string): string {
   return url.origin;
 }
 
-function parseServers(raw: string | undefined): PirServer[] {
+function parseServers(raw: string | undefined, allowInsecureHttp: boolean): PirServer[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw ?? '');
@@ -97,7 +105,7 @@ function parseServers(raw: string | undefined): PirServer[] {
     }
     if (seen.has(id)) throw new Error(`PIR: id server ${id} duplikat`);
     seen.add(id);
-    return { id, url: parseServerUrl(record?.url, id) };
+    return { id, url: parseServerUrl(record?.url, id, allowInsecureHttp) };
   });
 }
 
@@ -162,7 +170,7 @@ function parseSigningKeys(
 export function loadPirConfig(env: NodeJS.ProcessEnv = process.env): PirConfig | null {
   if (!isPirEnabled(env)) return null;
 
-  const servers = parseServers(env.PIR_SERVERS);
+  const servers = parseServers(env.PIR_SERVERS, env.PIR_ALLOW_INSECURE_HTTP === '1');
   const manifestKeys = parseManifestKeys(env.PIR_MANIFEST_KEYS, servers);
 
   const suite = env.PIR_SUITE?.trim();

@@ -119,3 +119,6 @@ playwright-report/
 
 # [docs/41] Output graphify lokal (bisa puluhan MB) — bukan artefak repo.
 graphify-out/
+
+# Rahasia + kunci + cert hash stack simulasi (dibuat scripts/sim/up.sh).
+.sim/

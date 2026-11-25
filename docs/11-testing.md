@@ -208,6 +208,31 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 - Tombol tutup `×` modal onboarding **jangan** diklik lewat `locator(...).first().click()`: saat berpindah langkah, modal lama masih ber-animasi keluar sehingga Playwright menunggu "stabil" sampai timeout. Pakai `dismissModalCloseButton` dari `helpers/registration.ts` (resolve ulang + `force`).
 - Kalau registrasi "berhasil" (201) tapi onboarding tak lanjut, cek apakah muncul `PasswordPromptModal`: jalur at-rest tidak boleh memanggil `getMasterSeed()` (yang memunculkan prompt) — pakai `getMasterSeedIfUnlocked()` (lihat `CHANGELOG` 2026-10-13).
 
+### 11.2a Stack simulasi penuh (semua layanan)
+
+Suite dev di atas hanya menyalakan API + Vite; WebTransport, OHTTP, PIR, dan KT
+punya job/stack terpisah. Untuk menguji aplikasi **nyata** dengan semua layanan
+hidup sekaligus ada stack Docker Compose di `deploy/sim`:
+
+```bash
+bash scripts/sim/up.sh      # build + nyalakan; app di http://localhost:8080
+bash scripts/sim/smoke.sh   # tiap layanan + isolasi jaringan
+bash scripts/sim/e2e.sh     # Playwright penuh (project chrome) terhadap stack
+bash scripts/sim/down.sh    # hentikan
+```
+
+Yang berjalan: nginx (Vite dev + `/api` + `/socket.io` +
+`/api/ohttp/relay`), API, sidecar WebTransport (UDP 33333, cert self-signed
+di-pin), relay OHTTP proses terpisah, dua sidecar XOR-PIR, log KT v2 +
+auditor, Postgres, Redis, dan coturn. Jaringan dipisah `edge`/`appnet`/`data`,
+dan `smoke.sh` membuktikan `web` tidak bisa menjangkau Postgres/Redis. Detail,
+port, serta perbedaan yang disengaja (PIR klien mati di E2E, `NODE_ENV`,
+R2/push/Turnstile tidak aktif): `deploy/sim/README.md`.
+
+E2E memakai `web/playwright.stack.config.ts` (tanpa `webServer`, base URL
+`http://localhost:8080`), lalu tetap menjalankan gate
+`verify-required-tests.mjs --project chrome`. Di CI ini job `e2e-stack`.
+
 ### 11.2b Manifest tes wajib (docs/41 §6.5)
 
 Exit code Playwright tidak membedakan "4 skip yang sah" dari "suite tidak menguji

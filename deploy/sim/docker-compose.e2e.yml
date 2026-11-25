@@ -1,0 +1,30 @@
+# Override HANYA untuk harness E2E di host.
+#
+# `server/scripts/reset-test-env.ts` sengaja menolak host non-loopback supaya
+# DB produksi tidak bisa terhapus. Karena Postgres/Redis berada di jaringan
+# internal compose, harness mempublikasikannya di 127.0.0.1 (port tidak lazim
+# agar tidak bentrok dengan instance dev) dan global setup Playwright berjalan
+# di host dengan URL loopback. `scripts/sim/e2e.sh` yang memakai file ini;
+# `scripts/sim/up.sh` tidak.
+#
+# Docker TIDAK mempublikasikan port container yang hanya terhubung ke network
+# `internal: true` (config tetap benar, `NetworkSettings.Ports` berisi null).
+# Karena itu postgres/redis juga dipasang ke `e2e-publish`, bridge biasa yang
+# hanya dipakai untuk binding host ini.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:55432:5432"
+    networks:
+      data: {}
+      e2e-publish: {}
+  redis:
+    ports:
+      - "127.0.0.1:56379:6379"
+    networks:
+      data: {}
+      e2e-publish: {}
+
+networks:
+  e2e-publish:
+    driver: bridge
