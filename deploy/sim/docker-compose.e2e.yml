@@ -12,6 +12,13 @@
 # Karena itu postgres/redis juga dipasang ke `e2e-publish`, bridge biasa yang
 # hanya dipakai untuk binding host ini.
 services:
+  # E2E mendaftarkan user lalu langsung mencarinya. Rebuild dirty default 3
+  # menit terlalu lambat, jadi stack uji memakai tick 5 detik; user baru masuk
+  # snapshot sebelum helper pencarian berikutnya berjalan.
+  server:
+    environment:
+      PIR_DIRTY_REFRESH_CRON: "*/5 * * * * *"
+
   postgres:
     ports:
       - "127.0.0.1:55432:5432"

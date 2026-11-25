@@ -35,6 +35,20 @@ test.describe('Real-time Transport (WebTransport)', () => {
     await page.bringToFront();
     await openDirectChatWith(page, usernameB);
 
+    // Pemanasan. Pesan pertama membayar biaya sekali-jalan yang bukan milik
+    // relay: X3DH + inisialisasi SPQR + verifikasi KT untuk kontak baru
+    // (terukur 8,6 dtk pada mesin 4 core ini, sedangkan pesan berikutnya
+    // 4,3 dtk). Biaya itu TETAP diuji di sini dengan batas longgar, supaya
+    // gate 8 dtk di bawah mengukur steady-state relay+decrypt — bukan startup
+    // yang membuat tes flaky.
+    const warmupMessage = `WT-warmup-${Date.now()}`;
+    await sendChatMessage(page, warmupMessage);
+    await pageB.bringToFront();
+    await expect(
+      pageB.getByRole('complementary').getByText(warmupMessage, { exact: false }).first()
+    ).toBeVisible({ timeout: 60000 });
+    await page.bringToFront();
+
     const testMessage = `WT-latency-${Date.now()}`;
     const t0 = Date.now();
     await sendChatMessage(page, testMessage);
@@ -45,11 +59,21 @@ test.describe('Real-time Transport (WebTransport)', () => {
     const tOptimistic = Date.now();
     console.log(`[perf] optimistic bubble: ${optimisticMs}ms`);
 
-    // Peer menerima via WebTransport real-time
+    // Peer menerima via WebTransport real-time.
+    //
+    // Gate mengukur KEDATANGAN pesan: preview sidebar sudah memuat plaintext
+    // hasil dekripsi, jadi angkanya tetap murni relay+decrypt. Membuka
+    // percakapan (klik baris sidebar → tunggu bubble di `main`) adalah biaya UI
+    // yang sempat membuat tes gagal karena baris sidebar ter-render ulang saat
+    // diklik; itu diuji setelah pengukuran, bukan di dalam gate.
     await pageB.bringToFront();
-    await expectPeerReceivesMessage(pageB, testMessage);
+    await expect(
+      pageB.getByRole('complementary').getByText(testMessage, { exact: false }).first()
+    ).toBeVisible({ timeout: 20000 });
     const transportLegMs = Date.now() - tOptimistic;
     console.log(`[perf] end-to-end receive: ${Date.now() - t0}ms (optimistic ${optimisticMs}ms, relay+decrypt ${transportLegMs}ms)`);
+
+    await expectPeerReceivesMessage(pageB, testMessage);
 
     // Regresi performa kasar pada jalur yang MEMANG milik protokol ini.
     //

@@ -68,11 +68,11 @@ Postgres, Redis, PIR, KT, dan relay tidak pernah dipublikasikan ke host pada
   CA publik.
 - **`NODE_ENV=development` di API.** Halaman disajikan `http://localhost`;
   cookie `secure` tidak akan terkirim. Selfhost produksi memakai TLS di edge.
-- **PIR klien mati di E2E** (`SIM_PIR_CLIENT=0`). Index PIR dibangun tiap 3
-  menit, sedangkan global setup E2E menghapus DB setiap run; menyalakannya
-  membuat pencarian user baru gagal sebelum rebuild pertama. Untuk uji manual,
-  default `up.sh` menyalakan klien PIR — tunggu ≤3 menit atau jalankan
-  `docker compose exec server pnpm exec tsx scripts/pir-snapshot.ts`.
+- **PIR klien hidup di E2E** (`SIM_PIR_CLIENT=1`). Override E2E mengubah cron
+  dirty dari 3 menit menjadi 5 detik (`PIR_DIRTY_REFRESH_CRON` di
+  `docker-compose.e2e.yml`), dan helper pencarian menunggu satu tick sebelum
+  mencari user baru. Uji manual memakai default 3 menit — tunggu ≤3 menit atau
+  jalankan `docker compose exec server pnpm exec tsx scripts/pir-snapshot.ts`.
 - **Tidak ada R2, push notification, Turnstile, pembayaran.** Jalur itu
   membutuhkan kredensial pihak ketiga; layanannya tetap boot dengan peringatan.
 - **Satu host.** KT auditor berjalan di host yang sama; itu membuktikan

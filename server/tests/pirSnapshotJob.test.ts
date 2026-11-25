@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  PIR_DIRTY_REFRESH_CRON,
   loadPirRefreshConfig,
+  pirDirtyRefreshCron,
   refreshPirSnapshot,
   refreshPirSnapshotIfDirty,
 } from '../src/jobs/pirSnapshot.js';
@@ -90,6 +92,18 @@ test('PIR refresh config: mati tanpa PIR aktif, null tanpa token admin', () => {
   assert.equal(loaded.adminToken, 'secret');
   assert.equal(loaded.recordBytes, 256);
   assert.equal(loaded.shardDir, '/tmp/pir-shards');
+});
+
+test('PIR dirty cron: default 3 menit, bisa ditimpa, ekspresi invalid ditolak', () => {
+  assert.equal(pirDirtyRefreshCron({}), PIR_DIRTY_REFRESH_CRON);
+  assert.equal(
+    pirDirtyRefreshCron({ PIR_DIRTY_REFRESH_CRON: '*/5 * * * * *' }),
+    '*/5 * * * * *',
+  );
+  assert.throws(
+    () => pirDirtyRefreshCron({ PIR_DIRTY_REFRESH_CRON: 'bukan cron' }),
+    /tidak valid/,
+  );
 });
 
 test('PIR refresh: build per server, tulis berkas, lalu hot-swap kedua sidecar', async () => {

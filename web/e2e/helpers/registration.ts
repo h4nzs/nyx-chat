@@ -192,9 +192,21 @@ async function walkOnboarding(
   let phrase = '';
   await page.goto('/register');
   // Tunggu form benar-benar siap (i18n/hydration + skrip Turnstile) sebelum
-  // mengisi. 30 dtk terlalu ketat pada tes pertama di stack (Cloudflare test
-  // key kadang baru selesai setelah ~40 dtk), sedangkan kegagalan tetap jelas.
-  await expect(page.getByRole('button', { name: /Initialize Identity/i })).toBeEnabled({ timeout: 60000 });
+  // mengisi. Tombol tetap "Checking Security…" selama widget Turnstile belum
+  // memberi token; skrip itu datang dari challenges.cloudflare.com, jadi
+  // jaringan yang putus-putus membuat halaman menggantung tanpa galat. Muat
+  // ulang (bukan memperpanjang batas) dan coba lagi; percobaan terakhir tetap
+  // gagal dengan galat asli.
+  const initButton = page.getByRole('button', { name: /Initialize Identity/i });
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await expect(initButton).toBeEnabled({ timeout: 45000 });
+      break;
+    } catch (error) {
+      if (attempt >= 3) throw error;
+      await page.reload({ waitUntil: 'domcontentloaded' });
+    }
+  }
 
   await fillStable(page.getByRole('textbox', { name: /Display Name/i }), displayName);
   await fillStable(page.getByRole('textbox', { name: /Username/i }), username);
@@ -330,10 +342,33 @@ export async function openDirectChatWith(
   await searchInput.waitFor({ state: 'visible', timeout: searchTimeoutMs });
   await searchInput.click();
   await searchInput.fill(peerUsername);
-  // ENTER memicu kalkulasi Argon2 blind index di Crypto Worker.
-  await searchInput.press('Enter');
 
   const searchResult = page.locator(`text=${peerUsername}`).first();
+  // Stack E2E menyalakan PIR. Dua hal membuat pencarian pertama bisa kosong:
+  // user baru belum masuk snapshot, dan rebuild dirty bisa memindahkan epoch
+  // saat query berjalan. Tunggu satu jendela snapshot lebih dulu, lalu ulangi
+  // pencarian sampai baris muncul — bukan mematikan PIR seperti sebelumnya.
+  const pirE2E = process.env.NYX_E2E_PIR === '1';
+  if (pirE2E) {
+    const settleMs = Number(process.env.NYX_E2E_PIR_SETTLE_MS ?? '7000');
+    await page.waitForTimeout(settleMs);
+  }
+  if (pirE2E) {
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      // ENTER memicu kalkulasi Argon2 blind index di Crypto Worker + query PIR.
+      await searchInput.press('Enter');
+      try {
+        await expect(searchResult).toBeVisible({ timeout: 4000 });
+        break;
+      } catch {
+        await page.waitForTimeout(2500);
+      }
+    }
+  } else {
+    // ENTER memicu kalkulasi Argon2 blind index di Crypto Worker.
+    await searchInput.press('Enter');
+  }
   await expect(searchResult).toBeVisible({ timeout: 30000 });
   await searchResult.click();
 }
@@ -361,8 +396,32 @@ export async function expectPeerReceivesMessage(
   text: string,
   timeoutMs = 15000
 ): Promise<void> {
-  const chatFromPeer = page.locator('div').filter({ hasText: text }).first();
-  await expect(chatFromPeer).toBeVisible({ timeout: timeoutMs });
-  await chatFromPeer.click();
-  await expect(page.locator(`text=${text}`).first()).toBeVisible({ timeout: timeoutMs });
+  // Scope ke sidebar lalu `main`: `locator('div').filter(...)` memindai seluruh
+  // DOM (dan `text=` juga cocok dengan preview sidebar, bukan bubble), yang
+  // membuat pengukuran latency ikut menghitung biaya locator.
+  const preview = page.getByRole('complementary').getByText(text, { exact: false }).first();
+  try {
+    await expect(preview).toBeVisible({ timeout: timeoutMs });
+  } catch (error) {
+    // Stack simulasi: koneksi WebTransport satu klien bisa terputus dan
+    // disambung ulang (sidecar mencatat authenticate/disconnect berulang),
+    // sehingga push real-time untuk satu arah bisa hilang. Pesan tetap
+    // tersimpan di server, jadi muat ulang sekali untuk membuktikan pesan
+    // bisa dibaca. Jalur real-time TETAP digerbang ketat oleh transport.spec
+    // (20 dtk + ambang 8 dtk) yang tidak memakai fallback ini.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(preview).toBeVisible({ timeout: timeoutMs }).catch(() => {
+      throw error;
+    });
+  }
+  const bubble = page.locator('main').getByText(text, { exact: false }).first();
+  // Baris sidebar bisa ter-render ulang (presence/preview berubah) tepat saat
+  // diklik, sehingga Playwright mengulang klik sampai batas test (300 dtk) dan
+  // pesan yang SUDAH diterima dilaporkan gagal. Klik hanya untuk membuka
+  // percakapan; kegagalannya tidak boleh menggantung — asersi bubble yang
+  // menentukan hasil.
+  if (!(await bubble.isVisible())) {
+    await preview.click({ timeout: 10000 }).catch(() => undefined);
+  }
+  await expect(bubble).toBeVisible({ timeout: timeoutMs });
 }

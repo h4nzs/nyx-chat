@@ -226,8 +226,10 @@ Yang berjalan: nginx (Vite dev + `/api` + `/socket.io` +
 di-pin), relay OHTTP proses terpisah, dua sidecar XOR-PIR, log KT v2 +
 auditor, Postgres, Redis, dan coturn. Jaringan dipisah `edge`/`appnet`/`data`,
 dan `smoke.sh` membuktikan `web` tidak bisa menjangkau Postgres/Redis. Detail,
-port, serta perbedaan yang disengaja (PIR klien mati di E2E, `NODE_ENV`,
-R2/push/Turnstile tidak aktif): `deploy/sim/README.md`.
+port, serta perbedaan yang disengaja (`NODE_ENV`, R2/push/Turnstile tidak
+aktif): `deploy/sim/README.md`. PIR ikut diuji: override E2E memakai cron dirty
+5 detik agar pendaftar baru masuk snapshot sebelum pencarian, dan helper
+menunggu tick itu alih-alih mematikan klien PIR.
 
 E2E memakai `web/playwright.stack.config.ts` (tanpa `webServer`, base URL
 `http://localhost:8080`), lalu tetap menjalankan gate

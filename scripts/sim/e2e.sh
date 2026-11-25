@@ -9,17 +9,19 @@
 #   - web adalah Vite dev server di belakang nginx (:8080), API lewat proxy
 #   - WebTransport/QUIC aktif (sidecar Rust) dan cert di-pin saat build
 #   - OHTTP aktif (relay proses terpisah), KT v2 + auditor hidup
-#   - PIR sidecar hidup, tetapi klien PIR DIMATIKAN: index dibangun tiap 3
-#     menit, sedangkan global setup menghapus DB tiap run. Jalur PIR klien
-#     tetap diuji job `e2e-pir` (docs/42).
+#   - PIR sidecar DAN klien PIR hidup. Override E2E memakai cron dirty 5 detik
+#     (default produksi 3 menit) supaya user yang baru didaftarkan masuk snapshot
+#     sebelum pencarian; helper menunggu tick itu, bukan mematikan PIR.
 # =============================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# Web harus dibangun tanpa klien PIR (lihat header). Di-export SEBELUM up.sh.
-export SIM_PIR_CLIENT=0
+# PIR klien hidup (lihat header). Di-export SEBELUM up.sh agar VITE_PIR_*
+# dibaca saat container web dibuat.
+export SIM_PIR_CLIENT=1
+export NYX_E2E_PIR=1
 export SIM_E2E_PORTS=1
 
 # up.sh memakai override port loopback (SIM_E2E_PORTS) supaya Postgres/Redis

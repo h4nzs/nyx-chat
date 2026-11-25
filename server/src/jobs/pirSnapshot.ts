@@ -44,6 +44,20 @@ export const PIR_REFRESH_CRON = '15 4 * * *';
  */
 export const PIR_DIRTY_REFRESH_CRON = '*/3 * * * *';
 
+/**
+ * Override interval dirty untuk stack uji; default tetap 3 menit. E2E
+ * memakai 5 detik supaya user yang baru didaftarkan masuk snapshot sebelum
+ * pencarian berikutnya, tanpa mematikan klien PIR.
+ */
+export function pirDirtyRefreshCron(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env.PIR_DIRTY_REFRESH_CRON?.trim();
+  if (!raw) return PIR_DIRTY_REFRESH_CRON;
+  if (!cron.validate(raw)) {
+    throw new Error(`PIR: PIR_DIRTY_REFRESH_CRON tidak valid: ${raw}`);
+  }
+  return raw;
+}
+
 export interface PirRefreshDeps {
   collect?: () => Promise<import('../pir/snapshot.js').PirRecordSource[]>;
   fetchImpl?: typeof fetch;
@@ -163,6 +177,7 @@ export function startPirSnapshotRefresher(
     );
   }
 
+  const dirtyCron = pirDirtyRefreshCron(env);
   let running = false;
   /** Satu putaran pada satu waktu; kunci Redis menjaga N worker pm2. */
   const schedule = (cronExpr: string, run: () => Promise<void>) => {
@@ -191,7 +206,7 @@ export function startPirSnapshotRefresher(
     );
   });
 
-  schedule(PIR_DIRTY_REFRESH_CRON, async () => {
+  schedule(dirtyCron, async () => {
     const result = await refreshPirSnapshotIfDirty(config, deps);
     if (result.status === 'rebuilt') {
       console.log(
@@ -201,7 +216,7 @@ export function startPirSnapshotRefresher(
   });
 
   console.log(
-    `[PIR] shard refresher aktif (harian ${PIR_REFRESH_CRON}, perubahan ${PIR_DIRTY_REFRESH_CRON})`,
+    `[PIR] shard refresher aktif (harian ${PIR_REFRESH_CRON}, perubahan ${dirtyCron})`,
   );
   return true;
 }

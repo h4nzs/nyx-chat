@@ -38,19 +38,31 @@ interface WireHeader {
  * membuat spec salah SKIP sendirinya — kegagalan yang tidak bisa dibedakan dari
  * "deployment memang mematikan jalur v2".
  */
-async function waitForCapabilities(page: Page, timeoutMs = 15000): Promise<string[]> {
-  const deadline = Date.now() + timeoutMs;
-  let caps: string[] = [];
-  while (Date.now() < deadline) {
-    caps = (await page.evaluate(async () => {
-      // @ts-ignore — path absolut Vite dev server (runtime-only)
-      const tc = await import('/src/lib/transportClient.ts');
-      return tc.getNegotiatedCapabilities();
-    })) as string[];
-    if (caps.length > 0) return caps;
-    await page.waitForTimeout(250);
+async function waitForCapabilities(page: Page, timeoutMs = 30000): Promise<string[]> {
+  // Sinyal siap adalah `isCapabilityNegotiationDone()`, bukan "daftarnya tidak
+  // kosong": jalur legacy (HELLO tidak dijawab dalam 5 dtk) juga menutup
+  // negosiasi dengan daftar kosong. Membedakan keduanya penting supaya spec
+  // tidak SKIP sendiri saat sidecar lambat menjawab.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const state = (await page.evaluate(async () => {
+        // @ts-ignore — path absolut Vite dev server (runtime-only)
+        const tc = await import('/src/lib/transportClient.ts');
+        return { done: tc.isCapabilityNegotiationDone(), caps: tc.getNegotiatedCapabilities() };
+      })) as { done: boolean; caps: string[] };
+      if (state.done) {
+        if (state.caps.length > 0) return state.caps;
+        break;
+      }
+      await page.waitForTimeout(250);
+    }
+    // Negosiasi ditutup tanpa kapabilitas: koneksi kedua hampir selalu
+    // dinegosiasikan normal. Satu muat ulang; kalau tetap kosong, biarkan
+    // `test.skip` di bawah yang memutuskan (deployment memang mematikannya).
+    if (attempt === 0) await page.reload({ waitUntil: 'domcontentloaded' });
   }
-  return caps;
+  return [];
 }
 
 /**

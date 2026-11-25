@@ -41,6 +41,12 @@ async function userId(page: Page): Promise<string> {
 /** URL Postgres stack E2E: env CI dulu, lalu `server/.env` untuk run lokal. */
 function databaseUrl(): string {
   const raw = (() => {
+    // `NYX_E2E_DATABASE_URL` didahulukan: itu DB yang di-reset global setup dan
+    // yang dipakai app di stack. `DATABASE_URL` di shell bisa kosong (mis.
+    // `export A=... B="$A"` — ekspansi terjadi sebelum assignment), dan dulu
+    // fallback ke `server/.env` membuat `psql` menembak DB dev lain tanpa
+    // terlihat: UPDATE 0 baris, pesan errornya menyesatkan.
+    if (process.env.NYX_E2E_DATABASE_URL) return process.env.NYX_E2E_DATABASE_URL;
     if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
     const envFile = readFileSync(resolve(process.cwd(), '../server/.env'), 'utf8');
     const line = envFile.split('\n').find((l) => l.trim().startsWith('DATABASE_URL='));

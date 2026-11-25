@@ -315,8 +315,14 @@ services:
     depends_on:
       server:
         condition: service_healthy
+    # Image web adalah node slim (tanpa wget/curl), jadi healthcheck memakai
+    # fetch bawaan Node — pola yang sama dengan service `server`.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/"]
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
       interval: 5s
       timeout: 3s
       retries: 20

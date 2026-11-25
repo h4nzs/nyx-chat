@@ -389,7 +389,11 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
           frame.set(data.payload, 5);
 
           await writer.write(frame);
-          await writer.close();
+          // `close()` bisa ditolak STOP_SENDING kalau sidecar sudah menutup sisi
+          // bacanya setelah membaca frame (ia membalas lalu berhenti membaca).
+          // Itu bukan kegagalan kirim: balasan tetap dibaca di bawah, dan tanpa
+          // toleransi ini negosiasi jatuh ke mode legacy.
+          await writer.close().catch(() => undefined);
 
           const timeout = new Promise<null>((resolve) =>
             setTimeout(() => resolve(null), CAPABILITY_HELLO_TIMEOUT_MS)
