@@ -5,7 +5,8 @@
 
 # Berkas cache Cargo
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock DI-COMMIT: ini binary crate, dan `deploy/sim/Dockerfile.sidecar`
+# menyalinnya lalu build dengan `--locked` (tanpa lock, build image gagal).
 
 # Berkas lingkungan dan konfigurasi lokal
 .env
