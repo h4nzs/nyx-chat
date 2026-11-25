@@ -127,6 +127,30 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("gagal memasang handler Ctrl+C");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("gagal memasang handler SIGTERM")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ensure_bind_allowed;
@@ -149,29 +173,5 @@ mod tests {
     #[test]
     fn non_loopback_boleh_dengan_opt_in() {
         assert!(ensure_bind_allowed(addr("0.0.0.0:9470"), true).is_ok());
-    }
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("gagal memasang handler Ctrl+C");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("gagal memasang handler SIGTERM")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
     }
 }
