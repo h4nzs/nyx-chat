@@ -18,6 +18,8 @@ describe('WT→WSS queue migration (H2)', () => {
     t.wtFailCount = 0;
     t.wtConnectTimer = null;
     t.wtConnecting = false;
+    t.lastWtGeneration = 0;
+    t.intentionalDisconnect = false;
   });
 
   afterEach(() => {
@@ -59,6 +61,44 @@ describe('WT→WSS queue migration (H2)', () => {
     expect((transportClient as any).offlineQueue.length).toBe(0);
     // Hanya pesan user (SEND_STREAM) yang dipindahkan; START_HANDSHAKE dibuang.
     expect((transportClient as any).wssOfflineQueue.length).toBe(1);
+  });
+
+  it('mengabaikan DISCONNECTED dari generation lama (kick tidak memutus sesi aktif)', () => {
+    const t = transportClient as any;
+    t.mode = 'wt';
+    t.connected = true;
+    t.connectedAt = Date.now();
+    t.wtConnecting = false;
+    t.lastWtGeneration = 5;
+    const onDisconnect = vi.fn();
+    t.on('disconnect', onDisconnect);
+
+    t.handleWorkerMessage({
+      data: { type: 'DISCONNECTED', reason: 'Kicked by server', generation: 4 },
+    });
+
+    expect(t.connected).toBe(true);
+    expect(t.wtFailCount).toBe(0);
+    expect(onDisconnect).not.toHaveBeenCalled();
+    t.off('disconnect', onDisconnect);
+  });
+
+  it('penutupan yang disengaja tidak dihitung sebagai kegagalan', () => {
+    const t = transportClient as any;
+    t.mode = 'wt';
+    t.connected = true;
+    t.connectedAt = Date.now();
+    t.wtConnecting = false;
+    t.lastWtGeneration = 5;
+    t.intentionalDisconnect = true;
+
+    t.handleWorkerMessage({
+      data: { type: 'DISCONNECTED', reason: 'client closed', generation: 6 },
+    });
+
+    expect(t.connected).toBe(false);
+    expect(t.wtFailCount).toBe(0);
+    expect(t.intentionalDisconnect).toBe(false);
   });
 
   it('mengabaikan event WT terlambat setelah fallback ke wss (banner tidak merah)', () => {

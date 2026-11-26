@@ -1,6 +1,11 @@
 import { TransportOpCode, MainToTransportWorker, TransportWorkerToMain } from '@nyx/shared';
 
 let transport: WebTransport | null = null;
+// Identitas koneksi yang sedang dipakai. `closed`/`ERROR` dari transport yang
+// sudah digantikan (CONNECT kedua, fallback WSS) dulu diteruskan sebagai
+// DISCONNECTED global, sehingga main thread menganggap koneksi AKTIF putus lalu
+// retry instan dan akhirnya memaksa WSS padahal jaringan sehat.
+let connectionGeneration = 0;
 let controlStream: WebTransportBidirectionalStream | null = null;
 let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 let datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
@@ -145,6 +150,16 @@ function stopChaffing() {
 }
 
 async function initWebTransport(url: string, token: string, certificateHash?: string, deviceIdentity?: string) {
+  const generation = ++connectionGeneration;
+  /** Hanya koneksi terbaru yang boleh mengubah state di main thread. */
+  const isCurrent = () => generation === connectionGeneration;
+  // Handle lokal, BUKAN variabel global: sesudah `await`, `transport` bisa
+  // sudah menunjuk koneksi yang lebih baru. Init lama tidak boleh memasang
+  // writer/reader ke koneksi itu.
+  let wt: WebTransport | null = null;
+  const abandon = () => {
+    try { wt?.close(); } catch { /* sudah tertutup */ }
+  };
   try {
     const options: WebTransportOptions = {};
     if (certificateHash && certificateHash.trim()) {
@@ -159,29 +174,37 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
       }
     }
 
-    transport = new WebTransport(url, options);
+    wt = new WebTransport(url, options);
+    transport = wt;
     
     // Prevent "Uncaught (in promise)" error when connection is rejected
-    transport.closed.then((info) => {
+    wt.closed.then((info) => {
+      if (!isCurrent()) return;
       stopChaffing();
       postMessage({ 
         type: 'DISCONNECTED', 
-        reason: info?.reason || 'connection closed' 
+        reason: info?.reason || 'connection closed',
+        generation,
       } satisfies TransportWorkerToMain);
     }).catch((err) => {
+      if (!isCurrent()) return;
       stopChaffing();
       postMessage({ 
         type: 'DISCONNECTED', 
-        reason: err?.message || 'connection error' 
+        reason: err?.message || 'connection error',
+        generation,
       } satisfies TransportWorkerToMain);
     });
 
-    await transport.ready;
+    await wt.ready;
+    if (!isCurrent()) { abandon(); return; }
     
     // Auth stream
-    controlStream = await transport.createBidirectionalStream();
-    controlWriter = controlStream.writable.getWriter();
-    datagramWriter = transport.datagrams.writable.getWriter();
+    const stream = await wt.createBidirectionalStream();
+    if (!isCurrent()) { abandon(); return; }
+    controlStream = stream;
+    controlWriter = stream.writable.getWriter();
+    datagramWriter = wt.datagrams.writable.getWriter();
     
     // Auth Payload: Combine JWT Token and Device Identity Metadata
     let parsedIdentity: unknown = null;
@@ -199,21 +222,25 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
     authFrame.set(authBytes, 5);
     
     await controlWriter.write(authFrame);
+    if (!isCurrent()) { abandon(); return; }
 
-    postMessage({ type: 'CONNECTED' } satisfies TransportWorkerToMain);
+    // Koneksi bisa sudah digantikan saat `await` di atas berjalan; jangan
+    // menyalakan state koneksi yang bukan milik generasi ini.
+    postMessage({ type: 'CONNECTED', generation } satisfies TransportWorkerToMain);
     startChaffing();
     // Perbaikan #5: kirim ulang frame pesan user yang gagal terkirim pada
     // koneksi sebelumnya (maks 3 percobaan per frame, dilihat enqueueSend).
     flushRetryQueue();
 
     // Start reading streams
-    readIncomingStreams(transport.incomingUnidirectionalStreams).catch(console.error);
-    readIncomingBidirectionalStreams(transport.incomingBidirectionalStreams).catch(console.error);
-    readIncomingDatagrams(transport.datagrams.readable).catch(console.error);
+    readIncomingStreams(wt.incomingUnidirectionalStreams).catch(console.error);
+    readIncomingBidirectionalStreams(wt.incomingBidirectionalStreams).catch(console.error);
+    readIncomingDatagrams(wt.datagrams.readable).catch(console.error);
     
   } catch (error: unknown) {
+    if (!isCurrent()) return;
     const msg = error instanceof Error ? error.message : 'Connection failed';
-    postMessage({ type: 'ERROR', error: msg } satisfies TransportWorkerToMain);
+    postMessage({ type: 'ERROR', error: msg, generation } satisfies TransportWorkerToMain);
   }
 }
 
@@ -340,8 +367,11 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
   const data = event.data;
   switch (data.type) {
     case 'CONNECT':
-      // Cleanup previous connection if any
+      // Cleanup previous connection if any. Naikkan generation SEBELUM close
+      // agar event `closed` dari koneksi lama tidak pernah dilaporkan sebagai
+      // disconnect koneksi baru.
       if (transport) {
+        connectionGeneration++;
         try { transport.close(); } catch (e) {}
         transport = null;
       }
@@ -351,15 +381,24 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
       updateChaffProfile(data);
       break;
     case 'DISCONNECT':
-      if (transport) {
-        stopChaffing();
-        if (datagramWriter) {
-          try { datagramWriter.releaseLock(); } catch (e) {}
-          datagramWriter = null;
+      // Naikkan generation DULU: init yang masih berjalan dan handler `closed`
+      // dari transport lama tidak boleh melapor setelah kita menutupnya.
+      {
+        const generation = ++connectionGeneration;
+        if (transport) {
+          stopChaffing();
+          if (datagramWriter) {
+            try { datagramWriter.releaseLock(); } catch (e) {}
+            datagramWriter = null;
+          }
+          transport.close();
+          transport = null;
+          postMessage({
+            type: 'DISCONNECTED',
+            reason: 'client closed',
+            generation,
+          } satisfies TransportWorkerToMain);
         }
-        transport.close();
-        transport = null;
-        postMessage({ type: 'DISCONNECTED', reason: 'client closed' } satisfies TransportWorkerToMain);
       }
       break;
     case 'SEND_STREAM':

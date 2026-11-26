@@ -183,6 +183,12 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   private readonly WT_TIMEOUT_MS = 8000;
   private wtConnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wtConnecting = false;
+  // Generation terakhir yang dilaporkan worker. Event dari koneksi yang sudah
+  // digantikan (kick server, CONNECT kedua) tidak boleh mengubah status
+  // koneksi aktif atau menaikkan wtFailCount.
+  private lastWtGeneration = 0;
+  // true hanya untuk DISCONNECT yang kita minta sendiri.
+  private intentionalDisconnect = false;
   private lastConnectParams: { url: string; token: string; certificateHash?: string } = { url: '', token: '' };
   // [WT FIX 2026-09-29] Sesi yang DITOLAK server sesaat setelah handshake
   // (mis. sidecar auth gagal / cert hash basi) tidak boleh dianggap koneksi
@@ -263,7 +269,17 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     // mid-connect → error "close() called on WebTransport while connecting"
     // → counter gagal tercemar oleh race, bukan kegagalan jaringan sungguhan).
     if (this.wtConnecting) return;
+    // Sesi WT yang masih hidup tidak boleh dibuka dua kali: sidecar akan
+    // menutup (kick) sesi lama untuk user+device yang sama. Tunggu event
+    // DISCONNECTED, baru reconnect.
+    // Kecuali baru saja diminta disconnect: reconnect eksplisit sesudahnya
+    // harus tetap boleh, dan event DISCONNECTED lama akan diabaikan lewat
+    // generation/intentionalDisconnect.
+    if (this.connected && this.mode === 'wt' && !this.intentionalDisconnect) return;
     this.lastConnectParams = { url, token, certificateHash };
+    // Ditandai SEBELUM await (ticket + fingerprint): dua connect() bersamaan
+    // dulu sama-sama lolos guard karena flag baru dipasang setelah await.
+    this.wtConnecting = true;
     // [AUDIT 2026-10-25] Tidak ada lagi fallback hardcoded
     // `https://api.nyx-app.my.id/transport`: host itu tidak menyajikan jalur
     // sidecar, sehingga sesi SELALU ditolak ("WebTransport connection
@@ -307,7 +323,6 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     this.worker.postMessage({ type: 'CONNECT', url: finalUrl, token, certificateHash: hash, deviceIdentity } satisfies MainToTransportWorker);
 
     // [+] TIMEOUT: jika WT tidak CONNECT dalam WT_TIMEOUT_MS, anggap gagal.
-    this.wtConnecting = true;
     this.clearWtTimer();
     this.wtConnectTimer = setTimeout(() => {
       this.handleWtFailure();
@@ -438,6 +453,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       this.socket = null;
       return;
     }
+    // Event DISCONNECTED yang menyusul adalah penutupan yang kita minta,
+    // bukan kegagalan jaringan yang perlu memicu retry/fallback.
+    this.intentionalDisconnect = true;
     this.worker.postMessage({ type: 'DISCONNECT' } satisfies MainToTransportWorker);
   }
 
@@ -445,10 +463,16 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
     const data = event.data;
     switch (data.type) {
-      case 'CONNECTED':
+      case 'CONNECTED': {
+        const generation = data.generation;
+        if (generation !== undefined) {
+          if (generation < this.lastWtGeneration) break;
+          this.lastWtGeneration = generation;
+        }
         // Event WT yang terlambat setelah fallback tidak boleh menghidupkan
         // kembali status koneksi: WSS adalah transport aktif saat ini.
         if (this.mode === 'wss') break;
+        this.intentionalDisconnect = false;
         this.clearWtTimer();
         this.wtConnecting = false;
         this.connected = true;
@@ -465,7 +489,15 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
         this.sendCapabilityHello();
         this.emit('connect');
         break;
-      case 'DISCONNECTED':
+      }
+      case 'DISCONNECTED': {
+        const generation = data.generation;
+        if (generation !== undefined) {
+          // Event dari koneksi yang sudah digantikan: jangan sentuh koneksi
+          // aktif dan jangan hitung sebagai kegagalan.
+          if (generation < this.lastWtGeneration) break;
+          this.lastWtGeneration = generation;
+        }
         // [BUG 2026-10-26] Penolakan WT kedua sudah memindahkan mode ke `wss`,
         // lalu worker yang sama mengirim DISCONNECTED terlambat. Dulu event itu
         // tetap `emit('disconnect')`, jadi banner merah menimpa koneksi WSS yang
@@ -476,13 +508,23 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
         this.clearHelloTimer();
         resetCapabilityState(false);
         this.emit('disconnect', data.reason);
+        if (this.intentionalDisconnect) {
+          this.intentionalDisconnect = false;
+          break;
+        }
         // Hitung sebagai kegagalan bila masih menyambung ATAU sesi baru saja
         // terbuka lalu langsung ditutup (ditolak sidecar — pola loop reload).
         if (this.wtConnecting || this.wasRecentlyConnected()) {
           this.handleWtFailure();
         }
         break;
-      case 'ERROR':
+      }
+      case 'ERROR': {
+        const generation = data.generation;
+        if (generation !== undefined) {
+          if (generation < this.lastWtGeneration) break;
+          this.lastWtGeneration = generation;
+        }
         // Setelah fallback, error dari worker WT yang ditinggalkan bukan lagi
         // kegagalan transport aktif (WSS). Jangan cemari log/penghitung/status.
         if (this.mode === 'wss') break;
@@ -493,6 +535,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
           this.handleWtFailure();
         }
         break;
+      }
       case 'DATA_RECEIVED':
         this.routeOpCode(data.opCode, data.payload);
         break;

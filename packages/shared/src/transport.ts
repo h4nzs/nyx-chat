@@ -176,9 +176,14 @@ export interface WebRtcSignalPayload {
 }
 
 export type TransportWorkerToMain = 
-  | { type: 'CONNECTED' }
-  | { type: 'DISCONNECTED'; reason: string }
-  | { type: 'ERROR'; error: string }
+  // `generation` = identitas percobaan koneksi di worker. Main thread memakai
+  // nilai ini untuk mengabaikan event dari koneksi yang sudah digantikan
+  // (mis. DISCONNECTED lama setelah CONNECT baru), sehingga kick server tidak
+  // dianggap sebagai kegagalan koneksi aktif. Opsional supaya pesan dari
+  // implementasi lama/tes tetap valid.
+  | { type: 'CONNECTED'; generation?: number }
+  | { type: 'DISCONNECTED'; reason: string; generation?: number }
+  | { type: 'ERROR'; error: string; generation?: number }
   | { type: 'DATA_RECEIVED'; opCode: TransportOpCode; payload: BinaryPayload }
   | { type: 'HANDSHAKE_COMPLETED'; success: boolean; error?: string };
 
