@@ -46,6 +46,13 @@ export DATABASE_URL="$NYX_E2E_DATABASE_URL"
 export REDIS_URL="redis://127.0.0.1:56379"
 export NYX_STACK_BASE_URL="http://localhost:8080"
 
+# `reset-test-env.ts` (globalSetup Playwright) mengimpor `PrismaClient` dari
+# `@prisma/client`, dan `pnpm install` tidak menjalankannya. Pada clone/runner
+# baru modul itu belum punya export `PrismaClient` → global setup gagal sebelum
+# satu tes pun jalan. Job `e2e-stack` di CI tidak punya langkah Prisma terpisah,
+# jadi skrip ini yang menjaminnya (juga untuk clone lokal yang baru).
+(cd "$ROOT/server" && pnpm exec prisma generate)
+
 cd "$ROOT/web"
 pnpm exec playwright test --config playwright.stack.config.ts --project=chrome "$@"
 node e2e/verify-required-tests.mjs --project chrome
