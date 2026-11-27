@@ -109,6 +109,7 @@
     "scanning": "Memindai Jaringan...",
     "no_nodes": "Tidak ada node aktif terdeteksi.",
     "current": "SAAT INI",
+    "back": "Kembali ke pengaturan",
     "ip": "IP",
     "last_ping": "PING TERAKHIR",
     "link_button": "Tautkan perangkat",

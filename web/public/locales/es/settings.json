@@ -109,6 +109,7 @@
     "scanning": "Escaneando red...",
     "no_nodes": "No se detectaron nodos activos.",
     "current": "ACTUAL",
+    "back": "Volver a ajustes",
     "ip": "IP",
     "last_ping": "ÚLTIMO PING",
     "link_button": "Vincular un dispositivo",

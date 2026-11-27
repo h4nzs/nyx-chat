@@ -210,5 +210,6 @@
   "contact_picker_all_selected": "Todos los contactos seleccionados.",
   "contact_trust_verified": "Verificado",
   "contact_trust_known": "Conocido",
-  "contact_trust_stranger": "Desconocido"
+  "contact_trust_stranger": "Desconocido",
+  "storage_pruned": "El almacenamiento está lleno: se eliminaron {{count}} mensajes antiguos de este dispositivo."
 }

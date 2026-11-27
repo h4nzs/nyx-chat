@@ -210,5 +210,6 @@
   "history_sync_payload_broadcasted_success": "History sync broadcast successfully.",
   "link_history_restored": "History from your previous device was restored ({{count}} items).",
   "preparing_history_sync_for_your_linked_d": "Preparing history sync for your linked devices...",
-  "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device..."
+  "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device...",
+  "storage_pruned": "Storage is full: removed {{count}} old messages from this device."
 }

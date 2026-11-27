@@ -17,8 +17,14 @@ import { initializeStorageSchema } from './schema';
 import { SqliteWorkerClient } from './sqliteClient';
 import { createSqliteKvStore, createSqliteMessageStore } from './sqliteStores';
 import { broadcastMessagesChanged } from '../dbBroadcast';
+import {
+  STORAGE_PRUNE_BATCH,
+  isStorageFullError,
+  selectOldestMessages,
+} from './storageFull';
 
 const DB_NAME = '/nyx-messages.sqlite3';
+const MAX_PRUNE_ATTEMPTS = 4;
 const READ_AHEAD = 32;
 
 let client: SqliteWorkerClient | null = null;
@@ -189,13 +195,55 @@ async function withStore(operation: (next: MessageStore) => Promise<void>): Prom
   await operation(await openStore());
 }
 
+async function writeRowsWithPrune(
+  next: MessageStore,
+  rows: MessageRow[],
+): Promise<MessageRow[]> {
+  const pruned: MessageRow[] = [];
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < MAX_PRUNE_ATTEMPTS; attempt += 1) {
+    try {
+      await next.bulkPut(rows);
+      return pruned;
+    } catch (error) {
+      if (!isStorageFullError(error)) throw error;
+      lastError = error;
+
+      const candidates = selectOldestMessages(await next.listAll(), STORAGE_PRUNE_BATCH);
+      if (candidates.length === 0) throw error;
+      for (const row of candidates) await next.delete(row.id);
+      pruned.push(...candidates);
+    }
+  }
+
+  throw lastError;
+}
+
 export async function mirrorMessageRows(rows: DecryptedMessageRecord[]): Promise<void> {
   if (rows.length === 0) return;
-  await withStore((next) => next.bulkPut(rows.map(toMessageRow)));
+
+  const next = await openStore();
+  const pruned = await writeRowsWithPrune(next, rows.map(toMessageRow));
+
   // [docs/43 §43.11.3] Tab lain membaca database OPFS yang sama; beri tahu
   // setelah tulisan benar-benar mendarat, bukan saat ia gagal.
-  for (const conversationId of new Set(rows.map((row) => row.conversationId))) {
+  const touched = new Set<string>();
+  for (const row of rows) touched.add(row.conversationId);
+  for (const row of pruned) touched.add(row.conversationId);
+  for (const conversationId of touched) {
     broadcastMessagesChanged(conversationId);
+  }
+
+  if (pruned.length > 0) {
+    // [docs/43 §43.10.2] Auto-prune tanpa pemberitahuan = kehilangan data yang
+    // terlihat seperti bug. App mendengarkan event ini dan menampilkan toast.
+    console.warn(`[storage] storage penuh: ${pruned.length} pesan lama dihapus`);
+    if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(
+        new CustomEvent('nyx:storage-pruned', { detail: { count: pruned.length } }),
+      );
+    }
   }
 }
 

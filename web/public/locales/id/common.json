@@ -210,5 +210,6 @@
   "history_sync_payload_broadcasted_success": "Sinkronisasi riwayat berhasil disiarkan.",
   "link_history_restored": "Riwayat dari perangkat sebelumnya dipulihkan ({{count}} item).",
   "preparing_history_sync_for_your_linked_d": "Menyiapkan sinkronisasi riwayat untuk perangkat terhubungmu...",
-  "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat lainmu..."
+  "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat lainmu...",
+  "storage_pruned": "Penyimpanan penuh: {{count}} pesan lama dihapus dari perangkat ini."
 }

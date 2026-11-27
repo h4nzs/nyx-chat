@@ -307,6 +307,19 @@ const AppContent = () => {
       .forEach((t) => { toast.dismiss(t.id); }); // Dismiss them
   }, [toasts]);
 
+  // [docs/43 §43.10.2] Auto-prune pesan lama saat storage penuh. Pesan yang
+  // dihapus hanya salinan lokal; pengguna tetap harus tahu agar tidak mengira
+  // riwayatnya hilang begitu saja.
+  useEffect(() => {
+    const handleStoragePruned = (event: Event) => {
+      const count = (event as CustomEvent<{ count?: number }>).detail?.count ?? 0;
+      if (count <= 0) return;
+      toast(i18n.t('common:storage_pruned', { count }), { icon: '🧹', duration: 6000 });
+    };
+    window.addEventListener('nyx:storage-pruned', handleStoragePruned);
+    return () => window.removeEventListener('nyx:storage-pruned', handleStoragePruned);
+  }, []);
+
   useEffect(() => {
     const commands = [
       {

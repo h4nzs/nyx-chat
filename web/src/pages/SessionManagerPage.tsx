@@ -62,7 +62,7 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: Session, onLo
           <div className="flex items-center gap-2">
             <h3 className="font-bold text-text-primary uppercase tracking-wide text-sm">{label}</h3>
             {isCurrent && (
-               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500 text-white shadow-sm">{t('settings:sessions_page.current')}</span>
+               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-700 text-white shadow-sm">{t('settings:sessions_page.current')}</span>
             )}
           </div>
           
@@ -188,6 +188,7 @@ export default function SessionManagerPage() {
       <div className="w-full max-w-3xl mb-8 mt-4 flex items-center justify-between">
          <Link 
             to="/settings" 
+            aria-label={t('settings:sessions_page.back')}
             className="
               p-3 rounded-xl text-text-secondary
               bg-bg-main

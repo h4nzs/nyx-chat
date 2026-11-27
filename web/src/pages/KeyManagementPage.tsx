@@ -212,7 +212,7 @@ export default function KeyManagementPage() {
                  <FiAlertTriangle className="text-red-500 mt-1" size={20} />
                  <div>
                    <h3 className="font-bold text-red-600 dark:text-red-400">{t('settings:keys_page.rotation_title')}</h3>
-                   <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">{t('settings:keys_page.rotation_desc')}</p>
+                   <p className="text-xs text-red-600 dark:text-red-400 mt-1">{t('settings:keys_page.rotation_desc')}</p>
                  </div>
               </div>
               

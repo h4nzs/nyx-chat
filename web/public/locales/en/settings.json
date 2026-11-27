@@ -109,6 +109,7 @@
     "scanning": "Scanning Network...",
     "no_nodes": "No active nodes detected.",
     "current": "CURRENT",
+    "back": "Back to settings",
     "ip": "IP",
     "last_ping": "LAST PING",
     "link_button": "Link a device",

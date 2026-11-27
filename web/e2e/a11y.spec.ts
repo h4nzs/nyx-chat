@@ -22,10 +22,14 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { registerUser } from './helpers/registration';
 
-async function scan(page: import('@playwright/test').Page, label: string) {
-  const results = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-    .analyze();
+async function scan(page: import('@playwright/test').Page, label: string, include?: string) {
+  const builder = new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']);
+  // Panel yang menutupi chat tidak perlu memindai seluruh halaman: elemen di
+  // belakangnya sudah dipindai di tes chat, dan overlay gelap membuat kontras
+  // yang sebenarnya tidak terlihat ikut terukur.
+  if (include) builder.include(include);
+  const results = await builder.analyze();
 
   const blocking = results.violations.filter(
     (violation) => violation.impact === 'serious' || violation.impact === 'critical'
@@ -95,6 +99,26 @@ test.describe('Aksesibilitas (axe)', () => {
     await expect(page.getByTestId('settings-export-backup')).toBeVisible({ timeout: 90000 });
     await page.waitForTimeout(500);
     await scan(page, 'settings');
+
+    // [docs/41 §8] Subhalaman Settings punya form/tabel sendiri dan tidak
+    // ikut terpindai oleh halaman induk. Jangan `page.goto`: reload penuh
+    // membuang state `hasRestoredKeys` dan mendarat di /login. Navigasi lewat
+    // tombol SPA mempertahankan sesi.
+    await page.getByRole('button', { name: /encryption keys/i }).first().click();
+    await expect(page).toHaveURL(/\/settings\/keys/, { timeout: 60000 });
+    await expect(page.locator('h1').first()).toBeVisible({ timeout: 60000 });
+    await page.waitForTimeout(500);
+    await scan(page, 'settings-keys');
+
+    // `goBack` memakai history SPA (tanpa reload); halaman Keys tidak punya
+    // link sidebar yang sama dengan shell Settings.
+    await page.goBack();
+    await expect(page.getByTestId('settings-export-backup')).toBeVisible({ timeout: 60000 });
+    await page.getByRole('button', { name: /active sessions/i }).first().click();
+    await expect(page).toHaveURL(/\/settings\/sessions/, { timeout: 60000 });
+    await expect(page.locator('h1').first()).toBeVisible({ timeout: 60000 });
+    await page.waitForTimeout(500);
+    await scan(page, 'settings-sessions');
   });
 
   // [docs/43 §43.15.2 #11] Tiga permukaan ber-sesi dipindai dalam SATU tes:
@@ -127,5 +151,61 @@ test.describe('Aksesibilitas (axe)', () => {
     await expect(page.locator('textarea[placeholder*="mind"]')).toBeVisible({ timeout: 30000 });
     await page.waitForTimeout(500);
     await scan(page, 'story-modal');
+  });
+
+  // [docs/41 §8] Dua permukaan grup yang paling berisiko: modal Create Group
+  // (picker kontak) dan panel Group Info (roster + aksi admin). Panel hanya
+  // terbuka dari sebuah grup nyata; satu akun + dua kontak palsu sudah cukup
+  // karena picker membaca contact store, bukan pencarian username (registrasi
+  // akun kedua lokal tertahan REGISTRATION_BURST_LIMIT).
+  test('create group, group info, dan add participant (ber-sesi) bebas pelanggaran serious/critical', async ({ page }) => {
+    test.setTimeout(300000);
+    const run = Date.now();
+    const peerName = 'A11y Group Peer';
+    const candidateName = 'A11y Add Candidate';
+
+    await registerUser(page, 'A11y Group Admin', `a11y_group_admin_${run}`);
+
+    // Picker grup hanya menampilkan contact store, bukan hasil pencarian
+    // username. Dua kontak uji di-seed langsung supaya tes tidak bergantung
+    // pada snapshot PIR/OPRF (config a11y mematikan PIR).
+    await page.evaluate(async ({ peerName: first, candidateName: second }) => {
+      // @ts-ignore — path absolut Vite dev server (runtime-only)
+      const contacts = await import('/src/lib/contactStore.ts');
+      const seed = async (userId: string, alias: string) => {
+        await contacts.upsertContact({ userId, conversationId: null, encryptedProfile: null, alias });
+      };
+      await seed('00000000-0000-4000-8000-000000000001', first);
+      await seed('00000000-0000-4000-8000-000000000002', second);
+    }, { peerName, candidateName });
+
+    await page.getByRole('button', { name: /new group/i }).first().click();
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30000 });
+    await page.waitForTimeout(800);
+    await scan(page, 'group-create');
+
+    const dialog = page.getByRole('dialog');
+    const groupTitle = `A11y Group ${run}`;
+    await dialog.getByPlaceholder(/group name/i).fill(groupTitle);
+    await dialog.getByRole('button', { name: new RegExp(peerName, 'i') }).first().click();
+    await dialog.getByRole('button', { name: /^create group$/i }).click();
+
+    // Panel info dibuka dari identity plate di header (bukan ikon "info" yang
+    // membuka ChatInfoModal). Panel ini bukan role=dialog.
+    const headerPlate = page.locator('main button').filter({ hasText: groupTitle }).first();
+    await headerPlate.waitFor({ state: 'visible', timeout: 60000 });
+    await headerPlate.click();
+    await expect(page.getByRole('button', { name: /add participants/i }).first()).toBeVisible({ timeout: 30000 });
+    await page.waitForTimeout(800);
+    await scan(page, 'group-info', '[data-testid="group-info-panel"]');
+
+    // Add Participant memakai picker kontak yang sama; kandidat kedua harus
+    // terlihat dan bisa dipilih, sementara anggota lama berstatus disabled.
+    await page.getByRole('button', { name: /add participants/i }).first().click();
+    const addDialog = page.getByRole('dialog').last();
+    await expect(addDialog).toBeVisible({ timeout: 30000 });
+    await expect(addDialog.getByRole('button', { name: new RegExp(candidateName, 'i') }).first()).toBeVisible({ timeout: 30000 });
+    await page.waitForTimeout(500);
+    await scan(page, 'group-add-participant', '[role="dialog"]');
   });
 });

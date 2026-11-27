@@ -49,6 +49,7 @@
     "searching": "Searching...",
     "min_query": "Keep typing (min. 3 characters) — search runs after you stop typing.",
     "no_users": "No users found.",
+    "no_contacts": "No contacts yet. Start a conversation first.",
     "already_member": "Already a member",
     "add_selected": "Add Selected",
     "adding": "Adding...",

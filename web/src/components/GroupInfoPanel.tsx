@@ -87,6 +87,7 @@ const CoverTrafficCard = ({ conversationId }: { conversationId: ConversationId }
         <button
           role="switch"
           aria-checked={isOn}
+          aria-label={t('modals:group_info.cover.title')}
           disabled={!masterEnabled}
           onClick={() => handleToggle(!maximum)}
           className={clsx(
@@ -408,7 +409,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     : undefined;
 
   return (
-    <div className="fixed inset-0 z-40">
+    <div className="fixed inset-0 z-40" data-testid="group-info-panel">
       <div 
         className={`absolute inset-0 bg-black/60 transition-opacity duration-300 ${isPanelOpen ? 'opacity-100' : 'opacity-0'}`}
         onClick={handleClose}
@@ -417,8 +418,12 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
 
       <div className={`absolute top-0 right-0 h-full w-full max-w-md bg-bg-surface shadow-neumorphic-convex z-50 flex flex-col transition-transform duration-300 ease-in-out ${isPanelOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <header className="p-4 flex items-center flex-shrink-0">
-          <button onClick={handleClose} className="btn-flat p-2 rounded-full text-text-secondary mr-2">
-            <FiX size={24} />
+          <button
+            onClick={handleClose}
+            aria-label={t('common:actions.close')}
+            className="btn-flat p-2 rounded-full text-text-secondary mr-2"
+          >
+            <FiX size={24} aria-hidden="true" />
           </button>
           <h2 className="text-xl font-bold text-text-primary">{t('modals:group_info.title')}</h2>
         </header>
@@ -463,8 +468,12 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                     <h3 className="text-2xl font-bold text-text-primary">{title}</h3>
                     <p className="text-text-secondary mt-1">{conversation.decryptedMetadata?.description || t('modals:group_info.no_desc')}</p>
                     {amIAdmin && (
-                      <button onClick={() => setIsEditing(true)} className="absolute top-4 right-4 text-text-secondary hover:text-accent-color">
-                        <FiEdit2 size={20} />
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        aria-label={t('modals:edit_group.title')}
+                        className="absolute top-4 right-4 text-text-secondary hover:text-accent-color"
+                      >
+                        <FiEdit2 size={20} aria-hidden="true" />
                       </button>
                     )}
                   </div>
@@ -479,9 +488,9 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                       {amIAdmin && (
                         <button
                           onClick={() => setIsAddParticipantModalOpen(true)}
-                          className="w-full flex items-center justify-center p-3 mt-4 rounded-lg text-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                          className="w-full flex items-center justify-center p-3 mt-4 rounded-lg text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
                         >
-                          <FiPlus className="mr-2" />
+                          <FiPlus className="mr-2 text-accent-color" aria-hidden="true" />
                           <span>{t('modals:group_info.add_participants')}</span>
                         </button>
                       )}
