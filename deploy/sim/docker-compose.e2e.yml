@@ -11,6 +11,10 @@
 # `internal: true` (config tetap benar, `NetworkSettings.Ports` berisi null).
 # Karena itu postgres/redis juga dipasang ke `e2e-publish`, bridge biasa yang
 # hanya dipakai untuk binding host ini.
+#
+# Metrics API ikut dipublikasikan (127.0.0.1:19464) karena spec OHTTP membaca
+# counter tag klien relay dari exporter. Port itu sama dengan milik stack
+# `playwright.ohttp.config.ts`; jangan jalankan keduanya bersamaan.
 services:
   # E2E mendaftarkan user lalu langsung mencarinya. Rebuild dirty default 3
   # menit terlalu lambat, jadi stack uji memakai tick 5 detik; user baru masuk
@@ -18,6 +22,21 @@ services:
   server:
     environment:
       PIR_DIRTY_REFRESH_CRON: "*/5 * * * * *"
+      # `e2e/ohttp.spec.ts` membaca `nyx_ohttp_client_tag_total` dari exporter
+      # API, dan exporter produksi sengaja loopback-only. Stack uji membukanya
+      # di antarmuka container (jaringan compose, bukan internet) lalu
+      # mempublikasikannya hanya ke 127.0.0.1 host — jangan tiru di produksi.
+      METRICS_HOST: "0.0.0.0"
+      # Gate Privacy Pass dinyalakan di harness supaya `privacyPassSync.spec.ts`
+      # benar-benar menguji penolakan sync tanpa bukti (403 PP_PROOF_REQUIRED).
+      # Ini konfigurasi PRODUK yang lebih ketat dari default build ini
+      # (docs/43 §43.14): `up.sh` biasa tetap membiarkannya kosong.
+      PP_SYNC_REQUIRED: "1"
+    ports:
+      - "127.0.0.1:19464:9464"
+    networks:
+      data: {}
+      e2e-publish: {}
 
   postgres:
     ports:

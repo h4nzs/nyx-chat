@@ -20,7 +20,7 @@ Aplikasi: <http://localhost:8080> (API same-origin di `/api`).
 | Artefak | Lokasi | Catatan |
 |---|---|---|
 | Rahasia acak | `.sim/env` (0600, gitignored) | DB, JWT/CSRF/CHAT, pepper, token internal OHTTP/PIR, TURN |
-| Kunci gateway OHTTP | `.sim/env` | P-256, dibuat sekali; rotasi = hapus dua baris lalu `up.sh` |
+| Kunci gateway OHTTP | `.sim/env` | P-256 **dan** X-Wing (hybrid), dibuat sekali; rotasi = hapus baris `OHTTP_*` lalu `up.sh` |
 | Kunci manifest PIR | `.sim/pir-keys/{a,b}.key` + `.sim/env` | ML-DSA-65 deterministik untuk simulasi |
 | Sertifikat WebTransport | volume `sidecar-certs` | Self-signed, hash di-pin ke build web |
 | Config + kunci KT v2 | volume `ktdata` | Dibuat `nyx-kt-v2-init`; **tidak** pernah lewat CI |
@@ -36,6 +36,7 @@ memakai cache layer.
 | 33333/udp | sidecar WebTransport | host |
 | 3478/udp + 49160–49200/udp | coturn | host (`network_mode: host`) |
 | 55432/tcp, 56379/tcp | Postgres/Redis | **hanya** override E2E, loopback |
+| 19464/tcp | exporter metrics API (`/metrics`) | **hanya** override E2E, loopback |
 
 Postgres, Redis, PIR, KT, dan relay tidak pernah dipublikasikan ke host pada
 `up.sh` biasa.
@@ -66,6 +67,10 @@ Postgres, Redis, PIR, KT, dan relay tidak pernah dipublikasikan ke host pada
   jadi `VITE_TRANSPORT_CERT_HASH` dibaca saat start. Tanpa pin, browser menolak
   QUIC self-signed. Build produksi mengabaikan pin ini dan memakai sertifikat
   CA publik.
+- **nginx me-resolve upstream lewat DNS Docker** (`resolver 127.0.0.11` +
+  `proxy_pass` variabel). `docker compose up -d` yang hanya membuat ulang
+  `server`/`web` memberi IP baru; tanpa ini edge yang tidak ikut dibuat ulang
+  menembak IP lama dan seluruh stack tampak "API tidak siap" (502).
 - **`NODE_ENV=development` di API.** Halaman disajikan `http://localhost`;
   cookie `secure` tidak akan terkirim. Selfhost produksi memakai TLS di edge.
 - **PIR klien hidup di E2E** (`SIM_PIR_CLIENT=1`). Override E2E mengubah cron
@@ -92,6 +97,20 @@ Postgres, Redis, PIR, KT, dan relay tidak pernah dipublikasikan ke host pada
 - himpunan spec sama dengan snapshot gate `chrome` (a11y/PIR/storage/opfsApp
   punya stack sendiri), lalu `verify-required-tests.mjs --project chrome`
   dijalankan.
+- `ohttp.spec.ts` **benar-benar berjalan** di sini, bukan skip: relay proses
+  terpisah, kunci P-256 + X-Wing, token internal relay → gateway yang sama di
+  kedua proses (`OHTTP_INTERNAL_TOKEN`), dan exporter metrics API dipublikasikan
+  di `127.0.0.1:19464` supaya counter tag klien bisa dibaca. Kalau OHTTP mati di
+  stack ini, spec gagal (bukan skip) karena `NYX_STACK_BASE_URL` diset.
+- `PP_SYNC_REQUIRED=1` hanya di override E2E: gate Privacy Pass adalah
+  konfigurasi produk yang lebih ketat dari default build ini (docs/43 §43.14),
+  dan `up.sh` biasa membiarkannya kosong supaya perilaku manual = perilaku
+  produk. Di harness, `privacyPassSync.spec.ts` membuktikan sync tanpa bukti
+  ditolak 403 `PP_PROOF_REQUIRED` dan token sekali pakai diterima.
+- `OHTTP_TRUSTED_PROXIES` sengaja kosong: hop nginx → relay di sini lewat
+  jaringan container, jadi semua klien berbagi tag alamat nginx (limiter tetap
+  per-tag, hanya tidak per-klien). Di selfhost hop itu loopback, yang sudah
+  dipercaya default.
 
 Spec PIR tetap diuji job terpisah (`test:e2e:pir`) karena membutuhkan snapshot
 yang dibangun di tengah spec. Stack ini memverifikasi PIR di level layanan

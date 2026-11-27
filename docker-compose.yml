@@ -96,6 +96,11 @@ services:
       OHTTP_ENABLED: "1"
       OHTTP_TOKEN_MODE: "on"
       OHTTP_RELAY_EXTERNAL: "1"
+      # Token internal relay → gateway HARUS sama di kedua proses. Tanpa ini
+      # gateway mengklasifikasikan setiap request sebagai `no-token`, tag klien
+      # relay tidak dipercaya, dan semua pengguna OHTTP berbagi satu bucket
+      # limiter (audit N9-01) — persis yang ditangkap `e2e/ohttp.spec.ts`.
+      OHTTP_INTERNAL_TOKEN: ${SIM_OHTTP_INTERNAL_TOKEN:-nyx-sim-ohttp-internal-token-0123456789}
       # Dua sidecar XOR-PIR + OPRF; index dibangun ulang tiap 3 menit.
       PIR_ENABLED: "1"
       PIR_OPRF_ENABLED: "1"

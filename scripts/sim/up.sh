@@ -95,6 +95,25 @@ if [[ -z "${OHTTP_PRIVATE_KEY:-}" || -z "${OHTTP_PUBLIC_KEY:-}" ]]; then
   set_env OHTTP_PUBLIC_KEY "$OHTTP_PUBLIC_KEY"
 fi
 
+# --- Kunci OHTTP suite hybrid (X-Wing) --------------------------------------
+# [docs/43 §43.12.4] Klien selalu meminta `application/ohttp-keys+xwing`. Tanpa
+# slot X-Wing, gateway hanya menyajikan collection P-256 dan stack ini tidak
+# pernah menguji suite yang dipakai produksi — asersi hybrid di
+# `web/e2e/ohttp.spec.ts` pun mustahil lulus.
+if [[ -z "${OHTTP_XWING_PRIVATE_KEY:-}" || -z "${OHTTP_XWING_PUBLIC_KEY:-}" ]]; then
+  echo "🔐 Membuat kunci gateway OHTTP X-Wing..."
+  XWING_OUT="$("${COMPOSE[@]}" run --rm --no-deps -T server \
+    pnpm exec tsx scripts/ohttp-key.ts --suite=xwing)"
+  OHTTP_XWING_PRIVATE_KEY="$(printf '%s\n' "$XWING_OUT" | sed -n 's/^OHTTP_XWING_PRIVATE_KEY=//p')"
+  OHTTP_XWING_PUBLIC_KEY="$(printf '%s\n' "$XWING_OUT" | sed -n 's/^OHTTP_XWING_PUBLIC_KEY=//p')"
+  [[ -n "$OHTTP_XWING_PRIVATE_KEY" && -n "$OHTTP_XWING_PUBLIC_KEY" ]] || {
+    echo "❌ Gagal membuat kunci OHTTP X-Wing" >&2
+    exit 1
+  }
+  set_env OHTTP_XWING_PRIVATE_KEY "$OHTTP_XWING_PRIVATE_KEY"
+  set_env OHTTP_XWING_PUBLIC_KEY "$OHTTP_XWING_PUBLIC_KEY"
+fi
+
 # --- Kunci tanda tangan manifest PIR (ML-DSA-65) -----------------------------
 mkdir -p "$SIM_DIR/pir-keys"
 if [[ -z "${SIM_PIR_MANIFEST_KEYS:-}" || -z "${PIR_SIGNING_KEYS:-}" ]]; then

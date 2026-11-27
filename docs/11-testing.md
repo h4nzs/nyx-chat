@@ -183,7 +183,7 @@ pnpm exec playwright test e2e/auth.spec.ts --project=chromium   # single spec
 
 **Important quirks:**
 - `workers: 1` (serial) — the suite is flaky in parallel against one local server.
-- **`pnpm --filter nyx-web run test:e2e:ohttp`** (`playwright.ohttp.config.ts`) menyalakan API di **:4100** dan Vite di **:5273**. Di selfhost yang relay OHTTP-nya sudah hidup (`nyx-ohttp-relay` juga memakai :4100), stack uji itu gagal `EADDRINUSE` — hentikan relay dulu (`systemctl --user stop nyx-ohttp-relay`) atau jalankan suite di checkout/mesin terpisah. Port itu hardcoded di config (CI tidak punya relay di host yang sama).
+- **`pnpm --filter nyx-web run test:e2e:ohttp`** (`playwright.ohttp.config.ts`) menyalakan API di **:4100** dan Vite di **:5273**. Di selfhost yang relay OHTTP-nya sudah hidup (`nyx-ohttp-relay` juga memakai :4100), stack uji itu gagal `EADDRINUSE` — hentikan relay dulu (`systemctl --user stop nyx-ohttp-relay`) atau jalankan suite di checkout/mesin terpisah. Port itu hardcoded di config (CI tidak punya relay di host yang sama). Stack yang sama menyalakan `PP_SYNC_REQUIRED=1` dan menjalankan `e2e/privacyPassSync.spec.ts` (sync tanpa cookie: 403 tanpa bukti, 200 dengan token, 403 saat token diulang).
 - `e2e/global.setup.ts` wipes the local DB + Redis (`server/scripts/reset-test-env.ts`). Never run against a valuable database. **Failure mode worth knowing (2026-10-17):** if `server/.env` has `NODE_ENV=production`, the reset script refuses (exit 1, `DANGER: Attempted to wipe database in non-local/production environment!`) and Playwright aborts before the first spec — every E2E run on such a machine is impossible, and the message looks like a setup bug. Run E2E with a test env (`NODE_ENV` not `production`), don't edit `.env` around the guard.
 - **Selfhost `.env` membuat suite mustahil tanpa override (terukur 2026-11-05, 2 run @37 menit).** Tiga nilai produksi menghalangi, dan gejalanya menyesatkan:
   1. `ABUSE_REGISTRATION_GUARD=on` membatasi 20 registrasi/jam/IP; suite membuat 20+ akun, jadi sisanya berhenti di layar registrasi dengan `REGISTRATION_BURST_LIMIT` (bukan error E2E).
@@ -234,6 +234,21 @@ menunggu tick itu alih-alih mematikan klien PIR.
 E2E memakai `web/playwright.stack.config.ts` (tanpa `webServer`, base URL
 `http://localhost:8080`), lalu tetap menjalankan gate
 `verify-required-tests.mjs --project chrome`. Di CI ini job `e2e-stack`.
+
+`e2e/privacyPassSync.spec.ts` juga berjalan nyata: override E2E menyalakan
+`PP_SYNC_REQUIRED=1` (default produk masih menerima sync tanpa bukti, docs/43
+§43.14), lalu spec membuktikan sync tanpa bukti 403 `PP_PROOF_REQUIRED`, token
+hasil komitmen diterima, dan token yang sama ditolak pada sync kedua.
+
+`e2e/ohttp.spec.ts` **berjalan** di stack ini (bukan skip seperti di suite dev):
+gateway menyajikan slot P-256 + X-Wing, relay proses terpisah menandatangani tag
+klien dengan `OHTTP_INTERNAL_TOKEN` yang sama di kedua proses, dan exporter
+metrics API dipublikasikan di `127.0.0.1:19464` sehingga counter
+`nyx_ohttp_client_tag_total{status="tagged"}` bisa dibaca. Karena
+`NYX_STACK_BASE_URL` diset, OHTTP yang mati di stack membuat spec **gagal**, bukan
+skip. Ketiga asersi intinya: pencarian lewat `POST /api/ohttp/relay`
+(`message/ohttp-req`), tidak ada `GET /api/users/search` langsung dari halaman,
+dan klien memilih suite hybrid (Accept X-Wing + pin hybrid, tanpa pin P-256).
 
 ### 11.2b Manifest tes wajib (docs/41 §6.5)
 
@@ -291,7 +306,7 @@ skip di project tersebut.
 | `e2e-chrome` | Google Chrome via apt (`channel: 'chrome'`) | `cargo test` (protokol murni + fuzz 20k) → **sidecar built + running**, cert hash parsed from its banner → transport + chat specs run fully; **coturn diinstal + dijalankan** (`TURN_URLS`/`TURN_STATIC_AUTH_SECRET` di env job) → `call.spec` run fully |
 | `alerts` | — | `promtool check config`/`check rules`/`test rules` atas 44 aturan (`SKIP_LIVE=1`) |
 | `drills` (**terjadwal**, `.github/workflows/drills.yml`) | — | Senin 04:00 UTC + `workflow_dispatch`: ketiga drill dalam satu tempat — promtool (`SKIP_LIVE=1`), pemulihan KT v2 11 langkah, dan **restore klien** (`.nyxbak` di atas dump Postgres nyata: seed → `pg_dump` → klaster `initdb` sementara → `pg_restore` → store SQLite produksi via driver `node:sqlite`). Alasan dijadwalkan: kemampuan memulihkan bergantung pada skrip/kunci/konfigurasi yang berubah tanpa PR yang menyebutnya, dan `client-restore` tidak pernah jalan per-PR |
-| `nightly` (**terjadwal**, `.github/workflows/nightly.yml`) | Firefox + WebKit (smoke), Chromium (a11y) | 02:00 UTC harian: fuzz web 1 jam (`fuzz:parsers:hour`), fuzz framing sidecar 1 jam (`NYX_FUZZ_SECONDS=3600`), k6 100 VU di stack ephemeral (Postgres+Redis service; **menulis pesan**), smoke `auth`+`settings` di Firefox/WebKit, `a11y.spec.ts`, dan contract test HTTP (`httpContract.test.ts`) |
+| `nightly` (**terjadwal**, `.github/workflows/nightly.yml`) | Firefox + WebKit (smoke build produksi), Chromium (a11y) | 02:00 UTC harian: fuzz web 1 jam (`fuzz:parsers:hour`), fuzz framing sidecar 1 jam (`NYX_FUZZ_SECONDS=3600`), k6 100 VU di stack ephemeral (Postgres+Redis service; **menulis pesan**), smoke `auth`+`settings` di Firefox/WebKit lewat `playwright.browsers.config.ts` (`vite build` + `vite preview`; menghindari bug COEP Worker ESM dev WebKit), `a11y.spec.ts`, dan contract test HTTP (`httpContract.test.ts`) |
 | `dr-oracle` | — | oracle Go: `build`/`vet`/`test` + gate drift vektor (`go run . -check`) + `x3dhOracleVectors.test.ts` + `x3dhOracleInterop.test.ts` |
 
 Fuzz panjang (≥1 jam) dan k6 **tidak** jalan per-PR; keduanya dijalankan
@@ -302,11 +317,12 @@ sebelum rilis besar (`docs/30` §30.20 sisa WS-G). Drill berjalan terjadwal Seni
 (`scripts/load/run-relay-load.sh`, 500 VU — send p95 74,4 ms / fetch p95 68,8 ms,
 0% error). Drill alert + vektor oracle **sudah** jalan per-PR (tabel di atas).
 
-**Branch protection — 14 required check (2026-11-05).** `main` sekarang meminta
-status check berikut sebelum PR bisa merge: 12 job `ci.yml` (Build, WASM
-reproducible, Unit Tests, PIR sidecar, Transport sidecar, Lint, Alerts, DR
-oracle, KT v2 recovery drill, Dependency Audit, E2E Chromium, E2E Chrome) plus
-kedua job CodeQL (`Analyze (actions)`, `Analyze (javascript-typescript)`).
+**Branch protection — 15 required check (2026-11-26; sebelumnya 14 sejak
+2026-11-05).** `main` sekarang meminta status check berikut sebelum PR bisa
+merge: 13 job `ci.yml` (Build, WASM reproducible, Unit Tests, PIR sidecar,
+Transport sidecar, Lint, Alerts, DR oracle, KT v2 recovery drill, Dependency
+Audit, E2E Chromium, E2E Chrome, E2E stack) plus kedua job CodeQL
+(`Analyze (actions)`, `Analyze (javascript-typescript)`).
 Namanya harus **persis** nama check-run (bukan id job di YAML) — ganti nama job
 berarti proteksi berhenti mencocokkan, jadi periksa ulang dengan
 `gh api repos/h4nzs/nyx-chat/commits/main/check-runs --jq '.check_runs[].name'`
