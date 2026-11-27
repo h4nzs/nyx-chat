@@ -807,7 +807,7 @@ groups:
           severity: high
         annotations:
           summary: "Sync anonim ditolak Privacy Pass >20% selama 15 menit"
-          description: "Gate PP_SYNC_REQUIRED menolak sync tanpa bukti sah. Periksa PP_ISSUER_PRIVATE_JWK (harus diset dan stabil antar worker/restart), rotasi kunci terakhir, dan nyx_privacy_pass_total{route=\"issue\"} — klien yang gagal menerbitkan bukti tidak akan pernah lolos. Prosedur di docs/10 \u00a710.22."
+          description: "Gate PP_SYNC_REQUIRED menolak sync tanpa bukti sah. Periksa versi klien (harus memakai token acak + komitmen, docs/43 \u00a743.4.1), stabilitas NYX_AT_REST_PEPPER antar worker/restart, dan nyx_privacy_pass_total{route=\"issue\"} — klien yang gagal menerbitkan bukti tidak akan pernah lolos. Prosedur di docs/10 \u00a710.22."
 
       # [docs/40 §40.6] Konsumen arsip riwayat gagal = pengguna kehilangan
       # riwayat yang sudah dijanjikan perangkat lama, DAN objek terenkripsi tetap

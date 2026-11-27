@@ -107,8 +107,11 @@ importers:
   packages/shared:
     dependencies:
       '@hpke/core':
-        specifier: 1.9.0
-        version: 1.9.0
+        specifier: 1.10.1
+        version: 1.10.1
+      '@hpke/hybridkem-x-wing':
+        specifier: 0.7.1
+        version: 0.7.1
       '@noble/curves':
         specifier: 2.4.0
         version: 2.4.0
@@ -134,9 +137,6 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1138.0
         version: 3.1138.0
-      '@cloudflare/blindrsa-ts':
-        specifier: 0.4.6
-        version: 0.4.6
       '@noble/post-quantum':
         specifier: 0.7.1
         version: 0.7.1
@@ -282,9 +282,6 @@ importers:
       '@aztec-labs/sqlite3mc-wasm':
         specifier: 6.0.0
         version: 6.0.0
-      '@cloudflare/blindrsa-ts':
-        specifier: 0.4.6
-        version: 0.4.6
       '@marsidev/react-turnstile':
         specifier: ^1.6.1
         version: 1.6.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1304,10 +1301,6 @@ packages:
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@cloudflare/blindrsa-ts@0.4.6':
-    resolution: {integrity: sha512-n+CAo1hM78qkiouXB0Io1pPVBFKIaJqU7FqdCDNtBAB7q2bBpQOifv7Om3Jln/nx+IhjQAjlDjp8la3e9Yg9Bw==}
-    engines: {node: '>=24'}
-
   '@csstools/color-helpers@6.1.1':
     resolution: {integrity: sha512-gLNsunvwf3mCi5u5o46/Z/JcJMnhbHSaZ69rkgPzNM3J4s8hWwpPUQB6/tt0EDFyCiWzxANlx+2LJwpYj4zS1w==}
     engines: {node: '>=20.19.0'}
@@ -1571,12 +1564,16 @@ packages:
   '@hexagon/base64@1.1.28':
     resolution: {integrity: sha512-lhqDEAvWixy3bZ+UOYbPwUbBkwBq5C1LAJ/xPC8Oi+lL54oyakv/npbA0aU2hgCsx/1NUd4IBvV03+aUBWxerw==}
 
-  '@hpke/common@1.10.1':
-    resolution: {integrity: sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==}
+  '@hpke/common@1.13.0':
+    resolution: {integrity: sha512-PqaJR89RWJQmt/WOGuBLrcrtXtEMbWu91XIbxDjKDTDgKvqvhlxOzQ9BAf9a0Q+yqqbTtQ0pK6KUyVi2WMehbA==}
     engines: {node: '>=16.0.0'}
 
-  '@hpke/core@1.9.0':
-    resolution: {integrity: sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==}
+  '@hpke/core@1.10.1':
+    resolution: {integrity: sha512-VZOk0rHC4vPsbW/fIRz7Q2IviSl0+9dRhP9yi/PmkKVKjj4vZDs1ufkN47twBFLZmiw37YFtTqBrxKAI7dlOrg==}
+    engines: {node: '>=16.0.0'}
+
+  '@hpke/hybridkem-x-wing@0.7.1':
+    resolution: {integrity: sha512-8BdZnfIagg8MFuShruSbVuj7/ujg63eNaRx/EE8dJzMg1keh2Vm8BPAigEu5Zzskgu9zv001yHYdV7PK8K0+aA==}
     engines: {node: '>=16.0.0'}
 
   '@img/colour@1.1.0':
@@ -3672,6 +3669,7 @@ packages:
   argon2@0.45.1:
     resolution: {integrity: sha512-skm+/WCjkGqCQxF7FG1LuZXM5yvbFjgbfiCGsud2oLgaDhh6b6dbH0b1EkghbM+xx4Bj8Ape+KKgixoIlWZicQ==}
     engines: {node: '>=16.17.0'}
+    deprecated: This version has a bug in hash encoding and generates invalid hashes, please update to v0.45.2 or later
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
@@ -5413,6 +5411,10 @@ packages:
     resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
     engines: {node: '>=16 || 14 >=14.17'}
 
+  mlkem@2.7.2:
+    resolution: {integrity: sha512-oXYAlmmosZ2bfe75Hb8zr3Egr3KDH5i0dq3Tlx8bqGwvh4BpGxN1GUFc3zmpl/X+vk4QOh89xmpHbhFrQ+nI3g==}
+    engines: {node: '>=16.0.0'}
+
   morgan@1.12.1:
     resolution: {integrity: sha512-tljKC0ex20AjO58Ob/eZ53JloycbVswbVNCHx6V6VLGzqt/w8dIynVGL0G8qVjNKwiA7sYSogCrN6QtJ82IV+g==}
     engines: {node: '>= 0.8.0'}
@@ -6226,9 +6228,6 @@ packages:
 
   sisteransi@1.0.5:
     resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
-
-  sjcl@1.0.9:
-    resolution: {integrity: sha512-dWM71tkSHxe7zEZj0/COjtJdmErIxp7UMp8a6D4xx8dTTtJLc4lFL+HAX8s6lvASyQQ2iYMHwa7rhhQq7MT5MA==}
 
   smob@1.6.2:
     resolution: {integrity: sha512-RQsvleCbF8cVHEv+xuDGaA4pOizFqJ0GgjtMSRo6oP8pnN7WsigHgVGey6aILRBKv4W2YOMHLqbKdnB6hpB9fw==}
@@ -8093,10 +8092,6 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@cloudflare/blindrsa-ts@0.4.6':
-    dependencies:
-      sjcl: 1.0.9
-
   '@csstools/color-helpers@6.1.1': {}
 
   '@csstools/css-calc@3.4.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.1))(@csstools/css-tokenizer@4.0.1)':
@@ -8282,11 +8277,16 @@ snapshots:
 
   '@hexagon/base64@1.1.28': {}
 
-  '@hpke/common@1.10.1': {}
+  '@hpke/common@1.13.0': {}
 
-  '@hpke/core@1.9.0':
+  '@hpke/core@1.10.1':
     dependencies:
-      '@hpke/common': 1.10.1
+      '@hpke/common': 1.13.0
+
+  '@hpke/hybridkem-x-wing@0.7.1':
+    dependencies:
+      '@hpke/common': 1.13.0
+      mlkem: 2.7.2
 
   '@img/colour@1.1.0':
     optional: true
@@ -12192,6 +12192,8 @@ snapshots:
 
   minipass@7.1.3: {}
 
+  mlkem@2.7.2: {}
+
   morgan@1.12.1:
     dependencies:
       basic-auth: 2.0.1
@@ -13161,8 +13163,6 @@ snapshots:
   signal-exit@4.1.0: {}
 
   sisteransi@1.0.5: {}
-
-  sjcl@1.0.9: {}
 
   smob@1.6.2: {}
 

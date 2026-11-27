@@ -3,42 +3,35 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/37 §37.3.3] Privacy Pass di klien (RFC 9474, Blind RSA).
+ * [docs/43 §43.4.1] Privacy Pass pengganti Blind RSA.
  *
- * Server menandatangani pesan **ter-blind**, jadi ia tidak bisa menghubungkan
- * token yang diserahkan saat redemption (tanpa akun) kembali ke issuance (yang
- * butuh bukti keanggotaan). Token dipakai sebagai bukti anti-abuse pada sync
- * anonim: satu token = satu sync.
+ * Klien membuat token acak 256-bit sendiri dan hanya mengirim komitmen
+ * `SHA-256(token)` saat issuance. Server menyimpan HMAC komitmen itu (tanpa
+ * token mentah), lalu saat sync klien menyerahkan token; server menghitung
+ * komitmen yang sama dan menandainya spent. Tidak ada RSA atau issuer key yang
+ * harus stabil antar-restart.
  *
  * Batas kejujuran:
- *  - unlinkability tergantung pada OHTTP + tidak adanya log waktu; tanpa itu
- *    server bisa mengorelasikan jam issuance dan redemption;
- *  - token ini buffered di perangkat (ter-seal saat vault terbuka). Kalau vault
- *    terkunci, token hanya hidup di memori — sync tetap jalan, hanya tanpa bukti.
+ *  - unlinkability issuance ↔ redemption tetap bergantung pada OHTTP + tidak
+ *    adanya log waktu; server tetap melihat kapan issuance dan redemption
+ *    terjadi jika itu dicatat;
+ *  - token disimpan ter-seal saat vault terbuka. Kalau vault terkunci, token
+ *    hanya hidup di memori — sync tetap jalan, hanya tanpa bukti.
  *
- * Wire token: `base64url(nonce(32) || signature(256))`,
- * pesan = `SHA-384("nyx-pp-v1|" || conversationId || "|" || nonce)`.
+ * Wire token: `base64url(random(32))`.
  */
 
-import { RSABSSA } from '@cloudflare/blindrsa-ts';
 import { api } from '@lib/api';
 import { getMyDeliveryToken, getMyGroupToken } from '@lib/groupPseudonyms';
-import { base64UrlToBytes, bytesToBase64Url } from './base64url';
+import { bytesToBase64Url } from './base64url';
 
-export const PP_SUITE = 'RSABSSA-SHA384-PSS-Deterministic';
-const PP_DOMAIN = 'nyx-pp-v1';
-const NONCE_BYTES = 32;
-const SIGNATURE_BYTES = 256;
+export const PP_SUITE = 'nyx-pp-token-v1';
+const TOKEN_BYTES = 32;
 /** Server memakai TTL 24 jam; token lebih tua dibuang, bukan dikirim sia-sia. */
 const PP_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_BATCH = 5;
 const MAX_BATCH = 10;
 const KV_KEY = 'nyx_pp_tokens';
-
-interface PpIssuer {
-  keyId: string;
-  publicKey: CryptoKey;
-}
 
 interface StoredGrant {
   tokens: string[];
@@ -47,35 +40,11 @@ interface StoredGrant {
 
 const memory = new Map<string, StoredGrant>();
 const issuing = new Set<string>();
-let issuerCache: PpIssuer | null = null;
 
-function suite () {
-  return RSABSSA.SHA384.PSS.Deterministic();
-}
-
-/** Pesan yang ditandatangani issuer — harus identik dengan `ppMessage` server. */
-export async function ppMessage (conversationId: string, nonce: Uint8Array): Promise<Uint8Array> {
-  const prefix = new TextEncoder().encode(`${PP_DOMAIN}|${conversationId}|`);
-  const input = new Uint8Array(prefix.length + nonce.length);
-  input.set(prefix, 0);
-  input.set(nonce, prefix.length);
-  return new Uint8Array(await crypto.subtle.digest('SHA-384', input));
-}
-
-export async function loadPpIssuer (): Promise<PpIssuer> {
-  if (issuerCache) return issuerCache;
-  const issuer = await api<{ suite: string; keyId: string; publicJwk: JsonWebKey }>('/api/groups/pp/issuer');
-  if (issuer?.suite !== PP_SUITE) throw new Error('PP_SUITE_MISMATCH');
-  if (!issuer.publicJwk?.n || !issuer.publicJwk?.e) throw new Error('PP_ISSUER_MALFORMED');
-  const publicKey = await crypto.subtle.importKey(
-    'jwk',
-    issuer.publicJwk,
-    { name: 'RSA-PSS', hash: 'SHA-384' },
-    true,
-    ['verify'],
-  );
-  issuerCache = { keyId: issuer.keyId, publicKey };
-  return issuerCache;
+async function tokenCommitment (token: Uint8Array): Promise<Uint8Array> {
+  const input = token.buffer.slice(token.byteOffset, token.byteOffset + token.byteLength) as ArrayBuffer;
+  const digest = await crypto.subtle.digest('SHA-256', input);
+  return new Uint8Array(digest);
 }
 
 // --- penyimpanan (ter-seal bila vault terbuka) ---
@@ -142,11 +111,7 @@ async function writeGrant (conversationId: string, grant: StoredGrant | null): P
 /**
  * Minta `count` token baru untuk satu grup. Butuh group token (era berjalan)
  * dan member token (bukti keanggotaan); tanpa keduanya tidak ada yang dikirim.
- * Mengembalikan jumlah token yang benar-benar tersimpan.
- */
-/**
- * Penerbitan satu putaran (tanpa penanganan rotasi kunci). Dipisah supaya
- * `issuePrivacyPassTokens` bisa mengulang SEKALI setelah issuer berganti.
+ * Hanya komitmen yang dikirim — token mentah tidak pernah meninggalkan klien.
  */
 async function issueOnce (conversationId: string, count: number): Promise<number> {
   const groupToken = getMyGroupToken(conversationId);
@@ -154,87 +119,33 @@ async function issueOnce (conversationId: string, count: number): Promise<number
   if (!groupToken || !memberToken) return 0;
 
   const batch = Math.min(Math.max(1, Math.floor(count)), MAX_BATCH);
-  const issuer = await loadPpIssuer();
-  const blindSuite = suite();
+  const tokens = Array.from({ length: batch }, () => crypto.getRandomValues(new Uint8Array(TOKEN_BYTES)));
+  const commitments = await Promise.all(tokens.map(tokenCommitment));
 
-  const prepared: Array<{ nonce: Uint8Array; msg: Uint8Array; blindedMsg: Uint8Array; inv: Uint8Array }> = [];
-  for (let i = 0; i < batch; i += 1) {
-    const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
-    const msg = await ppMessage(conversationId, nonce);
-    const { blindedMsg, inv } = await blindSuite.blind(issuer.publicKey, msg);
-    prepared.push({ nonce, msg, blindedMsg, inv });
-  }
-
-  const issued = await api<{ signatures?: string[]; suite?: string; keyId?: string }>('/api/groups/pp/issue', {
+  const issued = await api<{ suite?: string; accepted?: number }>('/api/groups/pp/issue', {
     method: 'POST',
     body: JSON.stringify({
       groupToken,
       memberToken,
-      blinded: prepared.map((entry) => bytesToBase64Url(entry.blindedMsg)),
+      commitments: commitments.map((commitment) => bytesToBase64Url(commitment)),
     }),
   });
   if (issued?.suite !== PP_SUITE) throw new Error('PP_SUITE_MISMATCH');
-  if (issued.keyId !== issuer.keyId) throw new Error('PP_ISSUER_KEY_CHANGED');
-  const signatures = issued.signatures ?? [];
-  if (signatures.length !== prepared.length) throw new Error('PP_ISSUE_MALFORMED');
-
-  const tokens: string[] = [];
-  for (let i = 0; i < prepared.length; i += 1) {
-    const entry = prepared[i]!;
-    const blindSignature = base64UrlToBytes(signatures[i] ?? '');
-    if (blindSignature.length !== SIGNATURE_BYTES) throw new Error('PP_SIGNATURE_MALFORMED');
-    // `finalize` melempar "invalid signature" bila issuer menandatangani dengan
-    // kunci lain; samakan pesannya supaya operator melihat penyebab sebenarnya
-    // (issuer berubah / respons dipalsukan), bukan error pustaka.
-    let signature: Uint8Array;
-    try {
-      signature = await blindSuite.finalize(issuer.publicKey, entry.msg, blindSignature, entry.inv);
-    } catch {
-      throw new Error('PP_TOKEN_UNVERIFIABLE');
-    }
-    // Token yang tidak lolos verifikasi lokal tidak boleh disimpan — ia hanya
-    // akan ditolak server dan menghabiskan jatah sync. `verify` bisa melempar
-    // (representative di luar modulus) untuk signature dari kunci lain.
-    let valid = false;
-    try {
-      valid = await blindSuite.verify(issuer.publicKey, signature, entry.msg);
-    } catch {
-      valid = false;
-    }
-    if (!valid) throw new Error('PP_TOKEN_UNVERIFIABLE');
-    const token = new Uint8Array(entry.nonce.length + signature.length);
-    token.set(entry.nonce, 0);
-    token.set(signature, entry.nonce.length);
-    tokens.push(bytesToBase64Url(token));
-  }
+  if (issued.accepted !== batch) throw new Error('PP_ISSUE_MALFORMED');
 
   const existing = await readGrant(conversationId);
   const kept = freshTokens(existing);
+  const encoded = tokens.map((token) => bytesToBase64Url(token));
   await writeGrant(conversationId, {
-    tokens: [...kept, ...tokens],
+    tokens: [...kept, ...encoded],
     expiresAt: Date.now() + PP_TOKEN_TTL_MS,
   });
-  return tokens.length;
+  return encoded.length;
 }
 
-/**
- * Minta token baru; bila issuer server sudah dirotasi (`keyId` berbeda), muat
- * ulang kunci publik dan coba SEKALI lagi.
- *
- * Tanpa ini, rotasi `PP_ISSUER_PRIVATE_JWK` (prosedur yang didokumentasikan di
- * `docs/10`) membuat setiap klien yang sudah menyimpan cache issuer gagal terus
- * dengan `PP_ISSUER_KEY_CHANGED` sampai halaman di-reload.
- */
+/** Minta token baru; kegagalan tidak menyimpan token setengah jadi. */
 export async function issuePrivacyPassTokens (conversationId: string, count = DEFAULT_BATCH): Promise<number> {
-  try {
-    return await issueOnce(conversationId, count);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'PP_ISSUER_KEY_CHANGED') {
-      issuerCache = null;
-      return await issueOnce(conversationId, count);
-    }
-    throw error;
-  }
+  return await issueOnce(conversationId, count);
 }
 
 // --- redemption ---
@@ -243,10 +154,10 @@ export async function issuePrivacyPassTokens (conversationId: string, count = DE
  * Ambil satu bukti untuk sync. `undefined` = tidak ada bukti saat ini — sync
  * TETAP dijalankan (server hanya menolak bila `PP_SYNC_REQUIRED=1`).
  *
- * Issuance saat stok kosong sengaja dijalankan **di latar**: blind RSA 2048 di
- * perangkat lambat butuh detik, dan sync tidak boleh menunggu itu. Hasilnya
- * dipakai sync berikutnya (TTL 24 jam). Jalur yang **butuh** bukti sekarang
- * (server menjawab `PP_PROOF_REQUIRED`) memakai `ensurePrivacyPassProof`.
+ * Issuance saat stok kosong tetap dijalankan **di latar** supaya sync tidak
+ * menunggu request jaringan; hasilnya dipakai sync berikutnya (TTL 24 jam).
+ * Jalur yang **butuh** bukti sekarang (server menjawab `PP_PROOF_REQUIRED`)
+ * memakai `ensurePrivacyPassProof`.
  */
 export async function takePrivacyPassProof (conversationId: string): Promise<string | undefined> {
   const tokens = freshTokens(await readGrant(conversationId));
@@ -266,9 +177,6 @@ export async function takePrivacyPassProof (conversationId: string): Promise<str
  * `PP_PROOF_REQUIRED` (mis. `PP_SYNC_REQUIRED=1` baru dinyalakan, stok kosong,
  * atau perangkat baru login). Tanpa jalur ini, menyalakan gate itu mematikan
  * discovery grup sampai issuance latar kebetulan selesai.
- *
- * Blind RSA 2048 butuh detik, jadi hanya dipanggil sekali per kegagalan sync
- * (bukan di setiap sync) dan tetap dibatasi `MAX_BATCH`.
  */
 export async function ensurePrivacyPassProof (conversationId: string): Promise<string | undefined> {
   const existing = freshTokens(await readGrant(conversationId));
@@ -302,13 +210,11 @@ export async function consumePrivacyPassProof (conversationId: string, proof: st
 
 /** Buang seluruh stok grup (mis. server bilang token tidak sah / era berubah). */
 export async function dropPrivacyPassTokens (conversationId: string): Promise<void> {
-  if (!memory.has(conversationId)) return;
   await writeGrant(conversationId, null);
 }
 
 /** Test-only: reset cache modul. */
 export function resetPrivacyPassForTests (): void {
-  issuerCache = null;
   memory.clear();
   issuing.clear();
 }

@@ -17,6 +17,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ohttp": "playwright test --config playwright.ohttp.config.ts --project=chromium",
     "test:e2e:storage": "playwright test --config playwright.storage.config.ts --project=chromium",
+    "test:e2e:pwa": "playwright test --config playwright.pwa.config.ts --project=chromium",
+    "test:e2e:browsers": "playwright test --config playwright.browsers.config.ts",
+    "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
     "test:e2e:pir": "playwright test --config playwright.pir.config.ts --project=chromium",
     "test:e2e:stack": "playwright test --config playwright.stack.config.ts",
     "test:e2e:stack:chrome": "playwright test --config playwright.stack.config.ts --project=chrome",
@@ -39,7 +42,6 @@
   },
   "dependencies": {
     "@aztec-labs/sqlite3mc-wasm": "6.0.0",
-    "@cloudflare/blindrsa-ts": "0.4.6",
     "@marsidev/react-turnstile": "^1.6.1",
     "@noble/post-quantum": "0.7.1",
     "@nyx/shared": "workspace:*",

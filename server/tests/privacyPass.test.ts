@@ -3,103 +3,105 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/37 §37.3.3] Privacy Pass blind-RSA token: roundtrip nyata melalui
- * pustaka (bukan mock), binding percakapan, double-spend, dan bentuk rusak.
+ * [docs/43 §43.4.1] Privacy Pass token acak + komitmen: issuance, binding
+ * percakapan, double-spend, TTL, dan bentuk rusak. Tidak ada RSA.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RSABSSA } from '@cloudflare/blindrsa-ts';
+import { createHash, randomBytes } from 'node:crypto';
 import {
-  clearPpKeyCacheForTests,
-  decodePpToken,
-  encodePpToken,
-  loadPpIssuerKeys,
-  newPpNonce,
-  ppBlindSign,
-  ppMessage,
+  PP_TOKEN_TTL_SEC,
+  ppCommitmentForToken,
+  ppIssueCommitments,
   ppRedeemToken,
-  ppVerifyToken,
 } from '../src/utils/privacyPass.js';
 
-const suite = RSABSSA.SHA384.PSS.Deterministic();
-
-/** Simulasikan klien: blind → (server) sign → finalize. */
-async function issueToken (conversationId: string): Promise<string> {
-  const keys = await loadPpIssuerKeys();
-  const nonce = newPpNonce();
-  const msg = ppMessage(conversationId, nonce);
-  const { blindedMsg, inv } = await suite.blind(keys.publicKey, msg);
-  const [blindSig] = await ppBlindSign([Buffer.from(blindedMsg).toString('base64url')]);
-  const signature = await suite.finalize(
-    keys.publicKey,
-    msg,
-    new Uint8Array(Buffer.from(blindSig!, 'base64url')),
-    inv
-  );
-  return encodePpToken(nonce, signature);
+function newToken (): string {
+  return randomBytes(32).toString('base64url');
 }
 
-test('privacy pass: token yang diterbitkan terverifikasi untuk percakapan yang sama', async () => {
-  clearPpKeyCacheForTests();
-  const token = await issueToken('conv-alpha');
-  assert.equal(await ppVerifyToken('conv-alpha', token), true);
-});
+function commitmentOf (token: string): string {
+  return createHash('sha256').update(Buffer.from(token, 'base64url')).digest('base64url');
+}
 
-test('privacy pass: token tidak bisa dipakai di percakapan lain (binding groupId)', async () => {
-  clearPpKeyCacheForTests();
-  const token = await issueToken('conv-alpha');
-  assert.equal(await ppVerifyToken('conv-beta', token), false);
-});
-
-test('privacy pass: token yang diubah / bentuk rusak ditolak', async () => {
-  clearPpKeyCacheForTests();
-  const token = await issueToken('conv-alpha');
-  const decoded = decodePpToken(token)!;
-  assert.ok(decoded.signature.length === 256);
-
-  const tampered = encodePpToken(decoded.nonce, decoded.signature.map((b, i) => (i === 0 ? b ^ 1 : b)));
-  assert.equal(await ppVerifyToken('conv-alpha', tampered), false);
-  assert.equal(await ppVerifyToken('conv-alpha', 'not-a-token'), false);
-  assert.equal(await ppVerifyToken('conv-alpha', Buffer.alloc(10).toString('base64url')), false);
-  assert.equal(decodePpToken(undefined), null);
-});
-
-/**
- * Fake Redis yang **hanya** mengenal `SET key value { EX, NX }`.
- *
- * [audit F-01] Bentuk posisional (`'EX', ttl, 'NX'`) harus gagal di sini:
- * itulah bentuk yang diabaikan node-redis 6 dan membuat token bisa di-replay
- * tanpa TTL. Fake menolak argumen yang bukan objek opsi.
- */
+/** Redis tiruan dengan `GET` + `SET { EX, NX }` — cukup untuk kedua fase. */
 function fakeRedis () {
-  const spent = new Map<string, number>();
+  const store = new Map<string, string>();
+  const sets: Array<{ key: string; ttl: number }> = [];
   const redis = {
-    async set (key: string, value: string, options?: { EX?: number; NX?: boolean }): Promise<'OK' | null> {
+    async get (key: string): Promise<string | null> {
+      return store.get(key) ?? null;
+    },
+    async set (key: string, value: string, options: { EX: number; NX: true }): Promise<string | null> {
       assert.equal(value, '1');
-      assert.ok(options && typeof options === 'object', 'SET wajib memakai objek opsi, bukan argumen posisional');
+      assert.ok(options && typeof options === 'object', 'SET wajib memakai objek opsi');
       assert.equal(options.NX, true, 'NX wajib: tanpa itu token bisa di-replay');
-      assert.ok(typeof options.EX === 'number' && options.EX > 0, 'EX wajib: tanpa itu key pp:spent tumbuh tanpa batas');
-      if (spent.has(key)) return null;
-      spent.set(key, options.EX);
+      assert.ok(options.EX > 0, 'EX wajib: tanpa itu key tumbuh tanpa batas');
+      if (store.has(key)) return null;
+      store.set(key, value);
+      sets.push({ key, ttl: options.EX });
       return 'OK';
     },
   };
-  return { redis, spent };
+  return { redis, store, sets };
 }
 
-test('privacy pass: redeem sekali pakai (double-spend ditolak, TTL diset)', async () => {
-  clearPpKeyCacheForTests();
-  const token = await issueToken('conv-alpha');
-  const { redis, spent } = fakeRedis();
+test('privacy pass: komitmen diterbitkan, token hanya sah di percakapan asalnya', async () => {
+  const token = newToken();
+  const other = newToken();
+  const { redis } = fakeRedis();
 
+  assert.equal(await ppIssueCommitments(redis, 'conv-alpha', [commitmentOf(token), commitmentOf(other)]), 2);
   assert.equal(await ppRedeemToken(redis, 'conv-alpha', token), 'ok');
   assert.equal(await ppRedeemToken(redis, 'conv-alpha', token), 'spent');
-  assert.equal(await ppRedeemToken(redis, 'conv-beta', token), 'invalid', 'binding gagal sebelum menyentuh Redis');
-  assert.equal(spent.size, 1, 'hanya token yang lolos binding yang menyentuh Redis');
-  assert.deepEqual([...spent.values()], [24 * 60 * 60], 'TTL = umur token');
+  assert.equal(await ppRedeemToken(redis, 'conv-alpha', other), 'ok');
+
+  const third = newToken();
+  assert.equal(await ppIssueCommitments(redis, 'conv-alpha', [commitmentOf(third)]), 1);
+  assert.equal(await ppRedeemToken(redis, 'conv-beta', third), 'invalid', 'binding percakapan harus gagal');
+  assert.equal(await ppRedeemToken(redis, 'conv-alpha', third), 'ok');
 });
 
-test('privacy pass: blindSign menolak pesan ter-blind dengan panjang salah', async () => {
-  clearPpKeyCacheForTests();
-  await assert.rejects(() => ppBlindSign(['AAAA']), /PP_INVALID_BLINDED_MESSAGE/);
+test('privacy pass: token/komitmen tidak pernah tersimpan mentah, TTL 24 jam', async () => {
+  const token = newToken();
+  const commitment = commitmentOf(token);
+  const { redis, store, sets } = fakeRedis();
+
+  await ppIssueCommitments(redis, 'conv-alpha', [commitment]);
+  await ppRedeemToken(redis, 'conv-alpha', token);
+
+  assert.deepEqual(sets.map((entry) => entry.ttl), [PP_TOKEN_TTL_SEC, PP_TOKEN_TTL_SEC]);
+  for (const key of store.keys()) {
+    assert.equal(key.includes(token), false, 'key tidak boleh memuat token');
+    assert.equal(key.includes(commitment), false, 'key tidak boleh memuat komitmen');
+    assert.match(key, /^pp:(issued|spent):[a-f0-9]{64}$/);
+  }
+});
+
+test('privacy pass: token yang tidak pernah diterbitkan / rusak ditolak', async () => {
+  const { redis } = fakeRedis();
+  const token = newToken();
+  assert.equal(await ppRedeemToken(redis, 'conv-alpha', token), 'invalid');
+
+  await ppIssueCommitments(redis, 'conv-alpha', [commitmentOf(token)]);
+  assert.equal(await ppRedeemToken(redis, 'conv-alpha', 'not-a-token'), 'invalid');
+  assert.equal(await ppRedeemToken(redis, 'conv-alpha', Buffer.alloc(31).toString('base64url')), 'invalid');
+  assert.equal(ppCommitmentForToken('not-a-token'), null);
+});
+
+test('privacy pass: komitmen duplikat / tidak sah tidak diterbitkan setengah jadi', async () => {
+  const token = newToken();
+  const commitment = commitmentOf(token);
+  const { redis } = fakeRedis();
+
+  assert.equal(await ppIssueCommitments(redis, 'conv-alpha', [commitment]), 1);
+  assert.equal(await ppIssueCommitments(redis, 'conv-alpha', [commitment]), 0, 'duplikat tidak diterima lagi');
+  await assert.rejects(
+    () => ppIssueCommitments(redis, 'conv-alpha', ['AAAA']),
+    /PP_INVALID_COMMITMENT/,
+  );
+  await assert.rejects(
+    () => ppIssueCommitments(redis, 'conv-alpha', Array.from({ length: 11 }, () => commitmentOf(newToken()))),
+    /PP_INVALID_COMMITMENT_COUNT/,
+  );
 });

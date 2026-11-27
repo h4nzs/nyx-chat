@@ -27,8 +27,7 @@ const REQUIRED = [
   'OHTTP_INTERNAL_TOKEN',
   'OHTTP_GATEWAY_TARGET',
   'OHTTP_GATEWAY_TRUSTED_HOSTS',
-  // Privacy Pass (docs/37 §37.3.3)
-  'PP_ISSUER_PRIVATE_JWK',
+  // Privacy Pass (docs/43 §43.4.1) — tidak ada issuer key lagi.
   'PP_SYNC_REQUIRED',
   // Arsip riwayat perangkat hasil link (docs/40) — kill switch operator.
   'LINK_HISTORY_ENABLED',

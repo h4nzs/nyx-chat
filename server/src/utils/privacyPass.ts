@@ -3,214 +3,127 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/37 §37.3.3] Privacy Pass (RFC 9577/9578, tipe Blind RSA) untuk
- * anti-abuse **anonymous sync**.
+ * [docs/43 §43.4.1] Privacy Pass pengganti Blind RSA: token acak 256-bit yang
+ * dibuat **klien**, bukan tanda tangan buta.
  *
- * Kenapa ini ada: sync anonim tidak punya akun untuk di-rate-limit. Bucket per
- * token saja masih membuat server bisa mengorelasikan "token yang sama memanggil
- * berkali-kali"; Privacy Pass memberi bukti "pernah diizinkan" yang tidak bisa
- * dihubungkan ke issuance-nya (unlinkable), sehingga satu token sync tidak
- * menjadi pengenal jangka panjang.
+ * Alur:
+ *  1. Klien membuat token acak dan mengirim komitmen `SHA-256(token)` saat
+ *     issuance (bersama group/member token). Server tidak pernah menerima token
+ *     mentah pada langkah ini.
+ *  2. Server menyimpan `HMAC(pepper, conversationId || commitment)` saja di
+ *     Redis, TTL 24 jam. Tidak ada token/komitmen mentah yang persist.
+ *  3. Saat sync anonim, klien menyerahkan token. Server menghitung komitmen dan
+ *     HMAC yang sama; token hanya sah bila pernah diterbitkan untuk percakapan
+ *     itu, lalu ditandai spent dengan `SET NX`.
  *
- * Batas kejujuran (ditulis juga di docs/37):
- *  - ini **komposisi protokol** di atas pustaka blind RSA Cloudflare
- *    (`@cloudflare/blindrsa-ts`, RFC 9474). Pustakanya diuji, komposisi wire
- *    format di sini belum diaudit eksternal;
- *  - issuer dan redeemer berada di proses yang sama. Unlinkability issuance ↔
- *    redemption bergantung pada OHTTP + tidak adanya log; tanpa itu, server bisa
- *    mengorelasikan waktu. Jangan mengklaim lebih.
+ * Unlinkability issuance ↔ redemption tetap bergantung pada OHTTP dan tidak
+ * adanya log waktu, sama seperti versi Blind RSA sebelumnya. Yang berubah:
+ * tidak ada RSA-2048, tidak ada issuer key yang harus stabil, dan server tidak
+ * pernah melihat token yang nanti dipakai.
  *
- * Wire token: `base64url(nonce(32) || signature(256))`.
- * Pesan yang ditandatangani mengikat percakapan:
- *   `SHA-384("nyx-pp-v1|" || conversationId || "|" || base64url(nonce))`
- * sehingga token grup A tidak bisa dipakai di grup B.
+ * Wire token: `base64url(random(32))`.
  */
 
-import { createHash, randomBytes } from 'node:crypto'
-import { RSABSSA } from '@cloudflare/blindrsa-ts'
+import { createHash } from 'node:crypto'
+import { pepperedIdentifier } from './atRestSecrets.js'
 
-export const PP_SUITE = 'RSABSSA-SHA384-PSS-Deterministic'
+export const PP_SUITE = 'nyx-pp-token-v1'
 export const PP_TOKEN_TTL_SEC = 24 * 60 * 60
 export const PP_MAX_ISSUE_PER_REQUEST = 10
 /** Batas issuance per member token per jam. */
 export const PP_ISSUE_LIMIT = { limit: 30, windowSeconds: 60 * 60 } as const
-const NONCE_BYTES = 32
-const SIGNATURE_BYTES = 256
-const TOKEN_BYTES = NONCE_BYTES + SIGNATURE_BYTES
-const PP_DOMAIN = 'nyx-pp-v1'
+export const PP_TOKEN_BYTES = 32
+export const PP_COMMITMENT_BYTES = 32
 
-const suite = RSABSSA.SHA384.PSS.Deterministic()
-
-export interface PpIssuerKeys {
-  keyId: string
-  publicKey: CryptoKey
-  privateKey: CryptoKey
-  publicJwk: JsonWebKey
-}
-
-let cachedKeys: PpIssuerKeys | null = null
+const B64URL_RE = /^[A-Za-z0-9_-]+$/
 
 function b64url (bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64url')
 }
 
-function fromB64url (value: string): Uint8Array | null {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null
+function fromB64url (value: unknown, expectedBytes: number): Uint8Array | null {
+  if (typeof value !== 'string' || !B64URL_RE.test(value)) return null
   try {
-    return new Uint8Array(Buffer.from(value, 'base64url'))
+    const bytes = new Uint8Array(Buffer.from(value, 'base64url'))
+    return bytes.length === expectedBytes ? bytes : null
   } catch {
     return null
   }
 }
 
-/** Pesan yang ditandatangani issuer (binding ke percakapan). */
-export function ppMessage (conversationId: string, nonce: Uint8Array): Uint8Array {
-  return new Uint8Array(
-    createHash('sha384')
-      .update(`${PP_DOMAIN}|${conversationId}|`)
-      .update(nonce)
-      .digest()
-  )
+/** `SHA-256(token)` — komitmen yang dikirim klien saat issuance. */
+export function ppCommitmentForToken (token: unknown): Uint8Array | null {
+  const bytes = fromB64url(token, PP_TOKEN_BYTES)
+  if (!bytes) return null
+  return new Uint8Array(createHash('sha256').update(bytes).digest())
 }
 
-export function encodePpToken (nonce: Uint8Array, signature: Uint8Array): string {
-  const combined = new Uint8Array(nonce.length + signature.length)
-  combined.set(nonce, 0)
-  combined.set(signature, nonce.length)
-  return b64url(combined)
+/** Validasi komitmen yang dikirim klien (32 byte base64url). */
+export function decodePpCommitment (commitment: unknown): Uint8Array | null {
+  return fromB64url(commitment, PP_COMMITMENT_BYTES)
 }
 
-export function decodePpToken (token: unknown): { nonce: Uint8Array; signature: Uint8Array } | null {
-  if (typeof token !== 'string') return null
-  const raw = fromB64url(token)
-  if (!raw || raw.length !== TOKEN_BYTES) return null
-  return { nonce: raw.subarray(0, NONCE_BYTES), signature: raw.subarray(NONCE_BYTES) }
-}
-
-export function newPpNonce (): Uint8Array {
-  return new Uint8Array(randomBytes(NONCE_BYTES))
+function ppTag (conversationId: string, commitment: Uint8Array): string {
+  // Domain + conversation mengikat token ke grup; HMAC pepper membuat dump Redis
+  // tidak bisa dipakai untuk menebak komitmen. Tidak ada token mentah di key.
+  return pepperedIdentifier(`pp-token:${conversationId}:${b64url(commitment)}`)
 }
 
 /**
- * Muat kunci issuer dari `PP_ISSUER_PRIVATE_JWK` (JSON JWK, rahasia server).
- *
- * Di production kunci WAJIB diset: kunci ephemeral berarti setiap restart
- * membatalkan semua token yang sudah dipegang klien (sync akan gagal sampai
- * klien meminta token baru). Di dev/test, kunci ephemeral dipakai dengan
- * peringatan supaya `pnpm test` tidak butuh rahasia.
+ * Terbitkan komitmen. Mengembalikan jumlah yang benar-benar baru; pemanggil
+ * memperlakukan hasil < jumlah sebagai kegagalan (klien tidak menyimpan token
+ * yang tidak terbit).
  */
-export async function loadPpIssuerKeys (envPrivateJwk?: string): Promise<PpIssuerKeys> {
-  if (cachedKeys) return cachedKeys
-
-  const raw = (envPrivateJwk ?? process.env.PP_ISSUER_PRIVATE_JWK ?? '').trim()
-  if (raw) {
-    const jwk = JSON.parse(raw) as JsonWebKey
-    const privateKey = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      { name: 'RSA-PSS', hash: 'SHA-384' },
-      true,
-      ['sign']
-    )
-    // WebCrypto menolak import bila `key_ops` JWK tidak sesuai usage yang
-    // diminta; JWK hasil exportKey berisi `key_ops: ['sign']`. Kunci publik
-    // dibangun ulang HANYA dari parameter publik.
-    const publicJwk: JsonWebKey = { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'PS384', ext: true }
-    const publicKey = await crypto.subtle.importKey(
-      'jwk',
-      publicJwk,
-      { name: 'RSA-PSS', hash: 'SHA-384' },
-      true,
-      ['verify']
-    )
-    const keyId = createHash('sha256').update(JSON.stringify(publicJwk)).digest('hex').slice(0, 16)
-    cachedKeys = { keyId, publicKey, privateKey, publicJwk }
-    return cachedKeys
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'PP_ISSUER_PRIVATE_JWK wajib diset di production: token Privacy Pass ' +
-        'harus bertahan lintas restart (docs/37 §37.3.3).'
-    )
-  }
-  console.warn('[privacyPass] PP_ISSUER_PRIVATE_JWK tidak diset — memakai kunci ephemeral (dev).')
-  const pair = await RSABSSA.SHA384.generateKey({ modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) })
-  const publicJwk = await crypto.subtle.exportKey('jwk', pair.publicKey) as JsonWebKey
-  const keyId = createHash('sha256').update(JSON.stringify(publicJwk)).digest('hex').slice(0, 16)
-  cachedKeys = { keyId, publicKey: pair.publicKey, privateKey: pair.privateKey, publicJwk }
-  return cachedKeys
+export interface PpIssueRedis {
+  set (key: string, value: string, options: { EX: number; NX: true }): Promise<string | null>
 }
 
-/** Untuk test: buang cache kunci. */
-export function clearPpKeyCacheForTests (): void {
-  cachedKeys = null
-}
-
-/** Tanda tangani N pesan ter-blind (issuance). Input/output base64url. */
-export async function ppBlindSign (blindedMessages: readonly string[]): Promise<string[]> {
-  const keys = await loadPpIssuerKeys()
-  const out: string[] = []
-  for (const blinded of blindedMessages) {
-    const bytes = fromB64url(blinded)
-    if (!bytes || bytes.length !== SIGNATURE_BYTES) throw new Error('PP_INVALID_BLINDED_MESSAGE')
-    const signature = await suite.blindSign(keys.privateKey, bytes)
-    out.push(b64url(signature))
+export async function ppIssueCommitments (
+  redis: PpIssueRedis,
+  conversationId: string,
+  commitments: readonly string[]
+): Promise<number> {
+  if (commitments.length === 0 || commitments.length > PP_MAX_ISSUE_PER_REQUEST) {
+    throw new Error('PP_INVALID_COMMITMENT_COUNT')
   }
-  return out
-}
 
-/**
- * Verifikasi token untuk percakapan tertentu (tanpa efek samping).
- * `false` untuk bentuk rusak, signature salah, atau binding grup tidak cocok.
- */
-export async function ppVerifyToken (conversationId: string, token: unknown): Promise<boolean> {
-  const decoded = decodePpToken(token)
-  if (!decoded) return false
-  const keys = await loadPpIssuerKeys()
-  try {
-    return await suite.verify(
-      keys.publicKey,
-      decoded.signature,
-      ppMessage(conversationId, decoded.nonce)
-    )
-  } catch {
-    return false
+  const seen = new Set<string>()
+  let accepted = 0
+  for (const value of commitments) {
+    const commitment = decodePpCommitment(value)
+    if (!commitment) throw new Error('PP_INVALID_COMMITMENT')
+    const key = `pp:issued:${ppTag(conversationId, commitment)}`
+    if (seen.has(key)) return accepted
+    seen.add(key)
+    const stored = await redis.set(key, '1', { EX: PP_TOKEN_TTL_SEC, NX: true })
+    if (!stored) return accepted
+    accepted += 1
   }
+  return accepted
 }
 
 export type PpRedeemResult = 'ok' | 'spent' | 'invalid'
 
-/**
- * Bagian klien Redis yang dipakai redemption: **hanya** `SET` dengan opsi.
- *
- * Sengaja bukan `Pick<RedisClientType,'set'>`: tanda tangan node-redis punya
- * banyak overload, sehingga pemanggil (dan fake Redis di test) harus memakai
- * cast. Bentuk di bawah adalah satu-satunya overload yang benar — objek
- * `{ EX, NX }` — dan itulah yang dipaksakan ke pemanggil.
- */
-export interface PpRedeemRedis {
-  set (key: string, value: string, options: { EX: number; NX: true }): Promise<string | null>
+export interface PpRedeemRedis extends PpIssueRedis {
+  get (key: string): Promise<string | null>
 }
 
 /**
- * Redemption sekali pakai. Kunci double-spend = SHA-256(token) di Redis dengan
- * TTL = umur token — tidak menyimpan token mentah dan tidak menyebut percakapan
- * di key (agar tidak menjadi graf).
- *
- * [audit F-01] Sebelum ini argumen dikirim posisional (`'EX', ttl, 'NX'`),
- * bentuk yang **diabaikan** node-redis 6: SET berjalan tanpa NX dan tanpa TTL,
- * jadi token bisa di-replay selamanya dan key `pp:spent:*` tumbuh tanpa batas.
- * Opsi harus berupa objek `{ EX, NX: true }`.
+ * Redemption sekali pakai. Kunci `pp:issued:*` membuktikan token pernah
+ * diterbitkan untuk percakapan ini; `pp:spent:*` mencegah replay dengan TTL
+ * seumur token. Keduanya hanya HMAC, bukan token/komitmen mentah.
  */
 export async function ppRedeemToken (
   redis: PpRedeemRedis,
   conversationId: string,
   token: string
 ): Promise<PpRedeemResult> {
-  if (!await ppVerifyToken(conversationId, token)) return 'invalid'
+  const commitment = ppCommitmentForToken(token)
+  if (!commitment) return 'invalid'
 
-  const spentKey = `pp:spent:${createHash('sha256').update(token).digest('hex')}`
-  const stored = await redis.set(spentKey, '1', { EX: PP_TOKEN_TTL_SEC, NX: true })
+  const tag = ppTag(conversationId, commitment)
+  if (!await redis.get(`pp:issued:${tag}`)) return 'invalid'
+
+  const stored = await redis.set(`pp:spent:${tag}`, '1', { EX: PP_TOKEN_TTL_SEC, NX: true })
   return stored === 'OK' ? 'ok' : 'spent'
 }

@@ -3,15 +3,10 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 
 /**
- * [docs/37 §37.3.3] Privacy Pass sisi klien.
- *
- * Issuer di test memakai kunci RSA asli (bukan stub): blind → sign → finalize →
- * verifikasi dijalankan utuh, jadi yang diuji adalah flow RFC 9474 yang sama
- * dengan server, bukan sekadar pemanggilan API.
+ * [docs/43 §43.4.1] Privacy Pass sisi klien: token acak 256-bit, komitmen
+ * `SHA-256(token)` yang dikirim ke server, dan redemption sekali pakai.
  */
-import { RSABSSA } from '@cloudflare/blindrsa-ts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { base64UrlToBytes, bytesToBase64Url } from '@lib/base64url';
 
 const apiMock = vi.fn<(path: string, options?: { method?: string; body?: string }) => Promise<unknown>>();
 
@@ -56,42 +51,33 @@ const {
   dropPrivacyPassTokens,
   ensurePrivacyPassProof,
   issuePrivacyPassTokens,
-  loadPpIssuer,
-  ppMessage,
   resetPrivacyPassForTests,
   takePrivacyPassProof,
 } = await import('@lib/privacyPass');
 
-const suite = RSABSSA.SHA384.PSS.Deterministic();
-const keyPair = await RSABSSA.SHA384.generateKey({ modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) });
-const publicJwk = (await crypto.subtle.exportKey('jwk', keyPair.publicKey)) as JsonWebKey;
-
-const base64url = (value: Uint8Array) => bytesToBase64Url(value);
-const bytes = (value: string) => base64UrlToBytes(value);
-
-/** Issuer palsu: perilaku server `pp/issue` (blindSign per pesan). */
-async function issueRoute (body: { blinded?: string[] }) {
-  const signatures = [];
-  for (const blinded of body.blinded ?? []) {
-    signatures.push(base64url(await suite.blindSign(keyPair.privateKey, bytes(blinded))));
-  }
-  return { signatures, suite: PP_SUITE, keyId: 'test-key' };
+interface IssueBody {
+  commitments?: string[];
+  tokens?: string[];
 }
 
-function installIssuer (overrides: { suite?: string; keyId?: string } = {}) {
+function installIssue (accepted: (body: IssueBody) => number = (body) => body.commitments?.length ?? 0, suite = PP_SUITE) {
   apiMock.mockImplementation(async (path: string, options?: { body?: string }) => {
-    if (path === '/api/groups/pp/issuer') {
-      return {
-        suite: overrides.suite ?? PP_SUITE,
-        keyId: overrides.keyId ?? 'test-key',
-        publicJwk,
-      };
-    }
-    if (path === '/api/groups/pp/issue') {
-      return issueRoute(JSON.parse(options?.body ?? '{}') as { blinded?: string[] });
-    }
-    throw new Error(`unexpected path ${path}`);
+    if (path !== '/api/groups/pp/issue') throw new Error(`unexpected path ${path}`);
+    const body = JSON.parse(options?.body ?? '{}') as IssueBody;
+    return { suite, accepted: accepted(body) };
   });
+}
+
+function lastIssueBody (): IssueBody {
+  const call = apiMock.mock.calls.at(-1);
+  return JSON.parse(call?.[1]?.body ?? '{}') as IssueBody;
+}
+
+function storedTokens (conversationId = 'conv-1'): string[] {
+  const stored = kv.get('nyx_pp_tokens') as Record<string, string> | undefined;
+  const value = stored?.[conversationId];
+  if (!value) return [];
+  return (JSON.parse(String(value).slice(5)) as { tokens: string[] }).tokens;
 }
 
 beforeEach(() => {
@@ -100,26 +86,23 @@ beforeEach(() => {
   groupTokens.group = 'GROUP_TOKEN';
   groupTokens.member = 'MEMBER_TOKEN';
   resetPrivacyPassForTests();
-  installIssuer();
+  installIssue();
 });
 
 describe('issuance', () => {
-  it('menghasilkan token yang lolos verifikasi issuer untuk percakapan ini', async () => {
+  it('mengirim komitmen, bukan token, lalu menyimpan token 256-bit', async () => {
     expect(await issuePrivacyPassTokens('conv-1', 3)).toBe(3);
 
-    const stored = kv.get('nyx_pp_tokens') as Record<string, string>;
-    const plain = JSON.parse(String(stored['conv-1']).slice(5)) as { tokens: string[]; expiresAt: number };
-    expect(plain.tokens).toHaveLength(3);
-    expect(plain.expiresAt).toBeGreaterThan(Date.now());
+    const body = lastIssueBody();
+    expect(body.commitments).toHaveLength(3);
+    expect(body.tokens).toBeUndefined();
+    for (const commitment of body.commitments ?? []) expect(commitment).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
-    const issuer = await loadPpIssuer();
-    for (const token of plain.tokens) {
-      const raw = bytes(token);
-      expect(raw.length).toBe(32 + 256);
-      const nonce = raw.subarray(0, 32);
-      const signature = raw.subarray(32);
-      const message = await ppMessage('conv-1', nonce);
-      expect(await suite.verify(issuer.publicKey, signature, message)).toBe(true);
+    const tokens = storedTokens();
+    expect(tokens).toHaveLength(3);
+    for (const token of tokens) {
+      expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(body.commitments).not.toContain(token);
     }
   });
 
@@ -132,53 +115,18 @@ describe('issuance', () => {
     expect(apiMock).not.toHaveBeenCalled();
   });
 
-  it('menolak issuer dengan suite lain (fail-closed, tanpa token)', async () => {
-    installIssuer({ suite: 'RSABSSA-SHA384-PSS-Randomized' });
+  it('menolak suite lain dan tidak menyimpan token', async () => {
+    installIssue(undefined, 'RSABSSA-SHA384-PSS-Deterministic');
     await expect(issuePrivacyPassTokens('conv-1', 1)).rejects.toThrow('PP_SUITE_MISMATCH');
-    expect(kv.has('nyx_pp_tokens')).toBe(false);
+    expect(storedTokens()).toEqual([]);
   });
 
-  it('token yang tidak bisa diverifikasi tidak disimpan', async () => {
-    apiMock.mockImplementation(async (path: string, options?: { body?: string }) => {
-      if (path === '/api/groups/pp/issuer') return { suite: PP_SUITE, keyId: 'test-key', publicJwk };
-      if (path === '/api/groups/pp/issue') {
-        const body = JSON.parse(options?.body ?? '{}') as { blinded?: string[] };
-        // Signature yang TIDAK bisa diverifikasi: ambil tanda tangan jujur lalu
-        // rusak satu byte.
-        //
-        // [2026-11-03] Sebelumnya tes ini menandatangani blinded message dengan
-        // pasangan kunci LAIN. Terdengar lebih realistis, tetapi TIDAK
-        // deterministik: RFC 9474 menandatangani representative apa adanya
-        // (`rsasp1(sk, m)`), dan representative hasil blinding dijamin <
-        // modulus ISSUER — belum tentu < modulus kunci lain. Bila lebih besar,
-        // pustaka melempar "signature representative out of range" dari DALAM
-        // mock; error itu lolos lewat `api()` (bukan jalur verifikasi klien),
-        // jadi tes gagal sesekali dengan pesan pustaka (terjadi di CI
-        // 2026-11-03) padahal yang diuji bukan itu. Merusak byte memberi hasil
-        // yang sama untuk klien — `finalize` + verifikasi gagal — tanpa
-        // bergantung pada keberuntungan modulus.
-        const signatures = await Promise.all(
-          (body.blinded ?? []).map(async (blinded) => {
-            const honest = await suite.blindSign(keyPair.privateKey, bytes(blinded));
-            const corrupted = new Uint8Array(honest);
-            const last = corrupted.length - 1;
-            corrupted[last] = corrupted[last]! ^ 0x01;
-            return base64url(corrupted);
-          }),
-        );
-        return { signatures, suite: PP_SUITE, keyId: 'test-key' };
-      }
-      throw new Error(`unexpected path ${path}`);
-    });
-
-    await expect(issuePrivacyPassTokens('conv-1', 1)).rejects.toThrow('PP_TOKEN_UNVERIFIABLE');
-    expect(kv.has('nyx_pp_tokens')).toBe(false);
+  it('menolak issuance parsial dan tidak menyimpan token setengah jadi', async () => {
+    installIssue(() => 1);
+    await expect(issuePrivacyPassTokens('conv-1', 3)).rejects.toThrow('PP_ISSUE_MALFORMED');
+    expect(storedTokens()).toEqual([]);
   });
-  // Blind RSA 2048 di JS butuh 3–5 detik per token di mesin 4 core; dengan
-  // seluruh suite berjalan paralel, anggaran 40 detik pun terlampaui (terukur
-  // timeout di sini, sementara berkas ini lulus 19,7 detik saat sendirian).
-  // Yang dinaikkan hanya anggaran waktu — asersi tidak diubah.
-}, 120_000);
+});
 
 describe('redemption', () => {
   it('mengambil satu bukti, dan membuangnya setelah diterima server', async () => {
@@ -196,23 +144,16 @@ describe('redemption', () => {
   it('stok kosong: sync tidak menunggu, issuance jalan di latar', async () => {
     expect(await takePrivacyPassProof('conv-1')).toBeUndefined();
 
-    // Issuance latar selesai → bukti tersedia untuk sync berikutnya.
     await vi.waitFor(async () => {
-      expect(apiMock.mock.calls.map(([path]) => path)).toEqual([
-        '/api/groups/pp/issuer',
-        '/api/groups/pp/issue',
-      ]);
+      expect(apiMock.mock.calls.map(([path]) => path)).toEqual(['/api/groups/pp/issue']);
       expect(await takePrivacyPassProof('conv-1')).toBeTypeOf('string');
-      // Anggaran inner-waitFor juga harus ikut naik: issuance latar menjalankan
-      // Blind RSA 2048 (3–5 detik/token di mesin 4 core), dan 30 detik terlampaui
-      // saat suite paralel — asersi tetap sama, hanya batas waktunya.
-    }, { timeout: 120_000, interval: 250 });
-  }, 120_000);
+    }, { timeout: 10_000, interval: 100 });
+  });
 
   it('drop menghapus seluruh stok grup', async () => {
     await issuePrivacyPassTokens('conv-1', 2);
     await dropPrivacyPassTokens('conv-1');
-    expect((kv.get('nyx_pp_tokens') as Record<string, string> | undefined)?.['conv-1']).toBeUndefined();
+    expect(storedTokens()).toEqual([]);
   });
 
   it('issuance yang gagal tidak melempar ke pemanggil sync', async () => {
@@ -221,56 +162,12 @@ describe('redemption', () => {
   });
 
   it('ensurePrivacyPassProof menerbitkan secara sinkron saat stok kosong', async () => {
-    // [PP hidup] Dipakai jalur retry setelah 403 PP_PROOF_REQUIRED.
     const proof = await ensurePrivacyPassProof('conv-1');
     expect(proof).toBeTypeOf('string');
 
-    // Panggilan berikutnya memakai stok yang sudah ada (tidak menagih issuer lagi).
     const callsAfterIssue = apiMock.mock.calls.length;
     const again = await ensurePrivacyPassProof('conv-1');
     expect(again).toBe(proof);
     expect(apiMock.mock.calls.length).toBe(callsAfterIssue);
   });
-
-  it('issuer yang dirotasi: cache dimuat ulang sekali, bukan gagal permanen', async () => {
-    // Skenario operator: `PP_ISSUER_PRIVATE_JWK` diganti, klien masih memegang
-    // kunci lama di cache. Tanpa penanganan ini setiap issuance gagal
-    // PP_ISSUER_KEY_CHANGED sampai halaman di-reload.
-    const rotated = await RSABSSA.SHA384.generateKey({ modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) });
-    const rotatedJwk = (await crypto.subtle.exportKey('jwk', rotated.publicKey)) as JsonWebKey;
-    let issuerReads = 0;
-    let issueCalls = 0;
-
-    apiMock.mockImplementation(async (path: string, options?: { body?: string }) => {
-      if (path === '/api/groups/pp/issuer') {
-        issuerReads += 1;
-        return issuerReads === 1
-          ? { suite: PP_SUITE, keyId: 'old-key', publicJwk }
-          : { suite: PP_SUITE, keyId: 'rotated-key', publicJwk: rotatedJwk };
-      }
-      if (path === '/api/groups/pp/issue') {
-        issueCalls += 1;
-        const body = JSON.parse(options?.body ?? '{}') as { blinded?: string[] };
-        // Panggilan pertama masih memakai `blinded` dari modulus lama, jadi
-        // tidak bisa ditandatangani kunci baru (`signature representative out of
-        // range`). Yang penting bagi klien adalah `keyId` baru: ia memicu
-        // refresh issuer sebelum signature dipakai. Panggilan kedua sudah
-        // memakai modulus baru, sehingga tanda tangan asli bisa dibuat.
-        const signingKey = issueCalls === 1 ? keyPair.privateKey : rotated.privateKey;
-        const signatures = await Promise.all(
-          (body.blinded ?? []).map(async (blinded) => base64url(await suite.blindSign(signingKey, bytes(blinded)))),
-        );
-        return { signatures, suite: PP_SUITE, keyId: 'rotated-key' };
-      }
-      throw new Error(`unexpected path ${path}`);
-    });
-
-    expect(await issuePrivacyPassTokens('conv-1', 1)).toBe(1);
-
-    const stored = kv.get('nyx_pp_tokens') as Record<string, string>;
-    const plain = JSON.parse(String(stored['conv-1']).slice(5)) as { tokens: string[] };
-    const raw = bytes(plain.tokens[0]!);
-    expect(await suite.verify(rotated.publicKey, raw.subarray(32), await ppMessage('conv-1', raw.subarray(0, 32)))).toBe(true);
-    expect(issuerReads).toBe(2);
-  });
-}, 120_000);
+});

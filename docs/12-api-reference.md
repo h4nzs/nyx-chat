@@ -102,8 +102,7 @@ ada handler yang menulis/membaca `userId` (`docs/37` §37.3).
 | GET | `/:id/epoch` | Admin capability → `{epoch, rotatedAt, createdAt, messageSeq}` — dasar keputusan rotasi PCS di klien (`docs/37` §37.3.6) |
 | POST | `/:id/epoch` | Admin capability → rotasi group token `{token, epoch, expiresAt}`; token mentah hanya dikembalikan ke pemegang capability |
 | DELETE | `/:id/membership` | Revoke oleh pemegang token: hapus barisnya sendiri (epoch **tidak** naik) |
-| GET | `/pp/issuer` | `{suite, keyId, publicJwk}` — kunci verifikasi Privacy Pass |
-| POST | `/pp/issue` | `{groupToken, memberToken, blinded[]}` → `{signatures, suite, keyId}`; issuer menandatangani pesan ter-blind (tidak melihat isinya) |
+| POST | `/pp/issue` | `{groupToken, memberToken, commitments[]}` → `{accepted, suite}`; klien mengirim `SHA-256(token)`, server menyimpan HMAC komitmen (tanpa token mentah) |
 | POST | `/pp/redeem` | `{conversationId, tokens[]}` → `{accepted, spent, invalid}`; 403 bila tidak ada yang diterima |
 
 ## messages — `/api/messages`

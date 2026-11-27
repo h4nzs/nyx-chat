@@ -52,8 +52,7 @@ import {
   PP_ISSUE_LIMIT,
   PP_MAX_ISSUE_PER_REQUEST,
   PP_SUITE,
-  loadPpIssuerKeys,
-  ppBlindSign,
+  ppIssueCommitments,
   ppRedeemToken,
 } from '../utils/privacyPass.js'
 
@@ -70,15 +69,17 @@ const SYNC_RATE = { limit: 120, windowSeconds: 60 } as const
 const REFRESH_RATE = { limit: 10, windowSeconds: 60 } as const
 
 const tokenSchema = z.string().refine(isOpaqueToken, 'invalid token')
+/** Token/komitmen Privacy Pass = 32 byte base64url (43 karakter). */
+const ppValueSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'invalid privacy pass value')
 
 const syncBodySchema = z.object({
   tokens: z.array(tokenSchema).max(MAX_SYNC_TOKENS),
   // `ids` TIDAK dipakai untuk discovery (itu jalur JWT `/conversations/sync`);
   // diterima hanya agar klien bisa mengirim satu request bentuk lama saat migrasi.
   ids: z.array(z.string()).max(200).optional(),
-  // [docs/37 §37.3.3] Bukti Privacy Pass (satu token = satu sync). Opsional
+  // [docs/43 §43.4.1] Bukti Privacy Pass (satu token = satu sync). Opsional
   // kecuali `PP_SYNC_REQUIRED=1`; token spent/invalid tidak pernah dicatat.
-  proofs: z.array(z.string().min(1).max(1024)).max(20).optional(),
+  proofs: z.array(ppValueSchema).max(20).optional(),
 })
 
 const refreshBodySchema = z.object({ token: tokenSchema })
@@ -102,12 +103,12 @@ const mailboxPullBodySchema = z.object({
 const ppIssueBodySchema = z.object({
   groupToken: tokenSchema,
   memberToken: tokenSchema,
-  blinded: z.array(z.string().min(1).max(1024)).min(1).max(PP_MAX_ISSUE_PER_REQUEST),
+  commitments: z.array(ppValueSchema).min(1).max(PP_MAX_ISSUE_PER_REQUEST),
 })
 
 const ppRedeemBodySchema = z.object({
   conversationId: z.string().min(1).max(64),
-  tokens: z.array(z.string().min(1).max(1024)).min(1).max(20),
+  tokens: z.array(ppValueSchema).min(1).max(20),
 })
 const membershipBodySchema = z.object({ token: tokenSchema })
 
@@ -226,29 +227,13 @@ router.post('/token/refresh', zodValidate({ body: refreshBodySchema }), async (r
 })
 
 /**
- * [docs/37 §37.3.3] Issuer Privacy Pass.
- *
- * Kunci publik boleh dilihat siapa pun (itu kunci verifikasi), kunci privat
- * hanya di server. `keyId` ikut dipublikasikan supaya rotasi kunci tidak
- * membuat klien menebak.
- */
-router.get('/pp/issuer', async (_req, res, next) => {
-  try {
-    const keys = await loadPpIssuerKeys()
-    res.json({ suite: PP_SUITE, keyId: keys.keyId, publicJwk: keys.publicJwk })
-  } catch (error) {
-    next(error)
-  }
-})
-
-/**
  * Issuance: butuh bukti keanggotaan (group token era berjalan + member token
- * yang masih sah). Server menandatangani pesan ter-blind TANPA melihat isinya,
- * jadi ia tidak bisa menghubungkan token hasil dengan pemanggil issuance.
+ * yang masih sah). Klien mengirim komitmen `SHA-256(token)`, bukan token;
+ * server hanya menyimpan HMAC-nya dan tidak bisa memakainya untuk redeem.
  */
 router.post('/pp/issue', zodValidate({ body: ppIssueBodySchema }), async (req, res, next) => {
   try {
-    const { groupToken, memberToken, blinded } = req.body as z.infer<typeof ppIssueBodySchema>
+    const { groupToken, memberToken, commitments } = req.body as z.infer<typeof ppIssueBodySchema>
 
     if (!await tokenBucketAllows(memberToken, 'pp_issue', PP_ISSUE_LIMIT.limit, PP_ISSUE_LIMIT.windowSeconds)) {
       incCounter(PRIVACY_PASS, { route: 'issue', result: 'rate_limited' })
@@ -274,9 +259,13 @@ router.post('/pp/issue', zodValidate({ body: ppIssueBodySchema }), async (req, r
       return res.status(403).json({ error: 'GROUP_AUTH_REQUIRED' })
     }
 
-    const signatures = await ppBlindSign(blinded)
+    const accepted = await ppIssueCommitments(redisClient, row.conversationId, commitments)
+    if (accepted !== commitments.length) {
+      incCounter(PRIVACY_PASS, { route: 'issue', result: 'denied' })
+      return res.status(409).json({ error: 'PP_ISSUE_REJECTED', accepted })
+    }
     incCounter(PRIVACY_PASS, { route: 'issue', result: 'ok' })
-    res.json({ signatures, suite: PP_SUITE, keyId: (await loadPpIssuerKeys()).keyId })
+    res.json({ accepted, suite: PP_SUITE })
   } catch (error) {
     next(error)
   }

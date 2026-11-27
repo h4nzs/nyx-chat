@@ -399,8 +399,9 @@ X25519, ChaCha20-Poly1305 option present) — only the group key-management arch
 fail-closed tanpa issuer.** Detail lengkap: `docs/37` (37.2, 37.3, §37.9). Yang
 sudah jalan: token grup ber-epoch + TTL/hash-at-rest (`utils/groupTokens.ts`),
 `POST /api/groups/sync` tanpa cookie/JWT (dipasang sebelum lapisan CSRF),
-mailbox grup pengganti graf distribusi kunci, Privacy Pass (blind RSA) untuk
-anti-abuse sync, OHTTP termasuk relay proses terpisah (opsional), rotasi epoch
+mailbox grup pengganti graf distribusi kunci, Privacy Pass (token acak +
+komitmen, `docs/43` §43.4.1; blind RSA dihapus 2026-11-27) untuk anti-abuse
+sync, OHTTP termasuk relay proses terpisah (opsional), rotasi epoch
 terjadwal 24 jam/500 pesan plus rotasi manual admin, dan verifier credential
 biner yang menolak semuanya sampai operator memasang suite (allowlist kosong).
 Yang **belum**: issuer PQ (spike BRaccoon ditutup, `docs/37` §37.9) dan

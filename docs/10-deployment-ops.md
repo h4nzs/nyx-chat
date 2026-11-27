@@ -100,7 +100,7 @@ ls /var/lib/nyx/kt-v2-snapshots/         # arsip snapshot KT terverifikasi (§10
 
 ### Server (`/root/nyx-app/.env`)
 
-**Wajib di production.** `config.ts` memperingatkan var wajib yang kosong (`PORT`, `CORS_ORIGIN`, `JWT_SECRET`) dan **menolak boot** bila `JWT_SECRET` kosong / bernilai `dev-secret`; `NYX_AT_REST_PEPPER` melempar error begitu dipakai tanpa nilai di produksi, dan issuer key gagal-tertutup saat kredensial grup diminta:
+**Wajib di production.** `config.ts` memperingatkan var wajib yang kosong (`PORT`, `CORS_ORIGIN`, `JWT_SECRET`) dan **menolak boot** bila `JWT_SECRET` kosong / bernilai `dev-secret`; `NYX_AT_REST_PEPPER` melempar error begitu dipakai tanpa nilai di produksi. Privacy Pass tidak punya issuer key sejak `docs/43` §43.4.1.
 
 | Var | Purpose |
 |---|---|
@@ -128,12 +128,13 @@ ls /var/lib/nyx/kt-v2-snapshots/         # arsip snapshot KT terverifikasi (§10
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` / `R2_PUBLIC_DOMAIN` | Cloudflare R2: blob terenkripsi + arsip snapshot KT |
 | `UPLOAD_DIR` | Direktori fallback upload lokal bila tidak memakai bucket R2 (default `uploads`) |
 | `GROUP_RELEASE_JITTER_MS` | [docs/37 P8] Jitter rilis pesan grup (ms, default kosong = mati, clip 2000). Menambah latensi ACK? Tidak — ACK dikirim dulu; hanya relay yang ditunda. Metrik `nyx_group_release_delay_ms` |
+| `OHTTP_PRIVATE_KEY` / `OHTTP_PUBLIC_KEY` | [docs/35 Fase 3] Pasangan kunci gateway P-256 (key id 1); `OHTTP_NEXT_*` untuk rotasi (key id 2). Generate: `pnpm --filter nyx-server run ohttp-key:generate`. Private key hanya di `/root/nyx-app/.env` (0600) |
+| `OHTTP_XWING_PRIVATE_KEY` / `OHTTP_XWING_PUBLIC_KEY` | [docs/43 §43.12.4] Slot hybrid X-Wing (key id 3; public 1216 byte). Opsional dan harus diisi berdua. Klien baru meminta lewat `Accept: application/ohttp-keys+xwing`; klien lama tetap P-256. `OHTTP_XWING_NEXT_*` untuk rotasi (key id 4). Generate: `pnpm --filter nyx-server run ohttp-key:generate -- --suite=xwing` |
 | `OHTTP_RELAY_EXTERNAL` | [docs/37 P7] `1` = relay OHTTP dijalankan proses terpisah; API tidak memasang `/api/ohttp/relay`. Butuh `nyx-ohttp-relay`; klien memakai default same-origin `/api/ohttp/relay` (nginx → `:4100`), `VITE_OHTTP_RELAY_URL` hanya bila relay berada di origin lain (§10.18) |
 | `OHTTP_TOKEN_MODE` | `on` (default) \| `off`. `off` = relay mencetak token sendiri (butuh sesi/CSRF, hanya loopback) — wajib `OHTTP_INTERNAL_TOKEN` atau `JWT_SECRET` yang sama di semua worker (§10.18) |
 | `OHTTP_INTERNAL_TOKEN` | [audit F-06/N9-01] Rahasia relay → gateway **dan** kunci HMAC tag klien relay (≥32 karakter). Saat `OHTTP_TOKEN_MODE=off` kosong = HMAC(`JWT_SECRET`) deterministik (tanpa keduanya boot gagal); pada mode `on` kosong = tanpa tag klien. Isi eksplisit **juga pada mode `on`** bila relay adalah proses/systemd sendiri, dengan nilai sama di API dan relay (§10.18) |
 | `OHTTP_GATEWAY_TARGET` / `OHTTP_GATEWAY_TRUSTED_HOSTS` | [docs/37 P7] Tujuan gateway untuk relay proses terpisah (wajib loopback kecuali host disebut di CSV `TRUSTED_HOSTS`) — §10.18 |
-| `PP_ISSUER_PRIVATE_JWK` | [docs/37 §37.3.3] JWK privat issuer Privacy Pass (RSA-2048, RSABSSA-SHA384-PSS-Deterministic). **Wajib di production**: `utils/privacyPass.ts` melempar bila kosong saat kunci diminta, karena kunci ephemeral membatalkan semua token klien setiap restart. Generate/rotasi: `pnpm --filter nyx-server run pp-key:generate` (cetak) atau `-- --write` (tulis `server/.env`, mode 0600). Nilai yang sama harus dipakai **semua worker** |
-| `PP_SYNC_REQUIRED` | [docs/37 §37.3.3] `1` = sync anonim tanpa bukti Privacy Pass sah dijawab `403 PP_PROOF_REQUIRED` (fail-closed). Kosong = bukti hanya dihabiskan bila klien mengirimnya. Nyalakan hanya setelah `PP_ISSUER_PRIVATE_JWK` stabil; metrik `nyx_privacy_pass_total{route,result}` + alert `NyxPrivacyPassDenied`. Prosedur: §10.22 |
+| `PP_SYNC_REQUIRED` | [docs/43 §43.4.1] `1` = sync anonim tanpa bukti Privacy Pass sah dijawab `403 PP_PROOF_REQUIRED` (fail-closed). Kosong = bukti hanya dihabiskan bila klien mengirimnya. Token 256-bit dibuat klien; server hanya menyimpan HMAC komitmen (`NYX_AT_REST_PEPPER` harus stabil). Nyalakan setelah semua klien memakai protokol baru; metrik `nyx_privacy_pass_total{route,result}` + alert `NyxPrivacyPassDenied`. Prosedur: §10.22 |
 | `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile verify (register/PoW) |
 | `VAPID_SUBJECT` / `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Web Push |
 | `TURN_URLS` / `TURN_STATIC_AUTH_SECRET` / `TURN_TTL` | coturn self-host **primer** (WebRTC): kredensial HMAC time-limited, username memakai `identityTag` (bukan userId). Kosong → jatuh ke Cloudflare. `docs/30` §30.9 |
@@ -1269,6 +1270,22 @@ curl -fsS http://127.0.0.1:4100/healthz
 #    berada di origin/host lain.
 ```
 
+**Dual-suite X-Wing (`docs/43` §43.12.4).** Collection P-256 tetap di
+`GET /api/ohttp/config` untuk klien lama. Klien baru mengirim
+`Accept: application/ohttp-keys+xwing` dan menerima collection hybrid (key id
+3/4) pada URL yang sama; response memakai `Vary: Accept` dan `Cache-Control:
+no-store`. Isi slot dengan:
+
+```bash
+pnpm --filter nyx-server run ohttp-key:generate -- --suite=xwing
+# salin OHTTP_XWING_PRIVATE_KEY / OHTTP_XWING_PUBLIC_KEY ke /root/nyx-app/.env
+pm2 restart nyx-api --update-env
+```
+
+Jangan mengisi separuh slot (boot gagal). Menghapus slot hybrid setelah klien
+memin-nya membuat klien baru gagal `OHTTP_HYBRID_REMOVED` (anti-downgrade);
+rollback memerlukan reset pin klien, jadi rotasi lebih aman daripada pencabutan.
+
 **Batasan yang ditegakkan saat boot.** Target gateway non-loopback ditolak
 (relay akan menjadi open proxy) kecuali host itu disebut eksplisit di
 `OHTTP_GATEWAY_TRUSTED_HOSTS` (Docker: `server`); `OHTTP_TOKEN_MODE=off` ditolak
@@ -1425,7 +1442,8 @@ berlapis); klien tetap memverifikasi sendiri.
   (`{a,b}` = publik ML-DSA-65 base64url), `PIR_SIGNING_KEYS`
   (`{a,b}` = path berkas kunci, 0600), `PIR_SHARD_DIR` (artefak lokal per
   server), `PIR_ADMIN_TOKEN` (**sama** dengan kedua sidecar),
-  `PIR_RECORD_BYTES` (default 512), `PIR_OPRF_ENABLED=1` (tanpa ini register/
+  `PIR_RECORD_BYTES` (default 2048), `PIR_DIRTY_REFRESH_CRON` (default
+  `*/3 * * * *`), `PIR_OPRF_ENABLED=1` (tanpa ini register/
   login tidak mengisi `oprfIndex` dan snapshot kosong).
 - Env sidecar `pir-a.env` / `pir-b.env`: `PIR_BIND` (loopback `:9470`/`:9471`),
   `PIR_ADMIN_TOKEN`, `PIR_SHARD_DIR` (direktori berisi shard server itu).
@@ -1645,24 +1663,21 @@ mati sementara API tampak sehat. Karena itu urutan menyalakannya penting.
 
 **Prasyarat**
 
-1. `PP_ISSUER_PRIVATE_JWK` sudah diset di `/root/nyx-app/.env` dan **stabil**
-   (bukan kunci ephemeral). Generate di VPS:
-   `pnpm --filter nyx-server run pp-key:generate -- --write` (menulis
-   `server/.env` mode 0600; `--write` tidak mencetak rahasianya). Salin nilainya
-   ke `/root/nyx-app/.env` — deploy menimpa `server/.env` dengan file itu.
-2. Semua worker memakai kunci yang sama (satu baris env; pm2 cluster membaca
-   `server/.env` yang sama, jadi ini otomatis kecuali ada override per proses).
-3. Klien yang beredar sudah memuat jalur retry `PP_PROOF_REQUIRED`
-   (`ensurePrivacyPassProof` → terbitkan bukti sinkron lalu ulangi sekali).
-   Klien lama akan gagal sync saat stok bukti kosong — ia menerbitkan bukti di
-   latar, jadi sync berikutnya lolos, tetapi discovery pertama bisa kosong.
+1. `NYX_AT_REST_PEPPER` stabil di `/root/nyx-app/.env`. Nilainya dipakai HMAC
+   komitmen token; mengganti pepper membuat semua token terbitan lama tidak sah
+   (dan, seperti sebelumnya, membuat kolom ter-seal legacy tak terbaca — lihat
+   §10.17). Tidak ada issuer key yang perlu digenerate.
+2. Klien yang beredar sudah memakai protokol token acak (`docs/43` §43.4.1)
+   dan jalur retry `PP_PROOF_REQUIRED` (`ensurePrivacyPassProof`). Klien lama
+   yang masih mengirim Blind RSA akan ditolak; jangan nyalakan gate sebelum
+   rollout klien selesai.
+3. Semua worker memakai env yang sama (pm2 cluster membaca `server/.env` yang
+   sama; tidak ada kunci per-proses).
 
 **Menyalakan**
 
 ```bash
 # di VPS
-grep -q '^PP_ISSUER_PRIVATE_JWK=..' /root/nyx-app/.env || \
-  pnpm --filter nyx-server run pp-key:generate -- --write   # lalu salin ke /root/nyx-app/.env
 sed -i 's/^PP_SYNC_REQUIRED=.*/PP_SYNC_REQUIRED=1/' /root/nyx-app/.env   # atau tambahkan barisnya
 pm2 restart nyx-api --update-env
 ```
@@ -1670,21 +1685,22 @@ pm2 restart nyx-api --update-env
 **Verifikasi (10–15 menit setelah restart)**
 
 - `curl -s localhost:${METRICS_PORT:-9464}/metrics | grep nyx_privacy_pass_total`
-  — `route="issue",result="ok"` harus bertambah (klien menerbitkan bukti) dan
+  — `route="issue",result="ok"` harus bertambah (klien mengirim komitmen) dan
   `route="sync",result="ok"` bertambah; `result="denied"` hanya boleh spike
   singkat saat klien lama mencoba pertama kali.
-- `GET /api/groups/pp/issuer` menjawab `{suite, keyId, publicJwk}` (bukan 500).
+- `POST /api/groups/pp/issue` dengan `{groupToken, memberToken, commitments}`
+  menjawab `{accepted, suite:"nyx-pp-token-v1"}`; rute lama
+  `GET /api/groups/pp/issuer` sudah tidak ada (404).
 - Alert `NyxPrivacyPassDenied` (rasio `denied` > 20% selama 15 menit) **tidak**
-  menyala. Kalau menyala: cek `PP_ISSUER_PRIVATE_JWK` (kosong/beda antar worker),
-  rotasi kunci terakhir, dan `nyx_privacy_pass_total{route="issue",result=…}`.
+  menyala. Kalau menyala: cek versi klien yang beredar, `NYX_AT_REST_PEPPER`
+  (berubah antar worker), dan `nyx_privacy_pass_total{route="issue",result=…}`.
 
-**Rotasi kunci issuer**
+**Rotasi**
 
-Generate kunci baru, ganti baris env, restart. Klien memuat ulang issuer saat
-`keyId` berubah (`PP_ISSUER_KEY_CHANGED` → cache dibuang, satu percobaan ulang);
-token lama ditolak sampai klien menerbitkan token baru. Ledakan 403 yang singkat
-itu normal — retry klien menutupnya, dan alert ratio (bukan hitungan absolut)
-tidak menyala karenanya.
+Tidak ada kunci issuer untuk dirotasi. Mengganti `NYX_AT_REST_PEPPER`
+menghanguskan token yang belum dipakai; klien menerbitkan token baru pada sync
+berikutnya, jadi gejalanya hanya 403 singkat. Ikuti prosedur reseal §10.17 bila
+perubahan pepper memang diperlukan.
 
 **Rollback**
 
@@ -1692,10 +1708,10 @@ Hapus/`0`-kan `PP_SYNC_REQUIRED` lalu `pm2 restart nyx-api --update-env`. Bukti
 yang sudah terbit tetap sah sampai TTL 24 jam; tidak ada data yang perlu
 dibersihkan (key `pp:spent:*` ber-TTL).
 
-**Batas yang jujur** (docs/37 §37.9.4): token Privacy Pass adalah komposisi di
-atas blind RSA (`@cloudflare/blindrsa-ts`), **bukan** unforgeability
-pasca-kuantum; unlinkability issuance↔redemption bergantung pada OHTTP dan
-ketiadaan log waktu (metrik hanya enum hasil, tanpa token/keyId).
+**Batas yang jujur** (docs/37 §37.9.4): token Privacy Pass adalah komitmen
+SHA-256 atas byte acak klien, **bukan** unforgeability pasca-kuantum;
+unlinkability issuance↔redemption bergantung pada OHTTP dan ketiadaan log waktu
+(metrik hanya enum hasil, tanpa token/commitment).
 
 ## 10.23 Tulisan KT yang dilewati (`nyx_kt_writes_total{result="invalid"}`) — added 2026-10-29
 

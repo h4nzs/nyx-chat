@@ -154,8 +154,8 @@ di sini adalah keputusan protokol (`docs/03` §3.7.1).
   menyalakannya, memverifikasi, merotasi kunci, dan rollback ada di `docs/10`
   §10.22. Klien menutup cold-start: saat sync dijawab `403 PP_PROOF_REQUIRED`
   ia menerbitkan satu bukti secara sinkron (`ensurePrivacyPassProof`) lalu
-  mengulang **sekali**, dan memuat ulang issuer bila `keyId` berubah (rotasi
-  kunci tidak lagi membuat klien gagal permanen sampai reload).
+  mengulang **sekali**. Sejak `docs/43` §43.4.1 tidak ada issuer key: token
+  dibuat klien dan server hanya menyimpan HMAC komitmennya.
 - **Tidak ada** penulisan `userId`/`routingIdentity` di jalur ini; log hanya
   memuat `conversationId`, `epoch`, `result` (metrik event-only).
 - Rate limit per token-hash (Redis bucket) + batas **200 item per request**
@@ -435,11 +435,11 @@ estimasi penulis, bukan hasil pengukuran kami.
 - **Wire format credential tidak diubah.** `sigLen` tetap u16 dan batas 8 KiB,
   jadi suite PQ kelak bisa masuk tanpa migrasi format bila signature-nya muat.
 - **Yang tidak boleh diklaim:** token grup ber-epoch bukan credential PQ; token
-  Privacy Pass (blind RSA, RFC 9474) hanya bukti anti-abuse untuk sync anonim —
-  **bukan** unforgeability pasca-kuantum, dan unlinkability-nya bergantung pada
-  OHTTP yang belum terpisah prosesnya.
+  Privacy Pass (token acak + komitmen, `docs/43` §43.4.1) hanya bukti anti-abuse
+  untuk sync anonim — **bukan** unforgeability pasca-kuantum, dan
+  unlinkability-nya bergantung pada OHTTP yang belum terpisah prosesnya.
 - **Privacy Pass dipakai (bukan dihapus)**: anti-replay `SET {EX,NX}` (F-01),
-  issuer key wajib di produksi, gate `PP_SYNC_REQUIRED=1` opsional dengan alert
+  tanpa issuer key, gate `PP_SYNC_REQUIRED=1` opsional dengan alert
   `NyxPrivacyPassDenied`. Exception PQ-nya tetap di
   `scripts/pq-only-exceptions.json` (tier B, gate BRaccoon §37.9.5).
 
