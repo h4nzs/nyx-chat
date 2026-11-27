@@ -28,15 +28,15 @@ Prinsip yang tidak berubah:
 | §6.6 MinIO jalur sukses R2 | ✅ dijalankan lokal + CI | `R2_ENDPOINT` di `server/src/config.ts` + `resolveR2Endpoint` (`utils/r2.ts`); 4 tes kontrak + 1 tes opt-in `NYX_R2_SMOKE=1`; presign→PUT→HEAD→GET→DELETE nyata lulus terhadap `rclone serve s3` (SigV4 penuh, 5/5). Job `unit` menjalankan `rclone serve s3` v1.75.2 (`NYX_R2_SMOKE_CREATE_BUCKET=1`) tanpa menambah required check |
 | §6.7 PIR dua server | ✅ WP1–WP9 | keputusan 2026-11-09: ChalametPIR (tanpa proof) diganti **XOR-PIR dua server + sharding** — deteksi dusta dari satu server jujur, tanpa proof dan tanpa hint. Kontrak, builder shard, sidecar A/B, proxy dua-server (`PIR_SERVERS`), dan klien XOR (dua relay OHTTP + verifikasi manifest) sudah ada; jalur lama sudah dihapus. Unit template + metrik/alert ops juga sudah (WP7). E2E dua server + vektor lintas-impl sudah (WP8, drill CI `pir-e2e`); WP9 = pembersihan sisa jalur lama + `STATUS.md` (selesai). Performa diukur manual via `scripts/bench/pir-query.mjs` (2026-11-11: p95 3,8 ms; 2.560 B/query; RSS 1,61× pada shard 8 MiB, 1,16× pada 32 MiB — target gate di `docs/42`). |
 | §6.8 KT live E2E | ✅ ABI 2 | `web/e2e/ktLive.spec.ts`: config `abiVersion: 2` + kunci ML-DSA-65, `/head`, anchor `distinguished`, bukti publik `POST /search`; **lulus 1,4 menit** terhadap KT v2 lokal. Interop `cmd/kt-client` tetap item lanjutan. |
-| §7.1 WebKit/Firefox smoke | ✅ hijau di nightly (belum PR gating) | `firefox`/`webkit` di `playwright.config.ts`, job `browsers` di `nightly.yml`. **Run hijau pertama 13 November 2026** (`43433660755`, head `ee2c0f2f`, job 12,6 menit): Firefox **4/4 (4,7 m)** dan WebKit **4/4 (4,8 m)** untuk `auth.spec` + `settings.spec`, lalu a11y **3/3 (1,4 m)** di job yang sama. Dua nightly berikutnya merah di job yang sama (`43574679145`, `43694895316`) karena pemindaian Settings membaca badge "SANDBOXED" yang ber-`animate-pulse` (opacity keyframe 1 → 0,5); animasinya dihapus di `72629e60`, lalu nightly **`43829117924`** (head `72629e60`, job **6,0 menit**) hijau 5/5 — Firefox 4/4, WebKit 4/4, a11y 3/3. Karena kontraknya "7 hari hijau berturut-turut", jamnya dihitung ulang dari **16 November 2026** (paling cepat 23 November 2026). `transport`/`chat` tetap di `e2e-chrome`: WebTransport tidak ada di Firefox/WebKit headless |
+| §7.1 WebKit/Firefox smoke | 🟡 harness produksi (verifikasi lokal; nightly berikutnya mengonfirmasi) | `firefox`/`webkit` di `playwright.browsers.config.ts` (build produksi + `vite preview` sejak 26 November 2026, karena worker ESM dev Vite ditolak COEP WebKit), job `browsers` di `nightly.yml`. **Run hijau pertama 13 November 2026** (`43433660755`, head `ee2c0f2f`, job 12,6 menit): Firefox **4/4 (4,7 m)** dan WebKit **4/4 (4,8 m)** untuk `auth.spec` + `settings.spec`, lalu a11y **3/3 (1,4 m)** di job yang sama. Dua nightly berikutnya merah di job yang sama (`43574679145`, `43694895316`) karena pemindaian Settings membaca badge "SANDBOXED" yang ber-`animate-pulse` (opacity keyframe 1 → 0,5); animasinya dihapus di `72629e60`, lalu nightly **`43829117924`** (head `72629e60`, job **6,0 menit**) hijau 5/5 — Firefox 4/4, WebKit 4/4, a11y 3/3. Karena kontraknya "7 hari hijau berturut-turut", jamnya dihitung ulang dari **16 November 2026** (paling cepat 23 November 2026). `transport`/`chat` tetap di `e2e-chrome`: WebTransport tidak ada di Firefox/WebKit headless |
 | §7.2 contract test HTTP | ✅ opt-in | `server/tests/httpContract.test.ts` (**7 sub-tes**: helmet, JSON 400, CSRF 403, body 413, csrf-token, CORS, **429**) + job `http-contract`; memakai `fetch` + `app.listen(0)`, bukan supertest, dan tidak jalan di suite unit karena butuh Redis/Postgres |
 | §7.3 nightly fuzz/k6 | ✅ hijau penuh | `.github/workflows/nightly.yml`: fuzz web 1 jam (60,4 m), fuzz sidecar 1 jam (61,1 m), k6 100 VU ephemeral (5,8 m), contract HTTP (39 dtk), smoke Firefox/WebKit + a11y (6,0 m). **5/5 job hijau** di run **`43829117924`** (16 November 2026, head `72629e60`); run sebelumnya `43433660755` (13 November 2026, head `ee2c0f2f`) juga 5/5, sedangkan `43574679145` dan `43694895316` merah hanya di job smoke (lihat §7.1) |
 | §7.4 flake gate + karantina | ✅ gate | `web/e2e/quarantine.json` + `evaluateQuarantine` di `verify-required-tests.mjs` (owner/reason/expires wajib; kedaluwarsa/masih-jalan tes hilang = gagal); self-test 12/12 |
 | §7.5 backup/restore E2E | ✅ Playwright | `web/e2e/backupRestore.spec.ts`: ekspor `.nyxbak` (**magic `NYXB`**, unduhan nyata) lalu restore dengan recovery phrase yang dibaca dari onboarding; **lulus 2,1 menit**. Drill mingguan tetap ada. |
-| §8 a11y (sisanya belum) | 🟡 a11y (4 halaman) | `web/e2e/a11y.spec.ts`: login, register/landing, **Settings ber-sesi**, dan satu tes gabungan chat + privacy status + modal story; pelanggaran yang ditemukan diperbaiki di UI (label select/input, nama tombol swatch, kontras tombol Register, kontras `DefaultAvatar`). Flake kontras terakhir bukan warna melainkan animasi: badge "SANDBOXED" memakai `animate-pulse` yang menurunkan opacity ke 0,5, sehingga axe kadang membaca kontras setengah (`43694895316` merah, `43433660755` hijau dengan kelas warna identik). Animasinya dihapus di `72629e60` (hover tetap menandakan interaktif, tes memeriksa kontras bukan animasi); 3 kali jalan berturut-turut hijau (1,7 / 1,5 / 1,3 menit) dan nightly `43829117924` hijau. 2026-11-24: tes ber-sesi keempat memindai chat, privacy status, dan modal story dalam satu registrasi (registrasi ketiga berturut-turut tertahan `REGISTRATION_BURST_LIMIT`); temuan yang diperbaiki: nama tombol lonceng notifikasi, kontras empty-state chat + tombol Refresh privacy, sr-only pada tombol story sendiri. PWA/offline, visual, perf, mutation belum |
-| §9.1 branch protection | ✅ aktif | 14 required contexts (12 job `ci.yml` + 2 CodeQL) |
+| §8 a11y (sisanya belum) | 🟡 a11y (4 halaman) | `web/e2e/a11y.spec.ts`: login, register/landing, **Settings ber-sesi**, dan satu tes gabungan chat + privacy status + modal story; pelanggaran yang ditemukan diperbaiki di UI (label select/input, nama tombol swatch, kontras tombol Register, kontras `DefaultAvatar`). Flake kontras terakhir bukan warna melainkan animasi: badge "SANDBOXED" memakai `animate-pulse` yang menurunkan opacity ke 0,5, sehingga axe kadang membaca kontras setengah (`43694895316` merah, `43433660755` hijau dengan kelas warna identik). Animasinya dihapus di `72629e60` (hover tetap menandakan interaktif, tes memeriksa kontras bukan animasi); 3 kali jalan berturut-turut hijau (1,7 / 1,5 / 1,3 menit) dan nightly `43829117924` hijau. 2026-11-24: tes ber-sesi keempat memindai chat, privacy status, dan modal story dalam satu registrasi (registrasi ketiga berturut-turut tertahan `REGISTRATION_BURST_LIMIT`); temuan yang diperbaiki: nama tombol lonceng notifikasi, kontras empty-state chat + tombol Refresh privacy, sr-only pada tombol story sendiri. 2026-11-26: subhalaman `/settings/keys` dan `/settings/sessions` ikut dipindai; temuan yang diperbaiki: kontras deskripsi rotasi kunci, kontras badge `CURRENT`, dan link kembali tanpa nama. PWA produksi kini `web/e2e/pwa.spec.ts` (SW aktif + shell login saat offline, config sendiri). 2026-11-26: alur grup (create → panel info → Add Participant) ikut dipindai; temuan tombol close/edit/switch/menu tanpa nama dan kontras judul/timestamp/Add Participants diperbaiki. Visual, perf, dan mutation belum |
+| §9.1 branch protection | ✅ aktif | 15 required contexts (13 job `ci.yml`, termasuk `E2E stack`, + 2 CodeQL) |
 | §9.2 Dependabot lockfile | ✅ selesai | `.github/workflows/dependabot-lockfile.yml` |
-| §9.4 CI hygiene | ✅ selesai | `concurrency` + `timeout-minutes` 12 job + artifact saat gagal |
+| §9.4 CI hygiene | ✅ selesai | `concurrency` + `timeout-minutes` 13 job + artifact saat gagal |
 
 ## 41.2 Baseline terukur (5 November 2026)
 
@@ -45,17 +45,17 @@ mengukurnya kembali.
 
 | Item | Nilai | Cara ukur |
 |---|---|---|
-| Job `ci.yml` | 12 | `python3 -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']))"` |
+| Job `ci.yml` | 13 | `python3 -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']))"` |
 | Workflow total | 12 | `ls .github/workflows/` |
-| Spec E2E | 19 | `ls web/e2e/*.spec.ts | wc -l` |
-| Berkas tes web | 137 | `find web/src -name '*.test.ts*' | wc -l` |
+| Spec E2E | 28 | `ls web/e2e/*.spec.ts | wc -l` |
+| Berkas tes web | 153 | `find web/src -name '*.test.ts*' | wc -l` |
 | Berkas tes server | 102 (13 Nov 2026) | daftar eksplisit `server/package.json` |
 | Tes Go KT | 58 | `cd server/kt-query && ./build.sh test` |
 | Aturan alert | 44 | `grep -c '^\s*- alert:' ops/prometheus/alerts.yml` |
-| Required contexts `main` | 14 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
-| Manifest E2E | chromium 14 / chrome 17 `mustPass`, `minTotal` 27 | `web/e2e/required-tests.json` |
+| Required contexts `main` | 15 | `gh api repos/h4nzs/nyx-chat/branches/main/protection` |
+| Manifest E2E | chromium 15 / chrome 19 `mustPass`, `minTotal` 29 | `web/e2e/required-tests.json` |
 | Durasi job E2E | 19,5 m (`chromium`) / 17,2 m (`chrome`) pada run `43692225973`, batas 40/45 m | halaman run Actions |
-| Alert Dependabot terbuka | 11 (2 high / 5 medium / 4 low) — per cek terakhir | `gh api .../dependabot/alerts?state=open` |
+| Alert Dependabot terbuka | 4 (1 medium / 3 low, semuanya `rustls`; bump 0.23.46 menutupnya setelah push) — 26 Nov 2026 | `gh api .../dependabot/alerts?state=open` |
 
 ## 41.3 Phase 0 — hijaukan main (terbukti hijau di CI)
 
@@ -220,11 +220,11 @@ hilang, jumlah menyusut; 4 karantina: sah, kedaluwarsa, tes hilang, masih
 berjalan; 4 snapshot: cocok, tes hilang, tes baru, `minTotal` tidak sinkron)
 dan ikut jalan di CI.
 
-Cakupan `mustPass` (dihitung 16 November 2026 dari manifest): auth
-(register/login/wrong password), profile, security, settings, recovery,
-deviceLinking, group lifecycle, group era, group faults, backup/restore —
-**12 tes di chromium** — plus transport (2), chat, dan seluruh daftar chromium di
-chrome (**15 tes**). Angka di paragraf ini pernah tertinggal (10/13) saat
+Cakupan `mustPass` (per 27 November 2026): auth (register/login/wrong password),
+profile, security, settings, recovery, deviceLinking, group lifecycle, group era,
+group faults, backup/restore, **panic wipe** — **15 tes di chromium** — plus
+transport (2), chat, dan burner destroyed-after-reload di chrome (**19 tes**).
+Angka di paragraf ini pernah tertinggal (10/13) saat
 `groupEra`/`groupFaults` masuk; sejak 2026-11-24 `web/e2e/required-tests.snapshot.json`
 mengunci himpunan `file::title` dan gate mensyaratkan `minTotal` sama dengan
 jumlah entri snapshot. Tes baru/berubah tidak bisa lolos tanpa memperbarui
@@ -329,8 +329,11 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
 ## 41.5 P1/P2 — status per 5 November 2026
 
 - **§7.1** WebKit/Firefox smoke — **hijau di nightly 13 November 2026**:
-  `firefox` dan `webkit` di `web/playwright.config.ts`, job `browsers` di
-  `nightly.yml` (auth + settings + a11y dalam satu job). Run `43433660755`
+  `firefox` dan `webkit` di `web/playwright.browsers.config.ts` (build
+  produksi + `vite preview`), job `browsers` di `nightly.yml` (auth + settings).
+  Build produksi dipakai karena WebKit 26.6 menolak import Worker ESM milik dev
+  server Vite di bawah COEP (bug 261734: CORP tidak berlaku untuk import di
+  dalam Worker); worker hasil bundle tidak punya import runtime. Run `43433660755`
   (head `ee2c0f2f`) selesai 5/5 job hijau: Firefox 4/4 (4,7 m), WebKit 4/4
   (4,8 m), a11y 3/3 (1,4 m). Yang membuat WebKit menggantung bukan tesnya:
   build dev tidak punya `sw.js`, dan menyentuh `navigator.serviceWorker` di
@@ -340,6 +343,9 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
   `TRUST_STEP_TIMEOUT_MS` = 180 dtk dengan angka terukur (Firefox CI 1,3 m,
   WebKit lokal 45–60 dtk), bukan 90 dtk yang memotong pekerjaan sah.
   **Naik ke PR setelah 7 hari hijau** (paling cepat 20 November 2026).
+  **26 November 2026**: harness pindah ke build produksi + `vite preview`
+  (`playwright.browsers.config.ts`) karena bug COEP Worker ESM WebKit; hitungan
+  7 hari dimulai ulang dari nightly pertama yang hijau dengan harness ini.
 - **§7.2** Contract test HTTP — **selesai sebagai tes opt-in**:
   `server/tests/httpContract.test.ts` (7 tes) dijalankan job `http-contract`
   nightly. Env diset sebelum `import app`; Redis disambungkan **sebelum** import
@@ -387,15 +393,25 @@ Interop `cmd/kt-client` tetap menjadi item terpisah sesuai keputusan §41.7(a).
   `color-contrast` serious — badge "SANDBOXED" di Settings
   (`text-yellow-500` di atas tint `bg-yellow-500/10` ≈ 1,4:1) — diperbaiki di
   UI menjadi `text-yellow-800 dark:text-yellow-300`; fase a11y lalu hijau
-  **3/3 (1,4 m)** di run `43433660755`. PWA/offline, visual regression, perf
-  budget, chaos/race, kebocoran lintas akun, dan mutation testing belum.
+  **3/3 (1,4 m)** di run `43433660755`. 2026-11-26: PWA produksi (SW + offline
+  shell) dan subhalaman Settings keys/sessions ikut dipindai. **26 November
+  2026**: alur grup (`create group` → panel info → Add Participant) dipindai
+  dengan satu akun + kontak/anggota palsu; temuan yang diperbaiki: tombol
+  close/edit grup, switch cover traffic, dan menu anggota tanpa nama, kontras
+  judul/timestamp sidebar serta tombol Add Participants, dan `text-accent`
+  pada aksi anggota. Panel info di-scan lewat `AxeBuilder.include()` agar
+  elemen chat di belakang overlay tidak ikut terbaca. Visual regression,
+  mutation, chaos/race, dan kebocoran lintas akun belum. Budget
+  ukuran bundle produksi sudah aktif (`check:bundle-budget`, nightly job `pwa`),
+  tetapi belum ada budget runtime/visual.
 
 ## 41.6 Engineering health
 
 ### 9.1 Branch protection — aktif
 
-14 required contexts = 12 job `ci.yml` + `Analyze (actions)` +
-`Analyze (javascript-typescript)`. `strict: false`, `enforce_admins: false`
+15 required contexts = 13 job `ci.yml` (termasuk `E2E stack`) +
+`Analyze (actions)` + `Analyze (javascript-typescript)`. `strict: false`,
+`enforce_admins: false`
 (bypass admin untuk darurat, alasannya dicatat), tanpa wajib PR/review,
 force-push dan penghapusan branch diblokir. Gate isi (manifest, coverage) hidup
 di dalam job — required check hanya sekuat job yang menjalankannya.

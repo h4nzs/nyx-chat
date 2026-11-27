@@ -3,7 +3,7 @@
   "note": "Manifest tes wajib E2E (docs/41 \u00a76.5). Dibaca oleh web/e2e/verify-required-tests.mjs dari report JSON Playwright. Aturannya: `minTotal` = jumlah tes yang harus terkumpul untuk project itu; `mustPass` = tes yang wajib ada DAN benar-benar dijalankan (skip selalu pelanggaran); `allowedSkipReasons` = substring/regex alasan skip yang boleh (skip tanpa alasan atau dengan alasan baru = pelanggaran, jadi skip baru harus lewat PR yang mengubah berkas ini).",
   "projects": {
     "chromium": {
-      "minTotal": 27,
+      "minTotal": 29,
       "mustPass": [
         {
           "file": "story.spec.ts",
@@ -60,6 +60,10 @@
         {
           "file": "backupRestore.spec.ts",
           "title": "Backup & restore .nyxbak \u203a ekspor dari Settings lalu restore dengan phrase yang sama"
+        },
+        {
+          "file": "panic.spec.ts",
+          "title": "Panic password \u203a panic password menghapus state lokal, bukan membuka sesi"
         }
       ],
       "allowedSkipReasons": [
@@ -69,7 +73,7 @@
         "Object storage",
         "opt-in: jalankan",
         "OHTTP tidak aktif di server uji",
-        "stack OHTTP terpisah",
+        "PP_SYNC_REQUIRED tidak aktif",
         "VITE_PQ_V2 tidak aktif",
         "relay tidak mengiklankan spqr-ratchet",
         "jalur v2 tidak aktif",
@@ -78,7 +82,7 @@
       ]
     },
     "chrome": {
-      "minTotal": 27,
+      "minTotal": 29,
       "mustPass": [
         {
           "file": "story.spec.ts",
@@ -147,6 +151,14 @@
         {
           "file": "backupRestore.spec.ts",
           "title": "Backup & restore .nyxbak \u203a ekspor dari Settings lalu restore dengan phrase yang sama"
+        },
+        {
+          "file": "panic.spec.ts",
+          "title": "Panic password \u203a panic password menghapus state lokal, bukan membuka sesi"
+        },
+        {
+          "file": "regression.spec.ts",
+          "title": "Regression: burner flows \u203a burner conversation destroyed on host stays deleted after reload (regression: reappears)"
         }
       ],
       "allowedSkipReasons": [
@@ -155,7 +167,7 @@
         "Object storage",
         "opt-in: jalankan",
         "OHTTP tidak aktif di server uji",
-        "stack OHTTP terpisah",
+        "PP_SYNC_REQUIRED tidak aktif",
         "VITE_PQ_V2 tidak aktif",
         "relay tidak mengiklankan spqr-ratchet",
         "jalur v2 tidak aktif",

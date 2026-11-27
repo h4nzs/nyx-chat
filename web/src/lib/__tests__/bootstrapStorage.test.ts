@@ -15,8 +15,16 @@ vi.mock('../storage/appKv', () => ({
     throw new Error('bootstrap tidak boleh membuka SQLite');
   },
 }));
+vi.mock('../sodiumInitializer', () => ({
+  getSodium: async () => ({ randombytes_buf: () => new Uint8Array(16) }),
+}));
+vi.mock('../crypto-worker-proxy', () => ({
+  workerPanicHash: async (password: string) => `panic-hash:${password}`,
+}));
 
-const { getEncryptedKeys, saveEncryptedKeys } = await import('../keyStorage');
+const { getEncryptedKeys, saveEncryptedKeys, setPanicPassword, checkPanicPassword } = await import(
+  '../keyStorage'
+);
 const { getPersistentInstallationId } = await import('../../utils/fingerprint');
 const { keyVault } = await import('../storage/idbKv');
 
@@ -36,5 +44,11 @@ describe('bootstrap storage sebelum vault terbuka', () => {
     const second = await getPersistentInstallationId();
     expect(second).toBe(first);
     expect(first.startsWith('nyx_inst_')).toBe(true);
+  });
+
+  it('panic hash dibaca sebelum vault terbuka (login setelah logout)', async () => {
+    await setPanicPassword('panic-pass-123');
+    await expect(checkPanicPassword('panic-pass-123')).resolves.toBe(true);
+    await expect(checkPanicPassword('wrong-pass-123')).resolves.toBe(false);
   });
 });

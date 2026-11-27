@@ -158,32 +158,44 @@ Sisa klasik-saja:
 
 | Titik | Primitive | Keputusan |
 |---|---|---|
-| `web/src/lib/privacyPass.ts` | Blind RSA (RFC 9474) | **diganti** — lihat §43.4.1 |
-| OHTTP/HPKE `VITE_OHTTP_*` | KEM X25519 | hybrid X25519 + ML-KEM-768 |
+| `web/src/lib/privacyPass.ts` | Blind RSA (RFC 9474) | **selesai diganti 2026-11-27** — token acak + komitmen (§43.4.1) |
+| OHTTP/HPKE `VITE_OHTTP_*` | KEM P-256 | **hybrid X-Wing (X25519 + ML-KEM-768) selesai 2026-11-27**; P-256 tetap fallback |
 
-### 43.4.1 Pengganti Blind RSA
+### 43.4.1 Pengganti Blind RSA — implemented 2026-11-27
 
 Tujuan aslinya: satu token anonim yang tidak bisa dikaitkan ke user, tapi hanya
 bisa dipakai sekali per sinkronisasi. Blind signature PQ yang matang belum ada,
-jadi mekanismenya diganti — bukan primitifnya:
+jadi mekanismenya diganti — bukan primitifnya. Implementasi ada di
+`web/src/lib/privacyPass.ts` (klien) dan `server/src/utils/privacyPass.ts`
+(server), suite `nyx-pp-token-v1`; rute `GET /pp/issuer` dan kunci
+`PP_ISSUER_PRIVATE_JWK` sudah dihapus.
 
-1. **Token buta tanpa tanda tangan buta**: server menerbitkan N token acak
-   256-bit per akun per 24 jam, disimpan sebagai HMAC(pepper) saja (tanpa
-   plaintext), dan klien menyimpannya ter-seal (`ENC1:`) seperti sekarang.
+1. **Token tanpa tanda tangan buta**: klien membuat token acak 256-bit dan
+   menyimpannya ter-seal (`ENC1:`); saat issuance ia hanya mengirim
+   `SHA-256(token)`. Server menyimpan `HMAC(pepper, conversationId || commitment)`
+   di Redis, tanpa token/komitmen mentah.
 2. **Anonimitas dari transport**, bukan dari buta kriptografis: token dikirim
    di dalam badan OHTTP (sudah ada), sehingga server tidak melihat IP/identitas
    saat memakai token.
-3. **Anti-replay + anti-linkability**: satu token = satu `POST /api/groups/sync`,
-   diikat ke `conversationId` lewat HMAC lokal (sudah ada di
-   `privacyPass.ts`); server menandai token terpakai di Redis dengan TTL 24 jam.
-4. **Batas**: server tetap bisa menghitung "berapa token dipakai per akun per
-   hari" (itu memang fitur rate-limit), tetapi tidak bisa mengaitkan token ke
-   percobaan sinkronisasi tertentu karena pemakaian terjadi di dalam OHTTP.
+3. **Anti-replay + binding**: satu token = satu `POST /api/groups/sync`.
+   Redemption menghitung komitmen dan HMAC yang sama; token hanya sah untuk
+   percakapan tempat ia diterbitkan, lalu ditandai spent (`SET NX`, TTL 24 jam).
+4. **Batas**: server tidak menyimpan pemetaan token→akun, jadi tidak bisa
+   menghitung "berapa token dipakai per akun per hari"; yang dibatasi adalah
+   issuance per member token per jam. Keterkaitan issuance↔redemption tetap
+   mungkin lewat waktu/IP bila OHTTP tidak dipakai.
 
-Risiko yang harus ditutup: tanpa blind signature, issuer bisa mengeluarkan token
-yang dapat dikenali. Mitigasi: token adalah byte acak yang dihasilkan **klien**
-lalu dikirim ke issuer yang hanya menyimpan HMAC-nya; issuer tidak pernah
-melihat nilai token, sehingga tidak bisa menandainya.
+Risiko yang harus ditutup: tanpa blind signature, server bisa mengeluarkan token
+yang dapat dikenali. Mitigasi: token adalah byte acak yang dihasilkan **klien**;
+server hanya menerima komitmen dan tidak pernah melihat nilai token sampai
+redemption, sehingga tidak bisa menandainya saat issuance.
+
+Gate E2E-nya `web/e2e/privacyPassSync.spec.ts` di stack
+`playwright.ohttp.config.ts` (yang menyalakan `PP_SYNC_REQUIRED=1`). Spec
+membuat dua akun lewat UI, membuat grup lewat API dengan token nyata, lalu:
+sync **tanpa cookie** tanpa bukti → 403 `PP_PROOF_REQUIRED`; issue komitmen →
+sync dengan token → 200 dan grup muncul; token yang sama diulang → 403. Ini
+membuktikan gate dan sifat sekali pakai, bukan hanya unit test dengan mock.
 
 ---
 
@@ -246,10 +258,10 @@ prosedur fail-closed saat satu host mati.
 | **B** | data lokal: **SQLite-WASM/OPFS menggantikan Dexie** (§43.11), satu skema tanpa rantai versi, kunci DB ter-seal | unit storage + kontrak, E2E auth + chat + group + backup + multi-tab |
 | **C** | protokol: pin ABI-1, `ktValue-1`, envelope v2/v3, `signingKeyV2` opsional, SPQR v1 + kill switch, `KT_SERVER_URL` | unit + E2E KT live + SPQR + group era |
 | **D** | at-rest satu format ber-AAD, hapus `sealedLookupCandidates` + `scripts/reseal-at-rest.ts` | unit server, drill backup/restore |
-| **E** | kripto: HPKE hybrid, pengganti Blind RSA (§43.4.1) | unit + E2E sync anonim |
+| **E** | kripto: HPKE hybrid X-Wing (**selesai 2026-11-27**, §43.12.4), pengganti Blind RSA (**selesai 2026-11-27**, §43.4.1) | unit + E2E sync anonim (**selesai 2026-11-27**: `web/e2e/privacyPassSync.spec.ts`, stack `test:e2e:ohttp`) |
 | **F** | infra: `docs/10` multi-host, unit systemd per peran, contoh topologi | drill, `scripts/drill-alerts.sh` |
 
-Setiap fase berakhir dengan `pnpm -r run build`, unit test, oxlint, dan CI 12/12.
+Setiap fase berakhir dengan `pnpm -r run build`, unit test, oxlint, dan CI 13/13.
 Fase B dan C menyentuh jalur kripto yang dipakai E2E kritis, jadi masing-masing
 butuh dua putaran E2E penuh sebelum dinyatakan selesai.
 
@@ -259,7 +271,7 @@ A–F tetap seperti di atas.
 | Fase | Isi | Gate |
 |---|---|---|
 | **G** | E2E: tutup celah gate (`mustPass` per spec), storage/multi-tab, offline/PWA, panic wipe, i18n 4 bahasa, versi-klien (§43.10) | suite inti ≤ 12 mnt di PR, penuh di nightly |
-| **H** | transport & OHTTP: WebTransport jadi jalur utama (Safari 26.4 Baseline), HPKE hybrid X-Wing di gateway (§43.12.2, §43.12.4) | unit + E2E `chrome` + gateway dua suite |
+| **H** | transport: WebTransport jadi jalur utama (Safari 26.4 Baseline) (§43.12.2) | unit + E2E `chrome` |
 | **I** | MLS (OpenMLS WASM) dievaluasi hanya setelah ciphersuite PQ-nya distandarkan; sampai itu SPQR tetap (§43.12.3) | keputusan tertulis, bukan kode |
 
 ---
@@ -283,18 +295,22 @@ Diukur 16 November 2026 dari repo (bukan dari ingatan): **21 berkas spec, 30 `te
 26 tes di suite utama** (a11y dan PIR punya config sendiri), 4 config Playwright,
 dan gate `required-tests.json` dengan `minTotal: 26`.
 
-> **Per 2026-11-24:** 25 berkas spec, 34 `test()`, `minTotal` 27 dengan
-> `mustPass` 14 (chromium) / 17 (chrome), dan a11y 4 tes. Angka di tabel bawah
-> adalah potret 16 November; angka hidup ada di `docs/41` §6.5. Himpunan judul
-> tes dikunci `web/e2e/required-tests.snapshot.json` (27/27 per project).
+> **Per 2026-11-27:** 28 berkas spec (PWA config sendiri), `minTotal` 29 karena
+> `pwa.spec.ts` dan config terpisah di-ignore suite utama; `mustPass` 15
+> (chromium) / 19 (chrome), termasuk panic wipe dan burner destroyed-after-reload.
+> Per 2026-11-24: 25 berkas spec, 34 `test()`, `minTotal` 27 dengan `mustPass`
+> 14/17. Angka di tabel bawah adalah potret 16 November; angka hidup ada di
+> `docs/41` §6.5. Himpunan judul tes dikunci
+> `web/e2e/required-tests.snapshot.json` (29/29 per project).
 
 | Proyek / config | Berkas | Tes | Dijalankan |
 |---|---|---|---|
-| `chromium` (PR) | 19 | 26 | `pnpm exec playwright test --project=chromium` |
-| `chrome` (PR, WebTransport) | 19 | 26 | job `e2e-chrome`, sidecar Rust + coturn |
+| `chromium` (PR) | 28 | 29 | `pnpm exec playwright test --project=chromium` |
+| `chrome` (PR, WebTransport) | 28 | 29 | job `e2e-chrome`, sidecar Rust + coturn |
 | `firefox` / `webkit` | 1 tiap engine | 4 | nightly job `browsers` (auth + settings + a11y) |
-| `a11y` | 1 | 3 | `playwright.a11y.config.ts` (tanpa reset DB) |
-| `ohttp` | 1 | 1 | `playwright.ohttp.config.ts` |
+| `a11y` | 1 | 4 | `playwright.a11y.config.ts` (tanpa reset DB) |
+| `pwa` | 1 | 1 | `playwright.pwa.config.ts` + nightly job `pwa` (build produksi) |
+| `ohttp` | 2 | 2 | `playwright.ohttp.config.ts` (OHTTP hybrid + gate sync Privacy Pass) |
 | `pir` | 1 | 1 | `playwright.pir.config.ts`, job `pir-e2e` di `drills.yml` |
 
 Durasi terukur (run `43692225973`): chromium **19,5 mnt**, chrome **17,2 mnt**;
@@ -304,7 +320,8 @@ pun tes baru.
 ### 43.10.1 Celah gate yang paling berbahaya
 
 `mustPass` hanya memuat **12 tes (chromium)** dan **15 tes (chrome)** dari 26 saat
-diukur; per 2026-11-24 menjadi 14/17 dari 27.
+diukur; per 2026-11-24 menjadi 14/17 dari 27, dan per 2026-11-27 menjadi 15/19
+dari 29.
 `minTotal` menjaga *jumlah* dan `mustPass` menjaga identitas, tetapi hanya untuk
 tes yang terdaftar. Konsekuensi yang perlu disadari: tes di luar `mustPass` boleh
 berubah menjadi skip dengan alasan yang sudah diizinkan — atau diganti tes lain
@@ -317,11 +334,10 @@ jadi bukan pelanggaran — tetapi artinya **lapisan yang dijamin gate hanya 12 d
 
 Dua akibat konkret dari membaca spec-nya:
 
-- `regression.spec.ts` **kedua** tesnya skip tanpa WebTransport, dan tes foto
-  juga butuh R2. Di job `e2e-chrome` sidecar hidup tetapi R2 tidak, jadi tes
-  "burner destroyed … setelah reload" **tidak pernah dijalankan di CI mana pun**
-  padahal hanya butuh sidecar. Ini regresi burner yang dulu muncul kembali setelah
-  reload — tepat jenis bug yang tidak tertangkap.
+- ✅ `regression.spec.ts` "burner destroyed … setelah reload" sudah dijalankan
+  nyata di project `chrome` (lokal, 2026-11-27: **1 passed**) dan masuk `mustPass`
+  chrome. Tes foto burner tetap boleh skip karena butuh R2; tes destroyed tidak
+  butuh R2, hanya sidecar.
 - `pqBenchThrottle` sengaja opt-in; jangan pernah memasukkannya ke `mustPass`,
   cukup pastikan ia tetap terdaftar sebagai tes opt-in di dokumentasi.
 
@@ -337,10 +353,10 @@ Perbaikan (Fase G, kecil dan langsung):
    tes baru belum didaftarkan, atau satu tes diganti tes lain), dan writer
    `pnpm --filter nyx-web run test:e2e:snapshot` membuatnya dari
    `playwright test --list` tanpa butuh DB/sidecar.
-3. **Tambahkan ke `mustPass` chrome** tes yang hanya butuh sidecar dan sudah
-   berjalan di job itu: `regression.spec.ts` → "burner conversation destroyed on
-   host stays deleted after reload". Jangan tambahkan tes foto burner (butuh R2)
-   atau `pqBenchThrottle` (opt-in).
+3. ✅ **`mustPass` chrome** (2026-11-27): `regression.spec.ts` → "burner
+   conversation destroyed on host stays deleted after reload" sudah terdaftar dan
+   terbukti lulus di Chrome dengan sidecar. Jangan tambahkan tes foto burner
+   (butuh R2) atau `pqBenchThrottle` (opt-in).
 4. ✅ **`minTotal` tidak lagi angka bebas** (2026-11-24): gate mensyaratkan
    `minTotal` sama dengan jumlah entri snapshot, dan snapshot dihitung dari
    suite yang benar-benar terdaftar — angka manual tidak bisa lagi menyimpang
@@ -350,16 +366,16 @@ Perbaikan (Fase G, kecil dan langsung):
 
 | Area | Bukti di kode | Risiko | Prioritas |
 |---|---|---|---|
-| Panic password / wipe | `web/src/store/auth.ts`, `nukeProtocol` | keamanan: klaim "wipe" tidak diuji end-to-end | **P0** |
+| Panic password / wipe | ✅ `panic.spec.ts` (2026-11-27): set → logout normal → login panic → vault/installation ID hilang. Spec menemukan bug nyata: hash panic disimpan di SQLite yang terkunci setelah logout, sehingga verifikasi selalu `false`; hash kini di vault IDB bootstrap + migrasi baris lama. **Trade-off yang disengaja:** record verifikasi Argon2id (salt + parameter + hash, bukan password) kini tinggal di IDB `nyx-key-vault` **tanpa** segel at-rest, karena verifikasi harus jalan sebelum vault terbuka; hash itu tidak bisa dipakai untuk login (server tetap memverifikasi password) dan ikut terhapus oleh wipe. Jalur baris lama (SHA-256 tanpa salt, perbandingan `===`) hanya hidup sampai migrasi selesai | keamanan: klaim "wipe" tidak diuji end-to-end | **P0** |
 | Multi-tab | ✅ `storage.spec.ts` (dua tab berbagi OPFS) + `opfsApp.spec.ts` (2026-11-19) | dua tab menulis DB yang sama; dengan SQLite §43.11 ini justru titik gagal baru | **P0** |
-| Offline / PWA / antrean kirim | ✅ antrean: `offlineQueue.spec.ts` (2026-11-23); SW/PWA penuh belum ada spec | pesan hilang saat jaringan putus, SW basi menolak envelope grup | **P0** |
-| Quota / storage penuh | belum ada | DB gagal tulis tanpa pesan yang benar | P1 |
-| i18n 4 bahasa | `web/public/locales/{en,es,id,pt-BR}` | `missingKey` hanya terlihat di konsol; tidak ada gate | P1 |
-| Story, link history | ✅ Story: `story.spec.ts` (2026-11-23); link history belum punya spec | regresi senyap | P1 |
-| Burner regression | `regression.spec.ts` | **selalu skip** tanpa WT+R2; tes "destroyed after reload" tidak pernah jalan meski hanya butuh sidecar | **P0** |
+| Offline / PWA / antrean kirim | ✅ antrean: `offlineQueue.spec.ts` (2026-11-23); ✅ PWA produksi: `pwa.spec.ts` (SW mengontrol + shell login offline, `playwright.pwa.config.ts`, nightly job `pwa`) + budget bundle (`check:bundle-budget`, 6,22 MB baseline) | pesan hilang saat jaringan putus, SW basi menolak envelope grup | **P0** |
+| Quota / storage penuh | ✅ `storageFull.ts` + unit test: deteksi `SQLITE_FULL`/kuota, hapus batch 250 pesan tertua, sisakan 500 terbaru, retry 4×; toast `common:storage_pruned` di 4 bahasa | DB gagal tulis tanpa pesan yang benar; auto-prune tetap kehilangan riwayat lama secara sengaja | P1 |
+| i18n 4 bahasa | `web/public/locales/{en,es,id,pt-BR}` | ✅ gate paritas key ada di `web/src/lib/__tests__/i18nLocaleParity.test.ts` (semua namespace harus identik di 4 bahasa); terjemahan itu sendiri tetap manual | P1 |
+| Story, link history | ✅ Story: `story.spec.ts` (2026-11-23); link history diuji di `deviceLinking.spec.ts` hanya saat R2 tersedia | regresi senyap; CI tanpa R2 tidak menjalankan jalur arsip sukses | P1 |
+| Burner regression | ✅ `regression.spec.ts` — tes "destroyed after reload" lulus di Chrome+sidecar dan masuk `mustPass` chrome; tes foto tetap skip tanpa R2 | regresi senyap bila tes destroyed tidak dijalankan | **P0** |
 | Push notification | `usePushNotifications`, `pushSupport` | sudah ada unit test gerbang; jalur nyata butuh HTTPS + izin | P2 |
-| Client version gate | `ClientVersionRequiredPage` | klien tua tidak tertahan | P1 |
-| Error boundary / chunk gagal | pesan `Error caught by boundary` muncul di E2E | halaman putih tanpa tes | P1 |
+| Client version gate | `ClientVersionRequiredPage` | ✅ unit test halaman + kontrak header/426 ada; E2E browser belum | P1 |
+| Error boundary / chunk gagal | `web/src/components/ErrorBoundary.tsx` | ✅ unit test render/catch/fallback ada; E2E chunk gagal belum | P1 |
 
 ### 43.10.3 Rencana suite (Fase G)
 
@@ -373,9 +389,10 @@ Perbaikan (Fase G, kecil dan langsung):
   `registerUser` yang sudah ada.
 - **Spec baru wajib**: ✅ `storage.spec.ts` (dua tab; COOP/COEP + OPFS lewat
   `opfsApp.spec.ts`) dan ✅ `offlineQueue.spec.ts` (antrean offline,
-  2026-11-23); ✅ a11y diperluas ke chat/privacy/modal story (2026-11-24; grup
-  dan tab Settings belum). **Belum ada**: quota/`panic.spec.ts`,
-  `i18n.spec.ts`, `clientVersion.spec.ts`, dan SW prod penuh.
+  2026-11-23); ✅ a11y diperluas ke chat/privacy/modal story (2026-11-24),
+  subhalaman Settings keys/sessions, dan alur grup create → info → Add
+  Participant (2026-11-26). ✅ quota, PWA produksi, dan `panic.spec.ts` sudah ada.
+  **Belum ada**: `i18n.spec.ts`, `clientVersion.spec.ts`.
 - **Metrik flake**: report JSON sudah memuat `status: flaky/expected`; simpan
   ringkasannya sebagai artifact dan tampilkan tren di `docs/41`. `quarantine.json`
   tetap kosong sampai ada data, bukan sebagai tempat menyembunyikan tes.
@@ -655,9 +672,12 @@ sebelum menyentuh Dexie — bukan menulis ke backend yang salah. Bukti:
 masih terbaca; `backupRestore.test.ts` mengunci pemilihan tabel.
 
 **Selesai 2026-11-20 — `kvStore` pindah ke SQLite:** keempat belas pemakai
-(panic hash, identitas KT, token admin grup, state SPQR + arsip era, Privacy
+(identitas KT, token admin grup, state SPQR + arsip era, Privacy
 Pass, epoch grup, verifikasi fingerprint, installation id, auto-unlock, retry
 riwayat) kini lewat satu pintu `lib/storage/appKv.ts`; tidak ada fallback Dexie.
+*(Koreksi 2026-11-27: panic hash **bukan** lagi pemakai `kvStore` — verifikasi
+panic harus jalan sebelum vault/SQLite terbuka, jadi record-nya pindah ke vault
+IDB `nyx-key-vault`, lihat §43.10.2.)*
 SQLite selalu aktif dan tidak ada hidrasi: build ini pre-launch, jadi baris
 Dexie lama sengaja tidak disalin. `KvStore.deleteByPrefix` menggantikan
 `where('key').startsWith()` milik Dexie (dipakai `clearSpqrStates`), dan
@@ -826,7 +846,7 @@ kontrol negatif (phrase salah, 1 byte rusak) ditolak tanpa menulis baris.
 | Area | Sekarang | Rekomendasi | Alasan |
 |---|---|---|---|
 | Transport | WebTransport + WSS | **WT jalur utama**, WSS fallback dipertahankan | Safari 26.4 (Mar 2026) membawa WT → Baseline; WSS tetap perlu untuk jaringan yang memblokir UDP/HTTP3 |
-| OHTTP HPKE | X25519 (klasik) | **hybrid X-Wing** di gateway, dual-suite | RFC 9458 klasik; draft PQ HPKE sudah berjalan di `hpke-rs`/Divvi Up. Jangan kirim PQ-only sebelum gateway mengiklankannya |
+| OHTTP HPKE | P-256 (klasik) | **hybrid X-Wing selesai 2026-11-27**, dual-suite lewat `Accept` | RFC 9458 klasik; draft PQ HPKE sudah berjalan di `hpke-rs`/Divvi Up. Klien baru meminta X-Wing, klien lama tetap P-256; jangan kirim PQ-only sebelum gateway mengiklankannya |
 | Grup | SPQR braid kustom | **tetap SPQR**, MLS ditunda | OpenMLS WASM ada (`js` feature), tapi ciphersuite-nya X25519/P-256 — melanggar §43.1.3 |
 | PIR | XOR-PIR 2 server | **tetap**, benchmark SimplePIR bila direktori membesar | XOR-PIR tanpa hint; SimplePIR butuh hint 121 MB/1 GB DB; ZipPIR 2026 tanpa client storage |
 | Blind signature | Blind RSA (dihapus) | **jangan adopsi PQ blind signature dulu** | BRaccoon 2026: 28 KB sig, 847 KB transcript, 2 ronde; MSIS 4,7 KB masih preprint |
@@ -865,21 +885,53 @@ lalu evaluasi OpenMLS; sampai itu SPQR tetap dan header v1 dibuang (§43.3.2).
 OHTTP (RFC 9458) memakai HPKE; implementasi PQ sudah tersedia sebagai draft:
 `hpke-rs` di libcrux dan gateway Divvi Up sudah mengiklankan suite hybrid
 ([CE Labs](https://celabs.eu/blog/pq-hpke), [Divvi Up](https://divviup.org/blog/pq-secure)).
-Rencana: gateway mengiklankan **dua** suite (X25519 dan X-Wing), klien memilih
-hybrid bila ada, dan request tetap satu amplop per request. `hpke-js` punya modul
-X-Wing eksperimental ([hpke-js](https://github.com/dajiaji/hpke-js)) — jangan
-jadikan satu-satunya implementasi; verifikasi silang dengan vektor uji, pola yang
-sama dengan `tools/dr-oracle`.
+**Implemented 2026-11-27.** Gateway mengiklankan **dua** suite: collection
+P-256 tetap di `GET /api/ohttp/config`, sedangkan klien baru mengirim
+`Accept: application/ohttp-keys+xwing` dan menerima collection X-Wing (key id
+3/4). Request tetap satu amplop; `enc` 1120 byte dan public key 1216 byte
+ditentukan dari `kemId` (0x647a), bukan 65 byte tetap. Pustaka:
+`@hpke/hybridkem-x-wing` (hpke-js), bukan implementasi tangan.
 
-### 43.12.5 Blind RSA: penggantian di §43.4.1 sudah benar
+Rollout dan kegagalannya:
+- klien lama tidak mengirim `Accept`, jadi tidak pernah menerima config yang
+tidak bisa diparse;
+- klien baru meminta hybrid lebih dulu dan jatuh ke P-256 hanya bila gateway
+  belum punya slot X-Wing;
+- pin hybrid disimpan terpisah (`nyx_ohttp_hybrid_pin_v1`); kalau kunci hybrid
+  pernah dipin lalu hilang dari config, klien **menolak** (`OHTTP_HYBRID_REMOVED`)
+  alih-alih turun diam-diam;
+- operator mengisi `OHTTP_XWING_PRIVATE_KEY`/`OHTTP_XWING_PUBLIC_KEY` bersama;
+  `OHTTP_XWING_NEXT_*` untuk rotasi. Menghapus slot hybrid adalah rollback yang
+  memerlukan reset pin klien — jangan lakukan tanpa rencana.
+
+Verifikasi silang sudah ada, dan E2E dua suite sudah berjalan. Vektor
+`server/tests/fixtures/hpke-xwing-ohttp.json` dibuat oleh implementasi
+**independen** `hpke` Rust 0.15.2 (`tools/hpke-xwing-vector`), bukan `@hpke/*`:
+Encapsulated Request X-Wing + AES-256-GCM dari Rust didekapsulasi oleh
+`decapsulateOhttpRequest` di `server/tests/ohttp.test.ts`, termasuk perbandingan
+plaintext Binary HTTP byte-per-byte. Arah sebaliknya juga diuji: klien TS
+mengenkapsulasi dengan `ekm` 64 byte tetap dan body-nya harus identik
+byte-per-byte dengan fixture Rust; tes Rust membuka fixture itu lewat
+`setup_receiver` (`cargo test --locked --manifest-path tools/hpke-xwing-vector/Cargo.toml`).
+Regenerasi deterministik:
+`cargo run --quiet --manifest-path tools/hpke-xwing-vector/Cargo.toml > server/tests/fixtures/hpke-xwing-ohttp.json`.
+
+E2E `web/e2e/ohttp.spec.ts` (stack `pnpm --filter nyx-web run test:e2e:ohttp`)
+sekarang mengisi slot X-Wing dan membuktikan klien mengirim
+`Accept: application/ohttp-keys+xwing`, memakai pin hybrid
+(`nyx_ohttp_hybrid_pin_v1`), dan **tidak** jatuh ke pin P-256. Codepoint KEM
+masih draft IANA (0x647a); jangan mengklaim standardisasi, dan jangan hapus
+slot hybrid tanpa rencana reset pin klien.
+
+### 43.12.5 Blind RSA: penggantian di §43.4.1 selesai 2026-11-27
 
 Status riset 2026: BRaccoon adalah blind signature lattice pertama yang
 concurrently secure dengan signature identik (28 KB, transcript 847 KB, 2 ronde)
 ([ePrint 2026/1084](https://eprint.iacr.org/2026/1084)); versi MSIS 4,7 KB masih
 preprint ([2026/1690](https://eprint.iacr.org/2026/1690)). Keduanya belum cukup
-matang untuk produksi. Keputusan §43.4.1 (token acak dari klien, issuer hanya
-menyimpan HMAC, anonimitas dari OHTTP) tetap: **mekanisme diganti, bukan
-primitifnya**. Tambahkan satu syarat: token 256-bit dari `crypto.getRandomValues`,
+matang untuk produksi. Keputusan §43.4.1 (token acak dari klien, server hanya
+menyimpan HMAC komitmen, anonimitas dari OHTTP) tetap: **mekanisme diganti,
+bukan primitifnya**. Tambahkan satu syarat: token 256-bit dari `crypto.getRandomValues`,
 bukan hasil KDF dari identitas.
 
 ### 43.12.6 PIR: pertahankan XOR-PIR, siapkan benchmark pengganti
@@ -913,7 +965,7 @@ dinyalakan lagi: `deploy.yml` (manual) → cek `/health` API → `/api/system/st
   `SERVER_CAPABILITIES`, KT fail-closed, LevelDB single-writer).
 - Format wire SPQR v2, header grup v4, dan envelope `base64url(nonce||ct)` sampai
   fase penggantinya benar-benar selesai dan diuji lintas implementasi.
-- Gate CI 12/12 dan branch protection 14 context; fase baru menambah job, bukan
+- Gate CI 13/13 dan branch protection 15 context; fase baru menambah job, bukan
   mengganti nama job yang sudah required.
 
 ## 43.14 Ukuran keberhasilan
@@ -959,7 +1011,7 @@ bagian ini dinyalakan dan diuji.
 | Push notification | `VAPID_SUBJECT/PUBLIC/PRIVATE` kosong | ketiganya di `server/.env` (deploy hanya meneruskan `VITE_VAPID_PUBLIC_KEY` dari secret, `deploy.yml:70`) | Server mencatat "push disabled"; UI tetap ada dan gagal diam-diam saat subscribe |
 | Gerbang versi klien | `MIN_CLIENT_VERSION` kosong; `CLIENT_VERSION_REQUIRE_MUTATIONS` kosong | angka versi setelah populasi klien stabil | Mengunci klien lama dari mengirim pesan; jangan dinyalakan sebelum metrik 426 terlihat |
 | Anti-abuse registrasi | `ABUSE_REGISTRATION_GUARD=off`, `ABUSE_REQUIRE_ATTESTATION=off` | guard `on`/`shadow`, bundle root attestation, keputusan `ALLOW_*` | `shadow` dulu; `on` bisa menolak perangkat tanpa authenticator |
-| Privacy Pass wajib | `PP_SYNC_REQUIRED` kosong | kunci issuer stabil (`PP_ISSUER_PRIVATE_JWK`) + semua klien terbaru | Sync anonim lama tetap lolos tanpa bukti (by design, tapi jangan disebut "wajib") |
+| Privacy Pass wajib | `PP_SYNC_REQUIRED` kosong | `NYX_AT_REST_PEPPER` stabil + semua klien memakai token acak/komitmen (`docs/43` §43.4.1) | Sync anonim lama tetap lolos tanpa bukti (by design, tapi jangan disebut "wajib") |
 | Jitter rilis grup | `GROUP_RELEASE_JITTER_MS` kosong | angka ≤ 2000 ms | Menambah latensi; metrik `nyx_group_release_delay_ms` harus dipantau |
 | Arsip riwayat link | **`LINK_HISTORY_ENABLED=on`** (default hidup) | kredensial R2 + lifecycle rule `link-history/` | Tanpa R2, `/limits.available=false` dan presign 503 — sudah terlihat, bukan diam |
 | Pembayaran kripto | `NOWPAYMENTS_*` kosong | API key + IPN secret | ✅ guard 2026-11-22 (§43.15.2 #3): `POST /create-crypto-transaction` menjawab 503 `PAYMENTS_NOT_CONFIGURED` sebelum memanggil NOWPayments; webhook juga 503 |
@@ -970,7 +1022,7 @@ kosong; snapshot PIR hanya berisi user `where oprfIndex != null`
 (`jobs/pirSnapshot.ts:57`).
 
 `jobs/pirSnapshot.ts` juga sudah menyegarkan shard **tiap 3 menit bila ada
-penulisan baru** (`PIR_DIRTY_REFRESH_CRON = '*/3 * * * *'`), bukan hanya 04:15.
+penulisan baru** (`PIR_DIRTY_REFRESH_CRON`, default `*/3 * * * *`), bukan hanya 04:15.
 Kalimat basi "akun baru tidak bisa dicari sampai 04:15" sudah dikoreksi 2026-11-24:
 `AGENTS.md`, `docs/10` §10.19, dan `docs/42` §42.8 kini menyebut dirty-refresh
 3 menit dan menempatkan 04:15 sebagai jaring pengaman penuh.

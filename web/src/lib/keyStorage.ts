@@ -33,11 +33,58 @@ const arrayBufferToBase64 = (buffer: Uint8Array) => {
   return window.btoa(binary);
 };
 
-// FIX 2: Pindahkan Panic Hash ke IndexedDB (kvStore) agar tersentralisasi.
-// Argon2id dijalankan di crypto worker — bukan main thread (jangan blocking UI).
+// Panic hash HARUS terbaca sebelum vault terbuka (login setelah logout/reload),
+// jadi tempatnya di vault IDB mentah `nyx-key-vault` — bukan `kvStore` SQLite
+// yang kuncinya ter-seal masterSeed. `checkPanicPassword` dulu membaca SQLite
+// dan selalu gagal setelah logout (fallback-nya `false`), sehingga panic
+// password tidak pernah memicu wipe. Nilai di sini hanya hash Argon2id bergaram,
+// bukan password. Argon2id berjalan di crypto worker (bukan main thread).
+const getPanicRecord = async (): Promise<string | undefined> => {
+  try {
+    return await keyVault.get<string>(STORAGE_KEYS.PANIC_HASH);
+  } catch (e) {
+    console.warn('[KeyStorage] Hash panic password tidak terbaca dari vault IDB:', e);
+    return undefined;
+  }
+};
+
+const setPanicRecord = (value: string) =>
+  keyVault.put({ key: STORAGE_KEYS.PANIC_HASH, value });
+
+const delPanicRecord = () => keyVault.delete(STORAGE_KEYS.PANIC_HASH);
+
+/** Hapus salinan legacy di SQLite bila vault sedang terbuka (best-effort). */
+const delLegacyPanicRecord = async () => {
+  try {
+    await del(STORAGE_KEYS.PANIC_HASH);
+  } catch {
+    // Vault terkunci: salinan lama tidak berbahaya, akan dihapus saat set ulang.
+  }
+};
+
+/**
+ * Pindahkan hash panic versi lama (SQLite `kvStore`) ke vault IDB saat vault
+ * terbuka. Idempoten; dijalankan fire-and-forget setelah unlock supaya pengguna
+ * lama tidak kehilangan panic password hanya karena sempat logout sebelum
+ * memperbarui build.
+ */
+const migrateLegacyPanicRecord = async () => {
+  if (await getPanicRecord()) return;
+  let legacy: string | undefined;
+  try {
+    legacy = await get<string>(STORAGE_KEYS.PANIC_HASH);
+  } catch {
+    return;
+  }
+  if (!legacy) return;
+  await setPanicRecord(legacy);
+  await delLegacyPanicRecord();
+};
+
 export const setPanicPassword = async (password: string) => {
   if (!password) {
-    await del(STORAGE_KEYS.PANIC_HASH);
+    await delPanicRecord();
+    await delLegacyPanicRecord();
     return;
   }
   
@@ -61,7 +108,8 @@ export const setPanicPassword = async (password: string) => {
     hash
   };
   
-  await set(STORAGE_KEYS.PANIC_HASH, JSON.stringify(record));
+  await setPanicRecord(JSON.stringify(record));
+  await delLegacyPanicRecord();
 };
 
 /**
@@ -75,12 +123,12 @@ export const setPanicPassword = async (password: string) => {
  * seperti sebelumnya (fail-closed).
  */
 export const checkPanicPassword = async (password: string): Promise<boolean> => {
-  let storedRecordStr: string | undefined;
-  try {
-    storedRecordStr = await get<string>(STORAGE_KEYS.PANIC_HASH);
-  } catch (e) {
-    console.warn('[KeyStorage] Hash panic password tidak terbaca (vault belum siap):', e);
-    return false;
+  let storedRecordStr = await getPanicRecord();
+  if (!storedRecordStr) {
+    // Migrasi baris lama hanya mungkin saat vault terbuka; login setelah logout
+    // tidak akan menemukannya dan tetap menjawab "bukan panic password".
+    await migrateLegacyPanicRecord();
+    storedRecordStr = await getPanicRecord();
   }
   if (!storedRecordStr) return false;
   
@@ -308,6 +356,7 @@ export const saveDeviceAutoUnlockKey = async (key: string) => {
       .then(m => m.migrateKeychainAtRestEncryption())
       .then(() => import('./shadowVaultDb'))
       .then(m => m.shadowVault.migrateAtRestSealing())
+      .then(() => migrateLegacyPanicRecord())
       .catch(e => console.warn('[KeyStorage] At-rest migration failed:', e));
   } catch (error) {
     console.error('Failed to save device auto unlock key');
