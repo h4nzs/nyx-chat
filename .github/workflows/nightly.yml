@@ -266,12 +266,18 @@ jobs:
       - name: Install Playwright Chromium untuk a11y
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
-      - name: Smoke Firefox
+      # Build produksi + `vite preview`: worker produksi ter-bundle, jadi import
+      # ESM milik Vite dev tidak lagi ditolak COEP WebKit (bug 261734).
+      - name: Smoke Firefox (build produksi)
         working-directory: web
-        run: pnpm exec playwright test e2e/auth.spec.ts e2e/settings.spec.ts --project=firefox
-      - name: Smoke WebKit
+        env:
+          CI: 'true'
+        run: pnpm exec playwright test --config=playwright.browsers.config.ts --project=firefox
+      - name: Smoke WebKit (build produksi)
         working-directory: web
-        run: pnpm exec playwright test e2e/auth.spec.ts e2e/settings.spec.ts --project=webkit
+        env:
+          CI: 'true'
+        run: pnpm exec playwright test --config=playwright.browsers.config.ts --project=webkit
       - name: Aksesibilitas (axe, halaman tanpa sesi)
         working-directory: web
         # Config khusus: tanpa global reset DB. Lewat config default, step ini
@@ -282,6 +288,42 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nightly-browser-results
+          path: |
+            web/test-results/
+            web/playwright-report/
+          retention-days: 7
+
+  pwa:
+    name: PWA produksi (SW + offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - name: Install dependencies (lockfile enforced)
+        run: pnpm install --frozen-lockfile --reporter=append-only
+      - name: Build shared package
+        run: pnpm --filter @nyx/shared run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      # Build produksi + `vite preview`; SW tidak didaftarkan di dev.
+      - name: PWA service worker + offline shell
+        working-directory: web
+        run: pnpm run test:e2e:pwa
+      - name: Budget bundle produksi
+        working-directory: web
+        # `test:e2e:pwa` sudah membangun `dist/`; budget membaca hasil build itu.
+        run: pnpm run check:bundle-budget
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-pwa-results
           path: |
             web/test-results/
             web/playwright-report/

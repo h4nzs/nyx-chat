@@ -17,7 +17,7 @@ const e2eServerEnv: Record<string, string> = {
 // selalu dipasang dev server). Opt-in hanya menentukan apakah `opfsApp.spec.ts`
 // ikut dijalankan: spec itu butuh stack bersih tanpa reset DB global.
 const opfsAppE2E = process.env.NYX_E2E_OPFS_APP === '1';
-const ignoredSpecs = [/a11y\.spec\.ts/, /pir\.spec\.ts/, /storage\.spec\.ts/];
+const ignoredSpecs = [/a11y\.spec\.ts/, /pir\.spec\.ts/, /storage\.spec\.ts/, /pwa\.spec\.ts/];
 if (!opfsAppE2E) ignoredSpecs.push(/opfsApp\.spec\.ts/);
 
 export default defineConfig({

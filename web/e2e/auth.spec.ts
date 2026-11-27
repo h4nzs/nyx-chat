@@ -81,43 +81,28 @@ test.describe('Authentication & Onboarding', () => {
       const attempts: Array<{ attempt: number; ok: boolean; error?: string }> = [];
 
       for (let attempt = 1; attempt <= 2; attempt++) {
-        // [E2E FLAKE 2026-11-04, run 41830562296] `logout()` memicu navigasi keras
-        // (halaman lama ditinggalkan), dan `page.evaluate` yang sedang berjalan di
-        // halaman itu bisa ditolak Playwright dengan "Execution context was
-        // destroyed", bukan oleh skripnya sendiri. Itu bukan bukti logout gagal —
-        // buktinya tetap cookie `rt` di bawah — jadi penolakan dicatat, bukan
-        // dilempar sebagai kegagalan tes.
+        // [nightly COEP] Lewat tombol Logout, bukan `import('/src/store/auth.ts')`:
+        // import path sumber hanya ada di dev server, sementara smoke WebKit
+        // menjalankan build produksi (worker ESM dev ditolak COEP WebKit).
+        // Alurnya tetap sama — tombol memanggil `useAuthStore.logout()` yang
+        // mengirim `POST /api/auth/logout` — dan justru menguji jalur pengguna.
         let result: { ok: boolean; error?: string };
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const evalTimeoutMs = 30_000;
         try {
-          result = await Promise.race([
-            page.evaluate(async () => {
-              try {
-                // @ts-ignore — path absolut Vite dev server (runtime-only)
-                const { useAuthStore } = await import('/src/store/auth.ts');
-                await useAuthStore.getState().logout();
-                return { ok: true };
-              } catch (e) {
-                return { ok: false, error: String(e) };
-              }
-            }),
-            // [BUG 2026-11-11] WebKit dulu menggantung di sini tanpa pernah
-            // menyelesaikan `evaluate`; tes lalu mati di timeout 240 dtk dan
-            // menyamar sebagai "context closed". Batas ini membuat penyebabnya
-            // tertulis di `attempts`, bukan hilang bersama timeout tes.
-            new Promise<{ ok: boolean; error?: string }>((resolve) => {
-              timer = setTimeout(
-                () => resolve({ ok: false, error: `logout() tidak selesai dalam ${evalTimeoutMs / 1000} dtk` }),
-                evalTimeoutMs,
-              );
-            }),
-          ]);
+          await page.getByRole('button', { name: /^logout$/i }).first().click({ timeout: 15_000 });
+          await page
+            .getByRole('dialog')
+            .getByRole('button', { name: /^confirm$/i })
+            .click({ timeout: 15_000 });
+          result = { ok: true };
         } catch (e) {
           result = { ok: false, error: String(e) };
-        } finally {
-          if (timer) clearTimeout(timer);
         }
+        // Tunggu POST logout selesai sebelum memeriksa cookie; klik tombol
+        // mengembalikan lebih dulu daripada respons server.
+        await expect
+          .poll(hasRefreshCookie, { timeout: 15_000 })
+          .toBe(false)
+          .catch(() => {});
         attempts.push({ attempt, ...result });
 
         // Bukti yang dipakai adalah cookie, bukan hasil promise: `logout()`

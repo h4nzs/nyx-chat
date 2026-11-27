@@ -12,7 +12,7 @@ const baseURL = process.env.NYX_STACK_BASE_URL || 'http://localhost:8080';
 
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: [/a11y\.spec\.ts/, /pir\.spec\.ts/, /storage\.spec\.ts/, /opfsApp\.spec\.ts/],
+  testIgnore: [/a11y\.spec\.ts/, /pir\.spec\.ts/, /storage\.spec\.ts/, /opfsApp\.spec\.ts/, /pwa\.spec\.ts/],
   fullyParallel: true,
   workers: 1,
   globalSetup: './e2e/global.setup.ts',
