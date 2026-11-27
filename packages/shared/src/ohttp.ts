@@ -6,17 +6,19 @@
  * [docs/35 Fase 3] Oblivious HTTP (RFC 9458) — kontrak wire + implementasi
  * kripto yang dipakai KLIEN (worker) dan GATEWAY (server).
  *
- * Profil yang dipakai NYX:
- *   KEM  DHKEM(P-256, HKDF-SHA256)  id 0x0010
- *   KDF  HKDF-SHA256                 id 0x0001
- *   AEAD AES-256-GCM                 id 0x0002
+ * Dua suite:
+ *   klasik  DHKEM(P-256, HKDF-SHA256)           id 0x0010
+ *   hybrid  X-Wing (X25519 + ML-KEM-768)        id 0x647a (draft)
+ *   KDF     HKDF-SHA256                          id 0x0001
+ *   AEAD    AES-256-GCM                          id 0x0002
  *
- * Ketiganya native di WebCrypto (browser + Node), sehingga tidak ada primitif
- * buatan sendiri dan tidak ada aset WASM baru. X25519 tidak dipakai di sini:
- * HPKE/OHTTP adalah Tier B (docs/35 §35.1) yang memang masih classical.
+ * Klasik tetap dipertahankan sebagai fallback; hybrid dipilih bila gateway
+ * mengiklankannya (lihat `OHTTP_XWING_ACCEPT`). X-Wing memakai pustaka
+ * `@hpke/hybridkem-x-wing` — bukan implementasi tangan sendiri — dan wire
+ * format key config mengikuti panjang kunci per KEM, bukan 65 byte tetap.
  *
  * Wire mengikuti RFC 9458 §4.1–4.4 apa adanya:
- *   Encapsulated Request  = hdr(7) ‖ enc(65) ‖ HPKE ct
+ *   Encapsulated Request  = hdr(7) ‖ enc(Nenc) ‖ HPKE ct
  *   hdr                   = keyId(1) ‖ kemId(2) ‖ kdfId(2) ‖ aeadId(2)
  *   info                  = "message/bhttp request" ‖ 0x00 ‖ hdr
  *   Encapsulated Response = response_nonce(32) ‖ AES-256-GCM ct
@@ -28,7 +30,8 @@
  * tanpa padding. Field name di-lowercase saat encode (aturan HTTP/2 §8.3.1).
  */
 
-import { Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
+import { Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256, type KemInterface } from '@hpke/core';
+import { XWing } from '@hpke/hybridkem-x-wing';
 import { expand, extract } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
@@ -36,8 +39,17 @@ export const OHTTP_KEY_ID = 0x01;
 /** Slot rotasi: kunci aktif + kunci berikutnya (lama tetap bisa dibuka). */
 export const OHTTP_MAX_KEY_CONFIGS = 4;
 export const OHTTP_KEM_P256_SHA256 = 0x0010;
+export const OHTTP_KEM_XWING = 0x647a;
 export const OHTTP_KDF_SHA256 = 0x0001;
 export const OHTTP_AEAD_AES256_GCM = 0x0002;
+/** Media type yang diminta klien baru agar gateway mengiklankan suite hybrid. */
+export const OHTTP_XWING_ACCEPT = 'application/ohttp-keys+xwing';
+/** Key id slot hybrid; klasik memakai 1/2, hybrid 3/4. */
+export const OHTTP_XWING_KEY_ID = 3;
+export const OHTTP_XWING_NEXT_KEY_ID = 4;
+export const OHTTP_XWING_PUBLIC_KEY_BYTES = 1216;
+export const OHTTP_XWING_PRIVATE_KEY_BYTES = 32;
+export const OHTTP_XWING_ENC_BYTES = 1120;
 
 export const OHTTP_REQUEST_INFO = 'message/bhttp request';
 export const OHTTP_RESPONSE_INFO = 'message/bhttp response';
@@ -58,16 +70,40 @@ export class OhttpError extends Error {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-let suite: CipherSuite | null = null;
+const suites = new Map<number, CipherSuite>();
 
-/** Cipher suite tunggal (dibuat lazy; aman dipakai browser dan Node). */
-export function ohttpSuite(): CipherSuite {
-  suite ??= new CipherSuite({
-    kem: new DhkemP256HkdfSha256(),
+/** Parameter panjang kunci/ciphertext per KEM yang didukung. */
+export function ohttpKemSizes(kemId: number): { publicKey: number; privateKey: number; enc: number } {
+  if (kemId === OHTTP_KEM_P256_SHA256) {
+    return { publicKey: OHTTP_GATEWAY_KEY_BYTES, privateKey: OHTTP_PRIVATE_KEY_BYTES, enc: OHTTP_ENC_BYTES };
+  }
+  if (kemId === OHTTP_KEM_XWING) {
+    return {
+      publicKey: OHTTP_XWING_PUBLIC_KEY_BYTES,
+      privateKey: OHTTP_XWING_PRIVATE_KEY_BYTES,
+      enc: OHTTP_XWING_ENC_BYTES,
+    };
+  }
+  throw new OhttpError(`ohttp: KEM tidak didukung (0x${kemId.toString(16)})`);
+}
+
+function ohttpKem(kemId: number): KemInterface {
+  if (kemId === OHTTP_KEM_P256_SHA256) return new DhkemP256HkdfSha256();
+  if (kemId === OHTTP_KEM_XWING) return new XWing();
+  throw new OhttpError(`ohttp: KEM tidak didukung (0x${kemId.toString(16)})`);
+}
+
+/** Cipher suite per KEM (dibuat lazy; aman dipakai browser dan Node). */
+export function ohttpSuite(kemId: number = OHTTP_KEM_P256_SHA256): CipherSuite {
+  const existing = suites.get(kemId);
+  if (existing) return existing;
+  const created = new CipherSuite({
+    kem: ohttpKem(kemId),
     kdf: new HkdfSha256(),
     aead: new Aes256Gcm(),
   });
-  return suite;
+  suites.set(kemId, created);
+  return created;
 }
 
 // ─────────────────────────── QUIC varint (RFC 9000 §16) ─────────────────────
@@ -270,37 +306,38 @@ export interface OhttpKeyConfig {
 
 /** Encode satu key config (RFC 9458 §3.1) — bukan collection. */
 export function encodeOhttpKeyConfig(config: OhttpKeyConfig): Uint8Array {
-  if (config.publicKey.length !== OHTTP_GATEWAY_KEY_BYTES) {
-    throw new OhttpError(`ohttp: public key harus ${OHTTP_GATEWAY_KEY_BYTES} byte`);
+  const sizes = ohttpKemSizes(config.kemId);
+  if (config.publicKey.length !== sizes.publicKey) {
+    throw new OhttpError(`ohttp: public key KEM 0x${config.kemId.toString(16)} harus ${sizes.publicKey} byte`);
   }
-  const out = new Uint8Array(1 + 2 + OHTTP_GATEWAY_KEY_BYTES + 2 + 4);
+  const out = new Uint8Array(1 + 2 + sizes.publicKey + 2 + 4);
   const view = new DataView(out.buffer);
   out[0] = config.keyId;
   view.setUint16(1, config.kemId, false);
   out.set(config.publicKey, 3);
-  view.setUint16(3 + OHTTP_GATEWAY_KEY_BYTES, 4, false); // panjang algoritma simetris
-  view.setUint16(3 + OHTTP_GATEWAY_KEY_BYTES + 2, config.kdfId, false);
-  view.setUint16(3 + OHTTP_GATEWAY_KEY_BYTES + 4, config.aeadId, false);
+  view.setUint16(3 + sizes.publicKey, 4, false); // panjang algoritma simetris
+  view.setUint16(3 + sizes.publicKey + 2, config.kdfId, false);
+  view.setUint16(3 + sizes.publicKey + 4, config.aeadId, false);
   return out;
 }
 
 /** Decode satu key config (tanpa panjang prefiks collection). */
 export function decodeOhttpKeyConfig(config: Uint8Array): OhttpKeyConfig {
-  if (config.length < 3 + OHTTP_GATEWAY_KEY_BYTES + 6) {
+  if (config.length < 3) throw new OhttpError('ohttp: key config terlalu pendek');
+  const view = new DataView(config.buffer, config.byteOffset, config.byteLength);
+  const kemId = view.getUint16(1, false);
+  const sizes = ohttpKemSizes(kemId);
+  if (config.length < 3 + sizes.publicKey + 6) {
     throw new OhttpError('ohttp: key config terlalu pendek');
   }
-  const view = new DataView(config.buffer, config.byteOffset, config.byteLength);
-  const publicKey = config.slice(3, 3 + OHTTP_GATEWAY_KEY_BYTES);
-  if (publicKey.length !== OHTTP_GATEWAY_KEY_BYTES) {
-    throw new OhttpError('ohttp: public key terpotong');
-  }
-  const symLength = view.getUint16(3 + OHTTP_GATEWAY_KEY_BYTES, false);
+  const publicKey = config.slice(3, 3 + sizes.publicKey);
+  const symLength = view.getUint16(3 + sizes.publicKey, false);
   if (symLength < 4) throw new OhttpError('ohttp: algoritma simetris tidak ada');
   return {
     keyId: config[0]!,
-    kemId: view.getUint16(1, false),
-    kdfId: view.getUint16(3 + OHTTP_GATEWAY_KEY_BYTES + 2, false),
-    aeadId: view.getUint16(3 + OHTTP_GATEWAY_KEY_BYTES + 4, false),
+    kemId,
+    kdfId: view.getUint16(3 + sizes.publicKey + 2, false),
+    aeadId: view.getUint16(3 + sizes.publicKey + 4, false),
     publicKey,
   };
 }
@@ -517,9 +554,11 @@ export interface OhttpClientSealedRequest {
   openResponse: (encapsulatedResponse: Uint8Array) => Promise<OhttpResponse>;
 }
 
-/** Generate keypair gateway (P-256). Dipakai script provisioning, bukan runtime. */
-export async function generateOhttpKeyPair(): Promise<{ privateKey: Uint8Array; publicKey: Uint8Array }> {
-  const kem = new DhkemP256HkdfSha256();
+/** Generate keypair gateway (P-256 atau X-Wing). Dipakai provisioning, bukan runtime. */
+export async function generateOhttpKeyPair(
+  kemId: number = OHTTP_KEM_P256_SHA256,
+): Promise<{ privateKey: Uint8Array; publicKey: Uint8Array }> {
+  const kem = ohttpKem(kemId);
   const keyPair = await kem.generateKeyPair();
   return {
     privateKey: new Uint8Array(await kem.serializePrivateKey(keyPair.privateKey)),
@@ -532,11 +571,15 @@ export async function generateOhttpKeyPair(): Promise<{ privateKey: Uint8Array; 
  * gateway diaktifkan: salah pasang kunci harus gagal keras, bukan menghasilkan
  * gateway yang membalas sampah ke setiap klien.
  */
-export async function assertOhttpKeyPair(privateKey: Uint8Array, publicKey: Uint8Array): Promise<void> {
+export async function assertOhttpKeyPair(
+  privateKey: Uint8Array,
+  publicKey: Uint8Array,
+  kemId: number = OHTTP_KEM_P256_SHA256,
+): Promise<void> {
   const probe = await encapsulateOhttpRequest(
     {
       keyId: OHTTP_KEY_ID,
-      kemId: OHTTP_KEM_P256_SHA256,
+      kemId,
       kdfId: OHTTP_KDF_SHA256,
       aeadId: OHTTP_AEAD_AES256_GCM,
       publicKey,
@@ -551,16 +594,52 @@ export async function encapsulateOhttpRequest(
   config: OhttpKeyConfig,
   request: OhttpRequest,
 ): Promise<OhttpClientSealedRequest> {
-  if (config.publicKey.length !== OHTTP_GATEWAY_KEY_BYTES) {
+  return encapsulateOhttpRequestInternal(config, request);
+}
+
+/**
+ * HANYA untuk vektor lintas implementasi: X-Wing menerima 64 byte `ekm`
+ * deterministik. Amplop dengan randomness tetap tidak semantic-secure, jadi
+ * fungsi ini sengaja terpisah dari `encapsulateOhttpRequest` dan tidak boleh
+ * dipakai runtime.
+ */
+export async function encapsulateOhttpRequestWithRandomness(
+  config: OhttpKeyConfig,
+  request: OhttpRequest,
+  encapsulationRandomness: Uint8Array,
+): Promise<OhttpClientSealedRequest> {
+  return encapsulateOhttpRequestInternal(config, request, encapsulationRandomness);
+}
+
+async function encapsulateOhttpRequestInternal(
+  config: OhttpKeyConfig,
+  request: OhttpRequest,
+  encapsulationRandomness?: Uint8Array,
+): Promise<OhttpClientSealedRequest> {
+  const sizes = ohttpKemSizes(config.kemId);
+  if (config.publicKey.length !== sizes.publicKey) {
     throw new OhttpError('ohttp: public key gateway tidak sah');
   }
-  const cs = ohttpSuite();
-  const kem = new DhkemP256HkdfSha256();
+  const cs = ohttpSuite(config.kemId);
+  const kem = ohttpKem(config.kemId);
   const recipientPublicKey = await kem.deserializePublicKey(config.publicKey);
-  const context = await cs.createSenderContext({
+  const randomness = encapsulationRandomness;
+  if (randomness) {
+    if (config.kemId !== OHTTP_KEM_XWING || randomness.length !== 64) {
+      throw new OhttpError('ohttp: encapsulationRandomness hanya untuk X-Wing (64 byte)');
+    }
+  }
+  const senderParams = {
     recipientPublicKey,
     info: buildRequestInfo(config),
-  });
+    ...(randomness ? { ekm: copyBytes(randomness) } : {}),
+  };
+  // `ekm` adalah parameter X-Wing (bukan SenderContextParams standar);
+  // @hpke/core meneruskannya ke Kem.encap, yang memvalidasi panjang 64 byte.
+  const context = await cs.createSenderContext(
+    senderParams as Parameters<typeof cs.createSenderContext>[0] & { ekm?: Uint8Array },
+  );
+
   const plaintext = encodeBinaryHttpRequest(request);
   const ciphertext = new Uint8Array(await context.seal(plaintext));
   const header = concatBytes(
@@ -570,6 +649,7 @@ export async function encapsulateOhttpRequest(
     Uint8Array.of((config.aeadId >> 8) & 0xff, config.aeadId & 0xff),
   );
   const enc = new Uint8Array(context.enc);
+  if (enc.length !== sizes.enc) throw new OhttpError('ohttp: panjang enc KEM tidak sah');
   const body = concatBytes(header, enc, ciphertext);
   if (body.length > OHTTP_MAX_MESSAGE_BYTES) throw new OhttpError('ohttp: request terlalu besar');
 
@@ -605,7 +685,7 @@ export async function decapsulateOhttpRequest(input: {
   encapsulatedRequest: Uint8Array;
 }): Promise<OhttpGatewaySealedRequest> {
   const bytes = input.encapsulatedRequest;
-  if (bytes.length < OHTTP_HEADER_BYTES + OHTTP_ENC_BYTES + 16) {
+  if (bytes.length < OHTTP_HEADER_BYTES + 16) {
     throw new OhttpError('ohttp: encapsulated request terpotong');
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -614,22 +694,26 @@ export async function decapsulateOhttpRequest(input: {
   const kemId = view.getUint16(1, false);
   const kdfId = view.getUint16(3, false);
   const aeadId = view.getUint16(5, false);
-  if (kemId !== OHTTP_KEM_P256_SHA256 || kdfId !== OHTTP_KDF_SHA256 || aeadId !== OHTTP_AEAD_AES256_GCM) {
+  if (kdfId !== OHTTP_KDF_SHA256 || aeadId !== OHTTP_AEAD_AES256_GCM) {
     throw new OhttpError('ohttp: parameter HPKE tidak didukung');
   }
-  if (input.privateKey.length !== OHTTP_PRIVATE_KEY_BYTES) {
+  const sizes = ohttpKemSizes(kemId);
+  if (bytes.length < OHTTP_HEADER_BYTES + sizes.enc + 16) {
+    throw new OhttpError('ohttp: encapsulated request terpotong');
+  }
+  if (input.privateKey.length !== sizes.privateKey) {
     throw new OhttpError('ohttp: private key gateway tidak sah');
   }
   const header = bytes.slice(0, OHTTP_HEADER_BYTES);
-  const enc = bytes.slice(OHTTP_HEADER_BYTES, OHTTP_HEADER_BYTES + OHTTP_ENC_BYTES);
-  const ciphertext = bytes.slice(OHTTP_HEADER_BYTES + OHTTP_ENC_BYTES);
+  const enc = bytes.slice(OHTTP_HEADER_BYTES, OHTTP_HEADER_BYTES + sizes.enc);
+  const ciphertext = bytes.slice(OHTTP_HEADER_BYTES + sizes.enc);
   const info = concatBytes(
     textEncoder.encode(OHTTP_REQUEST_INFO),
     Uint8Array.of(0),
     header,
   );
-  const cs = ohttpSuite();
-  const kem = new DhkemP256HkdfSha256();
+  const cs = ohttpSuite(kemId);
+  const kem = ohttpKem(kemId);
   let context;
   let plaintext: Uint8Array;
   try {

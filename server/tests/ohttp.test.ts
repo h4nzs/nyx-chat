@@ -6,11 +6,15 @@
 // §3), HPKE round-trip request/response, allowlist, dan gate konfigurasi.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   OHTTP_AEAD_AES256_GCM,
   OHTTP_KDF_SHA256,
   OHTTP_KEM_P256_SHA256,
+  OHTTP_KEM_XWING,
   OHTTP_KEY_ID,
+  OHTTP_XWING_ACCEPT,
+  OHTTP_XWING_KEY_ID,
   OHTTP_KT_SEARCH_MAX_BODY_BYTES,
   OHTTP_MAX_MESSAGE_BYTES,
   OHTTP_SYNC_MAX_BODY_BYTES,
@@ -19,10 +23,12 @@ import {
   decodeBinaryHttpRequest,
   decodeBinaryHttpResponse,
   decodeOhttpKeyConfigCollection,
+  decapsulateOhttpRequest,
   encodeBinaryHttpRequest,
   encodeBinaryHttpResponse,
   encodeOhttpKeyConfigCollection,
   encapsulateOhttpRequest,
+  encapsulateOhttpRequestWithRandomness,
   generateOhttpKeyPair,
   isOhttpTargetAllowed,
   sanitizeOhttpForwardHeaders,
@@ -47,6 +53,10 @@ import {
   isOhttpScopeRequestAllowed,
   signOhttpToken,
 } from '../src/utils/ohttpToken.js';
+
+function hexBytes(value: string): Uint8Array {
+  return Uint8Array.from(Buffer.from(value, 'hex'));
+}
 import { env } from '../src/config.js';
 
 const sampleRequest: OhttpRequest = {
@@ -61,17 +71,17 @@ const sampleRequest: OhttpRequest = {
   content: new Uint8Array(),
 };
 
-function publicConfigFor(keyId: number, publicKey: Uint8Array) {
+function publicConfigFor(keyId: number, publicKey: Uint8Array, kemId = OHTTP_KEM_P256_SHA256) {
   return {
     keyId,
-    kemId: OHTTP_KEM_P256_SHA256,
+    kemId,
     kdfId: OHTTP_KDF_SHA256,
     aeadId: OHTTP_AEAD_AES256_GCM,
     publicKey,
   };
 }
 
-async function makeConfig(keyCount = 1): Promise<OhttpConfig> {
+async function makeConfig(keyCount = 1, hybrid = false): Promise<OhttpConfig> {
   const keys = [];
   const publicConfigs = [];
   for (let index = 0; index < keyCount; index += 1) {
@@ -80,9 +90,16 @@ async function makeConfig(keyCount = 1): Promise<OhttpConfig> {
     keys.push({ keyId, privateKey: keyPair.privateKey });
     publicConfigs.push(publicConfigFor(keyId, keyPair.publicKey));
   }
+  const pqPublicConfigs = [];
+  if (hybrid) {
+    const keyPair = await generateOhttpKeyPair(OHTTP_KEM_XWING);
+    keys.push({ keyId: OHTTP_XWING_KEY_ID, privateKey: keyPair.privateKey });
+    pqPublicConfigs.push(publicConfigFor(OHTTP_XWING_KEY_ID, keyPair.publicKey, OHTTP_KEM_XWING));
+  }
   return {
     keys,
     publicConfigs,
+    pqPublicConfigs,
     relayTarget: 'http://127.0.0.1:4000/api/ohttp/gateway',
   };
 }
@@ -126,6 +143,17 @@ test('key config: collection round-trip mempertahankan key id + public key', asy
   assert.deepEqual(Array.from(decoded.publicKey), Array.from(config.publicConfigs[0]!.publicKey));
 });
 
+test('key config: X-Wing round-trip memakai public key 1216 byte', async () => {
+  const config = await makeConfig(1, true);
+  const [decoded] = decodeOhttpKeyConfigCollection(
+    encodeOhttpKeyConfigCollection(config.pqPublicConfigs),
+  );
+  assert.ok(decoded);
+  assert.equal(decoded.kemId, OHTTP_KEM_XWING);
+  assert.equal(decoded.keyId, OHTTP_XWING_KEY_ID);
+  assert.equal(decoded.publicKey.length, 1216);
+});
+
 test('key config: rotasi dua slot dipublikasikan dan bisa dipakai keduanya', async () => {
   const config = await makeConfig(2);
   const collection = encodeOhttpKeyConfigCollection(config.publicConfigs);
@@ -143,6 +171,22 @@ test('key config: rotasi dua slot dipublikasikan dan bisa dipakai keduanya', asy
     );
     assert.equal(response.status, 200);
   }
+});
+
+test('gateway: X-Wing request/response round-trip (enc 1120 byte)', async () => {
+  const config = await makeConfig(1, true);
+  const client = await encapsulateOhttpRequest(config.pqPublicConfigs[0]!, sampleRequest);
+  // hdr 7 + enc 1120 + minimal tag 16.
+  assert.ok(client.body.length > 7 + 1120 + 16);
+  const response = await client.openResponse(
+    await handleOhttpGateway(config, client.body, async () => ({
+      status: 200,
+      headers: [['content-type', 'application/json']],
+      content: new TextEncoder().encode('{"pq":true}'),
+    })),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(new TextDecoder().decode(response.content), '{"pq":true}');
 });
 
 test('gateway: key id yang tidak dikenal ditolak sebagai request tidak sah', async () => {
@@ -246,7 +290,36 @@ test('config: default mati, dan miskonfigurasi saat hidup gagal keras', async ()
   });
   assert.ok(config);
   assert.equal(config.keys.length, 1);
+  assert.deepEqual(config.pqPublicConfigs, []);
   await assertOhttpKeyPair(config.keys[0]!.privateKey, config.publicConfigs[0]!.publicKey);
+
+  // Slot hybrid: hanya aktif bila kedua kunci diisi; dipisah dari collection klasik.
+  const xwing = await generateOhttpKeyPair(OHTTP_KEM_XWING);
+  const hybrid = loadOhttpConfig({
+    OHTTP_ENABLED: '1',
+    OHTTP_PRIVATE_KEY: Buffer.from(keyPair.privateKey).toString('base64url'),
+    OHTTP_PUBLIC_KEY: Buffer.from(keyPair.publicKey).toString('base64url'),
+    OHTTP_XWING_PRIVATE_KEY: Buffer.from(xwing.privateKey).toString('base64url'),
+    OHTTP_XWING_PUBLIC_KEY: Buffer.from(xwing.publicKey).toString('base64url'),
+  });
+  assert.ok(hybrid);
+  assert.equal(hybrid.keys.length, 2);
+  assert.equal(hybrid.pqPublicConfigs[0]?.kemId, OHTTP_KEM_XWING);
+  assert.equal(hybrid.pqPublicConfigs[0]?.publicKey.length, 1216);
+  await assertOhttpKeyPair(
+    hybrid.keys[1]!.privateKey,
+    hybrid.pqPublicConfigs[0]!.publicKey,
+    OHTTP_KEM_XWING,
+  );
+  assert.throws(
+    () => loadOhttpConfig({
+      OHTTP_ENABLED: '1',
+      OHTTP_PRIVATE_KEY: Buffer.from(keyPair.privateKey).toString('base64url'),
+      OHTTP_PUBLIC_KEY: Buffer.from(keyPair.publicKey).toString('base64url'),
+      OHTTP_XWING_PRIVATE_KEY: Buffer.from(xwing.privateKey).toString('base64url'),
+    }),
+    /OHTTP_XWING_PRIVATE_KEY dan OHTTP_XWING_PUBLIC_KEY/,
+  );
 
   // Slot rotasi setengah terisi = boot gagal (klien baru tidak akan bisa dibuka).
   assert.throws(
@@ -356,6 +429,37 @@ test('gateway: amplop yang diubah ditolak (fail-closed)', async () => {
     () => handleOhttpGateway(config, tampered, async () => ({ status: 200, headers: [], content: new Uint8Array() })),
     OhttpError,
   );
+});
+
+test('config route: klien lama tetap P-256, klien hybrid mendapat X-Wing', async () => {
+  const config = await makeConfig(1, true);
+  const app = express();
+  app.use('/api/ohttp', createOhttpRouter(config));
+  const server: Server = await new Promise((resolve) => {
+    const instance = createServer(app).listen(0, '127.0.0.1', () => resolve(instance as unknown as Server));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    const classicResponse = await fetch(`${base}/api/ohttp/config`);
+    const classic = decodeOhttpKeyConfigCollection(
+      new Uint8Array(await classicResponse.arrayBuffer()),
+    );
+    assert.equal(classic[0]?.kemId, OHTTP_KEM_P256_SHA256);
+    assert.match(classicResponse.headers.get('vary') ?? '', /Accept/i);
+
+    const hybridResponse = await fetch(`${base}/api/ohttp/config`, {
+      headers: { accept: OHTTP_XWING_ACCEPT },
+    });
+    const hybrid = decodeOhttpKeyConfigCollection(
+      new Uint8Array(await hybridResponse.arrayBuffer()),
+    );
+    assert.equal(hybrid[0]?.kemId, OHTTP_KEM_XWING);
+    assert.equal(hybrid[0]?.keyId, OHTTP_XWING_KEY_ID);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('token carriage: umur pendek, scope ohttp, hanya untuk target allowlist GET', () => {
@@ -763,4 +867,85 @@ test('OHTTP_TRUSTED_PROXIES: entri tidak sah dilaporkan, bukan diabaikan diam-di
   assert.match(invalidTrustedProxyReason('10.0.0.0/eight') ?? '', /bukan angka/);
   // `/0` eksplisit tetap sah; nilainya memang "percaya semua hop".
   assert.equal(invalidTrustedProxyReason('0.0.0.0/0'), null);
+});
+
+// [docs/43 §43.12.4] Vektor lintas implementasi: Encapsulated Request dibuat
+// oleh `hpke` Rust 0.15.2 (bukan @hpke/*), lalu dibuka oleh jalur gateway NYX.
+// Round-trip internal tidak bisa membuktikan ini: dua salinan yang salah dengan
+// cara yang sama tetap saling cocok. Regenerasi:
+//   cargo run --quiet --manifest-path tools/hpke-xwing-vector/Cargo.toml \
+//     > server/tests/fixtures/hpke-xwing-ohttp.json
+test('X-Wing: Encapsulated Request dari rust-hpke dapat didekapsulasi gateway', async () => {
+  const vector = JSON.parse(
+    readFileSync(new URL('./fixtures/hpke-xwing-ohttp.json', import.meta.url), 'utf8'),
+  ) as {
+    keyId: number;
+    kemId: number;
+    privateKey: string;
+    enc: string;
+    plaintext: string;
+    encapsulatedRequest: string;
+  };
+  assert.equal(vector.kemId, OHTTP_KEM_XWING);
+  assert.equal(vector.privateKey.length, 64);
+  assert.equal(hexBytes(vector.enc).length, 1120);
+
+  const opened = await decapsulateOhttpRequest({
+    keyId: vector.keyId,
+    privateKey: hexBytes(vector.privateKey),
+    encapsulatedRequest: hexBytes(vector.encapsulatedRequest),
+  });
+  assert.equal(opened.request.method, 'GET');
+  assert.equal(opened.request.scheme, 'https');
+  assert.equal(opened.request.authority, 'nyx-app.my.id');
+  assert.equal(opened.request.path, '/api/users/search?q=xwing-vector');
+  assert.deepEqual(opened.request.headers, [['accept', 'application/json']]);
+  assert.deepEqual(Array.from(opened.request.content), []);
+  // Plaintext yang dilihat gateway harus sama byte-per-byte dengan yang
+  // dienkripsi implementasi Rust.
+  assert.deepEqual(Array.from(encodeBinaryHttpRequest(opened.request)), Array.from(hexBytes(vector.plaintext)));
+
+  // Jalur response juga harus hidup: nonce 32 byte + Binary HTTP response
+  // known-length + tag AES-GCM 16 byte.
+  const empty204 = { status: 204, headers: [], content: new Uint8Array() };
+  const sealed = await opened.sealResponse(empty204);
+  assert.equal(sealed.length, 32 + encodeBinaryHttpResponse(empty204).length + 16);
+});
+
+// Arah sebaliknya: enkapsulasi klien NYX (TS) dengan `ekm` yang sama harus
+// menghasilkan Encapsulated Request identik byte-per-byte dengan yang dibuat
+// rust-hpke. Tes Rust di `tools/hpke-xwing-vector` membuka fixture ini, jadi
+// pasangan tes ini membuktikan kedua arah, bukan hanya "gateway bisa membaca
+// dirinya sendiri".
+test('X-Wing: enkapsulasi klien TS identik dengan rust-hpke saat ekm tetap', async () => {
+  const vector = JSON.parse(
+    readFileSync(new URL('./fixtures/hpke-xwing-ohttp.json', import.meta.url), 'utf8'),
+  ) as {
+    keyId: number;
+    kemId: number;
+    kdfId: number;
+    aeadId: number;
+    publicKey: string;
+    encapsulationRandomness: string;
+    plaintext: string;
+    encapsulatedRequest: string;
+  };
+  const config = {
+    keyId: vector.keyId,
+    kemId: vector.kemId,
+    kdfId: vector.kdfId,
+    aeadId: vector.aeadId,
+    publicKey: hexBytes(vector.publicKey),
+  };
+  const request = decodeBinaryHttpRequest(hexBytes(vector.plaintext));
+  const sealed = await encapsulateOhttpRequestWithRandomness(
+    config,
+    request,
+    hexBytes(vector.encapsulationRandomness),
+  );
+  assert.equal(
+    Buffer.from(sealed.body).toString('hex'),
+    vector.encapsulatedRequest,
+    'body TS harus sama persis dengan body rust-hpke',
+  );
 });

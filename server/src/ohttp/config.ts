@@ -15,17 +15,23 @@
  * adalah kunci berikutnya. Keduanya dipublikasikan di `/api/ohttp/config`
  * sehingga klien lama (pin key id 1) dan klien baru (memilih key id 2) sama-sama
  * bisa membuka jawaban selama masa transisi. Gateway menerima keduanya; setelah
- * semua klien pindah, slot lama dikosongkan dan key id 3 boleh dibuat.
+ * semua klien pindah, slot lama dikosongkan (id 3/4 dicadangkan untuk hybrid).
+ *
+ * Slot hybrid X-Wing memakai id 3/4 dan **collection terpisah**: klien lama
+ * tidak bisa mem-parse public key 1216 byte, jadi collection hybrid hanya
+ * dikirim ke klien yang meminta `Accept: application/ohttp-keys+xwing`.
  */
 
 import { createHmac } from 'node:crypto';
 import {
   OHTTP_AEAD_AES256_GCM,
-  OHTTP_GATEWAY_KEY_BYTES,
   OHTTP_KDF_SHA256,
   OHTTP_KEM_P256_SHA256,
+  OHTTP_KEM_XWING,
   OHTTP_KEY_ID,
-  OHTTP_PRIVATE_KEY_BYTES,
+  OHTTP_XWING_KEY_ID,
+  OHTTP_XWING_NEXT_KEY_ID,
+  ohttpKemSizes,
   type OhttpAllowRule,
   type OhttpKeyConfig,
 } from '@nyx/shared';
@@ -40,8 +46,10 @@ export type OhttpTokenMode = 'on' | 'off';
 export interface OhttpConfig {
   /** Slot yang diterima gateway, urut naik berdasarkan key id. */
   keys: readonly OhttpKeySlot[];
-  /** Bentuk publik yang disajikan `/api/ohttp/config`. */
+  /** Bentuk publik klasik yang disajikan `/api/ohttp/config` (default). */
   publicConfigs: readonly OhttpKeyConfig[];
+  /** Bentuk publik hybrid; disajikan hanya bila klien meminta `OHTTP_XWING_ACCEPT`. */
+  pqPublicConfigs: readonly OhttpKeyConfig[];
   /** URL gateway internal yang dituju relay (bukan dari input klien). */
   relayTarget: string;
   /** Allowlist target; default dari shared bila tidak di-override. */
@@ -79,10 +87,14 @@ function assertLoopbackRelayTarget(target: string): void {
   }
 }
 
-function publicConfigFor(keyId: number, publicKey: Uint8Array): OhttpKeyConfig {
+function publicConfigFor(
+  keyId: number,
+  publicKey: Uint8Array,
+  kemId: number = OHTTP_KEM_P256_SHA256,
+): OhttpKeyConfig {
   return {
     keyId,
-    kemId: OHTTP_KEM_P256_SHA256,
+    kemId,
     kdfId: OHTTP_KDF_SHA256,
     aeadId: OHTTP_AEAD_AES256_GCM,
     publicKey,
@@ -147,15 +159,23 @@ export function loadOhttpConfig(env: NodeJS.ProcessEnv = process.env): OhttpConf
   if (tokenMode === 'off') assertLoopbackRelayTarget(relayTarget);
   const slots: OhttpKeySlot[] = [];
   const publicConfigs: OhttpKeyConfig[] = [];
+  const pqPublicConfigs: OhttpKeyConfig[] = [];
 
-  const addSlot = (keyId: number, privName: string, pubName: string) => {
-    const privateKey = decodeKey(privName, env[privName], OHTTP_PRIVATE_KEY_BYTES);
-    const publicKey = decodeKey(pubName, env[pubName], OHTTP_GATEWAY_KEY_BYTES);
+  const addSlot = (
+    target: OhttpKeyConfig[],
+    keyId: number,
+    privName: string,
+    pubName: string,
+    kemId: number,
+  ) => {
+    const sizes = ohttpKemSizes(kemId);
+    const privateKey = decodeKey(privName, env[privName], sizes.privateKey);
+    const publicKey = decodeKey(pubName, env[pubName], sizes.publicKey);
     slots.push({ keyId, privateKey });
-    publicConfigs.push(publicConfigFor(keyId, publicKey));
+    target.push(publicConfigFor(keyId, publicKey, kemId));
   };
 
-  addSlot(OHTTP_KEY_ID, 'OHTTP_PRIVATE_KEY', 'OHTTP_PUBLIC_KEY');
+  addSlot(publicConfigs, OHTTP_KEY_ID, 'OHTTP_PRIVATE_KEY', 'OHTTP_PUBLIC_KEY', OHTTP_KEM_P256_SHA256);
 
   const nextPriv = env.OHTTP_NEXT_PRIVATE_KEY;
   const nextPub = env.OHTTP_NEXT_PUBLIC_KEY;
@@ -164,16 +184,69 @@ export function loadOhttpConfig(env: NodeJS.ProcessEnv = process.env): OhttpConf
     throw new Error('OHTTP: OHTTP_NEXT_PRIVATE_KEY dan OHTTP_NEXT_PUBLIC_KEY harus diisi bersama');
   }
   if (nextPriv && nextPub) {
-    addSlot(OHTTP_KEY_ID + 1, 'OHTTP_NEXT_PRIVATE_KEY', 'OHTTP_NEXT_PUBLIC_KEY');
+    addSlot(
+      publicConfigs,
+      OHTTP_KEY_ID + 1,
+      'OHTTP_NEXT_PRIVATE_KEY',
+      'OHTTP_NEXT_PUBLIC_KEY',
+      OHTTP_KEM_P256_SHA256,
+    );
     const [first, second] = publicConfigs;
     if (first && second && Buffer.from(first.publicKey).equals(Buffer.from(second.publicKey))) {
       throw new Error('OHTTP: kunci rotasi tidak boleh sama dengan kunci aktif');
     }
   }
 
+  // Slot hybrid terpisah dari collection klasik. Klien lama tidak bisa
+  // mem-parse X-Wing, jadi hybrid hanya dikirim ke klien yang memintanya
+  // lewat `Accept: application/ohttp-keys+xwing`.
+  const xwingPriv = env.OHTTP_XWING_PRIVATE_KEY;
+  const xwingPub = env.OHTTP_XWING_PUBLIC_KEY;
+  if (Boolean(xwingPriv) !== Boolean(xwingPub)) {
+    throw new Error('OHTTP: OHTTP_XWING_PRIVATE_KEY dan OHTTP_XWING_PUBLIC_KEY harus diisi bersama');
+  }
+  if (xwingPriv && xwingPub) {
+    addSlot(
+      pqPublicConfigs,
+      OHTTP_XWING_KEY_ID,
+      'OHTTP_XWING_PRIVATE_KEY',
+      'OHTTP_XWING_PUBLIC_KEY',
+      OHTTP_KEM_XWING,
+    );
+    const nextXPriv = env.OHTTP_XWING_NEXT_PRIVATE_KEY;
+    const nextXPub = env.OHTTP_XWING_NEXT_PUBLIC_KEY;
+    if (Boolean(nextXPriv) !== Boolean(nextXPub)) {
+      throw new Error(
+        'OHTTP: OHTTP_XWING_NEXT_PRIVATE_KEY dan OHTTP_XWING_NEXT_PUBLIC_KEY harus diisi bersama',
+      );
+    }
+    if (nextXPriv && nextXPub) {
+      addSlot(
+        pqPublicConfigs,
+        OHTTP_XWING_NEXT_KEY_ID,
+        'OHTTP_XWING_NEXT_PRIVATE_KEY',
+        'OHTTP_XWING_NEXT_PUBLIC_KEY',
+        OHTTP_KEM_XWING,
+      );
+      const [first, second] = pqPublicConfigs;
+      if (first && second && Buffer.from(first.publicKey).equals(Buffer.from(second.publicKey))) {
+        throw new Error('OHTTP: kunci hybrid rotasi tidak boleh sama dengan kunci aktif');
+      }
+    }
+  } else if (env.OHTTP_XWING_NEXT_PRIVATE_KEY || env.OHTTP_XWING_NEXT_PUBLIC_KEY) {
+    throw new Error('OHTTP: isi OHTTP_XWING_PRIVATE_KEY/PUBLIC_KEY sebelum slot hybrid berikutnya');
+  }
+
+  // Key id harus unik lintas suite: gateway memilih slot hanya dari key id.
+  const ids = slots.map((slot) => slot.keyId);
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('OHTTP: key id gateway duplikat');
+  }
+
   return {
     keys: slots,
     publicConfigs,
+    pqPublicConfigs,
     relayTarget,
     tokenMode,
     internalToken: resolveInternalToken(env, tokenMode === 'off'),

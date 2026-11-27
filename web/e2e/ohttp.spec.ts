@@ -12,10 +12,14 @@
 //   3. Hasil pencarian tetap benar (relay → gateway → API loopback).
 //
 // Stack-nya terpisah dari suite utama: `playwright.ohttp.config.ts` menyalakan
-// API di 4100 dengan `OHTTP_ENABLED=1` + kunci P-256 yang dibuat saat config
-// dimuat, dan Vite di 5273 yang mem-proxy ke API itu. Pada suite utama
+// API di 4100 dengan `OHTTP_ENABLED=1` + kunci P-256/X-Wing yang dibuat saat
+// config dimuat, dan Vite di 5273 yang mem-proxy ke API itu. Pada suite utama
 // (server tanpa OHTTP) spec ini SKIP dengan alasan tertulis — bukan gagal —
 // karena default produksi memang mati.
+//
+// Stack simulasi (`scripts/sim/up.sh`) juga menjalankan spec ini: relay proses
+// terpisah, nginx → relay → gateway, kunci P-256 + X-Wing, dan exporter metrics
+// API dipublikasikan di 127.0.0.1:19464 (lihat `deploy/sim/docker-compose.e2e.yml`).
 import { test, expect } from '@playwright/test';
 import { registerUser } from './helpers/registration';
 
@@ -43,30 +47,40 @@ test.describe('OHTTP — pencarian lewat relay → gateway', () => {
 
   test('pencarian memakai amplop OHTTP, bukan request langsung', async ({ page, browser }) => {
     const config = await page.request.get('/api/ohttp/config');
+    // Stack simulasi (`scripts/sim/e2e.sh`, ditandai `NYX_STACK_BASE_URL`) selalu
+    // menyalakan OHTTP, jadi di sana 404 = konfigurasi stack rusak, bukan alasan
+    // melewati bukti. Suite dev/chromium memang menjalankan API tanpa OHTTP.
+    const stackSuite = Boolean(process.env.NYX_STACK_BASE_URL);
     test.skip(
-      config.status() === 404,
+      !stackSuite && config.status() === 404,
       'OHTTP tidak aktif di server uji (jalankan test:e2e:ohttp untuk stack dengan OHTTP_ENABLED=1)'
     );
     expect(config.ok(), `key config OHTTP harus tersedia: HTTP ${config.status()}`).toBe(true);
 
-    // Suite utama bisa berjalan di mesin yang API-nya mengaktifkan OHTTP tetapi
-    // stack uji terpisah (`playwright.ohttp.config.ts`, metrics :19464) tidak
-    // hidup. Tanpa probe ini spec masuk lalu gagal di asersi metrics — gejalanya
-    // "OHTTP rusak", padahal yang tidak ada hanya stack ujinya.
+    // Exporter metrik API harus terjangkau: asersi tag klien relay di bawah
+    // membaca `nyx_ohttp_client_tag_total` dari sana. Stack dengan OHTTP hidup
+    // tetapi tanpa exporter = harness yang belum siap, bukan alasan melewati
+    // seluruh bukti OHTTP (dulu di sinilah spec ini selalu skip di stack
+    // simulasi, sehingga relay/tag/hybrid tidak pernah diuji).
     const metricsProbe = await page.request
       .get(OHTTP_METRICS_URL, { timeout: 2000 })
       .catch(() => null);
-    test.skip(
-      !metricsProbe?.ok(),
-      'stack OHTTP terpisah tidak berjalan (metrics :19464 tidak terjangkau); jalankan test:e2e:ohttp'
-    );
+    expect(
+      metricsProbe?.ok(),
+      `exporter metrik ${OHTTP_METRICS_URL} tidak terjangkau — publikasikan metrics API ` +
+        '(stack simulasi: deploy/sim/docker-compose.e2e.yml; stack khusus: test:e2e:ohttp)'
+    ).toBe(true);
 
     const relayTypes: string[] = [];
     const directSearches: string[] = [];
+    const configAccepts: string[] = [];
     page.on('request', (request) => {
       const url = new URL(request.url());
       if (url.pathname === '/api/ohttp/relay') {
         relayTypes.push(request.headers()['content-type'] ?? '');
+      }
+      if (url.pathname === '/api/ohttp/config') {
+        configAccepts.push(request.headers().accept ?? '');
       }
       if (url.pathname === '/api/users/search') {
         directSearches.push(`${request.method()} ${url.pathname}${url.search}`);
@@ -141,7 +155,15 @@ test.describe('OHTTP — pencarian lewat relay → gateway', () => {
       `pencarian keluar dari jalur OHTTP: ${directSearches.join(', ')}`
     ).toHaveLength(0);
 
-    const pin = await page.evaluate(() => localStorage.getItem('nyx_ohttp_config_pin_v2'));
-    expect(pin, 'key config gateway harus dipin setelah pemakaian pertama').toBeTruthy();
+    // [docs/43 §43.12.4] Stack ini mengisi slot X-Wing, jadi klien WAJIB memilih
+    // hybrid — bukan hanya "tidak error" lalu diam-diam memakai P-256.
+    expect(
+      configAccepts.some((accept) => accept.includes('application/ohttp-keys+xwing')),
+      `klien tidak meminta suite hybrid: ${JSON.stringify(configAccepts)}`
+    ).toBe(true);
+    const hybridPin = await page.evaluate(() => localStorage.getItem('nyx_ohttp_hybrid_pin_v1'));
+    expect(hybridPin, 'key config X-Wing harus dipin setelah pemakaian pertama').toBeTruthy();
+    const classicPin = await page.evaluate(() => localStorage.getItem('nyx_ohttp_config_pin_v2'));
+    expect(classicPin, 'klien hybrid tidak boleh jatuh ke pin P-256').toBeNull();
   });
 });

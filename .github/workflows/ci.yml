@@ -254,6 +254,11 @@ jobs:
       - name: Test (protokol murni + fuzz deterministik)
         working-directory: server/transport-sidecar
         run: cargo test -- --nocapture
+      # [docs/43 §43.12.4] Arah sebaliknya: fixture dibuat rust-hpke lalu dibuka
+      # oleh implementasi Rust yang sama, sementara tes Node membuktikan
+      # enkapsulasi klien TS menghasilkan body identik byte-per-byte.
+      - name: HPKE X-Wing cross-implementation vector (Rust decrypts)
+        run: cargo test --locked --manifest-path tools/hpke-xwing-vector/Cargo.toml
 
   lint:
     # [2026-10-11, diperbarui 2026-10-14] Lint BLOCKING lewat oxlint (Rust; tidak

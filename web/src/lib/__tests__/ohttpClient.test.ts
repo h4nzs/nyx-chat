@@ -17,23 +17,25 @@ import {
   OHTTP_AEAD_AES256_GCM,
   OHTTP_KDF_SHA256,
   OHTTP_KEM_P256_SHA256,
+  OHTTP_KEM_XWING,
+  OHTTP_XWING_ACCEPT,
   encodeOhttpKeyConfigCollection,
 } from '@nyx/shared';
-import { OHTTP_CONFIG_PIN_KEY, OhttpPinError } from '../ohttpPin';
+import { OHTTP_CONFIG_PIN_KEY, OHTTP_HYBRID_PIN_KEY, OhttpPinError } from '../ohttpPin';
 import {
   _resetOhttpClientForTests,
   loadOhttpConfig,
   ohttpFetch,
 } from '../ohttpClient';
 
-function collectionBytes(keyId = 1, fill = 1): Uint8Array {
+function collectionBytes(keyId = 1, fill = 1, kemId = OHTTP_KEM_P256_SHA256): Uint8Array {
   return encodeOhttpKeyConfigCollection([
     {
       keyId,
-      kemId: OHTTP_KEM_P256_SHA256,
+      kemId,
       kdfId: OHTTP_KDF_SHA256,
       aeadId: OHTTP_AEAD_AES256_GCM,
-      publicKey: new Uint8Array(65).fill(fill),
+      publicKey: new Uint8Array(kemId === OHTTP_KEM_XWING ? 1216 : 65).fill(fill),
     },
   ]);
 }
@@ -98,6 +100,36 @@ describe('ohttpClient', () => {
     const config = await loadOhttpConfig();
     expect(config.keyId).toBe(1);
     expect(localStorage.getItem(OHTTP_CONFIG_PIN_KEY)).toBe(pinned);
+  });
+
+  it('meminta suite hybrid dan mem-pin X-Wing secara terpisah', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(headers.accept).toBe(OHTTP_XWING_ACCEPT);
+      const bytes = collectionBytes(3, 4, OHTTP_KEM_XWING);
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const config = await loadOhttpConfig();
+
+    expect(config.keyId).toBe(3);
+    expect(JSON.parse(localStorage.getItem(OHTTP_HYBRID_PIN_KEY) ?? '{}')).toEqual({
+      '3': expect.any(String),
+    });
+    expect(localStorage.getItem(OHTTP_CONFIG_PIN_KEY)).toBeNull();
+  });
+
+  it('menolak downgrade ke P-256 setelah kunci hybrid pernah dipin', async () => {
+    vi.stubGlobal('fetch', mockConfigResponse(collectionBytes(1, 5)));
+    localStorage.setItem(OHTTP_HYBRID_PIN_KEY, JSON.stringify({ '3': 'pin-hybrid-lama' }));
+
+    await expect(loadOhttpConfig()).rejects.toThrow('OHTTP_HYBRID_REMOVED');
+    expect(localStorage.getItem(OHTTP_HYBRID_PIN_KEY)).toBe(JSON.stringify({ '3': 'pin-hybrid-lama' }));
   });
 
   it('menolak target di luar allowlist sebelum worker/fetch dibuat', async () => {

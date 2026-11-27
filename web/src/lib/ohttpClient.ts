@@ -19,10 +19,15 @@
  * mutasi — batas itu ditegakkan `requireAuth` di server, bukan di klien.
  */
 
-import { decodeOhttpKeyConfigCollection, isOhttpTargetAllowed } from '@nyx/shared';
+import {
+  OHTTP_KEM_XWING,
+  OHTTP_XWING_ACCEPT,
+  decodeOhttpKeyConfigCollection,
+  isOhttpTargetAllowed,
+} from '@nyx/shared';
 import { authFetch, getClientInstallationId, getCsrfToken } from '@lib/api';
 import { clientVersionHeaders } from './clientVersion';
-import { evaluateOhttpConfigPin, OHTTP_CONFIG_PIN_KEY } from './ohttpPin';
+import { evaluateOhttpConfigPin, OHTTP_CONFIG_PIN_KEY, OHTTP_HYBRID_PIN_KEY } from './ohttpPin';
 
 export interface OhttpHttpResult {
   status: number;
@@ -96,13 +101,24 @@ export async function loadOhttpConfig(): Promise<OhttpKeyMaterial> {
   // gerbang `MIN_CLIENT_VERSION` di server menolak key config.
   const response = await fetch('/api/ohttp/config', {
     credentials: 'include',
-    headers: clientVersionHeaders(),
+    headers: {
+      ...clientVersionHeaders(),
+      // [docs/43 §43.12.4] Klien lama tidak mengirim header ini dan tetap
+      // menerima collection P-256; klien baru menerima X-Wing lebih dulu.
+      accept: OHTTP_XWING_ACCEPT,
+    },
   });
   if (!response.ok) throw new Error(`OHTTP config: HTTP ${response.status}`);
   const bytes = new Uint8Array(await response.arrayBuffer());
   const configs = decodeOhttpKeyConfigCollection(bytes);
-  const decision = await evaluateOhttpConfigPin(configs, localStorage.getItem(OHTTP_CONFIG_PIN_KEY));
-  if (decision.changed) localStorage.setItem(OHTTP_CONFIG_PIN_KEY, decision.pinJson);
+  const hybrid = configs.some((config) => config.kemId === OHTTP_KEM_XWING);
+  if (!hybrid && localStorage.getItem(OHTTP_HYBRID_PIN_KEY)) {
+    // Jangan turun diam-diam ke P-256 setelah suite hybrid pernah dipin.
+    throw new Error('OHTTP_HYBRID_REMOVED');
+  }
+  const pinKey = hybrid ? OHTTP_HYBRID_PIN_KEY : OHTTP_CONFIG_PIN_KEY;
+  const decision = await evaluateOhttpConfigPin(configs, localStorage.getItem(pinKey));
+  if (decision.changed) localStorage.setItem(pinKey, decision.pinJson);
   cachedConfig = { configB64: bytesToBase64(bytes), keyId: decision.keyId };
   return cachedConfig;
 }

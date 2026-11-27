@@ -1,0 +1,12 @@
+[package]
+name = "hpke-xwing-vector"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Implementasi independen dari @hpke/core + @hpke/hybridkem-x-wing yang dipakai
+# NYX. Pin ini yang membuat vektor berarti: kesalahan bersama di satu pustaka
+# tidak bisa lolos hanya karena round-trip dengan dirinya sendiri.
+hpke = { version = "0.15.2", features = ["mlkem", "x25519", "aes", "hkdfsha2"] }
+rand_core = "0.10"

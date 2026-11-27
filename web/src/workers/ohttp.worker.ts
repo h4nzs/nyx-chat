@@ -18,7 +18,7 @@ import { clientVersionHeaders } from '../lib/clientVersion';
 
 interface OhttpWorkerRequest {
   id: number;
-  /** `application/ohttp-keys` (base64) dari `/api/ohttp/config`. */
+  /** `application/ohttp-keys` (base64) dari `/api/ohttp/config` — P-256 atau X-Wing. */
   configB64: string;
   /** Key id yang sudah divalidasi pin klien — worker tidak memilih sendiri. */
   keyId: number;

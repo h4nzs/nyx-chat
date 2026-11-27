@@ -16,6 +16,7 @@
 // Jalankan: `pnpm --filter nyx-web run test:e2e:ohttp`.
 import { defineConfig, devices } from '@playwright/test';
 import crypto from 'node:crypto';
+import { OHTTP_KEM_XWING, generateOhttpKeyPair } from '@nyx/shared';
 
 const API_PORT = 4100;
 const WEB_PORT = 5273;
@@ -47,6 +48,10 @@ function ohttpTestKeys(): { privateKey: string; publicKey: string } {
 }
 
 const keys = ohttpTestKeys();
+// [docs/43 §43.12.4] Suite hybrid ikut dinyalakan. Kunci dibuat saat config
+// dimuat (bukan di-commit); klien baru akan memilih X-Wing lewat Accept, dan
+// spec membuktikan pin hybrid benar-benar terpasang.
+const xwingKeys = await generateOhttpKeyPair(OHTTP_KEM_XWING);
 // DB uji terpisah bila disediakan (lihat playwright.config.ts).
 const e2eDatabaseEnv: Record<string, string> = process.env.NYX_E2E_DATABASE_URL
   ? { DATABASE_URL: process.env.NYX_E2E_DATABASE_URL }
@@ -54,7 +59,10 @@ const e2eDatabaseEnv: Record<string, string> = process.env.NYX_E2E_DATABASE_URL
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /ohttp\.spec\.ts/,
+  // [docs/43 §43.4.1] Gate sync anonim ikut di stack ini karena keduanya
+  // membutuhkan relay/gateway OHTTP; `PP_SYNC_REQUIRED=1` tidak memengaruhi
+  // pencarian OHTTP, hanya `/api/groups/sync`.
+  testMatch: /(ohttp|privacyPassSync)\.spec\.ts/,
   workers: 1,
   globalSetup: './e2e/global.setup.ts',
   use: {
@@ -77,8 +85,12 @@ export default defineConfig({
         PORT: String(API_PORT),
         OHTTP_ENABLED: '1',
         OHTTP_TOKEN_MODE: 'off',
+        // Spec privacyPassSync membuktikan gate ini menolak sync tanpa bukti.
+        PP_SYNC_REQUIRED: '1',
         OHTTP_PRIVATE_KEY: keys.privateKey,
         OHTTP_PUBLIC_KEY: keys.publicKey,
+        OHTTP_XWING_PRIVATE_KEY: Buffer.from(xwingKeys.privateKey).toString('base64url'),
+        OHTTP_XWING_PUBLIC_KEY: Buffer.from(xwingKeys.publicKey).toString('base64url'),
         // Browser melihat origin Vite (5273); tanpa ini middleware CORS
         // menolak header Origin yang diteruskan proxy (request tetap jalan
         // karena same-origin, tapi log-nya penuh peringatan palsu).

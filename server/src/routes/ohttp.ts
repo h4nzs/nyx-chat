@@ -13,7 +13,7 @@
 
 import express, { type RequestHandler, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { encodeOhttpKeyConfigCollection } from '@nyx/shared';
+import { OHTTP_XWING_ACCEPT, encodeOhttpKeyConfigCollection } from '@nyx/shared';
 import { OHTTP_CLIENT_TAG, OHTTP_OPS, incCounter } from '../utils/metrics.js';
 import { clientRateLimitTag } from '../utils/clientIp.js';
 import { signOhttpToken } from '../utils/ohttpToken.js';
@@ -76,11 +76,21 @@ export default function createOhttpRouter(config: OhttpConfig, options: OhttpRou
     keyGenerator: (req) => clientRateLimitTag(req),
   });
 
-  router.get('/config', (_req, res) => {
+  router.get('/config', (req, res) => {
+    // [docs/43 §43.12.4] Dual-suite tanpa memecahkan klien lama: collection
+    // klasik tetap di URL yang sama, sedangkan klien yang paham X-Wing meminta
+    // `Accept: application/ohttp-keys+xwing`. Vary wajib supaya cache/CDN tidak
+    // menyajikan collection hybrid ke klien lama (yang tidak bisa mem-parse-nya).
+    const wantsHybrid = (req.get('accept') ?? '').toLowerCase().includes(OHTTP_XWING_ACCEPT);
+    const configs = wantsHybrid && config.pqPublicConfigs.length > 0
+      ? config.pqPublicConfigs
+      : config.publicConfigs;
     res.type('application/ohttp-keys');
+    res.vary('Accept');
+    res.set('Cache-Control', 'no-store');
     // Seluruh slot rotasi dipublikasikan: klien lama tetap memakai pin key id-nya,
-    // klien baru memilih key id tertinggi.
-    res.send(Buffer.from(encodeOhttpKeyConfigCollection(config.publicConfigs)));
+    // klien baru memilih key id tertinggi di suite yang tersedia.
+    res.send(Buffer.from(encodeOhttpKeyConfigCollection(configs)));
     incCounter(OHTTP_OPS, { route: 'config', result: 'ok' });
   });
 

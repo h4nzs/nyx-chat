@@ -23,6 +23,8 @@
 import type { OhttpKeyConfig } from '@nyx/shared';
 
 export const OHTTP_CONFIG_PIN_KEY = 'nyx_ohttp_config_pin_v2';
+/** Pin suite hybrid dipisah: upgrade ke X-Wing tidak menghapus pin klasik. */
+export const OHTTP_HYBRID_PIN_KEY = 'nyx_ohttp_hybrid_pin_v1';
 
 export class OhttpPinError extends Error {
   constructor(message: string) {
