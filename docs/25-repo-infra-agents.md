@@ -112,10 +112,11 @@ pesan lockfile yang jujur.
 `main` dijaga di sisi GitHub, bukan hanya oleh workflow. Konfigurasi terpasang
 (`gh api repos/h4nzs/nyx-chat/branches/main/protection`):
 
-- **14 required status checks** = 12 job `ci.yml` (`build`, `wasm`, `unit`,
+- **15 required status checks** = 13 job `ci.yml` (`build`, `wasm`, `unit`,
   `pir-sidecar`, `sidecar`, `lint`, `alerts`, `dr-oracle`, `kt-recovery-v2`,
-  `audit`, `e2e`, `e2e-chrome`) + dua job CodeQL (`Analyze (actions)`,
-  `Analyze (javascript-typescript)`). Nama konteks diambil dari `check-runs`
+  `audit`, `e2e`, `e2e-chrome`, `e2e-stack`) + dua job CodeQL (`Analyze (actions)`,
+  `Analyze (javascript-typescript)`). Diperbarui 2026-11-26; `E2E stack` sudah
+  required sejak `fd35a0a1`. Nama konteks diambil dari `check-runs`
   HEAD, bukan dari nama job di YAML — mengganti `name:` sebuah job berarti
   daftar ini harus diperbarui, atau merge akan menggantung menunggu konteks
   yang tidak pernah muncul.

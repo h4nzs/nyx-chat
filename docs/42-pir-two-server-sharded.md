@@ -198,8 +198,11 @@ Server (API):
   ML-DSA-65 (0600), dipakai builder.
 - `PIR_SHARD_DIR` — direktori artefak lokal (`<dir>/<id>/shard-<n>.{bin,json}`).
 - `PIR_ADMIN_TOKEN` — header `x-nyx-pir-internal` untuk `/admin/rebuild`.
-- `PIR_RECORD_BYTES` — ukuran record (default 512); klien menolak jawaban
+- `PIR_RECORD_BYTES` — ukuran record (default **2048**); klien menolak jawaban
   dengan panjang berbeda.
+- `PIR_DIRTY_REFRESH_CRON` — jadwal rebuild saat ada penulisan baru; default
+  `*/3 * * * *`. Stack E2E memakai `*/5 * * * * *` supaya user baru langsung
+  masuk snapshot; 04:15 tetap rebuild penuh harian.
 
 Sidecar (satu proses per role, env `pir-a.env` / `pir-b.env`):
 
@@ -226,8 +229,9 @@ blind-index dan **bukan** ke PIR satu server.
   `rsync`/objek storage, lalu `/admin/rebuild` per shard. Tidak ada jalur di mana
   A dan B membangun snapshot sendiri-sendiri — itu sumber desync. `dbRoot` A dan
   B dibandingkan sebelum satu byte pun dikirim; berbeda = build dibatalkan.
-- Rebuild: penanda dirty per shard (Redis set), cron `*/3` hanya membangun shard
-  yang kotor; cron `04:15` jaring pengaman penuh. Hot-swap tidak butuh restart.
+- Rebuild: penanda dirty (Redis), `PIR_DIRTY_REFRESH_CRON` (default `*/3 * * * *`)
+  hanya membangun shard yang kotor; cron `04:15` jaring pengaman penuh. Hot-swap
+  tidak butuh restart.
 - Metrik (exporter `nyx-api`, `server/src/utils/metrics.ts`, docs/10 §10.19):
   `nyx_pir_query_total{result}`, `nyx_pir_query_seconds`,
   `nyx_pir_rebuild_total{result}`, `nyx_pir_rebuild_seconds`,

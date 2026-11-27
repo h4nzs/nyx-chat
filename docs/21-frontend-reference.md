@@ -42,10 +42,10 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 ## 21.3 Lib modules (`lib/`, 89 files)
 
 **Pencarian privat & grup anonim (docs/10 §10.18–§10.19):**
-- `ohttpClient.ts` / `ohttpPin.ts` — ambil `application/ohttp-keys`, pin digest per key id (fail-closed bila config berubah tanpa rotasi), minta token 120 dtk lalu kirim amplop lewat `/api/ohttp/relay` (default same-origin).
+- `ohttpClient.ts` / `ohttpPin.ts` — ambil `application/ohttp-keys`, pin digest per key id (fail-closed bila config berubah tanpa rotasi). Klien baru meminta suite hybrid X-Wing lewat `Accept: application/ohttp-keys+xwing`; pin hybrid terpisah dan menolak downgrade ke P-256 (`OHTTP_HYBRID_REMOVED`). Minta token 120 dtk lalu kirim amplop lewat `/api/ohttp/relay` (default same-origin).
 - `pirParams.ts` / `pirClient.ts` — params PIR (`ETag`, cache 60 dtk, hint/filter/seed), query/process lewat worker WASM; `PIR_REQUIRES_OHTTP` bila OHTTP mati (tidak ada fallback ke `/search`).
 - `searchOprfClient.ts` / `userSearch.ts` — blind index OPRF (43-char Argon2id → 64-hex) dan **satu pintu** pencarian: OPRF → PIR bila aktif, lalu OHTTP, tanpa fallback diam-diam.
-- `groupSync.ts` / `groupMailbox.ts` / `groupPseudonyms.ts` / `privacyPass.ts` — sync grup anonim (token di body + OHTTP POST, opsional Privacy Pass Blind RSA yang disegel di `kvStore`).
+- `groupSync.ts` / `groupMailbox.ts` / `groupPseudonyms.ts` / `privacyPass.ts` — sync grup anonim (token di body + OHTTP POST, opsional Privacy Pass token acak + komitmen yang disegel di `kvStore`).
 
 **Crypto / storage**
 - `crypto-worker-proxy.ts` — main↔worker proxy: `deriveKeyFromPassword`, `registerAndGenerateKeys`, `generateNewKeys`, `retrievePrivateKeys`, `restoreFromPhrase`, `recoverAccountWithSignature`, `getRecoveryPhrase`, `encryptProfile`/`decryptProfile`/`generateProfileKey`, `hashUsername`, `minePoW`, `generateSafetyNumber`, `worker_crypto_secretbox_xchacha20poly1305_*`, `worker_pq_box_seal_v2(_open)`, `workerXChaChaSeal/Open`, `worker_x3dh_v2_*`, `worker_file_encrypt/decrypt`, `reEncryptBundleFromMasterKey`.
@@ -119,4 +119,4 @@ A complete inventory of `web/src`, written to help you find any module quickly. 
 
 ## 21.9 E2E (`e2e/`, 14 specs + global setup)
 
-`auth` (register/login), `chat` (2-page messaging), `profile` (name/bio), `security` (sessions), `settings` (emergency eject), `transport` (WebTransport latency + unsend, auto-skip when unsupported), `call` (coturn relay nyata, skip tanpa TURN), `deviceLinking` (QR), `recovery` (phrase restore), `regression` (burner/story/jebakan UI), `spqr` (ratchet v2 + rollback), `pqV2`, `pqBenchThrottle`, `ohttp` (jalur relay→gateway di stack terpisah, `playwright.ohttp.config.ts`), `global.setup` (DB+Redis reset). Run serially (`workers: 1`).
+`auth` (register/login), `chat` (2-page messaging), `profile` (name/bio), `security` (sessions), `settings` (emergency eject), `transport` (WebTransport latency + unsend, auto-skip when unsupported), `call` (coturn relay nyata, skip tanpa TURN), `deviceLinking` (QR), `recovery` (phrase restore), `regression` (burner/story/jebakan UI), `spqr` (ratchet v2 + rollback), `pqV2`, `pqBenchThrottle`, `ohttp` (jalur relay→gateway di stack terpisah, `playwright.ohttp.config.ts`), `privacyPassSync` (gate `PP_SYNC_REQUIRED=1` di stack yang sama), `global.setup` (DB+Redis reset). Run serially (`workers: 1`).

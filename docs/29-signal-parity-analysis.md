@@ -328,6 +328,14 @@ sekarang `hello-v1`, `spqr-ratchet`, `pq-v2`. Menghapus `spqr-ratchet` dari daft
 itu = kill switch setingkat deployment (`docs/33` §33.7). Rollout terukur lewat
 `nyx_wss_capability_total{capability}`.
 
+**Reconnect generation (2026-11-26).** Setiap percobaan WebTransport punya
+`generation`; `CONNECTED`/`DISCONNECTED`/`ERROR` membawanya dari worker ke main
+thread. Client mengabaikan event dengan generation lama, sehingga `closed` dari
+koneksi yang sudah di-kick atau digantikan tidak memicu retry instan/fallback
+WSS. Worker memakai handle `wt` lokal setelah `await` dan menaikkan generation
+saat `CONNECT`/`DISCONNECT`, jadi init lama tidak boleh memasang reader/writer ke
+koneksi baru. Jangan menghapus field ini tanpa mengganti mekanismenya.
+
 ### 5.7 Calls — **SELESAI** (STUN pihak ketiga hilang, signaling token)
 
 Signaling **tidak lagi** dirutekan ke `userId`: `handleWebRtcRelay`
