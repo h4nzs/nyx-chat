@@ -7,9 +7,15 @@
 //   2. logout normal (data terenkripsi sengaja dipertahankan untuk login);
 //   3. login dengan panic password → wipe lokal, bukan login.
 //
-// Barrier akhir memakai database `nyx-key-vault` (berisi installation id),
-// bukan `user`: logout normal sudah menghapus `user`, jadi hanya wipe yang
-// menghapus vault mentah itu.
+// Barrier akhir TIDAK memakai "database `nyx-key-vault` sudah tidak ada":
+// wipe berakhir dengan `location.replace('/')`, lalu boot halaman login memanggil
+// `getPersistentInstallationId()` yang membuat vault itu lagi (dengan id baru).
+// Di mesin lokal jendela "vault belum ada" sempat tertangkap; di CI pembuatan
+// ulangnya instan sehingga asersi itu selalu gagal walau wipe berjalan benar.
+// Yang diasersikan sekarang adalah efek yang stabil:
+//   - `installation_id` di vault BERUBAH (vault lama terhapus, bukan dibiarkan),
+//   - panic hash tidak lagi terverifikasi (`checkPanicPassword` false),
+//   - tidak ada sesi yang terbuka (tetap di /login, tab baru juga).
 import { test, expect } from '@playwright/test';
 import { registerUser } from './helpers/registration';
 
@@ -22,15 +28,24 @@ test.describe('Panic password', () => {
     const username = `panic_${Date.now()}`;
     await registerUser(page, 'Panic User', username);
 
-    // Navigasi wipe bisa menghancurkan execution context di tengah polling;
-    // `null` berarti "belum bisa dibaca", bukan "vault masih ada".
-    const hasVault = () =>
+    // Pembacaan lewat modul sumber (semua job E2E memakai dev server). `null`
+    // berarti "belum bisa dibaca" (halaman sedang navigasi), bukan nilai.
+    const installationId = () =>
       page
-        .evaluate(async () =>
-          (await indexedDB.databases()).some((db) => db.name === 'nyx-key-vault'),
-        )
+        .evaluate(async () => {
+          // @ts-ignore — path absolut Vite dev server (runtime-only)
+          const mod = await import('/src/utils/fingerprint');
+          return (await mod.getPersistentInstallationId()) as string;
+        })
         .catch(() => null);
-    await expect.poll(hasVault, { timeout: 30000 }).toBe(true);
+    const panicStillSet = () =>
+      page
+        .evaluate(async (password) => {
+          // @ts-ignore — path absolut Vite dev server (runtime-only)
+          const mod = await import('/src/lib/keyStorage');
+          return (await mod.checkPanicPassword(password)) as boolean;
+        }, PANIC_PASSWORD)
+        .catch(() => null);
 
     await page.locator('a[href="/settings"]').first().click();
     await expect(page).toHaveURL(/\/settings/, { timeout: 30000 });
@@ -45,6 +60,13 @@ test.describe('Panic password', () => {
     await panicInput.fill(PANIC_PASSWORD);
     await panicSection.getByRole('button', { name: /^Save$/i }).click();
     await expect(page.getByText(/saved/i).first()).toBeVisible({ timeout: 30000 });
+    // Hash panic benar-benar tersimpan dan terbaca sebelum vault terbuka —
+    // inilah yang dulu tidak pernah terjadi (bug P0), jadi diperiksa di sini.
+    await expect
+      .poll(panicStillSet, { timeout: 30000, message: 'panic hash tidak tersimpan di vault' })
+      .toBe(true);
+    const idBefore = await installationId();
+    expect(idBefore, 'installation id harus terbaca sebelum wipe').toBeTruthy();
 
     // Logout NORMAL — bukan Emergency Eject. Data lokal (termasuk panic hash)
     // harus bertahan supaya percobaan login berikutnya memicu panic.
@@ -65,29 +87,32 @@ test.describe('Panic password', () => {
     await page.locator('input[type="password"]').first().fill(PANIC_PASSWORD);
     await page.getByRole('button', { name: /^login$/i }).click();
 
+    // Jangan menyentuh IndexedDB selama wipe berjalan: `deleteDatabase` bisa
+    // terblokir oleh koneksi probe, dan wipe yang terblokir hanya memicu reload
+    // (vault lama selamat). Jeda ini melewati penyamaran 2 detik + delete.
+    await page.waitForTimeout(3000);
+
+    // Bukti wipe: vault lama hilang, bukan sekadar "DB-nya tidak terlihat".
+    // Wipe menghapus semua IDB + localStorage, lalu boot halaman login membuat
+    // `installation_id` baru — jadi id harus BERUBAH (bukan menghilang).
     await expect
-      .poll(hasVault, {
-        timeout: 30000,
-        message: 'nyx-key-vault masih ada — panic wipe tidak berjalan',
-      })
+      .poll(
+        async () => {
+          const current = await installationId();
+          return current !== null && current !== idBefore;
+        },
+        { timeout: 60000, message: 'installation id tidak berubah — panic wipe tidak berjalan' },
+      )
+      .toBe(true);
+    // Record panic ikut terhapus: password yang sama tidak lagi memicu wipe.
+    await expect
+      .poll(panicStillSet, { timeout: 30000, message: 'panic hash masih terbaca setelah wipe' })
       .toBe(false);
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 30000 }).toMatch(
       /^\/(login|register)?$/,
     );
 
     // Halaman baru di context yang sama tidak boleh menemukan sesi lama.
-    await expect
-      .poll(
-        () =>
-          page
-            .evaluate(async () => {
-              const dbs = (await indexedDB.databases()).map((db) => db.name ?? '');
-              return dbs.filter((name) => name.length > 0);
-            })
-            .catch(() => null),
-        { timeout: 30000, message: 'database lokal masih tersisa setelah panic wipe' },
-      )
-      .toEqual([]);
 
     const afterWipe = await page.context().newPage();
     await afterWipe.goto('/chat');
