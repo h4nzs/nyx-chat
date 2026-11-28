@@ -10,7 +10,7 @@
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
-import { keyVault } from '../idbKv';
+import { closeKeyVault, keyVault } from '../idbKv';
 
 describe('keyVault (IndexedDB mentah)', () => {
   it('menyimpan, membaca, dan menghapus nilai', async () => {
@@ -37,5 +37,26 @@ describe('keyVault (IndexedDB mentah)', () => {
     await keyVault.put({ key: 'k', value: 'v' });
     await keyVault.clear();
     expect(await keyVault.keys()).toEqual([]);
+  });
+
+  it('closeKeyVault membuat deleteDatabase berjalan, bukan terblokir', async () => {
+    // Wipe (`nukeProtocol`) menghapus seluruh database lewat
+    // `indexedDB.deleteDatabase`. Selama koneksi vault masih terbuka,
+    // permintaan itu hanya memicu `onblocked` — dan karena halaman login
+    // langsung membuka vault lagi saat boot, penghapusan bisa tertahan
+    // selamanya. Tes ini mengunci urutan yang benar: tutup dulu, baru hapus.
+    await keyVault.put({ key: 'nyx_panic_hash', value: 'x' });
+    await closeKeyVault();
+
+    const outcome = await new Promise<string>((resolve) => {
+      const request = indexedDB.deleteDatabase('nyx-key-vault');
+      request.onsuccess = () => resolve('success');
+      request.onblocked = () => resolve('blocked');
+      request.onerror = () => resolve('error');
+    });
+    expect(outcome).toBe('success');
+
+    // Vault baru tidak lagi memuat record lama.
+    expect(await keyVault.get('nyx_panic_hash')).toBeUndefined();
   });
 });

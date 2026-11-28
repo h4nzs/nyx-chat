@@ -53,6 +53,24 @@ async function withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore
   return result;
 }
 
+/**
+ * Tutup koneksi vault supaya `indexedDB.deleteDatabase('nyx-key-vault')` tidak
+ * terblokir.
+ *
+ * `deleteDatabase` menunggu SEMUA koneksi tertutup. Wipe dulu tidak menutup
+ * koneksi ini; `onblocked` memicu `window.location.reload()`, dan boot halaman
+ * baru langsung membuka vault lagi (`getPersistentInstallationId`) sehingga
+ * penghapusan bisa tertahan selamanya — vault lama (panic hash, installation
+ * id, kunci ter-seal) selamat dan panic wipe tampak tidak berjalan.
+ */
+export async function closeKeyVault(): Promise<void> {
+  const pending = opening;
+  opening = null;
+  if (!pending) return;
+  const database = await pending.catch(() => null);
+  database?.close();
+}
+
 export const keyVault: KvStore = {
   get: <T,>(key: string) => withStore('readonly', (store) => request<T | undefined>(store, (s) => s.get(key) as IDBRequest<T | undefined>)),
 

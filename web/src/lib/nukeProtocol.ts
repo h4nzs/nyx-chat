@@ -53,6 +53,20 @@ export const executeLocalWipe = async (redirectUrl: string = '/') => {
     // 0. Close active connections to release the file lock
     await closeDatabaseConnection().catch(() => {});
 
+    // 0.1 Kosongkan lalu tutup vault IDB bootstrap SEBELUM `deleteDatabase`.
+    // `deleteDatabase` terblokir selama ada koneksi terbuka, dan `onblocked`
+    // hanya me-reload halaman — boot halaman baru membuka vault lagi, jadi
+    // penghapusan bisa tertahan dan vault lama (panic hash, installation id,
+    // kunci ter-seal) selamat. `clear()` menjamin isinya hilang lebih dulu,
+    // `closeKeyVault()` membuat penghapusan DB benar-benar berjalan.
+    try {
+      const { keyVault, closeKeyVault } = await import('./storage/idbKv');
+      await keyVault.clear();
+      await closeKeyVault();
+    } catch (_e) {
+      // Vault belum pernah dibuka / IDB tidak tersedia — tidak ada yang perlu ditutup.
+    }
+
     // 0.5 Revoke all in-memory blob: URLs (decrypted media cache)
     try {
       const { clearBlobCache } = await import('@utils/blobCache');
