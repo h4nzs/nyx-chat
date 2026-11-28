@@ -15,8 +15,13 @@ test.describe('Security & Sessions', () => {
     const sessionsBtn = page.locator('button', { hasText: /sessions/i }).first();
     await sessionsBtn.click();
 
-    // 2. Wait for scanning to finish (if any spinner is shown)
-    const scanningSpinner = page.locator('text=Scanning').first();
+    // 2. Wait for scanning to finish (if any spinner is shown).
+    // `text=Scanning` adalah pencocokan substring case-insensitive, jadi locator
+    // pertama justru menangkap caption QR "Add another device by scanning its
+    // QR" yang selalu terlihat → asersi "hidden" mustahil lulus (CI run
+    // 46099671873). Pakai teks spinner yang sebenarnya
+    // (`settings:sessions_page.scanning` = "Scanning Network...").
+    const scanningSpinner = page.getByText(/scanning network/i).first();
     if (await scanningSpinner.isVisible()) {
       await expect(scanningSpinner).toBeHidden({ timeout: 15000 });
     }
